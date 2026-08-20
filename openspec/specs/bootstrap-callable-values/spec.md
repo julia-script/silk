@@ -17,20 +17,28 @@ Compiler-known integer actors SHALL use canonical lowercase source names such as
 ### Requirement: Named functions are first-class callable values
 
 Every resolved named function SHALL be usable as a callable value without invoking it. A function
-with two or more parameters SHALL also support one automatic leading-argument section: supplying
-exactly parameters one through the last SHALL construct a unary callable awaiting parameter zero.
-Silk MUST NOT require a `dual` marker and MUST NOT interpret fewer trailing arguments as arbitrary
-currying. A unary function SHALL be referenced by name rather than by an empty call.
+with `N` parameters SHALL form a section whenever a call supplies a non-empty trailing suffix of
+`K` arguments with `0 < K < N`. The section SHALL await the remaining ordered leading prefix, and
+successive direct stages SHALL bind another non-empty trailing suffix without holes, reordering, or
+repeated evaluation. Silk MUST NOT require a `dual` marker. Supplying zero or more than the
+remaining arity SHALL use the ordinary arity diagnostic; the retired unary-only `SEM0079`
+diagnostic SHALL NOT be emitted. A unary function SHALL be referenced by name rather than by an
+empty call.
 
 #### Scenario: Construct a binary section
 
 - **WHEN** `i32.add(2)` refers to `i32.add(left: i32, right: i32)`
 - **THEN** it produces a unary callable equivalent to applying `i32.add` with `2` as `right`
 
-#### Scenario: Reject deeper under-application
+#### Scenario: Construct a deeper section
 
-- **WHEN** a three-parameter function is supplied only its final parameter
-- **THEN** analysis reports an arity error rather than constructing a callable awaiting two parameters
+- **WHEN** `combine(a, b, c)` is referenced as `combine(3)`
+- **THEN** it produces `fn(A, B) -> C` with parameter `c` captured once
+
+#### Scenario: Apply in stages
+
+- **WHEN** source evaluates `combine(3)(2)(1)`
+- **THEN** capture evaluation follows source order and invocation calls `combine(1, 2, 3)`
 
 #### Scenario: Reference a unary function
 
@@ -63,7 +71,9 @@ exclusive borrows by exclusive loan, and moved affine values by ownership transf
 SHALL constrain callable lifetime, exclusive loans SHALL additionally require exclusive invocation,
 and consuming a captured affine value SHALL make the callable take-once. Dropping an uninvoked
 callable SHALL clean every owned capture exactly once, while successful consuming invocation SHALL
-transfer each consumed capture exactly once.
+transfer each consumed capture exactly once. Each staged argument SHALL be captured exactly once
+when its stage is constructed, and its original parameter position SHALL remain explicit
+independently of capture evaluation order.
 
 #### Scenario: Reuse a Copy section
 
@@ -79,6 +89,11 @@ transfer each consumed capture exactly once.
 
 - **WHEN** a section captures `move file` and leaves its region without invocation
 - **THEN** the generated callable environment drops the captured file exactly once
+
+#### Scenario: Preserve staged capture positions
+
+- **WHEN** successive stages capture parameters `c` and then `b`
+- **THEN** both captures evaluate once in that order while final invocation supplies them as `b, c`
 
 ### Requirement: Callable application is ordinary and ordered
 

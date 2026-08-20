@@ -240,13 +240,20 @@ and unavailable facts SHALL produce unavailable HIR with their originating cause
 
 HIR SHALL represent named function values, automatic sections, callable types and modes, ordered
 capture environments, direct or indirect application, and invocation access without backend layout
-or surface-syntax lookup. Borrowed and owned captures SHALL retain their canonical ownership roots
-and dependencies.
+or surface-syntax lookup. It SHALL retain every ordered remaining leading parameter, every captured
+trailing argument's original parameter ordinal, and source evaluation order across successive
+direct section stages. Borrowed and owned captures SHALL retain their canonical ownership roots and
+dependencies.
 
 #### Scenario: Retain an owned section environment
 
 - **WHEN** a section captures `move token` and crosses a function boundary
 - **THEN** HIR carries one canonical take-once environment with the token's ownership transfer
+
+#### Scenario: Retain three-stage application
+
+- **WHEN** `combine(3)(2)(1)` reaches HIR
+- **THEN** section construction captures `3` then `2` once and final application supplies `1` plus those positional captures
 
 ### Requirement: Struct construction is canonical typed HIR
 
@@ -391,10 +398,13 @@ from every call to its generic declaration and substitution.
 
 ### Requirement: HIR retains lexical slice semantics explicitly
 
-HIR SHALL represent each available slice type, whole-root borrow or reborrow, loan identity, access
-mode, backing-place provenance, runtime length projection, and borrowed indexed place without
-encoding a raw address. Expression and place traversal SHALL preserve source evaluation order and
-exact spans, and unavailable slice facts MUST NOT become typed HIR operations.
+HIR SHALL represent each available slice type, borrow or reborrow, loan identity, access mode,
+backing-place provenance, runtime length projection, and borrowed indexed place without encoding a
+raw address. Each borrow SHALL carry a named, parameter, pattern, or compiler-owned temporary root
+plus the complete ordered field and checked-index selector path. Expression and place traversal
+SHALL preserve source evaluation order and exact spans, including hidden temporary expressions and
+runtime selector expressions exactly once. Unavailable slice facts MUST NOT become typed HIR
+operations.
 
 #### Scenario: Retain a shared whole-array borrow
 
@@ -410,6 +420,11 @@ exact spans, and unavailable slice facts MUST NOT become typed HIR operations.
 
 - **WHEN** borrow analysis lacks a stable source root or compatible slice destination
 - **THEN** HIR preserves the diagnostic cause through surrounding unavailable facts and emits no executable borrow node
+
+#### Scenario: Retain an indexed inner-array borrow
+
+- **WHEN** HIR lowers `&mut matrix[index]`
+- **THEN** it records `matrix` as the root and the checked runtime array selector without copying the inner array
 
 ### Requirement: HIR retains exact usize operations
 

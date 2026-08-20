@@ -508,6 +508,16 @@ only.
 - **WHEN** the inspected source moves a binding and reads it again
 - **THEN** the lab marks the verdict as a violation, shows the `OWN0001` diagnostic's span in the timeline, and still lists every binding's range
 
+### Requirement: Inspector views expose generalized borrow roots
+
+Inspector ownership views SHALL render parameter, local, pattern, and compiler-owned temporary loan
+roots without assuming every non-parameter root is a source binding.
+
+#### Scenario: Inspect a temporary loan
+
+- **WHEN** analysis publishes a loan rooted in an addressable temporary
+- **THEN** the inspector labels the temporary deterministically and remains available
+
 ### Requirement: Inspect MIR control-flow graphs
 
 The docs site SHALL expose a direct-link MIR CFG lab rendering the hand-built MIR samples: the

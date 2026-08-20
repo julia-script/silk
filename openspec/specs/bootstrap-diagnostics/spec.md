@@ -12,6 +12,9 @@ data where the originating phase defines reasons for that code. A diagnostic MAY
 carry labeled related spans, notes, and unambiguous machine-applicable edits. Every diagnostic
 SHALL identify its originating phase and, where one exists, its originating semantic entity. A
 diagnostic caused by another diagnostic SHALL carry that diagnostic's identity as its cause.
+The unary-only deeper-under-application code `SEM0079` SHALL be retired. Zero-argument and
+over-arity calls SHALL use the ordinary arity diagnostic, while valid non-empty trailing sections
+SHALL produce no arity diagnostic.
 
 #### Scenario: Every phase produces the same shape
 - **WHEN** one source produces lexical, parser, and semantic mistakes in a single compilation
@@ -24,6 +27,11 @@ diagnostic caused by another diagnostic SHALL carry that diagnostic's identity a
 #### Scenario: Duplicate names surface their original as a related span
 - **WHEN** a declaration or parameter name repeats a present earlier occurrence
 - **THEN** the duplicate's diagnostic carries the original occurrence's span as a labeled related span in addition to its structured reason data
+
+#### Scenario: Diagnose only an invalid remaining arity
+
+- **WHEN** a multi-parameter callable receives zero arguments or more arguments than remain
+- **THEN** analysis reports the ordinary arity code and never `SEM0079`
 
 ### Requirement: Error sentinels preserve provenance
 Unavailable, missing, ambiguous, and damaged states in phase results SHALL retain the identity of

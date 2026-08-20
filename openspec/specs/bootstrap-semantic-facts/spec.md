@@ -564,9 +564,10 @@ Every present operator expression SHALL publish its concrete operator, ordered o
 resolved compiler-known actor operation when available, closed contract, result type, and exact
 source provenance. Every pipeline SHALL publish its left input, callable-producing right expression,
 resolved callable type and invocation mode, application contract, result type, and provenance.
-Section facts SHALL separately identify the canonical function, omitted leading parameter, supplied
-trailing arguments, captures, and resulting unary callable. Type mismatches SHALL reuse `SEM0012` at
-the offending operand span. Damaged or unavailable dependencies SHALL keep only the dependent fact
+Section facts SHALL identify the canonical callable, ordered remaining leading parameters, supplied
+trailing arguments, capture access, original parameter ordinals, substitutions, and resulting
+callable contract for every non-empty trailing suffix. Type mismatches SHALL reuse `SEM0012` at the
+offending operand span. Damaged or unavailable dependencies SHALL keep only the dependent fact
 unavailable with its originating diagnostic cause; analysis MUST NOT synthesize an alternate
 operator, callable, type, or argument.
 
@@ -594,6 +595,11 @@ operator, callable, type, or argument.
 
 - **WHEN** a pipeline right expression resolves to an inaccessible function or a non-callable value
 - **THEN** its callable and result facts remain unavailable with the originating cause and no fabricated target
+
+#### Scenario: Inspect a staged section
+
+- **WHEN** semantic analysis sees `combine(3)(2)`
+- **THEN** the fact retains remaining parameter `a` and captures `c` then `b` with their original ordinals
 
 ### Requirement: Callable facts expose mode and capture obligations
 
@@ -811,7 +817,9 @@ specializations. Every fact SHALL retain source provenance and causal diagnostic
 Semantic analysis SHALL publish slice type facts containing canonical element type and shared or
 exclusive access without a fixed length. Each explicit borrow or reborrow SHALL retain its access,
 stable source root, source type, resulting slice type, call destination, exact syntax provenance,
-and an explicit unavailable state when any prerequisite is missing.
+and an explicit unavailable state when any prerequisite is missing. Every borrow SHALL retain its
+stable logical owner and complete field or checked-index selector path. An owned temporary SHALL
+receive a deterministic compiler-owned identity rather than requiring a source binding name.
 
 #### Scenario: Resolve different arrays to one slice type
 
@@ -822,6 +830,11 @@ and an explicit unavailable state when any prerequisite is missing.
 
 - **WHEN** `&mut values` targets an immutable array binding
 - **THEN** the fact retains exclusive intent, the resolved source root and type, and the diagnostic cause without claiming an available exclusive slice
+
+#### Scenario: Inspect temporary and indexed roots
+
+- **WHEN** one function borrows `&[1, 2]` and another borrows `&matrix[index]`
+- **THEN** facts distinguish a hidden temporary owner from a named root plus runtime index selector
 
 ### Requirement: Slice operations publish runtime-place facts
 

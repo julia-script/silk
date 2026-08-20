@@ -526,7 +526,10 @@ Concrete monomorphic slice types SHALL remain logical shared or exclusive slice 
 formation SHALL identify one stable backing place, loan identity, access mode, element type, and
 lexical region; loan endings SHALL be explicit ordered facts on every structured exit. These
 operations SHALL remain inside the existing acyclic operation and region structure, including when
-loops later repeat through lexical outcomes, and MUST NOT expose a source-level raw pointer.
+loops later repeat through lexical outcomes, and MUST NOT expose a source-level raw pointer. Slice
+formation SHALL retain compiler-owned temporary roots and complete field or fixed-array element
+selectors. Runtime element selectors SHALL be bounds checked before address formation, and
+temporary cleanup SHALL occur after the matching loan end.
 
 #### Scenario: Lower a call-scoped borrow
 
@@ -537,6 +540,16 @@ loops later repeat through lexical outcomes, and MUST NOT expose a source-level 
 
 - **WHEN** a loop body forms a call-scoped slice and reaches `continue`
 - **THEN** the loan ends before the loop's lexical repeat outcome without introducing a cyclic MIR edge
+
+#### Scenario: Lower a runtime indexed subplace
+
+- **WHEN** HIR borrows `&mut matrix[index]`
+- **THEN** MIR begins the loan from `matrix` with its checked element selector and never materializes a copied inner array
+
+#### Scenario: Clean a temporary after its loan
+
+- **WHEN** an addressable temporary contains values with cleanup obligations
+- **THEN** MIR orders the matching loan end before the temporary owner's ordinary drop plan
 
 ### Requirement: MIR slice places derive bounds from one slice value
 
@@ -586,7 +599,9 @@ MIR SHALL represent monomorphic callable construction, ordered captures, shared,
 consuming environment access, direct or indirect application, and cleanup as typed operations and
 regions in the existing backend-neutral acyclic control DAG. Verification SHALL reject open generic
 callables, mismatched callable signatures, invalid invocation modes, duplicate capture transfers,
-and cleanup that can occur before a retained dependency is released.
+and cleanup that can occur before a retained dependency is released. Callable environments SHALL
+keep capture evaluation order and original parameter ordinals as separate facts, so backends can
+store captures in construction order and invoke targets in parameter order.
 
 #### Scenario: Lower a reusable arithmetic section
 
@@ -597,6 +612,11 @@ and cleanup that can occur before a retained dependency is released.
 
 - **WHEN** malformed MIR invokes a take-once environment twice
 - **THEN** verification rejects the second application before evaluation or backend emission
+
+#### Scenario: Lower staged positional captures
+
+- **WHEN** a three-parameter callable captures parameter two and then parameter one
+- **THEN** MIR constructs captures in that order and applies them in original parameter order after parameter zero
 
 ### Requirement: MIR run order follows the elaborated operand
 

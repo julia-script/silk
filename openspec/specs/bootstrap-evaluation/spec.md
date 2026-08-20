@@ -431,7 +431,9 @@ arguments, runtime dictionaries, or alternate generic layout decisions.
 Logical evaluation SHALL realize a slice as a view of one stable caller-owned storage place with a
 base position and runtime length, not as a copied array value. Shared reads and exclusive writes
 SHALL therefore observe the same backing state across nested ordinary calls while access mode and
-loan identity remain compiler facts rather than runtime payload.
+loan identity remain compiler facts rather than runtime payload. Logical slices SHALL retain the
+complete selector path from their backing cell to a nested fixed array. Hidden temporary cells
+SHALL remain live until their final derived loan ends.
 
 #### Scenario: Observe exclusive mutation in the caller
 
@@ -442,6 +444,11 @@ loan identity remain compiler facts rather than runtime payload.
 
 - **WHEN** one evaluated slice function receives arrays of two different lengths
 - **THEN** each invocation traverses exactly its runtime logical length without copying or specializing the callee by length
+
+#### Scenario: Mutate a runtime selected inner array
+
+- **WHEN** evaluation runs `edit(&mut matrix[index])`
+- **THEN** the checked inner array in `matrix` changes and no copied temporary receives the write
 
 ### Requirement: Slice evaluation preserves checked-place ordering
 
@@ -501,7 +508,9 @@ The evaluator SHALL construct monomorphic callable environments, preserve captur
 ownership, enforce shared, exclusive, and consuming invocation modes, invoke direct and stored
 callables, and drop unconsumed environments exactly as specified by MIR. Callable trace events
 SHALL be deterministic, bounded, and independent of JavaScript closure identity or garbage
-collection.
+collection. Evaluation SHALL preserve successive section capture order independently of original
+parameter order and SHALL end non-escaping reusable capture loans after their last statically known
+invocation.
 
 #### Scenario: Reuse an exclusive callable sequentially
 
@@ -512,6 +521,11 @@ collection.
 
 - **WHEN** a take-once callable is invoked after its owned capture was consumed
 - **THEN** evaluation exposes the phase-owned rejection rather than duplicating or fabricating the capture
+
+#### Scenario: Evaluate a staged section
+
+- **WHEN** evaluation runs `combine(3)(2)(1)`
+- **THEN** it invokes `combine(1, 2, 3)` after evaluating each supplied value once
 
 ### Requirement: Evaluation distinguishes run grouping
 

@@ -376,9 +376,11 @@ symbol. Backends MUST NOT merge layout-distinct instances or add runtime generic
 
 Native LLVM and direct WebAssembly emission SHALL consume the target-aware logical slice type,
 typed address-and-length calling shape, element stride, loan-validated operations, and structured
-control DAG supplied by the compiler. Neither backend MAY specialize a slice-taking function by
-source array length, flatten an unknown-length slice into fixed element parameters, or choose an
-independent slice ABI.
+control DAG supplied by the compiler. They SHALL compute projected borrow addresses from the
+compiler's ordered field and fixed-array selectors, including checked runtime indexes and
+target-planned element strides, and SHALL preserve the original root as authoritative storage.
+Neither backend MAY specialize a slice-taking function by source array length, flatten an
+unknown-length slice into fixed element parameters, or choose an independent slice ABI.
 
 #### Scenario: Emit one callee for distinct source lengths
 
@@ -389,6 +391,11 @@ independent slice ABI.
 
 - **WHEN** native and Wasm backends emit the same logical slice program
 - **THEN** native uses the planned pointer-width address lane and Wasm uses the planned linear-memory address lane without changing the logical MIR
+
+#### Scenario: Agree on runtime indexed subplace mutation
+
+- **WHEN** the parity corpus mutates `matrix[index]` through an exclusive inner-array slice
+- **THEN** native, Wasm, and evaluation return the same value and trap consistently for an invalid index
 
 ### Requirement: Address-taken arrays have authoritative contiguous storage
 
@@ -475,7 +482,9 @@ shared, exclusive, and consuming application, and cleanup from MIR with results 
 evaluation. The backend MAY erase a non-escaping section into a direct call or choose a target-aware
 code-and-environment representation, but MUST NOT change callable mode, capture lifetime,
 single-evaluation order, or cleanup behavior. Neither backend SHALL require one universal heap
-allocation or runtime callable interpreter.
+allocation or runtime callable interpreter. Backends SHALL preserve capture construction order
+while reordering captured lanes by explicit parameter ordinal at invocation; they MUST NOT infer
+target argument order from environment field order.
 
 #### Scenario: Erase a non-escaping section
 
@@ -491,6 +500,11 @@ allocation or runtime callable interpreter.
 
 - **WHEN** the parity corpus invokes shared, exclusive, and consuming callable environments
 - **THEN** native, Wasm, and evaluation agree on results, rejected repeats, mutation, and cleanup order
+
+#### Scenario: Agree on staged positional application
+
+- **WHEN** the parity corpus executes `combine(3)(2)(1)`
+- **THEN** native, Wasm, and evaluation all invoke `combine(1, 2, 3)`
 
 ### Requirement: Native and Wasm realize self-contained allocation identically
 
