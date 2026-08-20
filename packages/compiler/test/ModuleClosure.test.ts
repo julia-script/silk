@@ -45,6 +45,7 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
     ])
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.sync(() => {
           calls.push(module)
@@ -115,6 +116,7 @@ it.effect('retains partial closure facts around ordered operational failures', (
   Effect.gen(function* () {
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) => {
         if (module === 'readable') {
           return Effect.succeed(

@@ -3,6 +3,8 @@ import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicCatalog from './Intrinsic.js'
 import type * as NameResolution from './NameResolution.js'
+import * as Operator from './Operator.js'
+import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
 
@@ -18,6 +20,7 @@ export type Presentation =
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServicePresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'RolePresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServiceOperationPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ConstantPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ParameterPresentation'; readonly name: string })
@@ -40,6 +43,16 @@ export type Presentation =
 const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
+const requirementRole = (fact: DeclarationIndex.RequirementRoleFact): string => {
+  switch (fact._tag) {
+    case 'DefaultRole':
+      return ''
+    case 'UnresolvedRole':
+    case 'ResolvedRole':
+      return ` at ${fact.path.spelling}`
+  }
+}
+
 const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
@@ -49,7 +62,7 @@ const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
     case 'FailureMemberExpression':
       return declaredType(fact.member)
     case 'RequirementMemberExpression':
-      return `${fact.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(fact.capability)}${fact.role === 'DefaultRole' ? '' : `@${fact.role}`}`
+      return `${fact.access === 'Exclusive' ? '&mut ' : '&'}${declaredType(fact.capability)}${requirementRole(fact.role)}`
     case 'UnionRowExpression':
       return fact.operands.map(rowExpression).join(' | ')
     case 'WithoutRowExpression':
@@ -79,14 +92,14 @@ const constraints = (facts: ReadonlyArray<DeclarationIndex.ConstraintFact>): str
 
 const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
-  return `${parameter.type.kind === 'FailureRow' ? '!' : parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
+  return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
 }
 
 /** Renders a declaration in its source-level callable form. */
 export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
@@ -137,10 +150,23 @@ export const serviceDeclaration = (
   })
 }
 
+/** Renders one nominal dependency role declaration. */
+export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  return Object.freeze({
+    _tag: 'RolePresentation',
+    name,
+    text: `${visibility}role ${name}`,
+  })
+}
+
 /** Renders a complete operation contract nested beneath a service. */
 export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  const kind = self.functionKind === 'Effect' ? 'effect fn' : 'fn'
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const operator =
+    self.operator === undefined ? '' : `operator ${Operator.spelling(self.operator.operator)} `
   const typeParameters =
     self.typeParameters.length === 0
       ? ''
@@ -154,7 +180,7 @@ export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): P
   return Object.freeze({
     _tag: 'ServiceOperationPresentation',
     name,
-    text: `${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
+    text: `${operator}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
   })
 }
 
@@ -180,12 +206,7 @@ export const parameter = (self: DeclarationIndex.ParameterFact): Presentation =>
 
 export const typeParameter = (self: DeclarationIndex.TypeParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : self.type.name
-  const kind =
-    self.type.kind === 'FailureRow'
-      ? 'failure row'
-      : self.type.kind === 'RequirementRow'
-        ? 'requirement row'
-        : 'type'
+  const kind = self.type.kind === 'RequirementRow' ? 'requirement row' : 'type'
   return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
 }
 
@@ -245,7 +266,6 @@ export const type = (
       : `${base}<${self.arguments.map((argument) => genericArgument(argument, module, scope)).join(', ')}>`
   }
   if (Type.isParameter(self)) return self.name
-  if (Type.isFailureProjection(self)) return `Row<! ${self.parameter.name}>`
   if (Type.isFixedArray(self)) return `Array<${type(self.element, module, scope)}, ${self.length}>`
   if (Type.isSlice(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${type(self.element, module, scope)}]`
@@ -253,7 +273,7 @@ export const type = (
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${type(self.target, module, scope)}`
   if (Type.isCallable(self)) {
     const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
-    return `${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
+    return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
     const failureText = RowAlgebra.encode(
@@ -268,10 +288,10 @@ export const type = (
       Type.requirementRowPolicy(),
       self.requirementRow,
       (requirement) =>
-        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
       (parameter_) => parameter_.name,
       (member) =>
-        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
     )
     const requirements = requirementText.length === 0 ? '' : ` ? ${requirementText}`
     return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
@@ -294,29 +314,21 @@ export const genericArgument = (
         ? Type.encodeGenericArgument(self)
         : Type.isExactRepresentationArgument(self)
           ? Type.encodeGenericArgument(self)
-          : Type.isEffectIdentityArgument(self)
-            ? `effect@${self.identity}`
-            : Type.isCallableIdentityArgument(self)
-              ? `callable@${self.identity}`
-              : Type.isFailureRowArgument(self)
-                ? `! ${
-                    RowAlgebra.encode(
-                      Type.failureRowPolicy(),
-                      self.row,
-                      (failure) => type(failure, module, scope),
-                      (parameter_) => parameter_.name,
-                      (member) => member.parameter.name,
-                    ) || 'never'
-                  }`
+          : Type.isCompositeEffectRepresentationArgument(self)
+            ? Type.encodeGenericArgument(self)
+            : Type.isEffectIdentityArgument(self)
+              ? `effect@${self.identity}`
+              : Type.isCallableIdentityArgument(self)
+                ? `callable@${self.identity}`
                 : Type.isRequirementRowArgument(self)
                   ? `? ${RowAlgebra.encode(
                       Type.requirementRowPolicy(),
                       self.row,
                       (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === 'DefaultRole' ? '' : `@${requirement.role}`}`,
+                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
                       (parameter_) => parameter_.name,
                       (member) =>
-                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === 'DefaultRole' ? '' : `@${member.role}`}`,
+                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
                     )}`
                   : type(self, module, scope)
 

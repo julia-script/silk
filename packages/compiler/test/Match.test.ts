@@ -54,8 +54,7 @@ it('joins equal types precisely and nominal results canonically', () => {
   assert.strictEqual(joined._tag, 'Joined')
   if (joined._tag === 'Joined')
     assert.strictEqual(Type.encode(joined.type), 'main.End | main.Token')
-  assert.deepEqual(Match.join(['i32', 'bool']), {
-    _tag: 'Incompatible',
-    types: ['i32', 'bool'],
-  })
+  const ordinary = Match.join(['i32', 'bool'])
+  assert.strictEqual(ordinary._tag, 'Joined')
+  if (ordinary._tag === 'Joined') assert.strictEqual(Type.encode(ordinary.type), 'bool | i32')
 })

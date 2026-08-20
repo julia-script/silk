@@ -62,7 +62,9 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'map',
     kind: 'effect',
     expected: 42,
-    source: `fn addOne(value: i32) -> i32 { return value + 1 }
+    source: `import silk.effects as Effect
+
+fn addOne(value: i32) -> i32 { return value + 1 }
 effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(41) |> Effect.map(addOne) }`,
   },
@@ -79,7 +81,9 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'map-both-success',
     kind: 'effect',
     expected: 42,
-    source: `pub struct Problem { code: i32 }
+    source: `import silk.effects as Effect
+
+pub struct Problem { code: i32 }
 fn addOne(value: i32) -> i32 { return value + 1 }
 fn recover(problem: Problem) -> Problem { return move problem }
 effect fn succeed() -> i32 ! Problem { return 41 }
@@ -102,7 +106,9 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }`,
     pair: 'map-both-failure',
     kind: 'effect',
     expected: 42,
-    source: `struct Problem { code: i32 }
+    source: `import silk.effects as Effect
+
+struct Problem { code: i32 }
 struct OtherProblem { code: i32 }
 fn keep(value: i32) -> i32 { return value }
 fn translate(problem: Problem) -> OtherProblem { return OtherProblem { code: problem.code } }
@@ -127,7 +133,9 @@ pub fn main() -> i32 { return addOne(41) }`,
     pair: 'flat-map',
     kind: 'effect',
     expected: 42,
-    source: `effect fn succeed(value: i32) -> i32 { return value }
+    source: `import silk.effects as Effect
+
+effect fn succeed(value: i32) -> i32 { return value }
 effect fn addOne(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 { return run succeed(41) |> Effect.flatMap(addOne) }`,
   },
@@ -145,13 +153,17 @@ pub fn main() -> i32 { let clock = Clock { value: 42 } return read(&clock) }`,
     pair: 'provide',
     kind: 'effect',
     expected: 42,
-    source: `struct Clock { value: i32 }
+    source: `import silk.effects as Effect
+
+service Clock {}
+struct FixedClock { value: i32 }
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
-fn adapt<A, !E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
+fn adapt<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> {
   return move self
 }
 pub fn main() -> i32 {
-  let clock = Clock { value: 42 }
+  let clock = FixedClock { value: 42 }
   return run adapt(read()) |> Effect.provide(&clock)
 }`,
   },
@@ -169,7 +181,9 @@ pub fn main() -> i32 { return double(addOne(20)) }`,
     pair: 'stored',
     kind: 'effect',
     expected: 42,
-    source: `fn addOne(value: i32) -> i32 { return value + 1 }
+    source: `import silk.effects as Effect
+
+fn addOne(value: i32) -> i32 { return value + 1 }
 fn double(value: i32) -> i32 { return value * 2 }
 effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
@@ -183,21 +197,25 @@ pub fn main() -> i32 {
     pair: 'affine',
     kind: 'baseline',
     expected: 42,
-    source: `struct Payload { storage: Allocation value: i32 }
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+
+struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
-effect fn produce() -> Payload ! OutOfMemory {
+effect fn produce() -> Payload ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
-effect fn program() -> i32 ! OutOfMemory {
+effect fn program() -> i32 ! OutOfMemoryError {
   let payload = run produce()
   return consume(move payload)
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {
@@ -205,20 +223,24 @@ pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
     pair: 'affine',
     kind: 'effect',
     expected: 42,
-    source: `struct Payload { storage: Allocation value: i32 }
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+
+struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
-effect fn produce() -> Payload ! OutOfMemory {
+effect fn produce() -> Payload ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
   return Payload { storage: move storage, value: 42 }
 }
-effect fn program() -> i32 ! OutOfMemory {
+effect fn program() -> i32 ! OutOfMemoryError {
   return run produce() |> Effect.map(consume)
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
   },
   {
@@ -234,7 +256,9 @@ pub fn main() -> i32 { return divide(0) }`,
     pair: 'trap',
     kind: 'effect',
     expected: 'trap',
-    source: `fn divide(value: i32) -> i32 { return 1 / value }
+    source: `import silk.effects as Effect
+
+fn divide(value: i32) -> i32 { return 1 / value }
 effect fn zero() -> i32 { return 0 }
 pub fn main() -> i32 { return run zero() |> Effect.map(divide) }`,
   },
@@ -248,12 +272,12 @@ const directStaticCases = new Set([
   'map-both-success-effect',
   'map-both-failure-effect',
   'flat-map-effect',
+  'provide-effect',
   'stored-effect',
   'affine-imperative',
   'affine-effect',
   'trap-effect',
 ])
-const constructorOnlyCases = new Set(['provide-effect'])
 
 const clangText = (bitcode, id, arguments_) => {
   const bitcodePath = join(temporary, `${id}.bc`)
@@ -598,7 +622,7 @@ try {
       const evaluatorBehavior =
         evaluated._tag === 'Completed'
           ? Number(evaluated.result.value)
-          : evaluated.reason._tag === 'Trap'
+          : evaluated._tag === 'Trap'
             ? 'trap'
             : evaluated._tag
       if (evaluatorBehavior !== sample.expected) {
@@ -659,18 +683,10 @@ try {
       const loweredWasm = Analysis.loweredMir(wasm)
       const runners = runnerClassifications(loweredWasm)
       const mirOperationTags = countTags(loweredWasm.functions.flatMap(Mir.operations))
-      const continuationDescriptors = loweredWasm.functions.flatMap((fn) =>
-        (fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'RunSuspendableEffectRegion' && region.relay.continuation !== undefined
-            ? [region.relay.continuation]
-            : [],
-        ),
+      const coroutineFrameDescriptors = loweredWasm.functions.filter(
+        (fn) => fn.suspension?.frame !== undefined,
       ).length
-      const applicability = directStaticCases.has(sample.id)
-        ? 'DirectStaticRun'
-        : constructorOnlyCases.has(sample.id)
-          ? 'ConstructorOnly'
-          : 'None'
+      const applicability = directStaticCases.has(sample.id) ? 'DirectStaticRun' : 'None'
 
       cases.push(
         Object.freeze({
@@ -683,7 +699,7 @@ try {
             unnormalizedEvaluator:
               unnormalizedEvaluated._tag === 'Completed'
                 ? Number(unnormalizedEvaluated.result.value)
-                : unnormalizedEvaluated.reason._tag === 'Trap'
+                : unnormalizedEvaluated._tag === 'Trap'
                   ? 'trap'
                   : unnormalizedEvaluated._tag,
             wasm: directWasmBehavior,
@@ -708,7 +724,7 @@ try {
             executions: Analysis.suspendableExecutionsOf(wasm).map(identity),
             effects: Analysis.suspendableEffectsOf(wasm),
           }),
-          continuationDescriptors,
+          coroutineFrameDescriptors,
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),
             mir: occurrences(mir, /\|>/g),

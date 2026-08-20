@@ -34,6 +34,7 @@ it('selects failure-carrier members only under their explicit tag convention', (
   const effect = Type.effect('i32', [first, second])
 
   assert.strictEqual(Type.failureCarrierMember(first, 0, 'ZeroBased'), first)
+  assert.strictEqual(Type.failureCarrierMember('i32', 0, 'ZeroBased'), 'i32')
   assert.strictEqual(Type.failureCarrierMember(union, 0, 'ZeroBased'), first)
   assert.strictEqual(Type.failureCarrierMember(union, 1, 'ZeroBased'), second)
   assert.strictEqual(Type.failureCarrierMember(effect, 1, 'OneBased'), first)
@@ -50,16 +51,16 @@ it('selects failure-carrier members only under their explicit tag convention', (
 
 it('refuses carrier tags whose member order can change after specialization', () => {
   const owner = Object.freeze({ module: 'types/failure-carrier', name: 'specialize' })
-  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const failures = Type.parameter(owner, 0, 'E')
   const member = Type.parameter(owner, 1, 'T')
   const alpha = Type.nominal('types/failure-carrier', 'Alpha')
   const zed = Type.nominal('types/failure-carrier', 'Zed')
-  const openEffect = Type.effect('i32', [zed], 'Shared', [], [failures])
+  const openEffect = Type.effect('i32', [zed, failures])
 
   assert.isUndefined(Type.failureCarrierMember(openEffect, 1, 'OneBased'))
   const specializedEffect = Type.substitute(
     openEffect,
-    new Map([[Type.key(failures), Type.failureRowArgument([alpha])]]),
+    new Map([[Type.key(failures), Type.failureValue([alpha])]]),
   )
   const concreteEffect = Type.isEffect(specializedEffect)
     ? specializedEffect
@@ -132,7 +133,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   assert.isFalse(Type.isRuntimeConcrete(unavailableCallable))
   assert.isFalse(Type.isRuntimeConcrete(unavailableRepresentation))
   assert.isFalse(Type.isRuntimeConcreteGenericArgument(unavailableIdentity))
-  assert.isFalse(Type.isRuntimeConcreteGenericArgument(Type.failureRowArgument([unavailableOuter])))
+  assert.isFalse(Type.isRuntimeConcreteGenericArgument(Type.failureValue([unavailableOuter])))
   assert.isFalse(
     Type.isRuntimeConcreteGenericArgument(
       Type.requirementRowArgument([
@@ -295,7 +296,7 @@ it('keeps fixed-array element type and length in recursive structural identity',
   assert.strictEqual(Object.isFrozen(three), true)
 })
 
-it('normalizes structural unions as canonical nominal sets', () => {
+it('normalizes structural unions as canonical ordinary sets', () => {
   const token = Type.nominal('model/Token', 'Token')
   const end = Type.nominal('model/End', 'End')
   const first = Type.union([token, end, token])
@@ -328,17 +329,53 @@ it('finds generic nominal dependencies nested inside union members', () => {
   ])
 })
 
-it('collapses empty and singleton unions and rejects non-nominal leaves', () => {
+it('normalizes empty, singleton, scalar, and aggregate union members', () => {
   const token = Type.nominal('model/Token', 'Token')
   const empty = Type.union(['never'])
   const singleton = Type.union(['never', token, token])
-  const invalid = Type.union([token, 'i32', Type.fixedArray(token, 2)])
+  const aggregate = Type.union([token, 'i32', Type.fixedArray(token, 2)])
   assert.deepEqual(empty, { _tag: 'Normalized', type: 'never' })
   assert.strictEqual(singleton._tag, 'Normalized')
   if (singleton._tag === 'Normalized') assert.strictEqual(Type.equals(singleton.type, token), true)
-  assert.strictEqual(invalid._tag, 'InvalidMembers')
-  if (invalid._tag === 'InvalidMembers')
-    assert.deepEqual(invalid.members.map(Type.encode), ['i32', 'Array<model/Token.Token, 2>'])
+  assert.strictEqual(aggregate._tag, 'Normalized')
+  if (aggregate._tag === 'Normalized')
+    assert.strictEqual(
+      Type.encode(aggregate.type),
+      'Array<model/Token.Token, 2> | i32 | model/Token.Token',
+    )
+})
+
+it('admits only finite detached union storage and renormalizes generic members', () => {
+  const owner = { module: 'model/GenericUnion', name: 'choose' }
+  const left = Type.parameter(owner, 0, 'L')
+  const right = Type.parameter(owner, 1, 'R')
+  const borrowed = Type.slice('Shared', 'i32')
+  assert.deepEqual(Type.union(['i32', borrowed]), {
+    _tag: 'InvalidMembers',
+    members: [borrowed],
+  })
+  const callable = Type.callable(['i32'], 'i32')
+  const effect = Type.effect('i32', [])
+  assert.deepEqual(Type.union(['i32', callable]), {
+    _tag: 'InvalidMembers',
+    members: [callable],
+  })
+  assert.deepEqual(Type.union(['i32', effect]), {
+    _tag: 'InvalidMembers',
+    members: [effect],
+  })
+
+  const open = Type.union([left, right])
+  assert.strictEqual(open._tag, 'Normalized')
+  if (open._tag !== 'Normalized') return
+  const specialized = Type.substitute(
+    open.type,
+    new Map([
+      [Type.key(left), 'i32'],
+      [Type.key(right), 'i32'],
+    ]),
+  )
+  assert.strictEqual(specialized, 'i32')
 })
 
 it('normalizes compiler-private effect contract identity and traverses substitutions', () => {
@@ -364,14 +401,20 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
   const owner = { module: 'work', name: 'apply' }
   const parameter = Type.parameter(owner, 0, 'T')
   const shared = Type.callable([parameter, 'bool'], parameter)
+  const unsafe = Type.callable([parameter, 'bool'], parameter, 'Shared', undefined, true)
   const exclusive = Type.callable([parameter, 'bool'], parameter, 'Exclusive')
   const once = Type.callable([parameter, 'bool'], parameter, 'Take')
   const substitution = new Map([[Type.key(parameter), 'i32' as const]])
 
   assert.strictEqual(Type.encode(shared), 'fn(T, bool) -> T')
+  assert.strictEqual(Type.encode(unsafe), 'unsafe fn(T, bool) -> T')
   assert.strictEqual(Type.encode(exclusive), 'mut fn(T, bool) -> T')
   assert.strictEqual(Type.encode(once), 'once fn(T, bool) -> T')
   assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(i32, bool) -> i32')
+  assert.strictEqual(
+    Type.encode(Type.substitute(unsafe, substitution)),
+    'unsafe fn(i32, bool) -> i32',
+  )
   assert.deepEqual(Type.parameters(shared), [parameter])
   assert.strictEqual(
     TypeCompatibility.isCompatible(TypeCompatibility.check(shared, exclusive)),
@@ -387,6 +430,8 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
     TypeCompatibility.isCompatible(TypeCompatibility.check(once, exclusive)),
     false,
   )
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(shared, unsafe)), true)
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(unsafe, shared)), false)
 })
 
 it('normalizes finite rows and applies total exact set operations deterministically', () => {
@@ -415,7 +460,7 @@ it('normalizes finite rows and applies total exact set operations deterministica
   )
 })
 
-it('keeps requirement union joins separate from exact membership and difference', () => {
+it('keeps requirement union joins and exact membership separate from key difference', () => {
   type Capability = 'Clock' | 'Logger'
   type Member = RequirementRow.Member<Capability>
   const policy = RequirementRow.policy<Capability>((capability) => capability)
@@ -453,8 +498,8 @@ it('keeps requirement union joins separate from exact membership and difference'
   assert.strictEqual(FiniteRow.isSubset(policy, exclusive, shared), false)
   assert.strictEqual(FiniteRow.isSubset(policy, shared, shared), true)
   assert.strictEqual(FiniteRow.isSubset(policy, exclusive, exclusive), true)
-  assert.deepEqual(FiniteRow.difference(policy, shared, exclusive).members, shared.members)
-  assert.deepEqual(FiniteRow.difference(policy, exclusive, shared).members, exclusive.members)
+  assert.deepEqual(FiniteRow.difference(policy, shared, exclusive).members, [])
+  assert.deepEqual(FiniteRow.difference(policy, exclusive, shared).members, [])
   assert.deepEqual(FiniteRow.difference(policy, shared, shared).members, [])
   assert.deepEqual(FiniteRow.difference(policy, exclusive, exclusive).members, [])
 
@@ -551,7 +596,7 @@ it('defers concrete difference until generic member keys finish specializing', (
   )
   assert.deepEqual(
     specialize(requirement(left, 'Exclusive', 'Audit'), requirement(right, 'Shared', 'Audit')),
-    [requirement(concrete, 'Exclusive', 'Audit')],
+    [],
   )
   assert.deepEqual(
     specialize(

@@ -46,7 +46,11 @@ const describe = (outcome: unknown): string =>
  * equivalence compares the same tag — so two keys are equivalent exactly when they hash alike, which
  * is what `HashKey` requires of a witness.
  */
-const owners = `import silk.hash { HashKey, HashSeed }
+const owners = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.hash { HashKey, HashSeed }
 import silk.hash_map { HashMap, contains, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
@@ -66,16 +70,16 @@ fn handleHash(value: &Handle, seed: &HashSeed) -> u64 {
   return HashKey.mix(seed, i32.toU64(value.tag))
 }
 
-impl HashKey<Handle> for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
+impl HashKey for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
 
-effect fn handle(tag: i32) -> Handle ! OutOfMemory ? &mut Allocator {
+effect fn handle(tag: i32) -> Handle ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
   let block = run recipe
   return Handle { tag: tag, storage: move block }
 }
 
-effect fn held(tag: i32) -> Held ! OutOfMemory ? &mut Allocator {
+effect fn held(tag: i32) -> Held ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
   let block = run recipe
@@ -94,14 +98,17 @@ fn release(tag: i32, storage: Allocation) -> i32 {
 }`
 
 const program = (body: string): string =>
-  `${owners}
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+${owners}
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 ${body}
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

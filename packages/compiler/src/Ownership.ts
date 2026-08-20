@@ -24,6 +24,7 @@ export type BindingSite =
   | { readonly _tag: 'Parameter'; readonly parameter: DeclarationIndex.ParameterId }
   | { readonly _tag: 'Let'; readonly binding: Hir.BindingId }
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
+  | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
 
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
@@ -151,7 +152,7 @@ export type CleanupPlan =
       readonly _tag: 'UnionCleanup'
       readonly type: Type.StructuralUnion
       readonly cases: ReadonlyArray<{
-        readonly member: Type.Nominal
+        readonly member: Type.Type
         readonly ordinal: number
         readonly cleanup: CleanupPlan
       }>
@@ -185,6 +186,12 @@ export type CleanupPlan =
       readonly contract: Type.Effect
     }
   | {
+      /** Releases only the runtime-selected member of one finite Effect representation. */
+      readonly _tag: 'EffectCompositeCleanup'
+      readonly type: Type.Represented
+      readonly alternatives: ReadonlyArray<CleanupPlan>
+    }
+  | {
       readonly _tag: 'EffectCleanup'
       readonly type: Type.Effect
       readonly site: Hir.EffectSiteId
@@ -205,6 +212,8 @@ export const cleanupHasHook = (self: CleanupPlan): boolean =>
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupHasHook(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
     self.slots.some((slot) => cleanupHasHook(slot.cleanup))) ||
+  (self._tag === 'EffectCompositeCleanup' &&
+    self.alternatives.some((alternative) => cleanupHasHook(alternative))) ||
   (self._tag === 'RawBufferCleanup' && cleanupHasHook(self.allocation))
 
 /** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
@@ -216,7 +225,9 @@ export const cleanupReclaims = (self: CleanupPlan): boolean =>
   (self._tag === 'ArrayCleanup' && cleanupReclaims(self.element)) ||
   (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupReclaims(entry.cleanup))) ||
   ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
-    self.slots.some((slot) => cleanupReclaims(slot.cleanup)))
+    self.slots.some((slot) => cleanupReclaims(slot.cleanup))) ||
+  (self._tag === 'EffectCompositeCleanup' &&
+    self.alternatives.some((alternative) => cleanupReclaims(alternative)))
 
 /** Tests whether one cleanup plan has any observable runtime effect. */
 export const cleanupHasEffect = (self: CleanupPlan): boolean =>
@@ -309,7 +320,7 @@ export interface MatchOwnership {
   readonly span: SourceSpan.SourceSpan
   readonly arms: ReadonlyArray<{
     readonly id: Match.ArmId
-    readonly member?: Type.Nominal
+    readonly member?: Type.Type
     readonly universal: boolean
     readonly provisionalGuard: boolean
     readonly bindings: ReadonlyArray<BindingSite>
@@ -332,37 +343,26 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
-const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
+const categoryOf = (
+  index: DeclarationIndex.Index,
+  type: DeclarationIndex.SemanticType | undefined,
+  assumptions: ReadonlySet<string> = new Set(),
+): OwnershipCategory =>
   type === undefined ||
-  Type.isBuiltin(type) ||
-  Type.isString(type) ||
-  Type.isNever(type) ||
-  Type.isOutOfMemory(type)
+  (Type.isEffect(type) && type.access === 'Shared') ||
+  (Type.isCallable(type) && type.mode === 'Shared') ||
+  DeclarationIndex.copyType(index, type, assumptions)
     ? copyable
-    : Type.isSlice(type)
-      ? type.access === 'Shared'
-        ? copyable
-        : Object.freeze({ _tag: 'MoveOnly', type })
-      : Type.isReference(type)
-        ? type.access === 'Shared'
-          ? copyable
-          : Object.freeze({ _tag: 'MoveOnly', type })
-        : Type.isFixedArray(type)
-          ? categoryOf(type.element)._tag === 'Copyable'
-            ? copyable
-            : Object.freeze({ _tag: 'MoveOnly', type })
-          : Type.isEffect(type) && type.access === 'Shared'
-            ? copyable
-            : Type.isCallable(type) && type.mode === 'Shared'
-              ? copyable
-              : Object.freeze({ _tag: 'MoveOnly', type })
+    : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
     ? `p${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `b${site.binding.ordinal}`
-      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+        : `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
 
 interface MutableBinding {
   readonly site: BindingSite
@@ -379,6 +379,7 @@ interface MutableBinding {
 
 interface CheckState {
   readonly index: DeclarationIndex.Index
+  readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
@@ -404,31 +405,6 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
     return placeSite(expression.subject)
   }
   return useSite(expression)
-}
-
-/**
- * Names the dedicated extraction rejection when a place resolves to a field holding a concrete
- * executable representation. Extracting one would leave the aggregate owning a partially released
- * environment, so its captures could be cleaned twice; consuming invocation or execution takes the
- * whole aggregate instead. Every other partial move keeps the general struct-field rejection.
- */
-const representationFieldExtraction = (
-  place: Hir.Expression,
-  span: SourceSpan.SourceSpan,
-): Diagnostic.Diagnostic | undefined => {
-  if (place._tag !== 'Project') return undefined
-  const type = place.type
-  if (
-    !Type.isRepresented(type) ||
-    (!Type.isCallable(type.contract) && !Type.isEffect(type.contract))
-  )
-    return undefined
-  return Diagnostic.representationFieldExtraction(
-    Type.encode(place.nominal),
-    `#${place.field.ordinal}`,
-    Type.encode(type.contract),
-    span,
-  )
 }
 
 /**
@@ -697,10 +673,7 @@ const checkExpression = (
     case 'Move': {
       if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
         checkExpression(state, live, expression.subject, false, guard, escaping)
-        state.diagnostics.push(
-          representationFieldExtraction(expression.subject, expression.span) ??
-            Diagnostic.partialMove(expression.span),
-        )
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
         return
       }
       const site = useSite(expression.subject)
@@ -743,24 +716,31 @@ const checkExpression = (
     }
     case 'Project': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
-        state.diagnostics.push(
-          representationFieldExtraction(expression, expression.span) ??
-            Diagnostic.partialMove(expression.span),
-        )
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
+        state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
     }
     case 'IndexPlace': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
       checkExpression(state, live, expression.index, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
     }
     case 'SliceBorrow':
     case 'ValueBorrow': {
+      if (expression.root._tag === 'TemporarySliceRoot') {
+        checkExpression(state, live, expression.root.value, true, guard, escaping)
+        return
+      }
       const site: BindingSite =
         expression.root._tag === 'BindingSliceRoot'
           ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
@@ -776,7 +756,10 @@ const checkExpression = (
     case 'SliceIndexPlace': {
       checkExpression(state, live, expression.slice, false, guard, escaping)
       checkExpression(state, live, expression.index, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
         state.diagnostics.push(Diagnostic.borrowedMove(expression.span))
       }
       return
@@ -977,7 +960,7 @@ const checkExpression = (
         scrutineeSite === undefined ? undefined : state.bindings.get(siteKey(scrutineeSite))
       if (expression.access === 'Copy') {
         checkExpression(state, live, expression.scrutinee, false, guard, false)
-        if (categoryOf(scrutineeType)._tag === 'MoveOnly') {
+        if (categoryOf(state.index, scrutineeType, state.copyAssumptions)._tag === 'MoveOnly') {
           state.diagnostics.push(
             Diagnostic.explicitMoveRequired(scrutineeBinding?.name ?? '?', expression.span),
           )
@@ -1020,7 +1003,7 @@ const checkExpression = (
             mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
             liveFrom: pattern.span,
             liveTo: arm.span,
-            category: categoryOf(pattern.type),
+            category: categoryOf(state.index, pattern.type, state.copyAssumptions),
             type: pattern.type,
             matchAccess: pattern.access,
           }
@@ -1043,7 +1026,8 @@ const checkExpression = (
                 }),
                 ...arm.bindings.flatMap((binding) => {
                   const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-                  return armLive.has(siteKey(site)) && categoryOf(binding.type)._tag === 'MoveOnly'
+                  return armLive.has(siteKey(site)) &&
+                    categoryOf(state.index, binding.type, state.copyAssumptions)._tag === 'MoveOnly'
                     ? [
                         Object.freeze({
                           path: binding.path,
@@ -1128,6 +1112,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
   switch (statement._tag) {
     case 'Bind':
       return [statement.initializer]
+    case 'PatternBind':
+      return [statement.selection.subject]
     case 'Evaluate':
       return [statement.expression]
     case 'Return':
@@ -1144,6 +1130,8 @@ const statementRootExpressions = (statement: Hir.Statement): ReadonlyArray<Hir.E
     case 'If':
     case 'While':
       return [statement.condition]
+    case 'IfLet':
+      return [statement.selection.subject]
     default:
       return []
   }
@@ -1161,10 +1149,9 @@ const deferredBlocks = (
  * Run sites in this expression that can propagate a typed failure, stopping at effect blocks:
  * a deferred body's runs propagate out of its own compiled function, not out of this one.
  *
- * A run is fallible when its effect type carries failures OR an open failure row: inside a
- * generic body the caller's failures arrive as a row *parameter*, so `failures` is empty while
- * `failureParameters` is not, and specialization can substitute a row that really does fail.
- * Reading `failures` alone leaves every owner live at such a run without a release.
+ * A run is fallible when its effect type carries concrete or symbolic failures. In a generic body
+ * the caller's failures arrive as ordinary symbolic union members, so concrete
+ * members alone are insufficient to determine whether the run may propagate.
  */
 const fallibleRunSites = (
   expression: Hir.Expression,
@@ -1177,8 +1164,7 @@ const fallibleRunSites = (
     typeof subjectType === 'object' &&
     subjectType !== null &&
     (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    (Type.failureMembers(subjectType as Type.Effect).length > 0 ||
-      Type.failureRowParameters(subjectType as Type.Effect).length > 0)
+    !Type.isNever(Type.failureType(subjectType as Type.Effect))
   return fallible ? [expression, ...nested] : nested
 }
 
@@ -1207,7 +1193,9 @@ const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite =>
     ? Object.freeze({ _tag: 'Let', binding: root.binding.id })
     : root._tag === 'ParameterRoot'
       ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
-      : Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
+      : root._tag === 'PatternRoot'
+        ? Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
+        : Object.freeze({ _tag: 'Temporary', owner: root.owner })
 
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
@@ -1222,7 +1210,11 @@ const borrowedPlaceAccess = (
   return undefined
 }
 
-const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
+const analyzeLoans = (
+  fn: Elaboration.FunctionFact,
+  index: DeclarationIndex.Index,
+  copyAssumptions: ReadonlySet<string>,
+): LoanAnalysis => {
   const loans: Array<LoanFact> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
 
@@ -1362,6 +1354,18 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           scanRunEnds(expression.callee, region)
           for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
         }
+        {
+          const site = directSite(expression.callee)?.site
+          if (site?._tag === 'Let') {
+            const previous = callableEnds.get(site.binding.ordinal)
+            if (previous === undefined || previous.span.end <= expression.syntax.span.end) {
+              callableEnds.set(site.binding.ordinal, {
+                region,
+                span: expression.syntax.span,
+              })
+            }
+          }
+        }
         return
       case 'CallableSection':
         for (const capture of expression.captures) scanRunEnds(capture.expression, region)
@@ -1378,6 +1382,16 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         return
       case 'Identifier': {
         const site = directSite(expression)?.site
+        if (
+          site?._tag === 'Let' &&
+          expression.type._tag === 'Available' &&
+          Type.isCallable(expression.type.type)
+        ) {
+          // A later non-invocation use may store or escape the callable. The CallableApply case
+          // records the same occurrence again after visiting its callee, so only a last known
+          // invocation (or explicit drop) shortens the capture loan.
+          callableEnds.delete(site.binding.ordinal)
+        }
         if (
           site?._tag === 'Let' &&
           expression.type._tag === 'Available' &&
@@ -1410,11 +1424,19 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         case 'BindStatement':
           scanRunEnds(statement.binding.initializer, statement.region)
           break
+        case 'PatternBindStatement':
+          scanRunEnds(statement.selection.source, statement.region)
+          break
         case 'ExpressionStatement':
           scanRunEnds(statement.expression, statement.region)
           break
         case 'IfStatement':
           scanRunEnds(statement.condition, statement.region)
+          scanStatementRunEnds(statement.taken)
+          scanStatementRunEnds(statement.otherwise)
+          break
+        case 'IfLetStatement':
+          scanRunEnds(statement.selection.source, statement.region)
           scanStatementRunEnds(statement.taken)
           scanStatementRunEnds(statement.otherwise)
           break
@@ -1451,7 +1473,17 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
 
   const executableAliases = new Map<number, Set<number>>()
   for (const binding of fn.bindings) {
-    for (const source of movedExecutableBindings(binding.initializer)) {
+    const directAlias = directSite(binding.initializer)?.site
+    const callableAlias =
+      directAlias?._tag === 'Let' &&
+      binding.inferredType._tag === 'Available' &&
+      Type.isCallable(binding.inferredType.type)
+        ? [directAlias.binding.ordinal]
+        : []
+    for (const source of new Set([
+      ...movedExecutableBindings(binding.initializer),
+      ...callableAlias,
+    ])) {
       const destinations = executableAliases.get(source)
       if (destinations === undefined) executableAliases.set(source, new Set([binding.id.ordinal]))
       else destinations.add(binding.id.ordinal)
@@ -1509,10 +1541,12 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
 
   for (const binding of fn.bindings) {
+    const directBorrow =
+      binding.initializer._tag === 'Borrow' && binding.initializer.formation._tag !== 'Unavailable'
     if (
       binding.inferredType._tag !== 'Available' ||
       !Type.containsViewBorrow(binding.inferredType.type) ||
-      returnedArgumentOrdinal(binding.initializer) === undefined
+      (!directBorrow && returnedArgumentOrdinal(binding.initializer) === undefined)
     ) {
       continue
     }
@@ -1572,7 +1606,8 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
 
   const naturalAccess = (expression: Elaboration.ExpressionFact): 'Read' | 'Move' =>
-    expression.type._tag === 'Available' && categoryOf(expression.type.type)._tag === 'MoveOnly'
+    expression.type._tag === 'Available' &&
+    categoryOf(index, expression.type.type, copyAssumptions)._tag === 'MoveOnly'
       ? 'Move'
       : 'Read'
 
@@ -1594,8 +1629,57 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
           access,
         )
         return
-      case 'Borrow':
+      case 'Borrow': {
+        if (expression.formation._tag === 'Unavailable') return
+        const directRoot = borrowSite(expression.formation.root)
+        const root =
+          directRoot._tag === 'Let'
+            ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
+            : directRoot
+        const extended = [...active, ...delayedLoansAt(expression.syntax.span)]
+        const conflict = extended.find(
+          (loan) =>
+            sameSite(loan.root, root) &&
+            (loan.access === 'Exclusive' || expression.access === 'Exclusive'),
+        )
+        if (conflict !== undefined) {
+          diagnostics.push(
+            Diagnostic.conflictingSliceLoan(
+              conflict.access,
+              expression.access,
+              conflict.startSpan,
+              expression.syntax.span,
+            ),
+          )
+          return
+        }
+        loans.push(
+          Object.freeze({
+            _tag: 'Loan',
+            id: Object.freeze({
+              _tag: 'BorrowId',
+              function: fn.declaration.id,
+              callSpan: expression.syntax.span,
+              ordinal: 0,
+            }),
+            root,
+            access: expression.access,
+            origin:
+              expression.formation._tag === 'FixedArrayBorrow'
+                ? 'FixedArrayBorrow'
+                : expression.formation._tag === 'SliceReborrow'
+                  ? 'SliceReborrow'
+                  : 'ValueBorrow',
+            suspendsParent:
+              expression.formation._tag === 'SliceReborrow' && expression.formation.suspendsParent,
+            startRegion: region,
+            endRegion: delayedEnd?.region ?? region,
+            startSpan: expression.syntax.span,
+            endSpan: delayedEnd?.span ?? expression.syntax.span,
+          }),
+        )
         return
+      }
       case 'Move':
         inspect(expression.subject, region, active, 'Move', delayedEnd)
         return
@@ -2041,8 +2125,28 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
         case 'ExpressionStatement':
           inspect(statement.expression, statement.region, [], naturalAccess(statement.expression))
           break
+        case 'PatternBindStatement':
+          inspect(
+            statement.selection.source,
+            statement.region,
+            [],
+            naturalAccess(statement.selection.source),
+            { region: statement.region, span: statement.selection.loanEnd },
+          )
+          break
         case 'IfStatement':
           inspect(statement.condition, statement.region, [])
+          statements(statement.taken)
+          statements(statement.otherwise)
+          break
+        case 'IfLetStatement':
+          inspect(
+            statement.selection.source,
+            statement.region,
+            [],
+            naturalAccess(statement.selection.source),
+            { region: statement.region, span: statement.selection.loanEnd },
+          )
           statements(statement.taken)
           statements(statement.otherwise)
           break
@@ -2123,8 +2227,8 @@ export const cleanupPlan = (
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (DeclarationIndex.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
-  if (Type.isFailureProjection(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isSlice(type) || Type.isReference(type))
     return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
@@ -2379,6 +2483,18 @@ export const specializeCleanup = (
           ),
         ),
       })
+    case 'EffectCompositeCleanup':
+      if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
+        return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'EffectCompositeCleanup',
+        type,
+        alternatives: Object.freeze(
+          cleanup.alternatives.map((alternative) =>
+            specializeCleanup(alternative, substitution, resolveConcrete),
+          ),
+        ),
+      })
     case 'RepresentedCallableCleanup': {
       if (!Type.isRepresented(type) || !Type.isCallable(type.contract))
         return Object.freeze({ _tag: 'NoCleanup', type })
@@ -2447,7 +2563,7 @@ const borrowedReplacements = (
   const replacements: Array<BorrowedReplacementFact> = []
   const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
     for (const statement of statements) {
-      if (statement._tag === 'IfStatement') {
+      if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
         walk(statement.taken)
         walk(statement.otherwise)
         continue
@@ -2487,14 +2603,26 @@ const checkFunction = (
   semantic?: Elaboration.FunctionFact,
 ): CheckedFunction => {
   const declaration = fn.declaration
+  const copyAssumptions = new Set(
+    declaration.typeParameters.flatMap((parameter) =>
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' &&
+          Type.equals(bound.application.capability, Type.copyCapability),
+      )
+        ? [Type.key(parameter.type)]
+        : [],
+    ),
+  )
   const loanAnalysis =
     semantic === undefined
       ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
-      : analyzeLoans(semantic)
+      : analyzeLoans(semantic, index, copyAssumptions)
   const replacements =
     semantic === undefined ? Object.freeze([]) : borrowedReplacements(semantic, index)
   const state: CheckState = {
     index,
+    copyAssumptions,
     bindings: new Map(),
     order: [],
     diagnostics: [...loanAnalysis.diagnostics],
@@ -2517,7 +2645,7 @@ const checkFunction = (
           : 'Immutable',
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
-      category: categoryOf(type),
+      category: categoryOf(index, type, copyAssumptions),
       ...(type === undefined ? {} : { type }),
     }
     const key = siteKey(binding.site)
@@ -2560,6 +2688,97 @@ const checkFunction = (
     live: ReadonlySet<string>,
   ): ReadonlyArray<string> =>
     [...frames].reverse().flatMap((frame) => [...frame].reverse().filter((site) => live.has(site)))
+
+  const checkPatternSubject = (selection: Hir.PatternSelection, live: Set<string>): void => {
+    const subjectType =
+      selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
+    const subjectSite = placeSite(selection.subject)
+    const subjectBinding =
+      subjectSite === undefined ? undefined : state.bindings.get(siteKey(subjectSite))
+    if (selection.access === 'Copy') {
+      checkExpression(state, live, selection.subject, false)
+      if (categoryOf(index, subjectType, copyAssumptions)._tag === 'MoveOnly')
+        state.diagnostics.push(
+          Diagnostic.explicitMoveRequired(subjectBinding?.name ?? '?', selection.span),
+        )
+      return
+    }
+    if (selection.access === 'Move') {
+      if (subjectSite === undefined) checkExpression(state, live, selection.subject, true)
+      else checkUse(state, live, subjectSite, selection.span, true)
+      return
+    }
+    checkExpression(state, live, selection.subject, false)
+    if (selection.access === 'Exclusive') {
+      if (subjectSite === undefined)
+        state.diagnostics.push(Diagnostic.invalidMatchScrutineePlace('Exclusive', selection.span))
+      else if (subjectBinding?.mutability !== 'Mutable')
+        state.diagnostics.push(
+          Diagnostic.exclusiveMatchRequiresMutable(subjectBinding?.name ?? '?', selection.span),
+        )
+    }
+  }
+
+  const introducePatternBindings = (
+    selection: Hir.PatternSelection,
+    live: Set<string>,
+    frame: Array<string>,
+    liveTo: SourceSpan.SourceSpan,
+  ): ReadonlyArray<BindingSite> => {
+    const sites: Array<BindingSite> = []
+    for (const pattern of selection.bindings) {
+      const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: pattern.id })
+      const mutable: MutableBinding = {
+        site,
+        name: pattern.name,
+        mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+        liveFrom: pattern.span,
+        liveTo,
+        category: categoryOf(index, pattern.type, copyAssumptions),
+        type: pattern.type,
+        matchAccess: pattern.access,
+      }
+      const key = siteKey(site)
+      state.bindings.set(key, mutable)
+      state.order.push(mutable)
+      frame.push(key)
+      live.add(key)
+      sites.push(site)
+    }
+    return Object.freeze(sites)
+  }
+
+  const patternSelectionCleanup = (
+    selection: Hir.PatternSelection,
+    live: ReadonlySet<string>,
+    includeBindings: boolean,
+  ): MatchOwnership['arms'][number]['cleanup'] =>
+    selection.access === 'Move'
+      ? Object.freeze([
+          ...selection.cleanup.flatMap((path) => {
+            const subjectType =
+              selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
+            const type = cleanupTypeAtPath(index, selection.member ?? subjectType ?? 'never', path)
+            return type === undefined
+              ? []
+              : [Object.freeze({ path, cleanup: cleanupPlan(index, type) })]
+          }),
+          ...(includeBindings
+            ? selection.bindings.flatMap((binding) => {
+                const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
+                return live.has(siteKey(site)) &&
+                  categoryOf(index, binding.type, copyAssumptions)._tag === 'MoveOnly'
+                  ? [
+                      Object.freeze({
+                        path: binding.path,
+                        cleanup: cleanupPlan(index, binding.type),
+                      }),
+                    ]
+                  : []
+              })
+            : []),
+        ])
+      : Object.freeze([])
 
   const walkStatements = (
     statements: ReadonlyArray<Hir.Statement>,
@@ -2656,7 +2875,7 @@ const checkFunction = (
           mutability: statement.mutability,
           liveFrom: statement.span,
           liveTo: enclosingSpan,
-          category: categoryOf(type),
+          category: categoryOf(index, type, copyAssumptions),
           ...(type === undefined ? {} : { type }),
           ...(environment === undefined || type === undefined || !Type.isCallable(type)
             ? {}
@@ -2667,6 +2886,32 @@ const checkFunction = (
         state.order.push(binding)
         frames.at(-1)?.push(key)
         live.add(key)
+        continue
+      }
+      if (statement._tag === 'PatternBind') {
+        checkPatternSubject(statement.selection, live)
+        const frame = frames.at(-1) ?? []
+        const sites = introducePatternBindings(statement.selection, live, frame, enclosingSpan)
+        state.matches.push(
+          Object.freeze({
+            _tag: 'MatchOwnership',
+            id: statement.selection.id,
+            access: statement.selection.access,
+            span: statement.span,
+            arms: Object.freeze([
+              Object.freeze({
+                id: statement.selection.arm,
+                ...(statement.selection.member === undefined
+                  ? {}
+                  : { member: statement.selection.member }),
+                universal: statement.selection.universal,
+                provisionalGuard: false,
+                bindings: sites,
+                cleanup: patternSelectionCleanup(statement.selection, live, false),
+              }),
+            ]),
+          }),
+        )
         continue
       }
       if (statement._tag === 'Evaluate') {
@@ -2705,6 +2950,64 @@ const checkFunction = (
             continuing.every((candidate) => candidate.has(site)),
           ),
         )
+        continue
+      }
+      if (statement._tag === 'IfLet') {
+        checkPatternSubject(statement.selection, live)
+        const continuing: Array<Set<string>> = []
+        let selectedSites: ReadonlyArray<BindingSite> = Object.freeze([])
+        for (const [arm, body] of [
+          ['Taken', statement.taken],
+          ['Otherwise', statement.otherwise],
+        ] as const) {
+          const armFrames = [...frames.map((frame) => [...frame]), []]
+          const armLive = new Set(live)
+          if (arm === 'Taken')
+            selectedSites = introducePatternBindings(
+              statement.selection,
+              armLive,
+              armFrames.at(-1) ?? [],
+              statement.span,
+            )
+          const result = walkStatements(body, statement.span, armLive, armFrames, loopScopes)
+          const frame = armFrames.at(-1) ?? []
+          if (!result.returned && frame.length > 0)
+            exits.push(
+              Object.freeze({
+                kind: 'ArmEnd' as const,
+                span: statement.span,
+                region: statement.region,
+                arm,
+                sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+              }),
+            )
+          if (!result.returned) {
+            for (const site of frame) result.live.delete(site)
+            continuing.push(result.live)
+          }
+        }
+        state.matches.push(
+          Object.freeze({
+            _tag: 'MatchOwnership',
+            id: statement.selection.id,
+            access: statement.selection.access,
+            span: statement.span,
+            arms: Object.freeze([
+              Object.freeze({
+                id: statement.selection.arm,
+                ...(statement.selection.member === undefined
+                  ? {}
+                  : { member: statement.selection.member }),
+                universal: statement.selection.universal,
+                provisionalGuard: false,
+                bindings: selectedSites,
+                cleanup: patternSelectionCleanup(statement.selection, live, false),
+              }),
+            ]),
+          }),
+        )
+        if (continuing.length === 0) return Object.freeze({ returned: true, live })
+        live = intersection(continuing)
         continue
       }
       if (statement._tag === 'Write') {
@@ -3023,7 +3326,9 @@ const siteText = (site: BindingSite): string =>
     ? `p${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `b${site.binding.ordinal}`
-      : `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+        : `t${site.owner.span.start}.${site.owner.ordinal}`
 
 const cleanupText = (cleanup: CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
@@ -3052,6 +3357,9 @@ const cleanupText = (cleanup: CleanupPlan): string => {
   }
   if (cleanup._tag === 'EffectCleanup') {
     return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
+  }
+  if (cleanup._tag === 'EffectCompositeCleanup') {
+    return `effect-composite:${Type.encode(cleanup.type)} alternatives=${cleanup.alternatives.map((alternative, ordinal) => `${ordinal}(${cleanupText(alternative)})`).join(',')}`
   }
   if (cleanup._tag === 'RepresentedCallableCleanup') {
     return `represented-callable:${Type.encode(cleanup.contract)}`

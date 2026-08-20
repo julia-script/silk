@@ -4,7 +4,7 @@
   "version": 1,
   "status": "spike-local-only",
   "outcome": {
-    "tags": ["Success", "TypedFailure", "OutOfMemory"],
+    "tags": ["Success", "TypedFailure", "OutOfMemoryError"],
     "payloadLane": "i32"
   },
   "continuations": [

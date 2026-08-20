@@ -44,15 +44,11 @@ export const unexpectedTokensCode = 'PAR0002' as const
 /** Stable code for a primary-expression template start reserved for future support. */
 export const reservedTemplateSyntaxCode = 'PAR0003' as const
 
-/** Stable code for one wholly absent required return statement. */
-export const missingReturnStatementCode = 'PAR0004' as const
-
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
 
 /** Stable code for an import redundantly naming its own containing module. */
 export const selfImportCode = 'MOD0002' as const
-export const duplicateImportCode = 'MOD0003' as const
 
 /** Stable code for a user module claiming the reserved standard-library namespace. */
 export const reservedModuleIdentityCode = 'MOD0004' as const
@@ -92,7 +88,6 @@ export const conditionNotBoolCode = 'SEM0011' as const
 
 /** Stable code for a call argument whose type mismatches its parameter. */
 export const argumentTypeMismatchCode = 'SEM0012' as const
-export const redundantAliasCode = 'SEM0013' as const
 export const unknownImportedMemberCode = 'SEM0014' as const
 export const inaccessibleImportedMemberCode = 'SEM0015' as const
 export const bindingConflictCode = 'SEM0016' as const
@@ -100,7 +95,7 @@ export const duplicateFieldNameCode = 'SEM0017' as const
 export const expectedTypeCode = 'SEM0018' as const
 export const privateTypeExposureCode = 'SEM0019' as const
 export const inlineRecursiveStructCode = 'SEM0020' as const
-export const externalRawStructLiteralCode = 'SEM0021' as const
+export const inaccessibleStructConstructionCode = 'SEM0021' as const
 export const unknownStructFieldCode = 'SEM0022' as const
 export const duplicateStructInitializerCode = 'SEM0023' as const
 export const missingStructInitializerCode = 'SEM0024' as const
@@ -142,17 +137,16 @@ export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
 /** Stable code for a negative decimal literal contextualized as unsigned `usize`. */
 export const usizeNegativeCode = 'SEM0060' as const
-/** Stable code for a non-concrete or non-nominal member of a effect failure row. */
+/** Stable code for a type that cannot inhabit an Effect failure channel. */
 export const invalidFailureTypeCode = 'SEM0061' as const
-/** Stable code for a failure row attached to an ordinary function. */
-export const failureRowOnOrdinaryCode = 'SEM0062' as const
+/** Stable code for a failure channel attached to an ordinary function. */
+export const failureChannelOnOrdinaryCode = 'SEM0062' as const
 export const failOutsideEffectCode = 'SEM0063' as const
 export const undeclaredFailureCode = 'SEM0064' as const
 export const runNonEffectCode = 'SEM0065' as const
 export const unhandledEffectFailuresCode = 'SEM0066' as const
 export const invalidEffectHandlerCode = 'SEM0067' as const
 export const mutableEffectRecipeCode = 'SEM0068' as const
-export const effectIdentityErasureCode = 'SEM0069' as const
 /** Stable code for a non-concrete or non-nominal capability in a requirement row. */
 export const invalidRequirementTypeCode = 'SEM0070' as const
 export const unhandledEffectRequirementsCode = 'SEM0071' as const
@@ -162,9 +156,20 @@ export const nonCallableApplicationCode = 'SEM0075' as const
 export const incompatibleCallableSignatureCode = 'SEM0076' as const
 export const invalidCallableInvocationAccessCode = 'SEM0077' as const
 export const redundantUnaryEmptyCallCode = 'SEM0078' as const
-export const deeperUnderApplicationCode = 'SEM0079' as const
 export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
+/** Stable code for an Effect join whose alternatives cannot be represented as a finite composite. */
+export const nonFiniteEffectJoinCode = 'SEM0132' as const
+/** Stable code for a refutable pattern in an unconditional local binding. */
+export const refutableLetPatternCode = 'SEM0133' as const
+/** Stable code for an operator marker that cannot describe its interface operation. */
+export const invalidOperatorContractCode = 'SEM0134' as const
+/** Stable code for operator syntax with no marked operation accepting its operands. */
+export const operatorNotApplicableCode = 'SEM0135' as const
+/** Stable code for operator syntax matched by more than one marked operation. */
+export const ambiguousOperatorCode = 'SEM0136' as const
+/** Stable code for an unsafe acknowledgement that does not complete an unsafe invocation. */
+export const misplacedUnsafeAcknowledgementCode = 'SEM0137' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -187,12 +192,8 @@ export const invalidReturnedBorrowSignatureCode = 'SEM0091' as const
 export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 /** Stable code for one reachable intrinsic unavailable on the requested execution target. */
 export const intrinsicTargetUnavailableCode = 'SEM0093' as const
-/** Stable code for wrapping the already-borrowed string view in another reference or slice. */
-export const invalidStringViewTypeCode = 'SEM0094' as const
 /** Stable code for a float literal spelling no floating-point value can represent. */
 export const invalidFloatLiteralCode = 'SEM0095' as const
-/** Stable code for an effect site or a move inside the conditional right operand of `&&` or `||`. */
-export const impureShortCircuitOperandCode = 'SEM0096' as const
 /** Stable code for a bound operation call whose receiver names more than one bounded parameter. */
 export const ambiguousBoundOperationCode = 'SEM0097' as const
 /** Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. */
@@ -203,8 +204,6 @@ export const typeArgumentConflictCode = 'SEM0100' as const
 /** Stable code for a bound operation whose selected witness has no lowering. */
 export const unlowerableBoundWitnessCode = 'SEM0101' as const
 
-/** Stable code for selecting a suspending provider to allocate continuation storage. */
-export const suspendingContinuationAllocatorCode = 'SEM0102' as const
 /** Stable code for constructing an aggregate that stores a bare callable value. */
 export const storedCallableConstructionCode = 'SEM0103' as const
 /** Stable code for the first struct initializer that contradicts an inferred representation. */
@@ -235,6 +234,12 @@ export const selectedRowCardinalityCode = 'SEM0126' as const
 export const providerConformanceAmbiguityCode = 'SEM0127' as const
 /** Stable code for a surviving provider candidate whose conformance mapping is invalid. */
 export const invalidProviderConformanceCode = 'SEM0128' as const
+/** Stable code for an explicit return whose value violates the declaration result. */
+export const returnTypeMismatchCode = 'SEM0129' as const
+/** Stable code for a reachable non-unit function fallthrough. */
+export const missingReturnCode = 'SEM0130' as const
+/** Stable code for a provider whose key matches but whose access cannot satisfy the requirement. */
+export const providerAccessMismatchCode = 'SEM0131' as const
 /** Stable code for a `typeof` item that resolves to no declaration in scope. */
 export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
 /** Stable code for a `typeof` item whose name belongs to more than one declaration. */
@@ -272,9 +277,6 @@ export const conflictingSliceLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
 
-/** Stable code for extracting one owned representation-bearing field out of its aggregate. */
-export const representationFieldExtractionCode = 'OWN0013' as const
-
 /** Stable code for invoking a stored callable through too weak an aggregate receiver access. */
 export const storedCallableInvocationAccessCode = 'OWN0014' as const
 
@@ -296,10 +298,8 @@ export type Code =
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
-  | typeof missingReturnStatementCode
   | typeof unknownModuleCode
   | typeof selfImportCode
-  | typeof duplicateImportCode
   | typeof reservedModuleIdentityCode
   | typeof unknownTypeCode
   | typeof integerOutOfRangeCode
@@ -313,7 +313,6 @@ export type Code =
   | typeof unknownActorOperationCode
   | typeof conditionNotBoolCode
   | typeof argumentTypeMismatchCode
-  | typeof redundantAliasCode
   | typeof unknownImportedMemberCode
   | typeof inaccessibleImportedMemberCode
   | typeof bindingConflictCode
@@ -321,7 +320,7 @@ export type Code =
   | typeof expectedTypeCode
   | typeof privateTypeExposureCode
   | typeof inlineRecursiveStructCode
-  | typeof externalRawStructLiteralCode
+  | typeof inaccessibleStructConstructionCode
   | typeof unknownStructFieldCode
   | typeof duplicateStructInitializerCode
   | typeof missingStructInitializerCode
@@ -362,14 +361,13 @@ export type Code =
   | typeof implicitSliceDecayCode
   | typeof usizeNegativeCode
   | typeof invalidFailureTypeCode
-  | typeof failureRowOnOrdinaryCode
+  | typeof failureChannelOnOrdinaryCode
   | typeof failOutsideEffectCode
   | typeof undeclaredFailureCode
   | typeof runNonEffectCode
   | typeof unhandledEffectFailuresCode
   | typeof invalidEffectHandlerCode
   | typeof mutableEffectRecipeCode
-  | typeof effectIdentityErasureCode
   | typeof invalidRequirementTypeCode
   | typeof unhandledEffectRequirementsCode
   | typeof providerBackedFailureCode
@@ -378,9 +376,14 @@ export type Code =
   | typeof incompatibleCallableSignatureCode
   | typeof invalidCallableInvocationAccessCode
   | typeof redundantUnaryEmptyCallCode
-  | typeof deeperUnderApplicationCode
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
+  | typeof nonFiniteEffectJoinCode
+  | typeof refutableLetPatternCode
+  | typeof invalidOperatorContractCode
+  | typeof operatorNotApplicableCode
+  | typeof ambiguousOperatorCode
+  | typeof misplacedUnsafeAcknowledgementCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -393,14 +396,11 @@ export type Code =
   | typeof invalidReturnedBorrowSignatureCode
   | typeof invalidReturnedBorrowOriginCode
   | typeof intrinsicTargetUnavailableCode
-  | typeof invalidStringViewTypeCode
   | typeof invalidFloatLiteralCode
-  | typeof impureShortCircuitOperandCode
   | typeof ambiguousBoundOperationCode
   | typeof uninferredTypeParameterCode
   | typeof typeArgumentConflictCode
   | typeof unlowerableBoundWitnessCode
-  | typeof suspendingContinuationAllocatorCode
   | typeof storedCallableConstructionCode
   | typeof conflictingInitializerRepresentationCode
   | typeof divergentRepresentationJoinCode
@@ -416,6 +416,9 @@ export type Code =
   | typeof selectedRowCardinalityCode
   | typeof providerConformanceAmbiguityCode
   | typeof invalidProviderConformanceCode
+  | typeof returnTypeMismatchCode
+  | typeof missingReturnCode
+  | typeof providerAccessMismatchCode
   | typeof unresolvedExactRepresentationItemCode
   | typeof ambiguousExactRepresentationItemCode
   | typeof uncallableExactRepresentationItemCode
@@ -439,7 +442,6 @@ export type Code =
   | typeof conflictingSliceLoanCode
   | typeof ownerAccessDuringLoanCode
   | typeof borrowedMoveCode
-  | typeof representationFieldExtractionCode
   | typeof storedCallableInvocationAccessCode
   | typeof storedEffectRunAccessCode
   | typeof usizeTargetOutOfRangeCode
@@ -482,11 +484,9 @@ export type Reason =
       readonly expected: ReadonlyArray<string>
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
-  | { readonly _tag: 'MissingReturnStatement' }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
-  | { readonly _tag: 'DuplicateImport'; readonly module: string }
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
   | {
       readonly _tag: 'IntegerOutOfRange'
@@ -496,18 +496,30 @@ export type Reason =
     }
   | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
   | { readonly _tag: 'InvalidFailureType'; readonly type: string }
-  | { readonly _tag: 'FailureRowOnOrdinary' }
+  | { readonly _tag: 'FailureChannelOnOrdinary' }
   | { readonly _tag: 'FailOutsideEffect' }
   | { readonly _tag: 'UndeclaredFailure'; readonly type: string }
   | { readonly _tag: 'RunNonEffect'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectFailures'; readonly failures: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectHandler'; readonly detail: string }
   | { readonly _tag: 'MutableEffectRecipe' }
-  | { readonly _tag: 'EffectIdentityErasure' }
+  | { readonly _tag: 'NonFiniteEffectJoin'; readonly detail: string }
   | { readonly _tag: 'CallableIdentityErasure' }
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
+  | { readonly _tag: 'MisplacedUnsafeAcknowledgement' }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
+  | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
+  | {
+      readonly _tag: 'OperatorNotApplicable'
+      readonly operator: string
+      readonly operands: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'AmbiguousOperator'
+      readonly operator: string
+      readonly candidates: ReadonlyArray<string>
+    }
   | {
       readonly _tag: 'AmbiguousBoundOperation'
       readonly spelling: string
@@ -529,16 +541,6 @@ export type Reason =
   | { readonly _tag: 'InvalidDropHook'; readonly detail: string }
   | { readonly _tag: 'InvalidStaticLiteral'; readonly detail: string }
   | { readonly _tag: 'InvalidFloatLiteral'; readonly spelling: string }
-  | {
-      readonly _tag: 'ImpureShortCircuitOperand'
-      readonly operator: string
-      readonly detail: string
-    }
-  | {
-      readonly _tag: 'SuspendingContinuationAllocator'
-      readonly provider: string
-      readonly implementation: string
-    }
   | {
       readonly _tag: 'StoredCallableConstruction'
       readonly aggregate: string
@@ -621,7 +623,7 @@ export type Reason =
   | {
       readonly _tag: 'InvalidOpaqueResultBinder'
       readonly binder: string
-      readonly actual: 'Value' | 'FailureRow' | 'RequirementRow'
+      readonly actual: 'Value' | 'RequirementRow'
     }
   | { readonly _tag: 'MissingOpaqueRealization'; readonly family: string }
   | {
@@ -677,6 +679,12 @@ export type Reason =
       readonly expected: string
       readonly actual: string
     }
+  | {
+      readonly _tag: 'ReturnTypeMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
+  | { readonly _tag: 'MissingReturn'; readonly expected: string }
   | { readonly _tag: 'NonCallableApplication'; readonly actual: string }
   | {
       readonly _tag: 'IncompatibleCallableSignature'
@@ -688,13 +696,6 @@ export type Reason =
       readonly required: 'Shared' | 'Exclusive' | 'Take'
     }
   | { readonly _tag: 'RedundantUnaryEmptyCall'; readonly target: string }
-  | {
-      readonly _tag: 'DeeperUnderApplication'
-      readonly target: string
-      readonly expectedCount: number
-      readonly actualCount: number
-    }
-  | { readonly _tag: 'RedundantAlias'; readonly spelling: string }
   | { readonly _tag: 'UnknownImportedMember'; readonly module: string; readonly spelling: string }
   | {
       readonly _tag: 'InaccessibleImportedMember'
@@ -710,7 +711,7 @@ export type Reason =
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
   | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
-  | { readonly _tag: 'ExternalRawStructLiteral'; readonly type: string }
+  | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
       readonly _tag: 'DuplicateStructInitializer'
@@ -765,6 +766,11 @@ export type Reason =
     }
   | { readonly _tag: 'UnreachableMatchArm'; readonly member: string }
   | { readonly _tag: 'IncompleteMatch'; readonly missing: ReadonlyArray<string> }
+  | {
+      readonly _tag: 'RefutableLetPattern'
+      readonly actual: string
+      readonly missing: ReadonlyArray<string>
+    }
   | { readonly _tag: 'MatchGuardNotBool'; readonly actual: string }
   | { readonly _tag: 'MissingPatternField'; readonly type: string; readonly field: string }
   | {
@@ -812,13 +818,11 @@ export type Reason =
       readonly spelling: string
       readonly expected:
         | 'Value'
-        | 'FailureRow'
         | 'RequirementRow'
         | 'CallableRepresentation'
         | 'EffectRepresentation'
       readonly actual:
         | 'Value'
-        | 'FailureRow'
         | 'RequirementRow'
         | 'CallableRepresentation'
         | 'EffectRepresentation'
@@ -827,10 +831,6 @@ export type Reason =
       readonly _tag: 'ContractRowInference'
       readonly problem:
         | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
-        | {
-            readonly _tag: 'AmbiguousFailureRemainder'
-            readonly parameters: ReadonlyArray<string>
-          }
         | {
             readonly _tag: 'AbsentRequirementMember'
             readonly capability: string
@@ -854,14 +854,12 @@ export type Reason =
             readonly _tag: 'AmbiguousRequirementRemainder'
             readonly parameters: ReadonlyArray<string>
           }
-        | { readonly _tag: 'NonFiniteFailureRow' }
         | { readonly _tag: 'NonFiniteRequirementRow' }
     }
   | {
       readonly _tag: 'SliceTypePosition'
       readonly position: 'parameter' | 'return' | 'field' | 'type argument'
     }
-  | { readonly _tag: 'InvalidStringViewType'; readonly form: 'reference' | 'slice' }
   | { readonly _tag: 'InvalidBorrowPosition' }
   | { readonly _tag: 'InvalidBorrowOperand' }
   | { readonly _tag: 'ExclusiveBorrowRequiresMutable'; readonly spelling: string }
@@ -877,12 +875,6 @@ export type Reason =
       readonly moveSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'PartialMove' }
-  | {
-      readonly _tag: 'RepresentationFieldExtraction'
-      readonly aggregate: string
-      readonly field: string
-      readonly contract: string
-    }
   | {
       readonly _tag: 'StoredCallableInvocationAccess'
       readonly aggregate: string
@@ -993,7 +985,6 @@ export const hasGenericSpecializationErrors = (diagnostics: ReadonlyArray<Diagno
       diagnostic.code === selectedRowCardinalityCode ||
       diagnostic.code === providerConformanceAmbiguityCode ||
       diagnostic.code === invalidProviderConformanceCode ||
-      diagnostic.code === suspendingContinuationAllocatorCode ||
       diagnostic.code === nonConcreteSpecializationCode ||
       diagnostic.code === polymorphicRecursionCode,
   )
@@ -1011,6 +1002,13 @@ export const hasInstanceFenceErrors = (diagnostics: ReadonlyArray<Diagnostic>): 
     (diagnostic) =>
       diagnostic.code === storedCallableConstructionCode ||
       diagnostic.code === storedRepresentedEffectConstructionCode,
+  )
+
+/** Tests whether source return-contract errors must stop every target-dependent phase. */
+export const hasReturnContractErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === returnTypeMismatchCode || diagnostic.code === missingReturnCode,
   )
 
 /** Derives the identity of one diagnostic given its ordinal among equals. */
@@ -1207,26 +1205,6 @@ export const invalidFloatLiteral = (spelling: string, span: SourceSpan.SourceSpa
     span,
   })
 
-/**
- * Creates the semantic diagnostic for an effect site or a move in the right operand of `&&` or
- * `||`. That operand evaluates only when the left one does not already decide the result, so an
- * effect performed or a value consumed there would depend on the left operand's value.
- */
-export const impureShortCircuitOperand = (
-  operator: string,
-  detail: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: impureShortCircuitOperandCode,
-    severity: 'error',
-    message: `The right operand of ${operator} must be pure, found ${detail}`,
-    reason: Object.freeze({ _tag: 'ImpureShortCircuitOperand', operator, detail }),
-    span,
-  })
-
 /** Creates the semantic diagnostic for a constant outside the literal scalar contract. */
 export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -1236,6 +1214,50 @@ export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Di
     severity: 'error',
     message: `Invalid constant: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidConstant', detail }),
+    span,
+  })
+
+/** Creates the declaration diagnostic for an invalid interface operator marker. */
+export const invalidOperatorContract = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidOperatorContractCode,
+    severity: 'error',
+    message: `Invalid operator contract: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidOperatorContract', detail }),
+    span,
+  })
+
+/** Creates the operator-site diagnostic when no marked operation accepts the operands. */
+export const operatorNotApplicable = (
+  operator: string,
+  operands: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: operatorNotApplicableCode,
+    severity: 'error',
+    message: `Operator ${operator} does not accept (${operands.join(', ')})`,
+    reason: Object.freeze({ _tag: 'OperatorNotApplicable', operator, operands }),
+    span,
+  })
+
+/** Creates the operator-site diagnostic when static conformance leaves multiple candidates. */
+export const ambiguousOperator = (
+  operator: string,
+  candidates: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousOperatorCode,
+    severity: 'error',
+    message: `Operator ${operator} is ambiguous between ${candidates.join(', ')}`,
+    reason: Object.freeze({ _tag: 'AmbiguousOperator', operator, candidates }),
     span,
   })
 
@@ -1323,18 +1345,6 @@ export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic 
     span,
   })
 
-/** Creates the diagnostic for one wholly absent required return statement. */
-export const missingReturnStatement = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'parser',
-    code: missingReturnStatementCode,
-    severity: 'error',
-    message: 'Expected return statement',
-    reason: Object.freeze({ _tag: 'MissingReturnStatement' }),
-    span,
-  })
-
 /** Creates the diagnostic for an import whose target module is not supplied. */
 export const unknownModule = (module: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
@@ -1368,49 +1378,6 @@ export const reservedModuleIdentity = (module: string, span: SourceSpan.SourceSp
     message: `Module ${module} claims the reserved standard-library namespace silk/; user modules must live outside it`,
     reason: Object.freeze({ _tag: 'ReservedModuleIdentity', module }),
     span,
-  })
-
-/**
- * Creates the diagnostic for one module imported more than once.
- *
- * `removal` covers the repeated import line, so the emitted edit deletes that line whole.
- */
-export const duplicateImport = (
-  module: string,
-  removal: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'module',
-    code: duplicateImportCode,
-    severity: 'error',
-    message: `Module ${module} is imported more than once`,
-    reason: Object.freeze({ _tag: 'DuplicateImport', module }),
-    span,
-    edits: Object.freeze([Object.freeze({ span: removal, replacement: '' })]),
-  })
-
-/**
- * Creates the diagnostic for an alias that repeats the name it renames.
- *
- * `clause` covers the ` as name` bytes, so the emitted edit deletes the clause and leaves the
- * imported name it duplicated.
- */
-export const redundantAlias = (
-  spelling: string,
-  clause: SourceSpan.SourceSpan,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: redundantAliasCode,
-    severity: 'error',
-    message: `Alias ${spelling} does not change the name`,
-    reason: Object.freeze({ _tag: 'RedundantAlias', spelling }),
-    span,
-    edits: Object.freeze([Object.freeze({ span: clause, replacement: '' })]),
   })
 
 export const unknownImportedMember = (
@@ -1512,14 +1479,17 @@ export const inlineRecursiveStruct = (
     span,
   })
 
-export const externalRawStructLiteral = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const inaccessibleStructConstruction = (
+  type: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: externalRawStructLiteralCode,
+    code: inaccessibleStructConstructionCode,
     severity: 'error',
-    message: `Raw construction of ${type} is limited to its defining module`,
-    reason: Object.freeze({ _tag: 'ExternalRawStructLiteral', type }),
+    message: `Cannot construct ${type} because its raw constructor is not available at this site`,
+    reason: Object.freeze({ _tag: 'InaccessibleStructConstruction', type }),
     span,
   })
 
@@ -1774,39 +1744,39 @@ export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Di
     span,
   })
 
-/** Creates the diagnostic for a failure-row member that cannot be an owned nominal error. */
+/** Creates the diagnostic for a type that cannot inhabit an Effect failure channel. */
 export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidFailureTypeCode,
     severity: 'error',
-    message: `Effect failure ${type} must be one concrete nominal type`,
+    message: `Effect failure ${type} must be a detached ordinary value type`,
     reason: Object.freeze({ _tag: 'InvalidFailureType', type }),
     span,
   })
 
-/** Creates the diagnostic for a requirement that cannot name one concrete capability type. */
+/** Creates the diagnostic for a requirement that cannot name one dependency-eligible service. */
 export const invalidRequirementType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidRequirementTypeCode,
     severity: 'error',
-    message: `Effect requirement ${type} must be one concrete nominal capability type`,
+    message: `Effect requirement ${type} must be one concrete service type`,
     reason: Object.freeze({ _tag: 'InvalidRequirementType', type }),
     span,
   })
 
-/** Creates the diagnostic for spelling a failure row on a direct ordinary function. */
-export const failureRowOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
+/** Creates the diagnostic for spelling a failure channel on a direct ordinary function. */
+export const failureChannelOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: failureRowOnOrdinaryCode,
+    code: failureChannelOnOrdinaryCode,
     severity: 'error',
-    message: 'Only effect functions may declare a failure row',
-    reason: Object.freeze({ _tag: 'FailureRowOnOrdinary' }),
+    message: 'Only effect functions may declare a failure channel',
+    reason: Object.freeze({ _tag: 'FailureChannelOnOrdinary' }),
     span,
   })
 
@@ -1893,26 +1863,6 @@ export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSp
     severity: 'error',
     message: `Invalid Effect provider: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidEffectProvision', detail }),
-    span,
-  })
-
-/** Rejects an allocator whose selected allocation implementation can itself suspend. */
-export const suspendingContinuationAllocator = (
-  provider: string,
-  implementation: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: suspendingContinuationAllocatorCode,
-    severity: 'error',
-    message: `Allocator ${provider} cannot provide continuation storage because ${implementation} can suspend`,
-    reason: Object.freeze({
-      _tag: 'SuspendingContinuationAllocator',
-      provider,
-      implementation,
-    }),
     span,
   })
 
@@ -2152,7 +2102,7 @@ export const inlineOpaqueLayoutCycle = (
 /** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
 export const invalidOpaqueResultBinder = (
   binder: string,
-  actual: 'Value' | 'FailureRow' | 'RequirementRow',
+  actual: 'Value' | 'RequirementRow',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -2253,15 +2203,14 @@ export const mutableEffectRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
     span,
   })
 
-export const effectIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const nonFiniteEffectJoin = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: effectIdentityErasureCode,
+    code: nonFiniteEffectJoinCode,
     severity: 'error',
-    message:
-      'Cannot merge Effect values from different construction sites without explicit erasure',
-    reason: Object.freeze({ _tag: 'EffectIdentityErasure' }),
+    message: `Cannot form a finite Effect join: ${detail}`,
+    reason: Object.freeze({ _tag: 'NonFiniteEffectJoin', detail }),
     span,
   })
 
@@ -2479,6 +2428,34 @@ export const assignmentTypeMismatch = (
     span,
   })
 
+/** Creates the diagnostic for an explicit return that violates its declaration result. */
+export const returnTypeMismatch = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: returnTypeMismatchCode,
+    severity: 'error',
+    message: `Return expected ${expected} but received ${actual}`,
+    reason: Object.freeze({ _tag: 'ReturnTypeMismatch', expected, actual }),
+    span,
+  })
+
+/** Creates the diagnostic for a reachable closing brace in a non-unit body. */
+export const missingReturn = (expected: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingReturnCode,
+    severity: 'error',
+    message: `A reachable path must return ${expected}`,
+    reason: Object.freeze({ _tag: 'MissingReturn', expected }),
+    span,
+  })
+
 export const transferOutsideLoop = (
   transfer: 'break' | 'continue',
   span: SourceSpan.SourceSpan,
@@ -2499,7 +2476,7 @@ export const invalidUnionMember = (type: string, span: SourceSpan.SourceSpan): D
     phase: 'semantic',
     code: invalidUnionMemberCode,
     severity: 'error',
-    message: `Structural union members must be nominal types, found ${type}`,
+    message: `Structural union members must be detached ordinary values with finite storage, found ${type}`,
     reason: Object.freeze({ _tag: 'InvalidUnionMember', type }),
     span,
   })
@@ -2573,6 +2550,25 @@ export const incompleteMatch = (
     severity: 'error',
     message: `Match does not cover ${missing.join(', ')}`,
     reason: Object.freeze({ _tag: 'IncompleteMatch', missing: Object.freeze([...missing]) }),
+    span,
+  })
+
+export const refutableLetPattern = (
+  actual: string,
+  missing: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: refutableLetPatternCode,
+    severity: 'error',
+    message: `Let pattern is refutable for ${actual}; it does not cover ${missing.join(', ')}. Use if let or match`,
+    reason: Object.freeze({
+      _tag: 'RefutableLetPattern',
+      actual,
+      missing: Object.freeze([...missing]),
+    }),
     span,
   })
 
@@ -2700,18 +2696,8 @@ export const duplicateTypeParameter = (
 
 export const genericParameterKindMismatch = (
   spelling: string,
-  expected:
-    | 'Value'
-    | 'FailureRow'
-    | 'RequirementRow'
-    | 'CallableRepresentation'
-    | 'EffectRepresentation',
-  actual:
-    | 'Value'
-    | 'FailureRow'
-    | 'RequirementRow'
-    | 'CallableRepresentation'
-    | 'EffectRepresentation',
+  expected: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
+  actual: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -2785,9 +2771,7 @@ type ContractRowInferenceProblem = Extract<
 const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): string => {
   switch (problem._tag) {
     case 'AbsentFailureMember':
-      return `Failure row does not contain selected member ${problem.member}`
-    case 'AmbiguousFailureRemainder':
-      return `Failure row remainder is ambiguous across ${problem.parameters.join(', ')}`
+      return `Failure type does not contain selected member ${problem.member}`
     case 'AbsentRequirementMember':
       // Two complete templates rather than one with the access marker interpolated, so the
       // generated diagnostic catalog pins both wordings this problem can report.
@@ -2800,8 +2784,6 @@ const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): stri
       return `Requirement ${problem.capability}@${problem.role} has access ${problem.actual.join(' or ')}, expected ${problem.expected}`
     case 'AmbiguousRequirementRemainder':
       return `Requirement row remainder is ambiguous across ${problem.parameters.join(', ')}`
-    case 'NonFiniteFailureRow':
-      return 'Failure row specialization is not finite and concrete'
     case 'NonFiniteRequirementRow':
       return 'Requirement row specialization is not finite and concrete'
   }
@@ -2869,6 +2851,7 @@ export const typeArgumentConflict = (
   written: string,
   implied: string,
   span: SourceSpan.SourceSpan,
+  firstConstraint?: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -2878,6 +2861,13 @@ export const typeArgumentConflict = (
     message: `Type argument ${parameter} of ${target} is ${written}, but the supplied values imply ${implied}`,
     reason: Object.freeze({ _tag: 'TypeArgumentConflict', target, parameter, written, implied }),
     span,
+    ...(firstConstraint === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'type argument first constrained here', span: firstConstraint }),
+          ]),
+        }),
   })
 
 export const polymorphicRecursion = (
@@ -2909,23 +2899,6 @@ export const sliceTypePosition = (
         ? 'A slice must be the complete type of an ordinary function parameter'
         : `A slice cannot appear in a ${position} type`,
     reason: Object.freeze({ _tag: 'SliceTypePosition', position }),
-    span,
-  })
-
-export const invalidStringViewType = (
-  form: 'reference' | 'slice',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidStringViewTypeCode,
-    severity: 'error',
-    message:
-      form === 'reference'
-        ? '`string` is already a borrowed immutable view and cannot be referenced again'
-        : '`string` cannot be the element of another borrowed slice view',
-    reason: Object.freeze({ _tag: 'InvalidStringViewType', form }),
     span,
   })
 
@@ -2985,8 +2958,19 @@ export const missingUnsafeBoundary = (operation: string, span: SourceSpan.Source
     phase: 'semantic',
     code: missingUnsafeBoundaryCode,
     severity: 'error',
-    message: `${operation} requires a lexical unsafe block`,
+    message: `${operation} requires unsafe acknowledgement`,
     reason: Object.freeze({ _tag: 'MissingUnsafeBoundary', operation }),
+    span,
+  })
+
+export const misplacedUnsafeAcknowledgement = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: misplacedUnsafeAcknowledgementCode,
+    severity: 'error',
+    message: '`unsafe` must acknowledge a complete unsafe invocation',
+    reason: Object.freeze({ _tag: 'MisplacedUnsafeAcknowledgement' }),
     span,
   })
 
@@ -3135,6 +3119,19 @@ const providerNoMatch = (
     ...providerSelectionFields(problem, locations),
   })
 
+const providerAccessMismatch = (
+  problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'ProviderAccessMismatch' }>,
+  locations: ProviderSelection.DiagnosticLocations,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: providerAccessMismatchCode,
+    severity: 'error',
+    message: `${problem.provider.toLowerCase()} provider access cannot satisfy an ${problem.required.toLowerCase()} requirement`,
+    ...providerSelectionFields(problem, locations),
+  })
+
 const jointProviderSelectionConflict = (
   problem: Extract<ProviderSelection.SelectionProblem, { readonly _tag: 'JointSelectionConflict' }>,
   locations: ProviderSelection.DiagnosticLocations,
@@ -3208,6 +3205,8 @@ export const providerSelection = (
   switch (problem._tag) {
     case 'ProviderNoMatch':
       return providerNoMatch(problem, diagnostic.locations)
+    case 'ProviderAccessMismatch':
+      return providerAccessMismatch(problem, diagnostic.locations)
     case 'JointSelectionConflict':
       return jointProviderSelectionConflict(problem, diagnostic.locations)
     case 'ProviderAmbiguity':
@@ -3415,27 +3414,6 @@ export const redundantUnaryEmptyCall = (target: string, span: SourceSpan.SourceS
     span,
   })
 
-export const deeperUnderApplication = (
-  target: string,
-  expectedCount: number,
-  actualCount: number,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: deeperUnderApplicationCode,
-    severity: 'error',
-    message: `${target} only permits binding its ${expectedCount - 1} trailing arguments; received ${actualCount}`,
-    reason: Object.freeze({
-      _tag: 'DeeperUnderApplication',
-      target,
-      expectedCount,
-      actualCount,
-    }),
-    span,
-  })
-
 /** Creates the diagnostic for a binding used again after its consuming move. */
 export const useAfterMove = (
   spelling: string,
@@ -3461,27 +3439,6 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     severity: 'error',
     message: 'Struct fields cannot be moved independently',
     reason: Object.freeze({ _tag: 'PartialMove' }),
-    span,
-  })
-
-/**
- * Extracting an owned representation-bearing field would leave the aggregate holding a partially
- * released executable environment, so its captures could be cleaned twice. Consuming invocation or
- * execution takes the whole aggregate instead.
- */
-export const representationFieldExtraction = (
-  aggregate: string,
-  field: string,
-  contract: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'ownership',
-    code: representationFieldExtractionCode,
-    severity: 'error',
-    message: `Cannot move field ${field} out of ${aggregate}: it stores the executable representation ${contract}, whose captures are cleaned with the whole aggregate`,
-    reason: Object.freeze({ _tag: 'RepresentationFieldExtraction', aggregate, field, contract }),
     span,
   })
 

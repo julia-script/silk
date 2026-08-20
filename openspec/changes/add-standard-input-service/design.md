@@ -1,7 +1,7 @@
 ## Context
 
 `StandardStreams` is the only host byte boundary Silk has. It writes to stdout and stderr and
-reports `StreamWriteFailure`. Reading is not a missing parameter on that service; it is a different
+reports `StreamWriteError`. Reading is not a missing parameter on that service; it is a different
 shape of operation, and the two constraints below decide the design rather than leaving it open.
 
 ## Goals / Non-Goals
@@ -42,7 +42,7 @@ is never greater. Bytes past the committed prefix are untouched.
 
 `EndOfInput` is a member of the outcome rather than a failure because reaching the end is the
 ordinary way input finishes. A loop that drains input to completion therefore has no failure to
-handle on its normal path, and `StreamReadFailure` keeps its meaning: the host could not perform the
+handle on its normal path, and `StreamReadError` keeps its meaning: the host could not perform the
 read. This mirrors `Option` and `Result` in the standard library, which are ordinary structs holding
 a structural union narrowed by `match`, rather than a compiler-known outcome type.
 

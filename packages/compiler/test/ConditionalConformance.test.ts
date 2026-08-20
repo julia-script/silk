@@ -19,15 +19,15 @@ const analyze = (name: string, source: string) =>
  * witness, or that answered without following the requirement, cannot produce the expected number
  * by accident.
  */
-const mappedDecoder = `interface Decoder<T> {
-  fn decode(value: &T) -> i32
+const mappedDecoder = `interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct Schema { tag: i32 }
 
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 struct MappedSchema<S> { source: S }
 
@@ -35,7 +35,7 @@ fn mappedDecode<S: Decoder>(value: &MappedSchema<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
 
-impl<S: Decoder<S>> Decoder<MappedSchema<S>> for MappedSchema<S> {
+impl<S: Decoder> Decoder for MappedSchema<S> {
   decode: MappedSchema.mappedDecode
 }
 
@@ -93,7 +93,7 @@ pub fn main() -> i32 { return 0 }`,
     const proof = DeclarationIndex.prove(
       index,
       wrapped,
-      Type.nominal('conditional-conformance/proof', 'Decoder', [wrapped]),
+      Type.nominal('conditional-conformance/proof', 'Decoder'),
     )
     assert.strictEqual(proof._tag, 'Proved')
     if (proof._tag !== 'Proved') return
@@ -111,20 +111,20 @@ it.effect('infers nominal failure and requirement rows through conditional witne
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/kinded-rows',
-      `interface Decoder<T> { fn decode(value: &T) -> i32 }
+      `interface Decoder { fn decode(value: &Self) -> i32 }
 
 struct Schema { tag: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 struct Problem {}
-struct FailureBox<S, !E> { source: S }
-fn makeFailure<S, !E>(source: S, pending: once Effect<i32 ! E>) -> FailureBox<S, E> {
+struct FailureBox<S, E> { source: S }
+fn makeFailure<S, E>(source: S, pending: once Effect<i32 ! E>) -> FailureBox<S, E> {
   drop pending
   return FailureBox<S, E> { source: move source }
 }
-fn failureDecode<S: Decoder, !E>(value: &FailureBox<S, E>) -> i32 { return 1 }
-impl<S: Decoder<S>, !E> Decoder<FailureBox<S, E>> for FailureBox<S, E> {
+fn failureDecode<S: Decoder, E>(value: &FailureBox<S, E>) -> i32 { return 1 }
+impl<S: Decoder, E> Decoder for FailureBox<S, E> {
   decode: FailureBox.failureDecode
 }
 
@@ -134,7 +134,7 @@ fn makeRequirement<S, ?R>(source: S, pending: once Effect<i32 ? R>) -> Requireme
   return RequirementBox<S, R> { source: move source }
 }
 fn requirementDecode<S: Decoder, ?R>(value: &RequirementBox<S, R>) -> i32 { return 2 }
-impl<S: Decoder<S>, ?R> Decoder<RequirementBox<S, R>> for RequirementBox<S, R> {
+impl<S: Decoder, ?R> Decoder for RequirementBox<S, R> {
   decode: RequirementBox.requirementDecode
 }
 
@@ -166,7 +166,7 @@ pub fn main() -> i32 {
     assert.strictEqual(requirement.length, 1)
     assert.deepEqual(failure.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
       'conditional-conformance/kinded-rows.Schema',
-      '! conditional-conformance/kinded-rows.Problem',
+      'conditional-conformance/kinded-rows.Problem',
     ])
     assert.deepEqual(requirement.at(0)?.key.typeArguments.map(Type.encodeGenericArgument), [
       'conditional-conformance/kinded-rows.Schema',
@@ -177,30 +177,23 @@ pub fn main() -> i32 {
     const schema = Type.nominal(module, 'Schema')
     const problem = Type.nominal(module, 'Problem')
     const clock = Type.nominal(module, 'Clock')
-    const failureBox = Type.nominal(module, 'FailureBox', [
-      schema,
-      Type.failureRowArgument([problem]),
-    ])
+    const failureBox = Type.nominal(module, 'FailureBox', [schema, Type.failureValue([problem])])
     const requirementBox = Type.nominal(module, 'RequirementBox', [
       schema,
       Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
     ])
-    const failureProof = DeclarationIndex.prove(
-      index,
-      failureBox,
-      Type.nominal(module, 'Decoder', [failureBox]),
-    )
+    const failureProof = DeclarationIndex.prove(index, failureBox, Type.nominal(module, 'Decoder'))
     const requirementProof = DeclarationIndex.prove(
       index,
       requirementBox,
-      Type.nominal(module, 'Decoder', [requirementBox]),
+      Type.nominal(module, 'Decoder'),
     )
     assert.strictEqual(failureProof._tag, 'Proved')
     assert.strictEqual(requirementProof._tag, 'Proved')
     if (failureProof._tag === 'Proved')
       assert.deepEqual(failureProof.typeArguments.map(Type.encodeGenericArgument), [
         'conditional-conformance/kinded-rows.Schema',
-        '! conditional-conformance/kinded-rows.Problem',
+        'conditional-conformance/kinded-rows.Problem',
       ])
     if (requirementProof._tag === 'Proved')
       assert.deepEqual(requirementProof.typeArguments.map(Type.encodeGenericArgument), [
@@ -257,8 +250,8 @@ pub fn main() -> i32 {
  * Two wrappers over one base, so a proof chain has depth two and two unrelated specializations of
  * one conditional header exist in one program.
  */
-const nestedDecoder = `interface Decoder<T> {
-  fn decode(value: &T) -> i32
+const nestedDecoder = `interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct Schema { tag: i32 }
@@ -267,8 +260,8 @@ struct Other { code: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
 fn otherDecode(value: &Other) -> i32 { return value.code }
 
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
-impl Decoder<Other> for Other { decode: Other.otherDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
+impl Decoder for Other { decode: Other.otherDecode }
 
 struct OptionalSchema<S> { source: S }
 
@@ -276,7 +269,7 @@ fn optionalDecode<S: Decoder>(value: &OptionalSchema<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
 
-impl<S: Decoder<S>> Decoder<OptionalSchema<S>> for OptionalSchema<S> {
+impl<S: Decoder> Decoder for OptionalSchema<S> {
   decode: OptionalSchema.optionalDecode
 }
 
@@ -332,17 +325,17 @@ it.effect('discovers proved base witnesses even when the wrapper operation never
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/unused-requirement',
-      `interface Decoder<T> { fn decode(value: &T) -> i32 }
+      `interface Decoder { fn decode(value: &Self) -> i32 }
 
 struct Schema { tag: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 struct Wrapper<S> { source: S }
 fn wrapperDecode<S: Decoder>(value: &Wrapper<S>) -> i32 { return 7 }
-impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> { decode: Wrapper.wrapperDecode }
+impl<S: Decoder> Decoder for Wrapper<S> { decode: Wrapper.wrapperDecode }
 
-fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
+fn decodeOf<Self: Decoder>(value: Self) -> i32 { return Decoder.decode(&value) }
 
 pub fn main() -> i32 {
   return decodeOf<Wrapper<Schema>>(Wrapper<Schema> { source: Schema { tag: 41 } })
@@ -370,23 +363,28 @@ it.effect('discovers unused proof dependencies before a conditional Drop hook', 
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/drop-dependency',
-      `interface Releasable<T> { fn release(value: &T) -> i32 }
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+interface Releasable { fn release(value: &Self) -> i32 }
 
 struct Token { code: i32 }
 fn releaseToken(value: &Token) -> i32 { return value.code }
-impl Releasable<Token> for Token { release: Token.releaseToken }
+impl Releasable for Token { release: Token.releaseToken }
 
-struct Guard<T, U> {
-  first: T
+struct Guard<Self, U> {
+  first: Self
   second: U
   storage: Allocation
 }
 
-impl<T: Releasable<T>> Drop for Guard<T, T> {
+impl<T: Releasable> Drop for Guard<T, T> {
   fn drop(self: &mut Guard<T, T>) -> () { return () }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -399,7 +397,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     assert.deepEqual(
@@ -445,7 +443,7 @@ pub fn main() -> i32 { return 0 }`,
     )
     const schema = Type.nominal('conditional-conformance/root-edge', 'Schema')
     const wrapper = Type.nominal('conditional-conformance/root-edge', 'MappedSchema', [schema])
-    const capability = Type.nominal('conditional-conformance/root-edge', 'Decoder', [wrapper])
+    const capability = Type.nominal('conditional-conformance/root-edge', 'Decoder')
     const target = DeclarationIndex.interfaceWitnessTarget(
       Analysis.declarationIndex(snapshot),
       wrapper,
@@ -463,19 +461,19 @@ it.effect('tracks structural descent by provider when witness argument positions
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/provider-descent',
-      `interface Decoder<T> { fn decode(value: &T) -> i32 }
+      `interface Decoder { fn decode(value: &Self) -> i32 }
 
 struct X { tag: i32 }
 struct Y {}
 struct Z {}
 fn decodeX(value: &X) -> i32 { return value.tag }
-impl Decoder<X> for X { decode: X.decodeX }
+impl Decoder for X { decode: X.decodeX }
 
 struct Pair<A, B> { left: A right: B }
 fn decodePair<A: Decoder, B>(value: &Pair<A, B>) -> i32 {
   return Decoder.decode(&value.left) + 1
 }
-impl<A: Decoder<A>, B> Decoder<Pair<A, B>> for Pair<A, B> {
+impl<A: Decoder, B> Decoder for Pair<A, B> {
   decode: Pair.decodePair
 }
 
@@ -559,7 +557,7 @@ it.effect('infers reordered target binders and discovers two exact static specia
     const module = 'conditional-conformance/generic-targets'
     const snapshot = yield* analyze(
       module,
-      `interface Renderer<T> { fn render(value: &T) -> i32 }
+      `interface Renderer { fn render(value: &Self) -> i32 }
 
 struct Box<A, F: fn(i32) -> i32> { value: A }
 
@@ -569,7 +567,7 @@ fn box<F: fn(i32) -> i32>(value: i32, operation: F) -> Box<i32, F> {
 }
 
 fn render<F: fn(i32) -> i32, A>(value: &Box<A, F>) -> i32 { return 21 }
-impl<A, F: fn(i32) -> i32> Renderer<Box<A, F>> for Box<A, F> {
+impl<A, F: fn(i32) -> i32> Renderer for Box<A, F> {
   render: Box.render
 }
 
@@ -601,7 +599,7 @@ pub fn main() -> i32 {
     assert.isDefined(hir)
     if (hir === undefined) return
     const encodedHir = Hir.encode(hir)
-    assert.include(encodedHir, `bound ${module}.Renderer<T>.render over T`)
+    assert.include(encodedHir, `bound ${module}.Renderer.render over T`)
     const renderQuestion = hir.functions
       .find(
         (fn) =>
@@ -613,7 +611,7 @@ pub fn main() -> i32 {
     assert.strictEqual(renderQuestion?._tag, 'BoundOperationCall')
     if (renderQuestion?._tag !== 'BoundOperationCall') return
     assert.strictEqual(Type.encode(renderQuestion.provider), 'T')
-    assert.strictEqual(Type.encode(renderQuestion.capability), `${module}.Renderer<T>`)
+    assert.strictEqual(Type.encode(renderQuestion.capability), `${module}.Renderer`)
     assert.deepEqual(
       renderQuestion.contract.operands.map((operand) =>
         operand.type._tag === 'Resolved' ? Type.encode(operand.type.type) : operand.type._tag,
@@ -725,7 +723,7 @@ pub fn main() -> i32 {
     // over — and no witness. Which conformance answers it is decided per specialization, so a
     // generic body that already carried an answer would have to carry one answer for every provider.
     assert.isTrue(
-      encoded.includes('bound conditional-conformance/generic-hir.Decoder<S>.decode over S'),
+      encoded.includes('bound conditional-conformance/generic-hir.Decoder.decode over S'),
     )
     for (const spelling of ['witness', 'dictionary', 'vtable'])
       assert.isFalse(encoded.includes(spelling), `${spelling} reached generic HIR`)
@@ -736,17 +734,17 @@ it.effect('rejects two headers whose bounds are the only difference between them
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/bound-distinguished',
-      `interface Decoder<T> { fn decode(value: &T) -> i32 }
-interface Left<T> { fn decode(value: &T) -> i32 }
-interface Right<T> { fn decode(value: &T) -> i32 }
+      `interface Decoder { fn decode(value: &Self) -> i32 }
+interface Left { fn decode(value: &Self) -> i32 }
+interface Right { fn decode(value: &Self) -> i32 }
 
 struct Wrap<S> { source: S }
 
 fn viaLeft<S: Left>(value: &Wrap<S>) -> i32 { return Left.decode(&value.source) }
 fn viaRight<S: Right>(value: &Wrap<S>) -> i32 { return Right.decode(&value.source) }
 
-impl<S: Left<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaLeft }
-impl<S: Right<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaRight }
+impl<S: Left> Decoder for Wrap<S> { decode: Wrap.viaLeft }
+impl<S: Right> Decoder for Wrap<S> { decode: Wrap.viaRight }
 
 pub fn main() -> i32 { return 0 }`,
     )
@@ -764,14 +762,14 @@ it.effect('rejects a witness demanding a bound its header never promises', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'conditional-conformance/unpromised',
-      `interface Decoder<T> { fn decode(value: &T) -> i32 }
-interface Encoder<T> { fn decode(value: &T) -> i32 }
+      `interface Decoder { fn decode(value: &Self) -> i32 }
+interface Encoder { fn decode(value: &Self) -> i32 }
 
 struct Wrap<S> { source: S }
 
 fn viaEncoder<S: Encoder>(value: &Wrap<S>) -> i32 { return Encoder.decode(&value.source) }
 
-impl<S: Decoder<S>> Decoder<Wrap<S>> for Wrap<S> { decode: Wrap.viaEncoder }
+impl<S: Decoder> Decoder for Wrap<S> { decode: Wrap.viaEncoder }
 
 pub fn main() -> i32 { return 0 }`,
     )
@@ -792,13 +790,14 @@ it.effect('infers operand binders and propagates a failing smaller generic witne
     const module = 'conditional-conformance/smaller-generic-row'
     const snapshot = yield* analyze(
       module,
-      `import silk.result { Result, Success, Failure }
+      `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 struct Problem { code: i32 }
 struct Extra {}
 
-interface Decoder<T> {
-  effect fn decode(value: &T) -> i32 ! Problem | Extra
+interface Decoder {
+  effect fn decode(value: &Self) -> i32 ! Problem | Extra
 }
 
 struct Box<A> { value: A }
@@ -807,7 +806,7 @@ effect fn decodeBox<A>(value: &Box<A>) -> i32 ! Problem {
   fail Problem { code: 42 }
 }
 
-impl Decoder<Box<i32>> for Box<i32> { decode: Box.decodeBox }
+impl Decoder for Box<i32> { decode: Box.decodeBox }
 
 fn pending<T: Decoder>(value: &T) -> Effect<i32 ! Problem | Extra> {
   return Decoder.decode(value)
@@ -832,7 +831,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const provider = Type.nominal(module, 'Box', ['i32'])
-    const capability = Type.nominal(module, 'Decoder', [provider])
+    const capability = Type.nominal(module, 'Decoder')
     const target = DeclarationIndex.interfaceWitnessTarget(
       Analysis.declarationIndex(snapshot),
       provider,

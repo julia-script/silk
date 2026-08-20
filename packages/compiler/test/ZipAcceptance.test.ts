@@ -19,24 +19,31 @@ const ascii = (value: string): Uint8Array =>
  * the trace of acquire/release events spells out the execution order unambiguously, and an operand
  * that never ran contributes no events at all.
  */
-const prelude = `import silk.effects { Pair, Triple }
+const prelude = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.effects { Pair, Triple }
 
 struct Problem { code: i32 }
 
-struct Clock { storage: Allocation }
+service Clock {}
+struct FixedClock { storage: Allocation }
+impl Clock for FixedClock {}
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> FixedClock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
-  return Clock { storage: move allocation }
+  return FixedClock { storage: move allocation }
 }
 
-effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> FixedClock ! Problem { fail Problem { code: 9 } }
 
 /// One owner, acquired and released inside whichever body runs this.
-effect fn acquireClock() -> Clock ! Problem {
+effect fn acquireClock() -> FixedClock ! Problem {
   return run Effect.catchAll(openClock(), exhausted)
 }
 
@@ -89,7 +96,8 @@ fn combineTriple(triple: Triple<i32, i32, i32>) -> i32 {
 effect fn recover(problem: Problem) -> i32 { return problem.code }`
 
 /** Both operands succeed: the pair carries both values and the trace carries the order. */
-const zipping = `${prelude}
+const zipping = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(firstStep(), secondStep()) |> Effect.map(combinePair)
@@ -97,7 +105,8 @@ pub fn main() -> i32 {
 }`
 
 /** The first operand fails, so the second never runs and contributes no events. */
-const zipShortCircuiting = `${prelude}
+const zipShortCircuiting = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(failingStep(), secondStep()) |> Effect.map(combinePair)
@@ -105,7 +114,8 @@ pub fn main() -> i32 {
 }`
 
 /** The second operand fails, so the pair's own construction never happens either. */
-const zipFailingSecond = `${prelude}
+const zipFailingSecond = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip(firstStep(), failingStep()) |> Effect.map(combinePair)
@@ -113,7 +123,8 @@ pub fn main() -> i32 {
 }`
 
 /** All three operands succeed, in declaration order. */
-const zipping3 = `${prelude}
+const zipping3 = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip3(firstStep(), secondStep(), thirdStep()) |> Effect.map(combineTriple)
@@ -121,7 +132,8 @@ pub fn main() -> i32 {
 }`
 
 /** The middle operand fails, so the third never runs. */
-const zip3ShortCircuiting = `${prelude}
+const zip3ShortCircuiting = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = Effect.zip3(firstStep(), failingStep(), thirdStep()) |> Effect.map(combineTriple)
@@ -129,7 +141,8 @@ pub fn main() -> i32 {
 }`
 
 /** The piped form resolves to the same declaration and produces the same result. */
-const zipPiped = `${prelude}
+const zipPiped = `import silk.effects as Effect
+${prelude}
 
 pub fn main() -> i32 {
   let zipped = firstStep() |> Effect.zip(secondStep()) |> Effect.map(combinePair)
@@ -137,10 +150,11 @@ pub fn main() -> i32 {
 }`
 
 /** Distinct failure rows and distinct requirement rows on each operand, so both unions show. */
-const zipRowsSource = `struct Left { code: i32 }
+const zipRowsSource = `import silk.effects as Effect
+struct Left { code: i32 }
 struct Right { code: i32 }
-struct Clock {}
-struct Meter {}
+service Clock {}
+service Meter {}
 effect fn left() -> i32 ! Left ? &Clock { return 40 }
 effect fn right() -> i32 ! Right ? &Meter { return 2 }
 pub fn main() -> i32 {
@@ -148,12 +162,13 @@ pub fn main() -> i32 {
   return 0
 }`
 
-const zip3RowsSource = `struct Left { code: i32 }
+const zip3RowsSource = `import silk.effects as Effect
+struct Left { code: i32 }
 struct Middle { code: i32 }
 struct Right { code: i32 }
-struct Clock {}
-struct Meter {}
-struct Gauge {}
+service Clock {}
+service Meter {}
+service Gauge {}
 effect fn left() -> i32 ! Left ? &Clock { return 40 }
 effect fn middle() -> i32 ! Middle ? &Meter { return 2 }
 effect fn right() -> i32 ! Right ? &Gauge { return 0 }
@@ -168,7 +183,8 @@ pub fn main() -> i32 {
  * allocating body already fails on this shape without any zip in it, so holding zip to it would be
  * asserting a pre-existing backend limitation rather than anything about this combinator.
  */
-const parity = `import silk.effects { Pair, Triple }
+const parity = `import silk.effects as Effect
+import silk.effects { Pair, Triple }
 effect fn left() -> i32 { return 40 }
 effect fn middle() -> i32 { return 2 }
 effect fn right() -> i32 { return 300 }

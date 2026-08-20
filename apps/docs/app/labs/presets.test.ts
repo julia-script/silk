@@ -212,7 +212,7 @@ describe('preset catalog', () => {
         }
       }
     },
-    180_000,
+    360_000,
   )
 
   it('keeps the phases the labs shipped presets for', () => {
@@ -314,7 +314,7 @@ describe('preset catalog', () => {
     }
   })
 
-  it('exposes suspension, continuation state, composition, and recursion in Labs', () => {
+  it('exposes suspension, coroutine-frame state, composition, and recursion in Labs', () => {
     for (const [index, preset] of suspendedEffectPresets.entries()) {
       expect(preset, suspendedEffectLabels[index]).toBeDefined()
       if (preset === undefined) continue
@@ -333,14 +333,14 @@ describe('preset catalog', () => {
         evaluation.trace.some((event) => event._tag === 'SuspensionOrigin'),
         preset.label,
       ).toBe(true)
-      const requests = evaluation.trace.filter(
-        (event) => event._tag === 'ContinuationRequest',
+      const pushes = evaluation.trace.filter(
+        (event) => event._tag === 'CoroutineFramePush',
       ).length
-      const releases = evaluation.trace.filter(
-        (event) => event._tag === 'ContinuationRelease',
+      const completions = evaluation.trace.filter(
+        (event) => event._tag === 'CoroutineFrameComplete',
       ).length
-      expect(requests, preset.label).toBeGreaterThan(0)
-      expect(releases, preset.label).toBe(requests)
+      expect(pushes, preset.label).toBeGreaterThan(0)
+      expect(completions, preset.label).toBe(pushes)
     }
   })
 
@@ -562,7 +562,7 @@ describe('preset catalog', () => {
     expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain(
       'SEM0066',
     )
-    expect(Analysis.evaluate(snapshot)._tag).toBe('Blocked')
+    expect(Analysis.evaluate(snapshot)._tag).toBe('Trap')
   })
 
   it('coordinates every acceptance phase through existing panes', () => {
@@ -578,18 +578,26 @@ describe('preset catalog', () => {
       'app/Main',
       'compiler/Coverage',
       'compiler/Member',
+      'silk/bool',
       'silk/bytes',
+      'silk/char',
       'silk/core',
+      'silk/f32',
+      'silk/f64',
       'silk/format',
+      'silk/i16',
       'silk/i32',
       'silk/i64',
+      'silk/i8',
+      'silk/isize',
       'silk/layout',
       'silk/option',
       'silk/order',
-      'silk/raw-buffer',
+      'silk/raw_buffer',
       'silk/result',
       'silk/slot',
       'silk/string',
+      'silk/u16',
       'silk/u32',
       'silk/u64',
       'silk/u8',

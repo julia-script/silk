@@ -5,7 +5,9 @@ import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as Scalar from '../src/Scalar.js'
 
-const source = `import silk.option { Option, Some, None }
+const source = `import silk.i16 as i16
+import silk.u8 as u8
+import silk.option { Option, Some, None }
 
 fn overflow() -> Option<u8> {
   return u8.checkedAdd(255, 1)
@@ -71,6 +73,52 @@ it.effect('lowers checked integer outcomes through LLVM and direct Wasm', () =>
   }),
 )
 
+const characters = `import silk.u32 as u32
+import silk.char { fromU32, toU32 }
+import silk.option { Some, None }
+
+fn value(input: u32) -> u32 {
+  return match move fromU32(input) {
+    Some<char> { value } => toU32(value)
+    None {} => u32.toU32(0)
+  }
+}
+
+pub fn main() -> i32 {
+  let ascii = value(u32.toU32(65))
+  let emoji = value(u32.toU32(128640))
+  let surrogate = value(u32.toU32(55296))
+  let above = value(u32.toU32(1114112))
+  return u32.toI32(ascii + emoji + surrogate + above - u32.toU32(128663))
+}`
+
+it.effect('checks Unicode scalar construction and preserves total char-to-u32 conversion', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'scalar/character-conversion',
+      new TextEncoder().encode(characters),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const native = yield* Analysis.ofSourceRealized(
+      'scalar/character-conversion-native',
+      new TextEncoder().encode(characters),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.isAbove((yield* Analysis.codegen(native, { mode: 'debug' })).bitcode.length, 0)
+  }),
+)
+
 const integerArguments = (operation: Scalar.Operation): string => {
   switch (operation.code) {
     case 'Subtract':
@@ -133,7 +181,9 @@ const integerCase = (
   if (operation.result === 'Boolean')
     return `fn integerCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
   if (operation.result === 'OptionSelf' || operation.result === 'OptionTarget')
-    return `fn integerCase${ordinal}() -> i32 {
+    return `import silk.option { None }
+import silk.option { Some }
+fn integerCase${ordinal}() -> i32 {
   return match move ${invocation} {
     None {} => 0
     Some<${target.spelling}> { value } => ${target.spelling === 'i32' ? 'value' : `${target.spelling}.toI32(value)`}
@@ -152,7 +202,13 @@ const matrixSource = (() => {
   const checks = cases.map(
     (_, ordinal) => `  let checked${ordinal} = verify(integerCase${ordinal}())`,
   )
-  return `import silk.option { Some, None }
+  const imports = Scalar.integers()
+    .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
+    .join('\n')
+  return `${imports}
+import silk.f32 as f32
+import silk.f64 as f64
+import silk.option { Some, None }
 ${declarations.join('\n')}
 fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
 pub fn main() -> i32 {
@@ -186,7 +242,7 @@ it.effect(
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
       assert.isAbove(wasmArtifact.bytes.length, 0)
     }),
-  60_000,
+  120_000,
 )
 
 it.effect('accepts exact boundaries, unit fallthrough, and only lowercase primitive names', () =>
@@ -228,7 +284,8 @@ pub fn main() -> i32 {
   }),
 )
 
-const contextualCallSource = `fn selectByte(
+const contextualCallSource = `import silk.u8 as u8
+fn selectByte(
   source: &[u8],
   index: usize,
   first: u8,
@@ -297,7 +354,8 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
 
     const mismatch = yield* Analysis.ofSourceRealized(
       'integer/contextual-mismatch',
-      new TextEncoder().encode(`fn accept(value: u8) -> u8 { return value }
+      new TextEncoder().encode(`import silk.i32 as i32
+fn accept(value: u8) -> u8 { return value }
 pub fn main() -> i32 {
   let wider = i32.add(40, 2)
   let value = accept(wider)

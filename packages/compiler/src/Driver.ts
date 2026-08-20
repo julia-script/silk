@@ -5,14 +5,17 @@ import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
+import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeToolchain from './NativeToolchain.js'
 import * as PhaseObservation from './PhaseReport.js'
 import * as Pipeline from './Pipeline.js'
 import * as SourceFile from './SourceFile.js'
-import type * as SourceResolver from './SourceResolver.js'
+import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
+import type * as Type from './Type.js'
 
 /**
  * The end-to-end compiler driver: one orchestration path from a compilation request to a durable
@@ -44,6 +47,8 @@ export interface CompileRequest {
   readonly saveTemps?: boolean
   /** Set false to bypass the content-addressed artifact cache for this request. */
   readonly cache?: boolean
+  /** Explicit distribution metadata for embeddings and integrity tests; defaults to this build. */
+  readonly distribution?: ToolchainIntegrity.Graph
 }
 
 /** A completed compilation with its durable artifact identity and report. */
@@ -54,14 +59,17 @@ export interface Compiled {
   readonly path: string
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly termination: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport>
+  readonly toolchainIdentity: string
 }
 
 /** The request's root module has no valid entry; the toolchain was never invoked. */
 export interface NoEntry {
   readonly _tag: 'NoEntry'
   readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
+  readonly requirements?: ReadonlyArray<Type.Requirement>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport>
 }
@@ -90,6 +98,15 @@ export interface BackendFailed {
   readonly report: ReadonlyArray<PhaseReport>
 }
 
+/** A missing, malformed, or mismatched compiler distribution stopped compilation. */
+export interface ToolchainFailed {
+  readonly _tag: 'ToolchainFailed'
+  readonly expectedIdentity: string
+  readonly observedIdentity: string
+  readonly failures: ReadonlyArray<ToolchainIntegrity.IntegrityFailure>
+  readonly report: ReadonlyArray<PhaseReport>
+}
+
 /** Source diagnostics rejected artifact production after the recoverable frontend completed. */
 export interface Rejected {
   readonly _tag: 'Rejected'
@@ -109,7 +126,14 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
 }> {}
 
 /** The closed outcome of one driver run. */
-export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | Failed
+export type Outcome =
+  | Compiled
+  | Rejected
+  | NoEntry
+  | TargetFailed
+  | BackendFailed
+  | ToolchainFailed
+  | Failed
 
 /** Compiles one request end to end, writing its final artifact to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(function* (
@@ -117,6 +141,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
 ): Effect.fn.Return<Outcome, SourceResolutionFailed, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport> = []
   const heapBytes = () => memoryUsage().heapUsed
+  const distribution = request.distribution ?? ToolchainIntegrity.installed()
   const phase = <A>(
     name: string,
     inputs: number,
@@ -128,6 +153,44 @@ export const compile = Effect.fn('Driver.compile')(function* (
     report.push(phaseWithHeap(measured.report))
     return measured.value
   }
+
+  const integrityStartedAt = performance.now()
+  const packaged = yield* SourceResolver.toolchainSources().pipe(
+    Effect.map((sources) => Object.freeze({ _tag: 'Available' as const, sources })),
+    Effect.catchTag('SourceResolverError', (error) =>
+      Effect.succeed(Object.freeze({ _tag: 'Unavailable' as const, error })),
+    ),
+  )
+  const frontendIntegrity =
+    packaged._tag === 'Available'
+      ? ToolchainIntegrity.validateFrontend(
+          distribution,
+          new Map([...packaged.sources].map(([module, source]) => [module, source.bytes] as const)),
+        )
+      : Object.freeze({
+          _tag: 'Invalid' as const,
+          failures: Object.freeze([
+            ToolchainIntegrity.unreadableSource(packaged.error.module, packaged.error.message),
+          ]),
+        })
+  report.push(
+    Object.freeze({
+      phase: 'toolchain-integrity',
+      elapsedMs: performance.now() - integrityStartedAt,
+      inputs: distribution.components.length,
+      outputs: frontendIntegrity._tag === 'Matched' ? distribution.components.length : 0,
+      diagnostics: frontendIntegrity._tag === 'Invalid' ? frontendIntegrity.failures.length : 0,
+      heapBytes: memoryUsage().heapUsed,
+    }),
+  )
+  if (frontendIntegrity._tag === 'Invalid')
+    return Object.freeze({
+      _tag: 'ToolchainFailed',
+      expectedIdentity: ToolchainIntegrity.installed().digest,
+      observedIdentity: distribution.digest,
+      failures: frontendIntegrity.failures,
+      report: Object.freeze([...report]),
+    })
 
   const frontend = yield* Pipeline.frontend(request.compilation, { heapBytes })
   report.push(...frontend.report.map(phaseWithHeap))
@@ -144,7 +207,13 @@ export const compile = Effect.fn('Driver.compile')(function* (
   }
   const backend = request.backend ?? Backend.LlvmBackend
   const preparation = Pipeline.prepare(frontend, backend, request.compilation.target, { heapBytes })
-  report.splice(0, report.length, ...preparation.report.map(phaseWithHeap))
+  const integrityReport = report.at(0)
+  report.splice(
+    0,
+    report.length,
+    ...(integrityReport === undefined ? [] : [integrityReport]),
+    ...preparation.report.map(phaseWithHeap),
+  )
   if (preparation._tag === 'Rejected')
     return Object.freeze({
       _tag: 'Rejected',
@@ -156,6 +225,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     return Object.freeze({
       _tag: 'NoEntry',
       reason: preparation.reason,
+      ...(preparation.requirements === undefined ? {} : { requirements: preparation.requirements }),
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })
@@ -174,6 +244,41 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   const { diagnostics, program, target } = preparation
+  const targetIntegrityStartedAt = performance.now()
+  const targetIntegrity = ToolchainIntegrity.validateTarget(
+    distribution,
+    IntrinsicAvailability.backendTarget(backend.id),
+    program.intrinsics,
+    closure.sources.keys(),
+  )
+  report.push(
+    Object.freeze({
+      phase: 'toolchain-target',
+      elapsedMs: performance.now() - targetIntegrityStartedAt,
+      inputs: program.intrinsics.length,
+      outputs:
+        targetIntegrity._tag === 'Matched'
+          ? targetIntegrity.providers.length + targetIntegrity.runtimeSupport.length
+          : 0,
+      diagnostics: targetIntegrity._tag === 'Invalid' ? targetIntegrity.failures.length : 0,
+      heapBytes: memoryUsage().heapUsed,
+    }),
+  )
+  if (targetIntegrity._tag === 'UnsupportedTarget')
+    return Object.freeze({
+      _tag: 'TargetFailed',
+      error: Target.unavailableInventory(target, targetIntegrity.operations),
+      diagnostics,
+      report: Object.freeze([...report]),
+    })
+  if (targetIntegrity._tag === 'Invalid')
+    return Object.freeze({
+      _tag: 'ToolchainFailed',
+      expectedIdentity: ToolchainIntegrity.installed().digest,
+      observedIdentity: distribution.digest,
+      failures: targetIntegrity.failures,
+      report: Object.freeze([...report]),
+    })
   const backendStartedAt = performance.now()
   const emitted = yield* Backend.emit(backend, program, {
     mode: request.profile === 'release' ? 'release' : 'debug',
@@ -252,8 +357,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
         path: committed.path,
         target: committed.target,
         symbols: artifact.symbols,
+        termination: artifact.termination,
         diagnostics,
         report: Object.freeze([...report]),
+        toolchainIdentity: distribution.digest,
       })
     }
   }
@@ -283,8 +390,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
           path: committed.path,
           target: committed.target,
           symbols: artifact.symbols,
+          termination: artifact.termination,
           diagnostics,
           report: Object.freeze([...report]),
+          toolchainIdentity: distribution.digest,
         })
       }
 
@@ -321,8 +430,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
           path: finalized.path,
           target: finalized.target,
           symbols: artifact.symbols,
+          termination: artifact.termination,
           diagnostics,
           report: Object.freeze([...report]),
+          toolchainIdentity: distribution.digest,
         })
       }
 
@@ -393,8 +504,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
         path: linked.path,
         target: linked.target,
         symbols: artifact.symbols,
+        termination: artifact.termination,
         diagnostics,
         report: Object.freeze([...report]),
+        toolchainIdentity: distribution.digest,
       })
     },
     { saveTemps: request.saveTemps ?? false },

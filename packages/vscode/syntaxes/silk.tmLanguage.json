@@ -309,7 +309,7 @@
     },
     {
       "name": "storage.type.silk",
-      "match": "\\b(?:pub|struct|service|interface|effect|run|fail|drop|unsafe|impl|for|import|as|let|const|mut|once|move)\\b"
+      "match": "\\b(?:pub|struct|service|interface|role|effect|run|fail|drop|unsafe|impl|for|import|as|let|const|mut|once|move)\\b"
     },
     {
       "name": "constant.language.boolean.silk",

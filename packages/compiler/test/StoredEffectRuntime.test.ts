@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -44,7 +44,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
   )
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(lowered, provisional)
-  const module = ContinuationLayout.apply(
+  const module = CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -156,9 +156,14 @@ const assertOwnershipFacts = (
 ): void => {
   assert.isTrue('environment' in realization && 'cleanup' in realization, name)
   if (!('environment' in realization) || !('cleanup' in realization)) return
-  if (name === 'shared' || name === 'exclusive') {
+  if (
+    name === 'shared' ||
+    name === 'exclusive' ||
+    name === 'provided' ||
+    name === 'provided-moved'
+  ) {
     assert.isTrue(
-      name === 'shared'
+      name !== 'exclusive'
         ? realization.environment.every((slot) => !slot.owned)
         : realization.environment.some((slot) => slot.borrowed),
       name,
@@ -207,23 +212,29 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `struct Token { value: i32 storage: Allocation }
+const consuming = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let token = Token { value: 42, storage: move storage }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `service Counter { effect fn get() -> i32 ? &Counter }
+const provided = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 impl Counter for Fixed { get: Fixed.get }
@@ -235,11 +246,26 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
 
+const providedMoved = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn count() -> i32 ? &Counter { return run Counter.get() }
+struct Deferred<F: once Effect<i32>> { operation: F }
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let operation = count()
+  let deferred = Deferred { operation: move operation |> Effect.provide(&fixed) }
+  return run deferred.operation
+}`
+
 const runtimeMatrix = [
   { name: 'shared', source: shared, result: 42, access: 'Shared' },
   { name: 'exclusive', source: exclusive, result: 43, access: 'Exclusive' },
   { name: 'consuming', source: consuming, result: 42, access: 'Take' },
-  { name: 'provided', source: provided, result: 42, access: 'Take' },
+  { name: 'provided', source: provided, result: 42, access: 'Shared' },
+  { name: 'provided-moved', source: providedMoved, result: 42, access: 'Shared' },
 ] as const
 
 it.effect('executes stored Effects with exact runner, rows, access, and ownership transport', () =>
@@ -279,11 +305,16 @@ it.effect('executes stored Effects with exact runner, rows, access, and ownershi
 
 type CleanupExit = 'unrun' | 'failure'
 
-const cleanupProgram = (exit: CleanupExit): string => `struct Problem { code: i32 }
+const cleanupProgram = (exit: CleanupExit): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
@@ -293,14 +324,14 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   if result == 0 { return 0 }
   fail Problem { code: result }
 }
-effect fn build() -> i32 ! Problem | OutOfMemory {
+effect fn build() -> i32 ! Problem | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('cleans unrun and failing stored Effect environments exactly once', () =>
@@ -357,25 +388,30 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
   }),
 )
 
-const suspending = `struct Guard { tag: i32 storage: Allocation }
+const suspending = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
 }
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
@@ -401,18 +437,18 @@ it.effect('resumes a suspending stored Effect and cleans its environment exactly
     const allocationReleases = outcome.trace.flatMap((event) =>
       event._tag === 'AllocationRelease' ? [event.ticket] : [],
     )
-    assert.isAbove(allocationAcquires.length, 1, 'guard plus continuation allocations')
+    assert.lengthOf(allocationAcquires, 1, 'only the source Guard allocation')
     assertTicketsReleasedExactlyOnce(
       allocationAcquires,
       allocationReleases,
       'suspending allocation',
     )
-    const continuationAcquires = outcome.trace.flatMap((event) =>
-      event._tag === 'ContinuationAcquire' && event.ticket !== undefined ? [event.ticket] : [],
+    const framePushes = outcome.trace.flatMap((event) =>
+      event._tag === 'CoroutineFramePush' && event.ticket !== undefined ? [event.ticket] : [],
     )
-    const continuationReleases = outcome.trace.flatMap((event) =>
-      event._tag === 'ContinuationRelease' && event.ticket !== undefined ? [event.ticket] : [],
+    const frameCompletions = outcome.trace.flatMap((event) =>
+      event._tag === 'CoroutineFrameComplete' && event.ticket !== undefined ? [event.ticket] : [],
     )
-    assertTicketsReleasedExactlyOnce(continuationAcquires, continuationReleases, 'continuation')
+    assertTicketsReleasedExactlyOnce(framePushes, frameCompletions, 'coroutine frame')
   }),
 )

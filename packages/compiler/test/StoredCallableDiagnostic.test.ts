@@ -34,7 +34,8 @@ const describe = (outcome: unknown): string =>
   JSON.stringify(outcome, (_, value) => (typeof value === 'bigint' ? value.toString() : value))
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
-const reproducer = `struct Parser<A> {
+const reproducer = `import silk.i32 as i32
+struct Parser<A> {
   decode: fn(i32) -> A
 }
 
@@ -92,7 +93,8 @@ it.effect('fences realization: SEM0103 leaves layout and MIR unavailable, not In
 
 it.effect('rejects a monomorphic construction that stores a partial application', () =>
   Effect.gen(function* () {
-    const source = `struct Parser { decode: fn(i32) -> i32 }
+    const source = `import silk.i32 as i32
+struct Parser { decode: fn(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
   return parser.decode(41)
@@ -107,7 +109,8 @@ it.effect('points a generic wrapper violation at the specializing call site', ()
     // The declared field type is `T`; only instance substitution makes it a callable. The concrete
     // callable was written at the call, so that is the primary origin, and the generic body's
     // construction is retained as related provenance.
-    const source = `struct Holder<T> { value: T }
+    const source = `import silk.i32 as i32
+struct Holder<T> { value: T }
 fn wrap<T>(value: T) -> Holder<T> { return Holder<T> { value: move value } }
 pub fn main() -> i32 {
   let held = wrap(i32.add(1))
@@ -135,7 +138,8 @@ pub fn main() -> i32 {
 
 it.effect('rejects a callable stored through an array field and a bare array literal', () =>
   Effect.gen(function* () {
-    const throughField = `struct Parser { decode: [fn(i32) -> i32; 2] }
+    const throughField = `import silk.i32 as i32
+struct Parser { decode: [fn(i32) -> i32; 2] }
 pub fn main() -> i32 {
   let parser = Parser { decode: [i32.add(1), i32.add(2)] }
   return 42
@@ -148,7 +152,8 @@ pub fn main() -> i32 {
       messages(fieldSnapshot).join('\n'),
     )
 
-    const bare = `pub fn main() -> i32 {
+    const bare = `import silk.i32 as i32
+pub fn main() -> i32 {
   let transforms = [i32.add(1), i32.add(2)]
   return 42
 }`
@@ -159,7 +164,8 @@ pub fn main() -> i32 {
 
 it.effect('rejects a capturing closure stored in a nominal field', () =>
   Effect.gen(function* () {
-    const source = `struct Parser { decode: fn(i32) -> i32 }
+    const source = `import silk.i32 as i32
+struct Parser { decode: fn(i32) -> i32 }
 pub fn main() -> i32 {
   let offset = 1
   let parser = Parser { decode: i32.add(offset) }
@@ -172,7 +178,8 @@ pub fn main() -> i32 {
 
 it.effect('keeps nested structural callable captures fenced before layout and MIR', () =>
   Effect.gen(function* () {
-    const source = `struct Parser<F: fn(i32) -> i32> { decode: F }
+    const source = `import silk.i32 as i32
+struct Parser<F: fn(i32) -> i32> { decode: F }
 fn apply(value: i32, transform: fn(i32) -> i32) -> i32 { return transform(value) }
 pub fn main() -> i32 {
   let parser = Parser { decode: apply(i32.add(1)) }
@@ -188,7 +195,8 @@ pub fn main() -> i32 {
 
 it.effect('reports the stored callable alongside ownership findings for a once field', () =>
   Effect.gen(function* () {
-    const source = `struct Parser { decode: once fn(i32) -> i32 }
+    const source = `import silk.i32 as i32
+struct Parser { decode: once fn(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
   return parser.decode(41)
@@ -204,7 +212,9 @@ it.effect('points a stdlib construction reached through inference at the user ca
     // that cannot receive a layout lives inside silk/option, but the callable was written at the
     // user's call, so the primary span is the user source and the stdlib construction is related
     // provenance.
-    const source = `pub fn main() -> i32 {
+    const source = `import silk.i32 as i32
+import silk.option { Option }
+pub fn main() -> i32 {
   let optional = Option.some(i32.add(1))
   return 42
 }`
@@ -223,7 +233,8 @@ it.effect('points a stdlib construction reached through inference at the user ca
  * Callable-bearing declarations that never reach a live construction keep compiling, and the
  * asserted value — not compilation success — is the evidence on the evaluator and Wasm.
  */
-const accepted = `struct Parser { decode: fn(i32) -> i32 }
+const accepted = `import silk.i32 as i32
+struct Parser { decode: fn(i32) -> i32 }
 struct Nested { parser: Parser }
 
 fn size(self: &Parser) -> i32 { return 1 }
@@ -255,7 +266,8 @@ it.effect(
 
 it.effect('leaves direct callable parameters and calls unchanged', () =>
   Effect.gen(function* () {
-    const source = `fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 { return transform(value) }
+    const source = `import silk.i32 as i32
+fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 { return transform(value) }
 pub fn main() -> i32 { return apply(i32.add(40), 2) }`
     const snapshot = yield* analyzed('stored-callable/direct-call', source)
     assert.deepEqual(messages(snapshot), [])

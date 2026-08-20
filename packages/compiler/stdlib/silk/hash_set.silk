@@ -29,8 +29,19 @@
 // nested generic call: a `T: HashKey` body cannot hand its own `T` to a `K: HashKey` function, so a
 // set cannot be a map whose values are empty. What the two share is the shape, not the code.
 
+import silk.bool as bool
+import silk.core as AllocationFailure
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
 import silk.hash { HashKey, HashSeed }
+import silk.layout { Layout }
+import silk.layout { LayoutOverflow }
 import silk.option { Option, Some, None }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
 
 /// A slot is vacant, and no element was ever placed here.
 const VACANT: u8 = 0
@@ -49,6 +60,8 @@ pub struct Member<T> {
   hash: u64
   value: T
 }
+
+impl<T: Copy> Copy for Member<T> {}
 
 /// Allocation-free storage state used before the set creates its first table.
 pub struct Unseeded<T> {
@@ -179,19 +192,19 @@ fn openStorage<T>(storage: Unseeded<T> | Slots<T>) -> Slots<T> {
   }
 }
 
-effect fn overflowed() -> Layout ! OutOfMemory {
+effect fn overflowed() -> Layout ! OutOfMemoryError {
   return run AllocationFailure.outOfMemory()
 }
 
 // Both buffers exist before either is installed, so an allocation that fails releases the one
 // already taken and leaves the caller's set exactly as it was.
-effect fn allocateSlots<T>(count: usize) -> Slots<T> ! OutOfMemory ? &mut Allocator {
+effect fn allocateSlots<T>(count: usize) -> Slots<T> ! OutOfMemoryError ? &mut Allocator {
   let states = run vacantStates(count)
   let members = run memberStorage<T>(count)
   return Slots<T> { members: move members, states: move states }
 }
 
-effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemory ? &mut Allocator {
+effect fn vacantStates(count: usize) -> RawBuffer<u8> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<u8>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -217,7 +230,7 @@ fn markVacant(allocation: Allocation, count: usize) -> RawBuffer<u8> {
   return absurd<RawBuffer<u8>>()
 }
 
-effect fn memberStorage<T>(count: usize) -> RawBuffer<Member<T>> ! OutOfMemory ? &mut Allocator {
+effect fn memberStorage<T>(count: usize) -> RawBuffer<Member<T>> ! OutOfMemoryError ? &mut Allocator {
   let element = Layout.of<Member<T>>()
   let plan = Layout.repeat(move element, count)
   let layout = match move plan {
@@ -346,12 +359,12 @@ fn keep<T>(member: Member<T>) -> T {
 /// A set never holds two equivalent elements. When one is already held the set is unchanged and the
 /// arriving element is released, so the element that survives is the one the set already had.
 ///
-/// Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+/// Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 /// leaves every prior element present, and leaves the length and the bucket count unchanged.
 pub effect fn insert<T: HashKey>(
   self: &mut HashSet<T>,
   value: T
-) -> bool ! OutOfMemory ? &mut Allocator {
+) -> bool ! OutOfMemoryError ? &mut Allocator {
   let hashed = HashKey.hash(&value, &self.seed)
   if usize.ZERO < self.capacity {
     let storage = Intrinsic.replace(self.storage, Unseeded<T> { anchor: [] })
@@ -368,7 +381,7 @@ pub effect fn insert<T: HashKey>(
       if state == OCCUPIED {
         let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
         if held[usize.ZERO].hash == hashed {
-          if held[usize.ZERO].value == value {
+          if (&held[usize.ZERO].value) == (&value) {
             found = true
             break
           }
@@ -431,7 +444,7 @@ pub fn contains<T: HashKey>(self: &HashSet<T>, value: T) -> bool {
     if state == OCCUPIED {
       let held = memberAt<T>(self, index)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].value == value {
+        if (&held[usize.ZERO].value) == (&value) {
           return true
         }
       }
@@ -462,7 +475,7 @@ pub fn indexOf<T: HashKey>(self: &HashSet<T>, value: T) -> Option<usize> {
     if state == OCCUPIED {
       let held = memberAt<T>(self, index)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].value == value {
+        if (&held[usize.ZERO].value) == (&value) {
           return Option.some<usize>(index)
         }
       }
@@ -497,7 +510,7 @@ pub fn remove<T: HashKey>(self: &mut HashSet<T>, value: T) -> Option<T> {
     if state == OCCUPIED {
       let held = RawBuffer.view<Member<T>>(&owned.members, index, usize.ONE)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].value == value {
+        if (&held[usize.ZERO].value) == (&value) {
           found = index
           break
         }
@@ -531,21 +544,21 @@ fn evict<T>(owned: &mut Slots<T>, index: usize) -> T {
 /// # Details
 ///
 /// Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
-pub fn elementAt<T>(self: &HashSet<T>, index: usize) -> T {
+pub fn elementAt<T: Copy>(self: &HashSet<T>, index: usize) -> T {
   if !occupiedAt<T>(self, index) {
     let boom = 1 / 0
   }
   return keep<T>(readMember<T>(self, index))
 }
 
-fn readMember<T>(self: &HashSet<T>, index: usize) -> Member<T> {
+fn readMember<T: Copy>(self: &HashSet<T>, index: usize) -> Member<T> {
   return match &self.storage {
     Unseeded<T> nothing => absurd<Member<T>>()
     Slots<T> { members, states } => readAt<T>(&members, index)
   }
 }
 
-fn readAt<T>(members: &RawBuffer<Member<T>>, index: usize) -> Member<T> {
+fn readAt<T: Copy>(members: &RawBuffer<Member<T>>, index: usize) -> Member<T> {
   unsafe {
     return RawBuffer.read<Member<T>>(members, index)
   }

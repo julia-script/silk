@@ -45,8 +45,8 @@ is a lowered `Effect<...>` value.
 
 #### Scenario: Hover an effect function reference
 
-- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemory) -> i32`
-- **THEN** hover renders `effect fn recover(error: OutOfMemory) -> i32` rather than `fn(OutOfMemory) -> Effect<i32>`
+- **WHEN** the cursor hovers a resolved use of `recover` declared as `effect fn recover(error: OutOfMemoryError) -> i32`
+- **THEN** hover renders `effect fn recover(error: OutOfMemoryError) -> i32` rather than `fn(OutOfMemoryError) -> Effect<i32>`
 
 #### Scenario: Hover a function declaration name
 
@@ -147,3 +147,14 @@ documentation without presenting it as a compiler intrinsic.
 
 - **WHEN** a document contains both a generic integer addition call and `Intrinsic.i32Add`
 - **THEN** hover presents the navigable generic source contract for the first and the concrete intrinsic contract for the second
+
+### Requirement: Pattern-local hover uses source-like declarations
+
+Hover over a shared pattern declaration or reference SHALL use its compiler-published identity and
+render the source-like local binding name and exact narrowed type. Hover MUST NOT infer a type by
+reparsing the pattern or inspecting runtime tags.
+
+#### Scenario: Hover a pattern local
+
+- **WHEN** hover selects a reference introduced by `let Point { x, .. } = point`
+- **THEN** it renders `let x: i32` from the semantic pattern fact

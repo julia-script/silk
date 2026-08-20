@@ -70,6 +70,12 @@ const serializedString = (value: unknown, context: string): string => {
   return value
 }
 
+const serializedBoolean = (value: unknown, context: string): boolean => {
+  if (typeof value !== 'boolean')
+    throw new InvalidModuleSurfaceEncoding(`${context} must be a boolean`)
+  return value
+}
+
 const serializedNonNegativeInteger = (value: unknown, context: string): number => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
     throw new InvalidModuleSurfaceEncoding(`${context} must be a non-negative safe integer`)
@@ -88,7 +94,6 @@ const decodeParameterKind = (value: unknown, context: string): Type.ParameterKin
   const kind = serializedString(value, context)
   if (
     kind !== 'Value' &&
-    kind !== 'FailureRow' &&
     kind !== 'RequirementRow' &&
     kind !== 'CallableRepresentation' &&
     kind !== 'EffectRepresentation'
@@ -328,13 +333,10 @@ const decodeFailureRow = (value: unknown): Type.FailureRow =>
   decodeRow(
     value,
     Type.failureRowPolicy(),
-    (member) => {
-      const type_ = decodeTypeNode(member)
-      if (!Type.isNominal(type_))
-        throw new InvalidModuleSurfaceEncoding('failure row member must be nominal')
-      return type_
+    decodeTypeNode,
+    () => {
+      throw new InvalidModuleSurfaceEncoding('failure rows cannot contain whole-row parameters')
     },
-    (parameter) => decodeParameterOfKind(parameter, 'FailureRow', 'failure row parameter'),
     (member) => {
       const encoded = serializedRecord(member, 'failure member')
       if (serializedTag(encoded, 'failure member') !== 'FailureMember')
@@ -385,12 +387,10 @@ const genericArgumentMatchesKind = (
     ? argument.expectedKind === kind
     : kind === 'Value'
       ? Type.isTypeArgument(argument)
-      : kind === 'FailureRow'
-        ? Type.isFailureRowArgument(argument)
-        : kind === 'RequirementRow'
-          ? Type.isRequirementRowArgument(argument)
-          : Type.isRepresentationArgument(argument) &&
-            Type.representationArgumentKind(argument) === kind
+      : kind === 'RequirementRow'
+        ? Type.isRequirementRowArgument(argument)
+        : Type.isRepresentationArgument(argument) &&
+          Type.representationArgumentKind(argument) === kind
 
 const decodeSubstitution = (
   value: unknown,
@@ -497,8 +497,6 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
 }
 
 function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecord {
-  if (Type.isFailureRowArgument(value))
-    return { tag: 'FailureRowArgument', row: encodeFailureRow(value.row) }
   if (Type.isRequirementRowArgument(value))
     return { tag: 'RequirementRowArgument', row: encodeRequirementRow(value.row) }
   if (Type.isEffectIdentityArgument(value))
@@ -538,6 +536,12 @@ function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecor
       identity: encodeGenericArgumentNode(value.identity),
       contract: encodeTypeNode(value.contract),
     }
+  if (Type.isCompositeEffectRepresentationArgument(value))
+    return {
+      tag: 'CompositeEffectRepresentationArgument',
+      contract: encodeTypeNode(value.contract),
+      alternatives: value.alternatives.map(encodeGenericArgumentNode),
+    }
   if (Type.isUnavailableGenericArgument(value))
     return { tag: 'UnavailableGenericArgument', ...value }
   return { tag: 'TypeArgument', type: encodeTypeNode(value) }
@@ -546,8 +550,6 @@ function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecor
 function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
   const encoded = serializedRecord(value, 'generic argument')
   switch (serializedTag(encoded, 'generic argument')) {
-    case 'FailureRowArgument':
-      return Type.failureRowArgumentFromRow(decodeFailureRow(encoded.row))
     case 'RequirementRowArgument':
       return Type.requirementRowArgumentFromRow(decodeRequirementRow(encoded.row))
     case 'EffectIdentityArgument':
@@ -686,6 +688,26 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
         )
       return Type.exactRepresentationArgument(identity, contract)
     }
+    case 'CompositeEffectRepresentationArgument': {
+      const contract = decodeTypeNode(encoded.contract)
+      const alternatives = serializedArray(encoded.alternatives, 'composite alternatives').map(
+        decodeGenericArgumentNode,
+      )
+      if (
+        !Type.isEffect(contract) ||
+        alternatives.some(
+          (alternative) =>
+            !Type.isExactRepresentationArgument(alternative) ||
+            !Type.isEffect(alternative.contract) ||
+            !Type.isEffectIdentityArgument(alternative.identity),
+        )
+      )
+        throw new InvalidModuleSurfaceEncoding('composite Effect representation is invalid')
+      return Type.compositeEffectRepresentationArgument(
+        contract,
+        alternatives.filter(Type.isExactRepresentationArgument),
+      )
+    }
     case 'UnavailableGenericArgument':
       return Type.unavailableGenericArgument(
         decodeParameterKind(encoded.expectedKind, 'unavailable expected kind'),
@@ -710,8 +732,6 @@ function encodeTypeNode(value: Type.Type): unknown {
       arguments: value.arguments.map(encodeGenericArgumentNode),
     }
   if (Type.isParameter(value)) return encodeParameter(value)
-  if (Type.isFailureProjection(value))
-    return { tag: 'FailureProjection', parameter: encodeParameter(value.parameter) }
   if (Type.isFixedArray(value))
     return { tag: 'FixedArray', element: encodeTypeNode(value.element), length: value.length }
   if (Type.isSlice(value))
@@ -721,6 +741,7 @@ function encodeTypeNode(value: Type.Type): unknown {
   if (Type.isCallable(value))
     return {
       tag: 'Callable',
+      unsafe: value.unsafe,
       mode: value.mode,
       parameters: value.parameters.map(encodeTypeNode),
       result: encodeTypeNode(value.result),
@@ -763,6 +784,7 @@ function encodeCallableContract(value: CallableContract.CallableContract): Seria
   return {
     tag: 'CallableContract',
     functionKind: value.functionKind,
+    unsafe: value.unsafe,
     binders: value.binders.map(encodeParameter),
     parameters: value.parameters.map((parameter) => ({
       tag: 'CallableParameter',
@@ -815,6 +837,7 @@ function decodeCallableContract(value: unknown): CallableContract.CallableContra
   })
   return CallableContract.make({
     functionKind,
+    unsafe: serializedBoolean(encoded.unsafe, 'callable contract unsafe qualifier'),
     binders: serializedArray(encoded.binders, 'callable contract binders').map(decodeParameter),
     parameters,
     result: decodeTypeNode(encoded.result),
@@ -872,10 +895,6 @@ function decodeTypeNode(value: unknown): Type.Type {
       )
     case 'Parameter':
       return decodeParameterOfKind(encoded, 'Value', 'ordinary type parameter')
-    case 'FailureProjection':
-      return Type.failureProjection(
-        decodeParameterOfKind(encoded.parameter, 'FailureRow', 'failure projection parameter'),
-      )
     case 'FixedArray':
       return Type.fixedArray(
         decodeTypeNode(encoded.element),
@@ -976,7 +995,13 @@ function decodeTypeNode(value: unknown): Type.Type {
         throw new InvalidModuleSurfaceEncoding(
           'callable signature disagrees with its specialized schema contract',
         )
-      return Type.callable(parameters, result, mode, schema)
+      return Type.callable(
+        parameters,
+        result,
+        mode,
+        schema,
+        serializedBoolean(encoded.unsafe, 'callable unsafe qualifier'),
+      )
     }
     case 'Effect': {
       const access = serializedString(encoded.access, 'effect access')
@@ -1416,6 +1441,19 @@ const arrayLength = (value: DeclarationIndex.ArrayLengthFact): string => {
   }
 }
 
+const requirementRoleFact = (value: DeclarationIndex.RequirementRoleFact): string => {
+  switch (value._tag) {
+    case 'DefaultRole':
+      return record('DefaultRole')
+    case 'UnresolvedRole':
+      return record('UnresolvedRole', [typePath(value.path)])
+    case 'ResolvedRole':
+      return record('ResolvedRole', [value.role])
+    default:
+      return exhaustive(value)
+  }
+}
+
 const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
   switch (value._tag) {
     case 'Resolved':
@@ -1453,14 +1491,6 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
         declaredType(value.target),
         array(value.arguments.map(declaredType)),
         optional(
-          value.failureRow === undefined
-            ? undefined
-            : record('FailureRowArgument', [
-                array(value.failureRow.failures.map(declaredType)),
-                array(value.failureRow.parameters.map(type)),
-              ]),
-        ),
-        optional(
           value.requirementRow === undefined
             ? undefined
             : record('RequirementRowArgument', [
@@ -1468,7 +1498,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
                   value.requirementRow.requirements.map((requirement) =>
                     record('Requirement', [
                       declaredType(requirement.capability),
-                      requirement.role,
+                      requirementRoleFact(requirement.role),
                       requirement.access,
                     ]),
                   ),
@@ -1482,12 +1512,11 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
       return record('EffectType', [
         declaredType(value.success),
         array(value.failures.map(declaredType)),
-        array(value.failureParameters.map(type)),
         array(
           value.requirements.map((requirement) =>
             record('Requirement', [
               declaredType(requirement.capability),
-              requirement.role,
+              requirementRoleFact(requirement.role),
               requirement.access,
             ]),
           ),
@@ -1544,7 +1573,7 @@ const rowExpression = (value: DeclarationIndex.RowExpressionFact): string => {
       return record('RequirementMemberExpression', [
         declaredType(value.capability),
         value.access,
-        value.role,
+        requirementRoleFact(value.role),
       ])
     case 'UnionRowExpression':
       return record('UnionRowExpression', [array(value.operands.map(rowExpression))])
@@ -1589,7 +1618,11 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
     boolean(value.available),
     array(
       value.entries.map((entry) =>
-        record('RequirementEntry', [declaredType(entry.capability), entry.role, entry.access]),
+        record('RequirementEntry', [
+          declaredType(entry.capability),
+          requirementRoleFact(entry.role),
+          entry.access,
+        ]),
       ),
     ),
     rowExpression(value.expression),
@@ -1658,8 +1691,7 @@ const interfaceApplication = (value: DeclarationIndex.InterfaceApplicationFact):
     array(value.operations.map(interfaceOperationApplication)),
   ])
 
-const bound = (value: DeclarationIndex.BoundFact | undefined): string | undefined => {
-  if (value === undefined) return undefined
+const bound = (value: DeclarationIndex.BoundFact): string => {
   return value._tag === 'ResolvedBound'
     ? record('ResolvedBound', [value.spelling, interfaceApplication(value.application)])
     : record('UnresolvedBound', [value.spelling, declaredType(value.application)])
@@ -1670,7 +1702,7 @@ const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
     type(value.type),
     name(value.name),
     optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
-    optional(bound(value.bound)),
+    array(value.bounds.map(bound)),
   ])
 
 const declaration = (value: DeclarationIndex.DeclarationFact): string =>
@@ -1679,6 +1711,7 @@ const declaration = (value: DeclarationIndex.DeclarationFact): string =>
     canonicalState(value.canonical),
     value.visibility,
     value.functionKind,
+    boolean(value.unsafe),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),
     array(value.parameters.map(parameter)),
@@ -1747,6 +1780,8 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     declarationIdOrdinal(value.id),
     serviceOperationState(value.state),
     value.functionKind,
+    boolean(value.unsafe),
+    optional(value.operator?.operator),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),
     array(value.parameters.map(parameter)),
@@ -1820,6 +1855,13 @@ const member = (value: DeclarationIndex.MemberFact): string => {
       return service(value)
     case 'ConstantDeclaration':
       return constant(value)
+    case 'RoleDeclaration':
+      return record('RoleDeclaration', [
+        declarationIdOrdinal(value.id),
+        canonicalState(value.canonical),
+        value.visibility,
+        name(value.name),
+      ])
     default:
       return exhaustive(value)
   }

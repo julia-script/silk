@@ -42,17 +42,22 @@ The driver SHALL orchestrate closure loading, header collection, elaboration, ow
 
 ### Requirement: Driver outcomes identify backend and artifact kind
 
-Every successful driver outcome SHALL retain the canonical backend identifier, target, artifact kind, durable path, symbols, diagnostics, and phase report. Reports SHALL include only phases actually executed and SHALL distinguish backend emission from artifact finalization.
+Every successful driver outcome SHALL retain the canonical backend identifier, target, artifact
+kind, durable path, symbols, target-neutral entry termination contract, diagnostics, and phase
+report. The termination contract SHALL expose success policy, typed-failure identities and private
+tags, and logical-frame metadata as data without rendering it or creating ambient output. Reports
+SHALL include only phases actually executed and SHALL distinguish backend emission from artifact
+finalization.
 
 #### Scenario: Report a direct Wasm build
 
 - **WHEN** the direct WebAssembly backend successfully produces a durable module
-- **THEN** the outcome identifies backend `wasm`, target `wasm32-unknown-unknown`, artifact kind WebAssembly module, its destination, and no Clang phases
+- **THEN** the outcome identifies backend `wasm`, target `wasm32-unknown-unknown`, artifact kind WebAssembly module, its destination, structured termination contract, and no Clang phases
 
 #### Scenario: Report an LLVM Wasm build
 
 - **WHEN** LLVM successfully produces a durable WebAssembly module
-- **THEN** the outcome identifies backend `llvm`, the same canonical target, the WebAssembly module kind, and the executed LLVM finalization phases
+- **THEN** the outcome identifies backend `llvm`, the same canonical target, the WebAssembly module kind, structured termination contract, and the executed LLVM finalization phases
 
 ### Requirement: The differential harness is a continuous check
 
@@ -444,7 +449,7 @@ MIR, traces, textual output, and binary artifacts deterministic.
 #### Scenario: Compile the construction-guard milestone
 
 - **WHEN** a canonical program allocates runtime-counted move-only slots, initializes a guarded prefix, and exits through success and injected typed failure
-- **THEN** all three engines agree on values, `OutOfMemory`, hook order, exact releases, target layout, and emitted artifacts
+- **THEN** all three engines agree on values, `OutOfMemoryError`, hook order, exact releases, target layout, and emitted artifacts
 
 #### Scenario: Reject unsafe misuse before artifacts
 
@@ -462,7 +467,7 @@ The driver's continuous gates SHALL include a scanner written in Silk that borro
 source bytes as a slice and returns an owned `Vector<Token>`, growing across at least one
 reallocation. The differential harness SHALL verify identical token results across the evaluator,
 LLVM native execution, and instantiated Wasm; a failure-ordinal sweep over every allocation the
-scanner performs SHALL confirm each injected `OutOfMemory` propagates typed, rolls back partial
+scanner performs SHALL confirm each injected `OutOfMemoryError` propagates typed, rolls back partial
 initialization, and leaks nothing, with the evaluator and Wasm carrying every ordinal and native
 execution carrying representative boundary ordinals including at least the first failure, one
 mid-growth failure, and unrestricted completion; and repeated compilation SHALL keep the scanner's
@@ -476,7 +481,7 @@ artifacts deterministic.
 #### Scenario: Exhaustion at every ordinal leaks nothing
 
 - **WHEN** the harness injects allocation failure at each successive allocation ordinal of the scanner run
-- **THEN** every evaluator and Wasm run fails with typed `OutOfMemory` or completes and releases every live owner exactly once, and native runs at the boundary ordinals report no leaked allocation
+- **THEN** every evaluator and Wasm run fails with typed `OutOfMemoryError` or completes and releases every live owner exactly once, and native runs at the boundary ordinals report no leaked allocation
 
 #### Scenario: Scanner artifacts are deterministic
 
@@ -489,7 +494,7 @@ The continuous compiler corpus SHALL compile and execute a deterministic matrix 
 and Effect pipelines through evaluation, native LLVM, and direct WebAssembly. The matrix SHALL
 cover left association and grouping, direct and stored forms, ordinary and effectful entries,
 Copy and affine values, automatic and stored callables, `map`, `flatMap`, `tap`, `catch`, `retry`,
-`provide`, and `provideWith`, including representative combinations rather than only isolated
+`provide`, and `provideEffect`, including representative combinations rather than only isolated
 operators. Equivalent source shapes SHALL produce equal observable outcomes and cleanup; repeated
 analyses SHALL preserve deterministic artifacts.
 
@@ -531,3 +536,31 @@ on exact byte, branch, or timing measurements.
 
 - **WHEN** an Effect environment directly captures an affine or exclusive value
 - **THEN** the first normalization slice rejects that environment while the allocation-backed corpus preserves ordinary exactly-once Drop behavior
+
+### Requirement: Compilation validates one matched toolchain set
+
+Before analysis, emission, or execution consumes distribution artifacts, the compiler driver SHALL
+validate compatible identities and content digests for the compiler, standard-library catalog and
+sources, sealed intrinsic inventory, selected target providers, and required runtime support.
+
+#### Scenario: Reject a mismatched catalog
+
+- **WHEN** the supplied catalog identity or source digest does not match the compiler's declared toolchain contract
+- **THEN** the driver reports an incompatible distribution before resolving program imports
+
+#### Scenario: Admit a pay-for-use runtime subset
+
+- **WHEN** a program reaches only a subset of target intrinsics
+- **THEN** compatibility validation requires only the matched runtime support for that reachable inventory
+
+### Requirement: Integrity failures belong to their owning boundary
+
+The driver SHALL distinguish missing source, malformed or mismatched distribution, unsupported
+target inventory, unresolved entry contract, and operational execution failure as deterministic
+structured outcomes. It SHALL NOT reclassify these failures as source type errors or backend
+defects.
+
+#### Scenario: Distinguish unsupported target from bad installation
+
+- **WHEN** a valid matched toolchain lacks target support for one reachable intrinsic
+- **THEN** the driver reports target unavailability, while a missing artifact promised by the same toolchain reports distribution corruption

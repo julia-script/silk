@@ -7,21 +7,25 @@
 //! # Details
 //! The provider owns no persistent state and commits each host read directly into the caller's
 //! buffer. A zero-length host transfer becomes the outcome selected by [`endOfInput`]; only a host
-//! read error becomes [`StreamReadFailure`]. Partial transfer counts are preserved exactly.
+//! read error becomes [`StreamReadError`]. Partial transfer counts are preserved exactly.
 //!
 //! # Gotchas
 //! Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
 //! them rather than inventing a descriptor import; evaluator execution requires an injected adapter.
 
+import silk.i32 as i32
 import silk.option { None, Option, Some, none }
 import silk.standard_input {
   ReadOutcome,
   StandardInput,
-  StreamReadFailure,
+  StreamReadError,
   endOfInput,
   filled,
   readFailure
 }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 
 /// Native provider reading the process standard-input descriptor. It owns no state; the descriptor
 /// belongs to the process rather than to the value.
@@ -38,15 +42,15 @@ effect fn rawRead(output: &mut [u8], lowReason: &mut i32, nativeCode: &mut u32) 
   return none<usize>()
 }
 
-effect fn raise() -> never ! StreamReadFailure {
+effect fn raise() -> never ! StreamReadError {
   fail readFailure()
 }
 
 /// Commits one host read into the caller's buffer.
 ///
 /// The low-level boundary reports a zero-length transfer for the end of input, which becomes
-/// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadFailure`.
-effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure {
+/// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
+effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)
   let received = run rawRead(move buffer, &mut lowReason, &mut nativeCode)

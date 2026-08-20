@@ -163,7 +163,7 @@ export const evidenceKey = (self: ConstraintEvidence): string => {
       return Canonical.record('RequirementSelectionEvidence', [
         self.wantedKey,
         key(self.wanted),
-        Type.requirementRowPolicy().finite.memberKey(self.selected),
+        Type.requirementRowPolicy().finite.collisionKey(self.selected),
         Type.key(self.provider),
         providerMatchKey(self.providerMatch),
         self.providerMode,
@@ -249,6 +249,7 @@ export const proveStructural = (
       if (
         selected._tag !== 'Concrete' ||
         source._tag !== 'Concrete' ||
+        selected.row.members.length === 0 ||
         selected.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
         source.row.members.some((member) => !Type.isRuntimeConcrete(member)) ||
         !FiniteRow.isSubset(Type.failureRowPolicy().finite, selected.row, source.row)

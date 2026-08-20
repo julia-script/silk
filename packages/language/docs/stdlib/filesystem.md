@@ -191,14 +191,6 @@ pub reason: FileReason
 
 The portable reason callers can recover by.
 
-<a id="declaration-73696c6b2f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for FileError`
-
-```silk
-impl Report for FileError
-```
-
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a66696c65"></a>
 
 ## `file`
@@ -504,7 +496,7 @@ Returns the provider-defined numeric detail when one was retained.
 ## `make`
 
 ```silk
-pub effect fn make(value: string) -> Path ! FileError | OutOfMemory ? &mut Allocator
+pub effect fn make(value: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Constructs an owned normalized provider-absolute Path from semantic text.
@@ -514,7 +506,7 @@ Constructs an owned normalized provider-absolute Path from semantic text.
 ## `fromBytes`
 
 ```silk
-pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator
+pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Constructs an owned normalized provider-absolute Path from exact platform bytes.
@@ -532,7 +524,7 @@ required, so a Path built this way may have no `string` view.
 ## `root`
 
 ```silk
-pub effect fn root() -> Path ! OutOfMemory ? &mut Allocator
+pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator
 ```
 
 Constructs the selected provider's root Path.
@@ -587,7 +579,7 @@ Borrows the final component as text when its bytes are valid UTF-8; root returns
 ## `join`
 
 ```silk
-pub effect fn join(base: &silk/filesystem.Path, fragment: string) -> Path ! FileError | OutOfMemory ? &mut Allocator
+pub effect fn join(base: &silk/filesystem.Path, fragment: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Joins one already-normalized relative text fragment to an absolute Path.
@@ -597,7 +589,7 @@ Joins one already-normalized relative text fragment to an absolute Path.
 ## `joinUtf8`
 
 ```silk
-pub effect fn joinUtf8(base: &silk/filesystem.Path, fragment: &[u8]) -> Path ! FileError | OutOfMemory ? &mut Allocator
+pub effect fn joinUtf8(base: &silk/filesystem.Path, fragment: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Validates and joins one provider-supplied UTF-8 byte fragment.
@@ -607,7 +599,7 @@ Validates and joins one provider-supplied UTF-8 byte fragment.
 ## `resolve`
 
 ```silk
-pub effect fn resolve(base: &silk/filesystem.Path, relativeText: string) -> Path ! FileError | OutOfMemory ? &mut Allocator
+pub effect fn resolve(base: &silk/filesystem.Path, relativeText: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Resolves relative text lexically against one explicit absolute base.
@@ -617,7 +609,7 @@ Resolves relative text lexically against one explicit absolute base.
 ## `parent`
 
 ```silk
-pub effect fn parent(self: &silk/filesystem.Path) -> Option<silk/filesystem.Path> ! OutOfMemory ? &mut Allocator
+pub effect fn parent(self: &silk/filesystem.Path) -> Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates an independently owned parent Path, or None for root.
@@ -637,7 +629,7 @@ Portable mutable whole-file service. Providers own implementation and platform p
 ### Operation `readFile`
 
 ```silk
-effect fn readFile(path: &silk/filesystem.Path) -> Bytes ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+effect fn readFile(path: &silk/filesystem.Path) -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Reads one complete regular file into independently owned bytes.
@@ -667,7 +659,7 @@ Returns minimal regular-file or directory metadata.
 ### Operation `listDirectory`
 
 ```silk
-effect fn listDirectory(path: &silk/filesystem.Path) -> silk/vector.Vector<silk/filesystem.DirectoryEntry> ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+effect fn listDirectory(path: &silk/filesystem.Path) -> silk/vector.Vector<silk/filesystem.DirectoryEntry> ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Returns immediate owned child entries in deterministic path-byte order.
@@ -707,7 +699,7 @@ Removes exactly one empty directory.
 ### Operation `createTemporaryDirectory`
 
 ```silk
-effect fn createTemporaryDirectory(parent: &silk/filesystem.Path, prefix: &[u8]) -> Path ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+effect fn createTemporaryDirectory(parent: &silk/filesystem.Path, prefix: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates one directory under an existing parent under a name no other caller holds.
@@ -757,7 +749,7 @@ The complete owned path callers use while the scope remains live.
 ## `temporaryDirectory`
 
 ```silk
-pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates one temporary directory under `parent` whose name begins with `prefix`.
@@ -771,7 +763,7 @@ The result is owned. Nothing removes it until a caller runs `release` or `releas
 ## `release`
 
 ```silk
-pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Consumes one TemporaryDirectory and removes it together with everything inside it.
@@ -822,7 +814,7 @@ let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
 ## `removeDirectoryRecursively`
 
 ```silk
-pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Removes one directory and everything inside it.
@@ -841,7 +833,7 @@ vector capacity rather than stack.
 ## `createDirectoriesRecursively`
 
 ```silk
-pub effect fn createDirectoriesRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+pub effect fn createDirectoriesRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates every missing directory component with ordinary stat/create composition.
@@ -851,7 +843,7 @@ Creates every missing directory component with ordinary stat/create composition.
 ## `writeFileWithParents`
 
 ```silk
-pub effect fn writeFileWithParents(path: &silk/filesystem.Path, bytes: &[u8]) -> () ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+pub effect fn writeFileWithParents(path: &silk/filesystem.Path, bytes: &[u8]) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates missing parent directories, then delegates one complete write operation.

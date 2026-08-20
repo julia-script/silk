@@ -211,14 +211,12 @@ fn alsoNotify() {
 `Effect<i32>` from a body declared to produce `i32`, or returning `i32` from a body declared to
 produce `Effect<i32>`, is a type mismatch; neither direction runs, wraps, or flattens automatically.
 
-**Diagnostics:** A wholly missing required return currently uses parser diagnostic `PAR0004`.
-An incompatible returned expression must be diagnosed at that expression with the declared and
-actual types; the general mismatch still lacks one stable semantic code. Effect-specific examples
-and current compiler gaps are recorded under EFF-002.
+**Diagnostics:** Reachable non-unit fallthrough reports `SEM0130` at the closing boundary. An
+incompatible returned expression reports `SEM0129` at that expression with the declared and actual
+types. More specific union or representation diagnostics may explain those specialized joins.
+Effect-specific examples are recorded under EFF-002.
 
-**Current compiler:** The parser currently requires a syntactically trailing `return` in a non-unit
-body even when every reachable `if` arm already returns. The confirmed rule instead makes the
-contract semantic: a trailing return is unnecessary when no reachable path can fall through.
+The contract is semantic: a trailing return is unnecessary when no reachable path can fall through.
 
 **Evidence:** [function syntax](../../openspec/specs/bootstrap-syntax/spec.md),
 [Effect return semantics](effects-and-execution.md#eff-002--an-effect-body-returns-its-success-value),
@@ -250,14 +248,19 @@ The result is `42`. Naming `increment` does not call it and does not require emp
 **Boundary:** A function item must satisfy the expected parameter, result, and invocation-mode
 contract. Two functions with the same visible callable signature may retain distinct concrete
 identities for specialization; source cannot erase those identities merely by naming the structural
-callable type.
+callable type. Safety is also part of that contract: an `unsafe fn(A) -> B` value still requires an
+`unsafe` acknowledgement when its complete invocation occurs. A safe callable may satisfy an unsafe
+callable parameter, but an unsafe callable cannot satisfy a safe one. Partial application preserves
+the qualifier until the final invocation; constructing the section itself does not acknowledge the
+eventual call.
 
 **Diagnostics:** Applying a non-callable reports `SEM0075`. An incompatible callable parameter,
 result, or mode reports `SEM0076`. A context that would erase a required concrete callable identity
 reports `SEM0080` or the more specific represented-storage diagnostic.
 
 **Evidence:** [callable specification](../../openspec/specs/bootstrap-callable-values/spec.md),
-[indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts).
+[indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts),
+[unsafe callable contracts](unsafe-intrinsics-and-targets.md#unsafe-002--source-callable-contracts-carry-an-unsafe-qualifier).
 
 ### CALLABLE-002 — Supplying a trailing argument suffix constructs a section
 
@@ -289,13 +292,9 @@ use the function name as a callable value. Supplying more than the remaining ari
 callable used where its eventual result is required reports a type mismatch naming the remaining
 callable contract. Capture ownership errors occur when the section is constructed.
 
-**Current compiler:** The compiler currently constructs a section only when exactly one leading
-parameter remains. Deeper under-application such as `combine(3)` reports `SEM0079`; that restriction
-conflicts with this confirmed rule and with the ownership reference.
-
-**Conflicting artifact:** The
-[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md) still retains the
-older unary-section-only model and requires reconciliation.
+The compiler carries every remaining leading parameter and captured trailing argument through
+semantic facts, HIR, MIR, and each execution engine. `combine(3)(2)(1)` therefore preserves both
+source evaluation order and the final positional call `combine(1, 2, 3)`.
 
 **Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application),
 [pipeline syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md).

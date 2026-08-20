@@ -32,7 +32,8 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
  * A module-level string constant reads as the literal it names. The escaped and raw constants
  * below decode to identical bytes, so each must equal the inline literal it stands for.
  */
-const readsConstants = `import silk.string { byteLength, utf8Bytes }
+const readsConstants = `import silk.usize as usize
+import silk.string { byteLength, utf8Bytes }
 
 const escapedPattern: string = "\\\\d+\\\\.\\\\d+"
 const rawPattern: string = r"\\d+\\.\\d+"

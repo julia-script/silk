@@ -6,7 +6,14 @@ import * as Mir from '../src/Mir.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `effect fn store() -> i32 ! OutOfMemory {
+const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -20,13 +27,20 @@ const source = `effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = Effect.catchAll(store(), recover)
   return run recipe
 }`
 
-const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
+const sharedReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -42,11 +56,18 @@ const sharedReadSource = `effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const nonCopyReadSource = `struct Guard { storage: Allocation }
-effect fn store() -> i32 ! OutOfMemory {
+const nonCopyReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Guard { storage: Allocation }
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -67,13 +88,22 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const unionReadSource = `struct Left { value: i32 }
+const unionReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Left { value: i32 }
+impl Copy for Left {}
 struct Right { value: i32 }
+impl Copy for Right {}
 fn left(value: i32) -> Left | Right { return Left { value: value } }
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Left | Right; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -90,17 +120,24 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const moveOnlyUnionReadSource = `struct Guard { storage: Allocation }
+const moveOnlyUnionReadSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Guard { storage: Allocation }
 struct Marker { value: i32 }
 
 fn guarded(storage: Allocation) -> Guard | Marker {
   return Guard { storage: move storage }
 }
 
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Guard | Marker; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -121,13 +158,17 @@ effect fn store() -> i32 ! OutOfMemory {
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
-const unsafeProgram = (
-  body: string,
-  layout = '[i32; 2]',
-): string => `effect fn store() -> i32 ! OutOfMemory {
+const unsafeProgram = (body: string, layout = '[i32; 2]'): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<${layout}>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -138,7 +179,7 @@ ${body}
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
@@ -147,10 +188,9 @@ const expectTrap = Effect.fnUntraced(function* (name: string, source: string, re
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const evaluated = Analysis.evaluate(snapshot)
-  assert.strictEqual(evaluated._tag, 'Blocked')
-  if (evaluated._tag !== 'Blocked') return
-  assert.strictEqual(evaluated.reason._tag, 'Trap', JSON.stringify(evaluated.reason))
-  if (evaluated.reason._tag === 'Trap') assert.strictEqual(evaluated.reason.reason, reason)
+  assert.strictEqual(evaluated._tag, 'Trap')
+  if (evaluated._tag !== 'Trap') return
+  assert.strictEqual(evaluated.reason, reason)
 })
 
 it.effect('moves one allocation through RawBuffer and lexical Slot operations', () =>
@@ -286,18 +326,9 @@ it.effect('rejects shared RawBuffer reads of move-only nominal and union element
         `owned-allocation/read-${name}`,
         ascii(source),
       )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      const evaluated = Analysis.evaluate(snapshot)
-      assert.strictEqual(evaluated._tag, 'Blocked')
-      if (evaluated._tag !== 'Blocked') continue
-      assert.strictEqual(evaluated.reason._tag, 'InvalidMir')
-      if (evaluated.reason._tag !== 'InvalidMir') continue
-      assert.isTrue(
-        evaluated.reason.violations.some(
-          (violation) =>
-            violation.rule === 'InvalidRawStorageOperation' &&
-            violation.detail.includes('RawBuffer.read'),
-        ),
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        'SEM0083',
       )
     }
   }),

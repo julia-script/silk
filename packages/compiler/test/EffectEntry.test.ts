@@ -15,20 +15,21 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const failureSource = `pub struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 
 const successSource = `pub struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { return () }`
 
-const cleanupSource = `pub struct SomeError { storage: Allocation }
-impl Report for SomeError {}
-impl Report for OutOfMemory {}
+const cleanupSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+pub struct SomeError { storage: Allocation }
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
-pub effect fn main() -> () ! SomeError | OutOfMemory {
+pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -37,7 +38,6 @@ pub effect fn main() -> () ! SomeError | OutOfMemory {
 }`
 
 const evaluateOrderingSource = `pub struct SomeError {}
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError {
   let mut counter = 0
   run effect { counter = counter + 1 return () }
@@ -46,15 +46,18 @@ pub effect fn main() -> () ! SomeError {
   return ()
 }`
 
-const evaluateFailureSource = `pub struct SomeError {}
+const evaluateFailureSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+pub struct SomeError {}
 pub struct Guard { storage: Allocation }
-impl Report for SomeError {}
-impl Report for OutOfMemory {}
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 effect fn stop() -> never ! SomeError { fail SomeError {} }
-pub effect fn main() -> () ! SomeError | OutOfMemory {
+pub effect fn main() -> () ! SomeError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -64,13 +67,16 @@ pub effect fn main() -> () ! SomeError | OutOfMemory {
   return ()
 }`
 
-const providedMapSource = `struct Clock {}
+const providedMapSource = `import silk.effects as Effect
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn verify(value: i32) -> () {
   return ()
 }
 pub effect fn main() -> () {
-  let clock = Clock {}
+  let clock = FixedClock {}
   return run read()
     |> Effect.provide(&clock)
     |> Effect.map(verify)
@@ -78,6 +84,47 @@ pub effect fn main() -> () {
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-entry-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
+
+it.effect('maps an ordinary unit entry to status zero on every engine', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> () { return () }'
+    const logical = yield* Analysis.ofSourceRealized(
+      'entry/ordinary-unit',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'entry/ordinary-unit',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(logical), [])
+    const evaluated = Analysis.evaluate(logical)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 0n)
+
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const main = instance.exports.silk_main
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+
+    const compiled = yield* Driver.compile({
+      compilation: {
+        root: SourceFile.make('entry/ordinary-unit', ascii(source)),
+      },
+      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+      profile: 'release',
+      destination: join(destinationRoot, 'ordinary-unit'),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.strictEqual(compiled._tag, 'Compiled')
+    if (compiled._tag === 'Compiled') {
+      const native = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(native.status, 0, native.stderr)
+      assert.strictEqual(native.stderr, '')
+    }
+  }),
+)
 
 it.effect('runs an effect entry once and retains deterministic unhandled-failure data', () =>
   Effect.gen(function* () {
@@ -94,8 +141,37 @@ it.effect('runs an effect entry once and retains deterministic unhandled-failure
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     if (outcome._tag !== 'UnhandledFailure') return
     assert.strictEqual(outcome.tag, 1)
-    assert.strictEqual(outcome.report, 'effect-entry/failure.SomeError')
+    assert.strictEqual(outcome.identity, 'effect-entry/failure.SomeError')
     assert.strictEqual(outcome.trace.filter((event) => event._tag === 'Call').length, 2)
+  }),
+)
+
+it.effect('retains an earlier failure as causal history when its handler fails', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect-entry/causal',
+      ascii(`import silk.effects as Effect
+pub struct FirstError {}
+pub struct SecondError {}
+effect fn first() -> i32 ! FirstError { fail FirstError {} }
+effect fn recover(error: FirstError) -> i32 ! SecondError { fail SecondError {} }
+pub effect fn main() -> () ! SecondError {
+  let value = run Effect.catchAll(first(), recover)
+  drop value
+  return ()
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'UnhandledFailure')
+    if (outcome._tag !== 'UnhandledFailure') return
+    assert.strictEqual(outcome.identity, 'effect-entry/causal.SecondError')
+    assert.lengthOf(outcome.history, 2)
+    assert.strictEqual(outcome.history.at(0)?.recovered, true)
+    assert.strictEqual(outcome.history.at(0)?.identity, 'effect-entry/causal.FirstError')
+    assert.strictEqual(outcome.history.at(1)?.recovered, false)
+    assert.strictEqual(outcome.history.at(1)?.identity, 'effect-entry/causal.SecondError')
   }),
 )
 
@@ -131,10 +207,12 @@ it.effect('keeps effect-entry success and failure in LLVM/direct-Wasm parity', (
       )
       const llvmArtifact = yield* Analysis.codegen(native, { mode: 'release' })
       const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-      assert.deepEqual(llvmArtifact.termination, {
-        _tag: 'EffectReports',
-        reports: [`effect-entry/${name}.SomeError`],
-      })
+      assert.strictEqual(llvmArtifact.termination._tag, 'EntryTermination')
+      assert.strictEqual(llvmArtifact.termination.success, 'Zero')
+      assert.deepEqual(llvmArtifact.termination.failures, [
+        { tag: 1, identity: `effect-entry/${name}.SomeError` },
+      ])
+      assert.isAbove(llvmArtifact.termination.logicalFrames.length, 0)
       assert.deepEqual(wasmArtifact.termination, llvmArtifact.termination)
       assert.strictEqual(
         llvmArtifact.symbols.find((entry) => entry.symbol === 'silk_main')?.declaration.name,
@@ -168,7 +246,7 @@ it.effect('runs the selected failure payload cleanup before exposing its tag', (
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     assert.include(
       outcome.trace.flatMap((event) => (event._tag === 'Call' ? [event.target.name] : [])),
-      'drop@impl#2',
+      'drop@impl#0',
     )
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
@@ -205,7 +283,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       if (name === 'evaluate-failure') {
         assert.strictEqual(
           evaluated.trace.filter(
-            (event) => event._tag === 'Call' && event.target.name === 'drop@impl#2',
+            (event) => event._tag === 'Call' && event.target.name === 'drop@impl#0',
           ).length,
           1,
         )

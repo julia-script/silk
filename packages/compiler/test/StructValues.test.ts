@@ -6,6 +6,7 @@ import * as Layout from '../src/Layout.js'
 import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -214,7 +215,9 @@ pub fn main() -> i32 { return 0 }`),
     for (const ordinal of [0, 1, 2, 3]) {
       assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
     }
-    const partial = Analysis.rootAnalysis(invalid).hir.functions.at(4)
+    const partial = Analysis.rootAnalysis(invalid).hir.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'partial',
+    )
     const partialExpression = partial === undefined ? undefined : Hir.returned(partial)
     assert.strictEqual(partialExpression?._tag, 'Move')
     if (partialExpression?._tag === 'Move') {
@@ -226,7 +229,7 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('allows external factory construction while refusing external raw literals', () =>
+it.effect('uses field visibility as the external construction boundary', () =>
   Effect.gen(function* () {
     const sources = new Map([
       [
@@ -257,9 +260,93 @@ pub fn main() -> i32 { let token = Model.Token { kind: 1 } return token.kind }`)
         ],
       ]),
     )
-    assert.include(
-      Analysis.diagnostics(raw).map((diagnostic) => diagnostic.code),
-      'SEM0021',
+    assert.deepEqual(Analysis.diagnostics(raw), [])
+    const rawOutcome = Analysis.evaluate(raw)
+    assert.strictEqual(rawOutcome._tag, 'Completed')
+    if (rawOutcome._tag === 'Completed') assert.strictEqual(rawOutcome.result.value, 1n)
+
+    const privateField = yield* multiSnapshot(
+      'app/Main',
+      new Map([
+        [
+          'model/Secret',
+          ascii(`pub struct Secret { pub value: i32 key: i32 }
+pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`),
+        ],
+        [
+          'app/Main',
+          ascii(`import model.Secret as Model { Secret, make }
+pub fn main() -> i32 { let secret = Model.Secret { value: 1 } return secret.value }`),
+        ],
+      ]),
     )
+    assert.deepEqual(
+      Analysis.diagnostics(privateField).map((diagnostic) => diagnostic.code),
+      ['SEM0021'],
+    )
+    assert.notInclude(Analysis.diagnostics(privateField).at(0)?.message ?? '', 'key')
+  }),
+)
+
+it.effect('infers omitted ordinary struct parameters from every supplied field', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'struct-values/inference',
+      ascii(`struct Same<T> { first: T second: T }
+struct Pair<A, B> { first: A second: B }
+pub fn main() -> i32 {
+  let same = Same { second: 2, first: 1 }
+  let pair = Pair<i32> { second: true, first: 3 }
+  return same.first + pair.first
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const bindings = Analysis.rootAnalysis(self)
+      .functions.at(0)
+      ?.statements.flatMap((statement) =>
+        statement._tag === 'BindStatement' ? [statement.binding.initializer] : [],
+      )
+    const types = bindings?.flatMap((initializer) =>
+      initializer._tag === 'StructLiteral' && initializer.type._tag === 'Available'
+        ? [initializer.type.type]
+        : [],
+    )
+    assert.deepEqual(
+      types?.map((type) => Type.encode(type)),
+      ['struct-values/inference.Same<i32>', 'struct-values/inference.Pair<i32, bool>'],
+    )
+    const pair = bindings?.at(1)
+    assert.strictEqual(pair?._tag, 'StructLiteral')
+    if (pair?._tag !== 'StructLiteral') return
+    assert.deepEqual(
+      pair.typeArguments.map((argument) => argument.source),
+      ['Explicit', 'Inferred'],
+    )
+    assert.strictEqual(pair.typeArguments.at(1)?.origins.length, 1)
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 4n)
+  }),
+)
+
+it.effect('rejects conflicting and absent ordinary struct inference evidence', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'struct-values/inference-errors',
+      ascii(`struct Same<T> { first: T second: T }
+struct Phantom<T> { value: i32 }
+fn conflict() -> i32 { let value = Same { first: 1, second: true } return 0 }
+fn absent() -> i32 { let value = Phantom { value: 1 } return 0 }
+pub fn main() -> i32 { return 0 }`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0099', 'SEM0100'],
+    )
+    const conflict = Analysis.diagnostics(self).find((diagnostic) => diagnostic.code === 'SEM0100')
+    assert.strictEqual(conflict?.reason._tag, 'TypeArgumentConflict')
+    assert.strictEqual(conflict?.relatedSpans?.at(0)?.label, 'type argument first constrained here')
   }),
 )

@@ -22,7 +22,8 @@ const snapshot = (source: string, target?: string) =>
 const evaluate = (source: string) =>
   Effect.map(snapshot(source), (self) => ({ self, outcome: Analysis.evaluate(self) }))
 
-const sharedSource = `service Counter {
+const sharedSource = `import silk.effects as Effect
+service Counter {
   effect fn get() -> i32 ? &Counter
 }
 struct Fixed { value: i32 }
@@ -53,28 +54,29 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `interface Marker<T> { fn mark(value: &T) -> i32 }
+      const source = `import silk.effects as Effect
+interface Marker { fn mark(value: &Self) -> i32 }
 
 struct Token {}
 fn markToken(value: &Token) -> i32 { return 1 }
-impl Marker<Token> for Token { mark: Token.markToken }
+impl Marker for Token { mark: Token.markToken }
 
-interface Decoder<T> { fn decode(value: &T) -> i32 }
+interface Decoder { fn decode(value: &Self) -> i32 }
 struct Schema { tag: i32 }
 fn schemaDecode(value: &Schema) -> i32 { return value.tag }
-impl Decoder<Schema> for Schema { decode: Schema.schemaDecode }
+impl Decoder for Schema { decode: Schema.schemaDecode }
 
 struct Mapped<S> { source: S }
 fn mappedDecode<S: Decoder>(value: &Mapped<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
-impl<S: Decoder<S>> Decoder<Mapped<S>> for Mapped<S> { decode: Mapped.mappedDecode }
+impl<S: Decoder> Decoder for Mapped<S> { decode: Mapped.mappedDecode }
 
 struct Optional<S> { source: S }
 fn optionalDecode<S: Decoder>(value: &Optional<S>) -> i32 {
   return Decoder.decode(&value.source) + 1
 }
-impl<S: Decoder<S>> Decoder<Optional<S>> for Optional<S> { decode: Optional.optionalDecode }
+impl<S: Decoder> Decoder for Optional<S> { decode: Optional.optionalDecode }
 
 fn decodeOf<T: Decoder>(value: T) -> i32 { return Decoder.decode(&value) }
 
@@ -88,7 +90,7 @@ effect fn get<S: Marker>(self: &Fixed<S>, value: &S) -> i32 {
     source: Mapped<Schema> { source: Schema { tag: 40 } }
   })
 }
-impl<S: Marker<S>> Counter<i32, S> for Fixed<S> { get: Fixed.get }
+impl<S: Marker> Counter<i32, S> for Fixed<S> { get: Fixed.get }
 
 effect fn read(value: &Token) -> i32 ? &Counter<i32, Token> {
   return run Counter.get<i32, Token>(value)
@@ -175,15 +177,15 @@ it.effect('accepts failure and requirement rows promised by a generic service he
   Effect.gen(function* () {
     const self = yield* snapshot(`interface Marker<T> { fn mark(value: T) -> i32 }
 
-service Counter<!E, ?R, Value> {
+service Counter<E, ?R, Value> {
   effect fn get(value: &Value) -> i32 ! E ? R | &Counter<E, R, Value>
 }
 
-struct Fixed<S, !E, ?R> {}
-effect fn get<S: Marker, !E, ?R>(self: &Fixed<S, E, R>, value: &S) -> i32 ! E ? R {
+struct Fixed<S, E, ?R> {}
+effect fn get<S: Marker, E, ?R>(self: &Fixed<S, E, R>, value: &S) -> i32 ! E ? R {
   return 42
 }
-impl<S: Marker<S>, !E, ?R> Counter<E, R, S> for Fixed<S, E, R> { get: Fixed.get }
+impl<S: Marker<S>, E, ?R> Counter<E, R, S> for Fixed<S, E, R> { get: Fixed.get }
 
 pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(
@@ -195,7 +197,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('dispatches an exclusive source service and preserves provider mutation', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Counter {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
 struct Cell { value: i32 }
@@ -249,7 +252,8 @@ for (const provider of [
     `transfers ${provider.label} Effect recipes and protected borrows through move aliases`,
     () =>
       Effect.gen(function* () {
-        const source = `import silk.result { Result, Success, Failure }
+        const source = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 struct Token { value: i32 }
 service Counter {
   effect fn increment(token: ${provider.access === 'Exclusive' ? '&mut Token' : '&Token'}) -> i32 ? ${provider.access === 'Exclusive' ? '&mut Counter' : '&Counter'}
@@ -337,7 +341,8 @@ pub fn main() -> i32 {
 
 it.effect('dispatches an owned source service provider exactly once', () =>
   Effect.gen(function* () {
-    const source = `service Counter {
+    const source = `import silk.effects as Effect
+service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
 struct Cell { value: i32 }
@@ -353,7 +358,7 @@ effect fn twice() -> i32 ? &mut Counter {
 }
 pub fn main() -> i32 {
   let cell = Cell { value: 20 }
-  return run Effect.bindRequirementOwned<&mut Counter>(twice(), move cell)
+  return run Effect.bindRequirementOwned<Counter>(twice(), move cell)
 }`
     const self = yield* snapshot(source, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -400,20 +405,6 @@ it.effect('retains an affine owned provider while a pre-read scalar suspends and
       assert.isAbove(acquired, 0)
       assert.strictEqual(released, acquired)
     }
-    const providedProgram = mir.functions.find((fn) =>
-      fn.id.name.startsWith('program$effect$-1$provided$'),
-    )
-    assert.isDefined(providedProgram)
-    assert.isTrue(
-      providedProgram?.suspension?.regions.some(
-        (region) =>
-          region._tag === 'RunSuspendableEffectRegion' &&
-          region.runner.providers.some(
-            (provider) =>
-              provider.purposes.length === 2 && Type.equals(provider.capability, Type.allocator),
-          ),
-      ) ?? false,
-    )
     const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
     assert.strictEqual(
       yield* WasmMain.invoke(wasm.bytes, 'UserServices.invokeSuspendedOwnedProviderSuccessWasm'),
@@ -451,7 +442,10 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
 
 it.effect('keeps a synchronous service with an allocator requirement synchronous', () =>
   Effect.gen(function* () {
-    const source = `service Value {
+    const source = `import silk.core { Allocator }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+service Value {
   effect fn read() -> i32 ? &mut Value | &mut Allocator
 }
 struct Fixed { value: i32 }
@@ -463,8 +457,8 @@ effect fn program() -> i32 ? &mut Value | &mut Allocator {
 pub fn main() -> i32 {
   let mut fixed = Fixed { value: 42 }
   let mut allocator = SystemAllocator.make()
-  return run Effect.provideMut<&mut Allocator>(
-    Effect.provideMut<&mut Value>(program(), &mut fixed),
+  return run Effect.provideMut<Allocator>(
+    Effect.provideMut<Value>(program(), &mut fixed),
     &mut allocator,
   )
 }`
@@ -516,24 +510,28 @@ it.effect('keeps mixed provider specializations exact at one service site', () =
 
 it.effect('releases an owned source provider after the protected Effect completes', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+import silk.effects as Effect
 struct Problem { code: i32 }
 service Value { effect fn read() -> i32 ? &mut Value }
 struct Provider { storage: Allocation }
 effect fn read(self: &mut Provider) -> i32 { return 42 }
 impl Value for Provider { read: Provider.read }
-effect fn open() -> Provider ! OutOfMemory {
+effect fn open() -> Provider ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   return Provider { storage: move allocation }
 }
-effect fn exhausted(error: OutOfMemory) -> Provider ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> Provider ! Problem { fail Problem { code: 9 } }
 effect fn acquire() -> Provider ! Problem { return run Effect.catchAll(open(), exhausted) }
 effect fn use() -> i32 ? &mut Value { return run Value.read() }
 effect fn body() -> i32 ! Problem {
   let provider = run acquire()
-  return run Intrinsic.bindRequirementOwned<&mut Value>(use(), move provider)
+  return run Intrinsic.bindRequirementOwned<Value>(use(), move provider)
 }
 effect fn recover(error: Problem) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(body(), recover) }`
@@ -554,15 +552,17 @@ pub fn main() -> i32 { return run Effect.catchAll(body(), recover) }`
 
 it.effect('selects service roles and provider replacements without dynamic lookup', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Values {
-  effect fn left() -> i32 ? &Values@Left
-  effect fn right() -> i32 ? &Values@Right
+    const { self, outcome } = yield* evaluate(`role Left
+role Right
+service Values {
+  effect fn left() -> i32 ? &Values at Left
+  effect fn right() -> i32 ? &Values at Right
 }
 struct Fixed { value: i32 }
 effect fn left(self: &Fixed) -> i32 { return self.value }
 effect fn right(self: &Fixed) -> i32 { return self.value }
 impl Values for Fixed { left: Fixed.left right: Fixed.right }
-effect fn total() -> i32 ? &Values@Left | &Values@Right {
+effect fn total() -> i32 ? &Values at Left | &Values at Right {
   let leftValue = run Values.left()
   let rightValue = run Values.right()
   return leftValue * 10 + rightValue
@@ -571,8 +571,8 @@ pub fn main() -> i32 {
   let left = Fixed { value: 4 }
   let right = Fixed { value: 2 }
   let selected = total()
-    |> Intrinsic.bindRequirement<&Values@Left>(&left)
-    |> Intrinsic.bindRequirement<&Values@Right>(&right)
+    |> Intrinsic.bindRequirement<Values at Left>(&left)
+    |> Intrinsic.bindRequirement<Values at Right>(&right)
   return run selected
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
@@ -583,7 +583,8 @@ pub fn main() -> i32 {
 
 it.effect('uses a nested provider override only for its lexical provision', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Value {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Value {
   effect fn get() -> i32 ? &Value
 }
 struct Fixed { value: i32 }
@@ -619,7 +620,6 @@ pub fn main() -> i32 { return run read() }`)
 it.effect('keeps ordinary Report conformance static and out of requirement rows', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub struct Problem {}
-impl Report for Problem {}
 pub effect fn main() -> () ! Problem { return () }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const entry = Analysis.instancesOf(self).entry
@@ -629,9 +629,35 @@ pub effect fn main() -> () ! Problem { return () }`)
   }),
 )
 
+it.effect('rejects an ordinary interface as an Effect dependency', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Clock { fn now(value: &Self) -> i32 }
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 { return 0 }`)
+    assert.isTrue(
+      Analysis.diagnostics(self).some(
+        (diagnostic) => diagnostic.code === 'SEM0070' && diagnostic.message.includes('Clock'),
+      ),
+    )
+  }),
+)
+
+it.effect('allows a service to participate in an ordinary compile-time bound', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`service Clock { effect fn now() -> i32 ? &Clock }
+struct Fixed {}
+effect fn now(self: &Fixed) -> i32 { return 42 }
+impl Clock for Fixed { now: Fixed.now }
+fn preserve<T: Clock>(value: T) -> T { return move value }
+pub fn main() -> i32 { return 0 }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it.effect('ends the provider loan after the provided effect completes', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`service Value {
+    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+service Value {
   effect fn get() -> i32 ? &Value
 }
 struct Provider { value: i32 }

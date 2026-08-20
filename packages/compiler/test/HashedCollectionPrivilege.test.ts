@@ -27,11 +27,15 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
 /** A program that inserts, grows, looks up and removes, so the whole map is lowered, not a corner. */
-const usingAMap = `import silk.hash { HashKey, HashSeed, Word }
+const usingAMap = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.i32 as i32
+import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut map = make<Word, i32>(HashKey.seed(12345))
   let mut key = 0
@@ -50,7 +54,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -151,11 +155,13 @@ it.effect('treats HashKey as an ordinary interface rather than by its spelling',
     // spelling `HashKey`, this program and the one above would not agree.
     const snapshot = yield* analyzed(
       'hashed-privilege/renamed',
-      `import silk.hash { HashSeed }
+      `import silk.hash { HashKey }
+import silk.u64 as u64
+import silk.hash { HashSeed }
 
-interface Whatever<T> {
-  fn equals(left: &T, right: &T) -> bool
-  fn hash(value: &T, seed: &HashSeed) -> u64
+interface Whatever {
+  fn equals(left: &Self, right: &Self) -> bool
+  fn hash(value: &Self, seed: &HashSeed) -> u64
 }
 
 struct Tag { value: u64 }
@@ -163,7 +169,7 @@ struct Tag { value: u64 }
 fn tagEquals(left: &Tag, right: &Tag) -> bool { return left.value == right.value }
 fn tagHash(value: &Tag, seed: &HashSeed) -> u64 { return HashKey.mix(seed, value.value) }
 
-impl Whatever<Tag> for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
+impl Whatever for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
 
 fn hashOf<T: Whatever>(value: T, seed: HashSeed) -> u64 { return Whatever.hash(&value, &seed) }
 

@@ -315,7 +315,8 @@ it.effect('does not recurse through references to represented executable values'
   Effect.gen(function* () {
     const callable = yield* realized(
       'representation-fence/callable-reference',
-      `struct Pointer<F: fn(i32) -> i32> { operation: &F }
+      `import silk.i32 as i32
+struct Pointer<F: fn(i32) -> i32> { operation: &F }
 fn point<F: fn(i32) -> i32>(operation: &F) -> Pointer<F> {
   return Pointer<F> { operation }
 }
@@ -397,7 +398,8 @@ pub fn main() -> i32 {
 
 it.effect('realizes a represented capturing section stored in a nominal field', () =>
   Effect.gen(function* () {
-    const source = `struct Adder<F: fn(i32) -> i32> { step: F }
+    const source = `import silk.i32 as i32
+struct Adder<F: fn(i32) -> i32> { step: F }
 pub fn main() -> i32 {
   let adder = Adder { step: i32.add(1) }
   return adder.step(2)

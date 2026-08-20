@@ -118,7 +118,9 @@ it('covers the pointer width of every canonical target', () => {
   for (const target of Target.native) assert.strictEqual(TargetConstant.pointerBits(target), 64)
 })
 
-const mirProgram = `fn largestUsize() -> usize { return usize.MAX }
+const mirProgram = `import silk.isize as isize
+import silk.usize as usize
+fn largestUsize() -> usize { return usize.MAX }
 fn largestIsize() -> isize { return isize.MAX }
 fn smallestIsize() -> isize { return isize.MIN }
 fn pointerBits() -> u32 { return usize.BITS }
@@ -258,7 +260,11 @@ const probeNames = probes.map((declared) => declared.slice(3, declared.indexOf('
  * to drop. Every identity above must hold first: `verify` divides by zero on any other answer, so a
  * single disagreeing bound fails the whole program on whichever engine disagrees.
  */
-const acceptance = `import silk.option { Some, None }
+const acceptance = `import silk.i32 as i32
+import silk.isize as isize
+import silk.u32 as u32
+import silk.usize as usize
+import silk.option { Some, None }
 
 ${probes.join('\n')}
 

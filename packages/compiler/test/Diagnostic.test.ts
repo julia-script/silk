@@ -163,20 +163,28 @@ it('describes unexpected syntax with the encountered token and parser context', 
   )
 })
 
-it('describes one wholly absent return statement with one stable diagnostic', () => {
-  const diagnostic = Diagnostic.missingReturnStatement(spanAt(12, 12))
+it('describes return contract failures with stable semantic diagnostics', () => {
+  const missing = Diagnostic.missingReturn('i32', spanAt(12, 12))
+  const mismatch = Diagnostic.returnTypeMismatch('i32', 'Effect<i32>', spanAt(20, 31))
 
   assert.deepEqual(
-    {
+    [missing, mismatch].map((diagnostic) => ({
       phase: diagnostic.phase,
       code: diagnostic.code,
       reason: diagnostic.reason,
-    },
-    {
-      phase: 'parser',
-      code: 'PAR0004',
-      reason: { _tag: 'MissingReturnStatement' },
-    },
+    })),
+    [
+      {
+        phase: 'semantic',
+        code: 'SEM0130',
+        reason: { _tag: 'MissingReturn', expected: 'i32' },
+      },
+      {
+        phase: 'semantic',
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+      },
+    ],
   )
 })
 

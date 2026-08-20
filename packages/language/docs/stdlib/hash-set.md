@@ -41,6 +41,14 @@ pub struct Member<T>
 
 Internal hashed element record exposed by the current table representation.
 
+<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for silk/hash_set.Member<T>`
+
+```silk
+impl Copy for silk/hash_set.Member<T>
+```
+
 <a id="declaration-73696c6b2f686173685f7365743a3a556e736565646564"></a>
 
 ## `Unseeded`
@@ -111,7 +119,7 @@ pub fn occupiedAt<T>(self: &silk/hash_set.HashSet<T>, index: usize) -> bool
 
 Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
 
-<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173685f7365743a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Drop for silk/hash_set.HashSet<T>`
 
@@ -124,7 +132,7 @@ impl Drop for silk/hash_set.HashSet<T>
 ## `insert`
 
 ```silk
-pub effect fn insert<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> bool ! OutOfMemory ? &mut Allocator
+pub effect fn insert<T>(self: &mut silk/hash_set.HashSet<T>, value: T) -> bool ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned element, reporting whether an equivalent element was already held.
@@ -134,7 +142,7 @@ Inserts one owned element, reporting whether an equivalent element was already h
 A set never holds two equivalent elements. When one is already held the set is unchanged and the
 arriving element is released, so the element that survives is the one the set already had.
 
-Fails only with `OutOfMemory`, and only from the growth this insert needed. A failed insert
+Fails only with `OutOfMemoryError`, and only from the growth this insert needed. A failed insert
 leaves every prior element present, and leaves the length and the bucket count unchanged.
 
 <a id="declaration-73696c6b2f686173685f7365743a3a636f6e7461696e73"></a>

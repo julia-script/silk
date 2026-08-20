@@ -15,7 +15,13 @@ const ascii = (value: string): Uint8Array =>
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-multi-affine-return-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
-const allocated = `import silk.vector { Vector, make, append, length }
+const allocated = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.usize as usize
+import silk.vector { Vector, make, append, length }
 
 struct Step { pc: usize opcode: u8 depth: usize top: i32 }
 struct VmDiagnostic { pc: usize code: usize }
@@ -30,14 +36,14 @@ struct Returned {
 effect fn pushStep(
   values: &mut Vector<Step>,
   step: Step
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   return run append<Step>(move values, move step)
 }
 
 effect fn pushDiagnostic(
   values: &mut Vector<VmDiagnostic>,
   diagnostic: VmDiagnostic
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   return run append<VmDiagnostic>(move values, move diagnostic)
 }
 
@@ -55,7 +61,7 @@ fn finish(
   }
 }
 
-effect fn build() -> Returned ! OutOfMemory ? &mut Allocator {
+effect fn build() -> Returned ! OutOfMemoryError ? &mut Allocator {
   let stepLayout = Layout.of<Step>()
   let diagnosticLayout = Layout.of<VmDiagnostic>()
   let mut first = make<Step>()
@@ -94,14 +100,14 @@ fn observe(returned: Returned) -> i32 {
   }
 }
 
-effect fn execute() -> i32 ! OutOfMemory {
+effect fn execute() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let pending = build() |> Effect.provideMut(&mut allocator)
   let returned = run pending
   return observe(move returned)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(execute(), recover) }`
 

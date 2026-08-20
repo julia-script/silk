@@ -15,6 +15,8 @@
 //! raw-storage contract. Debug execution may diagnose these mistakes; portable code must not rely
 //! on a runtime check.
 
+
+
 /// Initializes one selected raw slot exactly once.
 pub fn write<T>(slot: Slot<T>, value: T) -> () {
   unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }
@@ -26,7 +28,7 @@ pub fn take<T>(slot: Slot<T>) -> T {
 }
 
 /// Copies an initialized Copy value out of one selected raw slot.
-pub fn copy<T>(slot: Slot<T>) -> T {
+pub fn copy<T: Copy>(slot: Slot<T>) -> T {
   unsafe { return Intrinsic.slotCopy<T>(move slot) }
 }
 

@@ -136,14 +136,16 @@ pub fn selected() -> typeof(id<i32>) { return 0 }`,
   }),
 )
 
-const identitySource = `struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
+const identitySource = `import silk.i32 as i32
+struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
 pub fn main() -> i32 {
   let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
   return 0
 }`
-const shiftedIdentitySource = `// Moving source trivia must not rename executable sites.
+const shiftedIdentitySource = `import silk.i32 as i32
+// Moving source trivia must not rename executable sites.
 
 struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
@@ -274,10 +276,10 @@ it.effect('rejects fully supplied exact arguments that remain open in every gene
   Effect.gen(function* () {
     const self = yield* index(
       'exact-representation/open-kinded',
-      `pub fn target<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>(value: A) -> A {
+      `pub fn target<A, E, ?R, F: fn(A) -> A, G: Effect<A>>(value: A) -> A {
   return move value
 }
-pub fn selected<A, !E, ?R, F: fn(A) -> A, G: Effect<A>>() -> typeof(target<A, E, R, F, G>) {
+pub fn selected<A, E, ?R, F: fn(A) -> A, G: Effect<A>>() -> typeof(target<A, E, R, F, G>) {
   loop {}
 }`,
     )
@@ -349,7 +351,7 @@ it.effect(
         `pub struct Failure {}
 pub service Capability {}
 pub fn callable(value: i32) -> i32 { return value }
-pub fn target<A, !E, ?R, F: fn(A) -> A>(value: A) -> A {
+pub fn target<A, E, ?R, F: fn(A) -> A>(value: A) -> A {
   return move value
 }
 pub fn selected() -> typeof(target<i32, Failure, Capability, typeof(callable)>) {
@@ -374,7 +376,7 @@ pub fn selected() -> typeof(target<i32, Failure, Capability, typeof(callable)>) 
       if (!Type.isCallableIdentityArgument(exact.identity)) return
       const [value, failures, requirements, callable] = exact.identity.typeArguments
       assert.strictEqual(value !== undefined && Type.isTypeArgument(value), true)
-      assert.strictEqual(failures !== undefined && Type.isFailureRowArgument(failures), true)
+      assert.strictEqual(failures !== undefined && Type.isTypeArgument(failures), true)
       assert.strictEqual(
         requirements !== undefined && Type.isRequirementRowArgument(requirements),
         true,
@@ -395,7 +397,7 @@ it.effect('rejects private exact identities nested in every non-value generic po
 pub struct Failure<F: fn(i32) -> i32> { value: i32 }
 pub struct Capability<F: fn(i32) -> i32> { value: i32 }
 pub fn generic<F: fn(i32) -> i32>(value: i32) -> i32 { return value }
-pub fn rows<!E, ?R>(value: i32) -> i32 { return value }
+pub fn rows<E, ?R>(value: i32) -> i32 { return value }
 pub fn nominalLeak() -> Failure<typeof(hidden)> { loop {} }
 pub fn identityLeak() -> typeof(generic<typeof(hidden)>) { loop {} }
 pub fn rowLeak() -> typeof(rows<Failure<typeof(hidden)>, Capability<typeof(hidden)>>) { loop {} }`,

@@ -1,13 +1,18 @@
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
 import silk.vector { Vector, make, append, get, length }
-
-impl Report for OutOfMemory {}
 
 struct QueueEntry {
   cell: usize
   distance: usize
 }
 
-effect fn search() -> usize ! OutOfMemory ? &mut Allocator {
+impl Copy for QueueEntry {}
+
+effect fn search() -> usize ! OutOfMemoryError ? &mut Allocator {
   let mut visited = [
     false, false, false, false, false,
     false, false, false, false, false,
@@ -74,7 +79,7 @@ fn verifyShortestDistance(distance: usize) -> () {
   return ()
 }
 
-pub effect fn main() -> () ! OutOfMemory {
+pub effect fn main() -> () ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   return run search()
     |> Effect.map(verifyShortestDistance)

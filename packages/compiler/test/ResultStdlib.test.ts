@@ -22,7 +22,12 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure)
 }`
 
-const affinePayload = `import silk.result { Result, Success, Failure, succeed }
+const affinePayload = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.result { Result, Success, Failure, succeed }
 
 struct Token { storage: Allocation }
 
@@ -46,7 +51,7 @@ fn observe(result: Result<Token, i32>) -> i32 {
   }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Intrinsic.bindRequirementMut(Allocator.allocate(move layout), &mut allocator)
@@ -55,11 +60,12 @@ effect fn build() -> i32 ! OutOfMemory {
   return observe(move result)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-const reifiedEffect = `import silk.result { Result, Success, Failure }
+const reifiedEffect = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -88,14 +94,19 @@ pub fn main() -> i32 {
   return first + second
 }`
 
-const reifiedRequirement = `import silk.result { Result, Success, Failure }
+const reifiedRequirement = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.result { Result, Success, Failure }
 
-effect fn allocateOne() -> Allocation ! OutOfMemory ? &mut Allocator {
+effect fn allocateOne() -> Allocation ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<i32>()
   return run Allocator.allocate(move layout)
 }
 
-effect fn attempt() -> Result<Allocation, OutOfMemory> ? &mut Allocator {
+effect fn attempt() -> Result<Allocation, OutOfMemoryError> ? &mut Allocator {
   return run Effect.result(allocateOne())
 }
 
@@ -103,9 +114,9 @@ effect fn build() -> i32 {
   let mut allocator = SystemAllocator.make()
   let completed = run Intrinsic.bindRequirementMut(attempt(), &mut allocator)
   return match move completed {
-    Result<Allocation, OutOfMemory> { value: outcome } => match move outcome {
+    Result<Allocation, OutOfMemoryError> { value: outcome } => match move outcome {
       Success<Allocation> { value: storage } => release(move storage)
-      Failure<OutOfMemory> { error: ignored } => 0
+      Failure<OutOfMemoryError> { error: ignored } => 0
     }
   }
 }
@@ -117,7 +128,8 @@ fn release(storage: Allocation) -> i32 {
 
 pub fn main() -> i32 { return run build() }`
 
-const reifiedTrap = `import silk.result { Result }
+const reifiedTrap = `import silk.effects as Effect
+import silk.result { Result }
 
 effect fn explode() -> i32 {
   return 1 / 0
@@ -128,20 +140,28 @@ pub fn main() -> i32 {
   return 42
 }`
 
-const boundRequirements = `struct Clock {}
-struct Config {}
+const boundRequirements = `role Primary
+service Clock { effect fn value() -> i32 ? &Clock }
+service Config { effect fn value() -> i32 ? &Config }
+struct FixedClock { value: i32 }
+struct FixedConfig { value: i32 }
+effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
+effect fn configValue(self: &FixedConfig) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
+impl Config for FixedConfig { value: FixedConfig.configValue }
 
-effect fn read() -> i32 ? &Clock@Primary | &Config { return 42 }
+effect fn read() -> i32 ? &Clock at Primary | &Config { return 42 }
 
 pub fn main() -> i32 {
-  let clock = Clock {}
-  let config = Config {}
-  let rest = Intrinsic.bindRequirement<&Clock@Primary>(read(), &clock)
+  let clock = FixedClock { value: 1 }
+  let config = FixedConfig { value: 2 }
+  let rest = Intrinsic.bindRequirement<Clock at Primary>(read(), &clock)
   let closed = rest |> Intrinsic.bindRequirement(&config)
   return run closed
 }`
 
-const sourceDefinedMaps = `import silk.result { Result, Success, Failure }
+const sourceDefinedMaps = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -166,7 +186,8 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 42
 }`
 
-const sourceDefinedEffectfulCombinators = `import silk.result { Result, Success, Failure }
+const sourceDefinedEffectfulCombinators = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
 struct Second { code: i32 }
@@ -205,7 +226,8 @@ pub fn main() -> i32 {
   return observeBoth(move chained) + observeBoth(move observed) + observeSecond(move recovered) - 82
 }`
 
-const sourceDefinedRetry = `import silk.result { Result, Success, Failure }
+const sourceDefinedRetry = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 
 struct Problem { code: i32 }
 
@@ -227,15 +249,19 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 2
 }`
 
-const sourceDefinedProvide = `struct Clock {}
+const sourceDefinedProvide = `import silk.effects as Effect
+service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 
 effect fn read() -> i32 ? &Clock { return 42 }
-effect fn makeClock() -> Clock { return Clock {} }
+effect fn makeClock() -> FixedClock { return FixedClock { value: 42 } }
 
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { value: 42 }
   let direct = run read() |> Effect.provide(&clock)
-  let acquired = run read() |> Effect.provideWith(makeClock())
+  let acquired = run read() |> Effect.provideEffect(makeClock())
   return direct + acquired - 42
 }`
 
@@ -302,8 +328,7 @@ it.effect('keeps runtime traps outside the typed Result error channel', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    assert.strictEqual(evaluated._tag === 'Blocked' ? evaluated.reason._tag : undefined, 'Trap')
+    assert.strictEqual(evaluated._tag, 'Trap')
   }),
 )
 

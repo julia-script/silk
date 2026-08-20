@@ -16,6 +16,7 @@
 //! ## Choose an overflow policy instead of relying on a trap
 //! ```silk
 //! import silk.option { None, Some }
+//! import silk.u8 as u8
 //!
 //! pub fn main() -> i32 {
 //!   let overflowed = match move u8.checkedAdd(255, 1) {
@@ -32,7 +33,25 @@
 //! # See also
 //! Use the `silk.char` module when a value is a Unicode scalar rather than an arbitrary byte.
 
+import silk.bool as bool
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.f32 as f32
+import silk.f64 as f64
+import silk.format as Format
+import silk.format { ParseError }
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
 import silk.option { Option }
+import silk.result { Result }
+import silk.string { String }
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.usize as usize
 
 /// The largest u8. The checked arithmetic intrinsics reject every result above this bound.
 pub const MAX: u8 = 255
@@ -304,11 +323,11 @@ pub fn greaterOrEqual(left: u8, right: u8) -> bool {
 }
 
 /// Renders the value as decimal text in freshly owned storage.
-pub effect fn toText(value: u8) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn toText(value: u8) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.unsignedText(toU64(value))
 }
 
 /// Reads complete decimal text as a `u8`, or reports why the text is not one.
-pub fn parse(text: string) -> Result<u8, ParseFailure> {
+pub fn parse(text: string) -> Result<u8, ParseError> {
   return Format.u8Value(text)
 }

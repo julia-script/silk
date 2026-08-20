@@ -15,13 +15,17 @@
 //! Logger failures are typed [`LogError`] values and do not imply that a message committed. Bounded
 //! accessors require a committed event and valid byte index; invalid indices trap.
 
+import silk.bool as bool
 import silk.core {
   NativeStandardStreams,
-  StreamWriteFailure,
+  StreamWriteError,
   send
 }
+import silk.i32 as i32
 import silk.result { Failure, Result, Success }
 import silk.string { utf8Bytes as stringUtf8Bytes }
+import silk.u8 as u8
+import silk.usize as usize
 
 /// A closed bootstrap logging severity.
 pub struct LogLevel {
@@ -51,8 +55,6 @@ pub struct LogError {
   code: i32
 }
 
-impl Report for LogError {}
-
 /// Returns the provider-defined bootstrap failure code.
 pub fn errorCode(error: LogError) -> i32 { return error.code }
 
@@ -78,7 +80,7 @@ pub fn stdout() -> StdoutLogger { return StdoutLogger {} }
 effect fn writeStdoutCounted(
   streams: &mut NativeStandardStreams,
   message: &[u8]
-) -> i32 ! StreamWriteFailure {
+) -> i32 ! StreamWriteError {
   let written = run Intrinsic.bindRequirementMut(send(false, message), streams)
   return 0
 }
@@ -92,9 +94,9 @@ effect fn writeStdout(
   let bytes = stringUtf8Bytes(message)
   let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, bytes))
   return match move completed {
-    Result<i32, StreamWriteFailure> { value: outcome } => match move outcome {
+    Result<i32, StreamWriteError> { value: outcome } => match move outcome {
       Success<i32> { value: success } => ()
-      Failure<StreamWriteFailure> { error: failure } => run reject(3)
+      Failure<StreamWriteError> { error: failure } => run reject(3)
     }
   }
 }

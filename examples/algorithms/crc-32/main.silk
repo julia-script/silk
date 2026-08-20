@@ -1,3 +1,6 @@
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 fn crc32(input: &[u8]) -> u32 {
   let mut crc = u32.bitNot(0)
   let mut index = usize.add(0, 0)

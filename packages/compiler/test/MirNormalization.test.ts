@@ -6,7 +6,8 @@ import * as MirNormalization from '../src/MirNormalization.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 
 const encoder = new TextEncoder()
-const source = `import silk.result { Result, Success, Failure }
+const source = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
 effect fn succeed(value: i32) -> i32 { return value }
 fn addOne(value: i32) -> i32 { return value + 1 }
 effect fn userMap(self: once Effect<i32>, onSuccess: once fn(i32) -> i32) -> i32 {
@@ -91,14 +92,12 @@ it.effect('retains concrete suspendable runs without a global suspension mode', 
   Effect.gen(function* () {
     const raw = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-suspendable',
-      encoder.encode(`effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+      encoder.encode(`import silk.effects as Effect
+effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let selected = delayed(42) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move selected, recover)
+  return run delayed(42)
 }`),
       'wasm32-unknown-unknown',
       { normalizeMir: false },
@@ -157,15 +156,13 @@ it.effect('retains suspendable reification and effect-entry closure control', ()
   Effect.gen(function* () {
     const reified = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-reify-suspendable',
-      encoder.encode(`effect fn seed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+      encoder.encode(`import silk.effects as Effect
+effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 fn increment(value: i32) -> i32 { return value + 1 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = seed(41) |> Effect.map(increment) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move pending, recover)
+  return run seed(41) |> Effect.map(increment)
 }`),
       'wasm32-unknown-unknown',
     )
@@ -207,24 +204,9 @@ pub fn main() -> i32 {
       (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }> =>
         operation._tag === 'ReifyEffect',
     )
-    const allocate = allOperations(reifiedProgram).find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Allocate' }> =>
-        operation._tag === 'Allocate',
-    )
     assert.isDefined(reify)
-    assert.isDefined(allocate)
-    if (reify === undefined || allocate === undefined) return
-    for (const failureTag of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
-      const forged = structuredClone(reifiedProgram)
-      const operation = allOperations(forged).find((candidate) => candidate._tag === 'Allocate')
-      assert.isDefined(operation)
-      if (operation === undefined) return
-      Reflect.set(operation, 'failureTag', failureTag)
-      assert.include(
-        Mir.verify(forged).map((violation) => violation.rule),
-        'InvalidAllocationOperation',
-      )
-    }
+    assert.isFalse(allOperations(reifiedProgram).some((operation) => operation._tag === 'Allocate'))
+    if (reify === undefined) return
     for (const field of ['successTag', 'failureTag'] as const) {
       for (const tag of [-1, reify.resultUnion.members.length, Number.MAX_SAFE_INTEGER + 1]) {
         const forged = structuredClone(reifiedProgram)
@@ -259,22 +241,19 @@ it.effect('retains a provider-specialized suspendable runner', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-provided-suspendable',
-      encoder.encode(`service Value {
-  effect fn get() -> i32 ! OutOfMemory ? &Value | &mut Allocator
+      encoder.encode(`import silk.effects as Effect
+service Value {
+  effect fn get() -> i32 ? &Value
 }
 struct SuspendedValue { value: i32 }
-effect fn get(self: &SuspendedValue) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn get(self: &SuspendedValue) -> i32 {
   return run Effect.suspend(effect { return self.value })
 }
 impl Value for SuspendedValue { get: SuspendedValue.get }
-effect fn read() -> i32 ! OutOfMemory ? &Value | &mut Allocator { return run Value.get() }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn read() -> i32 ? &Value { return run Value.get() }
 pub fn main() -> i32 {
   let provider = SuspendedValue { value: 42 }
-  let mut allocator = SystemAllocator.make()
-  let selected = read() |> Effect.provide(&provider)
-  let complete = move selected |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move complete, recover)
+  return run Effect.provide(read(), &provider)
 }`),
       'wasm32-unknown-unknown',
     )

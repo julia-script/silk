@@ -25,7 +25,7 @@ Public declarations: 2.
 ## `Integer`
 
 ```silk
-pub interface Integer<T>
+pub interface Integer
 ```
 
 Static addition contract for primitive integer values.
@@ -40,17 +40,17 @@ effect requirements, provider slots, or runtime dispatch.
 ### Operation `add`
 
 ```silk
-fn add(left: T, right: T) -> T
+operator + fn add(left: Self, right: Self) -> Self
 ```
 
 Adds two values using the concrete primitive integer operation.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `silk/numeric.Integer<u8> for u8`
+## Implementation `Integer for u8`
 
 ```silk
-impl silk/numeric.Integer<u8> for u8
+impl Integer for u8
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
@@ -63,10 +63,10 @@ add = Intrinsic.u8Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a31"></a>
 
-## Implementation `silk/numeric.Integer<u16> for u16`
+## Implementation `Integer for u16`
 
 ```silk
-impl silk/numeric.Integer<u16> for u16
+impl Integer for u16
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
@@ -79,10 +79,10 @@ add = Intrinsic.u16Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a32"></a>
 
-## Implementation `silk/numeric.Integer<u32> for u32`
+## Implementation `Integer for u32`
 
 ```silk
-impl silk/numeric.Integer<u32> for u32
+impl Integer for u32
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
@@ -95,10 +95,10 @@ add = Intrinsic.u32Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a33"></a>
 
-## Implementation `silk/numeric.Integer<u64> for u64`
+## Implementation `Integer for u64`
 
 ```silk
-impl silk/numeric.Integer<u64> for u64
+impl Integer for u64
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
@@ -111,10 +111,10 @@ add = Intrinsic.u64Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a34"></a>
 
-## Implementation `silk/numeric.Integer<usize> for usize`
+## Implementation `Integer for usize`
 
 ```silk
-impl silk/numeric.Integer<usize> for usize
+impl Integer for usize
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
@@ -127,10 +127,10 @@ add = Intrinsic.usizeAdd
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a35"></a>
 
-## Implementation `silk/numeric.Integer<i8> for i8`
+## Implementation `Integer for i8`
 
 ```silk
-impl silk/numeric.Integer<i8> for i8
+impl Integer for i8
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
@@ -143,10 +143,10 @@ add = Intrinsic.i8Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a36"></a>
 
-## Implementation `silk/numeric.Integer<i16> for i16`
+## Implementation `Integer for i16`
 
 ```silk
-impl silk/numeric.Integer<i16> for i16
+impl Integer for i16
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
@@ -159,10 +159,10 @@ add = Intrinsic.i16Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a37"></a>
 
-## Implementation `silk/numeric.Integer<i32> for i32`
+## Implementation `Integer for i32`
 
 ```silk
-impl silk/numeric.Integer<i32> for i32
+impl Integer for i32
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
@@ -175,10 +175,10 @@ add = Intrinsic.i32Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a38"></a>
 
-## Implementation `silk/numeric.Integer<i64> for i64`
+## Implementation `Integer for i64`
 
 ```silk
-impl silk/numeric.Integer<i64> for i64
+impl Integer for i64
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
@@ -191,10 +191,10 @@ add = Intrinsic.i64Add
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a39"></a>
 
-## Implementation `silk/numeric.Integer<isize> for isize`
+## Implementation `Integer for isize`
 
 ```silk
-impl silk/numeric.Integer<isize> for isize
+impl Integer for isize
 ```
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>

@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 
 const encoder = new TextEncoder()
 
@@ -21,11 +23,11 @@ const describe = (outcome: unknown): string =>
  * Two operations on one bound. `combine` calls both — `+` selects `add` and `-` selects
  * `subtract` — over the canonical parameter, once, before any concrete argument exists.
  */
-const twoOperations = `pub interface Arith<T> {
-  fn add(left: T, right: T) -> T
-  fn subtract(left: T, right: T) -> T
+const twoOperations = `pub interface Arith {
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
-impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
+impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
   return (move left + move right) - move offset
 }
@@ -43,12 +45,12 @@ it.effect('calls every operation of a two-operation bound in one generic body', 
 
 it.effect('specializes one two-operation bound per conforming provider', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Arith<T> {
-  fn add(left: T, right: T) -> T
-  fn subtract(left: T, right: T) -> T
+    const { self, outcome } = yield* evaluate(`pub interface Arith {
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
-impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-impl Arith<u8> for u8 { add: Intrinsic.u8Add subtract: Intrinsic.u8Subtract }
+impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
+impl Arith for u8 { add: Intrinsic.u8Add subtract: Intrinsic.u8Subtract }
 pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
   return (move left + move right) - move offset
 }
@@ -66,13 +68,13 @@ pub fn main() -> i32 {
  * A bound whose operations do not all return the parameter. `lessThan` is declared over `T` but
  * results in `bool`, so the operator keeps the operation's own declared result.
  */
-const comparisonBound = `pub interface Ranked<T> {
-  fn lessThan(left: &T, right: &T) -> bool
-  fn subtract(left: T, right: T) -> T
+const comparisonBound = `pub interface Ranked {
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
-impl Ranked<i32> for i32 { lessThan: Intrinsic.i32LessThan subtract: Intrinsic.i32Subtract }
+impl Ranked for i32 { lessThan: Intrinsic.i32LessThan subtract: Intrinsic.i32Subtract }
 pub fn gap<T: Ranked>(left: T, right: T) -> T {
-  if left < right { return move right - move left }
+  if (&left) < (&right) { return move right - move left }
   return move left - move right
 }
 pub fn main() -> i32 { return gap(2, 44) }`
@@ -88,11 +90,11 @@ it.effect('keeps a bound comparison at its declared result type', () =>
 
 it.effect('rejects a type argument whose witness omits one bound operation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub interface Arith<T> {
-  fn add(left: T, right: T) -> T
-  fn subtract(left: T, right: T) -> T
+    const self = yield* snapshot(`pub interface Arith {
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
-impl Arith<i32> for i32 { add: Intrinsic.i32Add }
+impl Arith for i32 { add: Intrinsic.i32Add }
 pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
   return (move left + move right) - move offset
 }
@@ -106,11 +108,11 @@ it.effect('checks a bound against a type argument an explicit prefix wrote', () 
   Effect.gen(function* () {
     // A substitution seeded from a written prefix is still a substitution: what it binds faces the
     // same conformance check an inferred binding does.
-    const declarations = `pub interface Arith<T> {
-  fn add(left: T, right: T) -> T
-  fn subtract(left: T, right: T) -> T
+    const declarations = `pub interface Arith {
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
-impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
+impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 struct Plain { value: i32 }
 pub fn combine<T: Arith, U>(left: T, right: T, offset: T, other: U) -> T {
   return (move left + move right) - move offset
@@ -159,12 +161,14 @@ pub fn main() -> i32 {
 
 it.effect('rejects a type argument with no witness for the bound', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub interface Arith<T> {
-  fn add(left: &T, right: &T) -> T
-  fn subtract(left: &T, right: &T) -> T
+    const self = yield* snapshot(`pub interface Arith {
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator - fn subtract(left: &Self, right: &Self) -> Self
 }
-impl Arith<i32> for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-pub fn combine<T: Arith>(left: T, right: T) -> T { return (left + right) - left }
+impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
+pub fn combine<T: Arith>(left: T, right: T) -> T {
+  return &((&left) + (&right)) - (&left)
+}
 pub fn main() -> i32 {
   let wide = combine<i64>(40, 44)
   return 0
@@ -188,11 +192,11 @@ pub fn main() -> i32 { return combine(40, 2) }`)
  * `u8` — so the call must read the witness the specialization selected rather than reuse an
  * operator's width-neutral lowering.
  */
-const nonOperatorOperation = `pub interface Mixer<T> {
-  fn mix(left: T, right: T) -> T
+const nonOperatorOperation = `pub interface Mixer {
+  fn mix(left: Self, right: Self) -> Self
 }
-impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
-impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
 pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
 pub fn main() -> i32 { return blend(40, 2) }`
 
@@ -207,11 +211,11 @@ it.effect('calls a bound operation no operator spells', () =>
 
 it.effect('reaches a different witness for each specialized type argument', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Mixer<T> {
-  fn mix(left: T, right: T) -> T
+    const { self, outcome } = yield* evaluate(`pub interface Mixer {
+  fn mix(left: Self, right: Self) -> Self
 }
-impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
-impl Mixer<u8> for u8 { mix: Intrinsic.u8SaturatingAdd }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for u8 { mix: Intrinsic.u8SaturatingAdd }
 pub fn blend<T: Mixer>(left: T, right: T) -> T { return Mixer.mix(move left, move right) }
 pub fn main() -> i32 {
   // u8 saturates at 255; i32 wraps from its maximum to its minimum. One shared body, two
@@ -230,10 +234,10 @@ pub fn main() -> i32 {
 
 it.effect('keeps a bound operation at the result its interface declares', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`pub interface Ranked<T> {
-  fn ranksBelow(left: &T, right: &T) -> bool
+    const { self, outcome } = yield* evaluate(`pub interface Ranked {
+  fn ranksBelow(left: &Self, right: &Self) -> bool
 }
-impl Ranked<i32> for i32 { ranksBelow: Intrinsic.i32LessThan }
+impl Ranked for i32 { ranksBelow: Intrinsic.i32LessThan }
 pub fn ranks<T: Ranked>(left: &T, right: &T) -> bool {
   return Ranked.ranksBelow(left, right)
 }
@@ -246,6 +250,60 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('rejects an unrun effectful bound operation at the generic return boundary', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Decoder {
+  effect fn decode(value: &Self) -> i32
+}
+struct Schema {}
+effect fn decodeSchema(value: &Schema) -> i32 { return 42 }
+impl Decoder for Schema { decode: Schema.decodeSchema }
+effect fn decodeWith<T: Decoder>(value: &T) -> i32 {
+  return Decoder.decode(value)
+}
+pub fn main() -> i32 {
+  let schema = Schema {}
+  return run decodeWith<Schema>(&schema)
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason,
+      })),
+      [
+        {
+          code: 'SEM0129',
+          reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+        },
+      ],
+    )
+    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
+  }),
+)
+
+it.effect('keeps a mapped witness with an invalid body out of target-dependent phases', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Decoder {
+  fn decode(value: &Self) -> i32
+}
+struct Schema {}
+fn decodeSchema(value: &Schema) -> i32 { return true }
+impl Decoder for Schema { decode: Schema.decodeSchema }
+fn decodeWith<T: Decoder>(value: &T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let schema = Schema {}
+  return decodeWith<Schema>(&schema)
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0129'],
+    )
+    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
   }),
 )
 
@@ -277,12 +335,116 @@ pub fn main() -> i32 { return Integer.add(40, 2) }`)
   }),
 )
 
+it.effect('executes an inline conformance operation with Self bound to its provider', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface Decoder {
+  fn decode(value: &Self) -> i32
+}
+struct Schema { value: i32 }
+impl Decoder for Schema {
+  fn decode(value: &Self) -> i32 { return value.value }
+}
+fn decode<T: Decoder>(value: &T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let schema = Schema { value: 42 }
+  return decode(&schema)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('combines inline and mapped operations in one complete conformance', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface PairValue {
+  fn left(value: &Self) -> i32
+  fn right(value: &Self) -> i32
+}
+struct Pair { left: i32 right: i32 }
+fn pairRight(value: &Pair) -> i32 { return value.right }
+impl PairValue for Pair {
+  fn left(value: &Self) -> i32 { return value.left }
+  right: Pair.pairRight
+}
+fn sum<T: PairValue>(value: &T) -> i32 {
+  return PairValue.left(value) + PairValue.right(value)
+}
+pub fn main() -> i32 {
+  let pair = Pair { left: 20, right: 22 }
+  return sum(&pair)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('requires and resolves every member of a bound conjunction', () =>
+  Effect.gen(function* () {
+    const { self, outcome } = yield* evaluate(`interface LeftValue {
+  fn left(value: &Self) -> i32
+}
+interface RightValue {
+  fn right(value: &Self) -> i32
+}
+struct Pair { left: i32 right: i32 }
+impl LeftValue for Pair {
+  fn left(value: &Self) -> i32 { return value.left }
+}
+impl RightValue for Pair {
+  fn right(value: &Self) -> i32 { return value.right }
+}
+fn sum<T: LeftValue + RightValue>(value: &T) -> i32 {
+  return LeftValue.left(value) + RightValue.right(value)
+}
+pub fn main() -> i32 {
+  let pair = Pair { left: 20, right: 22 }
+  return sum(&pair)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('rejects a repeated normalized member of a bound conjunction', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Display { fn display(value: &Self) -> i32 }
+fn inspect<T: Display + Display>(value: &T) -> i32 { return Display.display(value) }
+pub fn main() -> i32 { return 0 }`)
+    assert.include(messages(self), 'Invalid conformance: duplicate bound Display')
+  }),
+)
+
+it.effect('rejects a conformance outside the provider module', () =>
+  Effect.gen(function* () {
+    const model = encoder.encode(`pub interface Shape { fn area(value: &Self) -> i32 }
+pub struct Rectangle {}`)
+    const root = SourceFile.make(
+      'consumer',
+      encoder.encode(`import model { Shape, Rectangle }
+impl Shape for Rectangle {
+  fn area(value: &Self) -> i32 { return 42 }
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    const self = yield* Analysis.make({ root }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['model', model]]))),
+    )
+    assert.include(
+      messages(self),
+      "Invalid conformance: implementation for model.Rectangle must be declared in model, the provider's module",
+    )
+  }),
+)
+
 it.effect('reports a bound operation reachable through two bounded parameters', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub interface Mixer<T> {
-  fn mix(left: T, right: T) -> T
+    const self = yield* snapshot(`pub interface Mixer {
+  fn mix(left: Self, right: Self) -> Self
 }
-impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
 pub fn blend<A: Mixer, B: Mixer>(left: A, right: B) -> A {
   return Mixer.mix(move left, move left)
 }
@@ -293,10 +455,10 @@ pub fn main() -> i32 { return blend<i32, i32>(40, 2) }`)
 
 it.effect('reports a bound operation the interface never declares', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`pub interface Mixer<T> {
-  fn mix(left: T, right: T) -> T
+    const self = yield* snapshot(`pub interface Mixer {
+  fn mix(left: Self, right: Self) -> Self
 }
-impl Mixer<i32> for i32 { mix: Intrinsic.i32WrappingAdd }
+impl Mixer for i32 { mix: Intrinsic.i32WrappingAdd }
 pub fn blend<T: Mixer>(left: T, right: T) -> T {
   return Mixer.stir(move left, move right)
 }
@@ -313,7 +475,7 @@ it.effect('records the resolved bound contract on the declaration it belongs to'
       ?.declarations.find(
         (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === 'combine',
       )
-    const bound = declaration?.typeParameters.at(0)?.bound
+    const bound = declaration?.typeParameters.at(0)?.bounds.at(0)
     assert.strictEqual(bound?._tag, 'ResolvedBound')
     if (bound?._tag !== 'ResolvedBound') return
     assert.strictEqual(bound.spelling, 'Arith')

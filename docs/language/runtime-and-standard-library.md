@@ -70,10 +70,9 @@ canonical source locations. An unavailable target intrinsic is reported through 
 availability before lowering. Missing support required by a matched toolchain is a toolchain-
 integrity error, not a source-level missing import or typed failure.
 
-**Current compiler:** Partially aligned. Canonical standard-library files compile through the
-ordinary pipeline, platform providers are separate source modules, and intrinsic support is
-reachable-only. The single manifest does not classify these layers, and current name resolution
-still exposes an obsolete implicit standard-library prelude.
+**Current compiler:** Aligned. Canonical standard-library files compile through the ordinary
+pipeline, the generated catalog classifies portable and target-provider modules, source scope is
+explicit, and intrinsic support is reachable-only.
 
 **Evidence:** [bootstrap library source specification](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [minimum runtime inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
@@ -108,9 +107,8 @@ not inferred by this rule.
 at its canonical library location. Toolchain verification may additionally classify this as a
 broken distribution, but it cannot silently replace the module with a privileged implementation.
 
-**Current compiler:** Largely aligned. Shipped actors are canonical `.silk` files with a generated
-manifest and source navigation. Existing compiler-known library spellings and the implicit prelude
-remain reconciliation targets.
+**Current compiler:** Aligned. Shipped actors are canonical `.silk` files with a generated catalog,
+ordinary source analysis, explicit imports, and source navigation.
 
 **Evidence:** [canonical source requirements](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [standard-library source guide](../../packages/compiler/stdlib/README.md),
@@ -120,7 +118,7 @@ remain reconciliation targets.
 
 **Status:** Confirmed
 
-Only closed language bindings exisI thinkt without source imports. Standard-library actors—including
+Only closed language bindings exist without source imports. Standard-library actors—including
 `Option`, `Result`, `Effect`, scalar operation actors, `Vector`, `String`, services, and provider
 types—enter a module scope only through explicit imports.
 
@@ -151,11 +149,11 @@ ordinary project module named `Option` is unrelated to `silk.option`.
 diagnostic and may include an auto-import action. Declaring a project module under reserved
 `silk.*` reports a reserved-module-identity collision naming the project and toolchain origins.
 
-**Current compiler:** Disputed. Canonical module identities are reserved, but name resolution and
-module closure still seed or discover manifest namespaces without explicit import syntax.
+**Current compiler:** Aligned. Canonical module identities are reserved, while module closure and
+name resolution introduce standard-library declarations only through explicit imports.
 
 **Evidence:** [PRELUDE-001](modules-names-and-visibility.md#prelude-001--only-language-bindings-are-implicit),
-[module reconciliation ledger](modules-names-and-visibility.md#reconciliation-ledger),
+[module implementation evidence](modules-names-and-visibility.md#implementation-evidence),
 [standard-library module resolution](../../openspec/specs/bootstrap-silk-stdlib/spec.md).
 
 ### STDLIB-003 — One canonical catalog defines the shipped library, not the language
@@ -201,9 +199,9 @@ reports an unknown standard-library module and names the toolchain release. It d
 name is an unknown project path. A catalog that promises a missing or digest-mismatched file is a
 broken-toolchain diagnostic, not an ordinary source error.
 
-**Current compiler:** Partially aligned. One deterministic manifest ships all current modules and
-verifies generated embeddings, but it acts simultaneously as source catalog, implicit prelude, and
-internal implementation inventory. Those roles must be separated.
+**Current compiler:** Aligned. One deterministic generated catalog records canonical source,
+digests, documentation, layers, provider targets, and intrinsic inventories without creating source
+scope.
 
 **Evidence:** [current deterministic catalog](../../packages/compiler/stdlib/manifest.json),
 [bootstrap library inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
@@ -267,10 +265,10 @@ initialization and acquires no allocator, provider, registry entry, thread, glob
 resource.
 
 ```silk,ignore
-import silk.core { Allocator, OutOfMemory }
+import silk.core { Allocator, OutOfMemoryError }
 import silk.vector as Vector
 
-effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemory ? &mut Allocator {
+effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemoryError ? &mut Allocator {
   let mut result = Vector.make<i32>()
   // append operations state their allocation contract
   return move result
@@ -278,7 +276,7 @@ effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemory ? &mut Allocat
 ```
 
 Allocation-free construction remains allocation-free. Operations that may grow owned storage state
-`! OutOfMemory ? &mut Allocator` or another honest contract. Static strings and static bytes need no
+`! OutOfMemoryError ? &mut Allocator` or another honest contract. Static strings and static bytes need no
 hidden heap owner. Service use remains in the requirement row until explicitly provided.
 
 **Boundary:** The compiler may optimize a proven allocation, provider selection, or cleanup without
@@ -297,9 +295,8 @@ Hover and inlay information may show which call introduced each channel. An acti
 writes an ordinary signature or expression; the compiler does not silently infer a larger public
 contract or pretend the source already contains the edit.
 
-**Current standard library:** Mixed but directionally aligned. Allocation and services are usually
-explicit, while the current implicit prelude and some native-entry support can make source
-dependencies appear more ambient than their contracts intend.
+**Current standard library:** Aligned for source dependencies. Allocation, services, failures, and
+standard-library names remain explicit in source; entry adaptation is defined separately.
 
 **Evidence:** [Effect contracts](effect-contracts.md),
 [requirements and services](requirements-and-services.md),
@@ -327,9 +324,8 @@ Until then, a catalog flag cannot silently override the language's confirmed `pu
 compiler does not report an “internal standard library API” error for a declaration that is
 otherwise public and cataloged. Tooling may show a non-blocking stability or low-level API notice.
 
-**Current standard library:** Aligned with catalog-wide module resolution, although the implicit
-prelude currently exposes internal-looking actor namespaces even without an import. Removing the
-prelude restores deliberate access without inventing new visibility.
+**Current standard library:** Aligned. Catalog-wide module resolution preserves ordinary `pub`
+visibility, and no catalog namespace becomes visible without an explicit import.
 
 **Evidence:** [ordinary visibility](modules-names-and-visibility.md),
 [current source catalog](../../packages/compiler/stdlib/manifest.json),
@@ -456,9 +452,8 @@ source compatibility after the fact.
 verification rejects unrelated host imports, runtime symbols, static tables, or adapters not
 justified by the retained executable inventory.
 
-**Current compiler:** Largely aligned for intrinsic operations. Current lexical standard-library
-discovery and manifest-wide namespace seeding add source-analysis work that explicit imports should
-remove.
+**Current compiler:** Aligned for intrinsic operations. Source analysis follows explicit import
+closure, while executable support follows reachable specialized operations.
 
 **Evidence:** [TARGET-002](unsafe-intrinsics-and-targets.md#target-002--unreachable-target-specific-primitives-have-no-artifact-cost),
 [explicit module closure](modules-names-and-visibility.md#mod-003--imports-build-one-deterministic-transitive-module-closure),
@@ -585,10 +580,9 @@ through the program-entry diagnostics. Missing private adapter support is a brok
 Unhandled typed failures and fatal traps retain their distinct runtime behavior rather than being
 reported as source validation errors.
 
-**Current compiler:** Disputed where the obsolete operation-free `Report` marker still gates effect
-entries and where failure-member ordinals and incomplete rendering do not yet implement the
-confirmed termination-report rules. Automatic execution and requirement closure already follow the
-intended shape.
+**Implementation:** Entry discovery, generated MIR, evaluator outcomes, and backend termination
+contracts share the same entry inventory. The private native adapter is derived from that inventory;
+a trivial closed entry links no stream, command-line, scheduler, allocator, or provider machinery.
 
 **Evidence:** [program entry](program-entry.md),
 [entry termination specification](../../openspec/specs/bootstrap-entry-termination/spec.md),
@@ -620,9 +614,14 @@ required runtime artifacts report one deterministic broken-toolchain diagnostic 
 and observed component identities. The compiler does not continue with fallback copies, an older
 runtime, or a user module shadowing the missing standard source.
 
-**Current toolchain:** Largely aligned through generated source and intrinsic inventories, although
-the full compiler/source/runtime digest relationship is not yet presented as one public integrity
-check.
+**Current toolchain:** Aligned. [`ToolchainIntegrity`](../../packages/compiler/src/ToolchainIntegrity.ts)
+publishes one normalized `silk-toolchain-v1` graph covering the compiler, catalog, exact source
+bytes, sealed intrinsic inventory, target providers, and per-target runtime support. Its SHA-256
+identities exclude absolute paths, timestamps, directory enumeration order, and other checkout
+state. The driver validates the compiler/catalog/source/intrinsic set before project resolution,
+then validates only providers and runtime support reached by the prepared program before emission.
+Compiled artifacts retain the graph identity, and language-tooling inventories expose the same
+graph and validation result.
 
 **Evidence:** [standard-library manifest](../../packages/compiler/stdlib/manifest.json),
 [intrinsic inventory](../../packages/compiler/test/fixtures/intrinsic-inventory.json),
@@ -655,9 +654,12 @@ consequence.
 component and points to the earliest actionable source location when one exists. Stable wording and
 codes belong to the diagnostic catalog; this table fixes their semantic classification.
 
-**Current compiler:** Mixed. Dedicated diagnostics exist for many individual cases, but current
-stdlib discovery, entry reporting, and backend fallthrough can misclassify failures or surface an
-internal error after the real boundary was crossed.
+**Current compiler:** Aligned at the bootstrap driver boundary. A malformed, unreadable, or
+mismatched distribution produces the structured `ToolchainFailed` outcome; unsupported reachable
+intrinsics produce `TargetFailed`; missing project imports remain `SourceResolutionFailed`; open or
+invalid entries remain `NoEntry`; source diagnostics remain `Rejected`; backend construction and
+external tool execution retain their own outcomes. The CLI renders these classes separately and
+does not reinterpret a broken installation as a source or backend error.
 
 **Evidence:** [module diagnostics](modules-names-and-visibility.md),
 [entry diagnostics](program-entry.md),
@@ -702,8 +704,9 @@ behaves ordinarily rather than redirecting to a canonical actor because its spel
 and may still open the available canonical file. It must not synthesize declarations that let
 analysis continue as though the catalog were complete.
 
-**Current tooling:** Partially aligned. Canonical source documentation and navigation exist, while
-implicit prelude completion and catalog/source distinctions require reconciliation.
+**Current tooling:** Aligned for this boundary. Canonical source documentation and navigation exist;
+catalog completion materializes explicit collision-aware imports, and Effect repairs write visible
+source edits.
 
 **Evidence:** [standard-library documentation guide](../../packages/compiler/stdlib/DOCUMENTATION.md),
 [editor intelligence tests](../../packages/compiler/test/EditorIntelligence.test.ts),

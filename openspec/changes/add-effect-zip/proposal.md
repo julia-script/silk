@@ -60,6 +60,6 @@ and no error accumulation — the first typed failure stops the sequence.
 `Effect.all` over a collection is not part of this change and is not deferred pending a smaller fix.
 It requires `Vector<Effect<...>>`, so its prerequisite is giving Effect values a storable runtime
 representation — a compiler-core change, not a library addition. Two further questions would remain
-open even then: collecting into a `Vector` forces `! OutOfMemory ? &mut Allocator` onto the result,
+open even then: collecting into a `Vector` forces `! OutOfMemoryError ? &mut Allocator` onto the result,
 which no requirement in this capability authorizes, and moving an affine `once Effect` out of a
 `Vector` has no operation today (`Vector.get` is a bitwise read documented for `Copy` elements).

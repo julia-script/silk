@@ -10,7 +10,13 @@ const exampleSource = readFileSync(
   'utf8',
 )
 
-const portableProvider = `import silk.filesystem {
+const portableProvider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+import silk.filesystem {
   Path,
   DirectoryEntry,
   DirectoryInfo,
@@ -53,8 +59,6 @@ import silk.vector {
   make as vectorMake
 }
 
-impl Report for OutOfMemory {}
-
 struct MemoryFileSystem {
   contents: [u8; 4]
   fileExists: bool
@@ -69,7 +73,7 @@ fn emptyContents() -> [u8; 4] { return [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.t
 effect fn memoryRead(
   self: &mut MemoryFileSystem,
   path: &Path
-) -> Bytes ! FileError | OutOfMemory ? &mut Allocator {
+) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
   self.calls = self.calls + 1
   if self.fileExists == false { fail fsError(readFileOperation(), notFound()) }
   let contents = self.contents
@@ -122,7 +126,7 @@ effect fn memoryStat(
 effect fn memoryList(
   self: &mut MemoryFileSystem,
   path: &Path
-) -> Vector<DirectoryEntry> ! FileError | OutOfMemory ? &mut Allocator {
+) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
   self.calls = self.calls + 1
   return vectorMake<DirectoryEntry>()
 }
@@ -163,7 +167,7 @@ effect fn memoryCreateTemporary(
   self: &mut MemoryFileSystem,
   within: &Path,
   prefix: &[u8]
-) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   fail fsError(createTemporaryDirectoryOperation(), unsupported())
 }
 
@@ -188,7 +192,7 @@ fn checksum(values: &[u8]) -> i32 {
   return total
 }
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = MemoryFileSystem {
     contents: emptyContents(),
@@ -235,20 +239,22 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 10
+      Failure<FileError | OutOfMemoryError> { error } => 10
     }
   }
 }`
 
 it.effect('constructs and resolves normalized provider-absolute Paths', () =>
   Effect.gen(function* () {
-    const source = `import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
+    const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
 import silk.option { None, Option, Some }
 import silk.result { Failure, Result, Success }
-impl Report for OutOfMemory {}
-
 fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   return match move possible {
     None {} => false
@@ -256,7 +262,7 @@ fn matchesParent(possible: Option<Path>, expected: string) -> bool {
   }
 }
 
-effect fn check() -> i32 ! FileError | OutOfMemory {
+effect fn check() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let canonicalRoot = run root() |> Effect.provideMut(&mut allocator)
   if isRoot(&canonicalRoot) == false { return 3 }
@@ -276,9 +282,9 @@ effect fn check() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(check())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 2
+      Failure<FileError | OutOfMemoryError> { error } => 2
     }
   }
 }`
@@ -313,31 +319,32 @@ pub fn main() -> i32 {
 )
 
 it.effect('rejects malformed paths and lexical root escape before service provision', () => {
-  const source = `import silk.filesystem { FileError, joinUtf8, make, resolve }
+  const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError, joinUtf8, make, resolve }
 
-impl Report for OutOfMemory {}
-
-effect fn construct(value: string) -> bool ! FileError | OutOfMemory {
+effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let path = run make(value) |> Effect.provideMut(&mut allocator)
   return false
 }
 
-effect fn resolveEscape() -> bool ! FileError | OutOfMemory {
+effect fn resolveEscape() -> bool ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let escaped = run resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
   return false
 }
 
-effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemory {
+effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let invalid = run joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
   return false
 }
 
-effect fn recovered(error: FileError | OutOfMemory) -> bool { return true }
+effect fn recovered(error: FileError | OutOfMemoryError) -> bool { return true }
 
 pub fn main() -> i32 {
   if run Effect.catchAll(construct("relative"), recovered) {} else { return 1 }
@@ -374,12 +381,18 @@ pub fn main() -> i32 {
 })
 
 it.effect('preserves Path allocation failure without publishing partial owned storage', () => {
-  const source = `import silk.filesystem { make }
+  const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+import silk.layout { Layout }
+import silk.filesystem { make }
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -387,13 +400,13 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn build() -> i32 ! FileError | OutOfMemory {
+effect fn build() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: 0 }
   let path = run make("/never-owned") |> Effect.provideMut(&mut allocator)
   return 1
 }
 
-effect fn recover(error: FileError | OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: FileError | OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
   return Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -438,9 +451,10 @@ it.effect(
   'retains unprovided FileSystem and Allocator requirements instead of selecting ambient services',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.filesystem { FileError, FileSystem, root }
-impl Report for OutOfMemory {}
-pub effect fn main() -> i32 ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator {
+      const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.filesystem { FileError, FileSystem, root }
+pub effect fn main() -> i32 ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let path = run root()
   let info = run FileSystem.stat(&path)
   return 42

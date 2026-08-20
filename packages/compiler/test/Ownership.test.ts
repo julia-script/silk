@@ -256,7 +256,7 @@ pub fn main() -> i32 {
 it('consumes a take effect parameter on its first run and rejects a repeated run', () => {
   const facts = check(
     'ownership://take-effect-parameter.silk',
-    `pub effect fn twice<A, !E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+    `pub effect fn twice<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
   let first = run self
   return run self
 }`,
@@ -272,7 +272,7 @@ it('consumes a take effect parameter on its first run and rejects a repeated run
 it('accepts a single run of a take effect parameter', () => {
   const facts = check(
     'ownership://take-effect-parameter-single.silk',
-    `pub effect fn flattenLike<A, !E, !F, ?R, ?S>(
+    `pub effect fn flattenLike<A, E, F, ?R, ?S>(
   self: once Effect<Effect<A ! F ? S> ! E ? R>
 ) -> A ! E | F ? R | S {
   let inner = run self
@@ -398,6 +398,7 @@ it('copies an owned Copy provider so its bound Effect remains repeatable', () =>
   const facts = check(
     'ownership://copied-provider.silk',
     `struct Clock { tick: i32 }
+impl Copy for Clock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
   let clock = Clock { tick: 0 }
@@ -480,6 +481,25 @@ effect fn outer() -> () ! Problem {
   assert.deepEqual(
     propagation?.releases.map((release) => release.binding.name),
     ['token'],
+  )
+})
+
+it('keeps ownership checking active for acknowledged unsafe source calls', () => {
+  const facts = check(
+    'ownership://unsafe-call-move.silk',
+    `struct Token { value: i32 }
+unsafe fn consume(token: Token) -> () { drop move token return () }
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  unsafe consume(move token)
+  unsafe consume(move token)
+  return 0
+}`,
+  )
+
+  assert.include(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
   )
 })
 
@@ -657,7 +677,8 @@ it('keeps a Slot loan active until the lexical Slot is consumed', () => {
 it('reports moves and double drops inside lazy effect bodies', () => {
   const doubled = check(
     'ownership://effect-body-double-drop.silk',
-    `struct Token { value: i32 }
+    `import silk.effects as Effect
+struct Token { value: i32 }
 struct Problem { code: i32 }
 effect fn store() -> i32 ! Problem {
   let token = Token { value: 1 }
@@ -677,7 +698,8 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // exits and bindings belong to its own compiled function, not to the enclosing one.
   const healthy = check(
     'ownership://effect-body-healthy.silk',
-    `struct Token { value: i32 }
+    `import silk.effects as Effect
+struct Token { value: i32 }
 struct Problem { code: i32 }
 effect fn store() -> i32 ! Problem {
   let token = Token { value: 1 }

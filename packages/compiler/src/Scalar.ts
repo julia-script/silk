@@ -112,6 +112,7 @@ export type CheckedConversionOperationCode =
   | 'CheckedConvertToI32'
   | 'CheckedConvertToI64'
   | 'CheckedConvertToIsize'
+  | 'CheckedConvertToChar'
 
 /** One operation declared by a scalar actor. */
 export interface Operation {
@@ -423,10 +424,10 @@ export const boolean: BooleanScalar = Object.freeze({
  * to the `u32` a decoder produces today, and it orders by Unicode scalar value, which for the
  * range `0` to `0x10ffff` is exactly the unsigned 32-bit order.
  *
- * The catalog states equality and ordering and nothing else. Arithmetic is absent by design:
+ * The catalog states equality, ordering, and the two explicit `u32` conversions. Arithmetic is
+ * absent by design:
  * `char` names a value inside a fixed range that excludes the surrogates `0xd800` to `0xdfff`,
- * and every arithmetic operation can leave that range. The conversions to and from `u32` are
- * absent for a separate reason: representing the surrogate hole is the work of a follow-up.
+ * and every arithmetic operation can leave that range.
  */
 export const character: CharacterScalar = Object.freeze({
   spelling: 'char',
@@ -435,7 +436,11 @@ export const character: CharacterScalar = Object.freeze({
   signedness: undefined,
   layout: fixedLayout(4),
   lanes: Object.freeze({ llvm: 'LogicalWidth', wasm: 'I32' }),
-  operations: Object.freeze([...comparisonOperations]),
+  operations: Object.freeze([
+    operation('fromU32', 'CheckedConvertToChar', 1, 'OptionTarget', Object.freeze(['u32'])),
+    operation('toU32', 'ConvertToU32', 1, 'u32'),
+    ...comparisonOperations,
+  ]),
 })
 
 const catalog: ReadonlyArray<Scalar> = Object.freeze([
@@ -507,6 +512,10 @@ export const floatConversionTarget = (operation: string): FloatScalar | undefine
 
 /** Tests whether an integer operation returns the canonical recoverable Option outcome. */
 export const isCheckedOperation = (operation: string): boolean => operation.startsWith('Checked')
+
+/** Tests whether one mathematical integer names a valid Unicode scalar value. */
+export const isUnicodeScalarValue = (value: bigint): boolean =>
+  value >= 0n && value <= 0x10ffffn && (value < 0xd800n || value > 0xdfffn)
 
 /** Resolves the scalar's logical width for one target pointer width. */
 export const bits = (self: Scalar, pointerBits: 32 | 64): FixedBits =>

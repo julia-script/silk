@@ -240,7 +240,7 @@ semantic check Silk performs.
 
 Resource acceptance uses deterministic fail-at-allocation-ordinal sweeps on one small request that
 reaches each compiler phase, continuing until the first uninjected successful run. Every injected
-failure must surface as typed `OutOfMemory`, exit with status `2`, run exact LIFO cleanup, return live
+failure must surface as typed `OutOfMemoryError`, exit with status `2`, run exact LIFO cleanup, return live
 logical allocation bytes to the pre-request baseline, and leave neither temporary nor durable
 artifacts. Representative file-system, child-process, and standard-stream failures use test
 providers and obey the same guarantees. After every failure, a successful compilation in the same

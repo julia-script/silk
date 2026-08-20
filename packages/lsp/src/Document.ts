@@ -4,11 +4,13 @@ import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
+import * as ImportPlan from '@silk-effect/compiler/ImportPlan'
 import * as Presentation from '@silk-effect/compiler/Presentation'
 import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
-import * as SourceAction from '@silk-effect/compiler/SourceAction'
+import type * as SourceAction from '@silk-effect/compiler/SourceAction'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
+import type * as SyntaxFile from '@silk-effect/compiler/SyntaxFile'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import type * as Token from '@silk-effect/compiler/Token'
 import type * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
@@ -114,8 +116,7 @@ const owned = (
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.span.sourceId === self.module)
 
-/** Converts the document's own compiler diagnostics into protocol diagnostics. */
-export const diagnostics = (
+const compilerDiagnostics = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   uriOf: (module: string) => string | undefined,
@@ -147,16 +148,165 @@ export const diagnostics = (
   })
 }
 
-/**
- * Names the correction one edit-carrying diagnostic applies.
- *
- * A `Diagnostic.Edit` carries corrected bytes but no prose, so the title comes from the code that
- * emitted it. A code absent from this table carries no edit, so its diagnostic yields no action.
- */
-const correctionTitles: Partial<Record<Diagnostic.Code, string>> = {
-  [Diagnostic.duplicateImportCode]: 'Remove the repeated import',
-  [Diagnostic.redundantAliasCode]: 'Remove the redundant alias',
+interface ImportRedundancy {
+  readonly diagnostic: LspDiagnostic
+  readonly title: string
+  readonly edits: ReadonlyArray<TextEdit>
 }
+
+const sourceText = (
+  source: SourceFile.SourceFile,
+  element: SyntaxTree.Element,
+): string | undefined => Option.getOrUndefined(SourceFile.spelling(source, element.span))
+
+const aliasClause = (
+  source: SourceFile.SourceFile,
+  alias: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start = SyntaxTree.directToken(alias, 'AsKeyword')?.span.start ?? alias.span.start
+  while (start > 0 && [0x20, 0x09, 0x0d].includes(source.bytes[start - 1] ?? Number.NaN)) start -= 1
+  return Option.getOrElse(SourceSpan.make(source, start, alias.span.end), () => alias.span)
+}
+
+const importLine = (
+  source: SourceFile.SourceFile,
+  declaration: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start =
+    SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
+  while (start > 0 && [0x20, 0x09].includes(source.bytes[start - 1] ?? Number.NaN)) start -= 1
+  let end = declaration.span.end
+  while (end < source.bytes.length && [0x20, 0x09].includes(source.bytes[end] ?? Number.NaN))
+    end += 1
+  const preceding = start === 0 ? undefined : source.bytes[start - 1]
+  const ownsLine = start === 0 || preceding === 0x0a || preceding === 0x0d
+  if (ownsLine && source.bytes[end] === 0x0d) end += 1
+  if (ownsLine && source.bytes[end] === 0x0a) end += 1
+  return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
+}
+
+const importRedundancies = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<ImportRedundancy> => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return []
+  const source = syntax.source
+  const result: Array<ImportRedundancy> = []
+  const seen = new Set<string>()
+  const firstByPath = new Map<string, SyntaxTree.Node>()
+  for (const declaration of SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')) {
+    const normalized = sourceText(source, declaration)?.replace(/\s+/g, ' ').trim()
+    if (normalized !== undefined && seen.has(normalized)) {
+      const span = importLine(source, declaration)
+      result.push({
+        title: 'Remove the repeated import',
+        diagnostic: {
+          range: LineIndex.rangeOf(self.index, declaration.span),
+          severity: DiagnosticSeverity.Warning,
+          code: 'LSP0001',
+          source: 'silk-lsp',
+          message: 'This exact import is repeated',
+        },
+        edits: [{ range: LineIndex.rangeOf(self.index, span), newText: '' }],
+      })
+      continue
+    } else if (normalized !== undefined) seen.add(normalized)
+
+    const path = SyntaxTree.directNode(declaration, 'ImportPath')
+    const pathText = path === undefined ? undefined : sourceText(source, path)?.trim()
+    const first = pathText === undefined ? undefined : firstByPath.get(pathText)
+    if (pathText !== undefined && first === undefined) firstByPath.set(pathText, declaration)
+    if (
+      pathText !== undefined &&
+      first !== undefined &&
+      SyntaxTree.directNode(first, 'ImportAlias') === undefined &&
+      SyntaxTree.directNode(declaration, 'ImportAlias') === undefined
+    ) {
+      const firstList = SyntaxTree.directNode(first, 'ImportMemberList')
+      const repeatedList = SyntaxTree.directNode(declaration, 'ImportMemberList')
+      if (firstList !== undefined && repeatedList !== undefined) {
+        const members = [firstList, repeatedList]
+          .flatMap((list) => SyntaxTree.directNodes(list, 'ImportMember'))
+          .flatMap((member) => {
+            const rendered = sourceText(source, member)?.trim()
+            return rendered === undefined ? [] : [rendered]
+          })
+          .filter((member, index, all) => all.indexOf(member) === index)
+        if (members.length > 0) {
+          result.push({
+            title: 'Consolidate imports from this module',
+            diagnostic: {
+              range: LineIndex.rangeOf(self.index, declaration.span),
+              severity: DiagnosticSeverity.Warning,
+              code: 'LSP0003',
+              source: 'silk-lsp',
+              message: 'Imports from this module can be consolidated',
+            },
+            edits: [
+              {
+                range: LineIndex.rangeOf(self.index, first.span),
+                newText: `import ${pathText} { ${members.join(', ')} }`,
+              },
+              {
+                range: LineIndex.rangeOf(self.index, importLine(source, declaration)),
+                newText: '',
+              },
+            ],
+          })
+        }
+      }
+    }
+    const defaultName =
+      path === undefined
+        ? undefined
+        : SyntaxTree.tokens(path)
+            .filter((token) => token.kind === 'Identifier')
+            .at(-1)
+    const aliases = [
+      { owner: declaration, source: defaultName },
+      ...SyntaxTree.directNodes(
+        SyntaxTree.directNode(declaration, 'ImportMemberList') ?? declaration,
+        'ImportMember',
+      ).map((member) => ({ owner: member, source: SyntaxTree.directToken(member, 'Identifier') })),
+    ]
+    for (const candidate of aliases) {
+      const alias = SyntaxTree.directNode(candidate.owner, 'ImportAlias')
+      const local = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')
+      const original = candidate.source
+      if (
+        alias === undefined ||
+        local === undefined ||
+        original === undefined ||
+        sourceText(source, local) !== sourceText(source, original)
+      )
+        continue
+      const span = aliasClause(source, alias)
+      result.push({
+        title: 'Remove the redundant alias',
+        diagnostic: {
+          range: LineIndex.rangeOf(self.index, span),
+          severity: DiagnosticSeverity.Warning,
+          code: 'LSP0002',
+          source: 'silk-lsp',
+          message: 'This alias does not change the imported name',
+        },
+        edits: [{ range: LineIndex.rangeOf(self.index, span), newText: '' }],
+      })
+    }
+  }
+  return result
+}
+
+/** Publishes compiler errors plus non-semantic import style warnings. */
+export const diagnostics = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<LspDiagnostic> => [
+  ...compilerDiagnostics(self, snapshot, uriOf),
+  ...importRedundancies(self, snapshot).map((entry) => entry.diagnostic),
+]
 
 /** Tests whether two protocol ranges share at least one position. */
 const overlaps = (left: Range, right: Range): boolean =>
@@ -239,16 +389,163 @@ const workspaceEdit = (
   return { changes }
 }
 
-const diagnosticPlan = (
+const sourcePoint = (
+  self: Document,
   source: SourceFile.SourceFile,
-  edits: ReadonlyArray<Diagnostic.Edit>,
-): SourceAction.ChangePlan | undefined =>
-  Option.getOrUndefined(
-    SourceAction.changePlan({
-      preconditions: [SourceAction.precondition(source)],
-      changes: [[source.id, edits.map((edit) => SourceAction.edit(edit.span, edit.replacement))]],
-    }),
+  offset: number,
+): Range | undefined => {
+  const span = Option.getOrUndefined(SourceSpan.make(source, offset, offset))
+  return span === undefined ? undefined : LineIndex.rangeOf(self.index, span)
+}
+
+const sourceType = (rendered: string): string => {
+  const separator = Math.max(rendered.lastIndexOf('.'), rendered.lastIndexOf('/'))
+  return separator < 0 ? rendered : rendered.slice(separator + 1)
+}
+
+const sourceRequirement = (rendered: string): string =>
+  rendered.replace(/(&\s*(?:mut\s+)?)(?:[^\s.]+\.)+([A-Za-z_][A-Za-z0-9_]*)/, '$1$2')
+
+const enclosingFunctionDeclaration = (
+  syntax: SyntaxFile.SyntaxFile,
+  span: SourceSpan.SourceSpan,
+): SyntaxTree.Node | undefined =>
+  SyntaxTree.directNodes(syntax.root, 'FunctionDeclaration').find(
+    (declaration) => declaration.span.start <= span.start && span.end <= declaration.span.end,
   )
+
+const propagationEdit = (
+  self: Document,
+  syntax: SyntaxFile.SyntaxFile,
+  diagnostic: Diagnostic.Diagnostic,
+): { readonly title: string; readonly edit: TextEdit } | undefined => {
+  const declaration = enclosingFunctionDeclaration(syntax, diagnostic.span)
+  if (
+    declaration === undefined ||
+    SyntaxTree.directToken(declaration, 'EffectKeyword') === undefined
+  )
+    return undefined
+  if (diagnostic.reason._tag === 'UnhandledEffectFailures') {
+    const failures = diagnostic.reason.failures.map(sourceType).join(' | ')
+    const existing = SyntaxTree.directNode(declaration, 'FailureRow')
+    const anchor = existing ?? SyntaxTree.directNode(declaration, 'ReturnType')
+    if (anchor === undefined) return undefined
+    const range = sourcePoint(self, syntax.source, anchor.span.end)
+    return range === undefined
+      ? undefined
+      : {
+          title: `Propagate ${failures} from this Effect`,
+          edit: { range, newText: existing === undefined ? ` ! ${failures}` : ` | ${failures}` },
+        }
+  }
+  if (diagnostic.reason._tag === 'UnhandledEffectRequirements') {
+    const requirements = diagnostic.reason.requirements.map(sourceRequirement).join(' | ')
+    const existing = SyntaxTree.directNode(declaration, 'RequirementRow')
+    const anchor =
+      existing ??
+      SyntaxTree.directNode(declaration, 'FailureRow') ??
+      SyntaxTree.directNode(declaration, 'ReturnType')
+    if (anchor === undefined) return undefined
+    const range = sourcePoint(self, syntax.source, anchor.span.end)
+    return range === undefined
+      ? undefined
+      : {
+          title: `Propagate ${requirements} from this Effect`,
+          edit: {
+            range,
+            newText: existing === undefined ? ` ? ${requirements}` : ` | ${requirements}`,
+          },
+        }
+  }
+  return undefined
+}
+
+const handledEffectEdit = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  syntax: SyntaxFile.SyntaxFile,
+  diagnostic: Diagnostic.Diagnostic,
+  published: LspDiagnostic,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<CodeAction> => {
+  const raw = Option.getOrUndefined(SourceFile.spelling(syntax.source, diagnostic.span))
+  const trimmed = raw?.trimStart()
+  if (raw === undefined || trimmed === undefined || !trimmed.startsWith('run ')) return []
+  const leading = raw.slice(0, raw.length - trimmed.length)
+  const operation = trimmed.slice('run '.length)
+  const text = decoder.decode(SourceFile.toUint8Array(syntax.source))
+  const make = (
+    title: string,
+    imported: string,
+    localSpelling: string,
+    replacement: string,
+  ): ReadonlyArray<CodeAction> => {
+    const plan = Option.getOrUndefined(
+      ImportPlan.make({
+        syntax,
+        module: 'silk/effects',
+        spelling: imported,
+        localSpelling,
+      }),
+    )
+    if (plan === undefined) return []
+    const importEdit = workspaceEdit(self, snapshot, plan, uriOf)
+    const changes = importEdit?.changes?.[self.uri]
+    if (changes === undefined) return []
+    return [
+      {
+        title,
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [published],
+        edit: {
+          changes: {
+            [self.uri]: [
+              ...changes,
+              {
+                range: LineIndex.rangeOf(self.index, diagnostic.span),
+                newText: `${leading}${replacement}`,
+              },
+            ],
+          },
+        },
+      },
+    ]
+  }
+  if (
+    diagnostic.reason._tag === 'UnhandledEffectFailures' &&
+    /\beffect\s+fn\s+recover\s*\(/.test(text)
+  )
+    return make(
+      'Recover this Effect with recover',
+      'catchAll',
+      'effectCatchAll',
+      `run effectCatchAll(${operation}, recover)`,
+    )
+  if (
+    diagnostic.reason._tag === 'UnhandledEffectRequirements' &&
+    diagnostic.reason.requirements.length === 1
+  ) {
+    const mutable = diagnostic.reason.requirements[0]?.startsWith('&mut ') ?? false
+    const provider = mutable
+      ? /\blet\s+mut\s+provider\s*=/.test(text)
+      : /\blet\s+(?:mut\s+)?provider\s*=/.test(text)
+    if (!provider) return []
+    return mutable
+      ? make(
+          'Provide this Effect with provider',
+          'provideMut',
+          'effectProvideMut',
+          `run effectProvideMut(${operation}, &mut provider)`,
+        )
+      : make(
+          'Provide this Effect with provider',
+          'provide',
+          'effectProvide',
+          `run effectProvide(${operation}, &provider)`,
+        )
+  }
+  return []
+}
 
 /**
  * Offers each machine-applicable edit of the diagnostics touching one range as a quick fix.
@@ -266,28 +563,32 @@ export const codeActions = (
   inventory?: WorkspaceInventory.WorkspaceInventory,
 ): ReadonlyArray<CodeAction> => {
   // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
-  const published = diagnostics(self, snapshot, uriOf)
-  const sourceFile = Analysis.sources(snapshot).get(self.module)
-  return owned(self, snapshot).flatMap((diagnostic, order) => {
-    const title = correctionTitles[diagnostic.code]
+  const published = compilerDiagnostics(self, snapshot, uriOf)
+  const compiler = owned(self, snapshot).flatMap((diagnostic, order) => {
     const source = published[order]
     if (source === undefined || !overlaps(source.range, range)) return []
-    const replacements =
-      title === undefined || sourceFile === undefined
+    const syntax = Analysis.syntaxOf(snapshot, self.module)
+    const propagation = syntax === undefined ? undefined : propagationEdit(self, syntax, diagnostic)
+    const contract =
+      propagation === undefined
         ? []
-        : [diagnosticPlan(sourceFile, diagnostic.edits ?? [])].flatMap(
-            (plan): ReadonlyArray<CodeAction> => {
-              if (plan === undefined) return []
-              const edit = workspaceEdit(self, snapshot, plan, uriOf)
-              return edit === undefined
-                ? []
-                : [{ title, kind: CodeActionKind.QuickFix, diagnostics: [source], edit }]
-            },
-          )
-    if (inventory === undefined) return replacements
+        : [
+            {
+              title: propagation.title,
+              kind: CodeActionKind.QuickFix,
+              diagnostics: [source],
+              edit: { changes: { [self.uri]: [propagation.edit] } },
+            } satisfies CodeAction,
+          ]
+    const handled =
+      syntax === undefined
+        ? []
+        : handledEffectEdit(self, snapshot, syntax, diagnostic, source, uriOf)
+    if (inventory === undefined) return [...contract, ...handled]
     const imports = Analysis.autoImportsAt(snapshot, inventory, self.module, diagnostic.span.start)
     return [
-      ...replacements,
+      ...contract,
+      ...handled,
       ...imports.flatMap((action): ReadonlyArray<CodeAction> => {
         const plan = Option.getOrUndefined(
           Analysis.resolveAutoImport(
@@ -314,6 +615,20 @@ export const codeActions = (
       }),
     ]
   })
+  const redundancy = importRedundancies(self, snapshot).flatMap(
+    (entry): ReadonlyArray<CodeAction> =>
+      overlaps(entry.diagnostic.range, range)
+        ? [
+            {
+              title: entry.title,
+              kind: CodeActionKind.QuickFix,
+              diagnostics: [entry.diagnostic],
+              edit: { changes: { [self.uri]: [...entry.edits] } },
+            },
+          ]
+        : [],
+  )
+  return [...compiler, ...redundancy]
 }
 
 export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {
@@ -424,6 +739,66 @@ const enclosingCall = (
   return selected
 }
 
+/** The innermost struct literal whose initializer body contains one byte offset. */
+const enclosingStructLiteral = (
+  root: SyntaxTree.Node,
+  offset: number,
+):
+  | {
+      readonly target: SyntaxTree.Element
+      readonly literal: SyntaxTree.Node
+      readonly initializers: ReadonlyArray<SyntaxTree.Node>
+    }
+  | undefined => {
+  let selected:
+    | {
+        readonly target: SyntaxTree.Element
+        readonly literal: SyntaxTree.Node
+        readonly initializers: ReadonlyArray<SyntaxTree.Node>
+      }
+    | undefined
+  const visit = (node: SyntaxTree.Node): void => {
+    if (node.kind === 'StructLiteralExpression') {
+      const target = node.children[0]
+      const leftBrace = node.children.find(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'LeftBrace',
+      )
+      const rightBrace = node.children.find(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'RightBrace',
+      )
+      if (target !== undefined && leftBrace !== undefined) {
+        const end = rightBrace === undefined ? node.span.end : rightBrace.span.start
+        if (
+          offset > leftBrace.span.start &&
+          offset <= end &&
+          (selected === undefined ||
+            node.span.end - node.span.start <=
+              selected.literal.span.end - selected.literal.span.start)
+        )
+          selected = Object.freeze({
+            target,
+            literal: node,
+            initializers: SyntaxTree.directNodes(node, 'StructFieldInitializer'),
+          })
+      }
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(root)
+  return selected
+}
+
+const markdownDocumentation = (
+  snapshot: Analysis.FrontendSnapshot,
+  identity: SemanticOccurrence.Identity,
+): string | undefined => {
+  const raw = Analysis.documentationOfIdentity(snapshot, identity)
+  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
+  return raw === undefined || source === undefined
+    ? undefined
+    : Documentation.toMarkdown(Documentation.parse(source, raw))
+}
+
 /**
  * Describes the call the cursor sits inside, selecting the parameter the cursor is writing.
  *
@@ -441,7 +816,66 @@ export const signatureHelp = (
   if (syntax === undefined) return undefined
   const offset = LineIndex.offsetOf(self.index, position)
   const call = enclosingCall(syntax.root, offset)
-  if (call === undefined) return undefined
+  if (call === undefined) {
+    const structLiteral = enclosingStructLiteral(syntax.root, offset)
+    if (structLiteral === undefined) return undefined
+    const targetPath =
+      SyntaxTree.isNode(structLiteral.target) && structLiteral.target.kind === 'AppliedType'
+        ? (SyntaxTree.directNode(structLiteral.target, 'TypePath') ?? structLiteral.target)
+        : structLiteral.target
+    const occurrence = Analysis.semanticOccurrenceAt(
+      snapshot,
+      self.module,
+      SyntaxTree.span(targetPath).end - 1,
+    )
+    if (occurrence?.resolution._tag !== 'Available') return undefined
+    const identity = occurrence.resolution.identity
+    if (identity._tag !== 'DeclarationIdentity') return undefined
+    const declaration = Analysis.declarationForIdentity(snapshot, identity)
+    if (declaration?._tag !== 'StructDeclaration') return undefined
+    const fields = declaration.fields.filter(
+      (field) => field.visibility === 'Public' || occurrence.declaration?.module === self.module,
+    )
+    const activeInitializer = structLiteral.initializers.find(
+      (initializer) => offset >= initializer.span.start && offset <= initializer.span.end,
+    )
+    const fieldOccurrence =
+      activeInitializer === undefined
+        ? undefined
+        : Analysis.semanticOccurrenceAt(snapshot, self.module, activeInitializer.span.start)
+    const fieldIdentity =
+      fieldOccurrence?.resolution._tag === 'Available' &&
+      fieldOccurrence.resolution.identity._tag === 'FieldIdentity'
+        ? fieldOccurrence.resolution.identity
+        : undefined
+    const activeField =
+      fieldIdentity === undefined
+        ? -1
+        : fields.findIndex((field) => field.id.ordinal === fieldIdentity.id.ordinal)
+    const precedingInitializers = structLiteral.initializers.filter(
+      (initializer) => initializer.span.end < offset,
+    ).length
+    const activeParameter =
+      activeField >= 0
+        ? activeField
+        : Math.min(precedingInitializers, Math.max(0, fields.length - 1))
+    const documentation = markdownDocumentation(snapshot, identity)
+    return {
+      signatures: [
+        {
+          label: `${Presentation.structDeclaration(declaration).text} { ${fields
+            .map((field) => Presentation.field(field).text)
+            .join(', ')} }`,
+          parameters: fields.map((field) => ({ label: Presentation.field(field).text })),
+          ...(documentation === undefined || documentation.length === 0
+            ? {}
+            : { documentation: { kind: 'markdown' as const, value: documentation } }),
+        },
+      ],
+      activeSignature: 0,
+      activeParameter,
+    }
+  }
   // The callee's last byte is inside its name token, which is where its occurrence is indexed.
   const occurrence = Analysis.semanticOccurrenceAt(
     snapshot,
@@ -453,12 +887,7 @@ export const signatureHelp = (
   if (identity._tag !== 'DeclarationIdentity') return undefined
   const declaration = Analysis.declarationForIdentity(snapshot, identity)
   if (declaration?._tag !== 'FunctionDeclaration') return undefined
-  const raw = Analysis.documentationOfIdentity(snapshot, identity)
-  const source = raw === undefined ? undefined : Analysis.sources(snapshot).get(raw.span.sourceId)
-  const documentation =
-    raw === undefined || source === undefined
-      ? undefined
-      : Documentation.toMarkdown(Documentation.parse(source, raw))
+  const documentation = markdownDocumentation(snapshot, identity)
   const activeParameter = call.argumentList.children.filter(
     (child) =>
       SyntaxTree.isToken(child) && child.kind === 'Comma' && SyntaxTree.span(child).end <= offset,
@@ -868,6 +1297,7 @@ export const completion = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   position: Position,
+  inventory?: WorkspaceInventory.WorkspaceInventory,
 ): CompletionList => {
   const result = Analysis.completionAt(
     snapshot,
@@ -884,7 +1314,90 @@ export const completion = (
     sortText: `${String(candidate.sortGroup).padStart(2, '0')}-${String(ordinal).padStart(4, '0')}-${candidate.label}`,
     ...(candidate.detail === undefined ? {} : { detail: candidate.detail.text }),
   }))
-  return { isIncomplete: false, items: [...items] }
+  if (
+    inventory === undefined ||
+    result.context._tag === 'ActorMemberContext' ||
+    result.context._tag === 'ValueMemberContext'
+  )
+    return { isIncomplete: false, items: [...items] }
+
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return { isIncomplete: false, items: [...items] }
+  const visible = new Set(items.map((item) => item.label))
+  const imported = new Set<string>()
+  for (const entry of Analysis.moduleScope(snapshot, self.module)?.imports ?? []) {
+    if (entry._tag !== 'Available') continue
+    for (const binding of entry.bindings)
+      if (binding._tag === 'ImportedMember')
+        imported.add(`${binding.declaration.module}:${binding.sourceSpelling}`)
+  }
+  const capitalize = (value: string): string =>
+    value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`
+  const prefix = (module: string): string =>
+    module.split('/').at(-1)?.split('_').map(capitalize).join('') ?? 'Imported'
+  const alias = (candidate: WorkspaceInventory.Candidate): string => {
+    const base =
+      candidate.exported.namespace === 'Value'
+        ? `${(prefix(candidate.module)[0] ?? 'i').toLowerCase()}${prefix(candidate.module).slice(1)}${capitalize(candidate.exported.spelling)}`
+        : `${prefix(candidate.module)}${capitalize(candidate.exported.spelling)}`
+    let selected = base
+    let suffix = 2
+    while (visible.has(selected)) {
+      selected = `${base}${suffix}`
+      suffix += 1
+    }
+    return selected
+  }
+  const completionItemKind = (candidate: WorkspaceInventory.Candidate): CompletionItemKind => {
+    switch (candidate.exported.declarationKind) {
+      case 'Function':
+        return CompletionItemKind.Function
+      case 'Constant':
+        return CompletionItemKind.Constant
+      case 'Struct':
+        return CompletionItemKind.Struct
+      case 'Service':
+      case 'Interface':
+        return CompletionItemKind.Interface
+    }
+  }
+  const catalog = [...inventory.byName.values()]
+    .flat()
+    .filter(
+      (candidate) =>
+        candidate.module !== self.module &&
+        !imported.has(`${candidate.module}:${candidate.exported.spelling}`),
+    )
+    .flatMap((candidate, ordinal): ReadonlyArray<CompletionItem> => {
+      const localSpelling = visible.has(candidate.exported.spelling)
+        ? alias(candidate)
+        : candidate.exported.spelling
+      const plan = Option.getOrUndefined(
+        ImportPlan.make({
+          syntax,
+          module: candidate.module,
+          spelling: candidate.exported.spelling,
+          localSpelling,
+        }),
+      )
+      const edits = plan?.changes.get(self.module)
+      if (edits === undefined) return []
+      return [
+        {
+          label: candidate.exported.spelling,
+          labelDetails: { description: candidate.module },
+          kind: completionItemKind(candidate),
+          detail: `Import from ${candidate.module}`,
+          sortText: `20-${candidate.tier === 'Project' ? '0' : '1'}-${String(ordinal).padStart(5, '0')}-${candidate.module}`,
+          textEdit: { range, newText: localSpelling },
+          additionalTextEdits: edits.map((edit) => ({
+            range: LineIndex.rangeOf(self.index, edit.span),
+            newText: edit.replacement,
+          })),
+        },
+      ]
+    })
+  return { isIncomplete: false, items: [...items, ...catalog] }
 }
 
 /** Returns the document's top-level declarations as symbols. */
@@ -939,6 +1452,16 @@ export const symbols = (
                 ]
               : [],
           ),
+        },
+      ]
+    }
+    if (member._tag === 'RoleDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Enum,
+          range,
+          selectionRange,
         },
       ]
     }
@@ -1124,7 +1647,9 @@ export const semanticTokens = (
           onSome: (whole) => [...Analysis.semanticOccurrencesInRange(snapshot, self.module, whole)],
         })
   // Occurrences are start-sorted, so one advancing cursor pairs each identifier with its own.
-  const byStart = new Map(occurrences.map((occurrence) => [occurrence.span.start, occurrence]))
+  const byStart = new Map<number, SemanticOccurrence.SemanticOccurrence>()
+  for (const occurrence of occurrences)
+    if (!byStart.has(occurrence.span.start)) byStart.set(occurrence.span.start, occurrence)
   const data: Array<number> = []
   let previousLine = 0
   let previousCharacter = 0

@@ -11,7 +11,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -117,7 +117,7 @@ const lowerSource = Effect.fnUntraced(function* (
   )
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(lowered, provisional)
-  const module = ContinuationLayout.apply(
+  const module = CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -391,23 +391,29 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `struct Token { value: i32 storage: Allocation }
+const consuming = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let token = Token { value: 42, storage: move storage }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `service Counter { effect fn get() -> i32 ? &Counter }
+const provided = `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
 impl Counter for Fixed { get: Fixed.get }
@@ -423,7 +429,7 @@ const runtimeMatrix = [
   { name: 'shared', source: shared, result: 42, access: 'Shared' },
   { name: 'exclusive', source: exclusive, result: 43, access: 'Exclusive' },
   { name: 'consuming', source: consuming, result: 42, access: 'Take' },
-  { name: 'provided', source: provided, result: 42, access: 'Take' },
+  { name: 'provided', source: provided, result: 42, access: 'Shared' },
 ] as const
 
 layer(NodeServices.layer)('stored Effect engine parity', (it) => {
@@ -529,7 +535,8 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
    * process; Wasm still uses a non-zero class-0 free-list head at `wasmHeapTableBase` as the
    * missing-cleanup signal for the poison program.
    */
-  const cleanupSurface = (kind: DropKind = 'poison'): string => `struct Problem { code: i32 }
+  const cleanupSurface = (kind: DropKind = 'poison'): string => `import silk.i32 as i32
+struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard {
   fn drop(self: &mut Guard) -> () {
@@ -547,8 +554,8 @@ impl Drop for Guard {
     }
   }
 }
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> { operation: F }
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> { operation: move operation }
@@ -572,15 +579,20 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   const cleanupCycles = (
     exit: Exclude<CleanupExit, 'success'>,
     count: number,
-  ): string => `${cleanupSurface()}
-effect fn cycle() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+  ): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface()}
+effect fn cycle() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
   ${exit === 'failure' ? 'return run deferred.operation' : 'return 42'}
 }
-effect fn recover(error: Problem | OutOfMemory) -> i32 { return 42 }
-effect fn drive() -> i32 ! Problem | OutOfMemory ? &mut Allocator {
+effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 42 }
+effect fn drive() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   let mut index = 0
   let mut total = 0
   while index < ${count} {
@@ -605,28 +617,36 @@ pub fn main() -> i32 {
   }
 
   /** Runs a Wasm artifact and reports both its result and the heap it needed. */
-  const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array) {
-    return yield* Effect.try(() => {
-      const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
-      const main = instance.exports.silk_main
-      if (typeof main !== 'function') return unreachable('expected Wasm main')
-      const value = main()
-      const memory = instance.exports[StandardStreams.wasmMemoryExport]
-      const class0 =
-        memory instanceof WebAssembly.Memory
-          ? new DataView(memory.buffer).getInt32(wasmHeapTableBase, true)
-          : 0
-      return Object.freeze({ value, pages: pagesOf(instance), class0 })
+  const runWasmMeasured = Effect.fnUntraced(function* (bytes: Uint8Array, label = 'artifact') {
+    return yield* Effect.try({
+      try: () => {
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes.slice()), {})
+        const main = instance.exports.silk_main
+        if (typeof main !== 'function') return unreachable('expected Wasm main')
+        const value = main()
+        const memory = instance.exports[StandardStreams.wasmMemoryExport]
+        const class0 =
+          memory instanceof WebAssembly.Memory
+            ? new DataView(memory.buffer).getInt32(wasmHeapTableBase, true)
+            : 0
+        return Object.freeze({ value, pages: pagesOf(instance), class0 })
+      },
+      catch: (cause) => new Error(`failed to run ${label}`, { cause }),
     })
   })
 
   const cleanupProgram = (exit: CleanupExit, kind: DropKind = 'poison'): string => {
     const tag = exit === 'success' ? 2 : 7
-    const failures = exit === 'success' ? 'OutOfMemory' : 'Problem | OutOfMemory'
+    const failures = exit === 'success' ? 'OutOfMemoryError' : 'Problem | OutOfMemoryError'
     const recoverValue = exit === 'success' ? 0 : 42
     const construct = exit === 'success' ? 'succeeding(move guard)' : 'failing(move guard)'
     const runLine = exit === 'unrun' ? 'return 42' : 'return run deferred.operation'
-    return `${cleanupSurface(kind)}
+    return `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface(kind)}
 effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
 effect fn build() -> i32 ! ${failures} {
   let mut allocator = SystemAllocator.make()
@@ -720,13 +740,18 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     240_000,
   )
 
-  const suspendingProgram = (kind: DropKind = 'poison'): string => `${cleanupSurface(kind)}
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+  const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface(kind)}
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
@@ -885,10 +910,13 @@ pub fn main() -> i32 {
    * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
    * comparison below cannot see a leaked capture.
    */
-  const leakHolds = (
-    count: number,
-  ): string => `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+  const leakHolds = (count: number): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let hold${index} = run Allocator.allocate(Layout.of<[i64; 256]>())`).join('\n  ')}
   return 42
 }
@@ -897,19 +925,24 @@ pub fn main() -> i32 {
   return run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-  const suspendCycles = (count: number): string => `${cleanupSurface()}
-effect fn delayed(guard: Guard) -> i32 ! OutOfMemory ? &mut Allocator {
+  const suspendCycles = (count: number): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${cleanupSurface()}
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(effect { return 40 })
   return base + guard.tag
 }
-effect fn cycle() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn cycle() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<[i64; 256]>())
   let guard = Guard { tag: 2, storage: move storage }
   let deferred = defer(delayed(move guard))
   return run deferred.operation
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-effect fn drive() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   ${Array.from({ length: count }, (_, index) => `let value${index} = run cycle()`).join('\n  ')}
   return ${Array.from({ length: count }, (_, index) => `value${index}`).join(' + ')}
 }
@@ -920,82 +953,85 @@ pub fn main() -> i32 {
   return 1
 }`
 
-  it.effect('keeps the Wasm heap flat across repeated stored Effect cleanup cycles', () =>
-    Effect.gen(function* () {
-      const leakShort = yield* lowerSource(
-        'stored-effect-parity/cycles-leak-short',
-        leakHolds(8),
-        Target.wasm32UnknownUnknown,
-      )
-      const leakLong = yield* lowerSource(
-        'stored-effect-parity/cycles-leak-long',
-        leakHolds(80),
-        Target.wasm32UnknownUnknown,
-      )
-      const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
-        mode: 'release',
-      })
-      const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
-        mode: 'release',
-      })
-      assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
-      assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
-      if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
-      if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
-      const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
-      const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
-      assert.strictEqual(leakShortRun.value, 42, 'leak short')
-      assert.strictEqual(leakLongRun.value, 42, 'leak long')
-      // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
-      assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
+  it.effect(
+    'keeps the Wasm heap flat across repeated stored Effect cleanup cycles',
+    () =>
+      Effect.gen(function* () {
+        const leakShort = yield* lowerSource(
+          'stored-effect-parity/cycles-leak-short',
+          leakHolds(8),
+          Target.wasm32UnknownUnknown,
+        )
+        const leakLong = yield* lowerSource(
+          'stored-effect-parity/cycles-leak-long',
+          leakHolds(80),
+          Target.wasm32UnknownUnknown,
+        )
+        const leakShortWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakShort.module, {
+          mode: 'release',
+        })
+        const leakLongWasm = yield* Backend.emit(WasmBackend.WasmBackend, leakLong.module, {
+          mode: 'release',
+        })
+        assert.strictEqual(leakShortWasm._tag, 'WebAssemblyModuleArtifact', 'leak short')
+        assert.strictEqual(leakLongWasm._tag, 'WebAssemblyModuleArtifact', 'leak long')
+        if (leakShortWasm._tag !== 'WebAssemblyModuleArtifact') return
+        if (leakLongWasm._tag !== 'WebAssemblyModuleArtifact') return
+        const leakShortRun = yield* runWasmMeasured(leakShortWasm.bytes)
+        const leakLongRun = yield* runWasmMeasured(leakLongWasm.bytes)
+        assert.strictEqual(leakShortRun.value, 42, 'leak short')
+        assert.strictEqual(leakLongRun.value, 42, 'leak long')
+        // Sensitivity: 80 live 2KiB holds must grow past the 8-hold heap, or a missed Drop is invisible.
+        assert.isAbove(leakLongRun.pages, leakShortRun.pages, 'leak control must grow Wasm pages')
 
-      const programs = [
-        {
-          name: 'unrun',
-          short: 8,
-          long: 80,
-          source: (count: number) => cleanupCycles('unrun', count),
-        },
-        {
-          name: 'failure',
-          short: 8,
-          long: 80,
-          source: (count: number) => cleanupCycles('failure', count),
-        },
-        { name: 'suspending', short: 8, long: 80, source: suspendCycles },
-      ] as const
-      for (const testCase of programs) {
-        const short = yield* lowerStored(
-          `stored-effect-parity/cycles-${testCase.name}-short`,
-          testCase.source(testCase.short),
-          Target.wasm32UnknownUnknown,
-        )
-        const long = yield* lowerStored(
-          `stored-effect-parity/cycles-${testCase.name}-long`,
-          testCase.source(testCase.long),
-          Target.wasm32UnknownUnknown,
-        )
-        const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
-          mode: 'release',
-        })
-        const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
-          mode: 'release',
-        })
-        assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-        assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
-        if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
-        if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
-        const shortRun = yield* runWasmMeasured(shortWasm.bytes)
-        const longRun = yield* runWasmMeasured(longWasm.bytes)
-        assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
-        assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
-        // Same counts as the leak control: cleanup must reuse, so pages stay flat.
-        assert.strictEqual(
-          longRun.pages,
-          shortRun.pages,
-          `${testCase.name} heap growth across cycles`,
-        )
-      }
-    }),
+        const programs = [
+          {
+            name: 'unrun',
+            short: 8,
+            long: 80,
+            source: (count: number) => cleanupCycles('unrun', count),
+          },
+          {
+            name: 'failure',
+            short: 8,
+            long: 80,
+            source: (count: number) => cleanupCycles('failure', count),
+          },
+          { name: 'suspending', short: 8, long: 80, source: suspendCycles },
+        ] as const
+        for (const testCase of programs) {
+          const short = yield* lowerStored(
+            `stored-effect-parity/cycles-${testCase.name}-short`,
+            testCase.source(testCase.short),
+            Target.wasm32UnknownUnknown,
+          )
+          const long = yield* lowerStored(
+            `stored-effect-parity/cycles-${testCase.name}-long`,
+            testCase.source(testCase.long),
+            Target.wasm32UnknownUnknown,
+          )
+          const shortWasm = yield* Backend.emit(WasmBackend.WasmBackend, short.module, {
+            mode: 'release',
+          })
+          const longWasm = yield* Backend.emit(WasmBackend.WasmBackend, long.module, {
+            mode: 'release',
+          })
+          assert.strictEqual(shortWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+          assert.strictEqual(longWasm._tag, 'WebAssemblyModuleArtifact', testCase.name)
+          if (shortWasm._tag !== 'WebAssemblyModuleArtifact') return
+          if (longWasm._tag !== 'WebAssemblyModuleArtifact') return
+          const shortRun = yield* runWasmMeasured(shortWasm.bytes, `${testCase.name} short cycles`)
+          const longRun = yield* runWasmMeasured(longWasm.bytes, `${testCase.name} long cycles`)
+          assert.strictEqual(shortRun.value, 42, `${testCase.name} short cycles`)
+          assert.strictEqual(longRun.value, 42, `${testCase.name} long cycles`)
+          // Same counts as the leak control: cleanup must reuse, so pages stay flat.
+          assert.strictEqual(
+            longRun.pages,
+            shortRun.pages,
+            `${testCase.name} heap growth across cycles`,
+          )
+        }
+      }),
+    60_000,
   )
 })

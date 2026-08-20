@@ -53,9 +53,12 @@ it('declares the shared usize counts once and ships no private counted identity'
  * lowered counts are the evidence that replacing `counted(0)` with `usize.ZERO` moved no value:
  * the two struct fields still receive the same `usize` zero, now as a direct typed immediate.
  */
-const growth = `import silk.vector { Vector, make, append, get, length, capacity }
+const growth = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.vector { Vector, make, append, get, length, capacity }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
@@ -67,7 +70,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return get<i32>(&values, 0) + get<i32>(&values, 1)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -133,7 +136,11 @@ it.effect(
  * widths. Every one of them still carries `usize`, so the removal left no literal on the `i32`
  * default.
  */
-const scalars = `import silk.string {
+const scalars = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.string {
   ScalarCursor,
   ScalarStep,
   copy,
@@ -146,6 +153,7 @@ const scalars = `import silk.string {
   utf8Bytes
 }
 import silk.option { Some, None }
+import silk.char { toU32 as charToU32 }
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move nextScalar(value, move cursor) {
@@ -155,12 +163,12 @@ fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
 }
 
 fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = scalarValue(&step)
+  let scalar = charToU32(scalarValue(&step))
   let cursor = nextCursor(move step)
   return scalar + scalarSum(value, move cursor)
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let copying = copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
@@ -171,7 +179,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

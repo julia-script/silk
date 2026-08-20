@@ -50,8 +50,8 @@ layer(NodeServices.layer)('conditional conformance fixtures', (it) => {
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
       assert.strictEqual(
         text,
-        `interface Decoder<T> {
-  fn decode(value: &T) -> i32
+        `interface Decoder {
+  fn decode(value: &Self) -> i32
 }
 
 struct Wrapper<S> {
@@ -62,7 +62,7 @@ fn wrapperDecode<S: Decoder>(value: &Wrapper<S>) -> i32 {
   return Decoder.decode(&value.source)
 }
 
-impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {
+impl<S: Decoder> Decoder for Wrapper<S> {
   decode: Wrapper.wrapperDecode
 }
 `,
@@ -117,19 +117,6 @@ impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {
     }),
   )
 
-  it.effect('rejects equal and growing requirement providers at declaration time', () =>
-    Effect.gen(function* () {
-      for (const name of ['rejected-equal-provider', 'rejected-growing-provider']) {
-        const snapshot = yield* analyze(name)
-        const diagnostics = Analysis.diagnostics(snapshot).filter(
-          (diagnostic) => diagnostic.code === 'SEM0120',
-        )
-        assert.strictEqual(diagnostics.length, 1, name)
-        assert.include(diagnostics.at(0)?.message ?? '', 'does not descend')
-      }
-    }),
-  )
-
   it.effect('rejects an alpha-renamed duplicate conditional head', () =>
     Effect.gen(function* () {
       const snapshot = yield* analyze('duplicate')
@@ -153,28 +140,9 @@ impl<S: Decoder<S>> Decoder<Wrapper<S>> for Wrapper<S> {
       const proof = DeclarationIndex.prove(
         Analysis.declarationIndex(snapshot),
         provider,
-        Type.nominal('conditional-conformance/damaged', 'Decoder', [provider]),
+        Type.nominal('conditional-conformance/damaged', 'Decoder'),
       )
       assert.strictEqual(proof._tag, 'Unproved')
-    }),
-  )
-
-  it.effect('rejects mismatched and omitted interface providers', () =>
-    Effect.gen(function* () {
-      const mismatched = yield* analyze('wrong-provider')
-      const invalid = Analysis.diagnostics(mismatched).filter(
-        (diagnostic) =>
-          diagnostic.code === 'SEM0083' &&
-          diagnostic.reason._tag === 'InvalidConformance' &&
-          diagnostic.reason.detail.includes('must be applied to its own provider'),
-      )
-      assert.strictEqual(invalid.length, 1)
-
-      const omitted = yield* analyze('missing-provider')
-      assert.include(
-        Analysis.diagnostics(omitted).map((diagnostic) => diagnostic.code),
-        'SEM0051',
-      )
     }),
   )
 })

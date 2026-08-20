@@ -564,9 +564,10 @@ Every present operator expression SHALL publish its concrete operator, ordered o
 resolved compiler-known actor operation when available, closed contract, result type, and exact
 source provenance. Every pipeline SHALL publish its left input, callable-producing right expression,
 resolved callable type and invocation mode, application contract, result type, and provenance.
-Section facts SHALL separately identify the canonical function, omitted leading parameter, supplied
-trailing arguments, captures, and resulting unary callable. Type mismatches SHALL reuse `SEM0012` at
-the offending operand span. Damaged or unavailable dependencies SHALL keep only the dependent fact
+Section facts SHALL identify the canonical callable, ordered remaining leading parameters, supplied
+trailing arguments, capture access, original parameter ordinals, substitutions, and resulting
+callable contract for every non-empty trailing suffix. Type mismatches SHALL reuse `SEM0012` at the
+offending operand span. Damaged or unavailable dependencies SHALL keep only the dependent fact
 unavailable with its originating diagnostic cause; analysis MUST NOT synthesize an alternate
 operator, callable, type, or argument.
 
@@ -595,6 +596,11 @@ operator, callable, type, or argument.
 - **WHEN** a pipeline right expression resolves to an inaccessible function or a non-callable value
 - **THEN** its callable and result facts remain unavailable with the originating cause and no fabricated target
 
+#### Scenario: Inspect a staged section
+
+- **WHEN** semantic analysis sees `combine(3)(2)`
+- **THEN** the fact retains remaining parameter `a` and captures `c` then `b` with their original ordinals
+
 ### Requirement: Callable facts expose mode and capture obligations
 
 Every available function reference and section SHALL publish its complete callable type, shared,
@@ -622,8 +628,9 @@ grammar, its residual failure and requirement rows, one-layer success type, and 
 Semantic analysis SHALL resolve a literal target to one canonical nominal struct and retain every
 source initializer in source order while mapping valid names to canonical field identities. It SHALL
 also publish the complete declaration-ordered mapping used to construct the value. Construction
-authority, field completeness, uniqueness, visibility, and initializer type compatibility SHALL be
-independent explicit outcomes with stable causal diagnostics.
+authority, field completeness, uniqueness, visibility, initializer type compatibility, explicit
+type-argument prefix, inferred arguments, every inference origin, and completed substitution SHALL
+be independent explicit outcomes with stable causal diagnostics.
 
 #### Scenario: Map reordered initializers
 
@@ -634,6 +641,11 @@ independent explicit outcomes with stable causal diagnostics.
 
 - **WHEN** one initializer is duplicated and another has the wrong type
 - **THEN** both source facts and both stable causes remain visible without fabricating a complete construction
+
+#### Scenario: Inspect construction inference
+
+- **WHEN** omitted ordinary parameters are inferred from multiple named fields
+- **THEN** facts expose the canonical fields, inferred arguments, each field origin, completed substitution, and nominal result
 
 ### Requirement: Projection facts preserve every canonical step
 
@@ -727,18 +739,25 @@ SHALL produce a stable diagnostic without erasing independent nested facts.
 
 Semantic analysis SHALL retain each source-written union member and separator with its resolution,
 provenance, and causal availability while publishing one normalized type outcome containing the
-canonical ordered nominal member set. Failed members SHALL remain queryable and MUST make the
-dependent union outcome unavailable without erasing independent resolved members.
+canonical ordered ordinary member set. Each admitted member SHALL retain the exact evidence needed
+to distinguish its public type and, for represented executable values, its compiler-private finite
+representation. Failed members SHALL remain queryable and MUST make the dependent union outcome
+unavailable without erasing independent resolved members.
 
 #### Scenario: Analyze an equivalent duplicate union
 
-- **WHEN** source spells `End | Token | End`
-- **THEN** facts retain three source members while the available semantic type contains canonical `End` and `Token` exactly once
+- **WHEN** source spells `i32 | Token | i32`
+- **THEN** facts retain three source members while the available semantic type contains canonical `i32` and `Token` exactly once
+
+#### Scenario: Retain represented executable evidence
+
+- **WHEN** an exact callable or opaque Effect value enters a union
+- **THEN** its conversion fact identifies the exact represented source and canonical target member without exposing a public runtime tag
 
 #### Scenario: Retain one unresolved member
 
-- **WHEN** one member of `Token | Missing | End` cannot resolve
-- **THEN** the `Token` and `End` member facts remain available and the union outcome names the missing member's cause
+- **WHEN** one member of `Token | Missing | i32` cannot resolve
+- **THEN** the `Token` and `i32` member facts remain available and the union outcome names the missing member's cause
 
 ### Requirement: Contextual union conversions are explicit facts
 
@@ -811,7 +830,9 @@ specializations. Every fact SHALL retain source provenance and causal diagnostic
 Semantic analysis SHALL publish slice type facts containing canonical element type and shared or
 exclusive access without a fixed length. Each explicit borrow or reborrow SHALL retain its access,
 stable source root, source type, resulting slice type, call destination, exact syntax provenance,
-and an explicit unavailable state when any prerequisite is missing.
+and an explicit unavailable state when any prerequisite is missing. Every borrow SHALL retain its
+stable logical owner and complete field or checked-index selector path. An owned temporary SHALL
+receive a deterministic compiler-owned identity rather than requiring a source binding name.
 
 #### Scenario: Resolve different arrays to one slice type
 
@@ -822,6 +843,11 @@ and an explicit unavailable state when any prerequisite is missing.
 
 - **WHEN** `&mut values` targets an immutable array binding
 - **THEN** the fact retains exclusive intent, the resolved source root and type, and the diagnostic cause without claiming an available exclusive slice
+
+#### Scenario: Inspect temporary and indexed roots
+
+- **WHEN** one function borrows `&[1, 2]` and another borrows `&matrix[index]`
+- **THEN** facts distinguish a hidden temporary owner from a named root plus runtime index selector
 
 ### Requirement: Slice operations publish runtime-place facts
 
@@ -867,18 +893,18 @@ row.
 
 Semantic analysis SHALL publish canonical Effect success/failure/requirement contracts, capture
 access and repeatability, validated layouts, allocation and raw-buffer types, initialization
-transitions, Drop restrictions, explicit drop consumption, and typed `OutOfMemory`. It MUST NOT
+transitions, Drop restrictions, explicit drop consumption, and typed `OutOfMemoryError`. It MUST NOT
 publish named allocation scopes or allocator-kind facts.
 
 #### Scenario: Inspect a repeatable allocating Effect
 
 - **WHEN** an effect function appends to a Vector through an explicit allocator requirement
-- **THEN** facts expose its Effect contract, exclusive allocator access, repeatability, self-contained result ownership, and possible OutOfMemory without a retained-provider dependency
+- **THEN** facts expose its Effect contract, exclusive allocator access, repeatability, self-contained result ownership, and possible OutOfMemoryError without a retained-provider dependency
 
 ### Requirement: Allocation facts separate access, ownership, and unsafe storage state
 
 Semantic analysis SHALL publish canonical facts for validated `Layout`, selected allocator
-capability, nominal provider, conformance witness, and role, typed `OutOfMemory`, affine
+capability, nominal provider, conformance witness, and role, typed `OutOfMemoryError`, affine
 `Allocation`, private reclaim authority,
 `RawBuffer<T>`, lexical `Slot<T>`, initialization operations, restricted Drop hooks, and explicit
 drop. The provider loan SHALL end at the allocator call result; no returned fact may claim a
@@ -888,8 +914,8 @@ and stable diagnostics rather than fabricating usable storage.
 
 #### Scenario: Resolve an independent allocation result
 
-- **WHEN** an Effect allocates through `Allocator@Scratch` and returns the successful owner
-- **THEN** facts expose the requirement and call-scoped exclusive access separately from the self-contained affine result and its possible `OutOfMemory`
+- **WHEN** an Effect allocates through `Allocator at Scratch` and returns the successful owner
+- **THEN** facts expose the requirement and call-scoped exclusive access separately from the self-contained affine result and its possible `OutOfMemoryError`
 
 #### Scenario: Keep a custom provider nominal
 
@@ -1006,3 +1032,22 @@ Presentation and signature help SHALL render from the same facts used by call ad
 
 - **WHEN** tooling asks for occurrences of `S` in a declaration constraint and result row
 - **THEN** all source references resolve to the same generic binder without treating contextual keywords as declarations
+
+### Requirement: Statement pattern bindings are scoped non-shadowing facts
+
+Semantic analysis SHALL publish one shared typed pattern fact for match arms, unconditional local
+patterns, and conditional patterns. Each fact SHALL retain its source structure, exact selector,
+canonical member evidence, recursive field paths, bindings, access, coverage, irrefutability,
+source spans, and causal unavailability. Match-arm and if-let bindings SHALL be visible only in
+their selected body; irrefutable let bindings SHALL enter the enclosing block after declaration.
+Pattern bindings SHALL obey ordinary non-shadowing and collision rules.
+
+#### Scenario: Publish a local pattern binding
+
+- **WHEN** `let Point { x, .. } = move point` is valid
+- **THEN** semantic facts identify `x` as a typed pattern declaration visible after that statement
+
+#### Scenario: Keep mismatch scope empty
+
+- **WHEN** an if-let has an else body
+- **THEN** none of the pattern declarations resolve inside the else body

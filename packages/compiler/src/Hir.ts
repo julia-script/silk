@@ -22,6 +22,7 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 export interface Contract {
   readonly _tag: 'Contract'
   readonly functionKind?: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
   readonly result: DeclarationIndex.SemanticType
   readonly failureRow?: Type.FailureRow
@@ -65,6 +66,14 @@ export interface BorrowId {
   readonly _tag: 'BorrowId'
   readonly function: DeclarationIndex.DeclarationId
   readonly callSpan: SourceSpan.SourceSpan
+  readonly ordinal: number
+}
+
+/** Stable compiler-owned identity for one materialized borrowable temporary. */
+export interface TemporaryOwnerId {
+  readonly _tag: 'TemporaryOwnerId'
+  readonly function: DeclarationIndex.DeclarationId
+  readonly span: SourceSpan.SourceSpan
   readonly ordinal: number
 }
 
@@ -256,6 +265,31 @@ export type SliceRoot =
       readonly parameter: DeclarationIndex.ParameterId
     }
   | { readonly _tag: 'PatternSliceRoot'; readonly binding: Match.BindingId }
+  | {
+      readonly _tag: 'TemporarySliceRoot'
+      readonly owner: TemporaryOwnerId
+      readonly value: Expression
+    }
+
+export type BorrowSelector =
+  | {
+      readonly _tag: 'Field'
+      readonly field: DeclarationIndex.FieldId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'Index'
+      readonly index: Expression
+      readonly array: Type.FixedArray
+      readonly bounds: BoundsMode
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'SliceIndex'
+      readonly index: Expression
+      readonly slice: Type.Slice
+      readonly span: SourceSpan.SourceSpan
+    }
 
 /** One selector in a writable place, retained in source evaluation order. */
 export type WriteSelector =
@@ -304,6 +338,31 @@ export interface BorrowedWritePlace {
 }
 
 export type WritePlace = OwnedWritePlace | BorrowedWritePlace
+
+export interface PatternBinding {
+  readonly id: Match.BindingId
+  readonly name?: string
+  /** Absent for a whole-member binding, which observes or owns the entire selected payload. */
+  readonly field?: DeclarationIndex.FieldId
+  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly type: DeclarationIndex.SemanticType
+  readonly access: Match.Access
+  readonly span: SourceSpan.SourceSpan
+}
+
+export interface PatternSelection {
+  readonly id: Match.MatchId
+  readonly arm: Match.ArmId
+  readonly access: Match.Access
+  readonly subject: Expression
+  readonly members: ReadonlyArray<Type.Type>
+  readonly member?: Type.Type
+  readonly universal: boolean
+  readonly bindings: ReadonlyArray<PatternBinding>
+  readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+  readonly irrefutable: boolean
+  readonly span: SourceSpan.SourceSpan
+}
 
 /** One typed core semantic operation with exact source provenance. */
 export type Expression =
@@ -388,7 +447,7 @@ export type Expression =
   | {
       readonly _tag: 'UnionConvert'
       readonly source: Expression
-      readonly sourceType: Type.Nominal | Type.StructuralUnion | Type.Bottom | Type.Effect
+      readonly sourceType: Type.Type
       readonly target: Type.StructuralUnion | Type.Effect
       readonly conversion: 'Inject' | 'Widen' | 'EffectAccess'
       readonly mappings: ReadonlyArray<TypeCompatibility.MemberMapping>
@@ -409,26 +468,17 @@ export type Expression =
       readonly id: Match.MatchId
       readonly access: Match.Access
       readonly scrutinee: Expression
-      readonly members: ReadonlyArray<Type.Nominal>
+      readonly members: ReadonlyArray<Type.Type>
       readonly arms: ReadonlyArray<{
         readonly id: Match.ArmId
-        readonly member?: Type.Nominal
+        readonly member?: Type.Type
         readonly universal: boolean
-        readonly bindings: ReadonlyArray<{
-          readonly id: Match.BindingId
-          readonly name?: string
-          /** Absent for a whole-member binding, which owns the entire payload. */
-          readonly field?: DeclarationIndex.FieldId
-          readonly path: ReadonlyArray<DeclarationIndex.FieldId>
-          readonly type: DeclarationIndex.SemanticType
-          readonly access: Match.Access
-          readonly span: SourceSpan.SourceSpan
-        }>
+        readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
         readonly guard?: Expression
         readonly result: Expression
-        readonly before: ReadonlyArray<Type.Nominal>
-        readonly after: ReadonlyArray<Type.Nominal>
+        readonly before: ReadonlyArray<Type.Type>
+        readonly after: ReadonlyArray<Type.Type>
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
       }>
@@ -491,6 +541,7 @@ export type Expression =
       readonly _tag: 'SliceBorrow'
       readonly borrow: BorrowId
       readonly root: SliceRoot
+      readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.FixedArray | Type.Slice
       readonly access: Type.Slice['access']
       readonly reborrow: boolean
@@ -502,7 +553,7 @@ export type Expression =
       readonly _tag: 'ValueBorrow'
       readonly borrow: BorrowId
       readonly root: SliceRoot
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.Type
       readonly access: Type.Reference['access']
       readonly type: Type.Reference
@@ -560,7 +611,7 @@ export type Expression =
       readonly _tag: 'CallableSection'
       readonly site: CallableSiteId
       readonly target: CallableTarget
-      readonly omittedParameter: 0
+      readonly remainingParameters: ReadonlyArray<number>
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
         readonly parameterOrdinal: number
@@ -679,7 +730,7 @@ export type Expression =
        */
       readonly interfaceOperation?: {
         readonly capability: Type.Nominal
-        readonly provider: Type.Parameter
+        readonly provider: Type.Type
         readonly operation: string
         readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       }
@@ -740,6 +791,12 @@ export type Statement =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'PatternBind'
+      readonly selection: PatternSelection
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'Evaluate'
       readonly expression: Expression
       readonly region: RegionId
@@ -748,6 +805,14 @@ export type Statement =
   | {
       readonly _tag: 'If'
       readonly condition: Expression
+      readonly taken: ReadonlyArray<Statement>
+      readonly otherwise: ReadonlyArray<Statement>
+      readonly region: RegionId
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'IfLet'
+      readonly selection: PatternSelection
       readonly taken: ReadonlyArray<Statement>
       readonly otherwise: ReadonlyArray<Statement>
       readonly region: RegionId
@@ -790,7 +855,7 @@ export type Statement =
   | {
       readonly _tag: 'Fail'
       readonly expression: Expression
-      readonly failure: Type.Nominal | Type.FailureProjection
+      readonly failure: Type.Type
       readonly transfer: 'Copy' | 'Move'
       readonly region: RegionId
       readonly span: SourceSpan.SourceSpan
@@ -830,6 +895,8 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
       return statement.statements.flatMap(statementExpressions)
     case 'Bind':
       return [statement.initializer]
+    case 'PatternBind':
+      return [statement.selection.subject]
     case 'Evaluate':
       return [statement.expression]
     case 'Write':
@@ -852,6 +919,12 @@ export const statementExpressions = (statement: Statement): ReadonlyArray<Expres
     case 'If':
       return [
         statement.condition,
+        ...statement.taken.flatMap(statementExpressions),
+        ...statement.otherwise.flatMap(statementExpressions),
+      ]
+    case 'IfLet':
+      return [
+        statement.selection.subject,
         ...statement.taken.flatMap(statementExpressions),
         ...statement.otherwise.flatMap(statementExpressions),
       ]
@@ -879,6 +952,14 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return [expression.slice]
       case 'SliceIndexPlace':
         return [expression.slice, expression.index]
+      case 'SliceBorrow':
+      case 'ValueBorrow':
+        return [
+          ...(expression.root._tag === 'TemporarySliceRoot' ? [expression.root.value] : []),
+          ...expression.selectors.flatMap((selector) =>
+            selector._tag === 'Index' ? [selector.index] : [],
+          ),
+        ]
       case 'Construct':
         return expression.fields.map((field) => field.value)
       case 'ArrayConstruct':
@@ -1099,10 +1180,7 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
 
-const sameMembers = (
-  left: ReadonlyArray<Type.Nominal>,
-  right: ReadonlyArray<Type.Nominal>,
-): boolean =>
+const sameMembers = (left: ReadonlyArray<Type.Type>, right: ReadonlyArray<Type.Type>): boolean =>
   left.length === right.length &&
   left.every((member, index) => Type.equals(member, right[index] ?? member))
 
@@ -1132,7 +1210,6 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       if (
         !Type.equals(expression.type, Type.slice(expression.access, element)) ||
         expression.reborrow !== Type.isSlice(expression.source) ||
-        (expression.reborrow && expression.root._tag !== 'ParameterSliceRoot') ||
         (Type.isSlice(expression.source) &&
           expression.source.access === 'Shared' &&
           expression.access === 'Exclusive')
@@ -1357,6 +1434,7 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
   }
   return Object.freeze({
     _tag: 'Contract',
+    unsafe: declaration.unsafe,
     ...(declaration.functionKind === 'Effect'
       ? {
           functionKind: 'Effect' as const,
@@ -1387,6 +1465,19 @@ const contractText = (contract: ContractFact): string =>
   contract._tag === 'Contract'
     ? `(${contract.parameters.map(Type.encode).join(', ')}) -> ${Type.encode(contract.result)}`
     : 'contract-unavailable'
+
+const sliceRootText = (root: SliceRoot): string => {
+  switch (root._tag) {
+    case 'BindingSliceRoot':
+      return `b${root.binding.ordinal}`
+    case 'ParameterSliceRoot':
+      return `p${root.parameter.ordinal}`
+    case 'PatternSliceRoot':
+      return `a${root.binding.arm.ordinal}.b${root.binding.ordinal}`
+    case 'TemporarySliceRoot':
+      return `t${root.owner.span.start}.${root.owner.ordinal}`
+  }
+}
 
 const encodeExpression = (expression: Expression, depth: number): string => {
   const indent = '  '.repeat(depth)
@@ -1552,9 +1643,9 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         encodeExpression(expression.index, depth + 1),
       ].join('\n')
     case 'SliceBorrow':
-      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
+      return `${indent}${expression.reborrow ? 'reborrow-slice' : 'borrow-slice'} l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} suspended=${expression.suspendsParent} ${spanText(expression.span)}`
     case 'ValueBorrow':
-      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${expression.root._tag === 'BindingSliceRoot' ? `b${expression.root.binding.ordinal}` : expression.root._tag === 'ParameterSliceRoot' ? `p${expression.root.parameter.ordinal}` : `a${expression.root.binding.arm.ordinal}.b${expression.root.binding.ordinal}`} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+      return `${indent}borrow-value l${expression.borrow.ordinal} ${expression.access.toLowerCase()} ${sliceRootText(expression.root)} source=${Type.encode(expression.source)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'SliceLength':
       return [
         `${indent}slice-length : i32 ${spanText(expression.span)}`,
@@ -1574,7 +1665,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'CallableSection':
       return [
-        `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} omitted=p0 target=${
+        `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${
           expression.target._tag === 'DeclarationCallableTarget'
             ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
             : `${expression.target.actor}.${expression.target.operation}`
@@ -1654,6 +1745,8 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         `${indent}bind ${statement.mutability.toLowerCase()} b${statement.binding.ordinal} ${statement.name ?? '?'} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
+    case 'PatternBind':
+      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
     case 'Evaluate':
       return [
         `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
@@ -1686,6 +1779,12 @@ const encodeStatement = (statement: Statement, depth: number): string => {
               `${indent}else`,
               ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
             ]),
+      ].join('\n')
+    case 'IfLet':
+      return [
+        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
+        ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')
     case 'While':
       return [

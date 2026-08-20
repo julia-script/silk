@@ -106,9 +106,9 @@ it('refuses a binding only an infinite term would satisfy', () => {
   assert.isFalse(ConformanceHead.mayOverlap(left, right))
 })
 
-it('treats an open failure row as covering every row it could extend to', () => {
-  const open = Type.failureRowArgument([], [binder('a', 0, 'E', 'FailureRow')])
-  const closed = Type.failureRowArgument([Type.nominal('heads', 'Broken')])
+it('treats an open failure type as covering every type it could become', () => {
+  const open = binder('a', 0, 'E')
+  const closed = Type.failureValue([Type.nominal('heads', 'Broken')])
   const left = ConformanceHead.make(
     Type.nominal('heads', 'Runner', [open]),
     Type.nominal('heads', 'Box', [open]),
@@ -121,8 +121,8 @@ it('treats an open failure row as covering every row it could extend to', () => 
 })
 
 it('separates two closed failure rows that name different members', () => {
-  const first = Type.failureRowArgument([Type.nominal('heads', 'Broken')])
-  const second = Type.failureRowArgument([Type.nominal('heads', 'Other')])
+  const first = Type.failureValue([Type.nominal('heads', 'Broken')])
+  const second = Type.failureValue([Type.nominal('heads', 'Other')])
   const left = ConformanceHead.make(
     Type.nominal('heads', 'Runner', [first]),
     Type.nominal('heads', 'Box', [first]),
@@ -171,14 +171,7 @@ it('separates closed Effect heads with disjoint requirement rows', () => {
 })
 
 it('treats an open Effect requirement row as covering a compatible closed row', () => {
-  const openEffect = Type.effect(
-    'i32',
-    [],
-    'Shared',
-    [],
-    [],
-    [binder('a', 0, 'R', 'RequirementRow')],
-  )
+  const openEffect = Type.effect('i32', [], 'Shared', [], [binder('a', 0, 'R', 'RequirementRow')])
   const closedEffect = Type.effect('i32', [], 'Shared', [
     Object.freeze({
       capability: Type.nominal('heads', 'Clock'),

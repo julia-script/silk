@@ -17,7 +17,8 @@ export interface FloatMathProgram {
   readonly source: string
 }
 
-const f64Exact = `pub fn main() -> i32 {
+const f64Exact = `import silk.f64 as f64
+pub fn main() -> i32 {
   // Negative zero survives every operation in the exact group.
   if f64.toBits(f64.abs(-0.0)) != f64.toBits(0.0) { return 1 }
   if f64.toBits(f64.floor(-0.0)) != f64.toBits(-0.0) { return 2 }
@@ -67,7 +68,8 @@ const f64Exact = `pub fn main() -> i32 {
   return 42
 }`
 
-const f32Exact = `pub fn main() -> i32 {
+const f32Exact = `import silk.f32 as f32
+pub fn main() -> i32 {
   if f32.toBits(f32.abs(-0.0)) != f32.toBits(0.0) { return 1 }
   if f32.toBits(f32.floor(-0.0)) != f32.toBits(-0.0) { return 2 }
   if f32.toBits(f32.ceil(-0.0)) != f32.toBits(-0.0) { return 3 }
@@ -96,7 +98,9 @@ const f32Exact = `pub fn main() -> i32 {
   return 42
 }`
 
-const minimumMaximum = `pub fn main() -> i32 {
+const minimumMaximum = `import silk.f32 as f32
+import silk.f64 as f64
+pub fn main() -> i32 {
   if f64.min(1.0, 2.0) != 1.0 { return 1 }
   if f64.max(1.0, 2.0) != 2.0 { return 2 }
   if f64.min(2.0, 1.0) != 1.0 { return 3 }
@@ -125,7 +129,9 @@ const minimumMaximum = `pub fn main() -> i32 {
  * independently of the compiler, from a host square root, which IEEE-754 requires be correctly
  * rounded and which therefore agrees with any conforming implementation.
  */
-const squareRoot = `pub fn main() -> i32 {
+const squareRoot = `import silk.f32 as f32
+import silk.f64 as f64
+pub fn main() -> i32 {
   // sqrt(2), sqrt(3), sqrt(10) — irrational roots that pin the rounding of the last bit.
   if f64.toBits(f64.sqrt(f64.fromBits(4611686018427387904))) != 4609047870845172685 { return 1 }
   if f64.toBits(f64.sqrt(f64.fromBits(4613937818241073152))) != 4610479282544200874 { return 2 }
@@ -167,7 +173,9 @@ const squareRoot = `pub fn main() -> i32 {
  * Requirement 10: every function reports the one canonical NaN encoding for a NaN input, so no
  * engine's payload propagation rule can show through.
  */
-const canonicalNaN = `fn notANumber(zero: f64) -> f64 { return zero / zero }
+const canonicalNaN = `import silk.f32 as f32
+import silk.f64 as f64
+fn notANumber(zero: f64) -> f64 { return zero / zero }
 fn notANumber32(zero: f32) -> f32 { return zero / zero }
 pub fn main() -> i32 {
   let missing = notANumber(0.0)

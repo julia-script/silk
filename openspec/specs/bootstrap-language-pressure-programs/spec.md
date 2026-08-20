@@ -53,7 +53,7 @@ end-of-file, and unsupported byte runs.
 
 Representative valid and invalid lexer cases SHALL agree across evaluation, native LLVM, and
 direct WebAssembly execution. Allocation failure at every exercised growth ordinal SHALL preserve
-typed `OutOfMemory`, release every acquired allocation exactly once, and leave subsequent runs
+typed `OutOfMemoryError`, release every acquired allocation exactly once, and leave subsequent runs
 deterministic; the evaluator and WebAssembly SHALL carry every exercised ordinal, and native
 execution SHALL carry representative boundary ordinals including at least the first failing
 ordinal, one mid-growth ordinal, and unrestricted completion.
@@ -138,7 +138,7 @@ result, ordered executed steps, and ordered diagnostics.
 
 Representative valid and malformed VM programs SHALL agree across evaluation, native LLVM, and
 direct WebAssembly execution. Allocation failure at every exercised trace or diagnostic growth
-ordinal SHALL preserve typed `OutOfMemory`, release every acquired allocation exactly once, and
+ordinal SHALL preserve typed `OutOfMemoryError`, release every acquired allocation exactly once, and
 leave subsequent executions deterministic; the evaluator and WebAssembly SHALL carry every
 exercised ordinal, and native execution SHALL carry representative boundary ordinals including at
 least the first failing ordinal, one mid-growth ordinal, and unrestricted completion.

@@ -87,8 +87,9 @@ ordinary unknown-type diagnostic. Using `?R` in an ordinary value position repor
 identifies the requirement-row kind. Using ordinary `E` as a failure type is valid and must not
 request `!E` or `Row<!E>` syntax.
 
-**Current compiler:** Disputed for failures. It currently treats `!E` as a separate failure-row
-parameter kind. That behavior conflicts with the confirmed Effect contract and must be removed.
+**Current compiler:** Aligned for failure parameters. `E` is an ordinary type parameter; only
+requirement-row, callable-representation, and Effect-representation parameters retain specialized
+kinds in this area.
 
 **Evidence:** [generic Effect contract](effect-contracts.md#eff-012--ordinary-failure-types-and-generic-requirement-rows-preserve-a-contract),
 [current generic specification](../../openspec/specs/bootstrap-type-generics/spec.md),
@@ -385,9 +386,9 @@ conflicting field evidence. A parameter with no field or explicit evidence repor
 parameter diagnostic at the literal. Wrong-kind and explicit-prefix conflicts use the same
 application diagnostics as a generic call. All such failures occur before ownership or lowering.
 
-**Current compiler:** Partially aligned. It already infers omitted callable and Effect
-representation arguments from fields, including through a written prefix, but generally requires
-ordinary nominal arguments to be explicit. The stable rule removes that special case.
+**Current compiler:** Aligned. Construction collects field evidence for omitted ordinary, row, and
+representation parameters after a written prefix, retains every origin, and rejects missing or
+conflicting evidence before HIR lowering.
 
 **Evidence:** [representation inference tests](../../packages/compiler/test/RepresentationInference.test.ts),
 [struct literal elaboration](../../packages/compiler/src/Elaboration.ts),
@@ -734,9 +735,9 @@ type diagnostic at that spelling. Declaring a generic parameter or nominal type 
 scope where the implicit binding exists reports a reserved-binding collision. Supplying an extra
 provider argument to an interface application reports the ordinary interface-argument arity error.
 
-**Current compiler:** Disputed. Current interfaces model the provider as an ordinary explicit
-parameter and conformances repeat it in `Interface<Provider> for Provider`. Bounds then use special
-shorthand to hide the repetition. Those paths must converge on implicit `Self`.
+**Current compiler:** Aligned. Every interface and service contract records implicit `Self`, while
+its written generic parameters contain only additional contract arguments. Bounds and
+conformances bind the provider without adding a duplicated interface argument.
 
 **Evidence:** [SLP-0006 provider decision](../../proposals/0006-static-generics-and-coherent-interfaces/proposal.md),
 [current interface parser](../../packages/compiler/src/Parser.ts),
@@ -786,9 +787,8 @@ unsupported member reports an invalid-interface-member diagnostic at that member
 operation names report the later declaration and identify the first. Invalid function contracts
 retain their ordinary parameter, type, Effect-channel, and ownership diagnostics.
 
-**Current compiler:** Partially aligned. It parses ordinary and effect operation contracts and
-rejects most invalid members. It must migrate failure binders to ordinary types and must ensure
-service declarations reuse this exact operation path after eligibility checking.
+**Current compiler:** Aligned. Ordinary and effect operation contracts share the same declaration
+facts for interfaces and services, including ordinary failure types and requirement-row binders.
 
 **Evidence:** [complete interface contracts](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [service/interface boundary](requirements-and-services.md#serv-003--a-service-is-a-dependency-eligible-interface),
@@ -841,9 +841,8 @@ bound. Wrong interface-argument arity or kind uses the ordinary application diag
 call whose inferred provider lacks the required conformance reports a missing-conformance
 diagnostic at the generic application and names the full provider/interface goal.
 
-**Current compiler:** Disputed in application shape. Current simple bounds such as `T: Decoder`
-implicitly apply the provider as a hidden interface argument, while other bounds spell forms such as
-`T: Decoder<T>`. Both become the single `T: Decoder<Arguments>` rule.
+**Current compiler:** Aligned. A bound records the provider on its left and the complete interface
+application on its right; no provider argument is synthesized into that application.
 
 **Evidence:** [current interface-bound tests](../../packages/compiler/test/InterfaceBounds.test.ts),
 [conditional conformance specification](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
@@ -900,9 +899,8 @@ interface, wrong-arity, or wrong-kind diagnostic. At a concrete application, eac
 ambiguous conformance is reported as its complete provider/interface goal; the compiler does not
 stop at whichever bound happens to be written first.
 
-**Current compiler:** Missing. The parser and declaration model currently retain at most one
-interface bound per parameter. Existing constraint and conformance machinery can represent several
-independent obligations, but the source model must preserve the complete unordered list.
+**Current compiler:** Aligned. Parsing and declaration facts preserve every normalized conjunct,
+static calls can select operations from each contract, and duplicate conjuncts are diagnosed.
 
 **Evidence:** [single-bound parser](../../packages/compiler/src/Parser.ts),
 [bound facts](../../packages/compiler/src/DeclarationIndex.ts),
@@ -1021,9 +1019,9 @@ diagnostic at the operation. More than one reports an ambiguous-interface-applic
 listing the complete provider/application candidates. An unknown operation reports the ordinary
 unknown-interface-member diagnostic and does not fall back to a module function with the same name.
 
-**Current compiler:** Partially aligned for unique bound calls. It currently encodes the provider as
-an interface argument and can prefer bound operations by name. It must adopt the `Self` substitution
-and SLP-0004's explicit operator markers rather than giving certain operation names hidden meaning.
+**Current compiler:** Aligned for qualified static operation calls. Bound and concrete calls use
+the same `Self` substitution and witness selection. Operator eligibility remains the separate
+explicit-marker rule defined by OP-009.
 
 **Evidence:** [bound operation elaboration](../../packages/compiler/src/Elaboration.ts),
 [bound-operation tests](../../packages/compiler/test/BoundOperationWitness.test.ts),
@@ -1074,9 +1072,8 @@ interface value cannot own a conformance; the provider must have one canonical n
 diagnostic at the `for` type. Wrong interface-argument arity or kind reports the application error
 before operation mappings are checked. An invalid `Self` use retains the contextual type diagnostic.
 
-**Current compiler:** Disputed in interface application shape and inline syntax. It requires the
-provider to be repeated as an interface argument, and its general `impl` grammar accepts mappings
-but not arbitrary inline operation bodies.
+**Current compiler:** Aligned. The provider appears only after `for`, binds `Self`, and may supply
+operations inline, by mapping, or through both forms in one conformance.
 
 **Evidence:** [SLP-0006 provider decision](../../proposals/0006-static-generics-and-coherent-interfaces/proposal.md),
 [current impl parser](../../packages/compiler/src/Parser.ts),
@@ -1128,8 +1125,8 @@ when possible and otherwise at the `impl`, naming both interface and operation. 
 name explains that inline names match contract operations; it may suggest a mapping when a
 differently named actor function was likely intended.
 
-**Current compiler:** Disputed only for general inline bodies. Mapped completeness checking exists;
-inline support is currently limited to a special hook form.
+**Current compiler:** Aligned. Inline and mapped members populate one ordered witness table and are
+subject to the same completeness and duplicate checks.
 
 **Evidence:** [confirmed implementation forms](requirements-and-services.md#serv-001--a-conformance-may-define-or-map-each-operation),
 [user witness tests](../../packages/compiler/test/UserInterfaceWitness.test.ts),
@@ -1192,9 +1189,8 @@ target. The diagnostic identifies the interface operation and the first incompat
 operand mode/type, result type, failure type, or requirement. Nested Effect mismatches use the
 ordinary type names and never fall through to lowering as invalid MIR.
 
-**Current compiler:** Partially aligned. It checks mapped operand and result compatibility and has
-row-subsumption machinery, but current provider arguments, failure-row kinds, and service-specific
-adaptation must be removed.
+**Current compiler:** Aligned. Substituted inline and mapped operations retain literal operand,
+result, failure, and requirement contracts for both interfaces and services.
 
 **Evidence:** [complete witness compatibility](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [witness compatibility implementation](../../packages/compiler/src/DeclarationIndex.ts),
@@ -1238,8 +1234,9 @@ remain top-level `impl` declarations in the same module, preserving data-only no
 provider type and identifies its defining module. Tooling may suggest an owned adapter; it must not
 offer to move the conformance into a module the author cannot modify.
 
-**Current compiler:** Disputed. The intended module rule is recorded in the bootstrap language and
-style guide, but current conformance indexing must be audited for every generic and imported case.
+**Current compiler:** Aligned for source-declared contracts. A conformance is admitted only in the
+module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
+own explicitly privileged rules.
 
 **Evidence:** [actor and conformance style](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions),
 [module coherence decision](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
@@ -1326,9 +1323,8 @@ its declaration. A bound whose provider does not occur inside the conformance pr
 non-descending requirement described by IMPL-008. Invalid operations inside the body retain their
 ordinary missing-bound or contract diagnostics.
 
-**Current compiler:** Aligned in principle but uses the old duplicated-provider application. It
-already parses bounded `impl<...>` declarations and delays admission until concrete requirements
-are proven.
+**Current compiler:** Aligned. Bounded `impl<...>` declarations use implicit `Self`, preserve all
+bound conjuncts, and delay concrete admission until every requirement is proven.
 
 **Evidence:** [conditional conformance specification](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
 [conditional conformance fixtures](../../packages/compiler/test/ConditionalConformanceFixtures.test.ts).
@@ -1413,9 +1409,8 @@ diagnostic at the offending bound. It names the required provider and conformanc
 explains whether the step stayed equal, moved to an unrelated peer, grew, duplicated an open
 parameter, or changed a fixed interface argument.
 
-**Current compiler:** Aligned in principle. Its current structural termination proof also accounts
-for the old explicit provider argument, which must be replaced by implicit `Self` without weakening
-the descent invariant.
+**Current compiler:** Aligned. Structural termination is checked against the implicit provider and
+retains the strict descent and occurrence invariants.
 
 **Evidence:** [structural termination requirement](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
 [termination proof](../../packages/compiler/src/ConformanceHead.ts),
@@ -1448,9 +1443,8 @@ requested goal to the first missing, invalid, or ambiguous base goal. Declaratio
 termination failures retain their earlier source locations instead of being rediscovered as a
 generic call failure.
 
-**Current compiler:** Aligned in principle. It records conditional proof chains and concrete static
-witness identities; the stabilized surface must remove old provider duplication and service-
-specific branches while preserving deterministic proof.
+**Current compiler:** Aligned. Conditional proof chains and concrete witness identities use the
+same provider/interface goal for interfaces and services, with deterministic static selection.
 
 **Evidence:** [concrete proof requirement](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
 [conditional proof determinism](../../packages/compiler/test/ConditionalConformanceDeterminism.test.ts),
@@ -1526,7 +1520,7 @@ selection.
 | Explicit call arguments | Older type-system decision requires all arguments or none; current compiler accepts an ordered prefix. | Keep the current ordered-prefix model for calls and struct literals; the older rule is superseded. |
 | Provider application | `Decoder<Schema> for Schema` repeats the provider while `T: Decoder` hides an application. | Give every interface implicit `Self`; write only additional interface arguments and bind the provider after `for` or to the left of a bound. |
 | Generic operator calls | Current tests and elaboration infer bound operations from names such as `add`. | Use SLP-0004's explicit operator-eligibility declaration. |
-| Service conformance | Current witness logic has service-specific operation and special `Report` paths. | Keep only dependency eligibility special; reuse interface conformance afterward and remove `Report`. |
+| Service conformance | A service first passes dependency eligibility, then uses ordinary conformance proof and operation selection. | Keep only dependency eligibility special; do not introduce service-only witness behavior. |
 | Inline implementations | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function. | Implement the already confirmed general inline-or-mapped rule. |
 
 IMPL-005 resolves the former conformance-visibility question: conformances have no independently

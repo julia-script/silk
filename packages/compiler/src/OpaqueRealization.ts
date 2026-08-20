@@ -124,6 +124,13 @@ const evidenceOf = (
       : Object.freeze([])
   if (structural.length > 0)
     return Object.freeze(structural.map((argument) => Object.freeze({ argument, expression })))
+  const nestedFamily = Type.opaqueRepresentationArguments(expected).some((argument) =>
+    Type.equalsOpaqueFamily(argument.family, family),
+  )
+  if (nestedFamily) {
+    const argument = Elaboration.representationOfExpression(expression)
+    if (argument !== undefined) return Object.freeze([Object.freeze({ argument, expression })])
+  }
   const expectedArgument = Type.isRepresented(expected)
     ? expected.representation.argument
     : undefined

@@ -221,7 +221,7 @@ export interface ToolchainFailure {
   readonly _tag: 'ToolchainFailure'
   readonly planned: ToolchainPlan.PlannedCommand
   readonly reason:
-    | { readonly _tag: 'ProcessFailure' }
+    | { readonly _tag: 'ProcessError' }
     | { readonly _tag: 'MissingInput'; readonly path: string }
     | {
         readonly _tag: 'TargetMismatch'
@@ -342,7 +342,7 @@ const failure = (
   planned: ToolchainPlan.PlannedCommand,
   status: number | null,
   output: string,
-  reason: ToolchainFailure['reason'] = { _tag: 'ProcessFailure' },
+  reason: ToolchainFailure['reason'] = { _tag: 'ProcessError' },
 ): ToolchainFailure => Object.freeze({ _tag: 'ToolchainFailure', planned, reason, status, output })
 
 /**

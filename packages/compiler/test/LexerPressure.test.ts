@@ -97,6 +97,7 @@ const tokenKinds = [
   'AmpersandAmpersand',
   'PipePipe',
   'CharLiteral',
+  'RoleKeyword',
 ] as const satisfies ReadonlyArray<Token.TokenKind>
 
 const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
@@ -176,6 +177,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   AmpersandAmpersand: 73,
   PipePipe: 74,
   CharLiteral: 75,
+  RoleKeyword: 76,
 })
 
 interface ExpectedToken {
@@ -277,13 +279,18 @@ const quotaSourceFor = (input: string, id: string, quota: number): string => {
   const generated = sourceFor(input, id).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'impl Report for OutOfMemory {}',
-    `impl Report for OutOfMemory {}
+    'import silk.vector { Vector, make, append, get, length }',
+    `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.vector { Vector, make, append, get, length }
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -304,7 +311,7 @@ const corpus = [
   Object.freeze({
     id: 'keywords',
     input:
-      'pub struct service interface effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
+      'pub struct service interface role effect fn run fail drop unsafe impl for return import as let mut once move match if else while break continue true false const name _x2',
   }),
   Object.freeze({ id: 'numbers', input: '0 42 1.25 2e3 3E+4 4e- 5..6' }),
   Object.freeze({
@@ -548,7 +555,7 @@ it.effect(
         const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
         assert.strictEqual(run.status, quota === allocationCount ? 0 : 1, `${id}: ${run.stderr}`)
         if (quota === allocationCount) assert.strictEqual(run.stderr, '')
-        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemory\n')
+        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemoryError\n')
       }
     }),
   180_000,

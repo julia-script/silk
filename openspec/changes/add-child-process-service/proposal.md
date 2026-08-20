@@ -24,7 +24,7 @@ text type is introduced.
   environment starts empty rather than inheriting the caller's.
 - Add `ProcessOutcome` as `Exited { code output errors }` or `Signaled { signal output errors }`, so
   a nonzero exit code is outcome data and a terminating signal can never be read as an exit code.
-- Add `ProcessFailure` for a failure to start, to wait, or to capture only, carrying a closed
+- Add `ProcessError` for a failure to start, to wait, or to capture only, carrying a closed
   stage/reason pair plus an optional numeric provider detail.
 - Add `OsChildProcess`, an ordinary-source native provider using two new unsafe intrinsics:
   `Intrinsic.osProcessExecute` runs one child and reports its termination and capture lengths, and

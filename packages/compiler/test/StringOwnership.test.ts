@@ -10,7 +10,8 @@ const snapshot = (source: string) => Analysis.ofSource('string/ownership', encod
 
 it.effect('retains a runtime string backing loan through its last use', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn conflict() -> usize {
+    const self = yield* snapshot(`import silk.u8 as u8
+fn conflict() -> usize {
   let mut bytes = [u8.toU8(104), u8.toU8(195), u8.toU8(169)]
   unsafe {
     let text = Intrinsic.stringFromUtf8Unchecked(&bytes)
@@ -71,7 +72,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('propagates string loans through returned views and ordinary calls', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn view(bytes: &[u8]) -> string {
+    const self = yield* snapshot(`import silk.u8 as u8
+fn view(bytes: &[u8]) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(bytes) }
 }
 fn length(text: string) -> usize { return Intrinsic.stringByteLength(text) }
@@ -103,8 +105,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('preserves loans nested inside generic result data', () =>
   Effect.gen(function* () {
-    const self =
-      yield* snapshot(`import silk.result { Result, Success, Failure, succeed, failResult }
+    const self = yield* snapshot(`import silk.u8 as u8
+import silk.result { Result, Success, Failure, succeed, failResult }
 struct InvalidUtf8 { offset: usize }
 fn validate(bytes: &[u8], accepted: bool) -> Result<string, InvalidUtf8> {
   if accepted {

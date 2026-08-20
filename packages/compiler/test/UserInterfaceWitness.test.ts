@@ -23,14 +23,54 @@ const evaluatedValue = (name: string, source: string) =>
     return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
+it.effect('enforces unsafe operation variance and bound-call acknowledgement', () =>
+  Effect.gen(function* () {
+    const accepted = yield* analyzed(
+      'user-witness/unsafe-operation',
+      `interface Read {
+  unsafe fn read(value: &Self) -> i32
+}
+struct Cell { value: i32 }
+fn readCell(value: &Cell) -> i32 { return value.value }
+impl Read for Cell { read: Cell.readCell }
+fn readGeneric<T: Read>(value: T) -> i32 { return unsafe Read.read(&value) }
+pub fn main() -> i32 { return readGeneric<Cell>(Cell { value: 7 }) }`,
+    )
+    assert.deepEqual(messages(accepted), [])
+
+    const missingAcknowledgement = yield* analyzed(
+      'user-witness/unsafe-bound-call',
+      `interface Read { unsafe fn read(value: &Self) -> i32 }
+fn readGeneric<T: Read>(value: T) -> i32 { return Read.read(&value) }`,
+    )
+    assert.include(
+      Analysis.diagnostics(missingAcknowledgement).map((diagnostic) => diagnostic.code),
+      'SEM0082',
+    )
+
+    const unsafeWitness = yield* analyzed(
+      'user-witness/unsafe-witness-for-safe-operation',
+      `interface Read { fn read(value: &Self) -> i32 }
+struct Cell { value: i32 }
+unsafe fn readCell(value: &Cell) -> i32 { return value.value }
+impl Read for Cell { read: Cell.readCell }`,
+    )
+    assert.isTrue(
+      messages(unsafeWitness).some((message) =>
+        message.includes('unsafe witness cannot satisfy a safe operation contract'),
+      ),
+    )
+  }),
+)
+
 /**
  * One user-declared interface with two operator-spelled operations, one user struct witnessing
  * both, and one generic body bounded by the interface. A witness observes each operand through a
  * shared borrow, because the interface declares that ownership explicitly.
  */
-const twoOperations = `interface Blend<T> {
-  fn add(left: &T, right: &T) -> T
-  fn lessThan(left: &T, right: &T) -> bool
+const twoOperations = `interface Blend {
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -45,17 +85,17 @@ fn cellLess(left: &Cell, right: &Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Blend<Cell> for Cell {
+impl Blend for Cell {
   add: Cell.cellAdd
   lessThan: Cell.cellLess
 }
 
 /// Reaches both mapped operations: the comparison decides the branch and the sum is the result.
 fn merged<T: Blend>(left: T, right: T) -> T {
-  if left < right {
-    return left + right
+  if (&left) < (&right) {
+    return (&left) + (&right)
   }
-  return right + left
+  return (&right) + (&left)
 }
 `
 
@@ -79,9 +119,9 @@ it.effect('rejects a conformance that leaves one operation unmapped, naming it',
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'user-witness/missing-operation',
-      `interface Blend<T> {
-  fn add(left: &T, right: &T) -> T
-  fn lessThan(left: &T, right: &T) -> bool
+      `interface Blend {
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -92,7 +132,7 @@ fn cellLess(left: &Cell, right: &Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Blend<Cell> for Cell {
+impl Blend for Cell {
   lessThan: Cell.cellLess
 }
 
@@ -107,9 +147,9 @@ it.effect('rejects a bounded specialization at a type whose conformance is incom
     // The coverage check reaches the call site too: a half-mapped witness cannot satisfy a bound.
     const snapshot = yield* analyzed(
       'user-witness/incomplete-specialization',
-      `interface Blend<T> {
-  fn add(left: &T, right: &T) -> T
-  fn lessThan(left: &T, right: &T) -> bool
+      `interface Blend {
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -120,12 +160,12 @@ fn cellLess(left: &Cell, right: &Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Blend<Cell> for Cell {
+impl Blend for Cell {
   lessThan: Cell.cellLess
 }
 
 fn ordered<T: Blend>(left: T, right: T) -> bool {
-  return left < right
+  return (&left) < (&right)
 }
 
 pub fn main() -> i32 {
@@ -145,8 +185,8 @@ it.effect('admits a value witness only when the interface literally transfers ow
     // There is no blanket adaptation: authored value ownership matches an authored value witness.
     const snapshot = yield* analyzed(
       'user-witness/by-value-operand',
-      `interface Ordered<T> {
-  fn lessThan(left: T, right: T) -> bool
+      `interface Ordered {
+  fn lessThan(left: Self, right: Self) -> bool
 }
 
 struct Cell {
@@ -157,7 +197,7 @@ fn cellLess(left: Cell, right: Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Ordered<Cell> for Cell {
+impl Ordered for Cell {
   lessThan: Cell.cellLess
 }
 
@@ -171,8 +211,8 @@ it.effect('rejects a witness whose result disagrees with the contract', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'user-witness/wrong-result',
-      `interface Ordered<T> {
-  fn lessThan(left: &T, right: &T) -> bool
+      `interface Ordered {
+  fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -183,7 +223,7 @@ fn cellLess(left: &Cell, right: &Cell) -> i32 {
   return left.weight - right.weight
 }
 
-impl Ordered<Cell> for Cell {
+impl Ordered for Cell {
   lessThan: Cell.cellLess
 }
 
@@ -199,15 +239,15 @@ it.effect('rejects a mapping that names a function the provider actor does not d
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'user-witness/absent-function',
-      `interface Ordered<T> {
-  fn lessThan(left: &T, right: &T) -> bool
+      `interface Ordered {
+  fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
   weight: i32
 }
 
-impl Ordered<Cell> for Cell {
+impl Ordered for Cell {
   lessThan: Cell.absent
 }
 
@@ -254,7 +294,7 @@ fn cellLess(left: &Cell, right: &Cell) -> bool {
   return left.weight < right.weight
 }
 
-impl Order<Cell> for Cell {
+impl Order for Cell {
   lessThan: Cell.cellLess
 }
 

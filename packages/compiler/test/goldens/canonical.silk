@@ -19,6 +19,8 @@ pub struct Token {
 
 pub struct End {}
 
+pub role Clock
+
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   while moved < other {
@@ -37,10 +39,23 @@ fn helper(value: i32, other: i32) -> i32 {
   return moved
 }
 
+pub unsafe fn unchecked(value: i32) -> i32 {
+  return value
+}
+
 fn inspect(event: Token | End) -> i32 {
   return match &mut event {
     Token {span: Span {start: offset, ..}, ..} if true => offset
     _ => 0
+  }
+}
+
+fn destructure(pair: Pair, event: Token | End) -> i32 {
+  let Pair {left, ..} = move pair
+  if let Token whole = &event {
+    return left[0]
+  } else {
+    return 0
   }
 }
 
@@ -65,18 +80,18 @@ effect fn delayed(problem: Token) -> i32
 }
 
 effect fn timed() -> i32
-? &End@Clock {
+? &End at Clock {
   return 1
 }
 
-fn execute(problem: Token) -> i32 {
+fn execute(problem: Token, borrowed: &End) -> i32 {
   let local = effect {
     return 2
   }
   drop local
   let pending = delayed(move problem)
   let timed = timed()
-    |> End.provide<&End@Clock>(&local)
+    |> End.provide<End at Clock>(&local)
   return run pending
 }
 
@@ -90,6 +105,8 @@ fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
 }
 
 pub fn main() -> i32 {
-  return helper(-1, 2)
-    |> Core.finish()
+  return unsafe unchecked(
+    helper(-1, 2)
+      |> Core.finish(),
+  )
 }

@@ -6,7 +6,12 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** Fallthrough: the guard leaves scope, its hook runs, then its Allocation field releases. */
-const fallthrough = `struct Guard {
+const fallthrough = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -15,7 +20,7 @@ impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -24,12 +29,17 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Early drop: explicit drop releases at that statement and block cleanup does not repeat it. */
-const earlyDrop = `struct Guard {
+const earlyDrop = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -38,7 +48,7 @@ impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -48,12 +58,17 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Typed failure: a guard live at a failing run releases through its hook before propagating. */
-const failurePropagation = `struct Guard {
+const failurePropagation = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -64,13 +79,13 @@ impl Drop for Guard {
 
 struct ExhaustedAllocator { tag: i32 }
 
-effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  fail OutOfMemory {}
+effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
@@ -84,12 +99,17 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 /** Recursive return: every suspended activation releases its own guard exactly once. */
-const recursiveReturn = `struct Guard {
+const recursiveReturn = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -98,7 +118,7 @@ impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
+effect fn recurse(remaining: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -108,7 +128,7 @@ effect fn recurse(remaining: i32) -> i32 ! OutOfMemory {
   return run recurse(remaining - 1)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(recurse(2), recover) }`
 
@@ -155,7 +175,12 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
 )
 
 /** One parametric conformance serves two instantiations, each with its own hook instance. */
-const parametric = `struct Guard<T> {
+const parametric = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard<T> {
   value: T
   storage: Allocation
 }
@@ -164,7 +189,7 @@ impl<T> Drop for Guard<T> {
   fn drop(self: &mut Guard<T>) -> () { return () }
 }
 
-effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
+effect fn hold<T>(value: T) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -173,7 +198,7 @@ effect fn hold<T>(value: T) -> i32 ! OutOfMemory {
   return 21
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 {
   let first = run Effect.catchAll(hold<i32>(1), recover)
@@ -186,6 +211,8 @@ const copyInstantiation = `struct Holder<T> {
   value: T
 }
 
+impl<T: Copy> Copy for Holder<T> {}
+
 impl<T> Drop for Holder<T> {
   fn drop(self: &mut Holder<T>) -> () { return () }
 }
@@ -197,7 +224,7 @@ fn keep<T>(value: T) -> i32 {
 
 pub fn main() -> i32 { return keep<i32>(41) + 1 }`
 
-it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
+it.effect('rejects conflicting parametric Copy and Drop declarations', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'drop-hook/copy-instantiation',
@@ -205,8 +232,8 @@ it.effect('rejects a parametric Drop instantiated at a Copy provider', () =>
       'wasm32-unknown-unknown',
     )
     assert.include(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message),
-      'Invalid Drop hook: Copy type drop-hook/copy-instantiation.Holder<i32> cannot implement Drop',
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0083',
     )
   }),
 )

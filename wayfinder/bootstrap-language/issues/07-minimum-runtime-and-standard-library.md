@@ -29,7 +29,7 @@ no primitive resize, implicit zero-fill, user-callable `free`, or unchecked size
 Collection growth allocates a new block, moves or copies initialized elements, and drops the old
 owner.
 
-Allocation exhaustion is the typed allocation-free `OutOfMemory` failure rather than a trap. It
+Allocation exhaustion is the typed allocation-free `OutOfMemoryError` failure rather than a trap. It
 propagates through ordinary failure rows independently of the allocator requirement; automatic
 release after failure remains infallible. Each `Allocation` carries a private unforgeable reclaim
 ticket containing everything needed to invoke the originating release behavior after the allocator
@@ -38,7 +38,7 @@ provided. Public containers do not expose or retain an allocator, and static opt
 a reclaim ticket when its origin is known.
 
 As revised in issue 03, every service requirement is keyed by a nominal capability and nominal role
-pair. The notation `Allocator@Durable` and `Allocator@Scratch` here is semantic notation only; issue
+pair. The notation `Allocator at Durable` and `Allocator at Scratch` here is semantic notation only; issue
 08 owns its spelling. A function may require both roles simultaneously and select one for each
 allocation. It may also be generic over a role. An omitted role denotes `DefaultRole`, never the sole
 implementation that happens to be visible. This mechanism applies uniformly to every service, not
@@ -143,7 +143,7 @@ command-line processing, diagnostics, textual IR, and phase encoders: checked AS
 with explicit radix; locale-independent correctly rounded `F32` and `F64` parsing; decimal and
 hexadecimal integer append operations; and shortest-round-trip plus exact hexadecimal float
 formatting. Invalid text is ordinary result data so compiler phases can accumulate source
-diagnostics. Only destination growth may fail with `OutOfMemory`. A generic formatter,
+diagnostics. Only destination growth may fail with `OutOfMemoryError`. A generic formatter,
 interpolation framework, `printf`, locale, and arbitrary-precision arithmetic are excluded.
 
 The bootstrap constant evaluator is a closed expression subset. It admits scalar, static-string,

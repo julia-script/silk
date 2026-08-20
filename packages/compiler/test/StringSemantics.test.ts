@@ -138,3 +138,26 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
     }
   }),
 )
+
+it.effect('passes borrowed string values through ordinary reference and slice boundaries', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'string/ordinary-borrows',
+      new TextEncoder().encode(`fn shared(value: &string) -> () { return () }
+fn exclusive(value: &mut string) -> () { return () }
+fn many(values: &[string]) -> () { return () }
+
+pub fn main() -> () {
+  let mut text = "hello"
+  shared(&text)
+  exclusive(&mut text)
+  let values = ["one", "two"]
+  many(&values)
+  return ()
+}`),
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.mirOf(snapshot)._tag, 'Available')
+  }),
+)

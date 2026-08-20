@@ -26,15 +26,20 @@ const plansFor = (
 ): ReadonlyArray<SuspensionOwnership.Plan> =>
   self.plans.filter((plan) => plan.function.declaration.name.startsWith(`${declaration}$effect$`))
 
-const source = `struct Owner { value: i32 }
-effect fn delayed(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Owner { value: i32 }
+effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
-effect fn scalar() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn scalar() -> i32 {
   let dead = 100
   return 40 + run delayed(2)
 }
-effect fn owned() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn owned() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let firstLayout = Layout.of<i32>()
   let first = run Allocator.allocate(move firstLayout)
   let secondLayout = Layout.of<i32>()
@@ -42,31 +47,30 @@ effect fn owned() -> i32 ! OutOfMemory ? &mut Allocator {
   let right = run delayed(2)
   return 8 + right
 }
-effect fn borrowed(owner: &mut Owner) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn borrowed(owner: &mut Owner) -> i32 {
   let right = run delayed(2)
   return owner.value + right
 }
-effect fn branched(flag: bool, left: i32, right: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn shared(owner: &Owner) -> i32 {
+  let right = run delayed(2)
+  return owner.value + right
+}
+effect fn branched(flag: bool, left: i32, right: i32) -> i32 {
   let value = run delayed(1)
   if flag { return left + value }
   return right + value
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut scalarAllocator = SystemAllocator.make()
-  let scalarPending = scalar() |> Effect.provideMut(&mut scalarAllocator)
-  let scalarValue = run Effect.catchAll(move scalarPending, recover)
+  let scalarValue = run scalar()
   let mut ownedAllocator = SystemAllocator.make()
   let ownedPending = owned() |> Effect.provideMut(&mut ownedAllocator)
   let ownedValue = run Effect.catchAll(move ownedPending, recover)
   let mut owner = Owner { value: 20 }
-  let mut borrowedAllocator = SystemAllocator.make()
-  let borrowedPending = borrowed(&mut owner) |> Effect.provideMut(&mut borrowedAllocator)
-  let borrowedValue = run Effect.catchAll(move borrowedPending, recover)
-  let mut branchedAllocator = SystemAllocator.make()
-  let branchedPending = branched(true, 30, 12) |> Effect.provideMut(&mut branchedAllocator)
-  let branchedValue = run Effect.catchAll(move branchedPending, recover)
-  return scalarValue + ownedValue + borrowedValue + branchedValue
+  let borrowedValue = run borrowed(&mut owner)
+  let sharedValue = run shared(&owner)
+  let branchedValue = run branched(true, 30, 12)
+  return scalarValue + ownedValue + borrowedValue + sharedValue + branchedValue
 }`
 
 it.effect('classifies exact post-normalization MIR locals across relay', () =>
@@ -81,15 +85,18 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
         plan.slots.filter((slot) => slot.access._tag === 'AffineTransfer').length === 2,
     )
     const borrowed = plansFor(ownership, 'borrowed').find((plan) => plan.frame === 'StatefulRelay')
+    const shared = plansFor(ownership, 'shared').find((plan) => plan.frame === 'StatefulRelay')
     const branched = plansFor(ownership, 'branched').find((plan) => plan.frame === 'StatefulRelay')
     assert.isDefined(scalar, SuspensionOwnership.encode(ownership))
     assert.isDefined(owned, SuspensionOwnership.encode(ownership))
     assert.isDefined(borrowed, SuspensionOwnership.encode(ownership))
+    assert.isDefined(shared, SuspensionOwnership.encode(ownership))
     assert.isDefined(branched, SuspensionOwnership.encode(ownership))
     if (
       scalar === undefined ||
       owned === undefined ||
       borrowed === undefined ||
+      shared === undefined ||
       branched === undefined
     )
       return
@@ -112,33 +119,30 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
       ),
       SuspensionOwnership.encode(ownership),
     )
+    assert.isTrue(
+      shared.slots.some(
+        (slot) =>
+          slot.access._tag === 'BorrowedDependency' &&
+          slot.access.access === 'Shared' &&
+          slot.access.loan._tag === 'BorrowedParameter',
+      ),
+      SuspensionOwnership.encode(ownership),
+    )
     const affine = owned.slots.filter((slot) => slot.access._tag === 'AffineTransfer')
     assert.lengthOf(affine, 2)
     const affineLocals = affine.map((slot) => slot.local.ordinal)
     assert.deepEqual(
-      owned.allocationRefusal.releases.map((release) => release.local.ordinal),
+      owned.failure.releases
+        .map((release) => release.local.ordinal)
+        .filter((local) => affineLocals.includes(local)),
       [...affineLocals].reverse(),
     )
-    for (const rollback of owned.prefixRollbacks) {
-      assert.deepEqual(
-        [...rollback.frameDrops, ...rollback.sourceReleases]
-          .map((release) => release.local.ordinal)
-          .filter((local) => affineLocals.includes(local))
-          .sort((left, right) => left - right),
-        [...affineLocals].sort((left, right) => left - right),
-      )
-    }
-    assert.deepEqual(
-      owned.prefixRollbacks.at(-1)?.frameDrops.map((release) => release.local.ordinal),
-      [...affineLocals].reverse(),
-    )
-    // The user borrow and the exclusive continuation allocator are both retained dependencies.
+    // Only the user borrow is retained; private frame storage is not a source dependency.
     assert.lengthOf(
       borrowed.slots.filter((slot) => slot.access._tag === 'BorrowedDependency'),
-      2,
+      1,
     )
-    assert.lengthOf(borrowed.allocationRefusal.loanEnds, 2)
-    assert.lengthOf(borrowed.failure.loanEnds, 2)
+    assert.lengthOf(borrowed.failure.loanEnds, 1)
     assert.lengthOf(borrowed.success.loanEnds, 0)
     assert.deepEqual(
       branched.slots
@@ -150,7 +154,7 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
   }),
 )
 
-it.effect('publishes deterministic initialization and every prefix rollback', () =>
+it.effect('publishes deterministic state ownership and restoration', () =>
   Effect.gen(function* () {
     const first = yield* snapshot(source)
     const second = yield* snapshot(source)
@@ -159,15 +163,10 @@ it.effect('publishes deterministic initialization and every prefix rollback', ()
     assert.strictEqual(SuspensionOwnership.encode(left), SuspensionOwnership.encode(right))
     for (const plan of left.plans) {
       assert.deepEqual(
-        plan.initializationOrder,
+        plan.success.restores,
         plan.slots.map((slot) => slot.ordinal),
         Instances.keyText(plan.function),
       )
-      assert.deepEqual(
-        plan.prefixRollbacks.map((rollback) => rollback.initialized),
-        Array.from({ length: plan.slots.length + 1 }, (_value, ordinal) => ordinal),
-      )
-      assert.deepEqual(plan.success.restores, plan.initializationOrder)
     }
   }),
 )

@@ -10,9 +10,14 @@ const ascii = (value: string): Uint8Array =>
  * evaluator's allocation trace: an owner that outlived the run holding it shows up as an acquire
  * with no matching release, and one released twice traps instead of completing.
  */
-const provider = `struct Clock { storage: Allocation }
+const provider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -21,10 +26,9 @@ effect fn openClock() -> Clock ! OutOfMemory {
 }`
 
 /**
- * A generic effect body whose failure channel is a row *parameter*, holding an affine owner across
- * a run that the parameter lets fail. `Ownership.fallibleRunSites` treats such a run as infallible,
- * because it reads the run's own `failures` list, which is empty here while `failureParameters` is
- * not — so no propagation exit is published for it.
+ * A generic effect body whose failure channel is a generic type, holding an affine owner across a
+ * run that the type lets fail. `Ownership.fallibleRunSites` used to inspect only concrete members,
+ * so no propagation exit was published for it.
  *
  * Issue #68 reads that as a leak in every body of this shape. Measured, this one is not: the owner
  * is released on the failing path as well as the succeeding one, and the counts balance. The two
@@ -35,37 +39,41 @@ effect fn openClock() -> Clock ! OutOfMemory {
  */
 const generic = `${provider}
 
-effect fn holding<A, !E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
+effect fn holding<A, E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
   let value = run move self
   drop move held
   return move value
 }`
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
-const failingRun = `${generic}
+const failingRun = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let clock = run openClock()
   return run holding(failing(), move clock)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release is never in doubt. */
-const succeedingRun = `${generic}
+const succeedingRun = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${generic}
 
-effect fn fine() -> i32 ! OutOfMemory { return 7 }
+effect fn fine() -> i32 ! OutOfMemoryError { return 7 }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let clock = run openClock()
   return run holding(fine(), move clock)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 

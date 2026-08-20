@@ -43,7 +43,7 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
       )
       const binding = occurrenceAt(snapshot, source, 'allocator')
-      const actor = occurrenceAt(snapshot, source, 'SystemAllocator')
+      const actor = occurrenceAt(snapshot, source, 'SystemAllocator', 1)
       const operation = occurrenceAt(snapshot, source, 'make')
       assert.strictEqual(binding?.role, 'Declaration')
       assert.strictEqual(actor?.role, 'Actor')
@@ -164,7 +164,8 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 })
 
 it.effect('links public Effect operations to visible standard-library source', () => {
-  const source = `fn increment(value: i32) -> i32 { return value + 1 }
+  const source = `import silk.effects as Effect
+fn increment(value: i32) -> i32 { return value + 1 }
 effect fn answer() -> i32 { return 41 }
 pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -183,7 +184,7 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
         occurrence === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text,
-        'pub effect fn map<A, B, !E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
+        'pub effect fn map<A, B, E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
       )
       return undefined
     }),
@@ -191,7 +192,8 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
 })
 
 it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
-  const source = `import silk.vector { make, asSlice, asMutSlice }
+  const source = `import silk.usize as usize
+import silk.vector { make, asSlice, asMutSlice }
 pub fn main() -> i32 {
   let mut values = make<i32>()
   let shared = asSlice<i32>(&values)
@@ -228,7 +230,7 @@ pub fn main() -> i32 {
         vectorSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(vectorSource)),
         'RawBuffer.view<T>',
       )
-      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw-buffer')?.source
+      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw_buffer')?.source
       assert.include(
         rawBufferSource === undefined
           ? ''
@@ -241,7 +243,9 @@ pub fn main() -> i32 {
 })
 
 it.effect('navigates and presents the source-defined owned Bytes surface', () => {
-  const source = `import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
+  const source = `import silk.bytes { Bytes }
+import silk.usize as usize
+import silk.bytes { Bytes as OwnedBytes, make, copy, append, length, asSlice, asMutSlice }
 pub fn main() -> i32 {
   let bytes = Bytes.make()
   return usize.toI32(length(&bytes))
@@ -296,7 +300,12 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the source-defined logging surface', () => {
-  const source = `import silk.logging { Logger }
+  const source = `import silk.effects as Effect
+import silk.logging { InMemoryLogger }
+import silk.logging { LogError }
+import silk.logging { LogLevel }
+import silk.logging { StdoutLogger }
+import silk.logging { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {
   return run Effect.logAt(LogLevel.warning(), "ready")
 }
@@ -310,7 +319,7 @@ pub fn main() -> i32 {
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
-      const logger = occurrenceAt(snapshot, source, 'Logger', 1)
+      const logger = occurrenceAt(snapshot, source, 'Logger', 3)
       assert.strictEqual(logger?.role, 'Type')
       assert.strictEqual(logger?.declaration?.module, 'silk/logging')
 
@@ -366,15 +375,17 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the portable Path and FileSystem surface', () => {
-  const source = `import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
+  const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
 effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let info = run FileSystem.stat(path)
   return run exists(path)
 }
-effect fn locate(base: &Path) -> Path ! FileError | OutOfMemory ? &mut Allocator {
+effect fn locate(base: &Path) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   return run resolve(base, "child")
 }
-effect fn canonical() -> Path ! OutOfMemory ? &mut Allocator { return run Path.root() }
+effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run Path.root() }
 fn code(error: &FileError) -> i32 { return FileError.operationCode(error.operation) }
 pub fn main() -> i32 { return 42 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -382,7 +393,11 @@ pub fn main() -> i32 { return 42 }`
       for (const [spelling, ordinal, expected] of [
         ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
         ['exists', 1, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
-        ['resolve', 1, ['pub effect fn resolve(', '! FileError | OutOfMemory ? &mut Allocator']],
+        [
+          'resolve',
+          1,
+          ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator'],
+        ],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.strictEqual(occurrence?.declaration?.module, 'silk/filesystem', spelling)
@@ -498,7 +513,8 @@ it.effect(
   () =>
     Analysis.ofSourceRealized(
       'main',
-      encoder.encode(`struct Pair { left: i32 }
+      encoder.encode(`import silk.core { SystemAllocator }
+struct Pair { left: i32 }
 fn pick() -> i32 {
   let pair = Pair { left: 1 }
   let allocator = SystemAllocator.make()
@@ -648,6 +664,54 @@ pub fn main() -> i32 {
   )
 })
 
+it.effect('scopes let-pattern and if-let bindings for completion and navigation', () => {
+  const source = `struct Full { value: i32 }
+pub fn main() -> i32 {
+  let first = Full { value: 1 }
+  let Full { value } = move first
+  let copied = val
+  let second = Full { value: 2 }
+  if let Full inner = &second { let taken = inn } else { let missed = inn }
+  return value
+}`
+  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const atCompletion = (prefix: string) =>
+        Analysis.completionAt(snapshot, 'main', source.indexOf(prefix) + prefix.length)
+      assert.include(
+        atCompletion('let copied = val')?.candidates.map((candidate) => candidate.label) ?? [],
+        'value',
+      )
+      assert.include(
+        atCompletion('let taken = inn')?.candidates.map((candidate) => candidate.label) ?? [],
+        'inner',
+      )
+      assert.notInclude(
+        atCompletion('let missed = inn')?.candidates.map((candidate) => candidate.label) ?? [],
+        'inner',
+      )
+
+      const declarationOffset = source.indexOf('value }')
+      const useOffset = source.lastIndexOf('value')
+      const declaration = Analysis.semanticOccurrenceAt(snapshot, 'main', declarationOffset)
+      const use = Analysis.semanticOccurrenceAt(snapshot, 'main', useOffset)
+      assert.strictEqual(declaration?.role, 'Declaration')
+      assert.strictEqual(use?.declaration?.selectionSpan.start, declaration?.span.start)
+      assert.strictEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', useOffset)?.presentation.text,
+        'let value: i32',
+      )
+      assert.strictEqual(
+        Analysis.statementsOf(snapshot, 'main').filter(
+          (statement) => statement._tag === 'BindStatement',
+        ).length,
+        5,
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('retains exact import, alias, qualifier, and unavailable-member tokens', () => {
   const root = `import lib as Library { answer as read, hidden }
 pub fn main() -> i32 { return read() }`
@@ -680,8 +744,47 @@ fn hidden() -> i32 { return 0 }`
   )
 })
 
+it.effect('keeps struct field tooling visibility-aware across modules', () => {
+  const root = `import lib as Model { Secret, make }
+fn invalid() -> i32 {
+  let secret = Model.Secret { value: 1, key: 2 }
+  return 0
+}
+pub fn main() -> i32 {
+  let secret = Model.make(1)
+  return secret.
+}`
+  const library = `pub struct Secret { pub value: i32 key: i32 }
+pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
+  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    Effect.map((snapshot) => {
+      const completionOffset = root.lastIndexOf('secret.') + 'secret.'.length
+      const labels = Analysis.completionAt(snapshot, 'main', completionOffset)?.candidates.map(
+        (candidate) => candidate.label,
+      )
+      assert.include(labels ?? [], 'value')
+      assert.notInclude(labels ?? [], 'key')
+
+      const privateInitializer = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'main',
+        root.indexOf('key:'),
+      )
+      assert.strictEqual(privateInitializer?.resolution._tag, 'Available')
+      assert.strictEqual(privateInitializer?.declaration?.module, 'lib')
+      assert.include(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        'SEM0021',
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
-  const root = `import types.Models as Schema { Box as Selected }
+  const root = `import silk.box { Box }
+import types.Models as Schema { Box as Selected }
 struct Selected {}
 struct Problem {}
 pub fn main() -> i32 { return 0 }`
@@ -694,7 +797,7 @@ pub struct Other {}`
       const box = Type.nominal('types/Models', 'Box', Object.freeze(['i32']))
       const other = Type.nominal('types/Models', 'Other')
       const problem = Type.nominal('main', 'Problem')
-      const failureRow = Type.parameter({ module: 'main', name: 'transform' }, 0, 'E', 'FailureRow')
+      const failureRow = Type.parameter({ module: 'main', name: 'transform' }, 0, 'E')
       const requirementRow = Type.parameter(
         { module: 'main', name: 'transform' },
         1,
@@ -707,25 +810,24 @@ pub struct Other {}`
 
       const effect = Type.effect(
         Type.reference('Exclusive', box),
-        Object.freeze([problem]),
+        [problem, failureRow],
         'Shared',
-        Object.freeze([
+        [
           Object.freeze({
             capability: Type.allocator,
             role: 'Heap',
             access: 'Exclusive' as const,
           }),
-        ]),
-        [failureRow],
+        ],
         [requirementRow],
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator@Heap | R>',
+        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>',
       )
       assert.strictEqual(
-        Presentation.genericArgument(Type.failureRowArgument([problem]), 'main', scope),
-        '! Problem',
+        Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
+        'Problem',
       )
       assert.strictEqual(
         Presentation.genericArgument(
@@ -735,12 +837,12 @@ pub struct Other {}`
           'main',
           scope,
         ),
-        '? &mut Allocator@Heap',
+        '? &mut Allocator at Heap',
       )
-      const union = Type.union(Object.freeze([problem, Type.outOfMemory]))
+      const union = Type.union(Object.freeze([problem, Type.outOfMemoryError]))
       assert.strictEqual(
         union._tag === 'Normalized' ? Presentation.type(union.type, 'main', scope) : undefined,
-        'Problem | OutOfMemory',
+        'Problem | OutOfMemoryError',
       )
       return undefined
     }),
@@ -748,7 +850,8 @@ pub struct Other {}`
 })
 
 it.effect('keeps recovered Unicode-adjacent occurrence indexes compact and deterministic', () => {
-  const source = `// π🙂
+  const source = `import silk.core { SystemAllocator }
+// π🙂
 struct Problem {}
 pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
@@ -930,7 +1033,7 @@ it.effect('presents and completes the sealed suspension intrinsic with its exact
       const hover = Analysis.hoverSubjectAt(snapshot, 'main', operationOffset)
       assert.strictEqual(
         hover?.presentation.text,
-        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
       )
 
       const completionOffset = encoder.encode(
@@ -942,7 +1045,7 @@ it.effect('presents and completes the sealed suspension intrinsic with its exact
       )
       assert.strictEqual(
         candidate?.detail?.text,
-        'fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>',
+        'fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>',
       )
       return undefined
     }),

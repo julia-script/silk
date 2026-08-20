@@ -46,7 +46,6 @@ pub fn main() -> i32 { return 0 }`,
     // Repeated invocation neither consumes the parser nor demands a stronger receiver.
     assert.notInclude(codesOf(snapshot), 'OWN0014')
     assert.notInclude(codesOf(snapshot), 'OWN0001')
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
   }),
 )
 
@@ -71,7 +70,6 @@ pub fn main() -> i32 { return 0 }`,
     assert.strictEqual(diagnostic.reason.field, '#0')
     assert.include(diagnostic.message, 'access to the whole aggregate')
     // The take is rejected as an invocation, not reinterpreted as a field extraction.
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
   }),
 )
 
@@ -124,7 +122,6 @@ pub fn main() -> i32 { return 0 }`,
     // The first invocation takes the whole owner, so the second use is a plain use-after-move —
     // never a partial move of the field out of the aggregate.
     assert.include(codesOf(snapshot), 'OWN0001')
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
     assert.notInclude(codesOf(snapshot), 'OWN0002')
   }),
 )
@@ -140,7 +137,6 @@ pub fn main() -> i32 { return 0 }`,
     )
 
     assert.notInclude(codesOf(snapshot), 'OWN0014')
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
     assert.notInclude(codesOf(snapshot), 'OWN0001')
   }),
 )
@@ -240,6 +236,53 @@ pub fn main() -> i32 { return 0 }`,
 
     // A callable parameter is not stored in an aggregate, so the receiver rule never applies.
     assert.notInclude(codesOf(snapshot), 'OWN0014')
+    assert.include(codesOf(snapshot), 'OWN0001')
+  }),
+)
+
+it.effect('duplicates an explicitly Copy aggregate whose realized callable captures are Copy', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-callable-ownership/copy-realization',
+      `struct Offset { value: i32 }
+impl Copy for Offset {}
+struct Parser<F: fn(i32) -> i32> { parse: F }
+impl<F: fn(i32) -> i32> Copy for Parser<F> {}
+fn decode(value: i32, offset: Offset) -> i32 { return value + offset.value }
+fn consume<F: fn(i32) -> i32>(parser: Parser<F>, value: i32) -> i32 {
+  return parser.parse(value)
+}
+pub fn main() -> i32 {
+  let offset = Offset { value: 1 }
+  let parser = Parser { parse: decode(move offset) }
+  return consume(parser, 1) + consume(parser, 2)
+}`,
+    )
+
+    assert.notInclude(codesOf(snapshot), 'SEM0083')
+    assert.notInclude(codesOf(snapshot), 'OWN0001')
+  }),
+)
+
+it.effect('keeps an executable aggregate affine when its realized callable owns a capture', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-callable-ownership/affine-realization',
+      `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Parser<F: once fn(i32) -> i32> { parse: F }
+impl<F: once fn(i32) -> i32> Copy for Parser<F> {}
+fn decode(value: i32, token: Token) -> i32 { return value + token.value }
+fn consume<F: once fn(i32) -> i32>(parser: Parser<F>, value: i32) -> i32 {
+  return parser.parse(value)
+}
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let parser = Parser { parse: decode(move token) }
+  return consume(move parser, 1) + consume(move parser, 2)
+}`,
+    )
+
     assert.include(codesOf(snapshot), 'OWN0001')
   }),
 )

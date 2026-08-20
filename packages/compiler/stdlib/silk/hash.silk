@@ -25,6 +25,9 @@
 // reachable from a generic body through the operator that spells it, and `==` spells `equals`. The
 // hash is reached by naming the bound, which is the one call shape no operator provides.
 
+import silk.bool as bool
+import silk.u64 as u64
+
 /// The value every hash in one collection is computed under.
 ///
 /// # Details
@@ -36,6 +39,8 @@ pub struct HashSeed {
   /// The seed value handed to every hash the collection computes.
   pub value: u64
 }
+
+impl Copy for HashSeed {}
 
 /// Constructs a seed from one value.
 pub fn seed(value: u64) -> HashSeed {
@@ -55,11 +60,11 @@ pub fn seed(value: u64) -> HashSeed {
 /// A witness must compute equal hashes for two keys its own `equals` reports equivalent, under every
 /// seed. Nothing checks this — a witness that breaks it makes a present key unreachable, and a
 /// collection can neither detect the breakage nor recover from it.
-pub interface HashKey<T> {
+pub interface HashKey {
   /// Reports whether two keys name the same collection entry.
-  fn equals(left: &T, right: &T) -> bool
+  operator == fn equals(left: &Self, right: &Self) -> bool
   /// Computes the key's deterministic 64-bit hash under the collection seed.
-  fn hash(value: &T, seed: &HashSeed) -> u64
+  fn hash(value: &Self, seed: &HashSeed) -> u64
 }
 
 /// Mixes one value under one seed into a hash spread across the whole 64-bit range.
@@ -99,6 +104,8 @@ pub struct Word {
   pub value: u64
 }
 
+impl Copy for Word {}
+
 /// Constructs an integer key.
 pub fn word(value: u64) -> Word {
   return Word { value: value }
@@ -112,4 +119,4 @@ fn wordHash(value: &Word, seed: &HashSeed) -> u64 {
   return mix(seed, value.value)
 }
 
-impl HashKey<Word> for Word { equals: Word.wordEquals hash: Word.wordHash }
+impl HashKey for Word { equals: Word.wordEquals hash: Word.wordHash }

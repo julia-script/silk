@@ -30,33 +30,44 @@ erase different construction sites merely because their public contracts match.
 - **WHEN** an ordinary function performs eager setup and returns `effect { ... }`
 - **THEN** the returned Effect preserves its construction-site identity and captured environment until it is run or dropped
 
-### Requirement: Effect failure rows are normalized owned contracts
+### Requirement: Effect failure channels contain ordinary types
 
-The `!` row SHALL be a deterministic normalized set of canonical nominal types. `fail` SHALL stop
-the current Effect execution with success type `never`, copying a Copy payload or consuming an
-explicitly moved affine payload. Failure payloads MUST be detached owned values with no lexical or
-provider borrow.
+For `Effect<A ! E ? R>`, `E` SHALL be an ordinary detached owned type or normalized structural
+union. The `!` token SHALL label the channel only; it SHALL NOT create a distinct type kind, binder
+form, or value wrapper. `never` SHALL denote the empty failure channel. `fail` SHALL stop the current
+Effect execution with success type `never`, copying a Copy payload or consuming an explicitly moved
+affine payload.
 
 #### Scenario: Fail with a Copy problem
 
 - **WHEN** an Effect executes `fail problem` for a Copy nominal value
 - **THEN** the failure channel receives the copied value without requiring `fail move`
 
-### Requirement: Effect catch subtracts and composes rows
+#### Scenario: Use the same failure union as a value
 
-`Effect.catch(effect, handler)` and `effect |> Effect.catch(handler)` SHALL select one nominal
-failure type `S`, inferred from the handler or supplied as the first explicit argument in
-`Effect.catch<S>`, require singleton `S` to be a checked member of protected failure row `E`, and
-compute the semantic residual as `Without<E, S> | F`, where `F` is the handler's failure row.
-Success bypasses the handler and every nonmatching member belongs to the computed remainder.
-Membership proves a type relationship but SHALL NOT erase a failure without the handling operation.
+- **WHEN** `E` is `NotFoundError | OfflineError`
+- **THEN** the Effect failure channel, a propagated failure value, and a handler parameter all use that same ordinary union without a value conversion
 
-The selected nominal binder `S` SHALL be first so positional-prefix syntax `Effect.catch<Problem>`
-remains an ordinary generic call. A generic declaration MAY retain open `S` as a lifted singleton
-member parameter with assumed membership evidence. At each complete application, whether inferred
-or explicit, `S in E` SHALL require `S` to resolve to exactly one concrete nominal failure type;
-`never`, a structural or multi-member union, and a non-failure value SHALL fail this ordinary
-checked constraint before lowering.
+#### Scenario: Reject a borrowed failure payload
+
+- **WHEN** an Effect attempts to fail with a non-detached lexical borrow
+- **THEN** analysis reports the ordinary ownership violation rather than a failure-kind diagnostic
+
+### Requirement: Selective recovery subtracts ordinary unions
+
+`Effect.catch(effect, handler)` and `effect |> Effect.catch(handler)` SHALL select one ordinary type
+or union `S`, inferred from the handler or supplied as the first explicit argument in
+`Effect.catch<S>`, require nonempty `S` to be wholly contained in protected failure type `E`, pass
+`S` directly to the handler, and compute the semantic residual as `Without<E, S> | F`, where `F` is
+the handler's failure type. Handler success `B` SHALL join protected success `A` as an ordinary
+finite `A | B` union when needed. Success bypasses the handler and every nonmatching alternative
+belongs to the computed remainder. Membership proves a type relationship but SHALL NOT erase a
+failure without the handling operation.
+
+The selected binder `S` SHALL be first so positional-prefix syntax `Effect.catch<ProblemError>`
+remains an ordinary generic call. A generic declaration MAY retain open `S` with assumed membership
+evidence. At each complete application, whether inferred or explicit, `S in E` SHALL require every
+alternative of nonempty `S` to belong to `E` before lowering.
 The whole-row `Effect.catch` alias SHALL be removed; whole-row recovery SHALL use
 `Effect.catchAll`. Singleton `Effect.catch` SHALL be an ordinary wrapper over sealed
 `Intrinsic.catchFailure`, whose callable contract carries the same checked membership and
@@ -70,22 +81,42 @@ the protected Effect SHALL run exactly once, success SHALL bypass the handler, a
 SHALL invoke the handler with its payload, and a nonselected failure SHALL propagate in the residual
 row unchanged. Evaluator, WebAssembly, and native execution SHALL agree on results, failure tags,
 and cleanup order. A syntax, kind, inference, or membership failure SHALL take precedence and prevent
-MIR construction. This change adds no multi-member selector or runtime row dictionary.
+MIR construction. This change adds no runtime type dictionary.
 
-#### Scenario: Type singleton catch through a pipeline
+#### Scenario: Type selective catch through a pipeline
 
 - **WHEN** `relay(0) |> Effect.catch<Problem>(recover)` is analyzed before target availability
-- **THEN** the call contract gives `recover` the nominal `Problem` payload and computes the protected remainder with `Without`
+- **THEN** the call contract gives `recover` the selected `Problem` payload and computes the protected remainder with `Without`
 
 #### Scenario: Infer singleton catch from its handler
 
 - **WHEN** `Effect.catch(effect, recoverProblem)` supplies a handler whose input is nominal `Problem`
 - **THEN** ordinary call inference selects singleton `Problem`, checks `Problem in E`, and computes the same remainder as `Effect.catch<Problem>(effect, recoverProblem)`
 
-#### Scenario: Reject a non-singleton catch selector
+#### Scenario: Reject an invalid catch selector
 
-- **WHEN** explicit arguments or handler inference would select `never`, `First | Third`, or a non-nominal failure payload for `S`
-- **THEN** the common checked-constraint solver reports an invalid failure selector before intrinsic availability and without constructing multi-member dispatch
+- **WHEN** explicit arguments or handler inference would select `never` or a type containing an alternative absent from `E`
+- **THEN** the common checked-constraint solver reports an invalid failure selector before intrinsic availability and without constructing dispatch
+
+#### Scenario: Recover one member with a fallback
+
+- **WHEN** an `Effect<i32 ! NotFoundError | OfflineError>` catches `NotFoundError` with a `string` fallback
+- **THEN** the result is `Effect<i32 | string ! OfflineError>`
+
+#### Scenario: Re-fail an unhandled member
+
+- **WHEN** a catch-all handler matches one failure member and fails again with the unmatched value
+- **THEN** ordinary union narrowing preserves that unmatched member in the output failure channel
+
+#### Scenario: Catch the whole ordinary failure value
+
+- **WHEN** `Effect.catchAll` protects `Effect<A ! E>`
+- **THEN** its handler accepts `E` directly, without `Row<!E>` or another reification wrapper
+
+#### Scenario: Reject an invalid selected subset
+
+- **WHEN** `S` is `never` or contains an alternative absent from protected failure type `E`
+- **THEN** ordinary type constraints reject the catch before lowering
 
 #### Scenario: Preserve an open failure remainder
 
@@ -127,15 +158,15 @@ MIR construction. This change adds no multi-member selector or runtime row dicti
 - **WHEN** two reachable source applications specialize to one deduplicated wrapper instance containing singleton catch
 - **THEN** both call sites execute through the deduplicated concrete instance without conflating their runtime payloads or outcomes
 
-#### Scenario: Migrate whole-row catch to catchAll
+#### Scenario: Recover the whole ordinary failure value
 
-- **WHEN** source needs executable whole-row recovery with a `Row<!E>` handler rather than one nominal handler input
-- **THEN** it uses `Effect.catchAll`; omitting explicit generic arguments from a nominal-handler `Effect.catch(effect, handler)` instead performs ordinary singleton inference and does not select the removed whole-row alias
+- **WHEN** `Effect.catchAll` protects `Effect<A ! E>`
+- **THEN** its handler accepts ordinary `E` directly and the protected failure type is removed in full
 
-#### Scenario: Preserve singleton dispatch scope
+#### Scenario: Select a failure union
 
-- **WHEN** a caller wants to handle `First | Third` from a larger row
-- **THEN** it composes singleton catches or another source operation while set-to-set `Without` remains only the underlying type algebra in this change
+- **WHEN** a caller catches `FirstError | ThirdError` from a larger ordinary failure union
+- **THEN** both selected alternatives invoke the handler and every unselected alternative propagates unchanged
 
 #### Scenario: Recover through a pipeline
 
@@ -166,26 +197,27 @@ captured providers SHALL be reused.
 
 ### Requirement: Provision distinguishes shared borrow, exclusive borrow, and acquisition
 
-Requirement binding SHALL relate whole protected row `R`, exact selected singleton row `S`, and one
+Requirement binding SHALL relate whole protected row `R`, exact selected service-role key `S`, and one
 of three source-spellable provider parameter modes:
 
 - shared `&P provides S from R`;
 - exclusive `&mut P provides S from R`;
 - owned `P provides S from R`.
 
-Shared providers SHALL select only shared stored requirements. Exclusive and owned providers MAY
-satisfy shared or exclusive stored requirements, but selection MUST return the stored member's
-original access and role. For every mode, `P` MUST equal the selected capability or have one unique,
+Shared providers SHALL satisfy only shared stored requirements. Exclusive and owned providers MAY
+satisfy shared or exclusive stored requirements. Selection MUST resolve the service-role key before
+validating its stored access demand. For every mode, `P` MUST equal the selected capability or have one unique,
 valid service-conformance witness.
 
-When `S` is unbound, every compatible capability-role entry SHALL be considered and exactly one
+When `S` is unbound, every compatible service-role key SHALL be considered and exactly one
 candidate MUST remain. Whenever `S` is independently bound—by an explicit row generic argument or
 by another supplied-argument occurrence—the constraint SHALL first require it to normalize to
 exactly one member, then validate that member and its provider match (identity or one unique
 conformance witness). Empty or multi-member
 bound selectors SHALL report selector-cardinality failure before provider matching. Explicit
 disambiguation SHALL name
-the complete access-capability-role entry; there SHALL be no role-only intrinsic filter and an
+the complete service-role key as `Service` or `Service at Role`; access SHALL NOT appear in the
+selector, there SHALL be no role-only intrinsic filter, and an
 expected result row MUST NOT disambiguate selection. No match, multiple inferred members, ambiguous
 conformance, and invalid conformance SHALL have distinct deterministic outcomes before execution.
 When multiple provider constraints share an unbound `S`, analysis SHALL solve them conjunctively by
@@ -234,7 +266,7 @@ or construct the result Effect type.
 `Effect.provide`, and `Effect.provideMut` SHALL be ordinary fixed-mode Silk declarations. Borrowed
 forms SHALL not imply provider ownership or cleanup. Moving an affine owned provider SHALL make the
 result take-once; an owned Copy provider SHALL follow ordinary snapshot and repeatability rules.
-`Effect.provideWith` SHALL acquire a fresh provider implementation `P` per execution, where `P` may
+`Effect.provideEffect` SHALL acquire a fresh provider implementation `P` per execution, where `P` may
 differ from selected capability `C`, bind it through an exclusive provider parameter, and drop every
 successfully acquired owner after success or typed failure without replacing the original outcome.
 
@@ -280,18 +312,18 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Keep same-role multi-capability selection ambiguous
 
-- **WHEN** a provider conforms to `Clock@Primary` and `Logger@Primary` and both occur in the protected row
+- **WHEN** a provider conforms to `Clock at Primary` and `Logger at Primary` and both occur in the protected row
 - **THEN** the shared role name does not choose between them and inferred selection remains ambiguous
 
-#### Scenario: Select an explicit complete shared requirement
+#### Scenario: Select an explicit shared requirement key
 
-- **WHEN** `Intrinsic.bindRequirement<&Logger@Audit>(effect, &provider)` is called
-- **THEN** the first generic argument fixes the exact stored access, capability, and role before provider conformance is validated
+- **WHEN** `Intrinsic.bindRequirement<Logger at Audit>(effect, &provider)` is called
+- **THEN** the first generic argument fixes the exact service-role key before provider conformance and shared access are validated
 
-#### Scenario: Select an explicit complete exclusive requirement in a pipeline
+#### Scenario: Select an explicit exclusive requirement key in a pipeline
 
-- **WHEN** `effect |> Effect.provideMut<&mut Logger@Audit>(&mut provider)` is composed
-- **THEN** the ordinary positional generic prefix fixes `S` while all later type and row binders remain inferred from supplied arguments and constraints
+- **WHEN** `effect |> Effect.provideMut<Logger at Audit>(&mut provider)` is composed
+- **THEN** the ordinary positional generic prefix fixes `S` while the helper validates exclusive access and all later type and row binders remain inferred from supplied arguments and constraints
 
 #### Scenario: Reject an invalid explicit selector cardinality
 
@@ -390,7 +422,7 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Preserve a constraint through a stored provider section
 
-- **WHEN** `let provideLogger = Effect.provideMut<&mut Logger>(&mut logger)` is stored or passed through another function before receiving an Effect
+- **WHEN** `let provideLogger = Effect.provideMut<Logger>(&mut logger)` is stored or passed through another function before receiving an Effect
 - **THEN** its semantic callable value retains the quantified selection obligation and provider capture until static application
 
 #### Scenario: Drop a stored provider section
@@ -400,12 +432,12 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Acquire a conforming implementation
 
-- **WHEN** `provideWith` protects an Effect requiring `Logger` and acquisition produces owned `StdoutLogger` with its own failures and requirements
+- **WHEN** `provideEffect` protects an Effect requiring `Logger` and acquisition produces owned `StdoutLogger` with its own failures and requirements
 - **THEN** exclusive conformance selects `Logger`, acquisition channels compose, and the acquired owner drops before the completed outcome escapes
 
 #### Scenario: Catch outside per-run acquisition
 
-- **WHEN** a failing Effect is wrapped by `provideWith` and then by executable `Effect.catchAll`
+- **WHEN** a failing Effect is wrapped by `provideEffect` and then by executable `Effect.catchAll`
 - **THEN** the per-run provider drops before recovery begins
 
 #### Scenario: Provide one shared service
@@ -420,7 +452,7 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Catch outside per-run acquisition
 
-- **WHEN** a failing Effect is wrapped by `provideWith` and then by `Effect.catch`
+- **WHEN** a failing Effect is wrapped by `provideEffect` and then by `Effect.catch`
 - **THEN** the per-run provider drops before recovery begins
 
 ### Requirement: Traps remain outside Effect failure and cleanup
@@ -600,7 +632,7 @@ runtime. Traps and future interruption MUST NOT be converted into typed `E` valu
 ### Requirement: Standard Effect combinators are library-defined
 
 `map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `provide`, `provideMut`, and
-`provideWith` SHALL resolve to canonical ordinary Silk declarations. The compiler MUST NOT select
+`provideEffect` SHALL resolve to canonical ordinary Silk declarations. The compiler MUST NOT select
 their semantics from their names, actors, library origin, or a dedicated combinator HIR/MIR
 operation. Equivalent user code using the compiler-owned Effect core SHALL receive the same typing,
 ownership, execution, and cleanup behavior.
@@ -622,17 +654,18 @@ ownership, execution, and cleanup behavior.
 
 ### Requirement: Synchronous Effects retain a suspension-compatible abstraction
 
-The public Effect contract SHALL NOT expose a concrete callback ABI, scheduler object, continuation
-frame, runtime requirement record, or complete-or-suspended representation. A closed Effect call
-graph that cannot reach the suspension intrinsic MUST NOT contain continuation allocation,
-scheduler or fiber linkage, atomic synchronization, a mandatory complete-versus-pending branch, or
-a private suspension dispatcher. Existing source-defined combinators SHALL compose with
-suspendable Effects without changing their contracts or recognizing a private pending state.
+The public Effect contract SHALL NOT expose a concrete callback ABI, scheduler object, coroutine
+frame, runtime requirement record, execution-stack allocator, or complete-or-suspended
+representation. A closed Effect call graph that cannot reach the suspension intrinsic MUST NOT
+contain coroutine-frame transformation, scheduler or fiber linkage, atomic synchronization, a
+mandatory complete-versus-pending branch, or a private suspension dispatcher. Existing
+source-defined combinators SHALL compose with suspendable Effects without changing their contracts
+or recognizing a private pending state.
 
 #### Scenario: Run a closed synchronous pipeline
 
 - **WHEN** a closed Effect call graph cannot reach suspension, fork, interruption, or a fiber observation
-- **THEN** execution retains its direct synchronous entry and call shape and links no continuation or concurrency runtime solely because it uses library Effect combinators
+- **THEN** execution retains its direct synchronous entry and call shape and links no coroutine or concurrency runtime solely because it uses library Effect combinators
 
 #### Scenario: Preserve the runner seam under suspension
 
@@ -660,59 +693,181 @@ over minimal `Intrinsic` machinery.
 ### Requirement: Effect suspension is explicit lazy composition
 
 The canonical ordinary Silk function
-`Effect.suspend<A, !E, ?R>(deferred: once Effect<A ! E ? R>)` SHALL defer execution of `deferred`
-until the returned Effect is run. Its result contract SHALL be
-`A ! E | OutOfMemory ? R | &mut Allocator`: continuation storage exhaustion is an explicit typed
-failure and allocator requirement only at a suspension boundary. The compiler MUST NOT recognize
-the public function by actor, module, or operation spelling.
+`Effect.suspend<A, E, ?R>(deferred: once Effect<A ! E ? R>)` SHALL defer execution of `deferred`
+until the returned Effect is run and SHALL transfer its execution through the explicit stack-safe
+boundary. Its result contract SHALL be exactly `A ! E ? R`: suspension MUST NOT add an allocation
+failure or allocator requirement. Each concrete suspendable invocation SHALL reuse one statically
+shaped coroutine frame across its possible suspension states. Dynamic execution-stack exhaustion
+SHALL be a fatal trap outside the typed failure channel. The compiler MUST NOT recognize the public
+function by actor, module, or operation spelling.
 
 #### Scenario: Keep suspension lazy
 
 - **WHEN** an Effect with observable work is passed to `Effect.suspend` and the returned Effect is not run
 - **THEN** the deferred work does not execute and dropping the returned Effect releases its captures exactly once
 
-#### Scenario: Report continuation exhaustion explicitly
+#### Scenario: Preserve the child channels
 
-- **WHEN** the selected allocator refuses storage for a continuation at `Effect.suspend`
-- **THEN** the suspended Effect fails with `OutOfMemory`, the deferred body does not start, and no continuation owner is created
+- **WHEN** `Effect.suspend` receives `Effect<A ! E ? R>`
+- **THEN** the returned Effect has exactly `A ! E ? R` with no `OutOfMemoryError` member and no `Allocator` requirement introduced by suspension
 
-### Requirement: Explicitly suspended Effect cycles are stack safe
+#### Scenario: Preserve a nested Effect success value
 
-A terminating self-recursive or mutually-recursive Effect cycle SHALL use native and WebAssembly
-machine stack bounded by a constant independent of logical recursion depth when every recursive
-cycle crosses `Effect.suspend`. The guarantee SHALL include non-tail work and owned state retained
-after the suspended child completes. Recursion that does not cross `Effect.suspend`, ordinary
-function recursion, and recursive Drop hooks SHALL receive no stack-safety guarantee.
+- **WHEN** the deferred child succeeds with `Effect<i32>` as its declared success value
+- **THEN** one run of `Effect.suspend` produces that nested `Effect<i32>` value without flattening or running it
 
-#### Scenario: Resume non-tail self-recursion
+#### Scenario: Exhaust private execution storage
 
-- **WHEN** a recursive Effect suspends before its recursive run and adds one to the returned value at each of one million levels
-- **THEN** native execution returns the expected value without exhausting the machine stack
+- **WHEN** compiled suspended recursion exhausts its finite compiler-owned execution stack
+- **THEN** execution traps without producing a typed failure or permitting `Effect.catch` to recover the exhaustion
 
-#### Scenario: Resume mutual recursion
+#### Scenario: Do not interpret suspension as parking
 
-- **WHEN** two Effects call each other through explicit suspension until a finite counter reaches zero
-- **THEN** native, WebAssembly, and evaluation produce the same typed result with machine-stack use bounded on native and WebAssembly
+- **WHEN** a running Effect reaches `Effect.suspend`
+- **THEN** it transfers synchronous execution of its deferred child without creating a task, parking for a wakeup, yielding scheduler fairness, or adding interruption and cancellation semantics
 
-#### Scenario: Exclude ordinary recursive cleanup
+### Requirement: Explicit suspension covers recursive cycles, not recursive declarations
 
-- **WHEN** an ordinary Drop hook recursively destroys a deep heap-linked value without crossing an Effect suspension boundary
-- **THEN** this capability makes no stack-safety promise for that destruction
+A terminating self-recursive or mutually recursive Effect graph SHALL use bounded native and Wasm
+machine stack when every possible recursive cycle crosses an explicit suspension origin. A
+suspension origin on an unrelated or avoidable branch SHALL NOT cover a cycle. Recursive functions
+and Effects without a covered cycle SHALL remain valid Silk and MUST NOT receive a mandatory
+compiler diagnostic solely because their depth is unbounded.
+
+#### Scenario: Cover mutual recursion with one suspension edge
+
+- **WHEN** every path around a mutually recursive Effect cycle crosses one explicit `Effect.suspend` edge
+- **THEN** terminating execution uses bounded native and Wasm machine stack even though the other recursive edges do not suspend
+
+#### Scenario: Leave an uncovered cycle valid
+
+- **WHEN** a recursive Effect cycle can execute without crossing any suspension origin
+- **THEN** the compiler accepts the otherwise valid program without promising bounded machine stack
+
+#### Scenario: Ignore suspension on an unrelated branch
+
+- **WHEN** a recursive cycle can avoid a branch containing `Effect.suspend`
+- **THEN** that branch does not establish the bounded-machine-stack guarantee for the cycle
+
+### Requirement: Suspension imposes no allocator implementation restriction
+
+An ordinary implementation of the `Allocator` service SHALL be permitted to suspend whenever its
+declared Effect contract permits suspension. The compiler MUST NOT apply a suspension-specific
+bootstrap, recursion, conformance, or self-hosting restriction to that implementation.
+
+#### Scenario: Suspend inside an allocator operation
+
+- **WHEN** an `Allocator` implementation satisfies its ordinary service contract and one operation reaches `Effect.suspend`
+- **THEN** it is checked like any other service implementation and receives no suspension-specific diagnostic
 
 ### Requirement: Source-defined Effect combinators compose across suspension
 
-`Effect.map`, `Effect.flatMap`, outcome reification, recovery, retry, and provision SHALL compose
-with a suspended Effect through their existing ordinary Silk definitions and public signatures.
-They MUST NOT inspect or expose a pending state, continuation frame, driver token, or private runner
-ABI. The suspended Effect's existing failure and requirement rows, including `OutOfMemory` and
-`&mut Allocator`, SHALL compose by the ordinary row rules.
+`Effect.map`, `Effect.flatMap`, outcome reification, recovery, retry, provision, and equivalent user
+combinators SHALL compose with a suspended Effect through their existing ordinary Silk definitions
+and public signatures. They MUST NOT inspect or expose a pending state, coroutine frame, driver
+token, or private runner ABI. Suspension SHALL preserve the child's failure and requirement rows
+exactly; combinators SHALL compose only the rows contributed by their ordinary inputs and callbacks.
 
 #### Scenario: Map after suspension
 
 - **WHEN** a suspended Effect succeeds and its result is transformed with `Effect.map`
-- **THEN** the mapper runs once after resumption and receives the original success value
+- **THEN** the mapper runs once after resumption and receives the original success value without adding a suspension-specific failure or requirement
 
 #### Scenario: Flat-map into suspension
 
 - **WHEN** `Effect.flatMap` selects a suspended Effect from an input success
-- **THEN** execution waits for the suspended child and preserves the unioned failure and requirement rows without exposing a pending representation
+- **THEN** execution waits for the suspended child and preserves the ordinarily unioned failure and requirement rows without exposing a pending representation or adding storage channels
+
+### Requirement: Every executable body satisfies its resolved return contract before lowering
+
+Semantic analysis SHALL prove that every reachable explicit return and fallthrough path of an ordinary function, Effect function, generic declaration, and conformance operation is compatible with the declaration's resolved return type. A reachable fallthrough SHALL produce `()` and therefore SHALL be accepted only for a unit result. An `Effect<A>` value SHALL NOT satisfy an `A` return merely because the surrounding function is effectful.
+
+#### Scenario: Reject a nested Effect at its return
+
+- **WHEN** a body declared to return `i32` returns a call whose value is `Effect<i32>`
+- **THEN** analysis reports a return-type mismatch at that expression and constructs no executable HIR or MIR body for the declaration
+
+#### Scenario: Accept an explicitly nested Effect
+
+- **WHEN** a body declared to return `Effect<i32>` returns a call whose value is `Effect<i32>`
+- **THEN** analysis accepts the return without running or flattening the value
+
+#### Scenario: Accept terminal branches without a trailing return
+
+- **WHEN** every reachable branch of a non-unit body ends in a compatible return or another terminal operation
+- **THEN** analysis accepts the body without requiring a syntactically trailing return
+
+#### Scenario: Reject reachable non-unit fallthrough
+
+- **WHEN** a reachable path reaches the closing brace of a body declared to return `i32`
+- **THEN** analysis reports a missing return at that fallthrough boundary
+
+### Requirement: Invalid reachable bodies stop at the semantic boundary
+
+A declaration with an unresolved or invalid executable body SHALL be unavailable to reachability and lowering. Calls through an interface witness SHALL preserve that same validity requirement rather than substituting an invalid mapped body into MIR.
+
+#### Scenario: Reject issue 226 before the backend
+
+- **WHEN** an interface-dispatched operation implementation violates its resolved return contract
+- **THEN** the compiler emits the source semantic diagnostic and neither MIR verification nor a backend reports the primary failure
+
+### Requirement: Requirement identity is keyed independently from access
+
+An Effect requirement SHALL be identified by its canonical service identity plus optional `at` role. Shared, exclusive, and acquired access SHALL be checked as provider compatibility and SHALL NOT create different requirement keys. Requirement union, subtraction, and diagnostics SHALL be deterministic.
+
+#### Scenario: Distinguish two clocks by role
+
+- **WHEN** one Effect requires `Clock at source` and `Clock at destination`
+- **THEN** the row contains two keys and each provision discharges only the selected role
+
+#### Scenario: Reject insufficient provider access
+
+- **WHEN** an exclusive requirement key and conformance match but the provider offers only shared access
+- **THEN** provision reports `SEM0131` without changing the requirement's identity or treating the key as absent
+
+#### Scenario: Select one key before checking access
+
+- **WHEN** an explicit `Clock at Primary` selector names one row key
+- **THEN** provision resolves that key and its conformance before validating the helper's provider access mode
+
+### Requirement: Provision helpers discharge exact keys
+
+`provide`, `provideMut`, acquisition provision, and `provideEffect` SHALL discharge only their exact selected keys and preserve all unrelated failures and requirements. `provideWith` SHALL NOT remain as an alias. `Effect.flatten` SHALL union the requirements of both layers before provision.
+
+#### Scenario: Flatten a repeated requirement
+
+- **WHEN** `Effect.flatten` receives `Effect<Effect<i32 ? &Clock> ? &Clock>`
+- **THEN** the result is `Effect<i32 ? &Clock>` with one normalized key rather than two runtime slots
+
+#### Scenario: Build a provider effectfully
+
+- **WHEN** `provideEffect` obtains a provider from an Effect with its own failure and requirements
+- **THEN** those channels compose normally while the selected provided key is removed from the protected Effect
+
+### Requirement: Finite compatible Effects join without construction identity
+
+A finite control-flow join SHALL admit Effect values whose success, failure, requirement,
+capture-access, and ownership contracts have a valid common result, even when the Effects were
+constructed at different source sites. The join SHALL preserve laziness and SHALL NOT allocate or
+erase the concrete alternatives.
+
+#### Scenario: Join two lazy branch Effects
+
+- **WHEN** an `if` selects between independently constructed `Effect<i32 ! never>` values
+- **THEN** the expression has one usable Effect type and only the selected branch runs
+
+#### Scenario: Join compatible channels
+
+- **WHEN** two branch Effects contribute distinct ordinary failure members and requirement keys
+- **THEN** the joined Effect carries their normalized unions and preserves the selected branch's exact outcome
+
+### Requirement: Composite Effect realization is finite and deterministic
+
+HIR and MIR SHALL represent the admitted alternatives as a closed finite composite whose evaluator,
+LLVM, and Wasm realizations select one alternative without heap allocation. A join with no finite
+compatible representation SHALL retain a source diagnostic.
+
+#### Scenario: Compare all engines
+
+- **WHEN** equivalent joined Effects are evaluated and compiled repeatedly
+- **THEN** all engines produce the same typed outcome, ownership cleanup, and deterministic artifact identity

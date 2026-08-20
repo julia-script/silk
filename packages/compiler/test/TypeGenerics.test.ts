@@ -40,7 +40,7 @@ const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> =>
 it.effect('retains source-shaped row expressions and callable constraints in module facts', () =>
   Effect.gen(function* () {
     const constrained = `service Binder {
-  effect fn bind<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
+  effect fn bind<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
   ! E
   ? Without<R, S>
   where &mut P provides S from R, S in R
@@ -97,7 +97,7 @@ it.effect('rejects residual rows at the complete-application specialization fron
     const module = 'generics/frontier'
     const snapshot = yield* Analysis.ofSourceRealized(
       module,
-      new TextEncoder().encode(`effect fn forward<A, !E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+      new TextEncoder().encode(`effect fn forward<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
   return run self
 }
 pub fn main() -> i32 { return 0 }`),
@@ -142,7 +142,7 @@ it('parses declaration parameters and explicit call specialization losslessly', 
 })
 
 it('parses channel-kinded generic binders losslessly', () => {
-  const channelSource = `effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
+  const channelSource = `effect fn transform<A, E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
   return self
 }`
   const syntax = Parser.parse(
@@ -156,14 +156,14 @@ it('parses channel-kinded generic binders losslessly', () => {
         .filter((token) => token.kind !== 'Whitespace')
         .map((token) => token.kind),
     ),
-    [['Identifier'], ['Bang', 'Identifier'], ['Question', 'Identifier']],
+    [['Identifier'], ['Identifier'], ['Question', 'Identifier']],
   )
   assert.deepEqual(syntax.parserDiagnostics, [])
 })
 
 it('normalizes contract rows and infers selected-entry remainders', () => {
   const owner = { module: 'generics/Rows', name: 'transform' }
-  const failureRemainder = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const failureRemainder = Type.parameter(owner, 0, 'E')
   const requirementRemainder = Type.parameter(owner, 1, 'R', 'RequirementRow')
   const problem = Type.nominal('generics/Rows', 'Problem')
   const other = Type.nominal('generics/Rows', 'Other')
@@ -171,14 +171,12 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
   const allocator = Type.nominal('generics/Rows', 'Allocator')
   const pattern = Type.effect(
     'i32',
-    [problem],
+    [failureRemainder],
     'Shared',
     [{ capability: clock, role: 'Primary', access: 'Shared' }],
-    [failureRemainder],
     [requirementRemainder],
   )
   const actual = Type.effect('i32', [other, problem, other], 'Shared', [
-    { capability: allocator, role: 'DefaultRole', access: 'Shared' },
     { capability: clock, role: 'Primary', access: 'Shared' },
     { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
   ])
@@ -187,7 +185,7 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
   assert.strictEqual(Type.infer(pattern, actual, inferred), true)
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(failureRemainder)) ?? 'never'),
-    '! generics/Rows.Other',
+    'generics/Rows.Other | generics/Rows.Problem',
   )
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(requirementRemainder)) ?? 'never'),
@@ -198,7 +196,7 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
 
 it('checks computed rows forward-only without reconstructing their operands', () => {
   const owner = { module: 'generics/ForwardRows', name: 'without' }
-  const source = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const source = Type.parameter(owner, 0, 'E')
   const selected = Type.parameter(owner, 1, 'S')
   const problem = Type.nominal('generics/ForwardRows', 'Problem')
   const other = Type.nominal('generics/ForwardRows', 'Other')
@@ -207,43 +205,36 @@ it('checks computed rows forward-only without reconstructing their operands', ()
     unreachable('expected a valid source span')
   const computed = RowAlgebra.without(
     Type.failureRowPolicy(),
-    RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(source),
+    RowAlgebra.singleton(Type.failureRowPolicy(), Type.failureMemberShape(source), origin),
     RowAlgebra.singleton(Type.failureRowPolicy(), Type.failureMemberShape(selected), origin),
   )
-  const pattern = Type.nominal('generics/ForwardRows', 'Carrier', [
-    Type.failureRowArgumentFromRow(computed),
-  ])
-  const actual = Type.nominal('generics/ForwardRows', 'Carrier', [Type.failureRowArgument([other])])
-  const unbound = new Map<string, Type.GenericArgument>()
-
-  assert.isFalse(Type.infer(pattern, actual, unbound))
-  assert.isUndefined(unbound.get(Type.key(source)))
-  assert.isUndefined(unbound.get(Type.key(selected)))
-
   const independentlyBound = new Map<string, Type.GenericArgument>([
-    [Type.key(source), Type.failureRowArgument([problem, other])],
+    [Type.key(source), Type.failureValue([problem, other])],
     [Type.key(selected), problem],
   ])
-  assert.isTrue(Type.infer(pattern, actual, independentlyBound))
+  assert.strictEqual(
+    Type.encode(Type.failureType(Type.substituteFailureRow(computed, independentlyBound))),
+    'generics/ForwardRows.Other',
+  )
 })
 
 it('infers failure and requirement row arguments nested in nominal applications', () => {
   const owner = { module: 'generics/NominalRows', name: 'Carrier' }
-  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
+  const failures = Type.parameter(owner, 0, 'E')
   const requirements = Type.parameter(owner, 1, 'R', 'RequirementRow')
   const problem = Type.nominal('generics/NominalRows', 'Problem')
   const other = Type.nominal('generics/NominalRows', 'Other')
   const clock = Type.nominal('generics/NominalRows', 'Clock')
   const allocator = Type.nominal('generics/NominalRows', 'Allocator')
   const pattern = Type.nominal('generics/NominalRows', 'Carrier', [
-    Type.failureRowArgument([problem], [failures]),
+    failures,
     Type.requirementRowArgument(
       [{ capability: clock, role: 'DefaultRole', access: 'Shared' }],
       [requirements],
     ),
   ])
   const actual = Type.nominal('generics/NominalRows', 'Carrier', [
-    Type.failureRowArgument([problem, other]),
+    Type.failureValue([problem, other]),
     Type.requirementRowArgument([
       { capability: clock, role: 'DefaultRole', access: 'Shared' },
       { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
@@ -254,23 +245,20 @@ it('infers failure and requirement row arguments nested in nominal applications'
   assert.isTrue(Type.infer(pattern, actual, inferred))
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(failures)) ?? 'never'),
-    '! generics/NominalRows.Other',
+    'generics/NominalRows.Other | generics/NominalRows.Problem',
   )
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(requirements)) ?? 'never'),
     '? &mut generics/NominalRows.Allocator',
   )
 
-  const repeated = Type.nominal('generics/NominalRows', 'Repeated', [
-    Type.failureRowArgument([], [failures]),
-    Type.failureRowArgument([], [failures]),
-  ])
+  const repeated = Type.nominal('generics/NominalRows', 'Repeated', [failures, failures])
   assert.isFalse(
     Type.infer(
       repeated,
       Type.nominal('generics/NominalRows', 'Repeated', [
-        Type.failureRowArgument([problem]),
-        Type.failureRowArgument([other]),
+        Type.failureValue([problem]),
+        Type.failureValue([other]),
       ]),
       new Map(),
     ),
@@ -293,13 +281,13 @@ it('infers failure and requirement row arguments nested in nominal applications'
     ),
   )
 
-  const openFailures = Type.parameter(owner, 2, 'OpenE', 'FailureRow')
+  const openFailures = Type.parameter(owner, 2, 'OpenE')
   const openRequirements = Type.parameter(owner, 3, 'OpenR', 'RequirementRow')
   assert.isFalse(
     Type.infer(
       pattern,
       Type.nominal('generics/NominalRows', 'Carrier', [
-        Type.failureRowArgument([problem], [openFailures]),
+        Type.failureValue([problem, openFailures]),
         Type.requirementRowArgument(
           [{ capability: clock, role: 'DefaultRole', access: 'Shared' }],
           [openRequirements],
@@ -316,27 +304,6 @@ it('infers failure and requirement row arguments nested in nominal applications'
   const c = Type.nominal('generics/NominalRows', 'C')
   const pair = (left: Type.Type, right: Type.Type): Type.Nominal =>
     Type.nominal('generics/NominalRows', 'Pair', [left, right])
-  const ambiguousFailures = new Map<string, Type.GenericArgument>()
-  assert.isTrue(
-    Type.infer(
-      Type.nominal('generics/NominalRows', 'Backtracking', [
-        Type.failureRowArgument([pair(a, y), pair(x, b)]),
-      ]),
-      Type.nominal('generics/NominalRows', 'Backtracking', [
-        Type.failureRowArgument([pair(a, b), pair(a, c)]),
-      ]),
-      ambiguousFailures,
-    ),
-  )
-  assert.strictEqual(
-    Type.encodeGenericArgument(ambiguousFailures.get(Type.key(x)) ?? 'never'),
-    Type.encodeGenericArgument(a),
-  )
-  assert.strictEqual(
-    Type.encodeGenericArgument(ambiguousFailures.get(Type.key(y)) ?? 'never'),
-    Type.encodeGenericArgument(c),
-  )
-
   const requirement = (capability: Type.Nominal): Type.Requirement =>
     Object.freeze({ capability, role: 'DefaultRole', access: 'Shared' })
   const ambiguousRequirements = new Map<string, Type.GenericArgument>()
@@ -359,37 +326,11 @@ it('infers failure and requirement row arguments nested in nominal applications'
     Type.encodeGenericArgument(ambiguousRequirements.get(Type.key(y)) ?? 'never'),
     Type.encodeGenericArgument(c),
   )
-
-  const remainder = Type.parameter(owner, 6, 'Remainder', 'FailureRow')
-  const d = Type.nominal('generics/NominalRows', 'D')
-  const constrainedRemainder = new Map<string, Type.GenericArgument>([
-    [Type.key(remainder), Type.failureRowArgument([pair(a, b)])],
-  ])
-  assert.isTrue(
-    Type.infer(
-      Type.nominal('generics/NominalRows', 'BacktrackingRemainder', [
-        Type.failureRowArgument([pair(a, y), pair(x, b)], [remainder]),
-      ]),
-      Type.nominal('generics/NominalRows', 'BacktrackingRemainder', [
-        Type.failureRowArgument([pair(a, b), pair(a, c), pair(d, b)]),
-      ]),
-      constrainedRemainder,
-    ),
-  )
-  assert.strictEqual(
-    Type.encodeGenericArgument(constrainedRemainder.get(Type.key(x)) ?? 'never'),
-    Type.encodeGenericArgument(d),
-  )
-  assert.strictEqual(
-    Type.encodeGenericArgument(constrainedRemainder.get(Type.key(y)) ?? 'never'),
-    Type.encodeGenericArgument(c),
-  )
 })
 
-it('projects an erased failure row into its ordinary structural value sum', () => {
+it('uses an ordinary type parameter directly as an effect failure value', () => {
   const owner = { module: 'generics/Rows', name: 'result' }
-  const failures = Type.parameter(owner, 0, 'E', 'FailureRow')
-  const projection = Type.failureProjection(failures)
+  const failures = Type.parameter(owner, 0, 'E')
   const problem = Type.nominal('generics/Rows', 'Problem')
   const other = Type.nominal('generics/Rows', 'Other')
   const concrete = Type.union([problem, other])
@@ -397,9 +338,9 @@ it('projects an erased failure row into its ordinary structural value sum', () =
   if (concrete._tag !== 'Normalized') return
 
   const inferred = new Map<string, Type.GenericArgument>()
-  assert.strictEqual(Type.infer(projection, concrete.type, inferred), true)
+  assert.strictEqual(Type.infer(failures, concrete.type, inferred), true)
   assert.strictEqual(
-    Type.encode(Type.substitute(projection, inferred)),
+    Type.encode(Type.substitute(failures, inferred)),
     'generics/Rows.Other | generics/Rows.Problem',
   )
 
@@ -407,7 +348,9 @@ it('projects an erased failure row into its ordinary structural value sum', () =
     Lexer.lex(
       SourceFile.make(
         'generics/Projection',
-        new TextEncoder().encode('fn keep<!E>(value: Row<!E>) -> Row<!E> { return move value }'),
+        new TextEncoder().encode(
+          'effect fn keep<E>(value: Effect<i32 ! E>) -> Effect<i32 ! E> { return value }',
+        ),
       ),
     ),
   )
@@ -420,8 +363,6 @@ it('projects an erased failure row into its ordinary structural value sum', () =
 
 it('distinguishes row inference failure causes deterministically', () => {
   const owner = { module: 'generics/Rows', name: 'diagnose' }
-  const firstFailure = Type.parameter(owner, 0, 'E', 'FailureRow')
-  const secondFailure = Type.parameter(owner, 1, 'F', 'FailureRow')
   const firstRequirement = Type.parameter(owner, 2, 'R', 'RequirementRow')
   const secondRequirement = Type.parameter(owner, 3, 'S', 'RequirementRow')
   const problem = Type.nominal('generics/Rows', 'Problem')
@@ -446,13 +387,6 @@ it('distinguishes row inference failure causes deterministically', () => {
       { code: 'SEM0089', reason: 'ContractRowInference' },
     )
   assert.strictEqual(
-    Type.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [firstFailure, secondFailure]),
-      closed,
-    )?._tag,
-    'AmbiguousFailureRemainder',
-  )
-  assert.strictEqual(
     Type.rowInferenceFailure(Type.effect('i32', [], 'Shared', [requirement]), closed)?._tag,
     'AbsentRequirementMember',
   )
@@ -472,22 +406,15 @@ it('distinguishes row inference failure causes deterministically', () => {
   )
   assert.strictEqual(
     Type.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [], [firstRequirement, secondRequirement]),
+      Type.effect('i32', [], 'Shared', [], [firstRequirement, secondRequirement]),
       closed,
     )?._tag,
     'AmbiguousRequirementRemainder',
   )
   assert.strictEqual(
     Type.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [firstFailure]),
-      Type.effect('i32', [], 'Shared', [], [secondFailure]),
-    )?._tag,
-    'NonFiniteFailureRow',
-  )
-  assert.strictEqual(
-    Type.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [], [firstRequirement]),
-      Type.effect('i32', [], 'Shared', [], [], [secondRequirement]),
+      Type.effect('i32', [], 'Shared', [], [firstRequirement]),
+      Type.effect('i32', [], 'Shared', [], [secondRequirement]),
     )?._tag,
     'NonFiniteRequirementRow',
   )
@@ -590,7 +517,7 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
         SourceFile.make(
           'generics/channel-format',
           new TextEncoder().encode(
-            'effect fn transform < A , ! E , ? R >(self:Effect<A ! E ? R>)->Effect<A ! E ? R>{return self}',
+            'effect fn transform < A , E , ? R >(self:Effect<A ! E ? R>)->Effect<A ! E ? R>{return self}',
           ),
         ),
       ),
@@ -599,7 +526,7 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
     const text = new TextDecoder().decode(FormattedDocument.toUint8Array(formatted))
     assert.strictEqual(
       text,
-      `effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
+      `effect fn transform<A, E, ?R>(self: Effect<A ! E ? R>) -> Effect<A ! E ? R> {
   return self
 }
 `,
@@ -682,16 +609,16 @@ it.effect('accepts failure-row and requirement-row arguments in an explicit pref
       'generics/RowPrefix',
       new TextEncoder().encode(`struct First {}
 struct Second {}
-struct Clock {}
+service Clock {}
 effect fn risky() -> i32 ! First | Second { fail First {} }
 effect fn read() -> i32 ? &Clock { return 42 }
-effect fn keepFailures<!E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
+effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
 effect fn keepRequirements<?R>(self: once Effect<i32 ? R>) -> i32 ? R { return run self }
 effect fn useFailures() -> i32 ! First | Second {
   return run keepFailures<First | Second>(risky())
 }
 effect fn useRequirements() -> i32 ? &Clock {
-  return run keepRequirements<&Clock>(read())
+  return run keepRequirements<Clock>(read())
 }
 pub fn main() -> i32 { return 0 }`),
     )
@@ -700,21 +627,21 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('rejects an explicit prefix argument outside the binder row domain', () =>
+it.effect('rejects a borrowed explicit failure type', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'generics/WrongRowPrefix',
       new TextEncoder().encode(`struct Problem {}
 struct Clock {}
 effect fn risky() -> i32 ! Problem { fail Problem {} }
-effect fn keepFailures<!E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
-effect fn invalid() -> i32 ! Problem { return run keepFailures<&Clock>(risky()) }
+effect fn keepFailures<E>(self: once Effect<i32 ! E>) -> i32 ! E { return run self }
+effect fn invalid() -> i32 ! Problem { return run keepFailures<Clock>(risky()) }
 pub fn main() -> i32 { return 0 }`),
     )
 
     assert.include(
       snapshot.diagnostics.map((diagnostic) => diagnostic.code),
-      'SEM0088',
+      'SEM0100',
     )
   }),
 )
@@ -1040,7 +967,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   ],
   [
     'non-generic builtin specialization',
-    'pub fn main() -> i32 { return i32.add<i32>(40, 2) }',
+    'import silk.i32 as i32\npub fn main() -> i32 { return i32.add<i32>(40, 2) }',
     'SEM0051',
   ],
   [
@@ -1055,7 +982,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
   ],
   [
     'concrete-only operation in an open body',
-    'fn addOne<T>(value: T) -> i32 { return i32.add(move value, 1) }\npub fn main() -> i32 { return addOne<i32>(41) }',
+    'import silk.i32 as i32\nfn addOne<T>(value: T) -> i32 { return i32.add(move value, 1) }\npub fn main() -> i32 { return addOne<i32>(41) }',
     'SEM0012',
   ],
 ]

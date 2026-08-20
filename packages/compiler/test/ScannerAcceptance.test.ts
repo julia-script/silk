@@ -21,14 +21,19 @@ const quotaScannerSource = (quota: number): string =>
       `struct U8 {
   value: i32
 }`,
-      `struct QuotaAllocator {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct QuotaAllocator {
   remaining: i32
 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
-! OutOfMemory {
+! OutOfMemoryError {
   if self.remaining == 0 {
-    fail OutOfMemory {}
+    fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()

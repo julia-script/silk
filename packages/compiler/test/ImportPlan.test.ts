@@ -19,6 +19,19 @@ const apply = (text: string, module = 'lib', spelling = 'Wanted'): string | unde
   return output
 }
 
+const applyAliased = (text: string, localSpelling: string): string | undefined => {
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make('main', ascii(text))))
+  const plan = Option.getOrUndefined(
+    ImportPlan.make({ syntax, module: 'silk/logging', spelling: 'Logger', localSpelling }),
+  )
+  const edits = plan?.changes.get('main')
+  if (edits === undefined) return undefined
+  let output = text
+  for (const edit of edits.toReversed())
+    output = `${output.slice(0, edit.span.start)}${edit.replacement}${output.slice(edit.span.end)}`
+  return output
+}
+
 it('inserts a new selected-member import before declarations', () => {
   assert.strictEqual(
     apply('fn main() -> i32 { return 1 }'),
@@ -75,4 +88,18 @@ it('preserves member aliases and withholds duplicate or damaged plans', () => {
     undefined,
   )
   assert.strictEqual(apply('import lib { Existing\nfn main() -> i32 { return 1 }'), undefined)
+})
+
+it('renders a collision-selected local alias for new and existing module imports', () => {
+  assert.strictEqual(
+    applyAliased('struct Logger {}\npub fn main() -> i32 { return 0 }', 'LoggingLogger'),
+    'import silk.logging { Logger as LoggingLogger }\nstruct Logger {}\npub fn main() -> i32 { return 0 }',
+  )
+  assert.strictEqual(
+    applyAliased(
+      'import silk.logging { LogError }\nstruct Logger {}\npub fn main() -> i32 { return 0 }',
+      'LoggingLogger',
+    ),
+    'import silk.logging { LogError, Logger as LoggingLogger }\nstruct Logger {}\npub fn main() -> i32 { return 0 }',
+  )
 })

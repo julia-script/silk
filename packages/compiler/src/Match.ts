@@ -1,4 +1,5 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -34,41 +35,43 @@ export interface BindingId {
 }
 
 /** One source decision reduced to the facts that affect coverage. */
-export interface Decision {
-  readonly member?: Type.Nominal
+export interface Decision<Member extends Type.Type = Type.Type> {
+  readonly member?: Member
   readonly universal: boolean
   readonly guarded: boolean
 }
 
 /** One arm's immutable canonical coverage transition. */
-export interface CoverageTransition {
-  readonly before: ReadonlyArray<Type.Nominal>
-  readonly after: ReadonlyArray<Type.Nominal>
+export interface CoverageTransition<Member extends Type.Type = Type.Type> {
+  readonly before: ReadonlyArray<Member>
+  readonly after: ReadonlyArray<Member>
   readonly reachable: boolean
 }
 
 /** Complete ordered coverage result for one nominal or structural-union scrutinee. */
-export interface Coverage {
-  readonly initial: ReadonlyArray<Type.Nominal>
-  readonly transitions: ReadonlyArray<CoverageTransition>
-  readonly missing: ReadonlyArray<Type.Nominal>
+export interface Coverage<Member extends Type.Type = Type.Type> {
+  readonly initial: ReadonlyArray<Member>
+  readonly transitions: ReadonlyArray<CoverageTransition<Member>>
+  readonly missing: ReadonlyArray<Member>
   readonly exhaustive: boolean
 }
 
-const contains = (members: ReadonlyArray<Type.Nominal>, member: Type.Nominal): boolean =>
-  members.some((candidate) => Type.equals(candidate, member))
+const contains = <Member extends Type.Type>(
+  members: ReadonlyArray<Member>,
+  member: Member,
+): boolean => members.some((candidate) => Type.equals(candidate, member))
 
-/** Returns the canonical matchable member set, or `undefined` for a non-nominal type. */
-export const membersOf = (type: Type.Type): ReadonlyArray<Type.Nominal> | undefined =>
-  Type.isNominal(type) ? Object.freeze([type]) : Type.isUnion(type) ? type.members : undefined
+/** Returns the canonical exact-member set observed by a pattern decision. */
+export const membersOf = (type: Type.Type): ReadonlyArray<Type.Type> =>
+  Type.isUnion(type) ? type.members : Type.isNever(type) ? Object.freeze([]) : Object.freeze([type])
 
 /** Folds source decisions over one canonical remaining-member set. */
-export const cover = (
-  initial: ReadonlyArray<Type.Nominal>,
-  decisions: ReadonlyArray<Decision>,
-): Coverage => {
-  let remaining = Object.freeze([...initial]) as ReadonlyArray<Type.Nominal>
-  const transitions: Array<CoverageTransition> = []
+export const cover = <Member extends Type.Type>(
+  initial: ReadonlyArray<Member>,
+  decisions: ReadonlyArray<Decision<Member>>,
+): Coverage<Member> => {
+  let remaining = Object.freeze([...initial]) as ReadonlyArray<Member>
+  const transitions: Array<CoverageTransition<Member>> = []
   for (const decision of decisions) {
     const before = remaining
     const reachable = decision.universal
@@ -107,6 +110,32 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
   if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
   if (contributing.every((type) => Type.equals(type, first))) {
     return Object.freeze({ _tag: 'Joined', type: first })
+  }
+  const effects = contributing.flatMap((type) => {
+    const contract = Type.isRepresented(type) ? type.contract : type
+    return Type.isEffect(contract) ? [contract] : []
+  })
+  if (effects.length === contributing.length) {
+    const success = Type.union(effects.map((effect) => effect.success))
+    if (success._tag !== 'Normalized')
+      return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    const failureRow = effects.reduce(
+      (row, effect) => RowAlgebra.union(Type.failureRowPolicy(), row, effect.failureRow),
+      RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    )
+    const requirementRow = effects.reduce(
+      (row, effect) => RowAlgebra.union(Type.requirementRowPolicy(), row, effect.requirementRow),
+      RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+    )
+    const access = effects.some((effect) => effect.access === 'Take')
+      ? 'Take'
+      : effects.some((effect) => effect.access === 'Exclusive')
+        ? 'Exclusive'
+        : 'Shared'
+    return Object.freeze({
+      _tag: 'Joined',
+      type: Type.effectWithRows(success.type, failureRow, access, requirementRow),
+    })
   }
   for (const [leftOrdinal, left] of contributing.entries()) {
     for (const right of contributing.slice(leftOrdinal + 1)) {

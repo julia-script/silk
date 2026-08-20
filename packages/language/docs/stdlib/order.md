@@ -75,7 +75,7 @@ The comparison result, narrowed with `match`.
 ## `Order`
 
 ```silk
-pub interface Order<T>
+pub interface Order
 ```
 
 Static strict-ordering contract for primitive comparable values.
@@ -90,17 +90,17 @@ rather than declared, so a witness can never disagree with itself about which va
 ### Operation `lessThan`
 
 ```silk
-fn lessThan(left: &T, right: &T) -> bool
+operator < fn lessThan(left: &Self, right: &Self) -> bool
 ```
 
 Reports whether `left` orders strictly before `right`.
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a30"></a>
 
-## Implementation `silk/order.Order<u8> for u8`
+## Implementation `Order for u8`
 
 ```silk
-impl silk/order.Order<u8> for u8
+impl Order for u8
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
@@ -113,10 +113,10 @@ lessThan = Intrinsic.u8LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a31"></a>
 
-## Implementation `silk/order.Order<u16> for u16`
+## Implementation `Order for u16`
 
 ```silk
-impl silk/order.Order<u16> for u16
+impl Order for u16
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
@@ -129,10 +129,10 @@ lessThan = Intrinsic.u16LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a32"></a>
 
-## Implementation `silk/order.Order<u32> for u32`
+## Implementation `Order for u32`
 
 ```silk
-impl silk/order.Order<u32> for u32
+impl Order for u32
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
@@ -145,10 +145,10 @@ lessThan = Intrinsic.u32LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a33"></a>
 
-## Implementation `silk/order.Order<u64> for u64`
+## Implementation `Order for u64`
 
 ```silk
-impl silk/order.Order<u64> for u64
+impl Order for u64
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
@@ -161,10 +161,10 @@ lessThan = Intrinsic.u64LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a34"></a>
 
-## Implementation `silk/order.Order<usize> for usize`
+## Implementation `Order for usize`
 
 ```silk
-impl silk/order.Order<usize> for usize
+impl Order for usize
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a343a3a6f7065726174696f6e3a30"></a>
@@ -177,10 +177,10 @@ lessThan = Intrinsic.usizeLessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a35"></a>
 
-## Implementation `silk/order.Order<i8> for i8`
+## Implementation `Order for i8`
 
 ```silk
-impl silk/order.Order<i8> for i8
+impl Order for i8
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a353a3a6f7065726174696f6e3a30"></a>
@@ -193,10 +193,10 @@ lessThan = Intrinsic.i8LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a36"></a>
 
-## Implementation `silk/order.Order<i16> for i16`
+## Implementation `Order for i16`
 
 ```silk
-impl silk/order.Order<i16> for i16
+impl Order for i16
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a363a3a6f7065726174696f6e3a30"></a>
@@ -209,10 +209,10 @@ lessThan = Intrinsic.i16LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a37"></a>
 
-## Implementation `silk/order.Order<i32> for i32`
+## Implementation `Order for i32`
 
 ```silk
-impl silk/order.Order<i32> for i32
+impl Order for i32
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a373a3a6f7065726174696f6e3a30"></a>
@@ -225,10 +225,10 @@ lessThan = Intrinsic.i32LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a38"></a>
 
-## Implementation `silk/order.Order<i64> for i64`
+## Implementation `Order for i64`
 
 ```silk
-impl silk/order.Order<i64> for i64
+impl Order for i64
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a383a3a6f7065726174696f6e3a30"></a>
@@ -241,10 +241,10 @@ lessThan = Intrinsic.i64LessThan
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a39"></a>
 
-## Implementation `silk/order.Order<isize> for isize`
+## Implementation `Order for isize`
 
 ```silk
-impl silk/order.Order<isize> for isize
+impl Order for isize
 ```
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a393a3a6f7065726174696f6e3a30"></a>

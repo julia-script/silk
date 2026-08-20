@@ -13,6 +13,9 @@ it.effect('builds public-first project JSON with first-class child documentation
 /// Default recovery code.
 pub const defaultCode: i32 = 7
 
+/// Primary dependency position.
+pub role Primary
+
 /// Public recovery.
 pub fn recover(
   /// The failure to inspect.
@@ -36,12 +39,16 @@ pub struct Problem {
     assert.strictEqual(module.documentation?.markdown, 'Recovery utilities.')
     assert.deepStrictEqual(
       module.items.filter((item) => item.kind !== 'Implementation').map((item) => item.name),
-      ['defaultCode', 'recover', 'Problem'],
+      ['defaultCode', 'Primary', 'recover', 'Problem'],
     )
     const defaultCode = module.items.find((item) => item.name === 'defaultCode')
     assert.strictEqual(defaultCode?.kind, 'Constant')
     assert.strictEqual(defaultCode?.signature.text, 'pub const defaultCode: i32')
     assert.strictEqual(defaultCode?.documentation?.markdown, 'Default recovery code.')
+    const primary = module.items.find((item) => item.name === 'Primary')
+    assert.strictEqual(primary?.kind, 'Role')
+    assert.strictEqual(primary?.signature.text, 'pub role Primary')
+    assert.strictEqual(primary?.documentation?.markdown, 'Primary dependency position.')
     const recover = module.items.find((item) => item.name === 'recover')
     assert.strictEqual(recover?.children.at(0)?.documentation?.markdown, 'The failure to inspect.')
     const problem = module.items.find((item) => item.name === 'Problem')

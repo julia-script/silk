@@ -22,7 +22,7 @@ began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a736361
 
 Import as `String` with `import silk.string`.
 
-Public declarations: 21.
+Public declarations: 22.
 
 <a id="declaration-73696c6b2f737472696e673a3a537472696e67"></a>
 
@@ -74,6 +74,21 @@ pub struct ScalarStep
 
 One decoded Unicode scalar and the cursor following it.
 
+<a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638556e636865636b6564"></a>
+
+## `fromUtf8Unchecked`
+
+```silk
+pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
+```
+
+Borrows bytes as text without validating their UTF-8 encoding.
+
+### Gotchas
+
+The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
+returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
+
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638"></a>
 
 ## `fromUtf8`
@@ -104,7 +119,7 @@ Constructs an empty owned String without allocating.
 ## `copy`
 
 ```silk
-pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies valid text into independently owned storage.
@@ -114,7 +129,7 @@ Copies valid text into independently owned storage.
 ## `copyUtf8`
 
 ```silk
-pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemory ? &mut Allocator
+pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Validates complete UTF-8 bytes and copies them into independently owned storage.
@@ -131,7 +146,7 @@ way and owns the outcome.
 ## `append`
 
 ```silk
-pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends complete valid text atomically with respect to allocation failure.
@@ -141,7 +156,7 @@ Appends complete valid text atomically with respect to allocation failure.
 ## `appendOwned`
 
 ```silk
-pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends another owned String atomically with respect to allocation failure.
@@ -226,7 +241,7 @@ Returns a cursor's explicit UTF-8 byte offset.
 ## `scalarValue`
 
 ```silk
-pub fn scalarValue(step: &silk/string.ScalarStep) -> u32
+pub fn scalarValue(step: &silk/string.ScalarStep) -> char
 ```
 
 Returns the decoded Unicode scalar value for one step.

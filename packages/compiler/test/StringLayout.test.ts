@@ -7,7 +7,8 @@ import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 
-const source = `fn inspect(text: string, bytes: &[u8]) -> usize {
+const source = `import silk.usize as usize
+fn inspect(text: string, bytes: &[u8]) -> usize {
   return Intrinsic.stringByteLength(text) + bytes.length
 }
 pub fn main() -> i32 {

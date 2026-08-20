@@ -94,7 +94,8 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
 it.effect('keeps executable sites distinct across generic owner specializations', () =>
   Effect.gen(function* () {
     const result = Analysis.instancesOf(
-      yield* snapshot(`fn section<T>(value: T) -> i32 {
+      yield* snapshot(`import silk.i32 as i32
+fn section<T>(value: T) -> i32 {
   let plusOne = i32.add(1)
   return plusOne(41)
 }
@@ -159,6 +160,8 @@ pub fn main() -> i32 { return 42 }`),
       yield* snapshot('pub fn main(value: i32) -> i32 { return value }'),
     )
     const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> i32 { return 42 }'))
+    const privateEntry = Analysis.instancesOf(yield* snapshot('fn main() -> () { return () }'))
+    const unitEntry = Analysis.instancesOf(yield* snapshot('pub fn main() -> () { return () }'))
     assert.deepEqual(
       reachable.instances.map((instance) => instance.key.declaration.name),
       ['main'],
@@ -166,14 +169,19 @@ pub fn main() -> i32 { return 42 }`),
     assert.deepEqual(missing.entry, { _tag: 'Unavailable', reason: 'MissingEntry' })
     assert.deepEqual(generic.entry, { _tag: 'Unavailable', reason: 'GenericEntry' })
     assert.deepEqual(parameterized.entry, { _tag: 'Unavailable', reason: 'ParameterizedEntry' })
+    assert.deepEqual(privateEntry.entry, { _tag: 'Unavailable', reason: 'PrivateEntry' })
+    assert.strictEqual(unitEntry.entry._tag, 'Resolved')
+    if (unitEntry.entry._tag === 'Resolved') {
+      assert.strictEqual(unitEntry.entry.kind, 'Ordinary')
+      if (unitEntry.entry.kind === 'Ordinary') assert.strictEqual(unitEntry.entry.result, 'Unit')
+    }
   }),
 )
 
-it.effect('resolves closed reportable effect entries and rejects invalid effect contracts', () =>
+it.effect('resolves closed effect entries and rejects invalid effect contracts', () =>
   Effect.gen(function* () {
     const resolved = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }
-impl Report for SomeError {}
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     )
     assert.strictEqual(resolved.entry._tag, 'Resolved')
@@ -183,7 +191,7 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
         assert.deepEqual(resolved.entry.failures, [
           {
             type: Type.nominal('golden/program', 'SomeError'),
-            report: 'golden/program.SomeError',
+            identity: 'golden/program.SomeError',
           },
         ])
       }
@@ -193,9 +201,9 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
       yield* snapshot('pub effect fn main() -> i32 { return 0 }'),
     )
     const requirements = Analysis.instancesOf(
-      yield* snapshot('struct Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
+      yield* snapshot('service Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
     )
-    const unreportable = Analysis.instancesOf(
+    const ordinaryFailure = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     )
@@ -206,11 +214,15 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
     assert.deepEqual(requirements.entry, {
       _tag: 'Unavailable',
       reason: 'EffectEntryRequirements',
+      requirements: [
+        {
+          access: 'Exclusive',
+          capability: Type.nominal('golden/program', 'Clock'),
+          role: 'DefaultRole',
+        },
+      ],
     })
-    assert.deepEqual(unreportable.entry, {
-      _tag: 'Unavailable',
-      reason: 'UnreportableEntryFailure',
-    })
+    assert.strictEqual(ordinaryFailure.entry._tag, 'Resolved')
   }),
 )
 
@@ -218,7 +230,6 @@ it.effect('discovers cleanup hooks owned by effect-entry failures', () =>
   Effect.gen(function* () {
     const discovery = Analysis.instancesOf(
       yield* snapshot(`struct SomeError { storage: RawBuffer<i32> }
-impl Report for SomeError {}
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
@@ -231,7 +242,7 @@ pub effect fn main() -> () ! SomeError {
     assert.strictEqual(discovery.entry._tag, 'Resolved')
     assert.deepEqual(
       discovery.instances.map((instance) => instance.key.declaration.name),
-      ['main', 'makeError', 'drop@impl#1'],
+      ['main', 'makeError', 'drop@impl#0'],
     )
   }),
 )
@@ -367,7 +378,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const composed = Analysis.loweredMir(
-        yield* snapshot(`effect fn work() -> i32 { return 41 }
+        yield* snapshot(`import silk.effects as Effect
+effect fn work() -> i32 { return 41 }
 pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )
       const grouped = Analysis.loweredMir(
@@ -507,8 +519,16 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
         : Mir.operations(main).filter((operation) => operation._tag === 'Match')
     assert.strictEqual(matches.length, 2)
     assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
-    assert.strictEqual(matches.at(0)?.decisions.at(0)?.member.name, 'Box')
-    assert.strictEqual(matches.at(1)?.decisions.at(0)?.member.name, 'Token')
+    const outerMember = matches.at(0)?.decisions.at(0)?.member
+    const innerMember = matches.at(1)?.decisions.at(0)?.member
+    assert.strictEqual(
+      outerMember !== undefined && Type.isNominal(outerMember) ? outerMember.name : undefined,
+      'Box',
+    )
+    assert.strictEqual(
+      innerMember !== undefined && Type.isNominal(innerMember) ? innerMember.name : undefined,
+      'Token',
+    )
     assert.strictEqual(Mir.encode(mir), golden('match.mir.txt'))
     assert.strictEqual(
       Mir.encode(mir),
@@ -605,7 +625,7 @@ it.effect('deduplicates definitionally different open rows after concrete specia
     const result = yield* snapshot(`struct First {}
 struct Second {}
 effect fn source() -> i32 ! First | Second { return 1 }
-effect fn forward<A, !E>(self: once Effect<A ! E>) -> A ! E { return run self }
+effect fn forward<A, E>(self: once Effect<A ! E>) -> A ! E { return run self }
 pub fn main() -> i32 {
   let direct = forward<i32, First | Second>(source())
   let permuted = forward<i32, Second | First>(source())
@@ -622,10 +642,7 @@ pub fn main() -> i32 {
       const failures = instance.specialization.failureRow
       const requirements = instance.specialization.requirementRow
       if (failures !== undefined)
-        assert.strictEqual(
-          Type.isRuntimeConcreteGenericArgument({ _tag: 'FailureRowArgument', row: failures }),
-          true,
-        )
+        assert.strictEqual(Type.isRuntimeConcreteGenericArgument(Type.failureType(failures)), true)
       if (requirements !== undefined)
         assert.strictEqual(
           Type.isRuntimeConcreteGenericArgument({

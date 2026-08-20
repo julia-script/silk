@@ -240,13 +240,20 @@ and unavailable facts SHALL produce unavailable HIR with their originating cause
 
 HIR SHALL represent named function values, automatic sections, callable types and modes, ordered
 capture environments, direct or indirect application, and invocation access without backend layout
-or surface-syntax lookup. Borrowed and owned captures SHALL retain their canonical ownership roots
-and dependencies.
+or surface-syntax lookup. It SHALL retain every ordered remaining leading parameter, every captured
+trailing argument's original parameter ordinal, and source evaluation order across successive
+direct section stages. Borrowed and owned captures SHALL retain their canonical ownership roots and
+dependencies.
 
 #### Scenario: Retain an owned section environment
 
 - **WHEN** a section captures `move token` and crosses a function boundary
 - **THEN** HIR carries one canonical take-once environment with the token's ownership transfer
+
+#### Scenario: Retain three-stage application
+
+- **WHEN** `combine(3)(2)(1)` reaches HIR
+- **THEN** section construction captures `3` then `2` once and final application supplies `1` plus those positional captures
 
 ### Requirement: Struct construction is canonical typed HIR
 
@@ -343,20 +350,25 @@ property of the loop region and MUST NOT appear as a cyclic HIR edge.
 
 ### Requirement: HIR represents canonical union conversion explicitly
 
-HIR SHALL carry normalized union types as canonical nominal member sets and represent each accepted
-injection or widening as one typed conversion around its source expression. The conversion SHALL
-carry the exact source type, target union, canonical total member mapping, access mode, and
-provenance. It MUST NOT encode numeric runtime tags, backend storage, pattern narrowing, or cyclic
-control edges.
+HIR SHALL carry normalized union types as canonical ordinary member sets and represent each
+accepted injection or widening as one typed conversion around its source expression. The conversion
+SHALL carry the exact represented source type, target union, canonical total member mapping, access
+mode, and provenance. It MUST NOT encode numeric runtime tags, backend storage, pattern narrowing,
+or cyclic control edges.
 
 #### Scenario: Elaborate a nominal injection
 
-- **WHEN** a `Token` expression enters a declared `Token | End` return context
-- **THEN** HIR contains one conversion from precise `Token` to the canonical two-member union
+- **WHEN** an ordinary expression such as `i32` or `Token` enters a declared `i32 | Token` return context
+- **THEN** HIR contains one conversion from its precise source type to the canonical two-member union
+
+#### Scenario: Elaborate an executable injection
+
+- **WHEN** an exact callable or opaque Effect value enters a union containing its public contract
+- **THEN** HIR retains the represented source identity and maps it to that exact canonical member
 
 #### Scenario: Elaborate union widening inside a loop
 
-- **WHEN** a mutable `Token | End` binding is assigned into a `Token | End | Fault` destination inside a loop
+- **WHEN** a mutable `i32 | Token` binding is assigned into an `i32 | Token | Fault` destination inside a loop
 - **THEN** the write source contains one canonical widening operation and the surrounding HIR region graph remains acyclic
 
 ### Requirement: HIR represents matching as an acyclic typed region
@@ -391,10 +403,13 @@ from every call to its generic declaration and substitution.
 
 ### Requirement: HIR retains lexical slice semantics explicitly
 
-HIR SHALL represent each available slice type, whole-root borrow or reborrow, loan identity, access
-mode, backing-place provenance, runtime length projection, and borrowed indexed place without
-encoding a raw address. Expression and place traversal SHALL preserve source evaluation order and
-exact spans, and unavailable slice facts MUST NOT become typed HIR operations.
+HIR SHALL represent each available slice type, borrow or reborrow, loan identity, access mode,
+backing-place provenance, runtime length projection, and borrowed indexed place without encoding a
+raw address. Each borrow SHALL carry a named, parameter, pattern, or compiler-owned temporary root
+plus the complete ordered field and checked-index selector path. Expression and place traversal
+SHALL preserve source evaluation order and exact spans, including hidden temporary expressions and
+runtime selector expressions exactly once. Unavailable slice facts MUST NOT become typed HIR
+operations.
 
 #### Scenario: Retain a shared whole-array borrow
 
@@ -410,6 +425,11 @@ exact spans, and unavailable slice facts MUST NOT become typed HIR operations.
 
 - **WHEN** borrow analysis lacks a stable source root or compatible slice destination
 - **THEN** HIR preserves the diagnostic cause through surrounding unavailable facts and emits no executable borrow node
+
+#### Scenario: Retain an indexed inner-array borrow
+
+- **WHEN** HIR lowers `&mut matrix[index]`
+- **THEN** it records `matrix` as the root and the checked runtime array selector without copying the inner array
 
 ### Requirement: HIR retains exact usize operations
 
@@ -451,7 +471,7 @@ Calls and returns MUST preserve that identity rather than reducing the value to 
 ### Requirement: HIR retains allocation and cleanup semantics without policy
 
 HIR SHALL represent validated and repeated layout formation, general allocator capability dispatch,
-typed allocation success or `OutOfMemory`, self-contained allocation ownership, unsafe RawBuffer and
+typed allocation success or `OutOfMemoryError`, self-contained allocation ownership, unsafe RawBuffer and
 Slot operations, initialization transitions, restricted Drop declarations and calls, explicit drop,
 and automatic cleanup with canonical types and source provenance. HIR MUST NOT encode allocator
 implementation kinds, provider-dependent result lifetimes, named lifetime scopes, dynamic finalizer
@@ -545,3 +565,66 @@ deterministically.
 
 - **WHEN** a row-dependent HIR consumer is given an unupgraded assumed proof
 - **THEN** the required concrete specialized bundle cannot be constructed
+
+### Requirement: Executable HIR requires a proven return contract
+
+HIR construction MAY retain typed or explicitly unavailable body structure for inspection, but a
+function body SHALL be executable only when semantic analysis has proven every reachable return and
+fallthrough path against the resolved result contract. Source mistakes SHALL remain semantic
+diagnostics and the function MUST be unavailable to reachability and target-dependent phases.
+
+#### Scenario: Keep an invalid body out of executable HIR
+
+- **WHEN** a declaration returns a value incompatible with its resolved result type
+- **THEN** its semantic facts retain the source diagnostic, any retained HIR return is explicitly unavailable, and target-dependent phases cannot consume the body
+
+### Requirement: HIR retains closed finite Effect alternatives
+
+HIR SHALL represent an admitted Effect join as one closed finite composite that names every exact
+construction alternative, its normalized public contract, capture access, and ownership facts. The
+representation and its textual encoding SHALL be deterministic and SHALL NOT erase the alternatives
+to a universal runtime Effect identity.
+
+#### Scenario: Encode two construction alternatives
+
+- **WHEN** control flow joins two compatible Effects constructed at distinct source sites
+- **THEN** HIR records both exact alternatives in canonical order under one normalized Effect contract
+
+#### Scenario: Retain the selected capture contract
+
+- **WHEN** alternatives capture different values with compatible run access and ownership
+- **THEN** HIR preserves enough information to construct, run, and clean only the selected alternative
+
+### Requirement: HIR carries shared typed statement patterns
+
+HIR SHALL represent unconditional and conditional destructuring with the same typed pattern
+selection used by expression matching. Each selection SHALL carry the subject, access, canonical
+members, exact selected member, recursive binding paths and types, coverage, irrefutability,
+source span, and lexical region. Conditional bodies SHALL remain an acyclic typed region graph.
+
+#### Scenario: Elaborate an irrefutable local pattern
+
+- **WHEN** a nested nominal pattern covers its initializer exactly
+- **THEN** HIR contains one total pattern binding with typed recursive field paths
+
+#### Scenario: Elaborate an if-let selection
+
+- **WHEN** one exact union member is conditionally borrowed
+- **THEN** HIR contains one selection and two lexical bodies, with bindings visible only in the taken body
+
+### Requirement: HIR retains operator evidence and conditional right regions
+
+HIR SHALL record the exact interface operation, applied capability, provider, substituted operand
+types, result type, and witness evidence selected by a custom operator before specialization. `&&`
+and `||` SHALL remain typed conditional HIR whose right operand is a distinct region rather than an
+eager call or a purity-restricted expression.
+
+#### Scenario: Inspect a custom operator selection
+
+- **WHEN** a concrete or generic custom operator is accepted
+- **THEN** HIR identifies the marked operation and ordinary conformance question without runtime dispatch data
+
+#### Scenario: Preserve an effectful right operand
+
+- **WHEN** a valid right operand executes an Effect conditionally
+- **THEN** HIR retains the run site inside only the short-circuit right region

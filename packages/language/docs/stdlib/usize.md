@@ -607,7 +607,7 @@ Calls the concrete usize greaterOrEqual primitive.
 ## `toText`
 
 ```silk
-pub effect fn toText(value: usize) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn toText(value: usize) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Renders the value as decimal text in freshly owned storage.
@@ -617,7 +617,7 @@ Renders the value as decimal text in freshly owned storage.
 ## `parse`
 
 ```silk
-pub fn parse(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+pub fn parse(text: string) -> silk/result.Result<usize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `usize`, or reports why the text is not one.

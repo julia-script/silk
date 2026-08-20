@@ -18,19 +18,15 @@ const typeText = (type: Type.Type): string =>
             ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
             : type._tag === 'EffectType'
               ? `Effect<${typeText(type.success)}${
-                  Type.failureMembers(type).length === 0
-                    ? ''
-                    : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
+                  Type.failureType(type) === 'never' ? '' : ` ! ${typeText(Type.failureType(type))}`
                 }> ${type.access.toLowerCase()}`
               : type._tag === 'CallableType'
                 ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
                 : type._tag === 'ReferenceType'
                   ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-                  : type._tag === 'FailureProjectionType'
-                    ? `Row<!${type.parameter.name}>`
-                    : type._tag === 'RepresentedType'
-                      ? Type.encode(type)
-                      : type.members.map(typeText).join(' | ')
+                  : type._tag === 'RepresentedType'
+                    ? Type.encode(type)
+                    : type.members.map(typeText).join(' | ')
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -852,8 +848,8 @@ export const projectDataFlow = (
     overlay?.items.set(`${root.groupId}-result-return`, evidence)
   }
 
-  if (outcome?._tag === 'Blocked') {
-    const span = blockedSpan(outcome.reason)
+  if (outcome?._tag === 'Blocked' || outcome?._tag === 'Trap') {
+    const span = outcome._tag === 'Trap' ? outcome.provenance : blockedSpan(outcome.reason)
     const group =
       (span === undefined
         ? undefined
@@ -867,8 +863,11 @@ export const projectDataFlow = (
           id: terminalId,
           groupId: group.id,
           kind: 'Terminal',
-          label: `Evaluation stops: ${outcome.reason._tag}`,
-          detail: blockedLabel(outcome.reason),
+          label:
+            outcome._tag === 'Trap'
+              ? 'Evaluation stops: fatal trap'
+              : `Evaluation stops: ${outcome.reason._tag}`,
+          detail: outcome._tag === 'Trap' ? outcome.reason : blockedLabel(outcome.reason),
           depth: group.depth,
           ordinal: undefined,
           layer: 'Evaluated',
@@ -915,8 +914,10 @@ export const projectDataFlow = (
       : outcome._tag === 'Completed'
         ? `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
         : outcome._tag === 'UnhandledFailure'
-          ? `Evaluation terminated with ${outcome.report} (tag ${outcome.tag}); its completed trace is overlaid.`
-          : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
+          ? `Evaluation terminated with ${outcome.identity} (tag ${outcome.tag}); its completed trace is overlaid.`
+          : outcome._tag === 'Trap'
+            ? `Evaluation trapped at ${outcome.reason}; only its completed trace prefix is overlaid.`
+            : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
   return Object.freeze({
     _tag: 'FlowModel',
     mode: outcome === undefined ? 'Semantic' : 'Evaluated',

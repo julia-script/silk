@@ -215,7 +215,7 @@ const written = files(await download().then(extract))
 const digests = Object.entries(written)
   .map(([name, content]) => `${createHash('sha256').update(content).digest('hex')}  ${name}`)
   .join('\n')
-written['SHA256SUMS'] = `${digests}\n`
+written.SHA256SUMS = `${digests}\n`
 
 await mkdir(dataRoot, { recursive: true })
 

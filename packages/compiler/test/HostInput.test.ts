@@ -21,7 +21,15 @@ const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
  * A pure in-source provider. It answers from a scripted command line, a one-name environment, and a
  * fixed working directory, so a caller reaches the complete service without a host boundary.
  */
-const scriptedProvider = `struct Scripted {
+const scriptedProvider = `import silk.bytes { Bytes }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.host_input { HostInput }
+import silk.host_input { HostInputError }
+import silk.option { Option }
+import silk.u8 as u8
+import silk.usize as usize
+struct Scripted {
   count: usize
 }
 
@@ -29,14 +37,14 @@ fn scripted(count: usize) -> Scripted {
   return Scripted { count: count }
 }
 
-effect fn scriptedCount(self: &mut Scripted) -> usize ! HostInputFailure {
+effect fn scriptedCount(self: &mut Scripted) -> usize ! HostInputError {
   return self.count
 }
 
 effect fn scriptedArgument(
   self: &mut Scripted,
   index: usize
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   if index >= self.count { return none<Bytes>() }
   let source = [u8.toU8(97), u8.toU8(98), u8.toU8(99)]
   let one = [source[index]]
@@ -48,7 +56,7 @@ effect fn scriptedArgument(
 effect fn scriptedVariable(
   self: &mut Scripted,
   name: &[u8]
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   if name.length != usize.add(0, 4) { return none<Bytes>() }
   let value = [u8.toU8(200), u8.toU8(201)]
   let owned = run bytesCopy(&value)
@@ -57,7 +65,7 @@ effect fn scriptedVariable(
 
 effect fn scriptedDirectory(
   self: &mut Scripted
-) -> Bytes ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   let value = [u8.toU8(47), u8.toU8(119)]
   return run bytesCopy(&value)
 }
@@ -71,27 +79,27 @@ impl HostInput for Scripted {
 
 struct Broken {}
 
-effect fn brokenCount(self: &mut Broken) -> usize ! HostInputFailure {
+effect fn brokenCount(self: &mut Broken) -> usize ! HostInputError {
   fail inputFailure()
 }
 
 effect fn brokenArgument(
   self: &mut Broken,
   index: usize
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   fail inputFailure()
 }
 
 effect fn brokenVariable(
   self: &mut Broken,
   name: &[u8]
-) -> Option<Bytes> ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
   fail inputFailure()
 }
 
 effect fn brokenDirectory(
   self: &mut Broken
-) -> Bytes ! HostInputFailure | OutOfMemory ? &mut Allocator {
+) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
   fail inputFailure()
 }
 
@@ -104,7 +112,15 @@ impl HostInput for Broken {
 `
 
 /** Shared readers. Owned host bytes are read through a stable binding, never through an index. */
-const support = `fn firstOf(entry: &Bytes) -> u8 {
+const support = `import silk.bytes { Bytes }
+import silk.host_input { HostInputError }
+import silk.option { None }
+import silk.option { Option }
+import silk.option { Some }
+import silk.result { Result }
+import silk.string { InvalidUtf8 }
+import silk.usize as usize
+fn firstOf(entry: &Bytes) -> u8 {
   return bytesSlice(entry)[usize.ZERO]
 }
 
@@ -128,11 +144,11 @@ fn decodes(entry: &Bytes) -> bool {
   }
 }
 
-effect fn raiseMissing() -> never ! HostInputFailure {
+effect fn raiseMissing() -> never ! HostInputError {
   fail inputFailure()
 }
 
-effect fn required(found: Option<Bytes>) -> Bytes ! HostInputFailure {
+effect fn required(found: Option<Bytes>) -> Bytes ! HostInputError {
   return match move found {
     Some<Bytes> { value: bytes } => move bytes
     None {} => run raiseMissing()
@@ -143,7 +159,7 @@ effect fn required(found: Option<Bytes>) -> Bytes ! HostInputFailure {
 const preamble = `import silk.bytes { Bytes, asSlice as bytesSlice, copy as bytesCopy, length as bytesLength }
 import silk.host_input {
   HostInput,
-  HostInputFailure,
+  HostInputError,
   argument,
   argumentCount,
   arguments as hostArguments,
@@ -158,7 +174,6 @@ import silk.result { Failure, Result, Success }
 import silk.string { InvalidUtf8 }
 import silk.vector { Vector, length as vectorLength, remove as vectorRemove }
 
-impl Report for OutOfMemory {}
 `
 
 const scriptedSource = (body: string) => `${preamble}
@@ -173,7 +188,14 @@ ${body}`
 it.effect('returns the command-line arguments in the order the process received them', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      scriptedSource(`import silk.bytes { Bytes }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = scripted(usize.add(0, 3))
   let total = run Effect.provideMut(argumentCount(), &mut provider)
@@ -193,7 +215,7 @@ it.effect('returns the command-line arguments in the order the process received 
   return 42
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -207,7 +229,12 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports an argument past the end and an unset variable as absence, not failure', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      scriptedSource(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = scripted(usize.ONE)
   let past = run Effect.provideMut(
@@ -229,7 +256,7 @@ it.effect('reports an argument past the end and an unset variable as absence, no
 }
 
 // A recovery branch that survives proves absence never entered the failure channel.
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -243,7 +270,13 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      scriptedSource(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = scripted(usize.ONE)
   let found = run Effect.provideMut(
@@ -266,7 +299,7 @@ it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', (
   return 42
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -280,13 +313,16 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('routes an in-source provider error into the typed failure channel', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      scriptedSource(`import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut provider = Broken {}
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   return 1
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -297,7 +333,14 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
   }),
 )
 
-const nativeProgram = nativeSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+const nativeProgram = nativeSource(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.os_host_input { OsHostInput }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
@@ -329,7 +372,7 @@ const nativeProgram = nativeSource(`effect fn program() -> i32 ! HostInputFailur
   return 42
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
@@ -367,7 +410,14 @@ it.effect('copies a value longer than the provider buffer completely', () =>
   Effect.gen(function* () {
     const long = Object.freeze(Array.from({ length: 300 }, (_, index) => (index % 251) + 1))
     const self = yield* snapshot(
-      nativeSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      nativeSource(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.os_host_input { OsHostInput }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = OsHostInput.make()
   let found = run Effect.provideMut(
@@ -381,7 +431,7 @@ it.effect('copies a value longer than the provider buffer completely', () =>
   return 42
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -483,7 +533,15 @@ it.effect(
     Effect.gen(function* () {
       // The exit status is derived from the arguments the process actually received, so a shim that
       // dropped `argc` and `argv` could not produce it.
-      const source = nativeSource(`effect fn program() -> i32 ! HostInputFailure | OutOfMemory {
+      const source = nativeSource(`import silk.bytes { Bytes }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.host_input { HostInputError }
+import silk.os_host_input { OsHostInput }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
@@ -523,7 +581,7 @@ it.effect(
   return u8.toI32(firstOf(&mark)) - 33
 }
 
-effect fn recover(error: HostInputFailure | OutOfMemory) -> i32 { return 9 }
+effect fn recover(error: HostInputError | OutOfMemoryError) -> i32 { return 9 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
       const compiled = yield* Driver.compile({

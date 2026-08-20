@@ -88,7 +88,9 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.include(edits[0]?.newText, 'return 7')
 
     const hintUri = 'file:///silk-lsp-e2e/hints.silk'
-    const hintText = `pub fn main() -> i32 {
+    const hintText = `import silk.core { SystemAllocator }
+
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
@@ -99,7 +101,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
       method: 'textDocument/inlayHint',
       params: {
         textDocument: { uri: hintUri },
-        range: { start: { line: 0, character: 0 }, end: { line: 3, character: 1 } },
+        range: { start: { line: 0, character: 0 }, end: { line: 5, character: 1 } },
       },
     })
     const hints = (await client.waitFor((message) => response(message, 4))) as Array<{
@@ -111,7 +113,9 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     )
 
     const completionUri = 'file:///silk-lsp-e2e/completion.silk'
-    const completionText = `pub fn main() -> i32 {
+    const completionText = `import silk.effects as Effect
+
+pub fn main() -> i32 {
   return Effect.
 }`
     didOpen(client, completionUri, completionText)
@@ -121,7 +125,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
       method: 'textDocument/completion',
       params: {
         textDocument: { uri: completionUri },
-        position: { line: 1, character: '  return Effect.'.length },
+        position: { line: 3, character: '  return Effect.'.length },
       },
     })
     const completion = (await client.waitFor((message) => response(message, 5))) as {
@@ -225,7 +229,10 @@ pub fn main() -> i32 { return identity(42) }`,
     }>
     assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
 
-    const latest = `// π🙂
+    const latest = `import silk.effects as Effect
+import silk.i32 as i32
+
+// π🙂
 pub fn main() -> i32 {
   let allocator = i32.add(20, 22)
   return Effect.
@@ -247,7 +254,7 @@ pub fn main() -> i32 {
       method: 'textDocument/inlayHint',
       params: {
         textDocument: { uri },
-        range: { start: { line: 0, character: 0 }, end: { line: 4, character: 1 } },
+        range: { start: { line: 0, character: 0 }, end: { line: 7, character: 1 } },
       },
     })
     const latestHints = (await client.waitFor((message) => response(message, 4))) as Array<{
@@ -263,7 +270,7 @@ pub fn main() -> i32 {
       method: 'textDocument/completion',
       params: {
         textDocument: { uri },
-        position: { line: 3, character: '  return Effect.'.length },
+        position: { line: 6, character: '  return Effect.'.length },
       },
     })
     const latestCompletion = (await client.waitFor((message) => response(message, 5))) as {
@@ -279,7 +286,7 @@ pub fn main() -> i32 {
       method: 'textDocument/hover',
       params: {
         textDocument: { uri },
-        position: { line: 2, character: '  let allocator = '.length },
+        position: { line: 5, character: '  let allocator = '.length },
       },
     })
     const latestHover = (await client.waitFor((message) => response(message, 6))) as {
@@ -639,7 +646,7 @@ it('offers a diagnostic edit as a quick fix over real stdio', { timeout: 30_000 
       const published = publishedDiagnostics(message, mainUri)
       return published !== undefined && published.length === 1 ? published : undefined
     })
-    assert.strictEqual(diagnostics[0]?.code, 'SEM0013')
+    assert.strictEqual(diagnostics[0]?.code, 'LSP0002')
 
     client.send({
       id: 2,

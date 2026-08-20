@@ -11,6 +11,7 @@ import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
 import * as OsRuntime from '../src/OsRuntime.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as WasmBackend from '../src/WasmBackend.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -28,7 +29,9 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const lowLevelSource = `pub fn main() -> i32 {
+const lowLevelSource = `import silk.u32 as u32
+import silk.usize as usize
+pub fn main() -> i32 {
   let mut kind = 0
   let mut length = usize.add(0, 0)
   let mut reason = 0
@@ -70,8 +73,10 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'os-filesystem/importer',
-      ascii(`import silk.os_filesystem { OsFileSystem, make }
-pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+      ascii(`import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.os_filesystem { OsFileSystem, make }
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run make(root)
 }`),
     )
@@ -85,13 +90,14 @@ it.effect(
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
         'os-filesystem/list-runner',
-        ascii(`import silk.os_filesystem { OsFileSystem, make as osMake }
+        ascii(`import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.os_filesystem { OsFileSystem, make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
 
-impl Report for OutOfMemory {}
-
-pub effect fn main() -> () ! FileError | OutOfMemory {
+pub effect fn main() -> () ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
   let path = run pathRoot() |> Effect.provideMut(&mut allocator)
@@ -131,14 +137,17 @@ it.effect(
   'runs partial I/O and preserves primary failures through the injected evaluator host',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.os_filesystem { make as osMake }
+      const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
-
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/message") |> Effect.provideMut(&mut allocator)
@@ -155,11 +164,11 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => match move error {
+      Failure<FileError | OutOfMemoryError> { error } => match move error {
         FileError failure => failure.reason.code
-        OutOfMemory exhausted => 99
+        OutOfMemoryError exhausted => 99
       }
     }
   }
@@ -241,12 +250,14 @@ pub fn main() -> i32 {
 
 it.effect('retries oversized directory entries without advancing and sorts complete paths', () =>
   Effect.gen(function* () {
-    const source = `import silk.os_filesystem { make as osMake }
+    const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
 import silk.result { Failure, Result, Success }
 import silk.vector { asSlice as vectorSlice }
-
-impl Report for OutOfMemory {}
 
 fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bool {
   return match &entries[index] {
@@ -254,7 +265,7 @@ fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bo
   }
 }
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let root = run pathRoot() |> Effect.provideMut(&mut allocator)
@@ -272,9 +283,9 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let attempted = run Intrinsic.effectResult(program())
   return match move attempted {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 10
+      Failure<FileError | OutOfMemoryError> { error } => 10
     }
   }
 }`
@@ -348,6 +359,20 @@ it.effect(
           ['SEM0093'],
         )
       }
+
+      const driven = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('os-filesystem/driver-wasm', ascii(lowLevelSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        backend: WasmBackend.WasmBackend,
+        toolchain: { _tag: 'Toolchain', clang: '' },
+        profile: 'release',
+        destination: join(destinationRoot, 'unsupported.wasm'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(driven._tag, 'TargetFailed')
+      if (driven._tag === 'TargetFailed')
+        assert.strictEqual(driven.error.operation, 'Target.validateInventory')
     }),
 )
 
@@ -355,7 +380,10 @@ it.effect('keeps OsHandle opaque, affine, consuming, and unsafe-only', () =>
   Effect.gen(function* () {
     const construct = yield* Analysis.ofSourceRealized(
       'os-filesystem/construct-handle',
-      ascii(`pub fn main() -> i32 { let handle = OsHandle {}; return 0 }`),
+      ascii(`pub fn main() -> i32 {
+  let handle = OsHandle {}
+  return 0
+}`),
     )
     assert.include(
       Analysis.diagnostics(construct).map((diagnostic) => diagnostic.code),
@@ -398,7 +426,8 @@ pub fn main() -> i32 { return 0 }`),
 
     const reused = yield* Analysis.ofSourceRealized(
       'os-filesystem/reused-handle',
-      ascii(`pub effect fn twice(handle: OsHandle) -> bool {
+      ascii(`import silk.u32 as u32
+pub effect fn twice(handle: OsHandle) -> bool {
   let mut reason = 0
   let mut code = u32.toU32(0)
   unsafe {
@@ -418,8 +447,12 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('navigates provider policy to Silk source and low-level calls to Intrinsic', () =>
   Effect.gen(function* () {
-    const source = `import silk.os_filesystem { OsFileSystem, make as osMake }
-pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator {
+    const source = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.u32 as u32
+import silk.usize as usize
+import silk.os_filesystem { OsFileSystem, make as osMake }
+pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run osMake(root)
 }
 pub fn main() -> i32 {
@@ -544,14 +577,18 @@ it.effect(
   'runs the ordinary OS provider against a confined native root',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.os_filesystem { make as osMake }
+      const source = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
+import silk.os_filesystem { make as osMake }
 import silk.bytes { asSlice as bytesSlice }
 import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
-
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/hello.txt") |> Effect.provideMut(&mut allocator)
@@ -590,9 +627,9 @@ effect fn program() -> i32 ! FileError | OutOfMemory {
 pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => 10
+      Failure<FileError | OutOfMemoryError> { error } => 10
     }
   }
 }`

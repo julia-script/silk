@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
+import * as ToolchainIntegrity from '@silk-effect/compiler/ToolchainIntegrity'
 import * as Report from '../src/Report.js'
 
 const ascii = (text: string): Uint8Array =>
@@ -93,6 +94,19 @@ it('explains a missing entry in terms of the declaration the user must add', () 
   )
 })
 
+it('identifies private main visibility instead of blaming its resolved result', () => {
+  const outcome: Driver.Outcome = {
+    _tag: 'NoEntry',
+    reason: 'PrivateEntry',
+    diagnostics: [],
+    report: [],
+  }
+  assert.strictEqual(
+    Report.outcome(outcome, source('fn main() -> () { return () }'), 'main.silk'),
+    'No entry point: `main` must be public',
+  )
+})
+
 it('names the executable, target, and symbol count on success', () => {
   const outcome: Driver.Outcome = {
     _tag: 'Compiled',
@@ -112,8 +126,15 @@ it('names the executable, target, and symbol count on success', () => {
         symbol: 'silk_main',
       },
     ],
+    termination: {
+      _tag: 'EntryTermination',
+      success: 'ReturnedStatus',
+      failures: [],
+      logicalFrames: [],
+    },
     diagnostics: [],
     report: [],
+    toolchainIdentity: 'fixture-toolchain',
   }
   assert.strictEqual(
     Report.outcome(outcome, source('pub fn main() -> i32 { return 42 }'), 'main.silk'),
@@ -133,7 +154,7 @@ it('keeps the failing command so a toolchain failure is reproducible by hand', (
         command: 'clang',
         arguments: ['-o', 'a.out'],
       },
-      reason: { _tag: 'ProcessFailure' },
+      reason: { _tag: 'ProcessError' },
       status: 1,
       output: 'ld: symbol not found',
     } as Driver.Failed['failure'],
@@ -148,6 +169,33 @@ it('keeps the failing command so a toolchain failure is reproducible by hand', (
       '  | ld: symbol not found',
     ].join('\n'),
   )
+})
+
+it('reports broken distribution identity separately from backend and source failures', () => {
+  const installed = ToolchainIntegrity.installed()
+  const stale = ToolchainIntegrity.make(
+    installed.components.map((component) =>
+      component.kind === 'IntrinsicInventory'
+        ? { ...component, digest: '0'.repeat(64) }
+        : component,
+    ),
+  )
+  const validation = ToolchainIntegrity.validateFrontend(stale)
+  assert.strictEqual(validation._tag, 'Invalid')
+  if (validation._tag !== 'Invalid') return
+  const rendered = Report.outcome(
+    {
+      _tag: 'ToolchainFailed',
+      expectedIdentity: installed.digest,
+      observedIdentity: stale.digest,
+      failures: validation.failures,
+      report: [],
+    },
+    source(''),
+    'main.silk',
+  )
+  assert.include(rendered, 'Broken toolchain:')
+  assert.include(rendered, 'IntrinsicInventory silk/intrinsic/inventory digest mismatch')
 })
 
 it('treats only a Compiled outcome as success', () => {

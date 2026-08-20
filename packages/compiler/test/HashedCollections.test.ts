@@ -58,6 +58,7 @@ const agrees = (outcome: { bootstrap: unknown; direct: unknown }, expected: numb
 }
 
 const mapImports = `import silk.hash { HashKey, HashSeed, Word }
+import silk.i32 as i32
 import silk.hash_map {
   HashMap,
   bucketCount,
@@ -72,18 +73,23 @@ import silk.hash_map {
   remove,
   valueAt
 }
-import silk.option { Option, Some, None }`
+import silk.option { Option, Some, None }
+import silk.u64 as u64
+import silk.usize as usize`
 
-/** Wraps a body in the allocator the collections require and the recovery an `OutOfMemory` needs. */
+/** Wraps a body in the allocator the collections require and the recovery an `OutOfMemoryError` needs. */
 const program = (imports: string, body: string): string =>
-  `${imports}
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+${imports}
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 ${body}
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -186,16 +192,27 @@ it.effect('leaves the map intact when the growth allocation fails', () =>
     // that needs growth, and it fails; every entry placed before it must still answer at its key.
     const value = yield* evaluatedValue(
       'hashed-collections/failed-growth',
-      `${mapImports}
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.hash { HashKey }
+import silk.hash { Word }
+import silk.hash_map { HashMap }
+import silk.i32 as i32
+import silk.layout { Layout }
+import silk.option { Option }
+import silk.usize as usize
+${mapImports}
 
 struct Budget {
   inner: SystemAllocator
   remaining: usize
 }
 
-effect fn allocate(self: &mut Budget, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut Budget, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == usize.ZERO {
-    fail OutOfMemory {}
+    fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - usize.ONE
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
@@ -204,15 +221,15 @@ effect fn allocate(self: &mut Budget, layout: Layout) -> Allocation ! OutOfMemor
 
 impl Allocator for Budget { allocate: Budget.allocate }
 
-effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let previous = run insert<Word, i32>(move map, HashKey.word(6), 106)
   drop previous
   return 0
 }
 
-effect fn noRoom(error: OutOfMemory) -> i32 { return 1 }
+effect fn noRoom(error: OutOfMemoryError) -> i32 { return 1 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Budget { inner: SystemAllocator.make(), remaining: 2 }
   let mut map = make<Word, i32>(HashKey.seed(5))
   let mut key = 0
@@ -242,7 +259,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
@@ -297,6 +314,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
 )
 
 const setImports = `import silk.hash { HashKey, HashSeed, Word }
+import silk.u64 as u64
 import silk.hash_set {
   HashSet,
   bucketCount,
@@ -350,11 +368,15 @@ it.effect('refuses a key type that has no HashKey witness', () =>
     // hash and no equivalence, and the instantiation is reported rather than accepted.
     const snapshot = yield* analyzed(
       'hashed-collections/no-witness',
-      `${mapImports}
+      `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.hash { HashKey }
+${mapImports}
 
 struct Unhashed { tag: i32 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut map = make<Unhashed, i32>(HashKey.seed(1))
   let placed = run insert<Unhashed, i32>(&mut map, Unhashed { tag: 1 }, 2)
@@ -363,7 +385,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )

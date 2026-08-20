@@ -10,27 +10,38 @@
 //! runtime dispatch. The interface intentionally exposes only the operation spelled by `+`; it does
 //! not attempt to erase the distinct ranges and conversion rules of each integer type.
 
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
 /// Static addition contract for primitive integer values.
 ///
 /// # Details
 ///
 /// Interfaces select compiler-known operations during specialization. They do not create
 /// effect requirements, provider slots, or runtime dispatch.
-pub interface Integer<T> {
+pub interface Integer {
   /// Adds two values using the concrete primitive integer operation.
-  fn add(left: T, right: T) -> T
+  operator + fn add(left: Self, right: Self) -> Self
 }
 
-impl Integer<u8> for u8 { add: Intrinsic.u8Add }
-impl Integer<u16> for u16 { add: Intrinsic.u16Add }
-impl Integer<u32> for u32 { add: Intrinsic.u32Add }
-impl Integer<u64> for u64 { add: Intrinsic.u64Add }
-impl Integer<usize> for usize { add: Intrinsic.usizeAdd }
-impl Integer<i8> for i8 { add: Intrinsic.i8Add }
-impl Integer<i16> for i16 { add: Intrinsic.i16Add }
-impl Integer<i32> for i32 { add: Intrinsic.i32Add }
-impl Integer<i64> for i64 { add: Intrinsic.i64Add }
-impl Integer<isize> for isize { add: Intrinsic.isizeAdd }
+impl Integer for u8 { add: Intrinsic.u8Add }
+impl Integer for u16 { add: Intrinsic.u16Add }
+impl Integer for u32 { add: Intrinsic.u32Add }
+impl Integer for u64 { add: Intrinsic.u64Add }
+impl Integer for usize { add: Intrinsic.usizeAdd }
+impl Integer for i8 { add: Intrinsic.i8Add }
+impl Integer for i16 { add: Intrinsic.i16Add }
+impl Integer for i32 { add: Intrinsic.i32Add }
+impl Integer for i64 { add: Intrinsic.i64Add }
+impl Integer for isize { add: Intrinsic.isizeAdd }
 
 /// Adds two values using the concrete integer operation selected during specialization.
 pub fn add<T: Integer>(left: T, right: T) -> T {

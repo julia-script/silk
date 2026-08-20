@@ -15,7 +15,11 @@ const encoder = new TextEncoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `pub effect fn main() -> () ! StreamWriteFailure {
+const source = `import silk.core as StandardStream
+import silk.core { NativeStandardStreams }
+import silk.core { StreamWriteError }
+import silk.effects as Effect
+pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
@@ -77,7 +81,7 @@ it.effect('records complete ordered writes and typed provider failure determinis
     const failing = StandardStreams.memory({ failAt: 1 })
     const failed = Analysis.evaluate(self, { standardStreams: failing.provider })
     assert.strictEqual(failed._tag, 'UnhandledFailure')
-    if (failed._tag === 'UnhandledFailure') assert.include(failed.report, 'StreamWriteFailure')
+    if (failed._tag === 'UnhandledFailure') assert.include(failed.identity, 'StreamWriteError')
     assert.strictEqual(failing.events().length, 1)
   }),
 )
@@ -174,7 +178,11 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
   Effect.gen(function* () {
     const replaced = yield* Analysis.ofSourceRealized(
       'standard-streams/memory',
-      encoder.encode(`struct MemoryStreams { writes: i32 }
+      encoder.encode(`import silk.core as StandardStream
+import silk.core { StandardStreams }
+import silk.core { StreamWriteError }
+import silk.effects as Effect
+struct MemoryStreams { writes: i32 }
 effect fn record(
   self: &mut MemoryStreams,
   destination: bool,
@@ -184,7 +192,7 @@ effect fn record(
   return ()
 }
 impl StandardStreams for MemoryStreams { writeAll: MemoryStreams.record }
-pub effect fn main() -> () ! StreamWriteFailure {
+pub effect fn main() -> () ! StreamWriteError {
   let mut memory = MemoryStreams { writes: 0 }
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("one")), &mut memory)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), Intrinsic.stringUtf8Bytes("two")), &mut memory)

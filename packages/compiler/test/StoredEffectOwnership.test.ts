@@ -159,7 +159,6 @@ pub fn main() -> i32 { return 0 }`,
     )
 
     assert.include(codesOf(snapshot), 'OWN0001')
-    assert.notInclude(codesOf(snapshot), 'OWN0013')
   }),
 )
 
@@ -174,12 +173,10 @@ it.effect('rejects extracting a represented Effect field directly', () =>
 }`,
     )
     const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'OWN0013',
+      (candidate) => candidate.code === 'OWN0002',
     )
 
-    assert.strictEqual(diagnostic?.reason._tag, 'RepresentationFieldExtraction')
-    assert.include(diagnostic?.message ?? '', 'executable representation')
-    assert.notInclude(codesOf(snapshot), 'OWN0002')
+    assert.strictEqual(diagnostic?.reason._tag, 'PartialMove')
   }),
 )
 
@@ -207,5 +204,54 @@ pub fn main() -> i32 {
       loan === undefined ? undefined : source.slice(loan.endSpan.start, loan.endSpan.end).trim(),
       'drop deferred',
     )
+  }),
+)
+
+it.effect('duplicates an explicitly Copy aggregate whose realized Effect captures are Copy', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-effect-ownership/copy-realization',
+      `struct Offset { value: i32 }
+impl Copy for Offset {}
+struct Deferred<F: Effect<i32>> { operation: F }
+impl<F: Effect<i32>> Copy for Deferred<F> {}
+effect fn compute(value: i32, offset: Offset) -> i32 { return value + offset.value }
+fn consume<F: Effect<i32>>(value: Deferred<F>) -> () { drop value }
+pub fn main() -> i32 {
+  let offset = Offset { value: 2 }
+  let deferred = Deferred { operation: compute(40, move offset) }
+  consume(deferred)
+  consume(deferred)
+  return 0
+}`,
+    )
+
+    assert.notInclude(codesOf(snapshot), 'SEM0083')
+    assert.notInclude(codesOf(snapshot), 'OWN0001')
+  }),
+)
+
+it.effect('keeps an executable aggregate affine when its realized Effect owns a capture', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'stored-effect-ownership/affine-realization',
+      `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Deferred<F: once Effect<i32>> { operation: F }
+impl<F: once Effect<i32>> Copy for Deferred<F> {}
+fn consume<F: once Effect<i32>>(value: Deferred<F>) -> () { drop value }
+pub fn main() -> i32 {
+  let token = Token { value: 42 }
+  let deferred = Deferred { operation: effect {
+    let owned = move token
+    return owned.value
+  } }
+  consume(move deferred)
+  consume(move deferred)
+  return 0
+}`,
+    )
+
+    assert.include(codesOf(snapshot), 'OWN0001')
   }),
 )

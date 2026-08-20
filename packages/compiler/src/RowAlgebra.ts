@@ -5,6 +5,7 @@ import * as SourceSpan from './SourceSpan.js'
 export type MemberSubstitution<Member, SymbolicMember> =
   | { readonly _tag: 'Residual'; readonly member: SymbolicMember }
   | { readonly _tag: 'Concrete'; readonly member: Member }
+  | { readonly _tag: 'ConcreteRow'; readonly members: ReadonlyArray<Member> }
   | { readonly _tag: 'InvalidSingleton'; readonly reason: string }
 
 /** Domain behavior for one kind-preserving symbolic row algebra. */
@@ -470,6 +471,7 @@ export const substitute = <Member, RowParameter, SymbolicMember, MemberParameter
       case 'Singleton': {
         const result = substitution.member(expression.member)
         if (result._tag === 'Concrete') return concrete(policy, [result.member])
+        if (result._tag === 'ConcreteRow') return concrete(policy, result.members)
         if (result._tag === 'Residual') {
           const residualExpression: Expression<Member, RowParameter, SymbolicMember> =
             Object.freeze({ _tag: 'Singleton', member: result.member })

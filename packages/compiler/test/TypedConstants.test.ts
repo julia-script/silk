@@ -121,7 +121,8 @@ pub fn main() -> i32 { return move answer }`),
  * datum the equivalent `let` binding lowers to. Identical HIR data ids are that byte equality.
  */
 const stringConstantSource = (initializer: string, binding: string) =>
-  `import silk.string { byteLength }
+  `import silk.usize as usize
+import silk.string { byteLength }
 
 const pattern: string = ${initializer}
 
@@ -185,7 +186,8 @@ pub fn main() -> i32 { return 0 }`
 it.effect('resolves a public string constant across a module boundary', () =>
   Effect.gen(function* () {
     const strings = 'pub const greeting: string = "hi"'
-    const main = `import strings { greeting }
+    const main = `import silk.usize as usize
+import strings { greeting }
 import silk.string { byteLength }
 
 pub fn main() -> i32 { return usize.toI32(byteLength(greeting)) }`
@@ -258,32 +260,37 @@ pub fn main() -> i32 { return 0 }`
   }),
 )
 
-it.effect('rejects constant storage operations while preserving call-site navigation', () =>
-  Effect.gen(function* () {
-    const input = `const answer: i32 = 42
+it.effect(
+  'rejects calling and assigning constants while permitting a borrowed materialization',
+  () =>
+    Effect.gen(function* () {
+      const input = `const answer: i32 = 42
 pub fn main() -> i32 {
   let called = answer()
   let borrowed = &mut answer
   answer = 1
   return called
 }`
-    const snapshot = yield* Analysis.ofSourceRealized('constants/operations', encoder.encode(input))
-    const codes = Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
-    assert.include(codes, Diagnostic.nonCallableApplicationCode)
-    assert.include(codes, Diagnostic.invalidBorrowPositionCode)
-    assert.include(codes, Diagnostic.invalidAssignmentPlaceCode)
-    const occurrence = Analysis.semanticOccurrenceAt(
-      snapshot,
-      'constants/operations',
-      input.indexOf('answer()'),
-    )
-    assert.strictEqual(occurrence?.resolution._tag, 'Available')
-    assert.strictEqual(occurrence?.declaration?.module, 'constants/operations')
-    assert.strictEqual(
-      occurrence === undefined
-        ? undefined
-        : Analysis.occurrencePresentation(snapshot, 'constants/operations', occurrence)?.text,
-      'const answer: i32',
-    )
-  }),
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'constants/operations',
+        encoder.encode(input),
+      )
+      const codes = Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
+      assert.include(codes, Diagnostic.nonCallableApplicationCode)
+      assert.notInclude(codes, Diagnostic.invalidBorrowPositionCode)
+      assert.include(codes, Diagnostic.invalidAssignmentPlaceCode)
+      const occurrence = Analysis.semanticOccurrenceAt(
+        snapshot,
+        'constants/operations',
+        input.indexOf('answer()'),
+      )
+      assert.strictEqual(occurrence?.resolution._tag, 'Available')
+      assert.strictEqual(occurrence?.declaration?.module, 'constants/operations')
+      assert.strictEqual(
+        occurrence === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'constants/operations', occurrence)?.text,
+        'const answer: i32',
+      )
+    }),
 )

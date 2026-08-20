@@ -42,6 +42,7 @@ const categories: Record<Token.TokenKind, Category | undefined> = {
   StructKeyword: keyword,
   ServiceKeyword: keyword,
   InterfaceKeyword: keyword,
+  RoleKeyword: keyword,
   FnKeyword: keyword,
   EffectKeyword: keyword,
   RunKeyword: keyword,

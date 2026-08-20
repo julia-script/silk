@@ -12,7 +12,8 @@ it.effect('shares authoritative array cells across calls and compatible reborrow
   Effect.gen(function* () {
     const self = yield* snapshot(
       'mutation',
-      `fn inner(values: &mut [i32], index: usize) -> i32 {
+      `import silk.usize as usize
+fn inner(values: &mut [i32], index: usize) -> i32 {
   values[index] = 42
   return usize.toI32(values.length)
 }
@@ -53,7 +54,8 @@ it.effect('uses runtime lengths for different source arrays and zero-sized eleme
   Effect.gen(function* () {
     const self = yield* snapshot(
       'lengths',
-      `struct Empty {}
+      `import silk.usize as usize
+struct Empty {}
 fn length<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
 fn three() -> i32 { let values = [1, 2, 3] return length(&values) }
 fn six() -> i32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }
@@ -88,11 +90,8 @@ pub fn main() -> i32 { let values = [10, 20] return choose(&values, 2) }`,
     for (const self of [upper]) {
       assert.deepEqual(Analysis.diagnostics(self), [])
       const outcome = Analysis.evaluate(self)
-      assert.strictEqual(outcome._tag, 'Blocked')
-      if (outcome._tag === 'Blocked') {
-        assert.strictEqual(outcome.reason._tag, 'Trap')
-        if (outcome.reason._tag === 'Trap') assert.include(outcome.reason.reason, 'slice index')
-      }
+      assert.strictEqual(outcome._tag, 'Trap')
+      if (outcome._tag === 'Trap') assert.include(outcome.reason, 'slice index')
     }
   }),
 )

@@ -1,15 +1,19 @@
 /** Shared acceptance programs for compiler-owned editor intelligence. */
-export const allocatorSource = `pub fn main() -> i32 {
+export const allocatorSource = `import silk.core { SystemAllocator }
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
 
-export const effectHandlerSource = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+export const effectHandlerSource = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
 
-export const pipedCatchSource = `struct Problem {}
+export const pipedCatchSource = `import silk.effects as Effect
+struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = relay(0)
@@ -28,7 +32,9 @@ export const nestedBindingSource = `pub fn main() -> i32 {
   return value
 }`
 
-export const recoveredMemberSource = `pub fn main() -> i32 {
+export const recoveredMemberSource = `import silk.core { SystemAllocator }
+import silk.effects as Effect
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return Effect.
 }`

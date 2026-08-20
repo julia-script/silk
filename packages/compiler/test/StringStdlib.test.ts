@@ -17,7 +17,8 @@ const diagnosticSummary = (snapshot: Analysis.Snapshot) =>
     start: diagnostic.span.start,
   }))
 
-const validation = `import silk.string { InvalidUtf8, fromUtf8, byteLength }
+const validation = `import silk.usize as usize
+import silk.string { InvalidUtf8, fromUtf8, byteLength }
 import silk.result { Result, Success, Failure }
 
 fn observe(result: Result<string, InvalidUtf8>) -> i32 {
@@ -65,7 +66,36 @@ it.effect('validates complete UTF-8 and reports the first invalid byte offset', 
   }),
 )
 
-const owned = `import silk.string {
+it.effect('exposes unchecked UTF-8 construction as an unsafe source callable', () =>
+  Effect.gen(function* () {
+    const safe = yield* Analysis.ofSourceRealized(
+      'string-stdlib/unchecked-safe',
+      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+import silk.usize { toI32 }
+pub fn main() -> i32 { return toI32(byteLength(fromUtf8Unchecked(b"silk"))) }`),
+    )
+    assert.deepEqual(
+      diagnosticSummary(safe).map(({ code }) => code),
+      ['SEM0082'],
+    )
+
+    const acknowledged = yield* Analysis.ofSourceRealized(
+      'string-stdlib/unchecked-acknowledged',
+      ascii(`import silk.string { byteLength, fromUtf8Unchecked }
+import silk.usize { toI32 }
+pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk"))) }`),
+    )
+    assert.deepEqual(diagnosticSummary(acknowledged), [])
+    const evaluated = Analysis.evaluate(acknowledged)
+    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 4n)
+  }),
+)
+
+const owned = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.string {
   copy,
   append,
   view,
@@ -73,7 +103,7 @@ const owned = `import silk.string {
   ownedUtf8Bytes
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let copying = copy("h\\u{e9}") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
@@ -85,7 +115,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -115,12 +145,17 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
   }),
 )
 
-const appendRollback = `import silk.string { String, copy, append, view, ownedByteLength }
+const appendRollback = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.string { String, copy, append, view, ownedByteLength }
 
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -129,10 +164,10 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn ignore(error: OutOfMemory) -> () { return () }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   // One allocation, spent by the copy. Appending grows the copied storage in place rather than
   // copying it into fresh storage first, so starving the append takes one fewer than it used to.
   let mut allocator = QuotaAllocator { remaining: 1 }
@@ -163,7 +198,9 @@ it.effect('rolls append back when growth cannot allocate', () =>
   }),
 )
 
-const scalars = `import silk.string {
+const scalars = `import silk.u32 as u32
+import silk.usize as usize
+import silk.string {
   ScalarCursor,
   ScalarStep,
   scalarCursor,
@@ -174,6 +211,7 @@ const scalars = `import silk.string {
   nextCursor
 }
 import silk.option { Option, Some, None }
+import silk.char { toU32 as charToU32 }
 
 fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
   if cursorByteOffset(&cursor) == expectedOffset {} else { return u32.toU32(1) }
@@ -185,7 +223,7 @@ fn walk(value: string, cursor: ScalarCursor, expectedOffset: usize) -> u32 {
 
 fn continueWalk(value: string, step: ScalarStep) -> u32 {
   let offset = scalarByteOffset(&step)
-  let scalar = scalarValue(&step)
+  let scalar = charToU32(scalarValue(&step))
   let next = nextCursor(move step)
   return scalar + walk(value, move next, offset + stringWidth(scalar))
 }

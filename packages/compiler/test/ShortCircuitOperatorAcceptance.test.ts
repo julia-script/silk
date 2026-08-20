@@ -249,18 +249,22 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('rejects an effect site in the right operand and accepts it in the left', () =>
+it.effect('runs an effect site only when its short-circuit path is selected', () =>
   Effect.gen(function* () {
-    const rejected = yield* Analysis.ofSourceRealized(
+    const right = yield* Analysis.ofSourceRealized(
       'short-circuit/effect-right',
       ascii(`effect fn decide() -> bool { return true }
 fn choose(flag: bool) -> bool { return flag && run decide() }
-pub fn main() -> i32 { return 0 }`),
+pub fn main() -> i32 {
+  if choose(false) == false {} else { return 1 }
+  if choose(true) {} else { return 2 }
+  return 42
+}`),
     )
-    assert.deepEqual(
-      Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
-      [Diagnostic.impureShortCircuitOperandCode],
-    )
+    assert.deepEqual(Analysis.diagnostics(right), [])
+    const rightOutcome = Analysis.evaluate(right)
+    assert.strictEqual(rightOutcome._tag, 'Completed')
+    if (rightOutcome._tag === 'Completed') assert.strictEqual(rightOutcome.result.value, 42n)
 
     const accepted = yield* Analysis.ofSourceRealized(
       'short-circuit/effect-left',
@@ -284,19 +288,23 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('rejects a move in the right operand and accepts it in the left', () =>
+it.effect('moves an affine value only on the selected short-circuit path', () =>
   Effect.gen(function* () {
-    const rejected = yield* Analysis.ofSourceRealized(
+    const right = yield* Analysis.ofSourceRealized(
       'short-circuit/move-right',
       ascii(`struct Flag { value: bool }
 fn unwrap(flag: Flag) -> bool { return flag.value }
 fn choose(gate: bool, flag: Flag) -> bool { return gate && unwrap(move flag) }
-pub fn main() -> i32 { return 0 }`),
+pub fn main() -> i32 {
+  if choose(false, Flag { value: true }) == false {} else { return 1 }
+  if choose(true, Flag { value: true }) {} else { return 2 }
+  return 42
+}`),
     )
-    assert.deepEqual(
-      Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
-      [Diagnostic.impureShortCircuitOperandCode],
-    )
+    assert.deepEqual(Analysis.diagnostics(right), [])
+    const rightOutcome = Analysis.evaluate(right)
+    assert.strictEqual(rightOutcome._tag, 'Completed')
+    if (rightOutcome._tag === 'Completed') assert.strictEqual(rightOutcome.result.value, 42n)
 
     const accepted = yield* Analysis.ofSourceRealized(
       'short-circuit/move-left',
@@ -314,5 +322,24 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('rejects a use reached after one short-circuit path moves its owner', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'short-circuit/conditional-use-after-move',
+      ascii(`struct Flag { value: bool }
+fn unwrap(flag: Flag) -> bool { return flag.value }
+fn invalid(gate: bool, flag: Flag) -> bool {
+  let selected = gate && unwrap(move flag)
+  return selected && flag.value
+}
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [Diagnostic.useAfterMoveCode],
+    )
   }),
 )

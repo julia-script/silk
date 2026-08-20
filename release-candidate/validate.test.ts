@@ -332,7 +332,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SyntaxFile',
       './SyntaxTree',
       './Target',
+      './Termination',
       './Token',
+      './ToolchainIntegrity',
       './ToolchainPlan',
       './Transcendental',
       './Type',
@@ -554,6 +556,7 @@ const names = analysis.functions.map((fact) =>
 console.log(
   JSON.stringify({
     root: Object.keys(api).sort(),
+    toolchainIdentity: api.ToolchainIntegrity.installed().digest,
     rootNamespaces: Object.fromEntries(
       paths
         .filter((path) => path !== './NativeToolchain' && path !== './Driver')
@@ -765,7 +768,9 @@ console.log(
       'SyntaxTree',
       'Target',
       'TargetConstant',
+      'Termination',
       'Token',
+      'ToolchainIntegrity',
       'ToolchainPlan',
       'Transcendental',
       'Type',
@@ -774,6 +779,7 @@ console.log(
       'WasmBackend',
       'WorkspaceInventory',
     ])
+    expect(api.toolchainIdentity).toMatch(/^[0-9a-f]{64}$/)
     for (const [path, exports] of Object.entries(api.deep) as ReadonlyArray<
       readonly [string, ReadonlyArray<string>]
     >) {

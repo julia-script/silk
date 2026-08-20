@@ -55,7 +55,7 @@ checker:
 5. represented callable and Effect fields have milestone-specific move-only and extraction rules
    instead of deriving ordinary aggregate ownership from their realized fields; and
 6. the otherwise mature lifecycle edge still inherits the general return-contract hole, old
-   `OutOfMemory` spelling, and unfinished suspension/terminal-report reconciliation.
+   `OutOfMemoryError` spelling, and unfinished suspension/terminal-report reconciliation.
 
 The focused suite passed all 212 tests across 21 files. One Wasm heap-flatness test exceeded its
 default five-second timeout in the combined run and passed when rerun alone with a 20-second test
@@ -169,7 +169,7 @@ These and the remaining tables refer to `ownership-and-borrowing.md`.
 | DROP-001 | Implemented | Aligned | Explicit drop consumes complete Copy or affine owners immediately, omits later cleanup, and rejects partial projection drop or live-loan conflict. |
 | DROP-002 | Partial | Partial | Restricted automatic infallible Drop hooks and their cross-engine order are implemented. Their exclusion from Copy types currently consults structural `copyType`, not the accepted opt-in marker, so an all-Copy affine nominal is incorrectly barred. |
 | CLOSE-001 | Implemented | Aligned | Fallible finalization is already an ordinary consuming function or Effect with ordinary failure, requirement, ownership, and cleanup behavior; no hidden cleanup channel exists. |
-| ALLOC-001 | Partial | Partial | Allocation carries private one-owner reclaim authority, detaches from the allocator loan, and cleans exactly once across engines. The public failure is still named `OutOfMemory`, not the confirmed `OutOfMemoryError`, and service/failure syntax inherits ticket 01. |
+| ALLOC-001 | Partial | Partial | Allocation carries private one-owner reclaim authority, detaches from the allocator loan, and cleans exactly once across engines. The public failure is still named `OutOfMemoryError`, not the confirmed `OutOfMemoryError`, and service/failure syntax inherits ticket 01. |
 | EFFECT-LIFE-001 | Partial | Partial | Unrun, successful, failing, retrying, and stored Effects clean per-run and retained environment state correctly. Explicit suspension has working ownership facts and cases, but its accepted coroutine-storage reconciliation remains ticket 06 rather than a completed all-target guarantee. |
 | TRAP-001 | Implemented | Partial | Traps remain outside typed failure and make no source cleanup guarantee. Stable terminal status and presentation behavior belong to ticket 05 and are not yet fully reflected in current execution boundaries. |
 
@@ -207,7 +207,7 @@ These and the remaining tables refer to `ownership-and-borrowing.md`.
 6. **Complete semantic returns and lifecycle edges through existing handoffs.** Ticket 01 owns the
    general return-contract diagnostic and ordinary failure/service model; ticket 05 owns terminal
    trap reporting; ticket 06 owns all-target suspension storage and cleanup. Rename
-   `OutOfMemory` atomically with the ordinary-failure change rather than creating an ownership-only
+   `OutOfMemoryError` atomically with the ordinary-failure change rather than creating an ownership-only
    compatibility alias.
 
 ### Next frontier

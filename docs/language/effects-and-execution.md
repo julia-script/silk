@@ -24,9 +24,8 @@ than constructing an Effect.
 
 **Diagnostics:** Calling an effect function is not itself an error. Using its `Effect<A>` result in
 a context that requires `A` must produce a type-mismatch diagnostic naming both types at the use
-site. The current compiler has context-specific mismatch diagnostics but no general return-value
-mismatch; the resulting defect is recorded under EFF-002. Ignoring the Effect as an expression
-statement is the separate `SEM0087` boundary described under
+site. Returning it from a body whose contract requires `A` produces `SEM0129`. Ignoring the Effect
+as an expression statement is the separate `SEM0087` boundary described under
 [statements and discarded values](statements-and-discarding.md).
 
 **Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
@@ -59,20 +58,16 @@ effect fn outer() -> i32 { return inner() }
 
 **Diagnostics:** Returning a value incompatible with an effect body's declared success type must
 produce a return-type mismatch at the returned expression, naming the declared success type and the
-actual expression type. Analysis must reject the program before HIR or MIR reaches a backend. No
-stable diagnostic code is currently assigned for this general return mismatch.
-
-**Current compiler:** Disputed. The analyzer recognizes that `Effect<i32>` is not compatible with
-`i32`, but its return-checking path emits no general type-mismatch diagnostic when the specialized
-representation and union diagnostics do not apply. It instead places an unavailable expression in
-HIR. As a result, `silk check` reports success and a reachable build later fails with `Backend
-error: LLVM cannot emit invalid MIR`.
+actual expression type. `SEM0129` reports an incompatible explicit return at the returned
+expression. `SEM0130` reports reachable fallthrough from a body whose declared result is not `()`.
+HIR may retain explicitly unavailable structure for inspection, but realization, layout, MIR, and
+backends are unavailable while either diagnostic exists.
 
 This is not intentional tail propagation. Issue
 [#226](https://github.com/julia-script/silk/issues/226) records the interface-dispatched version of
-the same source/backend disagreement.
+the former source/backend disagreement and is now a semantic regression case.
 
-The same missing diagnostic also appears in the opposite direction:
+The opposite direction is equally invalid:
 
 ```silk,ignore
 effect fn inner() -> i32 { return 42 }
@@ -86,11 +81,8 @@ pub fn main() -> i32 {
 }
 ```
 
-Here `run inner()` is `i32`, which cannot satisfy `outer`'s declared `Effect<i32>` result. Current
-`silk check` and `silk build` nevertheless succeed. Lowering replaces the unavailable body with a
-trap, so the emitted native program terminates with `SIGTRAP`; `silk run` currently hides that
-signal behind `Cannot run compiled program ...`. This is another compiler failure mode, not a
-runtime meaning for the source.
+Here `run inner()` is `i32`, which cannot satisfy `outer`'s declared `Effect<i32>` result. Analysis
+reports `SEM0129`; it does not construct MIR or an executable program.
 
 Both valid alternatives make the boundary explicit:
 
@@ -103,8 +95,8 @@ fn executed() -> i32 { return run inner() }
 
 **Evidence:** [explicit execution syntax](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
 [effect elaboration](../../packages/compiler/src/Elaboration.ts),
-[MIR fallback lowering](../../packages/compiler/src/Lower.ts),
-[compiled-program runner](../../packages/compiler-cli/src/Program.ts).
+[return-contract regressions](../../packages/compiler/test/InterfaceBounds.test.ts),
+[MIR return verification](../../packages/compiler/src/Mir.ts).
 
 ## EFF-003 — `run` executes exactly one Effect layer
 
@@ -125,7 +117,7 @@ pub fn main() -> i32 {
 
 **Boundary:** Running `outer()` once produces `Effect<i32>`, not `i32`.
 
-The following superficially confusing case does not demonstrate automatic flattening:
+The following invalid case does not demonstrate automatic flattening:
 
 ```silk,ignore
 effect fn inner() -> i32 { return 42 }
@@ -136,9 +128,9 @@ pub effect fn main() {
 }
 ```
 
-`outer()` has type `Effect<i32>` from its declaration, so one `run` gives `value` type `i32`. The
-bug is that `outer`'s incompatible body was not rejected with a source diagnostic; lowering then
-fails on invalid MIR.
+`outer()` has type `Effect<i32>` from its declaration, so one `run` would give `value` type `i32`.
+The program is nevertheless invalid because `outer` returns `Effect<i32>` where its success
+contract requires `i32`; `SEM0129` rejects the declaration before lowering.
 
 **Diagnostics:** Applying `run` to a non-Effect value reports `SEM0065` at the operand and identifies
 its actual type. A `run` that leaves failures or requirements outside the surrounding contract
@@ -161,8 +153,8 @@ effect fn inner() -> i32 { return 42 }
 effect fn nested() -> Effect<i32> { return inner() }
 ```
 
-**Boundary:** Declaring the success type as `i32` does not request implicit flattening. Current
-compiler behavior diverges as recorded under EFF-002.
+**Boundary:** Declaring the success type as `i32` does not request implicit flattening. Returning an
+`Effect<i32>` from that body produces `SEM0129` as recorded under EFF-002.
 
 **Diagnostics:** Constructing or returning a nested Effect is valid and produces no diagnostic.
 Using `Effect<A>` where `A` is required must produce the type mismatch described under EFF-002.

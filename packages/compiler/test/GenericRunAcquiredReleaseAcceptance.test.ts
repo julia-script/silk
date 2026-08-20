@@ -10,9 +10,14 @@ const ascii = (value: string): Uint8Array =>
  * evaluator's allocation trace: an owner stranded by a propagating failure shows up as an acquire
  * with no matching release, and one released twice traps instead of completing.
  */
-const provider = `struct Clock { storage: Allocation }
+const provider = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -22,21 +27,21 @@ effect fn openClock() -> Clock ! OutOfMemory {
 
 /**
  * A generic effect body that *acquires* an owner and then holds it across a run whose failure
- * channel is a row parameter — the shape `provideWith` had before #67 restructured it around a
+ * channel is a row parameter — the shape `provideEffect` had before #67 restructured it around a
  * reified `Result`.
  *
- * This is the leak issue #68 describes. `fallibleRunSites` read only the run's own `failures`
- * list, which is empty inside a generic body while `failureParameters` is not, so the run counted
- * as infallible, no propagation exit was published for it, and `held` was stranded whenever the
- * specialized row let `self` fail.
+ * This is the leak issue #68 describes. `fallibleRunSites` used to inspect only concrete failure
+ * members, so a generic failure type counted as infallible, no propagation exit was published for
+ * it, and `held` was stranded whenever the specialized type let `self` fail.
  *
  * The companion `GenericRunReleaseAcceptance` covers the neighbouring shape where the owner is
  * *passed in* rather than acquired; that one never leaked, and pins that the caller does not also
  * release an owner it moved into the callee.
  */
-const generic = `${provider}
+const generic = `import silk.core { OutOfMemoryError }
+${provider}
 
-effect fn acquiring<A, !E>(self: once Effect<A ! E>) -> A ! E | OutOfMemory {
+effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemoryError {
   let held = run openClock()
   let value = run move self
   drop move held
@@ -44,24 +49,28 @@ effect fn acquiring<A, !E>(self: once Effect<A ! E>) -> A ! E | OutOfMemory {
 }`
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
-const failingRun = `${generic}
+const failingRun = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory { return run acquiring(failing()) }
+effect fn work() -> i32 ! OutOfMemoryError { return run acquiring(failing()) }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
-const succeedingRun = `${generic}
+const succeedingRun = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${generic}
 
-effect fn fine() -> i32 ! OutOfMemory { return 7 }
+effect fn fine() -> i32 ! OutOfMemoryError { return 7 }
 
-effect fn work() -> i32 ! OutOfMemory { return run acquiring(fine()) }
+effect fn work() -> i32 ! OutOfMemoryError { return run acquiring(fine()) }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
@@ -70,17 +79,19 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  * generic body and must release it before the next one acquires, so a per-execution leak shows up
  * as a growing imbalance rather than a single missing release.
  */
-const retriedRun = `${generic}
+const retriedRun = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${generic}
 
-effect fn failing() -> i32 ! OutOfMemory { fail OutOfMemory {} }
+effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
 
-effect fn work() -> i32 ! OutOfMemory {
+effect fn work() -> i32 ! OutOfMemoryError {
   let attempt = acquiring(failing())
   let retried = attempt |> Effect.retry(2)
   return run retried
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 

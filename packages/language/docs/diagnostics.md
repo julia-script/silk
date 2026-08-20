@@ -14,10 +14,10 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | Prefix | Phase | Codes |
 | --- | --- | --- |
 | `LEX` | Lexical | 7 |
-| `PAR` | Parser | 4 |
-| `MOD` | Module | 4 |
-| `SEM` | Semantic | 126 |
-| `OWN` | Ownership | 15 |
+| `PAR` | Parser | 3 |
+| `MOD` | Module | 3 |
+| `SEM` | Semantic | 129 |
+| `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
 There are 157 codes in total.
@@ -41,7 +41,6 @@ There are 157 codes in total.
 | `PAR0001` | Stable code for one required token that is absent at its insertion position. | `Expected <describeexpected>` |
 | `PAR0002` | Stable code for one maximal region of unexpected concrete tokens. | `Unexpected <encountered>; expected valid syntax`<br>`Unexpected <encountered>; expected <expectation>`<br>`Unexpected <encountered> while parsing a statement`<br>`Unexpected <encountered> while parsing a <context>` |
 | `PAR0003` | Stable code for a primary-expression template start reserved for future support. | `Template syntax is reserved but not implemented` |
-| `PAR0004` | Stable code for one wholly absent required return statement. | `Expected return statement` |
 
 ## Module (`MOD`)
 
@@ -49,7 +48,6 @@ There are 157 codes in total.
 | --- | --- | --- |
 | `MOD0001` | Stable code for an import naming a module absent from the supplied sources. | `Unknown module <module>` |
 | `MOD0002` | Stable code for an import redundantly naming its own containing module. | `Module <module> imports itself` |
-| `MOD0003` |  | `Module <module> is imported more than once` |
 | `MOD0004` | Stable code for a user module claiming the reserved standard-library namespace. | `Module <module> claims the reserved standard-library namespace silk/; user modules must live outside it` |
 
 ## Semantic (`SEM`)
@@ -68,7 +66,6 @@ There are 157 codes in total.
 | `SEM0010` | Stable code for a known actor called with an unknown operation name. | `<actor> has no operation <spelling>` |
 | `SEM0011` | Stable code for a conditional whose condition is not `bool`. | `Condition must be bool, found <actual>` |
 | `SEM0012` | Stable code for a call argument whose type mismatches its parameter. | `Expected <expected> but received <actual>` |
-| `SEM0013` |  | `Alias <spelling> does not change the name` |
 | `SEM0014` |  | `Module <module> has no member <spelling>` |
 | `SEM0015` |  | `<module>.<spelling> is private` |
 | `SEM0016` |  | `Multiple bindings claim <spelling>` |
@@ -76,7 +73,7 @@ There are 157 codes in total.
 | `SEM0018` |  | `Expected a type, found <spelling>` |
 | `SEM0019` |  | `Public declaration exposes private type <type>` |
 | `SEM0020` |  | `Inline recursive struct layout: <join>` |
-| `SEM0021` |  | `Raw construction of <type> is limited to its defining module` |
+| `SEM0021` |  | `Cannot construct <type> because its raw constructor is not available at this site` |
 | `SEM0022` |  | `<type> has no field <field>` |
 | `SEM0023` |  | `Field <field> is initialized more than once` |
 | `SEM0024` |  | `Missing initializer for <type>.<field>` |
@@ -94,7 +91,7 @@ There are 157 codes in total.
 | `SEM0036` |  | `Assignment requires a writable binding, field, or indexed place` |
 | `SEM0037` |  | `Assignment expected <expected> but received <actual>` |
 | `SEM0038` |  | `<transfer> is only valid inside a loop` |
-| `SEM0039` |  | `Structural union members must be nominal types, found <type>` |
+| `SEM0039` |  | `Structural union members must be detached ordinary values with finite storage, found <type>` |
 | `SEM0040` |  | `<source> cannot widen to <target>; missing <join>` |
 | `SEM0041` |  | `Cannot match non-nominal type <actual>` |
 | `SEM0042` |  | `<member> is not a member of <scrutinee>` |
@@ -116,16 +113,15 @@ There are 157 codes in total.
 | `SEM0058` |  | `A shared slice cannot be reborrowed exclusively` |
 | `SEM0059` |  | `Passing an array as <expected> requires an explicit borrow` |
 | `SEM0060` | Stable code for a negative decimal literal contextualized as unsigned `usize`. | `usize literals cannot be negative` |
-| `SEM0061` | Stable code for a non-concrete or non-nominal member of a effect failure row. | `Effect failure <type> must be one concrete nominal type` |
-| `SEM0062` | Stable code for a failure row attached to an ordinary function. | `Only effect functions may declare a failure row` |
+| `SEM0061` | Stable code for a type that cannot inhabit an Effect failure channel. | `Effect failure <type> must be a detached ordinary value type` |
+| `SEM0062` | Stable code for a failure channel attached to an ordinary function. | `Only effect functions may declare a failure channel` |
 | `SEM0063` |  | `Only effect functions may originate a typed failure` |
 | `SEM0064` |  | `Failure <type> is not declared by this effect function` |
 | `SEM0065` |  | `Cannot run non-effect value <type>` |
 | `SEM0066` |  | `Run leaves unhandled failures: <join>` |
 | `SEM0067` |  | `Invalid Effect.catch handler: <detail>` |
 | `SEM0068` |  | `Effect recipe bindings are immutable` |
-| `SEM0069` |  | `Cannot merge Effect values from different construction sites without explicit erasure` |
-| `SEM0070` | Stable code for a non-concrete or non-nominal capability in a requirement row. | `Effect requirement <type> must be one concrete nominal capability type` |
+| `SEM0070` | Stable code for a non-concrete or non-nominal capability in a requirement row. | `Effect requirement <type> must be one concrete service type` |
 | `SEM0071` |  | `Run leaves unsatisfied requirements: <join>` |
 | `SEM0073` |  | `Failure <type> is not detached because it contains a lexical borrow` |
 | `SEM0074` |  | `Invalid Effect provider: <detail>` |
@@ -133,29 +129,25 @@ There are 157 codes in total.
 | `SEM0076` |  | `Callable <actual> cannot satisfy <expected>` |
 | `SEM0077` |  | `Callable invocation requires <toLowerCase> access` |
 | `SEM0078` |  | `<target> is unary; name it directly instead of calling it with no arguments` |
-| `SEM0079` |  | `<target> only permits binding its <expectedCount1> trailing arguments; received <actualCount>` |
 | `SEM0080` |  | `Cannot merge callable values from different construction sites without explicit erasure` |
 | `SEM0081` |  | `Cannot return an owned callable whose concrete environment identity is unknown` |
-| `SEM0082` | Stable code for a raw storage operation outside lexical unsafe authority. | `<operation> requires a lexical unsafe block` |
+| `SEM0082` | Stable code for a raw storage operation outside lexical unsafe authority. | `<operation> requires unsafe acknowledgement` |
 | `SEM0083` | Stable code for an invalid source-declared capability implementation. | `Invalid conformance: <detail>` |
 | `SEM0084` | Stable code for a Drop implementation outside the compiler-sealed hook contract. | `Invalid Drop hook: <detail>` |
 | `SEM0085` | Stable code for malformed escapes, invalid UTF-8, or non-byte literal values. | `Invalid static literal: <detail>` |
 | `SEM0086` | Stable code for a typed constant whose type or literal is outside the constant contract. | `Invalid constant: <detail>` |
 | `SEM0087` | Stable code for an expression statement whose result cannot be intentionally ignored. | `Expression statement produces <actual>, but only () or never may be ignored` |
 | `SEM0088` | Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. | `Generic parameter <spelling> has kind <actual>, expected <expected>` |
-| `SEM0089` | Stable code for a failure or requirement row that cannot be finitely decomposed. | `Failure row does not contain selected member <member>`<br>`Failure row remainder is ambiguous across <join>`<br>`Requirement row does not contain &mut <capability>@<role>`<br>`Requirement row does not contain &<capability>@<role>`<br>`Requirement <capability> has role <joinor>, expected <expected>`<br>`Requirement <capability>@<role> has access <joinor>, expected <expected>`<br>`Requirement row remainder is ambiguous across <join>`<br>`Failure row specialization is not finite and concrete`<br>`Requirement row specialization is not finite and concrete` |
+| `SEM0089` | Stable code for a failure or requirement row that cannot be finitely decomposed. | `Failure type does not contain selected member <member>`<br>`Requirement row does not contain &mut <capability>@<role>`<br>`Requirement row does not contain &<capability>@<role>`<br>`Requirement <capability> has role <joinor>, expected <expected>`<br>`Requirement <capability>@<role> has access <joinor>, expected <expected>`<br>`Requirement row remainder is ambiguous across <join>`<br>`Requirement row specialization is not finite and concrete` |
 | `SEM0090` | Stable code for storage, bodies, or defaults inside a source service contract. | `Invalid service declaration: <detail>` |
 | `SEM0091` |  | `A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter` |
 | `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
-| `SEM0094` | Stable code for wrapping the already-borrowed string view in another reference or slice. | `` `string` is already a borrowed immutable view and cannot be referenced again ``<br>`` `string` cannot be the element of another borrowed slice view `` |
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
-| `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
 | `SEM0099` | Stable code for one named type parameter left undetermined by an explicit prefix and the arguments. | `Cannot infer type argument <parameter> of <target> from supplied values` |
 | `SEM0100` | Stable code for an explicit type argument contradicting the type its value arguments imply. | `Type argument <parameter> of <target> is <written>, but the supplied values imply <implied>` |
 | `SEM0101` | Stable code for a bound operation whose selected witness has no lowering. | `<spelling> has no witness that can be lowered for <provider>` |
-| `SEM0102` | Stable code for selecting a suspending provider to allocate continuation storage. | `Allocator <provider> cannot provide continuation storage because <implementation> can suspend` |
 | `SEM0103` | Stable code for constructing an aggregate that stores a bare callable value. | `Cannot construct <aggregate>: <site> retains the static identity of <callable>, but represented callable storage has no supported runtime layout`<br>`Cannot construct <aggregate>: <site> would store the callable <callable>, whose environment layout depends on a hidden concrete identity that <aggregate> does not carry` |
 | `SEM0104` | Stable code for the first struct initializer that contradicts an inferred representation. | `Representation <parameter> was inferred as <expected>, but this initializer uses <actual>` |
 | `SEM0105` | Stable code for the first exact representation that diverges at a static value join. | `Cannot join <expected> with <actual>; consume each represented value inside its branch before joining` |
@@ -182,6 +174,15 @@ There are 157 codes in total.
 | `SEM0126` | Stable code for an explicitly or independently selected row that is not exactly one member. | `Selected requirement row has <count> members; exactly one is required` |
 | `SEM0127` | Stable code for a surviving provider candidate with more than one conformance witness. | `More than one conformance witness can provide the selected requirement` |
 | `SEM0128` | Stable code for a surviving provider candidate whose conformance mapping is invalid. | `The provider's conformance mapping is invalid: <reason>` |
+| `SEM0129` | Stable code for an explicit return whose value violates the declaration result. | `Return expected <expected> but received <actual>` |
+| `SEM0130` | Stable code for a reachable non-unit function fallthrough. | `A reachable path must return <expected>` |
+| `SEM0131` | Stable code for a provider whose key matches but whose access cannot satisfy the requirement. | `<toLowerCase> provider access cannot satisfy an <toLowerCase> requirement` |
+| `SEM0132` | Stable code for an Effect join whose alternatives cannot be represented as a finite composite. | `Cannot form a finite Effect join: <detail>` |
+| `SEM0133` | Stable code for a refutable pattern in an unconditional local binding. | `Let pattern is refutable for <actual>; it does not cover <join>. Use if let or match` |
+| `SEM0134` | Stable code for an operator marker that cannot describe its interface operation. | `Invalid operator contract: <detail>` |
+| `SEM0135` | Stable code for operator syntax with no marked operation accepting its operands. | `Operator <operator> does not accept (<join>)` |
+| `SEM0136` | Stable code for operator syntax matched by more than one marked operation. | `Operator <operator> is ambiguous between <join>` |
+| `SEM0137` | Stable code for an unsafe acknowledgement that does not complete an unsafe invocation. | `` `unsafe` must acknowledge a complete unsafe invocation `` |
 
 ## Ownership (`OWN`)
 
@@ -199,7 +200,6 @@ There are 157 codes in total.
 | `OWN0010` |  | `<requested> slice loan conflicts with an active <toLowerCase> loan` |
 | `OWN0011` |  | `<toLowerCase> access to <spelling> conflicts with an active slice loan` |
 | `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
-| `OWN0013` | Stable code for extracting one owned representation-bearing field out of its aggregate. | `Cannot move field <field> out of <aggregate>: it stores the executable representation <contract>, whose captures are cleaned with the whole aggregate` |
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 

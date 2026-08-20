@@ -16,11 +16,16 @@ const ascii = (value: string): Uint8Array =>
  * block, so acquiring and releasing it are both events, and the position of the finalizer's own
  * events relative to the protected Effect's local cleanup is what pins the LIFO order.
  */
-const prelude = `struct Problem { code: i32 }
+const prelude = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Problem { code: i32 }
 
 struct Clock { storage: Allocation }
 
-effect fn openClock() -> Clock ! OutOfMemory {
+effect fn openClock() -> Clock ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -28,20 +33,20 @@ effect fn openClock() -> Clock ! OutOfMemory {
   return Clock { storage: move allocation }
 }
 
-effect fn exhausted(error: OutOfMemory) -> Clock ! Problem { fail Problem { code: 9 } }
+effect fn exhausted(error: OutOfMemoryError) -> Clock ! Problem { fail Problem { code: 9 } }
 
 /// One owner, acquired inside whichever body runs this and released by that body's cleanup.
 effect fn acquireClock() -> Clock ! Problem {
   return run Effect.catchAll(openClock(), exhausted)
 }
 
-effect fn release() -> () ! OutOfMemory {
+effect fn release() -> () ! OutOfMemoryError {
   let held = run openClock()
   drop move held
   return ()
 }
 
-effect fn ignore(error: OutOfMemory) -> () { return () }
+effect fn ignore(error: OutOfMemoryError) -> () { return () }
 
 /// A fallible release recovered into the finalizer's infallible contract.
 ///
@@ -56,7 +61,7 @@ effect fn finalize() -> () {
 /// The same shape holding two owners, so the finalizer's events are a nested pair rather than a
 /// second copy of the protected Effect's single pair — that asymmetry is what makes the ordering
 /// assertion unambiguous rather than a trace that reads the same in either order.
-effect fn releasePair() -> () ! OutOfMemory {
+effect fn releasePair() -> () ! OutOfMemoryError {
   let first = run openClock()
   let second = run openClock()
   drop move second
@@ -73,7 +78,8 @@ effect fn finalizePair() -> () {
 effect fn recover(problem: Problem) -> i32 { return problem.code }`
 
 /** The finalizer runs after a success, and the success value reaches the caller unchanged. */
-const succeeding = `${prelude}
+const succeeding = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem { return 5 }
 
@@ -83,7 +89,8 @@ pub fn main() -> i32 {
 }`
 
 /** The finalizer runs after a typed failure, and that same failure reaches the caller. */
-const failing = `${prelude}
+const failing = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem { fail Problem { code: 3 } }
 
@@ -98,7 +105,8 @@ pub fn main() -> i32 {
  * then `acquire acquire release release` for the finalizer. The finalizer running first would
  * read `acquire acquire release release acquire release` instead.
  */
-const ordering = `${prelude}
+const ordering = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem {
   let held = run acquireClock()
@@ -116,7 +124,8 @@ pub fn main() -> i32 {
  * named this combinator as the one that would reintroduce that leak, so the balance is asserted
  * over both bodies at once — the protected Effect's owner and the finalizer's own.
  */
-const acquiringThenFailing = `${prelude}
+const acquiringThenFailing = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem {
   let held = run acquireClock()
@@ -129,7 +138,8 @@ pub fn main() -> i32 {
 }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
-const acquiringThenSucceeding = `${prelude}
+const acquiringThenSucceeding = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem {
   let held = run acquireClock()
@@ -142,7 +152,8 @@ pub fn main() -> i32 {
 }`
 
 /** A release that genuinely fails, recovered by the caller before it reaches `ensuring`. */
-const fallibleRelease = `${prelude}
+const fallibleRelease = `import silk.effects as Effect
+${prelude}
 
 effect fn work() -> i32 ! Problem { fail Problem { code: 3 } }
 
@@ -161,7 +172,8 @@ pub fn main() -> i32 {
  * A trap inside the protected Effect. Traps bypass everything — `Effect.catch`, Drop hooks, and
  * now the finalizer — so the run blocks with the trap and the finalizer never starts.
  */
-const trapping = `${prelude}
+const trapping = `import silk.effects as Effect
+${prelude}
 
 effect fn work(divisor: i32) -> i32 ! Problem {
   let held = run acquireClock()
@@ -283,9 +295,8 @@ it.effect('lets a trap bypass the finalizer', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'Trap')
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag !== 'Trap') return
     // One acquire and nothing after it: the owner the trap stranded, and no finalizer pair.
     assert.deepEqual(allocationEvents(evaluated), [acquire])
   }),

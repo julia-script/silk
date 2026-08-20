@@ -14,7 +14,12 @@ const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
  * A pure in-source provider. It replays a scripted byte sequence in at most `chunk` byte commits,
  * so a caller observes both partial fills and the end of input without a host boundary.
  */
-const scriptedProvider = `struct Scripted {
+const scriptedProvider = `import silk.standard_input { ReadOutcome }
+import silk.standard_input { StandardInput }
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+struct Scripted {
   bytes: [u8; 5]
   length: usize
   offset: usize
@@ -30,7 +35,7 @@ fn scripted(length: usize, chunk: usize) -> Scripted {
   }
 }
 
-effect fn scriptedRead(self: &mut Scripted, buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure {
+effect fn scriptedRead(self: &mut Scripted, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
   if self.offset == self.length { return endOfInput() }
   let mut limit = self.chunk
   let remaining = self.length - self.offset
@@ -50,7 +55,7 @@ impl StandardInput for Scripted { read: Scripted.scriptedRead }
 
 struct Broken {}
 
-effect fn brokenRead(self: &mut Broken, buffer: &mut [u8]) -> ReadOutcome ! StreamReadFailure {
+effect fn brokenRead(self: &mut Broken, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
   fail readFailure()
 }
 
@@ -73,7 +78,11 @@ ${body}`
 it.effect('reads a known byte sequence from a test provider and reports its count', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! StreamReadFailure {
+      scriptedSource(`import silk.effects as Effect
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! StreamReadError {
   let mut provider = scripted(usize.add(0, 5), usize.add(0, 5))
   let mut buffer = [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)]
   let outcome = run Effect.provideMut(receive(&mut buffer), &mut provider)
@@ -84,7 +93,7 @@ it.effect('reads a known byte sequence from a test provider and reports its coun
   return 42
 }
 
-effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
+effect fn recover(error: StreamReadError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -98,7 +107,11 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports the end of input as data rather than a typed failure', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! StreamReadFailure {
+      scriptedSource(`import silk.effects as Effect
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! StreamReadError {
   let mut provider = scripted(usize.ZERO, usize.add(0, 4))
   let mut buffer = [u8.toU8(1), u8.toU8(1), u8.toU8(1), u8.toU8(1)]
   let outcome = run Effect.provideMut(receive(&mut buffer), &mut provider)
@@ -110,7 +123,7 @@ it.effect('reports the end of input as data rather than a typed failure', () =>
 }
 
 // A recovery branch that survives proves the drained read never entered the failure channel.
-effect fn recover(error: StreamReadFailure) -> i32 { return 7 }
+effect fn recover(error: StreamReadError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -124,7 +137,11 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports the true committed count of a partial read, not the buffer length', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! StreamReadFailure {
+      scriptedSource(`import silk.effects as Effect
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+effect fn program() -> i32 ! StreamReadError {
   let mut provider = scripted(usize.add(0, 5), usize.add(0, 2))
   let mut buffer = [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)]
   let first = run Effect.provideMut(receive(&mut buffer), &mut provider)
@@ -141,7 +158,7 @@ it.effect('reports the true committed count of a partial read, not the buffer le
   return 42
 }
 
-effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
+effect fn recover(error: StreamReadError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -155,14 +172,17 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('routes a provider error into the typed failure channel', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`effect fn program() -> i32 ! StreamReadFailure {
+      scriptedSource(`import silk.effects as Effect
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+effect fn program() -> i32 ! StreamReadError {
   let mut provider = Broken {}
   let mut buffer = [u8.toU8(0), u8.toU8(0)]
   let outcome = run Effect.provideMut(receive(&mut buffer), &mut provider)
   return 1
 }
 
-effect fn recover(error: StreamReadFailure) -> i32 { return 42 }
+effect fn recover(error: StreamReadError) -> i32 { return 42 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     )
@@ -173,9 +193,14 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
   }),
 )
 
-const nativeSource = `import silk.standard_input { count, isEndOfInput, receive }
+const nativeSource = `import silk.effects as Effect
+import silk.os_standard_input { OsStandardInput }
+import silk.standard_input { StreamReadError }
+import silk.u8 as u8
+import silk.usize as usize
+import silk.standard_input { count, isEndOfInput, receive }
 
-effect fn program() -> i32 ! StreamReadFailure {
+effect fn program() -> i32 ! StreamReadError {
   let mut provider = OsStandardInput.make()
   let mut buffer = [u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)]
   let first = run Effect.provideMut(receive(&mut buffer), &mut provider)
@@ -186,7 +211,7 @@ effect fn program() -> i32 ! StreamReadFailure {
   return 42
 }
 
-effect fn recover(error: StreamReadFailure) -> i32 { return 0 }
+effect fn recover(error: StreamReadError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 

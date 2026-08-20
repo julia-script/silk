@@ -13,7 +13,9 @@ const ascii = (value: string): Uint8Array =>
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const source = `struct Problem { code: i32 }
+const source = `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem { code: i32 }
 effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
   if selector == 0 { fail move Problem { code: 41 } }
   return move value
@@ -39,7 +41,9 @@ const exclusiveCaptureSource = `pub fn main() -> i32 {
   let second = run pending
   return first * 10 + second
 }`
-const retrySource = `struct Problem { code: i32 }
+const retrySource = `import silk.effects as Effect
+import silk.i32 as i32
+struct Problem { code: i32 }
 effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
   let work = effect {
@@ -55,37 +59,48 @@ pub fn main() -> i32 {
   let handled = retrying() |> Effect.catchAll(recover)
   return run handled
 }`
-const providerSource = `struct Clock {}
-effect fn read() -> i32 ? &Clock@Primary { return 42 }
+const providerSource = `role Primary
+service Clock { effect fn tick() -> i32 ? &Clock }
+struct FixedClock { marker: i32 }
+effect fn tick(self: &FixedClock) -> i32 { return self.marker }
+impl Clock for FixedClock { tick: FixedClock.tick }
+effect fn read() -> i32 ? &Clock at Primary { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock {}
-  let provided = read() |> Intrinsic.bindRequirement<&Clock@Primary>(&clock)
+  let clock = FixedClock { marker: 0 }
+  let provided = read() |> Intrinsic.bindRequirement<Clock at Primary>(&clock)
   return run provided
 }`
-const callableMapSource = `effect fn succeed(value: i32) -> i32 { return value }
+const callableMapSource = `import silk.effects as Effect
+import silk.i32 as i32
+effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
 const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
 effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
-const flattenSource = `${flattenPrelude}
+const flattenSource = `import silk.effects as Effect
+${flattenPrelude}
 pub fn main() -> i32 {
   let nested = outer(21)
   let flattened = Effect.flatten(move nested)
   return run flattened
 }`
-const flattenPipedSource = `${flattenPrelude}
+const flattenPipedSource = `import silk.effects as Effect
+${flattenPrelude}
 pub fn main() -> i32 { return run (outer(21) |> Effect.flatten) }`
-const flattenRowsSource = `struct Outer { code: i32 }
+const flattenRowsSource = `import silk.effects as Effect
+struct Outer { code: i32 }
 struct Inner { code: i32 }
-struct Clock {}
-struct Meter {}
-effect fn inner() -> i32 ! Inner ? &Meter { return 21 }
-effect fn outer() -> Effect<i32 ! Inner ? &Meter> ! Outer ? &Clock { return inner() }
+service Clock {}
+service Meter {}
+effect fn inner() -> i32 ! Inner ? &Clock | &Meter { return 21 }
+effect fn outer() -> Effect<i32 ! Inner ? &Clock | &Meter> ! Outer ? &Clock { return inner() }
 pub fn main() -> i32 {
   let nested = outer()
   let flattened = Effect.flatten(move nested)
   return 0
 }`
-const pipelinePrelude = `struct Clock {}
+const pipelinePrelude = `service Clock {}
+struct FixedClock { marker: i32 }
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 20 }
 fn add(value: i32) -> i32 { return value + 1 }
 fn double(value: i32) -> i32 { return value * 2 }
@@ -95,18 +110,20 @@ const pipelineSources = [
   {
     name: 'grouped',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run ((read() |> Effect.provide(&clock)) |> Effect.map(add)) |> Effect.map(double)
 }`,
   },
   {
     name: 'reverse',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.map(add)
     |> Effect.provide(&clock)
@@ -116,9 +133,10 @@ pub fn main() -> i32 {
   {
     name: 'provided-last',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.map(add)
     |> Effect.map(double)
@@ -128,18 +146,20 @@ pub fn main() -> i32 {
   {
     name: 'data-first',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run Effect.map(Effect.provide(Effect.map(read(), add), &clock), double)
 }`,
   },
   {
     name: 'stored',
     expected: 42,
-    source: `${pipelinePrelude}
+    source: `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   let mapped = read() |> Effect.map(add)
   let provided = mapped |> Effect.provide(&clock)
   let mappedAgain = provided |> Effect.map(double)
@@ -147,25 +167,28 @@ pub fn main() -> i32 {
 }`,
   },
 ] as const
-const effectOperatorPipelineSource = `${pipelinePrelude}
+const effectOperatorPipelineSource = `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   return run read()
     |> Effect.flatMap(increment)
     |> Effect.tap(observe)
     |> Effect.map(double)
     |> Effect.provide(&clock)
 }`
-const storedEffectOperatorPipelineSource = `${pipelinePrelude}
+const storedEffectOperatorPipelineSource = `import silk.effects as Effect
+${pipelinePrelude}
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { marker: 0 }
   let flatMapped = read() |> Effect.flatMap(increment)
   let tapped = flatMapped |> Effect.tap(observe)
   let mapped = tapped |> Effect.map(double)
   let provided = mapped |> Effect.provide(&clock)
   return run provided
 }`
-const recoveryPipelineSource = `struct Problem { code: i32 }
+const recoveryPipelineSource = `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn failValue() -> i32 ! Problem { fail Problem { code: 21 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code }
 fn double(value: i32) -> i32 { return value * 2 }
@@ -178,19 +201,20 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catchAll(recover)',
   'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
-const outOfMemorySource = `import silk.core { OutOfMemory }
+const outOfMemoryErrorSource = `import silk.effects as Effect
+import silk.core { OutOfMemoryError }
 
-effect fn exhaust() -> i32 ! OutOfMemory {
-  fail OutOfMemory {}
+effect fn exhaust() -> i32 ! OutOfMemoryError {
+  fail OutOfMemoryError {}
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 {
   return run exhaust() |> Effect.catchAll(recover)
 }`
 const higherOrderEffectSource = `effect fn succeed(value: i32) -> i32 { return value }
 effect fn alternate(value: i32) -> i32 { return value }
 fn pass(self: once Effect<i32>) -> once Effect<i32> { return move self }
-fn specialize<A, !E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> { return move self }
+fn specialize<A, E, ?R>(self: once Effect<A ! E ? R>) -> once Effect<A ! E ? R> { return move self }
 fn wrap(self: once Effect<i32>) -> once Effect<i32> {
   return effect { return run self }
 }
@@ -218,16 +242,20 @@ pub fn main() -> i32 {
   let result = run forwarded
   return result.value
 }`
-const droppedHigherOrderEffectSource = `struct Payload { storage: Allocation }
+const droppedHigherOrderEffectSource = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Payload { storage: Allocation }
 impl Drop for Payload {
   fn drop(self: &mut Payload) -> () { return () }
 }
-impl Report for OutOfMemory {}
 fn discard(self: once Effect<Payload>) -> () {
   drop self
   return ()
 }
-pub effect fn main() -> () ! OutOfMemory {
+pub effect fn main() -> () ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -358,31 +386,39 @@ it.effect('provides an existing borrowed capability across evaluator and Wasm', 
   }),
 )
 
-it.effect('constructs allocation-free OutOfMemory and recovers across evaluator and Wasm', () =>
-  Effect.gen(function* () {
-    const logical = yield* Analysis.ofSourceRealized(
-      'effect-runtime/oom-logical',
-      ascii(outOfMemorySource),
-      'aarch64-apple-darwin',
-    )
-    const wasm = yield* Analysis.ofSourceRealized(
-      'effect-runtime/oom-wasm',
-      ascii(outOfMemorySource),
-      'wasm32-unknown-unknown',
-    )
-    assert.deepEqual(Analysis.diagnostics(logical), [])
-    assert.deepEqual(Analysis.diagnostics(wasm), [])
-    const layout = Analysis.layoutOf(logical)
-    const oom =
-      layout._tag === 'Available' ? Analysis.callingShapeOf(logical, Type.outOfMemory) : undefined
-    assert.strictEqual(oom?.lanes.length, 0)
-    const evaluated = Analysis.evaluate(logical)
-    assert.strictEqual(evaluated._tag, 'Completed', JSON.stringify(evaluated, Json.bigIntReplacer))
-    assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
-    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
-  }),
+it.effect(
+  'constructs allocation-free OutOfMemoryError and recovers across evaluator and Wasm',
+  () =>
+    Effect.gen(function* () {
+      const logical = yield* Analysis.ofSourceRealized(
+        'effect-runtime/oom-logical',
+        ascii(outOfMemoryErrorSource),
+        'aarch64-apple-darwin',
+      )
+      const wasm = yield* Analysis.ofSourceRealized(
+        'effect-runtime/oom-wasm',
+        ascii(outOfMemoryErrorSource),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(logical), [])
+      assert.deepEqual(Analysis.diagnostics(wasm), [])
+      const layout = Analysis.layoutOf(logical)
+      const oom =
+        layout._tag === 'Available'
+          ? Analysis.callingShapeOf(logical, Type.outOfMemoryError)
+          : undefined
+      assert.strictEqual(oom?.lanes.length, 0)
+      const evaluated = Analysis.evaluate(logical)
+      assert.strictEqual(
+        evaluated._tag,
+        'Completed',
+        JSON.stringify(evaluated, Json.bigIntReplacer),
+      )
+      assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
+      const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }),
 )
 
 it.effect('executes the same handled failure through the evaluator and Wasm', () =>
@@ -407,6 +443,11 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
 
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
+    if (logical._tag === 'Completed') {
+      assert.isAbove(logical.history.length, 0)
+      assert.isTrue(logical.history.every((failure) => failure.recovered))
+      assert.isTrue(logical.history.some((failure) => failure.logicalPath.length > 0))
+    }
     assert.strictEqual(main(), 42)
     assert.include(wasm.wat, 'call')
     assert.include(wasm.wat, 'if')
@@ -569,8 +610,7 @@ it.effect('keeps arithmetic traps outside the typed failure channel', () =>
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
     const main = instance.exports.silk_main as () => number
 
-    assert.strictEqual(logical._tag, 'Blocked')
-    assert.strictEqual(logical._tag === 'Blocked' ? logical.reason._tag : undefined, 'Trap')
+    assert.strictEqual(logical._tag, 'Trap')
     assert.throws(() => main(), WebAssembly.RuntimeError)
   }),
 )
@@ -673,8 +713,8 @@ it.effect('unions both failure rows and both requirement rows through flatten', 
         : [],
     )
     assert.deepEqual(encoded, [
-      `Effect<i32 ! ${module}.Inner ? &${module}.Meter>`,
-      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
+      `Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter>`,
+      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
       `Effect<i32 ! ${module}.Inner | ${module}.Outer ? &${module}.Clock | &${module}.Meter>`,
     ])
   }),

@@ -27,7 +27,7 @@ and MUST NOT receive compiler-known layout, collection, encoding, or cleanup tre
 
 `Bytes` SHALL provide empty construction, copying from `&[u8]`, `length`, append from `&[u8]`,
 `asSlice`, and `asMutSlice`. Empty construction, length, and borrowed views SHALL be infallible.
-Copying and growth SHALL report `OutOfMemory` and require `&mut Allocator` only when allocation may
+Copying and growth SHALL report `OutOfMemoryError` and require `&mut Allocator` only when allocation may
 occur. The API MUST NOT claim that its contents are UTF-8 or another text encoding.
 
 #### Scenario: Copy arbitrary octets
@@ -38,7 +38,7 @@ occur. The API MUST NOT claim that its contents are UTF-8 or another text encodi
 #### Scenario: Append bytes with explicit allocation effects
 
 - **WHEN** appending a slice requires storage growth
-- **THEN** the operation uses the provided allocator and either preserves the ordered result or reports `OutOfMemory`
+- **THEN** the operation uses the provided allocator and either preserves the ordered result or reports `OutOfMemoryError`
 
 #### Scenario: Borrow bytes without copying
 

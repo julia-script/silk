@@ -101,10 +101,9 @@ identifies the borrow or provider dependency that would escape.
 
 Using a non-nominal concrete type is valid and produces no diagnostic.
 
-**Current compiler:** Disputed. The compiler currently treats the failure channel as a distinct row
-kind, restricts its members to concrete nominal types, and reports `SEM0061` for built-in types such
-as `i32`. The distinct kind and nominal-only restriction are superseded by this rule. The compiler
-already reports `SEM0073` for a named payload containing a lexical borrow.
+**Current compiler:** Aligned. Failure channels accept detached ordinary types, including primitive
+types, type parameters, and structural unions, while `SEM0073` rejects payloads that would carry a
+lexical borrow out of scope.
 
 **Evidence:** [confirmed stabilization decision](README.md),
 [older nominal-only direction](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
@@ -289,9 +288,8 @@ fn invalid() -> Effect<i32> {
 must produce a type mismatch at that use and identify the complete actual success type. A stable
 diagnostic code for this general mismatch is not yet assigned.
 
-**Current compiler:** Disputed. The current `Effect.catch` and `Effect.catchAll` standard-library
-signatures require the protected Effect and handler to share one success type `A`. That restriction
-must be generalized to separate success types whose normalized union becomes the result.
+**Current compiler:** Aligned. `Effect.catch` and `Effect.catchAll` use separate protected and
+handler success types and normalize the result to `A | B`.
 
 **Evidence:** [current recovery signatures](../../packages/compiler/stdlib/silk/effects.silk),
 [earlier union decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
@@ -371,13 +369,11 @@ protected types and identify every selected alternative that the protected Effec
 handler whose input does not accept the complete selected type receives an ordinary callable
 compatibility diagnostic at the handler argument.
 
-**Current compiler:** Disputed. The compiler currently requires failure-row parameters such as
-`!E`, uses `Row<!E>` to turn them into values, and restricts `S in E` plus
-`Intrinsic.catchFailure<S>` to one nominal selected type. Recovery must instead use ordinary types
-`E`, `S`, and `F`, accept every valid failure type confirmed under FAIL-001, and partition a
-specialized failure union between `S` and `Without<E, S>`. The public `Effect.catch` contract and
-selection policy remain ordinary standard-library Silk; a sealed target-neutral primitive may
-perform the owned runtime partition.
+**Current compiler:** Aligned. Recovery uses ordinary `E`, `S`, and `F` types. `S in E` accepts a
+selected ordinary type or union, `Without<E, S>` preserves the unselected alternatives, and the
+handler receives `S` directly. The public `Effect.catch` contract and selection policy remain
+ordinary standard-library Silk; the sealed target-neutral primitive performs only the owned runtime
+partition.
 
 A runtime partition must preserve both possible payloads. For `S` selected from `E`, its result is
 equivalent to:
@@ -441,10 +437,10 @@ ownership diagnostics identify double cleanup, use after move, or an invalid imp
 When a typed failure reaches the generated entry boundary, its runtime report includes the failure
 identity and available logical Effect trace after cleanup has completed.
 
-**Current compiler:** Partially aligned. The evaluator retains a deterministic execution trace on
-an unhandled effect-entry failure, and existing entry tests confirm that payload cleanup runs before
-the failure is exposed. The stable source-level trace policy and causal presentation of a handler
-failure remain unimplemented.
+**Implementation:** The evaluator returns an explicit causal history and source-level logical path
+on terminal outcomes. Generated entry cleanup still releases the owned payload exactly once before
+the failure becomes a host outcome. Physical entry adapters and coroutine-resume helpers are not
+logical source frames.
 
 **Evidence:** [ownership cleanup rule](ownership-and-borrowing.md#cleanup-001--cleanup-follows-ownership),
 [effect finalization contract](../../packages/compiler/stdlib/silk/effects.silk),

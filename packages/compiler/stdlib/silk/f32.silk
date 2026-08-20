@@ -19,6 +19,19 @@
 //! Converting to an integer discards the fractional part and traps for NaN, infinity, or a value
 //! outside the destination range. Converting a large integer to f32 can round it.
 
+import silk.bool as bool
+import silk.f64 as f64
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
 /// The largest finite f32.
 pub const MAX: f32 = 3.4028235e38
 

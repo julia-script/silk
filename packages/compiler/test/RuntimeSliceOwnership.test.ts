@@ -55,7 +55,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('retains reborrow parent suspension and restores access after the call', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn edit(values: &mut [i32]) -> i32 { return 1 }
+    const self = yield* snapshot(`import silk.usize as usize
+fn edit(values: &mut [i32]) -> i32 { return 1 }
 fn forward(values: &mut [i32]) -> i32 {
   let result = edit(&mut values)
   return usize.toI32(values.length)
@@ -72,9 +73,117 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
+it.effect('ends lexical borrow bindings at last use and restores their owner', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn conflict() -> i32 {
+  let mut values = [1, 2]
+  let view = &values
+  values[0] = 40
+  return view[1]
+}
+pub fn main() -> i32 {
+  let mut values = [1, 2]
+  let mut view = &mut values
+  view[0] = 40
+  let first = view[0]
+  values[1] = 2
+  return first + values[1]
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+    const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
+    const loan = main?.loans.find((candidate) => candidate.origin === 'FixedArrayBorrow')
+    assert.strictEqual(loan?.access, 'Exclusive')
+    assert.strictEqual(loan === undefined ? false : loan.endSpan.end > loan.startSpan.end, true)
+
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('ends a reusable callable capture loan after its last invocation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
+  return value + values[0]
+}
+pub fn main() -> i32 {
+  let mut values = [1]
+  let callback = inspect(&values)
+  let observed = callback(1)
+  values[0] = 40
+  return observed + values[0]
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('retains a callable capture loan when the callable is stored after invocation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
+  return value + values[0]
+}
+pub fn main() -> i32 {
+  let mut values = [1]
+  let callback = inspect(&values)
+  let observed = callback(1)
+  let stored = callback
+  values[0] = 40
+  drop stored
+  return observed + values[0]
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+  }),
+)
+
+it.effect('cleans a hidden temporary owner after its loan ends', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Guard { value: i32 }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+fn read(values: &[Guard]) -> i32 { return values[0].value }
+pub fn main() -> i32 { return read(&[Guard { value: 42 }]) }`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.mirOf(self)
+    assert.strictEqual(mir._tag, 'Available')
+    if (mir._tag !== 'Available') return
+    const main = mir.value.functions.find((fn) => fn.id.name === 'main')
+    const operations =
+      main?.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations
+          : region._tag === 'CleanupRegion'
+            ? region.releases
+            : [],
+      ) ?? []
+    const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
+    const cleanup = operations.findIndex(
+      (operation, ordinal) => operation._tag === 'Drop' && ordinal > ending,
+    )
+    assert.isAtLeast(ending, 0)
+    assert.isAbove(cleanup, ending)
+  }),
+)
+
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }
+    const self = yield* snapshot(`import silk.usize as usize
+fn identity(values: &[i32]) -> &[i32] { return values }
 fn conflict() -> i32 {
   let mut values = [1, 2]
   let view = identity(&values)
@@ -180,7 +289,8 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('plans exactly one displaced cleanup for exclusive borrowed replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: i32 }
+    const self = yield* snapshot(`import silk.usize as usize
+struct Token { value: i32 }
 struct Empty {}
 fn replace(values: &mut [Token], index: usize) -> i32 {
   values[index] = Token { value: 42 }

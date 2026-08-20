@@ -7,10 +7,11 @@ Evaluate the first closed, semantically checked Silk program to an exact `i32` r
 ### Requirement: First bootstrap entry point
 
 Bootstrap evaluation SHALL execute the snapshot's lowered MIR program from the entry that instance
-discovery resolved. An ordinary `main() -> i32` SHALL retain its exact completed value. An effectful
+discovery resolved. An ordinary `main() -> ()` SHALL complete with status zero, an ordinary
+`main() -> i32` SHALL retain its exact completed value, and an effectful
 `main() -> () ! E` SHALL be constructed and run once by the lowered entry adapter, producing
-either completed status `0` or deterministic unhandled-failure termination data retaining the
-normalized failure tag and canonical identity. When discovery reports an unavailable entry,
+either completed status `0` or deterministic structured unhandled-failure termination data
+retaining status one, canonical identity, provenance, logical path, and causal history. When discovery reports an unavailable entry,
 evaluation SHALL return a closed `Blocked` outcome carrying that explicit entry reason rather than
 throw, fail, or choose a declaration.
 
@@ -26,8 +27,8 @@ throw, fail, or choose a declaration.
 
 #### Scenario: Retain an unhandled entry failure
 
-- **WHEN** effectful `main` fails with a reportable failure
-- **THEN** evaluation returns deterministic termination data naming its normalized tag and canonical identity
+- **WHEN** effectful `main` fails with a concrete detached owned failure
+- **THEN** evaluation returns deterministic termination data naming status one, its private tag, canonical identity, provenance, logical path, and causal history
 
 #### Scenario: Block a missing main
 
@@ -51,8 +52,9 @@ them, calls evaluate their already-computed argument locals bound positionally t
 parameter locals, drops execute as explicit no-release events for the copyable slice, and each
 function returns its terminator's value, publishing the exact `i32` result on completion.
 Unavailable facts and ownership violations reach evaluation as the explicit generated traps
-lowering inserted; executing a trap SHALL produce a `Blocked` outcome carrying the trap's
-function identity, reason, and provenance rather than a guessed value. Functions absent from the
+lowering inserted; executing a trap SHALL produce a top-level `Trap` outcome carrying its
+classification, reason, provenance, and available logical path rather than a guessed value.
+Functions absent from the
 lowered program MUST NOT affect the outcome.
 
 #### Scenario: Evaluate a literal main
@@ -80,20 +82,20 @@ lowered program MUST NOT affect the outcome.
 - **WHEN** a compatible call contains two nested call arguments
 - **THEN** the first nested expression completes before the second begins and both completed values are then bound to their matching outer parameters
 
-#### Scenario: Block at a lowered trap
+#### Scenario: Trap at a lowered trap
 
 - **WHEN** a reachable function's body was unavailable and lowered to a generated trap
-- **THEN** evaluation is blocked at that trap with its function identity, reason, and causative span
+- **THEN** evaluation returns a fatal-trap outcome with its function identity, reason, and causative span
 
 #### Scenario: Block at an inner unavailable fact
 
 - **WHEN** a body contains an unavailable fact anywhere in its returned expression
-- **THEN** lowering has already turned that body into a generated trap and evaluation blocks there before executing any enclosing target
+- **THEN** lowering has already turned that body into a generated trap and evaluation terminates there before executing any enclosing target
 
 #### Scenario: Block wrong call arity
 
 - **WHEN** a call contract at any nesting depth is an arity mismatch
-- **THEN** the enclosing body's HIR is unavailable, its lowered function traps, and evaluation blocks with that trap's provenance
+- **THEN** the enclosing body's HIR is unavailable, its lowered function traps, and evaluation returns that trap's provenance
 
 #### Scenario: Ignore an unreachable broken function
 
@@ -105,10 +107,10 @@ lowered program MUST NOT affect the outcome.
 - **WHEN** `main` binds `let value = identity(42)` and returns `value`
 - **THEN** the call completes into the binding's local, its drop executes at the exit, and evaluation completes with `42`
 
-#### Scenario: Block a use-after-move program at its trap
+#### Scenario: Trap a use-after-move program at its trap
 
 - **WHEN** a reachable function's ownership verdict is a violation
-- **THEN** its lowered function is a generated trap and evaluation blocks there with the violation's provenance
+- **THEN** its lowered function is a generated trap and evaluation returns fatal termination with the violation's provenance
 
 ### Requirement: Recursive calls execute in distinct activation frames
 
@@ -186,7 +188,7 @@ depending on object identity, wall-clock time, random state, I/O, or process-glo
 #### Scenario: Retain a partial blocked trace
 
 - **WHEN** evaluation reaches a trap after completing earlier nested calls
-- **THEN** the blocked outcome retains the ordered successful events preceding the trap without a binding or return that did not occur
+- **THEN** the trap outcome retains the ordered successful events preceding the trap without a binding or return that did not occur
 
 #### Scenario: Repeat successful evaluation
 
@@ -354,18 +356,23 @@ canonical region and source provenance.
 ### Requirement: Evaluation carries immutable tagged union values
 
 Evaluation SHALL represent a union as one immutable logical value containing its canonical union
-type, active nominal member identity, and complete member payload. Injection SHALL install the
+type, active ordinary member identity, and complete member payload. Injection SHALL install the
 source member, widening SHALL remap that member into the target union without changing the payload,
 and calls, returns, aggregate storage, moves, and writes SHALL preserve the same active identity.
 
 #### Scenario: Evaluate injection and widening
 
-- **WHEN** a `Token` is injected into `Token | End` and widened to `Token | End | Fault`
-- **THEN** evaluation retains the complete `Token` payload under the canonical wider type
+- **WHEN** an `i32` is injected into `i32 | Token` and widened to `i32 | Token | Fault`
+- **THEN** evaluation retains the complete scalar payload under the canonical wider type
+
+#### Scenario: Evaluate represented executable members
+
+- **WHEN** an exact callable or opaque Effect value is injected, stored, projected, and invoked or run
+- **THEN** evaluation preserves its exact finite representation and produces the same result as the unwrapped value
 
 #### Scenario: Evaluate a union inside an array
 
-- **WHEN** a fixed array stores values contextually injected into one union element type
+- **WHEN** a fixed array stores values contextually injected into one ordinary union element type
 - **THEN** each element retains its own active member and complete immutable payload
 
 ### Requirement: Evaluation cleans only the active union payload
@@ -429,7 +436,9 @@ arguments, runtime dictionaries, or alternate generic layout decisions.
 Logical evaluation SHALL realize a slice as a view of one stable caller-owned storage place with a
 base position and runtime length, not as a copied array value. Shared reads and exclusive writes
 SHALL therefore observe the same backing state across nested ordinary calls while access mode and
-loan identity remain compiler facts rather than runtime payload.
+loan identity remain compiler facts rather than runtime payload. Logical slices SHALL retain the
+complete selector path from their backing cell to a nested fixed array. Hidden temporary cells
+SHALL remain live until their final derived loan ends.
 
 #### Scenario: Observe exclusive mutation in the caller
 
@@ -440,6 +449,11 @@ loan identity remain compiler facts rather than runtime payload.
 
 - **WHEN** one evaluated slice function receives arrays of two different lengths
 - **THEN** each invocation traverses exactly its runtime logical length without copying or specializing the callee by length
+
+#### Scenario: Mutate a runtime selected inner array
+
+- **WHEN** evaluation runs `edit(&mut matrix[index])`
+- **THEN** the checked inner array in `matrix` changes and no copied temporary receives the write
 
 ### Requirement: Slice evaluation preserves checked-place ordering
 
@@ -474,7 +488,7 @@ encoding.
 
 Evaluation SHALL distinguish construction from execution, represent success and owned nominal
 failure explicitly, run one layer, recover exact members, propagate unmatched members, and record
-deterministic ordered flow/failure/cleanup events. Traps SHALL remain separate blocked outcomes.
+deterministic ordered flow/failure/cleanup events. Traps SHALL remain separate fatal outcomes.
 
 #### Scenario: Compare lazy success and recovery
 
@@ -499,7 +513,9 @@ The evaluator SHALL construct monomorphic callable environments, preserve captur
 ownership, enforce shared, exclusive, and consuming invocation modes, invoke direct and stored
 callables, and drop unconsumed environments exactly as specified by MIR. Callable trace events
 SHALL be deterministic, bounded, and independent of JavaScript closure identity or garbage
-collection.
+collection. Evaluation SHALL preserve successive section capture order independently of original
+parameter order and SHALL end non-escaping reusable capture loans after their last statically known
+invocation.
 
 #### Scenario: Reuse an exclusive callable sequentially
 
@@ -510,6 +526,11 @@ collection.
 
 - **WHEN** a take-once callable is invoked after its owned capture was consumed
 - **THEN** evaluation exposes the phase-owned rejection rather than duplicating or fabricating the capture
+
+#### Scenario: Evaluate a staged section
+
+- **WHEN** evaluation runs `combine(3)(2)(1)`
+- **THEN** it invokes `combine(1, 2, 3)` after evaluating each supplied value once
 
 ### Requirement: Evaluation distinguishes run grouping
 
@@ -537,7 +558,7 @@ copy, destruction, and release.
 #### Scenario: Sweep allocation exhaustion
 
 - **WHEN** the same construction program fails each allocation ordinal in turn
-- **THEN** every run returns `OutOfMemory`, releases each successfully acquired owner exactly once, and permits a subsequent successful run in the same evaluator
+- **THEN** every run returns `OutOfMemoryError`, releases each successfully acquired owner exactly once, and permits a subsequent successful run in the same evaluator
 
 #### Scenario: Drop after provision ends
 
@@ -600,7 +621,7 @@ array, allocation, or host string.
 #### Scenario: Trap an out-of-bounds static read
 
 - **WHEN** the runtime index equals or exceeds the static view length
-- **THEN** evaluation blocks with the ordinary indexed-read trap and the indexing span
+- **THEN** evaluation returns the ordinary indexed-read fatal trap and the indexing span
 
 ### Requirement: Evaluation applies the canonical transcendental contract
 
@@ -643,9 +664,10 @@ a process filesystem implementation by default.
 ### Requirement: Evaluation preserves first-class string semantics
 
 Evaluation SHALL model `string` as valid immutable text with storage provenance, byte length, and
-lexical lifetime distinct from a byte slice. It SHALL agree with emitted targets on explicit byte
-viewing, scalar traversal, exact equality, safe validation results, owned-string views, and loan
-endings without using host-string identity as observable semantics.
+lexical lifetime distinct from a byte slice. It SHALL agree with emitted targets on ordinary
+references to string values, explicit byte viewing, `char` traversal, exact equality, safe
+validation results, owned-string views, checked scalar conversion, and loan endings without using
+host-string identity as observable semantics.
 
 #### Scenario: Compare exact strings
 
@@ -656,6 +678,16 @@ endings without using host-string identity as observable semantics.
 
 - **WHEN** stdlib validation receives valid and invalid runtime byte views
 - **THEN** evaluation returns the borrowing `string` for the valid input and the typed invalid-UTF-8 value for the invalid input
+
+#### Scenario: Traverse a non-ASCII scalar
+
+- **WHEN** evaluation traverses a valid multi-byte UTF-8 sequence
+- **THEN** it produces the exact `char` and next byte offset through checked scalar conversion
+
+#### Scenario: Reject an invalid scalar conversion
+
+- **WHEN** evaluation checks a surrogate or a value above `0x10ffff`
+- **THEN** it returns `None` without a trap or truncated character
 
 #### Scenario: Keep invalid unchecked construction outside safe guarantees
 
@@ -723,20 +755,70 @@ browser-capable compiler cores, and MUST NOT commit more bytes than the caller's
 
 ### Requirement: Evaluation executes suspension through logical activations
 
-Evaluation SHALL execute explicit suspension by retaining the parent logical activation in its heap
-activation machine, evaluating the deferred child, and resuming the parent with the child's exact
-typed outcome. It SHALL model continuation allocation, initialization, ownership transfer, and
-release through the selected allocator with the same logical boundary identities, request order,
-success or failure ordinals, ownership transfers, and release count as the native and Wasm engines.
-Each engine MAY use a different validated physical frame size, alignment, and private header.
-Evaluation MUST NOT recurse on the JavaScript stack or expose a pending value as a source result.
+Evaluation SHALL execute explicit suspension by retaining the parent logical invocation as one
+reusable coroutine frame in its heap activation machine, evaluating the deferred child, and
+resuming the parent with the child's exact typed outcome. It SHALL model the same frame states,
+ownership transfers, stable loans, provider access, cleanup, and release as native and Wasm without
+requesting a source allocator, emitting continuation-allocation events, or producing typed storage
+failure. A suspended parent SHALL remain one active source-logical invocation for `CallDepth`;
+compiler-generated driver and resume work SHALL add no source-logical depth. Evaluation MUST NOT
+recurse on the JavaScript stack or expose a pending value as a source result.
 
 #### Scenario: Complete deep suspension under raised limits
 
 - **WHEN** a terminating suspended Effect recursion is evaluated with step and call-depth limits above its logical work
-- **THEN** evaluation completes with the same result, logical allocation order and outcomes, ownership and release counts, and cleanup trace as native and Wasm without requiring identical physical frame bytes or depending on the JavaScript call stack
+- **THEN** evaluation completes with the same result, frame-state transitions, ownership, and cleanup trace as native and Wasm without depending on the JavaScript call stack
 
-#### Scenario: Sweep continuation allocation failure
+#### Scenario: Bound suspended logical recursion
 
-- **WHEN** deterministic allocation failure rejects each continuation allocation ordinal in turn
-- **THEN** evaluation returns `OutOfMemory` at that boundary, creates no owner for the rejected request, and cleans every previously created logical continuation exactly once
+- **WHEN** a suspended recursive Effect would add a source-logical invocation beyond `maxCallDepth`
+- **THEN** evaluation returns the deterministic `CallDepth` blocked outcome at that exact source boundary rather than simulating allocation failure
+
+#### Scenario: Preserve channels during evaluation
+
+- **WHEN** evaluation runs `Effect.suspend` over `Effect<A ! E ? R>`
+- **THEN** its source-visible outcome and requirements remain exactly `A ! E ? R` with no allocator request or `OutOfMemoryError` branch
+
+#### Scenario: Exhaust private evaluator activation storage
+
+- **WHEN** the evaluator cannot retain the private activation state required to continue suspended execution
+- **THEN** evaluation terminates with a fatal host defect or trap-equivalent outcome outside the program's typed failure channel and does not synthesize `OutOfMemoryError`
+
+### Requirement: Evaluation executes finite Effect composites exactly
+
+Evaluation SHALL construct only the selected member of a finite Effect composite, preserve its
+laziness, run exactly that member when requested, and retain its exact success or typed-failure
+identity under the normalized joined channels. Dropping or completing the value SHALL clean only
+the active member and SHALL introduce no allocation event.
+
+#### Scenario: Run the selected success member
+
+- **WHEN** a branch selects one of two compatible lazy Effects and the result is run
+- **THEN** evaluation enters only the selected body and returns its exact success value
+
+#### Scenario: Preserve selected failure identity
+
+- **WHEN** the selected member fails with one member of the joined failure union
+- **THEN** evaluation retains that exact failure member and payload while closing an unhandled entry failure with status one
+
+#### Scenario: Drop a selected affine capture
+
+- **WHEN** a composite holding one affine capture is dropped without running
+- **THEN** evaluation records exactly one cleanup for that selected capture and none for inactive alternatives
+
+### Requirement: Evaluation executes statement patterns from logical members
+
+Evaluation SHALL execute MIR statement selections using the scrutinee's canonical logical active
+member. It SHALL preserve nested payload values, create only the selected bindings, execute the
+correct conditional body, and apply the MIR ownership and cleanup plan without decoding backend
+storage or choosing numeric tags independently.
+
+#### Scenario: Evaluate nested local destructuring
+
+- **WHEN** an irrefutable pattern binds fields nested inside two nominal values
+- **THEN** evaluation exposes the exact nested payloads to subsequent statements
+
+#### Scenario: Evaluate conditional mismatch
+
+- **WHEN** the active union member does not equal an if-let selector
+- **THEN** evaluation creates no taken-body bindings and executes only the mismatch body

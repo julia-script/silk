@@ -27,8 +27,8 @@ moves, calls, drops, returns, branches, traps, and generated entry termination m
 operations — and SHALL realize every scalar representation from the MIR layout table exactly. It
 SHALL emit LLVM bitcode directly, without loading `libLLVM`, using the LLVM C API, or requiring a
 compiler-private native FFI. The artifact SHALL record the canonical target, each instance's
-deterministic symbol, the explicit machine entry symbol `silk_main`, and ordered effect-entry report
-identities when present. Function order MUST NOT select the machine entry. Identical target-aware
+deterministic symbol, the explicit machine entry symbol `silk_main`, and the target-neutral entry
+termination contract when present. Function order MUST NOT select the machine entry. Identical target-aware
 MIR programs and requests SHALL produce byte-identical bitcode across fresh processes, gated by a
 committed digest.
 
@@ -39,8 +39,8 @@ committed digest.
 
 #### Scenario: Lower an effectful entry adapter
 
-- **WHEN** MIR selects an effectful `()` entry with two reportable failures
-- **THEN** bitcode contains a zero-parameter scalar `silk_main` adapter that returns `0` or the normalized one-based failure tag and the artifact records both canonical report identities
+- **WHEN** MIR selects an effectful `()` entry with two concrete failures
+- **THEN** bitcode contains a zero-parameter scalar `silk_main` adapter that returns its private closed tag and the artifact records both canonical identities, public status policy, and logical-frame metadata
 
 #### Scenario: Ignore function order for entry naming
 
@@ -60,9 +60,9 @@ committed digest.
 ### Requirement: Direct WebAssembly closes effectful entry outcomes
 
 The direct WebAssembly backend SHALL emit the same explicit `silk_main` adapter semantics as the
-LLVM backend without adding host imports: `0` for success and the normalized one-based failure tag
-for an unhandled typed failure after payload cleanup. Its artifact SHALL retain the ordered canonical
-report identities.
+LLVM backend without adding host imports: `0` for success and the private normalized failure tag
+for an unhandled typed failure after payload cleanup. Its artifact SHALL retain the target-neutral
+termination contract containing public status policy, canonical identities, and logical metadata.
 
 #### Scenario: Emit an import-free effect entry
 
@@ -302,14 +302,15 @@ or commit, and valid writes SHALL preserve complete logical values and exact rep
 ### Requirement: Backends realize the compiler-owned union plan
 
 Native LLVM and direct WebAssembly emission SHALL consume the union's compiler-owned discriminant,
-member tags, payload placement, padding, calling shape, and member-slot mappings without choosing a
-different representation. Injection, calls, returns, struct/array storage, reads, moves, and writes
-SHALL preserve the same active member and complete payload as evaluation.
+member tags, payload placement, padding, calling shape, exact executable representation plans, and
+member-slot mappings without choosing a different representation. Injection, calls, returns,
+struct/array storage, reads, moves, writes, invocation, and execution SHALL preserve the same active
+ordinary member and complete payload as evaluation.
 
 #### Scenario: Emit one union through both backends
 
-- **WHEN** a program injects a move-only nominal value, transports it through an aggregate, and widens it
-- **THEN** native and WebAssembly execution agree with evaluation on the final result and cleanup
+- **WHEN** a program injects scalar, array, nominal, droppable, and represented executable values into unions and transports them through aggregates
+- **THEN** native and WebAssembly execution agree with evaluation on results and active-payload cleanup
 
 ### Requirement: Backend union dispatch remains private and deterministic
 
@@ -376,9 +377,11 @@ symbol. Backends MUST NOT merge layout-distinct instances or add runtime generic
 
 Native LLVM and direct WebAssembly emission SHALL consume the target-aware logical slice type,
 typed address-and-length calling shape, element stride, loan-validated operations, and structured
-control DAG supplied by the compiler. Neither backend MAY specialize a slice-taking function by
-source array length, flatten an unknown-length slice into fixed element parameters, or choose an
-independent slice ABI.
+control DAG supplied by the compiler. They SHALL compute projected borrow addresses from the
+compiler's ordered field and fixed-array selectors, including checked runtime indexes and
+target-planned element strides, and SHALL preserve the original root as authoritative storage.
+Neither backend MAY specialize a slice-taking function by source array length, flatten an
+unknown-length slice into fixed element parameters, or choose an independent slice ABI.
 
 #### Scenario: Emit one callee for distinct source lengths
 
@@ -389,6 +392,11 @@ independent slice ABI.
 
 - **WHEN** native and Wasm backends emit the same logical slice program
 - **THEN** native uses the planned pointer-width address lane and Wasm uses the planned linear-memory address lane without changing the logical MIR
+
+#### Scenario: Agree on runtime indexed subplace mutation
+
+- **WHEN** the parity corpus mutates `matrix[index]` through an exclusive inner-array slice
+- **THEN** native, Wasm, and evaluation return the same value and trap consistently for an invalid index
 
 ### Requirement: Address-taken arrays have authoritative contiguous storage
 
@@ -460,7 +468,7 @@ propagation, cleanup, and traps SHALL agree with evaluation.
 
 Native LLVM and direct Wasm SHALL realize compiler-planned Effect outcomes, allocator witness calls,
 self-contained reclaim tickets, raw-buffer operations, Vector moves, and Drop order from verified MIR.
-Neither backend may choose layout, turn `OutOfMemory` into a trap, recognize an allocator kind, or
+Neither backend may choose layout, turn `OutOfMemoryError` into a trap, recognize an allocator kind, or
 introduce a lifetime scope absent from MIR.
 
 #### Scenario: Agree on successful and exhausted growth
@@ -475,7 +483,9 @@ shared, exclusive, and consuming application, and cleanup from MIR with results 
 evaluation. The backend MAY erase a non-escaping section into a direct call or choose a target-aware
 code-and-environment representation, but MUST NOT change callable mode, capture lifetime,
 single-evaluation order, or cleanup behavior. Neither backend SHALL require one universal heap
-allocation or runtime callable interpreter.
+allocation or runtime callable interpreter. Backends SHALL preserve capture construction order
+while reordering captured lanes by explicit parameter ordinal at invocation; they MUST NOT infer
+target argument order from environment field order.
 
 #### Scenario: Erase a non-escaping section
 
@@ -492,10 +502,15 @@ allocation or runtime callable interpreter.
 - **WHEN** the parity corpus invokes shared, exclusive, and consuming callable environments
 - **THEN** native, Wasm, and evaluation agree on results, rejected repeats, mutation, and cleanup order
 
+#### Scenario: Agree on staged positional application
+
+- **WHEN** the parity corpus executes `combine(3)(2)(1)`
+- **THEN** native, Wasm, and evaluation all invoke `combine(1, 2, 3)`
+
 ### Requirement: Native and Wasm realize self-contained allocation identically
 
 Native LLVM and direct WebAssembly SHALL lower verified general allocator witness calls,
-compiler-planned target layouts, typed `OutOfMemory`, affine allocation and reclaim tickets,
+compiler-planned target layouts, typed `OutOfMemoryError`, affine allocation and reclaim tickets,
 RawBuffer and Slot operations, shared bounds-checked recursively Copy reads including structural
 unions, restricted Drop, and cleanup ordering from MIR. A shared union read SHALL load the canonical
 tag and complete payload lanes without writing storage, changing owner state, allocating, or
@@ -513,7 +528,7 @@ exactly-once release MUST match evaluation.
 #### Scenario: Agree under exhaustion
 
 - **WHEN** deterministic exhaustion rejects a requested allocation
-- **THEN** native and Wasm propagate the same `OutOfMemory`, clean earlier owners in the same order, and create no release for the rejected request
+- **THEN** native and Wasm propagate the same `OutOfMemoryError`, clean earlier owners in the same order, and create no release for the rejected request
 
 #### Scenario: Preserve zero-sized identity
 
@@ -776,16 +791,22 @@ does not contain one.
 ### Requirement: Backends preserve string semantics and presentation
 
 Native LLVM and direct WebAssembly emission SHALL realize the target plan for `string` exactly and
-SHALL agree with evaluation on static text, validated runtime views, explicit UTF-8 bytes, byte
-length, exact equality, calls, returns, and lexical ownership behavior. Debug builds and compiler
-inspection artifacts SHALL retain the logical `string` identity and present valid values as quoted,
-escaped Unicode text; byte slices SHALL remain numeric binary views even when their bytes are valid
-UTF-8.
+SHALL agree with evaluation on static text, validated runtime views, ordinary references to string
+values, explicit UTF-8 bytes, byte length, `char` traversal, checked scalar conversion, exact
+equality, calls, returns, and lexical ownership behavior. Debug builds and compiler inspection
+artifacts SHALL retain the logical `string` and `char` identities and present valid string values as
+quoted, escaped Unicode text; byte slices SHALL remain numeric binary views even when their bytes
+are valid UTF-8.
 
 #### Scenario: Compare engines on non-ASCII text
 
-- **WHEN** a program passes a non-ASCII `string` through calls and observes its bytes and exact equality
+- **WHEN** a program passes a non-ASCII `string` through calls, traverses its scalars, and observes its bytes and exact equality
 - **THEN** evaluation, native execution, and Wasm execution agree on all results without allocating for the view
+
+#### Scenario: Reject invalid scalars identically
+
+- **WHEN** checked scalar conversion receives surrogate and above-range integers
+- **THEN** native and Wasm return the same `None` outcomes as evaluation
 
 #### Scenario: Distinguish text in a debug build
 
@@ -801,14 +822,16 @@ UTF-8.
 
 Native LLVM and direct WebAssembly SHALL realize target-neutral suspension as private iterative
 execution boundaries whose machine-stack usage is bounded by a constant independent of the number
-of active suspended logical invocations. A suspended child SHALL complete or suspend through the
-private runner, then resume its parent with the exact typed outcome and live continuation state.
-An explicit suspension origin SHALL return transfer to the private boundary; an ordinary
-suspendable runner SHALL be able to complete synchronously or relay transfer. Relaying callers
-SHALL prepare their unpublished continuation state without recursively starting the deferred child,
-and the driver SHALL begin that child only after the complete continuation chain is published.
-Neither backend MAY depend on LLVM `musttail`, WebAssembly tail-call instructions, host exception
-unwinding, a JavaScript promise, or recursive host calls to provide this guarantee.
+of active suspended logical invocations. Each active suspendable invocation SHALL occupy one
+compiler-owned execution-stack frame with one statically determined maximum layout over its resume
+states. Repeated suspension by that invocation SHALL reuse the frame. A suspended child SHALL
+complete or suspend through the private runner, then resume its parent with the exact typed outcome
+and live state. An explicit suspension origin SHALL return transfer to the private boundary; an
+ordinary suspendable runner SHALL be able to complete synchronously or relay transfer. The parent
+SHALL finish its frame-state transition before the driver begins the child. Neither backend MAY
+depend on LLVM `musttail`, WebAssembly tail-call instructions, host exception unwinding, a
+JavaScript promise, recursive host calls, a source allocator, or typed allocation failure to provide
+this guarantee.
 
 #### Scenario: Run deep non-tail suspension on native
 
@@ -823,22 +846,68 @@ unwinding, a JavaScript promise, or recursive host calls to provide this guarant
 #### Scenario: Preserve typed failure through the private runner
 
 - **WHEN** a deep suspended child produces a typed failure
-- **THEN** native and Wasm resume and clean the same logical continuations as evaluation before returning the unchanged failure member and payload
+- **THEN** native and Wasm resume and clean the same logical frames as evaluation before returning the unchanged failure member and payload
+
+#### Scenario: Reuse a frame across repeated suspension
+
+- **WHEN** one invocation suspends and resumes repeatedly before completing
+- **THEN** backend structural evidence shows one invocation frame reused across states rather than one source allocation per suspension
+
+#### Scenario: Trap on execution-stack exhaustion
+
+- **WHEN** a compiled target exhausts the finite private execution stack while adding an active suspended invocation
+- **THEN** it terminates through the target trap path without constructing a typed failure or consulting a source allocator
 
 ### Requirement: Suspension runner ABIs remain private and pay for use
 
-Continuation frame headers, resume discriminants, step results, driver loops, target function
-references, and storage layouts SHALL remain backend-private and unreachable from Silk source.
-A compiled program whose reachable MIR contains no suspension operation MUST NOT emit or link those
-forms, a continuation allocation path, or a complete-versus-pending branch, and its established
-synchronous entry and Effect-call artifact shape SHALL remain unchanged.
+Coroutine frame headers, resume discriminants, step results, driver loops, target function
+references, and execution-stack layouts SHALL remain backend-private and unreachable from Silk
+source. A compiled program whose reachable MIR contains no suspension operation MUST NOT emit or
+link those forms, a coroutine-frame or execution-stack path, or a complete-versus-pending branch,
+and its established synchronous entry and Effect-call artifact shape SHALL remain unchanged.
 
 #### Scenario: Inspect a non-suspending native artifact
 
 - **WHEN** a closed synchronous Effect program is compiled to native release bitcode
-- **THEN** structural inspection finds its established direct Effect calls and no suspension driver, continuation allocator, resume dispatch, or pending branch
+- **THEN** structural inspection finds its established direct Effect calls and no suspension driver, coroutine frame, resume dispatch, execution-stack helper, or pending branch
 
 #### Scenario: Inspect a non-suspending Wasm artifact
 
 - **WHEN** the same closed synchronous Effect program is compiled to direct WebAssembly
-- **THEN** structural and linkage inspection finds no suspension table, driver, continuation allocation path, or pending branch
+- **THEN** structural and linkage inspection finds no suspension table, driver, coroutine-frame path, execution-stack helper, or pending branch
+
+### Requirement: Backends realize finite Effect composites without allocation
+
+Native LLVM and direct WebAssembly SHALL realize a finite Effect composite as a statically planned
+tag plus storage sufficient for its largest alternative. Construction SHALL initialize only the
+selected member, execution SHALL dispatch only to its runner, and cleanup SHALL release only that
+member. The representation SHALL require no source or private heap allocation, and equivalent
+inputs SHALL emit deterministic artifacts.
+
+#### Scenario: Execute the same selected member across engines
+
+- **WHEN** a closed program constructs and runs one member of a finite compatible Effect join
+- **THEN** native and WebAssembly agree with evaluation on its result, failure identity, and cleanup
+
+#### Scenario: Inspect allocation-free lowering
+
+- **WHEN** a finite Effect composite is emitted for either backend
+- **THEN** its tag, maximum static storage, dispatch, and cleanup are present without an allocation request or universal Effect interpreter
+
+#### Scenario: Emit joined Effects deterministically
+
+- **WHEN** equivalent joined Effect programs are compiled repeatedly
+- **THEN** native and WebAssembly artifacts preserve identical alternative ordering and bytes
+
+### Requirement: Backends privately realize verified statement-pattern dispatch
+
+Native LLVM and direct WebAssembly emission SHALL realize every verified expression-match and
+statement-pattern selection from the compiler-owned MIR member and layout plan. Both backends SHALL
+preserve source-ordered selection, retained statement bindings, branch-local borrowed bindings,
+move-on-both-outcomes, active-payload cleanup, and structured joins without introducing a distinct
+pattern ABI or independently choosing tags.
+
+#### Scenario: Emit shared statement patterns
+
+- **WHEN** one program uses recursive let destructuring and both matching and mismatching if-let selections
+- **THEN** native, WebAssembly, and evaluation agree on results, binding visibility, and active-payload cleanup

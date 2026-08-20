@@ -81,7 +81,9 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ArgumentList',
   'ArrayLiteralExpression',
   'AssignmentStatement',
+  'BindingPattern',
   'BindingStatement',
+  'PatternBindingStatement',
   'Block',
   'BooleanLiteralExpression',
   'BorrowExpression',
@@ -89,6 +91,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallExpression',
   'CallTypeArgumentList',
   'ConditionalStatement',
+  'PatternConditionalStatement',
   'ContinueStatement',
   'ConstantDeclaration',
   'DropStatement',
@@ -123,6 +126,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ReferenceType',
   'Requirement',
   'RequirementRow',
+  'RequirementSelector',
+  'RoleDeclaration',
   'PatternField',
   'ReturnStatement',
   'RunExpression',
@@ -136,6 +141,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'StructLiteralExpression',
   'TypePath',
   'UnionType',
+  'UnitExpression',
+  'UnsafeExpression',
   'UniversalPattern',
   'WhileStatement',
 ])
@@ -157,6 +164,25 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
 `,
     )
     const second = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('omits semantic fallthrough completion nodes from formatted source', () =>
+  Effect.gen(function* () {
+    const source = 'fn missing()->i32 { let value=42 } pub fn main()->() {}'
+    const first = yield* Formatter.format(parse('memory://implicit-returns.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn missing() -> i32 {
+  let value = 42
+}
+
+pub fn main() -> () {}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://implicit-returns.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -434,13 +460,13 @@ it.effect('formats bounded conditional conformances canonically and idempotently
 
 it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
-    const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator@Scratch>{return effect{return 1}}
-effect fn work()->i32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
+    const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator at Scratch>{return effect{return 1}}
+effect fn work()->i32!Problem?&FileSystem|&mut Allocator at Scratch{return 1}`
     const first = yield* Formatter.format(parse('memory://effect-requirement-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+      `fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect {
     return 1
   }
@@ -448,7 +474,7 @@ effect fn work()->i32!Problem?&FileSystem|&mut Allocator@Scratch{return 1}`
 
 effect fn work() -> i32
 ! Problem
-? &FileSystem | &mut Allocator@Scratch {
+? &FileSystem | &mut Allocator at Scratch {
   return 1
 }
 `,
@@ -460,12 +486,12 @@ effect fn work() -> i32
 
 it.effect('formats row differences and callable constraints idempotently', () =>
   Effect.gen(function* () {
-    const source = `effect fn bind<?S,A,P,!E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?Without<R,S> where &mut P provides S from R,S in R{return run self}`
+    const source = `effect fn bind<?S,A,P,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?Without<R,S> where &mut P provides S from R,S in R{return run self}`
     const first = yield* Formatter.format(parse('memory://row-constraints.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `effect fn bind<?S, A, P, !E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
+      `effect fn bind<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A
 ! E
 ? Without<R, S>
 where &mut P provides S from R, S in R {
@@ -480,12 +506,12 @@ where &mut P provides S from R, S in R {
 
 it.effect('preserves nested row-difference precedence and selected-row call prefixes', () =>
   Effect.gen(function* () {
-    const source = `effect fn transform<?S,A,P,!E,!F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<&mut Logger@Audit>(move self,provider)}`
+    const source = `effect fn transform<?S,A,P,E,F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<Logger at Audit>(move self,provider)}`
     const first = yield* Formatter.format(parse('memory://nested-row-format.silk', source))
     const text = formattedText(first)
     assert.include(text, '! Without<E | F, First | Third>')
     assert.include(text, '? Without<R | Q, S>')
-    assert.include(text, 'Intrinsic.bindRequirementMut<&mut Logger@Audit>')
+    assert.include(text, 'Intrinsic.bindRequirementMut<Logger at Audit>')
     const second = yield* Formatter.format(parse('memory://nested-row-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
@@ -493,7 +519,7 @@ it.effect('preserves nested row-difference precedence and selected-row call pref
 
 it.effect('breaks long constraint lists after where with one constraint per line', () =>
   Effect.gen(function* () {
-    const source = `effect fn transform<S,P,A,!E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?R where SelectedCapability in ExtremelyLongRequirementRowParameter,&mut ExtremelyLongProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,&ExtremelyLongSharedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,AnotherSelectedCapability in ExtremelyLongRequirementRowParameter{return run self}`
+    const source = `effect fn transform<S,P,A,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?R where SelectedCapability in ExtremelyLongRequirementRowParameter,&mut ExtremelyLongProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,&ExtremelyLongSharedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,AnotherSelectedCapability in ExtremelyLongRequirementRowParameter{return run self}`
     const first = yield* Formatter.format(parse('memory://long-where-format.silk', source))
     const text = formattedText(first)
     assert.include(
@@ -827,6 +853,7 @@ pub struct Pair {
 pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub struct End {}
+pub role Clock
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value
   while moved < other {
@@ -836,8 +863,13 @@ fn helper(value: i32, other: i32) -> i32 {
   if !false { return (moved + other) } else { return Pair { left: [1, 2], right: true }.left[0] }
   return moved
 }
+pub unsafe fn unchecked(value: i32) -> i32 { return value }
 fn inspect(event: Token | End) -> i32 {
   return match &mut event { Token { span: Span { start: offset, .. }, .. } if true => offset _ => 0 }
+}
+fn destructure(pair: Pair, event: Token | End) -> i32 {
+  let Pair { left, .. } = move pair
+  if let Token whole = &event { return left[0] } else { return 0 }
 }
 fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
@@ -849,12 +881,12 @@ effect fn delayed(problem: Token) -> i32 ! Token {
   if false { fail move problem }
   return 1
 }
-effect fn timed() -> i32 ? &End@Clock { return 1 }
-fn execute(problem: Token) -> i32 {
+effect fn timed() -> i32 ? &End at Clock { return 1 }
+fn execute(problem: Token, borrowed: &End) -> i32 {
   let local = effect { return 2 }
   drop local
   let pending = delayed(move problem)
-  let timed = timed() |> End.provide<&End@Clock>(&local)
+  let timed = timed() |> End.provide<End at Clock>(&local)
   return run pending
 }
 fn selected() -> typeof(helper) {
@@ -864,7 +896,7 @@ fn borrow(values: [i32; 2], output: [i32; 2]) -> i32 {
   let mut target = move output
   return scan(&values, &mut target)
 }
-pub fn main() -> i32 { return helper(-1, 2) |> Core.finish() }
+pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
 `
     const original = parse('memory://grammar.silk', source)
     assert.deepEqual(original.lexicalDiagnostics, [])

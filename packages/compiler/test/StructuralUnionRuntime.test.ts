@@ -207,6 +207,108 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('transports finite executable representations as ordinary union members', () =>
+  Effect.gen(function* () {
+    const programs = Object.freeze([
+      Object.freeze({
+        name: 'callable',
+        source: `fn add(left: i32, right: i32) -> i32 { return left + right }
+fn selected() -> typeof(add) | i32 { return add }
+pub fn main() -> i32 { drop selected() return 42 }`,
+      }),
+      Object.freeze({
+        name: 'effect',
+        source: `fn selected() -> some<F: Effect<i32>> F | i32 {
+  return effect { return 42 }
+}
+pub fn main() -> i32 { drop selected() return 42 }`,
+      }),
+    ])
+    for (const program of programs) {
+      const self = yield* Analysis.ofSourceRealized(
+        `union-executable/${program.name}`,
+        ascii(program.source),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+        [],
+        program.name,
+      )
+      const executableConversion = Analysis.hirOf(self, `union-executable/${program.name}`)
+        ?.functions.flatMap((fn) => fn.statements.flatMap(Hir.statementExpressions))
+        .flatMap(expressions)
+        .find(
+          (expression) =>
+            expression._tag === 'UnionConvert' &&
+            expression.mappings.some(
+              (mapping) => Type.isRepresented(mapping.source) && Type.isRepresented(mapping.target),
+            ),
+        )
+      assert.strictEqual(executableConversion?._tag, 'UnionConvert', program.name)
+      const layout = Analysis.layoutOf(self)
+      assert.strictEqual(layout._tag, 'Available', program.name)
+      if (layout._tag === 'Available') {
+        const executableUnion = layout.value.entries.find(
+          (entry) => Type.isUnion(entry.type) && entry.type.members.some(Type.isRepresented),
+        )
+        assert.isDefined(executableUnion, program.name)
+        assert.strictEqual(
+          executableUnion === undefined
+            ? undefined
+            : Layout.callingShape(layout.value, executableUnion.type)?.tree._tag,
+          'SumShape',
+          program.name,
+        )
+      }
+      assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [], program.name)
+      const outcome = Analysis.evaluate(self)
+      assert.strictEqual(outcome._tag, 'Completed', program.name)
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n, program.name)
+      const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42, program.name)
+    }
+  }),
+)
+
+it.effect('derives scalar and droppable-array behavior from the normalized member plan', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'union-array/main',
+      ascii(`struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+fn accept(value: i32 | [Token; 2]) -> i32 { drop value return 42 }
+pub fn main() -> i32 {
+  return accept([Token { value: 1 }, Token { value: 2 }])
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(Mir.verify(mir), [])
+    const unionCleanup = mir.functions
+      .flatMap(Mir.operations)
+      .flatMap((operation) =>
+        operation._tag === 'Drop' && operation.cleanup._tag === 'UnionCleanup'
+          ? [operation.cleanup]
+          : [],
+      )
+      .at(0)
+    const arrayCase = unionCleanup?.cases.find((entry) => Type.isFixedArray(entry.member))
+    assert.strictEqual(arrayCase?.cleanup._tag, 'ArrayCleanup')
+    if (arrayCase?.cleanup._tag === 'ArrayCleanup')
+      assert.strictEqual(arrayCase.cleanup.element._tag, 'HookCleanup')
+
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('diagnoses narrowing and non-containing union targets deterministically', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
@@ -233,7 +335,10 @@ pub fn main() -> i32 { return accept(C {}) }`),
  * `u64` is that shape on a 32-bit target. The bits are the same bits either way, so the transfer
  * bridges the containers and every engine now agrees.
  */
-const widened = `struct Wide { value: u64 }
+const widened = `import silk.i32 as i32
+import silk.u64 as u64
+import silk.u8 as u8
+struct Wide { value: u64 }
 struct Narrow { code: u8 }
 struct Holder { value: Wide | Narrow }
 

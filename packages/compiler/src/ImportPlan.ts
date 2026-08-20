@@ -9,7 +9,12 @@ export interface Request {
   readonly syntax: SyntaxFile.SyntaxFile
   readonly module: string
   readonly spelling: string
+  /** Local binding used when the imported spelling collides with an existing name. */
+  readonly localSpelling?: string
 }
+
+const renderedMember = (spelling: string, localSpelling: string): string =>
+  spelling === localSpelling ? spelling : `${spelling} as ${localSpelling}`
 
 const text = (source: SourceFile.SourceFile, element: SyntaxTree.Element): string | undefined =>
   Option.getOrUndefined(SourceFile.spelling(source, element.span))
@@ -69,9 +74,12 @@ const extendMemberList = (
   source: SourceFile.SourceFile,
   list: SyntaxTree.Node,
   spelling: string,
+  localSpelling: string,
 ): SourceAction.Edit | undefined => {
   if (!SyntaxTree.isAvailableSyntax(list)) return undefined
-  if (importedSpellings(source, list).includes(spelling)) return undefined
+  const imported = importedSpellings(source, list)
+  if (imported.includes(spelling) || imported.includes(localSpelling)) return undefined
+  const rendered = renderedMember(spelling, localSpelling)
   const members = SyntaxTree.directNodes(list, 'ImportMember')
   const last = members.at(-1)
   const right = SyntaxTree.directToken(list, 'RightBrace')
@@ -84,31 +92,33 @@ const extendMemberList = (
   const multiline = containsNewline(source, list.span.start, list.span.end)
   if (!multiline)
     return trailingComma
-      ? insertion(source, right.span.start, `${spelling}, `)
-      : insertion(source, last.span.end, `, ${spelling}`)
+      ? insertion(source, right.span.start, `${rendered}, `)
+      : insertion(source, last.span.end, `, ${rendered}`)
   const newline = newlineOf(source)
   const firstMember = members.at(0)
   const firstName =
     firstMember === undefined ? undefined : SyntaxTree.directToken(firstMember, 'Identifier')
   const indent = indentationAt(source, firstName?.span.start ?? last.span.start)
   return trailingComma
-    ? insertion(source, right.span.start, `${indent}${spelling},${newline}`)
-    : insertion(source, last.span.end, `,${newline}${indent}${spelling}`)
+    ? insertion(source, right.span.start, `${indent}${rendered},${newline}`)
+    : insertion(source, last.span.end, `,${newline}${indent}${rendered}`)
 }
 
 const extendNamespaceImport = (
   source: SourceFile.SourceFile,
   declaration: SyntaxTree.Node,
   spelling: string,
+  localSpelling: string,
 ): SourceAction.Edit | undefined =>
   SyntaxTree.isAvailableSyntax(declaration)
-    ? insertion(source, declaration.span.end, ` { ${spelling} }`)
+    ? insertion(source, declaration.span.end, ` { ${renderedMember(spelling, localSpelling)} }`)
     : undefined
 
 const newImport = (
   syntax: SyntaxFile.SyntaxFile,
   module: string,
   spelling: string,
+  localSpelling: string,
 ): SourceAction.Edit | undefined => {
   const imports = SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')
   const newline = newlineOf(syntax.source)
@@ -133,15 +143,17 @@ const newImport = (
       ? leadingModuleDocumentationEnd
       : (syntax.root.children.at(0)?.span.start ?? 0))
   const sourceModule = module.split('/').join('.')
+  const member = renderedMember(spelling, localSpelling)
   const replacement =
     last === undefined
-      ? `import ${sourceModule} { ${spelling} }${newline}`
-      : `${newline}import ${sourceModule} { ${spelling} }`
+      ? `import ${sourceModule} { ${member} }${newline}`
+      : `${newline}import ${sourceModule} { ${member} }`
   return insertion(syntax.source, offset, replacement)
 }
 
 /** Plans one selected-member import without rewriting unrelated syntax or trivia. */
 export const make = (request: Request): Option.Option<SourceAction.ChangePlan> => {
+  const localSpelling = request.localSpelling ?? request.spelling
   const imports = SyntaxTree.directNodes(request.syntax.root, 'ImportDeclaration')
   const matching = imports.filter(
     (declaration) => pathOf(request.syntax.source, declaration) === request.module,
@@ -149,13 +161,14 @@ export const make = (request: Request): Option.Option<SourceAction.ChangePlan> =
   if (matching.length > 1) return Option.none()
   const declaration = matching.at(0)
   let edit: SourceAction.Edit | undefined
-  if (declaration === undefined) edit = newImport(request.syntax, request.module, request.spelling)
+  if (declaration === undefined)
+    edit = newImport(request.syntax, request.module, request.spelling, localSpelling)
   else {
     const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
     edit =
       list === undefined
-        ? extendNamespaceImport(request.syntax.source, declaration, request.spelling)
-        : extendMemberList(request.syntax.source, list, request.spelling)
+        ? extendNamespaceImport(request.syntax.source, declaration, request.spelling, localSpelling)
+        : extendMemberList(request.syntax.source, list, request.spelling, localSpelling)
   }
   if (edit === undefined) return Option.none()
   return SourceAction.changePlan({

@@ -30,9 +30,58 @@ export type Infix =
  */
 export type ShortCircuit = 'And' | 'Or'
 
+/** Operators an interface operation may supply through an explicit declaration marker. */
+export type Eligible = Exclude<Prefix | Infix, ShortCircuit>
+
+/** Token kinds retained after the contextual `operator` marker, including rejected control forms. */
+export const declarationTokenKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
+  'Minus',
+  'Bang',
+  'Tilde',
+  'Star',
+  'Slash',
+  'Percent',
+  'Plus',
+  'Ampersand',
+  'Caret',
+  'Pipe',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'EqualEqual',
+  'BangEqual',
+  'AmpersandAmpersand',
+  'PipePipe',
+  'PipeGreater',
+  'Equals',
+  'RunKeyword',
+])
+
+/** True when a token can be retained for operator-marker validation. */
+export const isDeclarationToken = (kind: Token.TokenKind): boolean =>
+  declarationTokenKinds.includes(kind)
+
+/** Resolves a valid eager marker using the operation arity to disambiguate `-`. */
+export const declaration = (kind: Token.TokenKind, arity: number): Eligible | undefined => {
+  const selected = arity === 1 ? prefix(kind) : arity === 2 ? infix(kind)?.operator : undefined
+  return selected === undefined || isShortCircuit(selected) ? undefined : selected
+}
+
 /** True only for the operators whose right operand is conditionally evaluated. */
 export const isShortCircuit = (self: Prefix | Infix): self is ShortCircuit =>
   self === 'And' || self === 'Or'
+
+/** True when an eager infix operator always returns `bool` rather than its operand type. */
+export const isPredicate = (
+  self: Prefix | Infix,
+): self is 'LessThan' | 'LessOrEqual' | 'GreaterThan' | 'GreaterOrEqual' | 'Equals' | 'NotEquals' =>
+  self === 'LessThan' ||
+  self === 'LessOrEqual' ||
+  self === 'GreaterThan' ||
+  self === 'GreaterOrEqual' ||
+  self === 'Equals' ||
+  self === 'NotEquals'
 
 /** The associativity used when parsing one infix precedence level. */
 export type Associativity = 'Left' | 'None'
@@ -162,6 +211,13 @@ export const infix = (kind: Token.TokenKind): InfixInfo | undefined => infixByTo
 /** Returns the canonical source spelling of one prefix operator. */
 export const prefixSpelling = (self: Prefix): string =>
   self === 'Negate' ? '-' : self === 'Not' ? '!' : '~'
+
+/** Returns the canonical source spelling of one eager operator. */
+export const spelling = (self: Eligible): string => {
+  if (self === 'Negate' || self === 'Not' || self === 'BitNot') return prefixSpelling(self)
+  for (const info of Object.values(infixByToken)) if (info?.operator === self) return info.spelling
+  throw new RangeError(`Operator table has no spelling for ${self}`)
+}
 
 const operationByOperator: Readonly<
   Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals' | ShortCircuit>, string>

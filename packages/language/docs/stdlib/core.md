@@ -14,19 +14,19 @@ structured logging belongs in `silk.logging`.
 
 Both capabilities are ordinary source-declared services. Their requirements remain in an
 Effect until a caller supplies a provider, so tests and applications can replace process-backed
-implementations lexically. Allocation failure is typed as [`OutOfMemory`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279), and stream failure as
-[`StreamWriteFailure`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654661696c757265).
+implementations lexically. Allocation failure is typed as [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), and stream failure as
+[`StreamWriteError`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72).
 
 Import as `Allocator` with `import silk.core`.
 
 Public declarations: 12.
 
-<a id="declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279"></a>
+<a id="declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72"></a>
 
-## `OutOfMemory`
+## `OutOfMemoryError`
 
 ```silk
-pub struct OutOfMemory
+pub struct OutOfMemoryError
 ```
 
 Reports that an allocator could not satisfy a storage request.
@@ -36,10 +36,10 @@ Reports that an allocator could not satisfy a storage request.
 ## `outOfMemory`
 
 ```silk
-pub effect fn outOfMemory() -> never ! OutOfMemory
+pub effect fn outOfMemory() -> never ! OutOfMemoryError
 ```
 
-Fails immediately with [`OutOfMemory`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279), for translating checked sizing failures.
+Fails immediately with [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), for translating checked sizing failures.
 
 <a id="declaration-73696c6b2f636f72653a3a416c6c6f6361746f72"></a>
 
@@ -56,7 +56,7 @@ Mutable service for acquiring owned storage described by a layout.
 ### Operation `allocate`
 
 ```silk
-effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemory ? &mut Allocator
+effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 ```
 
 Acquires one allocation or fails without returning partial storage.
@@ -97,23 +97,15 @@ impl Allocator for SystemAllocator
 allocate = SystemAllocator.allocate
 ```
 
-<a id="declaration-73696c6b2f636f72653a3a53747265616d57726974654661696c757265"></a>
+<a id="declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72"></a>
 
-## `StreamWriteFailure`
+## `StreamWriteError`
 
 ```silk
-pub struct StreamWriteFailure
+pub struct StreamWriteError
 ```
 
 Failure to commit one complete stream message.
-
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Report for StreamWriteFailure`
-
-```silk
-impl Report for StreamWriteFailure
-```
 
 <a id="declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d73"></a>
 
@@ -130,7 +122,7 @@ Portable complete-message output contract.
 ### Operation `writeAll`
 
 ```silk
-effect fn writeAll(destination: bool, bytes: &[u8]) -> () ! StreamWriteFailure ? &mut StandardStreams
+effect fn writeAll(destination: bool, bytes: &[u8]) -> () ! StreamWriteError ? &mut StandardStreams
 ```
 
 Commits one complete immutable byte sequence to the selected destination.
@@ -175,7 +167,7 @@ pub fn native() -> NativeStandardStreams
 
 Constructs the process-backed standard-stream provider.
 
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a32"></a>
+<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `StandardStreams for NativeStandardStreams`
 
@@ -183,7 +175,7 @@ Constructs the process-backed standard-stream provider.
 impl StandardStreams for NativeStandardStreams
 ```
 
-<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `writeAll`
 
@@ -196,7 +188,7 @@ writeAll = NativeStandardStreams.nativeWriteAll
 ## `send`
 
 ```silk
-pub effect fn send(destination: bool, bytes: &[u8]) -> () ! StreamWriteFailure ? &mut StandardStreams
+pub effect fn send(destination: bool, bytes: &[u8]) -> () ! StreamWriteError ? &mut StandardStreams
 ```
 
 Builds one complete-write service effect.

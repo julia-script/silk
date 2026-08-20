@@ -7,7 +7,8 @@ import * as Type from '../src/Type.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const source = `struct Token { kind: i32 flag: bool }
+const source = `import silk.usize as usize
+struct Token { kind: i32 flag: bool }
 struct Empty {}
 fn scan(values: &[i32]) -> i32 { return usize.toI32(values.length) }
 fn edit(values: &mut [i32]) -> i32 { return usize.toI32(values.length) }

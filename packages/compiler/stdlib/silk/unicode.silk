@@ -15,26 +15,6 @@
 //! This module implements canonical NFC and NFD, not compatibility normalization (NFKC or NFKD),
 //! locale-sensitive comparison, grapheme segmentation, or case folding.
 
-import silk.result { Result, Success, Failure }
-import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
-import silk.unicode_tables {
-  Decomposition,
-  canonicalComposition,
-  canonicalDecomposition,
-  combiningClass,
-  dataVersion as tableDataVersion,
-  maximumDecompositionLength
-}
-import silk.vector {
-  Vector,
-  make as vectorMake,
-  append as vectorAppend,
-  asSlice as vectorAsSlice,
-  get as vectorGet,
-  length as vectorLength,
-  set as vectorSet,
-  truncate as vectorTruncate
-}
 
 // Unicode policy lives here rather than in the compiler, and it is explicitly invoked. Nothing on
 // this path runs unless a program calls it: ordinary `string` equality still compares exact bytes,
@@ -48,6 +28,33 @@ import silk.vector {
 // borrow has to come from a direct binding and a reference parameter cannot be reborrowed. Moving
 // a Vector is a move of its three fields, not a copy of its storage, so the buffer is built once
 // and handed along.
+
+import silk.bool as bool
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.result { Result, Success, Failure }
+import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.unicode_tables {
+  Decomposition,
+  canonicalComposition,
+  canonicalDecomposition,
+  combiningClass,
+  dataVersion as tableDataVersion,
+  maximumDecompositionLength
+}
+import silk.usize as usize
+import silk.vector {
+  Vector,
+  make as vectorMake,
+  append as vectorAppend,
+  asSlice as vectorAsSlice,
+  get as vectorGet,
+  length as vectorLength,
+  set as vectorSet,
+  truncate as vectorTruncate
+}
 
 /// Hangul syllables decompose and compose arithmetically rather than through a table, so UAX #15
 /// names these constants instead of tabulating eleven thousand rows.
@@ -106,7 +113,7 @@ fn isHangulSyllable(scalar: u32) -> bool {
 effect fn appendOrdered(
   buffer: Vector<u32>,
   scalar: u32,
-) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
   let mut ordered = move buffer
   let appended = run vectorAppend<u32>(&mut ordered, scalar)
   let class = combiningClass(scalar)
@@ -128,7 +135,7 @@ effect fn appendOrdered(
 effect fn decomposeHangul(
   buffer: Vector<u32>,
   scalar: u32,
-) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
   let index = scalar - HANGUL_SYLLABLE_BASE
   let leading = HANGUL_LEADING_BASE + index / (HANGUL_VOWEL_COUNT * HANGUL_TRAILING_COUNT)
   let vowel = HANGUL_VOWEL_BASE
@@ -148,7 +155,7 @@ effect fn decomposeHangul(
 effect fn decomposeInto(
   buffer: Vector<u32>,
   scalar: u32,
-) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
   if isHangulSyllable(scalar) { return run decomposeHangul(move buffer, scalar) }
   let mut pending = [scalar, scalar, scalar, scalar]
   let mut depth = usize.ZERO
@@ -247,7 +254,7 @@ fn composeInPlace(buffer: Vector<u32>) -> Vector<u32> {
 ///
 /// The input is a `string`, so it is already valid UTF-8 and the decode needs no validation; the
 /// safe validating decoder is `silk/string`'s `fromUtf8`.
-effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemory ? &mut Allocator {
+effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemoryError ? &mut Allocator {
   let bytes = utf8Bytes(value)
   let mut buffer = vectorMake<u32>()
   let mut offset = usize.ZERO
@@ -286,7 +293,7 @@ effect fn decomposedScalars(value: string) -> Vector<u32> ! OutOfMemory ? &mut A
 /// The encoder only ever writes well-formed UTF-8, so the validation inside `copyUtf8` cannot fail
 /// here; the failing arm returns empty text because this module has no reason to reach for the
 /// unchecked constructor to save a scan it is not paying much for.
-effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemory ? &mut Allocator {
+effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemoryError ? &mut Allocator {
   let source = move scalars
   let mut bytes = vectorMake<u8>()
   let mut index = usize.ZERO
@@ -323,7 +330,7 @@ effect fn encodeOwned(scalars: Vector<u32>) -> String ! OutOfMemory ? &mut Alloc
 }
 
 /// Returns the Normalization Form D of text: fully decomposed, in canonical order.
-pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
   let scalars = run decomposedScalars(value)
   return run encodeOwned(move scalars)
 }
@@ -334,7 +341,7 @@ pub effect fn normalizeNfd(value: string) -> String ! OutOfMemory ? &mut Allocat
 ///
 /// This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
 /// only does so where source asks for it.
-pub effect fn normalizeNfc(value: string) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
   let scalars = run decomposedScalars(value)
   let composed = composeInPlace(move scalars)
   return run encodeOwned(move composed)

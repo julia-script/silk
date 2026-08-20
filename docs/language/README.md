@@ -67,7 +67,7 @@ not belong in a language rule unless a program can observe them.
   boundary, covered recursive cycles, exact channel preservation, ownership and cleanup, logical
   depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
-  bounds; generic failure types and requirement rows; and concrete Effect identity.
+  bounds; generic failure types and requirement rows; and finite compatible Effect joins.
 - [Requirements and services](requirements-and-services.md) — runtime-provided capabilities,
   dependency-eligible interfaces, conformances, roles, access, provision, and requirement-row
   operations.

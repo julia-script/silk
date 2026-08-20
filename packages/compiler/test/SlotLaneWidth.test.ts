@@ -39,7 +39,15 @@ const cases: ReadonlyArray<Case> = [
   { element: 'f64', neighbour: 1, first: '-7.0', second: '11.0', expected: 108 },
 ]
 
-const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemory {
+const program = (entry: Case): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.${entry.element} as ${entry.element}
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[${entry.element}; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -58,7 +66,7 @@ const program = (entry: Case): string => `effect fn store() -> i32 ! OutOfMemory
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -91,7 +99,15 @@ for (const entry of cases) {
 }
 
 /** The reproduction as issue #114 states it: two `7u8` in one word, taken back and summed. */
-const reported = `effect fn store() -> i32 ! OutOfMemory {
+const reported = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u8 as u8
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -108,7 +124,7 @@ const reported = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -139,7 +155,11 @@ it.effect('sums two u8 slots in one word to 14 on every engine', () =>
  * field but the last would otherwise drag its neighbours in, and the signed ones pin the
  * sign-extending mnemonic rather than the zero-extending one.
  */
-const packedReference = `struct Packed {
+const packedReference = `import silk.i16 as i16
+import silk.i8 as i8
+import silk.u16 as u16
+import silk.u8 as u8
+struct Packed {
   first: u8
   second: i8
   third: u16

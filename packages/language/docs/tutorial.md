@@ -70,8 +70,9 @@ Three rules are already visible:
 - `pub` makes a declaration visible outside its module. Without it a declaration is private to the
   file.
 - `let` binds a name. The type is inferred; an unconstrained integer literal is `i32`.
-- **`return` is required.** Silk has no trailing-expression return. A function body that reaches
-  its closing brace without a `return` is a `PAR0004` error.
+- **A non-unit path must return.** Silk has no trailing-expression return. Every reachable path of
+  a function returning a value must end in `return` or another terminal operation; fallthrough is
+  a `SEM0130` error.
 
 Check the program without running it:
 
@@ -160,6 +161,8 @@ When a function only needs to read or update a value in place, borrow it rather 
 Borrows are written `&` (shared) and `&mut` (exclusive), and they exist only as call arguments:
 
 ```silk
+import silk.usize as usize
+
 fn total(values: &[i32], length: usize) -> i32 {
   let mut sum = 0
   let mut index = usize.add(0, 0)
@@ -245,8 +248,6 @@ that can fail:
 ```silk
 pub struct Overflowed {}
 
-impl Report for Overflowed {}
-
 effect fn checked(value: i32) -> i32 ! Overflowed {
   if value > 100 {
     fail Overflowed {}
@@ -270,8 +271,8 @@ What each piece does:
   type error, not a silently ignored value.
 - `run` propagates the failure into the enclosing effect's row, which is why `main` also declares
   `! Overflowed`.
-- `impl Report for Overflowed {}` is required for any failure that can reach the entry point: it
-  is how an escaping failure becomes an exit status.
+- Any concrete owned failure value may reach an effectful entry point without marker conformance.
+  An unhandled failure terminates with status 1 and retains its canonical type identity.
 
 An effectful entry point returns `()` and reports success as exit status 0. An unhandled failure
 becomes a non-zero status.
@@ -287,6 +288,6 @@ logger: a caller supplies them with `provide`, and the row shrinks as they are s
   and ownership, and the effect system.
 - The [standard library reference](./stdlib/) lists every module and public declaration.
 - The [diagnostic index](./diagnostics.md) explains every error code, including the `OWN0001` and
-  `PAR0004` mentioned above.
+  `SEM0130` mentioned above.
 - `examples/algorithms/` in the repository holds larger programs — quicksort, FFT, CRC-32,
   game of life — that compile and run today.

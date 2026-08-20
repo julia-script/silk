@@ -733,6 +733,18 @@ const collectPattern = (
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
+  // A shorthand field pattern uses one token for both the selected field and the new local.
+  // Prefer the declaration occurrence for exact-position queries while retaining the field
+  // occurrence in range queries.
+  for (const binding of pattern.bindings)
+    if (binding.name._tag === 'Present')
+      push(
+        pending,
+        binding.name.token.span,
+        'Declaration',
+        available(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
+        locationOfBinding(binding),
+      )
   if (pattern._tag === 'NominalPattern') {
     const token = pattern.target._tag === 'Resolved' ? pattern.target.token : undefined
     if (pattern.target._tag === 'Resolved')
@@ -755,16 +767,9 @@ const collectPattern = (
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
     }
+  } else if (pattern._tag === 'TypePattern') {
+    collectDeclaredType(pattern.declared, index, scope, pending)
   }
-  for (const binding of pattern.bindings)
-    if (binding.name._tag === 'Present')
-      push(
-        pending,
-        binding.name.token.span,
-        'Declaration',
-        available(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
-        locationOfBinding(binding),
-      )
 }
 
 const collectExpression = (
@@ -860,7 +865,7 @@ const collectExpression = (
         )
       for (const initializer of expression.initializers) {
         const fieldToken = initializer.token
-        if (initializer.state._tag === 'Resolved')
+        if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,
             fieldToken?.span,
@@ -945,6 +950,10 @@ const collectStatement = (
         )
       collectExpression(statement.binding.initializer, index, scope, pending)
       return
+    case 'PatternBindStatement':
+      collectPattern(statement.selection.pattern, index, scope, pending)
+      collectExpression(statement.selection.source, index, scope, pending)
+      return
     case 'ExpressionStatement':
       collectExpression(statement.expression, index, scope, pending)
       return
@@ -955,6 +964,12 @@ const collectStatement = (
       return
     case 'IfStatement':
       collectExpression(statement.condition, index, scope, pending)
+      for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
+      for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
+      return
+    case 'IfLetStatement':
+      collectPattern(statement.selection.pattern, index, scope, pending)
+      collectExpression(statement.selection.source, index, scope, pending)
       for (const nested of statement.taken) collectStatement(nested, index, scope, pending)
       for (const nested of statement.otherwise) collectStatement(nested, index, scope, pending)
       return
@@ -1080,6 +1095,7 @@ const collectMember = (
     }
     return
   }
+  if (member._tag === 'RoleDeclaration') return
   for (const field of member.fields) {
     if (field.name._tag === 'Present')
       push(

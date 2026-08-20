@@ -95,6 +95,17 @@ it('reserves interface only as a complete declaration keyword', () => {
   )
 })
 
+it('reserves role only as a complete declaration keyword', () => {
+  const result = Lexer.lex(
+    SourceFile.make('memory://role-keyword.silk', ascii('role roles roleValue')),
+  )
+
+  assert.deepEqual(
+    result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
+    ['RoleKeyword', 'Identifier', 'Identifier', 'EndOfFile'],
+  )
+})
+
 it('recognizes all static-literal forms with exact multiline boundaries', () => {
   const text = '"one" b"two" """line 1\r\n// still text\nline 3""" b"""a \\"b\\" c""" tail'
   const source = SourceFile.make('memory://literal-forms.silk', ascii(text))
@@ -591,13 +602,13 @@ it('recognizes once only as a complete callable-mode keyword', () => {
   )
 })
 
-it('recognizes requirement-row and role punctuation', () => {
+it('recognizes requirement-row punctuation and the at selector word', () => {
   const result = Lexer.lex(
-    SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator@Scratch')),
+    SourceFile.make('memory://effect-requirements.silk', ascii('? &Allocator at Scratch')),
   )
   assert.deepEqual(
     result.tokens.filter((token) => token.kind !== 'Whitespace').map((token) => token.kind),
-    ['Question', 'Ampersand', 'Identifier', 'At', 'Identifier', 'EndOfFile'],
+    ['Question', 'Ampersand', 'Identifier', 'Identifier', 'Identifier', 'EndOfFile'],
   )
 })
 

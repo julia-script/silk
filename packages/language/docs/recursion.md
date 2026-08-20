@@ -28,7 +28,7 @@ than the stack, and there is no version of that which only the deep call sites p
   compiler emits.
 - **Every call would need an allocator.** Spilled frames live somewhere, and in Silk there is no
   ambient heap — allocation is an `Allocator` capability that a function has to require, and it can
-  fail with `OutOfMemory`. Hidden per-call spilling would give an allocator requirement and a
+  fail with `OutOfMemoryError`. Hidden per-call spilling would give an allocator requirement and a
   failure row to functions that declare neither.
 - **Some calls cannot have one.** A `Drop` hook may declare no failure row and no capability
   requirement at all, so there is no legal place to put a hidden allocation inside cleanup. A
@@ -88,6 +88,9 @@ the weight:
 
 ```silk
 import silk.box { Box, make as boxMake, into as boxInto }
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
 
 pub struct End {}
 
@@ -130,7 +133,7 @@ fn unlinkKind(kind: End | Link) -> Unlinked {
 }
 
 // Builds outward instead of downward: each turn wraps the chain built so far in one more link.
-effect fn build(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut current = Chain { step: Step { kind: End {} } }
   let mut remaining = depth
   while remaining > 0 {
@@ -158,7 +161,7 @@ fn length(chain: Chain) -> i32 {
   return counted
 }
 
-effect fn measure() -> i32 ! OutOfMemory {
+effect fn measure() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(4096) |> Effect.provideMut(&mut allocator)
   let counted = length(move built)
@@ -166,7 +169,7 @@ effect fn measure() -> i32 ! OutOfMemory {
   return 2
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }
 ```
@@ -179,6 +182,9 @@ bounded by the stack:
 
 ```silk
 import silk.box { Box, make as boxMake, get as boxGet }
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
 
 pub struct End {}
 
@@ -208,7 +214,7 @@ fn viewDepth(view: &[Chain]) -> i32 {
   }
 }
 
-effect fn build(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut current = Chain { step: Step { kind: End {} } }
   let mut remaining = depth
   while remaining > 0 {
@@ -220,7 +226,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
   return move current
 }
 
-effect fn measure() -> i32 ! OutOfMemory {
+effect fn measure() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(64) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
@@ -229,7 +235,7 @@ effect fn measure() -> i32 ! OutOfMemory {
   return 2
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }
 ```
@@ -279,7 +285,7 @@ This works today. It is also, honestly, incomplete, and it is worth knowing wher
 - **The failure path is not covered at all.** If construction runs out of allocations halfway down,
   the half-built chain is released by the ordinary failure path, and there is no point in the source
   at which a teardown could be called on it — the value never becomes yours. A program that drains
-  religiously still meets recursive cleanup on its `OutOfMemory` path, at whatever depth
+  religiously still meets recursive cleanup on its `OutOfMemoryError` path, at whatever depth
   construction had reached. That is a real gap, and today it has no answer beyond bounding the
   depth you build.
 

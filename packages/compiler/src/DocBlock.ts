@@ -90,8 +90,15 @@ const attachedAtEnd = (
 const directLeadingTrivia = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> => {
   const leading: Array<Token.Token> = []
   for (const child of node.children) {
-    if (!SyntaxTree.isToken(child) || !isTrivia(child)) break
-    leading.push(child)
+    if (SyntaxTree.isToken(child)) {
+      if (!isTrivia(child)) break
+      leading.push(child)
+      continue
+    }
+    if (leading.length === 0 && SyntaxTree.isNode(child)) {
+      leading.push(...directLeadingTrivia(child))
+    }
+    break
   }
   return Object.freeze(leading)
 }

@@ -1,6 +1,6 @@
 struct Problem {}
 
-interface Broken<S, !E> {
+interface Broken<S, E> {
   effect fn decode(
     self: &S,
     encoded: Missing,
@@ -10,6 +10,6 @@ interface Broken<S, !E> {
   ) -> Missing ! E ? &MissingRow
 }
 
-fn broken<T: Broken<T ! Problem>>(value: T) -> T {
+fn broken<T: Broken<T, Problem>>(value: T) -> T {
   return move value
 }

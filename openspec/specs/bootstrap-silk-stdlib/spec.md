@@ -79,7 +79,7 @@ source of truth.
 
 The standard library SHALL ship canonical `.silk` declarations for success, failure, and
 requirement-channel transformations and for the derived `map`, `mapError`, `mapBoth`, `flatMap`,
-`tap`, `catch`, `retry`, `provide`, and `provideWith` API. These files SHALL be the only editable
+`tap`, `catch`, `retry`, `provide`, and `provideEffect` API. These files SHALL be the only editable
 source of truth, participate in the deterministic standard-library manifest, and retain ordinary
 source spans in semantic facts, diagnostics, documentation, hover, and navigation.
 
@@ -168,7 +168,7 @@ remain subject to returned lexical borrow checking.
 
 The generated standard-library module graph SHALL export one canonical `Bytes` actor implemented in
 ordinary Silk source over `Vector<u8>`. Its manifest dependencies SHALL use the ordinary `Allocator`,
-`OutOfMemory`, returned-borrow, and Drop contracts, and MUST NOT import filesystem or String policy.
+`OutOfMemoryError`, returned-borrow, and Drop contracts, and MUST NOT import filesystem or String policy.
 
 #### Scenario: Load Bytes without platform facilities
 
@@ -224,7 +224,7 @@ provide implementations at their outer boundary.
 
 Canonical standard-library source SHALL define `OsFileSystem` as an ordinary provider separate from
 the portable `FileSystem`, `Path`, and value actors. Its constructor SHALL copy one absolute native
-root into owned `Bytes` and SHALL require `OutOfMemory ? &mut Allocator`. Portable service signatures
+root into owned `Bytes` and SHALL require `OutOfMemoryError ? &mut Allocator`. Portable service signatures
 MUST NOT mention `OsHandle`, native paths, target selectors, or the provider type.
 
 #### Scenario: Construct an owned native root
@@ -358,7 +358,7 @@ MUST NOT mention the provider type, native storage, or target selectors.
 - **WHEN** tooling resolves an `OsHostInput` lookup
 - **THEN** it navigates to canonical Silk source while only the enclosed low-level call resolves to `Intrinsic`
 
-### Requirement: Effect row combinators are ordinary fixed-mode Silk source
+### Requirement: Effect channel combinators are ordinary fixed-mode Silk source
 
 The standard library SHALL define shared `bindRequirement`, exclusive `bindRequirementMut`, owned
 `bindRequirementOwned`, `provide`, `provideMut`, and acquisition-based provision as ordinary Silk
@@ -366,10 +366,11 @@ declarations using whole input row `R`, selected row `S`, checked fixed-mode pro
 and `Without<R, S>`. Public wrappers SHALL place `S` first and discharge the same intrinsic wanted
 from a definitionally equivalent declared given.
 
-Singleton `Effect.catch` SHALL infer or explicitly accept one nominal `S`, require `S in E`, call
-the sealed executable selective primitive, and return `Without<E, S> | F`. Whole-row
-recovery SHALL use `Effect.catchAll`; the prior whole-row `catch` alias SHALL not remain. No compiler
-phase SHALL recognize these wrappers by standard-library actor, name, or origin.
+`Effect.catch<S>` SHALL accept one nonempty ordinary selected type or union `S`, require `S in E`,
+call the sealed executable selective primitive, pass `S` directly to its handler, and return
+`Effect<A | B ! Without<E, S> | F ? R | Q>`. `Effect.catchAll` SHALL pass ordinary `E` directly and
+remove the entire protected failure channel. No compiler phase SHALL recognize either wrapper by
+standard-library actor, name, or origin.
 
 #### Scenario: Preserve Clock while providing Logger
 
@@ -381,7 +382,47 @@ phase SHALL recognize these wrappers by standard-library actor, name, or origin.
 - **WHEN** shared, exclusive, and owned wrappers are analyzed
 - **THEN** their bodies type-check from declared givens and ordinary capture semantics determine borrow, Copy snapshot, or affine take-once behavior
 
-#### Scenario: Separate singleton and whole-row recovery
+#### Scenario: Recover a selected failure union through ordinary source
 
-- **WHEN** source handles one nominal failure it uses `Effect.catch`; when it handles a reified whole failure row it uses `Effect.catchAll`
-- **THEN** the two public contracts remain distinct without compiler-known stdlib dispatch
+- **WHEN** source applies `Effect.catch<FirstError | ThirdError>` to a compatible protected Effect
+- **THEN** the wrapper passes that ordinary union to the handler and preserves only the unselected failure alternatives
+
+#### Scenario: Recover the whole failure type through ordinary source
+
+- **WHEN** source applies `Effect.catchAll` to `Effect<A ! E>`
+- **THEN** the handler accepts ordinary `E` and no failure-value conversion exists
+
+### Requirement: Shipped error types use the Error suffix
+
+Canonical standard-library error declarations and their public contracts SHALL use descriptive
+PascalCase names ending in `Error`. The migration SHALL be atomic and SHALL retain no old-name alias,
+fallback, or compatibility export.
+
+#### Scenario: Name allocation failure canonically
+
+- **WHEN** source or tooling resolves the standard allocation failure type
+- **THEN** it resolves `OutOfMemoryError` and no old-name declaration or alias exists
+
+#### Scenario: Keep ordinary values eligible as failures
+
+- **WHEN** user source declares `Effect<A ! string>` or another valid detached ordinary type without an `Error` suffix
+- **THEN** the compiler accepts it because the suffix is a style rule for error-like declarations, not a type-system gate
+
+### Requirement: Standard provision helpers use canonical key selectors
+
+The canonical Effect source library SHALL expose `provide`, `provideMut`, and `provideEffect` as
+ordinary Silk declarations whose explicit selector is `Service` or `Service at Role`. The selector
+SHALL NOT contain `&` or `&mut`; each helper's provider parameter SHALL determine available access.
+`provideEffect` SHALL acquire a fresh provider for each execution and compose the acquisition
+Effect's failure and requirement channels. The superseded `provideWith` name SHALL not resolve as
+an alias.
+
+#### Scenario: Resolve only the canonical effectful helper
+
+- **WHEN** tooling inspects the Effect standard-library actor
+- **THEN** it exposes `provideEffect` with source spans and does not expose `provideWith`
+
+#### Scenario: Select a non-default role
+
+- **WHEN** a caller supplies `Clock at Primary` to any provision helper
+- **THEN** the helper discharges that key and validates provider access separately

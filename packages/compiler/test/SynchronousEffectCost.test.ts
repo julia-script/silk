@@ -70,7 +70,7 @@ interface CostCase {
     readonly executions: ReadonlyArray<string>
     readonly effects: ReadonlyArray<string>
   }
-  readonly continuationDescriptors: number
+  readonly coroutineFrameDescriptors: number
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
   readonly mirOperationTags: ReadonlyArray<TagCount>
   readonly suspensionOperationTags: ReadonlyArray<TagCount>
@@ -146,7 +146,7 @@ it('captures synchronous Effect entry structure', () => {
     assert.deepEqual(sample.suspendability.instances, [], sample.id)
     assert.deepEqual(sample.suspendability.executions, [], sample.id)
     assert.deepEqual(sample.suspendability.effects, [], sample.id)
-    assert.strictEqual(sample.continuationDescriptors, 0, sample.id)
+    assert.strictEqual(sample.coroutineFrameDescriptors, 0, sample.id)
     // These values come from backend symbol tables, native-runtime requirements, LLVM
     // declarations, and Wasm imports. An unreferenced but linked suspension component is covered.
     assert.deepEqual(sample.suspensionLinkage, [], sample.id)
@@ -186,7 +186,7 @@ it('captures synchronous Effect entry structure', () => {
   }
 
   const runners = report.cases.flatMap((sample) => sample.runners)
-  assert.strictEqual(runners.length, 21)
+  assert.strictEqual(runners.length, 22)
   assert.isTrue(runners.every((runner) => runner.estimatedClonedSize > 0))
   assert.isTrue(runners.every((runner) => !runner.prototypeEligible))
   assert.deepEqual(

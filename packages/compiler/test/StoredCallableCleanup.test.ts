@@ -163,7 +163,8 @@ it.effect('owes nothing for a stored callable whose captures are all Copy', () =
     const module = 'stored-callable-cleanup/copy'
     const snapshot = yield* realized(
       module,
-      `struct Adder<F: fn(i32) -> i32> { step: F }
+      `import silk.i32 as i32
+struct Adder<F: fn(i32) -> i32> { step: F }
 pub fn main() -> i32 {
   let adder = Adder { step: i32.add(1) }
   return adder.step(2)
@@ -284,7 +285,12 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
     const module = 'stored-callable-cleanup/typed-failure'
     const snapshot = yield* realized(
       module,
-      `${takeCapture}effect fn build() -> i32 ! OutOfMemory {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${takeCapture}effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -293,7 +299,7 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
   let allocation = run recipe
   return 42
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const facts = snapshot.ownership.get(module) ?? unreachable('expected ownership facts')
@@ -394,7 +400,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('records a distinct symbolic cleanup obligation for a stored Effect', () =>
+it.effect('omits cleanup for a stored Effect whose exact environment is Copy', () =>
   Effect.gen(function* () {
     const module = 'stored-callable-cleanup/effect'
     const snapshot = yield* realized(
@@ -407,6 +413,6 @@ pub fn main() -> i32 {
     )
     const stored = fieldCleanup(bindingCleanup(snapshot, module, 'deferred'), 0)
 
-    assert.strictEqual(stored._tag, 'RepresentedEffectCleanup')
+    assert.strictEqual(stored._tag, 'NoCleanup')
   }),
 )

@@ -262,16 +262,34 @@ equality and ordering by scalar value.
 **Boundary:** `char` is not an integer type. Arithmetic is unavailable, and conversion to or from
 an integer requires an explicit checked or named operation.
 
+```silk
+import silk.char { fromU32, toU32 }
+import silk.option { Option }
+
+fn checked(value: u32) -> Option<char> {
+  return fromU32(value)
+}
+
+fn scalarNumber(value: char) -> u32 {
+  return toU32(value)
+}
+```
+
+`fromU32` returns `Some<char>` for `0...0xd7ff` and `0xe000...0x10ffff`. It returns
+`None` for surrogate values and larger integers, without truncating or trapping. `toU32` is total
+because every existing `char` is already a valid scalar. Canonical string traversal returns
+`char`; callers choose `toU32` explicitly when they need its integer value.
+
 **Diagnostics:** A literal containing zero or multiple scalar values reports `LEX0007`. Malformed
 escapes and invalid scalar spellings receive their literal diagnostic without constructing a
-partial `char`.
-
-**Current compiler:** String scalar traversal still exposes a `u32` until the standard library has
-the checked `u32`-to-`char` conversion needed to prove the surrogate exclusion.
+partial `char`. Supplying `u32` where `char` is required, or `char` where `u32` is required, uses
+the ordinary type-mismatch diagnostic; `fromU32` represents an invalid integer as `None` rather
+than a diagnostic or trap.
 
 **Evidence:** [character literal specification](../../openspec/specs/bootstrap-lexer/spec.md),
 [character scalar catalog](../../packages/compiler/src/Scalar.ts),
-[character tests](../../packages/compiler/test/CharacterScalar.test.ts).
+[character tests](../../packages/compiler/test/CharacterScalar.test.ts),
+[conversion and engine tests](../../packages/compiler/test/IntegerScalars.test.ts).
 
 ### TEXT-001 — `string` is immutable UTF-8 text and byte strings are byte views
 
@@ -326,10 +344,6 @@ a runtime string view's backing owner merely because the view is nested.
 
 **Diagnostics:** Indexing `string` reports the non-indexable-type diagnostic. Implicit text
 conversions use the enclosing type-mismatch diagnostic.
-
-**Current compiler:** Declaration indexing rejects `&string`, `&mut string`, and `&[string]` with
-`SEM0094`. That special restriction conflicts with this confirmed ordinary-value rule and must be
-removed.
 
 **Evidence:** [string access and conversion specification](../../openspec/specs/bootstrap-string/spec.md),
 [string type diagnostics](../../packages/compiler/test/DeclarationIndex.test.ts).
@@ -389,21 +403,20 @@ constructor functions when external construction is intended.
 
 **Boundary:** Unknown, duplicate, missing, inaccessible, or mistyped initializers produce no
 partially initialized value. Construction never fills omitted fields with defaults. A diagnostic
-for hidden required fields does not expose their names or types.
+for hidden required fields does not expose their names or types. A declarationless opaque nominal
+type, such as a runtime handle, has no source constructor; an empty semantic field list does not
+turn it into an ordinary zero-field struct.
 
 **Diagnostics:** Unknown fields report `SEM0022`; duplicates `SEM0023`; missing visible fields
 `SEM0024`; incompatible field values `SEM0025`. Inaccessible construction needs one stable semantic
 code that does not reveal hidden field details.
 
-**Current compiler:** Construction outside the defining module reports `SEM0021` even when every
-field is public. That module-wide restriction conflicts with this confirmed visibility rule and
-must be removed.
+**Current compiler:** Aligned. Construction resolves every named initializer to its canonical field,
+checks that field's visibility, and uses `SEM0021` when a required field is inaccessible or the
+nominal type has no source struct declaration.
 
-**Conflicting artifact:** The current
-[struct value specification](../../openspec/specs/bootstrap-struct-values/spec.md) grants raw
-construction only to the defining module and must be reconciled.
-
-**Evidence:** [struct value tests](../../packages/compiler/test/StructValues.test.ts).
+**Evidence:** [struct value tests](../../packages/compiler/test/StructValues.test.ts),
+[struct literal elaboration](../../packages/compiler/src/Elaboration.ts).
 
 ### STRUCT-003 — Field projection follows the declared nominal field
 
@@ -474,11 +487,8 @@ reference rather than by field shape alone.
 **Boundary:** A field-only scalar struct does not become Copy automatically. An owner of allocated
 memory cannot request Copy merely because its physical representation contains a copyable pointer.
 
-**Diagnostics:** Invalid implicit copying reports `OWN0003`. An invalid `impl Copy` must identify the
-first affine or cleanup-bearing reason; it does not yet have a stable declaration diagnostic code.
-
-**Current compiler:** The nominal implementation still derives Copy recursively from fields. That
-behavior conflicts with this confirmed rule and must be reconciled.
+**Diagnostics:** Invalid implicit copying reports `OWN0003`. An invalid `impl Copy` reports
+`SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
 
@@ -616,7 +626,9 @@ uses `SEM0058`; implicit array decay uses `SEM0059`.
 `A | B` denotes a finite, unordered, duplicate-free set of canonical ordinary value types. Nested
 unions flatten, member order does not affect identity, duplicate members disappear, `never` is the
 empty union, and a one-member union normalizes to that member. Members need not be nominal: scalars,
-arrays, `string`, callables, Effects, and other concrete value types use the same union operation.
+arrays, `string`, and other detached concrete value types use the same union operation. A callable
+or Effect member must additionally retain one finite exact, opaque, or composite representation;
+its bare structural contract has no standalone storage layout.
 
 ```silk
 struct Token { kind: i32 }
@@ -632,7 +644,7 @@ fn next(done: bool) -> Token | End {
 
 `Token | End`, `End | Token`, and `Token | (End | Token)` are the same type.
 
-```silk,ignore
+```silk
 fn describe(code: i32) -> i32 | string {
   if code == 0 {
     return "none"
@@ -641,24 +653,37 @@ fn describe(code: i32) -> i32 | string {
 }
 ```
 
-The second example is valid language but remains ignored until the compiler implements general
-union members.
+Executable members use their ordinary representation syntax:
+
+```silk
+fn add(left: i32, right: i32) -> i32 { return left + right }
+
+fn selected() -> typeof(add) | i32 {
+  return add
+}
+```
+
+`typeof(add)` contributes the callable's exact finite environment plan. An opaque result binder can
+do the same for an Effect construction without exposing its private runner identity. By contrast,
+`fn(i32) -> i32 | i32` and `Effect<i32> | i32` are invalid: those structural contracts alone do not
+identify storage.
 
 **Boundary:** Union formation does not erase ownership, lifetime, Effect requirements, callable
-access, or another member property. Injecting or storing a borrowed member remains valid only where
-the ownership rules permit that borrowed value; a union never makes it detached. Requirement rows
-remain capability rows rather than value unions.
+access, or another member property. A lexical borrow cannot become an owned union member; a union
+never makes it detached. Requirement rows remain capability rows rather than value unions.
+
+Generic unions normalize again after monomorphic substitution. If `A | B` specializes with both
+parameters equal to `i32`, the instance carries `i32`, not two indistinguishable tags. HIR retains
+the authored mapping and MIR deterministically recomputes the concrete mapping and canonical order.
 
 **Diagnostics:** An unresolved or otherwise unavailable member reports that member's ordinary type
-diagnostic. A valid non-nominal member produces no diagnostic.
+diagnostic. A borrow or bare executable contract reports `SEM0039` because it has no detached finite
+storage plan. A valid non-nominal or represented executable member produces no diagnostic.
 
-**Current compiler:** Union normalization accepts only nominal members and reports `SEM0039` for
-ordinary types such as `i32` and `string`. That restriction conflicts with this confirmed rule and
-must be removed.
-
-**Conflicting artifact:** The current
-[structural union specification](../../openspec/specs/bootstrap-structural-unions/spec.md) defines
-nominal-only unions and must be reconciled.
+**Current compiler:** Aligned. Normalization, compatibility, target layout, ownership, cleanup,
+HIR/MIR mappings, evaluation, LLVM, and Wasm consume canonical ordinary member identities. Exact and
+opaque executable representations remain compiler-private while their public contract spelling is
+preserved.
 
 **Evidence:** [union normalization](../../packages/compiler/src/Type.ts),
 [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).

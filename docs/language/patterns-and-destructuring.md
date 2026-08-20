@@ -1,7 +1,7 @@
 # Patterns and destructuring
 
-Patterns inspect existing value structure and introduce local bindings. Silk uses the same nominal
-pattern forms in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
+Patterns inspect existing value structure and introduce local bindings. Silk uses the same pattern
+grammar in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
 The surrounding construct decides whether a pattern must always match or provides a mismatch path.
 
 Patterns are not expressions. They perform no conversion, equality call, interface dispatch,
@@ -161,9 +161,10 @@ let _ = operation()
 This form is invalid. Intentional result discard continues to use `drop operation()` so one rule
 governs explicit discard throughout the language.
 
-**Diagnostics:** A refutable `let` pattern reports the initializer type and uncovered alternatives
-and suggests `if let` or `match`. A standalone wildcard binding suggests `drop` rather than silently
-discarding the result. No stable code is assigned.
+**Diagnostics:** A refutable `let` pattern reports `SEM0133`, includes the initializer type and
+uncovered alternatives, and suggests `if let` or `match`. A standalone wildcard binding reports
+the ordinary explicit-discard diagnostic `SEM0087` and suggests `drop` rather than silently
+discarding the result.
 
 **Evidence:** [confirmed pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
 
@@ -299,8 +300,10 @@ or escaped binding. It names the relevant scrutinee type and member or field set
 **Boundary:** One damaged pattern must not erase independent facts or cause later arms,
 declarations, or statements to be parsed as part of the same error.
 
-**Diagnostics:** Existing specific codes remain authoritative where assigned. New contextual
-irrefutability and `if let` codes remain to be assigned rather than borrowing unrelated codes.
+**Diagnostics:** Existing specific codes remain authoritative where assigned. Refutable
+unconditional destructuring reports `SEM0133`; malformed `if let` syntax uses parser-owned
+recovery diagnostics, and its member, field, binding, and ownership failures retain their ordinary
+codes.
 
 **Evidence:** [reference diagnostic policy](README.md),
 [parser recovery contract](../../openspec/specs/bootstrap-syntax/spec.md).
@@ -363,14 +366,15 @@ fn normalize(value: i32 | bool) -> i32 {
 ```
 
 Here `i32 number` selects and binds the complete integer member; `bool flag` selects and binds the
-complete boolean member. The same form applies to admitted array, view, callable, Effect, and other
-ordinary value members when their exact type can be written.
+complete boolean member. The same form applies to admitted arrays, strings, finite represented
+callable or Effect values, and other detached ordinary members when their exact type can be written.
 
 **Boundary:** Field destructuring with `{ ... }` remains nominal-struct behavior. A scalar, array,
-view, callable, or Effect pattern can bind the complete member but exposes no invented fields.
+string, or represented executable pattern can bind the complete member but exposes no invented
+fields. Lexical references are not detached union members and therefore are not selectors.
 
-**Diagnostics:** A type absent from the scrutinee reports the exact requested type and canonical
-member set. No stable general code is assigned.
+**Diagnostics:** A type absent from the scrutinee reports `SEM0042` with the exact requested type
+and canonical member set.
 
 **Evidence:** [ordinary structural unions](values-and-types.md#union-001--a-structural-union-is-a-normalized-set-of-ordinary-value-types),
 [whole-member nominal pattern](#patt-003--nominal-patterns-select-canonical-nominal-identity).
@@ -455,33 +459,34 @@ ownership diagnostics at the access expression or binding use.
 [consuming conditional](#patt-008--a-consuming-conditional-consumes-on-both-outcomes),
 [borrowed conditional](#patt-009--a-borrowed-conditional-preserves-its-owner).
 
-## PATT-019 — A selector must be statically distinct in a generic body
+## PATT-019 — Generic selectors renormalize at complete applications
 
 **Status:** Confirmed
 
-A generic body may use a type parameter as a pattern selector only when its declared constraints
-prove that the selector is one distinct member of the scrutinee for every admitted specialization.
-Silk does not postpone pattern overlap, exhaustiveness, or reachability checking until each call.
+A generic body is checked once against its symbolic normalized member set. Every complete
+application substitutes its concrete types and renormalizes the member set and selectors before MIR
+lowering. If two symbolic selectors become the same concrete member, the first matching arm in
+source order selects that member; a later equivalent arm has no runtime tag and produces no new
+source diagnostic during specialization.
 
-```silk,ignore
-fn choose<T>(value: T | End) -> i32 {
+```silk
+fn choose<A, B>(value: A | B) -> i32 {
   return match move value {
-    T selected => 1
-    End {} => 0
+    A selected => 1
+    B selected => 0
   }
 }
 ```
 
-With unconstrained `T`, this is invalid because `T` could specialize to `End`, collapsing the two
-members and changing coverage. A future exclusion or distinctness constraint could make the proof
-expressible.
+`choose<i32, string>` retains two cases. `choose<i32, i32>` carries only `i32`; its first arm wins
+under ordinary source-order matching and the second has no distinct concrete case.
 
-**Boundary:** A concrete alias or fully resolved generic application is valid when it identifies
-one exact member. This rule does not forbid generic payloads such as `Box<T>` when `Box<T>` and every
-other outer member remain canonically distinct for all admitted `T`.
+**Boundary:** Symbolic checking must still prove that each selector belongs to the authored symbolic
+scrutinee and that the authored arms cover it. Complete applications do not rerun source diagnostics
+or invent overlapping runtime tags; they only substitute and normalize already-checked facts.
 
-**Diagnostics:** An underconstrained selector reports the potentially overlapping member and the
-missing distinctness proof. It must not choose behavior from one observed specialization.
+**Diagnostics:** An absent symbolic selector receives the ordinary member-not-in-scrutinee
+diagnostic. Member collapse during a valid complete application produces no compiler diagnostic.
 
 **Evidence:** [generic body checking](generics-interfaces-and-specialization.md#gen-004--a-generic-body-is-checked-once-against-its-declared-contract),
 [finite specialization](generics-interfaces-and-specialization.md#gen-005--every-reachable-generic-application-becomes-finite-monomorphic-code).

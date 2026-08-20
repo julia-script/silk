@@ -8,7 +8,7 @@ and working-directory lookups each taking an exclusive byte buffer plus explicit
 native-code outputs and returning `Option<usize>`. A present count SHALL be the value's complete byte
 length with the prefix that fits copied into the buffer; an absent result SHALL write the normalized
 low-level reason and native code, where the not-found reason means the value does not exist. The
-compiler MUST NOT construct or recognize `HostInputFailure` or the `HostInput` service, and MUST NOT
+compiler MUST NOT construct or recognize `HostInputError` or the `HostInput` service, and MUST NOT
 admit an operation that sets an environment variable, changes the working directory, or parses
 arguments.
 

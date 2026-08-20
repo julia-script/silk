@@ -57,11 +57,15 @@ it.effect(
 
 it.effect('keeps synchronous Effect core artifacts free of concurrency runtime ABI', () =>
   Effect.gen(function* () {
-    const source = `import silk.result { Result, Success, Failure }
-struct Clock {}
+    const source = `import silk.effects as Effect
+import silk.result { Result, Success, Failure }
+service Clock { effect fn value() -> i32 ? &Clock }
+struct FixedClock { value: i32 }
+effect fn clockValue(self: &FixedClock) -> i32 { return self.value }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 effect fn read() -> i32 ? &Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock { value: 42 }
   let closed = Intrinsic.bindRequirement(read(), &clock)
   let completed = run Effect.result(closed)
   return match move completed {

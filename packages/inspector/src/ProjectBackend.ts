@@ -40,19 +40,15 @@ const typeText = (type: Type.Type): string =>
             ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
             : type._tag === 'EffectType'
               ? `Effect<${typeText(type.success)}${
-                  Type.failureMembers(type).length === 0
-                    ? ''
-                    : ` ! ${Type.failureMembers(type).map(typeText).join(' | ')}`
+                  Type.failureType(type) === 'never' ? '' : ` ! ${typeText(Type.failureType(type))}`
                 }> ${type.access.toLowerCase()}`
               : type._tag === 'CallableType'
                 ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
                 : type._tag === 'ReferenceType'
                   ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-                  : type._tag === 'FailureProjectionType'
-                    ? `Row<!${type.parameter.name}>`
-                    : type._tag === 'RepresentedType'
-                      ? Type.encode(type)
-                      : type.members.map(typeText).join(' | ')
+                  : type._tag === 'RepresentedType'
+                    ? Type.encode(type)
+                    : type.members.map(typeText).join(' | ')
 
 export const closureRows = (closure: ModuleClosure.Closure): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
@@ -114,6 +110,8 @@ const declaredTypeText = (fact: DeclarationIndex.DeclaredTypeFact): string =>
       : 'unavailable'
 
 const memberSignature = (member: DeclarationIndex.MemberFact): string => {
+  if (member._tag === 'RoleDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}role`
   const parameters =
     member.typeParameters.length === 0
       ? ''
@@ -236,8 +234,6 @@ const bindingDetail = (binding: NameResolution.Binding): string => {
       return `LocalDeclaration · ${binding.declaration.module}.${binding.declaration.name}`
     case 'IntrinsicActor':
       return 'IntrinsicActor · language intrinsic'
-    case 'StdlibNamespace':
-      return `StdlibNamespace · ${binding.module}`
     case 'ModuleNamespace':
       return `ModuleNamespace · ${binding.module}`
     case 'ImportedMember':
@@ -305,14 +301,18 @@ export const resolutionRows = (resolution: NameResolution.Resolution): ReadonlyA
 const bindingSiteText = (fact: Ownership.BindingFact): string =>
   fact.site._tag === 'Parameter'
     ? `parameter #${fact.site.parameter.ordinal}`
-    : `let b${fact.site.binding.ordinal}`
+    : fact.site._tag === 'Temporary'
+      ? `temporary @${fact.site.owner.span.start}`
+      : `let b${fact.site.binding.ordinal}`
 
 const loanSiteText = (site: Ownership.BindingSite): string =>
   site._tag === 'Parameter'
     ? `parameter #${site.parameter.ordinal}`
     : site._tag === 'Let'
       ? `let b${site.binding.ordinal}`
-      : `pattern b${site.binding.ordinal}`
+      : site._tag === 'Pattern'
+        ? `pattern b${site.binding.ordinal}`
+        : `temporary @${site.owner.span.start}`
 
 const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
   switch (cleanup._tag) {
@@ -346,6 +346,10 @@ const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
       return `${typeText(cleanup.type)} captures ${cleanup.slots
         .map(({ ordinal, cleanup: slot }) => `#${ordinal}:${cleanupText(slot)}`)
         .join(' → ')}`
+    case 'EffectCompositeCleanup':
+      return `${typeText(cleanup.type)} selected Effect alternative · ${cleanup.alternatives
+        .map((alternative, ordinal) => `${ordinal}:${cleanupText(alternative)}`)
+        .join(', ')}`
     case 'RepresentedCallableCleanup':
       return `${typeText(cleanup.type)} stored ${typeText(cleanup.contract)} · lanes resolved at the complete instance`
   }
@@ -703,6 +707,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = byte length ${localText(operation.string)}`
     case 'StringEqualsExact':
       return `${localText(operation.destination)} = exact string ${operation.negated ? 'not equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)}`
+    case 'PackEffectComposite':
+      return `${localText(operation.destination)} = effect choice #${operation.alternative} ${localText(operation.source)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
@@ -717,7 +723,7 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)}`
     case 'FloatTranscendental':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${localText(operation.source)}`
-    case 'CheckedInteger':
+    case 'CheckedScalar':
       return `${localText(operation.destination)} = ${operation.operation.toLowerCase()} ${operation.operands.map(localText).join(', ')}`
     case 'ValidateLayout':
       return `${localText(operation.destination)} = layout ${localText(operation.bytes)} bytes · align ${localText(operation.alignment)}`
@@ -757,6 +763,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
+    case 'RunEffectComposite':
+      return `${localText(operation.destination)} = run effect choice ${localText(operation.effect)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
     case 'ReifyEffect':
@@ -1034,19 +1042,21 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                       ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
                       : value._tag === 'EffectValue'
                         ? `${typeText(value.type)} recipe ${value.runner.name}`
-                        : value._tag === 'CallableBorrowValue'
-                          ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
-                          : value._tag === 'CallableValue'
-                            ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
-                            : value._tag === 'AllocationValue'
-                              ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
-                              : value._tag === 'RawBufferValue'
-                                ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
-                                : value._tag === 'SlotValue'
-                                  ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-                                  : value._tag === 'ReferenceValue'
-                                    ? `borrow f${value.frame}.c${value.cell}`
-                                    : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                        : value._tag === 'EffectCompositeValue'
+                          ? `effect choice #${value.alternative} ${valueText(value.effect)}`
+                          : value._tag === 'CallableBorrowValue'
+                            ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
+                            : value._tag === 'CallableValue'
+                              ? `${typeText(value.type)} callable #${value.ticket} · ${value.captures.length} capture${value.captures.length === 1 ? '' : 's'}`
+                              : value._tag === 'AllocationValue'
+                                ? `${typeText(value.type)} ticket=${value.ticket} · ${value.bytes.toString()} bytes · align ${value.alignment.toString()}`
+                                : value._tag === 'RawBufferValue'
+                                  ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
+                                  : value._tag === 'SlotValue'
+                                    ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
+                                    : value._tag === 'ReferenceValue'
+                                      ? `borrow f${value.frame}.c${value.cell}`
+                                      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -1150,22 +1160,14 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `release allocation #${event.ticket}`
     case 'SuspensionOrigin':
       return `originate suspension ${event.point.ordinal}`
-    case 'ContinuationRequest':
-      return `request continuation ${event.ordinal ?? '?'} · ${event.bytes ?? '?'} bytes · align ${event.alignment ?? '?'}`
-    case 'ContinuationReject':
-      return `reject continuation ${event.ordinal ?? '?'}`
-    case 'ContinuationAcquire':
-      return `acquire continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationLoanEnd':
-      return `end continuation allocator loan · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationInitialize':
-      return `initialize continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationPublish':
-      return `publish continuation #${event.ticket ?? '?'} · ordinal ${event.ordinal ?? '?'}`
-    case 'ContinuationResume':
-      return `resume continuation #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
-    case 'ContinuationRelease':
-      return `release continuation #${event.ticket ?? '?'}`
+    case 'CoroutineFramePush':
+      return `push coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
+    case 'CoroutineFrameStateTransition':
+      return `transition coroutine frame #${event.ticket ?? '?'} · state ${event.point.ordinal}`
+    case 'CoroutineFrameResume':
+      return `resume coroutine frame #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
+    case 'CoroutineFrameComplete':
+      return `complete coroutine frame #${event.ticket ?? '?'}`
     case 'SuspensionChildStart':
       return `start suspended child · point ${event.point.ordinal}`
     case 'SuspensionChildComplete':
@@ -1236,14 +1238,10 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SlotDrop':
     case 'AllocationRelease':
     case 'SuspensionOrigin':
-    case 'ContinuationRequest':
-    case 'ContinuationReject':
-    case 'ContinuationAcquire':
-    case 'ContinuationLoanEnd':
-    case 'ContinuationInitialize':
-    case 'ContinuationPublish':
-    case 'ContinuationResume':
-    case 'ContinuationRelease':
+    case 'CoroutineFramePush':
+    case 'CoroutineFrameStateTransition':
+    case 'CoroutineFrameResume':
+    case 'CoroutineFrameComplete':
     case 'SuspensionChildStart':
     case 'SuspensionChildComplete':
     case 'HostWrite':
@@ -1328,18 +1326,27 @@ export const evaluationRows = (
             key: 'outcome',
             dot: 'warning',
             label: 'Unhandled failure',
-            detail: `${outcome.report} · tag ${outcome.tag}`,
+            detail: `${outcome.identity} · tag ${outcome.tag}`,
             head: true,
             tone: 'warning',
           }
-        : {
-            key: 'outcome',
-            dot: 'warning',
-            label: 'Blocked',
-            detail: blockedReasonText(outcome.reason),
-            head: true,
-            tone: 'warning',
-          },
+        : outcome._tag === 'Trap'
+          ? {
+              key: 'outcome',
+              dot: 'warning',
+              label: 'Fatal trap',
+              detail: outcome.reason,
+              head: true,
+              tone: 'warning',
+            }
+          : {
+              key: 'outcome',
+              dot: 'warning',
+              label: 'Blocked',
+              detail: blockedReasonText(outcome.reason),
+              head: true,
+              tone: 'warning',
+            },
   )
 
   return rows
@@ -1376,7 +1383,7 @@ export const structValueRows = (
       dot: literal.target._tag === 'Resolved' ? 'symbol' : 'warning',
       label:
         literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
-      detail: literal.authorized ? 'module-owned' : 'not authorized',
+      detail: literal.authorized ? 'fields visible' : 'field access denied',
       span,
       ...(literal.target._tag === 'Resolved' && literal.authorized
         ? {}
@@ -1398,6 +1405,18 @@ export const structValueRows = (
           .map(({ field }) => (field.name._tag === 'Present' ? field.name.spelling : '?'))
           .join(', ') || 'empty',
     })
+    if (literal.typeArguments.length > 0)
+      rows.push({
+        key: `${key}-arguments`,
+        depth: 2,
+        label: 'type arguments',
+        detail: literal.typeArguments
+          .map(
+            (argument) =>
+              `${argument.parameter.name}=${argument.argument === undefined ? '?' : Type.encodeGenericArgument(argument.argument)} (${argument.source.toLowerCase()})`,
+          )
+          .join(', '),
+      })
   }
 
   rows.push({

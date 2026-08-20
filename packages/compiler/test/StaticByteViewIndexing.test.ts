@@ -9,7 +9,9 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const moduleName = 'static-byte-view-indexing/main'
-const bytesSource = `fn sum(input: &[u8]) -> i32 {
+const bytesSource = `import silk.u8 as u8
+import silk.usize as usize
+fn sum(input: &[u8]) -> i32 {
   let mut total = 0
   let mut index = usize.add(0, 0)
   while index < input.length {
@@ -20,7 +22,9 @@ const bytesSource = `fn sum(input: &[u8]) -> i32 {
 }
 pub fn main() -> i32 { return sum(b"\\x99\\x13\\x1d\\x00") }`
 
-const directSource = `pub fn main() -> i32 {
+const directSource = `import silk.u8 as u8
+import silk.usize as usize
+pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let decoy = [1, 2]
   let index = usize.add(0, 1)
@@ -200,7 +204,9 @@ it.effect(
 
       const repeated = yield* Analysis.ofSourceRealized(
         `${moduleName}/repeated`,
-        ascii(`pub fn main() -> i32 {
+        ascii(`import silk.u8 as u8
+import silk.usize as usize
+pub fn main() -> i32 {
   let bytes = b"\\x99"
   let index = usize.add(0, 0)
   return u8.toI32(bytes[index]) + u8.toI32(bytes[index])
@@ -212,26 +218,27 @@ it.effect(
 
       const empty = yield* Analysis.ofSourceRealized(
         `${moduleName}/empty`,
-        ascii('pub fn main() -> i32 { let bytes = b"" return usize.toI32(bytes.length) }'),
+        ascii(
+          'import silk.usize as usize\npub fn main() -> i32 { let bytes = b"" return usize.toI32(bytes.length) }',
+        ),
       )
       const emptyResult = Analysis.evaluate(empty)
       assert.strictEqual(emptyResult._tag, 'Completed')
       if (emptyResult._tag === 'Completed') assert.strictEqual(emptyResult.result.value, 0n)
 
-      const boundsSource = `pub fn main() -> i32 {
+      const boundsSource = `import silk.u8 as u8
+import silk.usize as usize
+pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let index = usize.add(0, 4)
   return u8.toI32(bytes[index])
 }`
       const bounds = yield* Analysis.ofSourceRealized(`${moduleName}/bounds`, ascii(boundsSource))
       const blocked = Analysis.evaluate(bounds)
-      assert.strictEqual(blocked._tag, 'Blocked')
-      if (blocked._tag === 'Blocked') {
-        assert.strictEqual(blocked.reason._tag, 'Trap')
-        if (blocked.reason._tag === 'Trap') {
-          assert.include(blocked.reason.reason, 'slice index 4 is outside length 4')
-          assert.strictEqual(blocked.reason.span.start, boundsSource.indexOf('bytes[index]'))
-        }
+      assert.strictEqual(blocked._tag, 'Trap')
+      if (blocked._tag === 'Trap') {
+        assert.include(blocked.reason, 'slice index 4 is outside length 4')
+        assert.strictEqual(blocked.provenance.start, boundsSource.indexOf('bytes[index]'))
       }
     }),
 )
@@ -262,7 +269,9 @@ it.effect('loads immutable static storage on LLVM and Wasm and traps before over
     assert.strictEqual(typeof wasmMain, 'function')
     if (typeof wasmMain === 'function') assert.strictEqual(wasmMain(), 201)
 
-    const boundsSource = `pub fn main() -> i32 {
+    const boundsSource = `import silk.u8 as u8
+import silk.usize as usize
+pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let index = usize.add(0, 4)
   return u8.toI32(bytes[index])

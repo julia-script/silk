@@ -22,9 +22,14 @@ export interface Target {
 
 /** Expected failure while resolving a target request. */
 export class TargetError extends Data.TaggedError('TargetError')<{
-  readonly operation: 'Target.resolve' | 'Target.host' | 'Target.requireNative'
+  readonly operation:
+    | 'Target.resolve'
+    | 'Target.host'
+    | 'Target.requireNative'
+    | 'Target.validateInventory'
   readonly requested: string
   readonly message: string
+  readonly unavailableOperations?: ReadonlyArray<string>
 }> {}
 
 /** Queryable result of selecting a compilation target. */
@@ -139,6 +144,18 @@ export const requireNative = Effect.fn('Target.requireNative')(function* (
     message: `Native compilation does not support target ${self.id}`,
   })
 })
+
+/** Reports a valid program whose reachable inventory has no implementation on one target. */
+export const unavailableInventory = (
+  self: Target,
+  operations: ReadonlyArray<string>,
+): TargetError =>
+  new TargetError({
+    operation: 'Target.validateInventory',
+    requested: self.id,
+    message: `Target ${self.id} does not support ${operations.join(', ')}`,
+    unavailableOperations: Object.freeze([...operations]),
+  })
 
 /** Whether a target value exactly matches its compiler-owned canonical profile. */
 export const isCanonical = (self: Target): boolean =>

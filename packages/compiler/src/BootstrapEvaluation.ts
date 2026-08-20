@@ -1,5 +1,4 @@
 import type * as ChildProcess from './ChildProcess.js'
-import * as ContinuationTransaction from './ContinuationTransaction.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -7,7 +6,6 @@ import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
-import type * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
@@ -16,6 +14,7 @@ import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
+import type * as Termination from './Termination.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 
@@ -73,6 +72,11 @@ export interface SliceValue {
   readonly cell: number
   readonly base: number
   readonly length: number
+  /** Place path from the backing cell to the fixed array viewed by this slice. */
+  readonly selectors?: ReadonlyArray<
+    Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' | 'ElementSelector' }>
+  >
+  readonly indexes?: ReadonlyArray<number>
   /** Present only for a zero-copy RawBuffer-backed slice. */
   readonly ticket?: number
 }
@@ -114,14 +118,16 @@ export interface ReferenceValue {
   readonly _tag: 'ReferenceValue'
   readonly frame: number
   readonly cell: number
-  readonly selectors: ReadonlyArray<Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' }>>
+  readonly selectors: ReadonlyArray<Mir.PlaceSelector>
+  /** Selector ordinals captured in the frame where the loan formed. */
+  readonly indexes: ReadonlyArray<number>
 }
 
 export interface UnionValue {
   readonly _tag: 'UnionValue'
   readonly type: Type.StructuralUnion
-  readonly member: Type.Nominal
-  readonly payload: AggregateValue
+  readonly member: Type.Type
+  readonly payload: Value
 }
 
 export interface EffectOutcomeValue {
@@ -192,6 +198,12 @@ export interface EffectValue {
   readonly captures: ReadonlyArray<Value>
 }
 
+export interface EffectCompositeValue {
+  readonly _tag: 'EffectCompositeValue'
+  readonly alternative: number
+  readonly effect: EffectValue
+}
+
 /** One logical heap block; identity and liveness live in evaluator state, not JS identity. */
 export interface AllocationValue {
   readonly _tag: 'AllocationValue'
@@ -233,6 +245,7 @@ export type Value =
   | EffectBorrowValue
   | CallableBorrowValue
   | EffectValue
+  | EffectCompositeValue
   | CallableValue
   | EffectOutcomeValue
   | AllocationValue
@@ -316,9 +329,9 @@ export interface UnionConversionTraceEvent {
   readonly _tag: 'UnionConversion'
   readonly function: DeclarationIndex.CanonicalId
   readonly conversion: 'Inject' | 'Widen'
-  readonly source: Type.Nominal | Type.StructuralUnion
+  readonly source: Type.Type
   readonly target: Type.StructuralUnion
-  readonly member: Type.Nominal
+  readonly member: Type.Type
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -359,7 +372,7 @@ export interface CleanupTraceEvent {
   readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly local: number
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -373,12 +386,12 @@ export interface MatchTraceEvent {
   readonly function: DeclarationIndex.CanonicalId
   readonly match: number
   readonly arm?: number
-  readonly member: Type.Nominal
+  readonly member: Type.Type
   readonly access: Match.Access
   readonly binding?: number
   readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
   readonly value?: Value
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -396,12 +409,16 @@ export interface ControlTraceEvent {
   readonly function: DeclarationIndex.CanonicalId
   readonly region: number
   readonly loop?: number
-  readonly members?: ReadonlyArray<Type.Nominal>
+  readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
 }
 
 export interface EffectTraceEvent {
   readonly _tag: 'EffectSuccess' | 'EffectFailure'
+  readonly phase: 'Produced' | 'Propagated' | 'Closed'
+  readonly identity?: string
+  readonly frame: number
+  readonly depth: number
   readonly function: DeclarationIndex.CanonicalId
   readonly tag: number
   readonly span: SourceSpan.SourceSpan
@@ -436,17 +453,13 @@ export interface AllocationTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
-export interface ContinuationTraceEvent {
+export interface CoroutineFrameTraceEvent {
   readonly _tag:
     | 'SuspensionOrigin'
-    | 'ContinuationRequest'
-    | 'ContinuationReject'
-    | 'ContinuationAcquire'
-    | 'ContinuationLoanEnd'
-    | 'ContinuationInitialize'
-    | 'ContinuationPublish'
-    | 'ContinuationResume'
-    | 'ContinuationRelease'
+    | 'CoroutineFramePush'
+    | 'CoroutineFrameStateTransition'
+    | 'CoroutineFrameResume'
+    | 'CoroutineFrameComplete'
     | 'SuspensionChildStart'
     | 'SuspensionChildComplete'
   readonly function: DeclarationIndex.CanonicalId
@@ -501,7 +514,7 @@ export type TraceEvent =
   | EffectTraceEvent
   | CallableTraceEvent
   | AllocationTraceEvent
-  | ContinuationTraceEvent
+  | CoroutineFrameTraceEvent
   | StandardStreamTraceEvent
   | StringTraceEvent
 
@@ -553,21 +566,13 @@ export type BlockedReason =
     }
 
 /** A completed exact bootstrap result. */
-export interface Completed {
-  readonly _tag: 'Completed'
-  readonly entry: DeclarationIndex.CanonicalId
-  readonly result: IntegerValue
-  readonly trace: ReadonlyArray<TraceEvent>
-}
+export type Completed = Termination.Completed<IntegerValue, TraceEvent>
 
-/** A reportable application failure closed by the generated effect-entry adapter. */
-export interface UnhandledFailure {
-  readonly _tag: 'UnhandledFailure'
-  readonly entry: DeclarationIndex.CanonicalId
-  readonly tag: number
-  readonly report: string
-  readonly trace: ReadonlyArray<TraceEvent>
-}
+/** An owned typed application failure closed by the generated effect-entry adapter. */
+export type UnhandledFailure = Termination.UnhandledFailure<TraceEvent>
+
+/** Fatal abnormal termination produced by executable MIR. */
+export type Trap = Termination.Trap<TraceEvent>
 
 /** A normal, inspectable reason bootstrap evaluation could not complete. */
 export interface Blocked {
@@ -578,7 +583,87 @@ export interface Blocked {
 }
 
 /** The closed outcome of executing one lowered program. */
-export type Outcome = Completed | UnhandledFailure | Blocked
+export type Outcome = Completed | UnhandledFailure | Trap | Blocked
+
+const isPhysicalEntryAdapter = (name: string): boolean =>
+  name === '$effect-entry' || name === '$unit-entry'
+
+const failureIdentity = (type: Type.Effect | Type.FailureRow, tag: number): string => {
+  const failure = Type.failureMembers(type).at(tag - 1)
+  if (failure === undefined) throw new RangeError(`Effect failure tag ${tag} has no type identity`)
+  return Type.encode(failure)
+}
+
+const logicalPathAt = (
+  trace: ReadonlyArray<TraceEvent>,
+  through: number,
+): ReadonlyArray<Termination.LogicalFrame> => {
+  const active = new Map<
+    number,
+    { readonly depth: number; readonly value: Termination.LogicalFrame }
+  >()
+  for (let index = 0; index <= through; index += 1) {
+    const event = trace.at(index)
+    if (event?._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name)) {
+      active.set(
+        event.frame,
+        Object.freeze({
+          depth: event.depth,
+          value: Object.freeze({ function: event.function, provenance: event.span }),
+        }),
+      )
+    } else if (event?._tag === 'Return') {
+      active.delete(event.frame)
+    }
+  }
+  return Object.freeze(
+    [...active.values()].sort((left, right) => left.depth - right.depth).map(({ value }) => value),
+  )
+}
+
+const causalHistory = (
+  trace: ReadonlyArray<TraceEvent>,
+  terminal: 'Success' | 'TypedFailure' | 'Trap',
+  terminalIdentity?: string,
+): ReadonlyArray<Termination.CausalFailure> => {
+  const failures = trace.flatMap((event, index) =>
+    event._tag === 'EffectFailure' && event.phase === 'Produced'
+      ? [
+          Object.freeze({
+            event,
+            index,
+            key: `${event.function.module}\u0000${event.function.name}\u0000${event.tag}\u0000${event.span.start}\u0000${event.span.end}`,
+          }),
+        ]
+      : [],
+  )
+  const distinct = failures.filter(
+    (failure, index) => failures.findIndex((candidate) => candidate.key === failure.key) === index,
+  )
+  return Object.freeze(
+    distinct.map(({ event, index }, ordinal) => {
+      const identity =
+        event.identity ?? (ordinal === distinct.length - 1 ? terminalIdentity : undefined)
+      return Object.freeze({
+        tag: event.tag,
+        ...(identity === undefined ? {} : { identity }),
+        provenance: event.span,
+        logicalPath: logicalPathAt(trace, index),
+        recovered: terminal !== 'TypedFailure' || ordinal !== distinct.length - 1,
+      })
+    }),
+  )
+}
+
+const longestCausalPath = (
+  history: ReadonlyArray<Termination.CausalFailure>,
+  fallback: ReadonlyArray<Termination.LogicalFrame>,
+): ReadonlyArray<Termination.LogicalFrame> =>
+  history.reduce(
+    (selected, candidate) =>
+      candidate.logicalPath.length > selected.length ? candidate.logicalPath : selected,
+    fallback,
+  )
 
 type Step =
   | { readonly _tag: 'Value'; readonly value: Value }
@@ -698,10 +783,12 @@ interface EvaluationState {
   nextFrame: number
   nextAllocation: number
   nextCallable: number
-  nextContinuation: number
+  nextCoroutineFrame: number
   steps: number
   readonly maxSteps: number
   readonly maxCallDepth: number
+  readonly maxExecutionStackBytes: number
+  executionStackBytes: number
   activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
   readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
@@ -740,28 +827,15 @@ interface OriginTransferRequest {
 interface RelayTransferRequest {
   readonly _tag: 'RelayTransferRequest'
   readonly transfer: TransferStep
-  readonly region: Mir.RunSuspendableEffectRegion
-  readonly relay?: ContinuationTransaction.Relay
+  readonly state?: Mir.CoroutineFrameState
 }
 
 interface TransferContext {
   readonly step: TransferStep
-  readonly relays: Array<ContinuationTransaction.Relay>
   readonly pending: Array<{
     readonly activation: ActivationRecord
-    readonly relay?: ContinuationTransaction.Relay
+    readonly state?: Mir.CoroutineFrameState
   }>
-  readonly allocations: Array<{
-    readonly relay: ContinuationTransaction.Relay
-    readonly allocation: AllocationValue
-  }>
-  preparation?: {
-    index: number
-    phase: 'Constructor' | 'Runner'
-    readonly relay: ContinuationTransaction.Relay
-    readonly pending: ActivationRecord
-    activation: ActivationRecord
-  }
   readonly parent?: TransferContext
 }
 
@@ -773,9 +847,11 @@ interface ActivationRecord extends ActiveFrame {
   continuation?: FunctionExecution
   pendingCall?: CallRequest
   cleanupState?: Ownership.CleanupPlan['_tag']
-  continuationTicket?: number
-  continuationPoint?: Mir.SuspensionPointId
-  continuationAllocation?: AllocationValue
+  coroutineFrame?: {
+    readonly ticket: number
+    readonly bytes: number
+    point: Mir.SuspensionPointId
+  }
 }
 
 type FunctionExecution = Generator<MachineRequest, Step, Step>
@@ -811,6 +887,22 @@ function* executeFunction(
     return result
   }
 
+  const relayTransfers = function* (
+    initial: Step,
+    state_?: Mir.CoroutineFrameState,
+  ): FunctionExecution {
+    let result = initial
+    while (result._tag === 'Transfer') {
+      const request: RelayTransferRequest = Object.freeze({
+        _tag: 'RelayTransferRequest',
+        transfer: result,
+        ...(state_ === undefined ? {} : { state: state_ }),
+      })
+      result = yield request
+    }
+    return result
+  }
+
   const suspensionFor = (
     operation: Mir.Operation,
   ): Mir.SuspendEffectRegion | Mir.RunSuspendableEffectRegion | undefined =>
@@ -842,16 +934,8 @@ function* executeFunction(
     const result = yield* callFunction(target, arguments_, operation.provenance.span)
     if (result._tag !== 'Transfer') return result
     if (control?._tag !== 'RunSuspendableEffectRegion') return result
-    const descriptor = control.relay.continuation
-    const relay =
-      descriptor === undefined ? undefined : ContinuationTransaction.relay(program, fn, descriptor)
-    const request: RelayTransferRequest = Object.freeze({
-      _tag: 'RelayTransferRequest',
-      transfer: result,
-      region: control,
-      ...(relay === undefined ? {} : { relay }),
-    })
-    return yield request
+    const frameState = control.relay.state
+    return yield* relayTransfers(result, frameState)
   }
 
   const evaluationLimit = (
@@ -900,6 +984,37 @@ function* executeFunction(
     return found
   }
 
+  const selectStoredPlace = (
+    root: Value,
+    selectors: NonNullable<SliceValue['selectors']>,
+    indexes: ReadonlyArray<number>,
+  ): Value => {
+    let selected = root
+    for (const [ordinal, selector] of selectors.entries()) {
+      const index = indexes.at(ordinal)
+      if (index === undefined) throw new RangeError('Stored slice place omitted a checked index')
+      if (selector._tag === 'FieldSelector') {
+        if (selected._tag !== 'AggregateValue')
+          throw new RangeError('Stored slice field selects a non-aggregate')
+        const field = selected.fields.find(
+          (candidate) =>
+            candidate.field.ordinal === selector.field.ordinal &&
+            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.field.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined) throw new RangeError('Stored slice field is missing')
+        selected = field.value
+      } else {
+        if (selected._tag !== 'ArrayValue')
+          throw new RangeError('Stored slice element selects a non-array')
+        const element = selected.elements.at(index)
+        if (element === undefined) throw new RangeError('Stored slice element is missing')
+        selected = element
+      }
+    }
+    return selected
+  }
+
   const referenced = (local: Mir.LocalId): LocalState => {
     const reference = read(local).value
     if (reference._tag !== 'ReferenceValue') {
@@ -909,17 +1024,39 @@ function* executeFunction(
     if (found === undefined)
       throw new RangeError('MIR reference points at a missing evaluator cell')
     let selected = found.value
-    for (const selector of reference.selectors) {
-      if (selected._tag !== 'AggregateValue')
-        throw new RangeError('MIR reference selector points at a non-struct value')
-      const field = selected.fields.find(
-        (candidate) =>
-          candidate.field.ordinal === selector.field.ordinal &&
-          candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-          candidate.field.struct.ordinal === selector.field.struct.ordinal,
-      )
-      if (field === undefined) throw new RangeError('MIR reference selector lost its field')
-      selected = field.value
+    for (const [ordinal, selector] of reference.selectors.entries()) {
+      const index = reference.indexes.at(ordinal)
+      if (index === undefined) throw new RangeError('MIR reference omitted a captured selector')
+      if (selector._tag === 'FieldSelector') {
+        if (selected._tag !== 'AggregateValue')
+          throw new RangeError('MIR reference selector points at a non-struct value')
+        const field = selected.fields.find(
+          (candidate) =>
+            candidate.field.ordinal === selector.field.ordinal &&
+            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.field.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined) throw new RangeError('MIR reference selector lost its field')
+        selected = field.value
+        continue
+      }
+      if (selector._tag === 'SliceElementSelector') {
+        if (selected._tag !== 'SliceValue' || selected.ticket !== undefined)
+          throw new RangeError('MIR raw reference selector points at an unsupported slice')
+        const backing = cell(selected).value
+        if (backing._tag !== 'ArrayValue')
+          throw new RangeError('MIR slice reference lost its array backing')
+        const element = backing.elements.at(selected.base + index)
+        if (element === undefined)
+          throw new RangeError('MIR slice reference is outside its backing')
+        selected = element
+        continue
+      }
+      if (selected._tag !== 'ArrayValue')
+        throw new RangeError('MIR reference selector points at an unsupported place')
+      const element = selected.elements.at(index)
+      if (element === undefined) throw new RangeError('MIR reference selector lost its element')
+      selected = element
     }
     return Object.freeze({ value: selected, fromCall: found.fromCall })
   }
@@ -1061,6 +1198,14 @@ function* executeFunction(
         }
         return undefined
       }
+      case 'EffectCompositeCleanup': {
+        if (owner._tag !== 'EffectCompositeValue')
+          throw new RangeError('Effect composite cleanup lost its selected alternative')
+        const selected = cleanup.alternatives.at(owner.alternative)
+        if (selected === undefined)
+          throw new RangeError('Effect composite cleanup selected an absent alternative')
+        return yield* releaseThroughPlan(selected, owner.effect, provenance, localOrdinal)
+      }
       case 'HookCleanup': {
         const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
         if (target === undefined) {
@@ -1089,6 +1234,7 @@ function* executeFunction(
           frame,
           cell: localOrdinal,
           selectors: Object.freeze([]),
+          indexes: Object.freeze([]),
         })
         const result = yield* callFunction(target, [reference], provenance.span)
         if (result._tag === 'Blocked') return result
@@ -1273,6 +1419,39 @@ function* executeFunction(
       )
       return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
     }
+    if (operation === 'CheckedConvertToChar') {
+      const subject = arguments_.at(0)
+      if (actorScalar?.category !== 'Character' || subject?._tag !== 'IntegerValue')
+        throw new RangeError('MIR verifier allowed an invalid checked char callable')
+      const exact = BigInt(subject.value)
+      const succeeded = Scalar.isUnicodeScalarValue(exact)
+      const semantic = Type.option('char')
+      if (!Type.isUnion(semantic))
+        throw new RangeError('Canonical Option did not normalize to a structural union')
+      const member = succeeded ? Type.some('char') : Type.none
+      const entry = program.layout.entries.find((candidate) => Type.equals(candidate.type, member))
+      if (entry?._tag !== 'LayoutEntry' || entry.representation._tag !== 'Aggregate')
+        throw new RangeError('Target plan omitted a canonical callable Option member')
+      return Object.freeze({
+        _tag: 'Value',
+        value: Object.freeze({
+          _tag: 'UnionValue',
+          type: semantic,
+          member,
+          payload: Object.freeze({
+            _tag: 'AggregateValue',
+            type: member,
+            fields: Object.freeze(
+              succeeded
+                ? entry.representation.fields.map((field) =>
+                    Object.freeze({ field: field.id, value: characterValue(Number(exact)) }),
+                  )
+                : [],
+            ),
+          }),
+        }),
+      })
+    }
     if (Scalar.isCheckedOperation(operation)) {
       const source = Scalar.find(target.actor)
       const resultScalar = conversionTarget ?? source
@@ -1337,6 +1516,11 @@ function* executeFunction(
     }
     if (conversionTarget !== undefined) {
       const subject = arguments_.at(0)
+      if (actorScalar?.category === 'Character' && subject?._tag === 'CharacterValue')
+        return Object.freeze({
+          _tag: 'Value',
+          value: integerValue(conversionTarget.spelling, BigInt(subject.value)),
+        })
       if (subject === undefined || subject._tag !== 'IntegerValue')
         throw new RangeError('MIR verifier allowed a non-integer conversion argument')
       const exact = BigInt(subject.value)
@@ -1581,7 +1765,7 @@ function* executeFunction(
   const cleanupMembers = (
     cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
     owner: Value,
-  ): ReadonlyArray<Type.Nominal> => {
+  ): ReadonlyArray<Type.Type> => {
     if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
       return Object.freeze([])
     }
@@ -1619,6 +1803,11 @@ function* executeFunction(
         }),
       )
     }
+    if (cleanup._tag === 'EffectCompositeCleanup') {
+      if (owner._tag !== 'EffectCompositeValue') return Object.freeze([])
+      const selected = cleanup.alternatives.at(owner.alternative)
+      return selected === undefined ? Object.freeze([]) : cleanupMembers(selected, owner.effect)
+    }
     if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
     if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
     // Unresolved stored-executable obligations never reach evaluation: specialization resolves
@@ -1639,10 +1828,7 @@ function* executeFunction(
     )
   }
 
-  const selectFieldPath = (
-    root: AggregateValue,
-    path: ReadonlyArray<DeclarationIndex.FieldId>,
-  ): Value => {
+  const selectFieldPath = (root: Value, path: ReadonlyArray<DeclarationIndex.FieldId>): Value => {
     let selected: Value = root
     for (const selector of path) {
       if (selected._tag !== 'AggregateValue') {
@@ -1674,6 +1860,7 @@ function* executeFunction(
     | { readonly _tag: 'Blocked'; readonly step: Step } => {
     let selected = read(root).value
     let effectiveSelectors = selectors
+    let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
     const indexes: Array<number> = []
     // A reference root reads through the borrow: the place lives on the referenced cell.
     if (selected._tag === 'ReferenceValue') {
@@ -1681,9 +1868,10 @@ function* executeFunction(
       if (target === undefined)
         throw new RangeError('MIR reference points at a missing evaluator cell')
       effectiveSelectors = Object.freeze([...selected.selectors, ...selectors])
+      capturedIndexes = selected.indexes
       selected = target.value
     }
-    for (const selector of effectiveSelectors) {
+    for (const [ordinal, selector] of effectiveSelectors.entries()) {
       if (selector._tag === 'FieldSelector') {
         if (selected._tag !== 'AggregateValue') {
           throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
@@ -1704,7 +1892,9 @@ function* executeFunction(
         if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
           throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
         }
-        const exactIndex = readInteger(selector.index, 'usize').value
+        const captured = capturedIndexes.at(ordinal)
+        const exactIndex =
+          captured === undefined ? readInteger(selector.index, 'usize').value : BigInt(captured)
         if (exactIndex >= BigInt(selected.length)) {
           return {
             _tag: 'Blocked',
@@ -1736,7 +1926,11 @@ function* executeFunction(
           selected = element
           continue
         }
-        const backing = cell(selected).value
+        const backing = selectStoredPlace(
+          cell(selected).value,
+          selected.selectors ?? Object.freeze([]),
+          selected.indexes ?? Object.freeze([]),
+        )
         if (backing._tag !== 'ArrayValue') {
           throw new RangeError('MIR slice cell does not contain an array value')
         }
@@ -1752,9 +1946,10 @@ function* executeFunction(
         throw new RangeError('MIR verifier allowed an element selector on a non-array value')
       }
       const index =
-        selector.index._tag === 'Proven'
+        capturedIndexes.at(ordinal) ??
+        (selector.index._tag === 'Proven'
           ? selector.index.value
-          : Number(readInteger(selector.index.local, 'usize').value)
+          : Number(readInteger(selector.index.local, 'usize').value))
       if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
         return {
           _tag: 'Blocked',
@@ -1819,15 +2014,18 @@ function* executeFunction(
         return current
       }
       const backing = cell(current)
-      if (backing.value._tag !== 'ArrayValue') {
+      const prefixSelectors = current.selectors ?? Object.freeze([])
+      const prefixIndexes = current.indexes ?? Object.freeze([])
+      const selectedBacking = selectStoredPlace(backing.value, prefixSelectors, prefixIndexes)
+      if (selectedBacking._tag !== 'ArrayValue') {
         throw new RangeError('Invalid slice backing cell replacement')
       }
       const absolute = current.base + ordinal
       const updated: ArrayValue = Object.freeze({
         _tag: 'ArrayValue',
-        type: backing.value.type,
+        type: selectedBacking.type,
         elements: Object.freeze(
-          backing.value.elements.map((element, index) =>
+          selectedBacking.elements.map((element, index) =>
             index === absolute
               ? replacePlace(element, selectors, indexes, replacement, depth + 1)
               : element,
@@ -1835,7 +2033,7 @@ function* executeFunction(
         ),
       })
       state.cells.set(cellKey(current.frame, current.cell), {
-        value: updated,
+        value: replacePlace(backing.value, prefixSelectors, prefixIndexes, updated),
         fromCall: backing.fromCall,
       })
       return current
@@ -1863,12 +2061,7 @@ function* executeFunction(
     const target = state.cells.get(key)
     if (target === undefined) throw new RangeError('OS intrinsic output references a missing cell')
     state.cells.set(key, {
-      value: replacePlace(
-        target.value,
-        reference.selectors,
-        Object.freeze(reference.selectors.map((selector) => selector.field.ordinal)),
-        replacement,
-      ),
+      value: replacePlace(target.value, reference.selectors, reference.indexes, replacement),
       fromCall: target.fromCall,
     })
   }
@@ -2110,13 +2303,13 @@ function* executeFunction(
                 ? scrutinee.member
                 : scrutinee._tag === 'AggregateValue'
                   ? scrutinee.type
-                  : undefined
+                  : Mir.semanticType(operation.scrutineeType)
             const payload =
               scrutinee._tag === 'UnionValue'
                 ? scrutinee.payload
                 : scrutinee._tag === 'AggregateValue'
                   ? scrutinee
-                  : undefined
+                  : scrutinee
             if (activeMember === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed matching a scalar value')
             }
@@ -2404,6 +2597,16 @@ function* executeFunction(
             state.activeLoans.add(borrowKey(operation.borrow))
             const source = read(operation.root)
             if (operation.type._tag === 'Reference') {
+              const capturedIndexes = Object.freeze(
+                operation.selectors.map((selector) => {
+                  if (selector._tag === 'FieldSelector') return selector.field.ordinal
+                  if (selector._tag === 'SliceElementSelector')
+                    return Number(readInteger(selector.index, 'usize').value)
+                  return selector.index._tag === 'Proven'
+                    ? selector.index.value
+                    : Number(readInteger(selector.index.local, 'usize').value)
+                }),
+              )
               const inherited =
                 source.value._tag === 'ReferenceValue'
                   ? source.value
@@ -2412,6 +2615,7 @@ function* executeFunction(
                       frame,
                       cell: operation.root.ordinal,
                       selectors: Object.freeze([]),
+                      indexes: Object.freeze([]),
                     })
               const key = cellKey(inherited.frame, inherited.cell)
               if (!state.cells.has(key)) state.cells.set(key, source)
@@ -2421,6 +2625,7 @@ function* executeFunction(
                   frame: inherited.frame,
                   cell: inherited.cell,
                   selectors: Object.freeze([...inherited.selectors, ...operation.selectors]),
+                  indexes: Object.freeze([...inherited.indexes, ...capturedIndexes]),
                 }),
                 fromCall: source.fromCall,
               })
@@ -2436,9 +2641,10 @@ function* executeFunction(
                     if (operation.sourceType._tag !== 'FixedArray') {
                       throw new RangeError('MIR verifier allowed a non-array slice root')
                     }
-                    if (source.value._tag !== 'ArrayValue') {
-                      throw new RangeError('MIR verifier allowed borrowing a non-array value')
-                    }
+                    const resolved = resolvePlace(operation.root, operation.selectors)
+                    if (resolved._tag === 'Blocked') return resolved
+                    if (resolved.selected._tag !== 'ArrayValue')
+                      throw new RangeError('MIR verifier allowed borrowing a non-array place')
                     const key = cellKey(frame, operation.root.ordinal)
                     if (!state.cells.has(key)) state.cells.set(key, source)
                     return Object.freeze({
@@ -2447,8 +2653,20 @@ function* executeFunction(
                       cell: operation.root.ordinal,
                       base: 0,
                       length: operation.sourceType.type.length,
+                      selectors: Object.freeze(
+                        operation.selectors.filter(
+                          (
+                            selector,
+                          ): selector is Extract<
+                            Mir.PlaceSelector,
+                            { readonly _tag: 'FieldSelector' | 'ElementSelector' }
+                          > => selector._tag !== 'SliceElementSelector',
+                        ),
+                      ),
+                      indexes: resolved.indexes,
                     })
                   })()
+            if (slice._tag === 'Blocked') return slice.step
             if (slice._tag !== 'SliceValue') {
               throw new RangeError('MIR verifier allowed reborrowing a non-slice value')
             }
@@ -2492,7 +2710,7 @@ function* executeFunction(
                     )
                   : undefined
             const payload =
-              operation.conversion === 'Inject' && source._tag === 'AggregateValue'
+              operation.conversion === 'Inject'
                 ? source
                 : operation.conversion === 'Widen' && source._tag === 'UnionValue'
                   ? source.payload
@@ -2512,7 +2730,7 @@ function* executeFunction(
                 _tag: 'UnionConversion',
                 function: fn.id,
                 conversion: operation.conversion,
-                source: operation.sourceType.type,
+                source: Mir.semanticType(operation.sourceType),
                 target: operation.targetType.type,
                 member: converted.member,
                 span: operation.provenance.span,
@@ -3836,6 +4054,13 @@ function* executeFunction(
           case 'ConvertScalar': {
             const sourceType = Scalar.find(operation.sourceType._tag)
             const targetType = Scalar.find(operation.type._tag)
+            if (sourceType?.category === 'Character' && targetType?.spelling === 'u32') {
+              write(operation.destination, {
+                value: integerValue('u32', BigInt(readCharacter(operation.source).value)),
+                fromCall: false,
+              })
+              break
+            }
             if (sourceType?.category === 'Floating' && targetType?.category === 'Floating') {
               const source = readFloat(operation.source)
               const encoded = FloatingPoint.fromNumber(
@@ -3914,18 +4139,22 @@ function* executeFunction(
             })
             break
           }
-          case 'CheckedInteger': {
+          case 'CheckedScalar': {
             const operands = operation.operands.map((operand) => BigInt(readInteger(operand).value))
             const left = operands.at(0)
             const right = operands.at(1)
             const source = Scalar.find(operation.sourceType._tag)
             const target = Scalar.find(operation.valueType._tag)
+            const characterConversion =
+              operation.operation === 'CheckedConvertToChar' &&
+              source?.spelling === 'u32' &&
+              target?.category === 'Character'
             if (
               left === undefined ||
               source?.category !== 'Integer' ||
-              target?.category !== 'Integer'
+              (target?.category !== 'Integer' && !characterConversion)
             )
-              throw new RangeError('MIR verifier allowed an invalid checked integer operation')
+              throw new RangeError('MIR verifier allowed an invalid checked scalar operation')
             const arithmetic = operation.operation.startsWith('CheckedConvertTo')
               ? left
               : operation.operation === 'CheckedAdd'
@@ -3943,9 +4172,18 @@ function* executeFunction(
                           ? undefined
                           : left % right
                         : undefined
-            const range = Scalar.range(target, program.layout.target.pointerSize === 4 ? 32 : 64)
             const success =
-              arithmetic !== undefined && arithmetic >= range.minimum && arithmetic <= range.maximum
+              arithmetic !== undefined &&
+              (characterConversion
+                ? Scalar.isUnicodeScalarValue(arithmetic)
+                : target?.category === 'Integer' &&
+                  (() => {
+                    const range = Scalar.range(
+                      target,
+                      program.layout.target.pointerSize === 4 ? 32 : 64,
+                    )
+                    return arithmetic >= range.minimum && arithmetic <= range.maximum
+                  })())
             const member = success ? operation.success : operation.failure
             const entry = program.layout.entries.find((candidate) =>
               Type.equals(candidate.type, member),
@@ -3960,7 +4198,10 @@ function* executeFunction(
                   ? entry.representation.fields.map((field) =>
                       Object.freeze({
                         field: field.id,
-                        value: integerValue(target.spelling, arithmetic),
+                        value:
+                          target.category === 'Character'
+                            ? characterValue(Number(arithmetic))
+                            : integerValue(target.spelling, arithmetic),
                       }),
                     )
                   : [],
@@ -4046,15 +4287,17 @@ function* executeFunction(
           case 'ReadPlace': {
             let selected = read(operation.root).value
             let effectiveSelectors = operation.selectors
+            let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
             const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
             if (selected._tag === 'ReferenceValue') {
               const target = state.cells.get(cellKey(selected.frame, selected.cell))
               if (target === undefined)
                 throw new RangeError('MIR reference points at a missing evaluator cell')
               effectiveSelectors = Object.freeze([...selected.selectors, ...operation.selectors])
+              capturedIndexes = selected.indexes
               selected = target.value
             }
-            for (const selector of effectiveSelectors) {
+            for (const [ordinal, selector] of effectiveSelectors.entries()) {
               if (selector._tag === 'FieldSelector') {
                 if (selected._tag !== 'AggregateValue') {
                   throw new RangeError(
@@ -4078,7 +4321,11 @@ function* executeFunction(
                 if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
                   throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
                 }
-                const exactIndex = readInteger(selector.index, 'usize').value
+                const captured = capturedIndexes.at(ordinal)
+                const exactIndex =
+                  captured === undefined
+                    ? readInteger(selector.index, 'usize').value
+                    : BigInt(captured)
                 if (exactIndex >= BigInt(selected.length)) {
                   return blockedStep({
                     _tag: 'Trap',
@@ -4150,9 +4397,10 @@ function* executeFunction(
                 )
               }
               const index =
-                selector.index._tag === 'Proven'
+                capturedIndexes.at(ordinal) ??
+                (selector.index._tag === 'Proven'
                   ? selector.index.value
-                  : Number(readInteger(selector.index.local, 'usize').value)
+                  : Number(readInteger(selector.index.local, 'usize').value))
               if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
                 return blockedStep({
                   _tag: 'Trap',
@@ -4465,6 +4713,20 @@ function* executeFunction(
             })
             break
           }
+          case 'PackEffectComposite': {
+            const effect = read(operation.source).value
+            if (effect._tag !== 'EffectValue')
+              throw new RangeError('MIR attempted to pack a non-Effect alternative')
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'EffectCompositeValue',
+                alternative: operation.alternative,
+                effect,
+              }),
+              fromCall: false,
+            })
+            break
+          }
           case 'PackEffectOutcome': {
             const payload = read(operation.source).value
             write(operation.destination, {
@@ -4479,8 +4741,16 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
+                phase: 'Produced',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: operation.tag,
+                ...(operation.tag === 0
+                  ? {}
+                  : {
+                      identity: failureIdentity(operation.type.type, operation.tag),
+                    }),
                 span: operation.provenance.span,
               }),
             )
@@ -4520,8 +4790,12 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Produced',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
+                identity: failureIdentity(operation.type.type, mapping.target),
                 span: operation.provenance.span,
               }),
             )
@@ -4658,6 +4932,9 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Propagated',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
                 span: operation.provenance.span,
@@ -4674,22 +4951,50 @@ function* executeFunction(
             )
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
+          case 'RunEffectComposite':
           case 'RunEffectValue':
           case 'RunStaticEffect': {
-            const captures =
-              operation._tag === 'RunEffectValue'
+            const composite =
+              operation._tag === 'RunEffectComposite'
                 ? (() => {
-                    const effect = read(operation.effect).value
-                    if (effect._tag !== 'EffectValue')
-                      throw new RangeError('MIR attempted to run a non-Effect value')
-                    return effect.captures
+                    const value = read(operation.effect).value
+                    if (value._tag !== 'EffectCompositeValue')
+                      throw new RangeError('MIR attempted to run a non-composite Effect value')
+                    const alternative = operation.alternatives.at(value.alternative)
+                    if (alternative === undefined)
+                      throw new RangeError('MIR Effect composite selected an absent alternative')
+                    return Object.freeze({ value, alternative })
                   })()
-                : operation.captures.map((capture) => read(capture.source).value)
-            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
+                : undefined
+            const captures =
+              composite !== undefined
+                ? composite.value.effect.captures
+                : operation._tag === 'RunEffectValue'
+                  ? (() => {
+                      const effect = read(operation.effect).value
+                      if (effect._tag !== 'EffectValue')
+                        throw new RangeError('MIR attempted to run a non-Effect value')
+                      return effect.captures
+                    })()
+                  : operation._tag === 'RunStaticEffect'
+                    ? operation.captures.map((capture) => read(capture.source).value)
+                    : Object.freeze([])
+            const runner =
+              operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.runner ?? operation.alternatives.at(0)?.runner)
+                : operation.runner
+            const runnerTypeArguments =
+              operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.runnerTypeArguments ??
+                  operation.alternatives.at(0)?.runnerTypeArguments)
+                : operation.runnerTypeArguments
+            if (runner === undefined || runnerTypeArguments === undefined)
+              throw new RangeError('MIR Effect composite has no runnable alternative')
+            const target = functionFor(program, runner, runnerTypeArguments)
             if (target === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
-                target: operation.runner,
+                target: runner,
                 span: operation.provenance.span,
               })
             trace.push(
@@ -4698,7 +5003,7 @@ function* executeFunction(
                 frame: activation.frame,
                 depth: activation.depth,
                 caller: fn.id,
-                target: operation.runner,
+                target: runner,
                 callerInstance: fn.instance,
                 targetInstance: target.instance,
                 span: operation.provenance.span,
@@ -4706,7 +5011,9 @@ function* executeFunction(
             )
             const runnerArguments = Object.freeze([
               ...captures,
-              ...operation.arguments.map((argument) => read(argument).value),
+              ...(operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.arguments ?? []).map((argument) => read(argument).value)
+                : operation.arguments.map((argument) => read(argument).value)),
             ])
             const result =
               operation._tag === 'RunEffectValue'
@@ -4716,7 +5023,31 @@ function* executeFunction(
             if (result._tag === 'Transfer') return result
             if (result.value._tag !== 'EffectOutcomeValue')
               throw new RangeError('MIR Effect runner returned a non-outcome value')
-            const effectOutcome = result.value
+            const rawOutcome: EffectOutcomeValue = result.value
+            const effectOutcome: EffectOutcomeValue =
+              composite === undefined || rawOutcome.tag === 0
+                ? rawOutcome
+                : (() => {
+                    const mapping = composite.alternative.tagMappings.find(
+                      (candidate) => candidate.source === rawOutcome.tag,
+                    )
+                    if (mapping === undefined)
+                      throw new RangeError(
+                        'MIR Effect composite has no alternative failure mapping',
+                      )
+                    return Object.freeze({
+                      _tag: 'EffectOutcomeValue' as const,
+                      type: operation.outcomeType.type,
+                      tag: mapping.target,
+                      payload: repackFailurePayload(
+                        rawOutcome.payload,
+                        composite.alternative.type.type,
+                        rawOutcome.tag,
+                        operation.outcomeType.type,
+                        mapping.target,
+                      ),
+                    })
+                  })()
             write(operation.outcome, { value: effectOutcome, fromCall: true })
             if (effectOutcome.tag === 0) {
               write(operation.destination, { value: effectOutcome.payload, fromCall: true })
@@ -4807,7 +5138,7 @@ function* executeFunction(
                       outcome.tag,
                       'OneBased',
                     )
-                    if (failure === undefined || outcome.payload._tag !== 'AggregateValue')
+                    if (failure === undefined)
                       throw new RangeError('MIR Effect result has an invalid failure tag')
                     const failureValue: Value = Type.isUnion(operation.failureValueType)
                       ? Object.freeze({
@@ -4881,13 +5212,11 @@ function* executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const execution = yield* callFunction(
-              runner,
-              effect.captures,
-              operation.provenance.span,
-            )
+            const called = yield* callFunction(runner, effect.captures, operation.provenance.span)
+            const execution = yield* relayTransfers(called)
             if (execution._tag === 'Blocked') return execution
-            if (execution._tag === 'Transfer') return execution
+            if (execution._tag === 'Transfer')
+              throw new RangeError('Effect entry retained a relayed suspension transfer')
             if (execution.value._tag !== 'EffectOutcomeValue')
               throw new RangeError('MIR effect entry runner returned a non-outcome value')
             const effectOutcome = execution.value
@@ -4917,13 +5246,17 @@ function* executeFunction(
             trace.push(
               Object.freeze({
                 _tag: 'EffectFailure',
+                phase: 'Closed',
+                frame,
+                depth: activation.depth,
                 function: fn.id,
                 tag: failure.tag,
+                identity: failure.identity,
                 span: operation.provenance.span,
               }),
             )
             write(operation.destination, {
-              value: integerValue('i32', failure.tag),
+              value: integerValue('i32', 1),
               fromCall: true,
             })
             break
@@ -5144,243 +5477,73 @@ const executeMachine = (
   let transfer: TransferContext | undefined
   let resumed: Step | undefined
 
-  const localValue = (activation: ActivationRecord, local: Mir.LocalId): Value | undefined =>
-    state.cells.get(cellKey(activation.frame, local.ordinal))?.value ??
-    activation.locals.get(local.ordinal)?.value
-
-  const providerInEffect = (
-    effect: EffectValue,
-    environment: Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
-    providerType: Type.Nominal,
-    visited = new Set<string>(),
-  ): Value | undefined => {
-    const identity = Instances.effectIdentity(environment.instance, environment.site)
-    if (visited.has(identity)) return undefined
-    const nextVisited = new Set(visited).add(identity)
-    let selected: Value | undefined
-    for (const [ordinal, field] of environment.fields.entries()) {
-      const capture = effect.captures.at(ordinal)
-      if (capture === undefined) continue
-      if (
-        Type.isReference(field.type) &&
-        field.type.access === 'Exclusive' &&
-        Type.isNominal(field.type.target) &&
-        Type.equals(field.type.target, providerType)
-      )
-        selected = capture
-      if (field.effectIdentity !== undefined && capture._tag === 'EffectValue') {
-        const nested = program.layout.effectEnvironments.find(
-          (candidate) =>
-            candidate._tag === 'EffectEnvironment' &&
-            Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
-        )
-        if (nested?._tag === 'EffectEnvironment') {
-          const nestedSelected = providerInEffect(capture, nested, providerType, nextVisited)
-          if (nestedSelected !== undefined) selected = nestedSelected
-        }
-      }
-    }
-    return selected
-  }
-
-  const continuationAllocatorCall = (
-    relay: ContinuationTransaction.Relay,
-    activation: ActivationRecord,
-  ):
-    | {
-        readonly constructor: Mir.MirFunction
-        readonly arguments: ReadonlyArray<Value>
-      }
-    | undefined => {
-    const provider = relay.descriptor.runner.providers.find(
-      (candidate) => candidate.purposes.length === 2 && candidate.argument !== undefined,
-    )
-    if (provider?.argument === undefined || provider.witness?._tag !== 'SourceConformanceWitness')
-      return undefined
-    const argumentType =
-      activation.function.module === relay.function.declaration.module
-        ? program.functions
-            .find(
-              (candidate) =>
-                Instances.keyText(candidate.instance) === Instances.keyText(relay.function),
-            )
-            ?.localTypes.at(provider.argument.ordinal)
-        : undefined
-    const argument = localValue(activation, provider.argument)
-    const selectedProvider =
-      argumentType?._tag === 'EffectValue' && argument?._tag === 'EffectValue'
-        ? providerInEffect(argument, argumentType.environment, provider.providerType)
-        : argument
-    if (selectedProvider === undefined) return undefined
-    const implementation = provider.witness.operations.find(
-      (operation) => operation.name === 'allocate',
-    )?.implementation
-    if (implementation === undefined) return undefined
-    const layoutConstructor = program.functions.find((candidate) => {
-      const parameter = candidate.localTypes.at(0)
-      return (
-        candidate.id.module === implementation.module &&
-        candidate.id.name === implementation.name &&
-        parameter?._tag === 'Reference' &&
-        Type.equals(parameter.type.target, provider.providerType) &&
-        candidate.result._tag === 'EffectValue'
-      )
-    })
-    const layoutEntry = program.layout.entries.find((candidate) =>
-      Type.equals(candidate.type, Type.layout),
-    )
-    if (
-      layoutConstructor === undefined ||
-      layoutEntry?._tag !== 'LayoutEntry' ||
-      layoutEntry.representation._tag !== 'Aggregate'
-    )
-      return undefined
-    const request = relay.layout.acquisition.request
-    const layoutValue: AggregateValue = Object.freeze({
-      _tag: 'AggregateValue',
-      type: Type.layout,
-      fields: Object.freeze(
-        layoutEntry.representation.fields.map((field) =>
-          Object.freeze({
-            field: field.id,
-            value: integerValue(
-              'usize',
-              BigInt(field.name === 'bytes' ? request.bytes : request.alignment),
-            ),
-          }),
-        ),
-      ),
-    })
-    return Object.freeze({
-      constructor: layoutConstructor,
-      arguments: Object.freeze([selectedProvider, layoutValue]),
-    })
-  }
-
-  const beginAllocatorPreparation = (context: TransferContext): boolean => {
-    const relay = context.relays.at(context.allocations.length)
-    if (relay === undefined) return false
-    const pending = context.pending.find((candidate) => candidate.relay === relay)?.activation
-    if (pending === undefined)
-      throw new RangeError('Evaluator continuation relay lost its activation')
-    const call = continuationAllocatorCall(relay, pending)
-    if (call === undefined)
-      throw new RangeError('Evaluator continuation allocator did not resolve to a selected witness')
-    const activation = makeActivation(
-      program,
-      call.constructor,
-      call.arguments,
-      pending.depth + 1,
-      trace,
-      state,
-    )
-    context.preparation = {
-      index: context.allocations.length,
-      phase: 'Constructor',
-      relay,
-      pending,
-      activation,
-    }
-    stack.push(activation)
-    return true
-  }
-
-  const reclaimContinuationAllocation = (
-    allocation: AllocationValue,
-    function_: DeclarationIndex.CanonicalId,
-    point: Mir.SuspensionPointId,
-  ): void => {
-    const ticket = state.allocations.get(allocation.ticket)
-    if (ticket === undefined || !ticket.active)
-      throw new RangeError('Evaluator continuation allocation was reclaimed more than once')
-    ticket.active = false
+  const releaseActivationFrame = (activation: ActivationRecord): void => {
+    const frame = activation.coroutineFrame
+    if (frame === undefined) return
+    state.executionStackBytes -= frame.bytes
     trace.push(
       Object.freeze({
-        _tag: 'AllocationRelease',
-        function: function_,
-        ticket: allocation.ticket,
-        span: suspensionSpan(program, point),
+        _tag: 'CoroutineFrameComplete',
+        function: activation.function,
+        point: frame.point,
+        ticket: frame.ticket,
+        span: suspensionSpan(program, frame.point),
       }),
     )
+    delete activation.coroutineFrame
   }
 
-  const releaseActivationContinuation = (activation: ActivationRecord): void => {
-    const point = activation.continuationPoint
-    if (point === undefined) return
-    if (activation.continuationTicket !== undefined)
-      trace.push(
-        Object.freeze({
-          _tag: 'ContinuationRelease',
-          function: activation.function,
-          point,
-          ticket: activation.continuationTicket,
-          span: suspensionSpan(program, point),
-        }),
-      )
-    if (activation.continuationAllocation !== undefined)
-      reclaimContinuationAllocation(activation.continuationAllocation, activation.function, point)
-    delete activation.continuationTicket
-    delete activation.continuationPoint
-    delete activation.continuationAllocation
-  }
-
-  const publishPreparedTransfer = (context: TransferContext): void => {
-    const prepared = ContinuationTransaction.prepare(context.relays, undefined)
-    if (prepared._tag !== 'Prepared')
-      throw new RangeError('Evaluator continuation preparation unexpectedly refused')
-    const tickets = new Map<number, number>()
-    for (const event of prepared.events) {
-      if (event._tag === 'Acquire') {
-        const ticket = state.nextContinuation
-        state.nextContinuation += 1
-        tickets.set(event.ordinal, ticket)
-      }
-      if (
-        event._tag !== 'Request' &&
-        event._tag !== 'Acquire' &&
-        event._tag !== 'EndAllocatorLoan' &&
-        event._tag !== 'Initialize' &&
-        event._tag !== 'Publish'
-      )
-        continue
-      const tag =
-        event._tag === 'Request'
-          ? 'ContinuationRequest'
-          : event._tag === 'Acquire'
-            ? 'ContinuationAcquire'
-            : event._tag === 'EndAllocatorLoan'
-              ? 'ContinuationLoanEnd'
-              : event._tag === 'Initialize'
-                ? 'ContinuationInitialize'
-                : 'ContinuationPublish'
-      const ticket = tickets.get(event.ordinal)
-      const relay = context.relays.at(event.ordinal - 1)
-      const continuationEvent: ContinuationTraceEvent = Object.freeze({
-        _tag: tag,
-        function: relay?.function.declaration ?? context.step.child.target.id,
-        point: event.point,
-        ordinal: event.ordinal,
-        ...(ticket === undefined ? {} : { ticket }),
-        ...(event._tag === 'Request' ? { bytes: event.bytes, alignment: event.alignment } : {}),
-        span: suspensionSpan(program, event.point),
-      })
-      trace.push(continuationEvent)
-    }
-    let relayOrdinal = 0
+  const publishTransfer = (context: TransferContext): BlockedReason | undefined => {
     for (const pending of context.pending) {
-      if (pending.relay === undefined) continue
-      relayOrdinal += 1
-      // A resumed activation may relay another transfer before completing. The replacement frame
-      // is now fully prepared, so its prior private storage no longer owns live payload and can be
-      // reclaimed before the activation adopts the new continuation identity.
-      releaseActivationContinuation(pending.activation)
-      const ticket = tickets.get(relayOrdinal)
-      if (ticket !== undefined) pending.activation.continuationTicket = ticket
-      pending.activation.continuationPoint = pending.relay.descriptor.point
-      const allocation = context.allocations.find(
-        (candidate) => candidate.relay === pending.relay,
-      )?.allocation
-      if (allocation !== undefined) pending.activation.continuationAllocation = allocation
+      const frameState = pending.state
+      if (frameState === undefined) continue
+      const existing = pending.activation.coroutineFrame
+      if (existing === undefined) {
+        const bytes =
+          program.coroutineFrames?.entries.find(
+            (candidate) =>
+              Instances.keyText(candidate.function) ===
+              Instances.keyText(pending.activation.instance),
+          )?.size ?? 0
+        if (state.executionStackBytes + bytes > state.maxExecutionStackBytes) {
+          return Object.freeze({
+            _tag: 'Trap',
+            function: pending.activation.function,
+            reason: 'private execution stack exhausted',
+            span: suspensionSpan(program, frameState.point),
+          })
+        }
+        const ticket = state.nextCoroutineFrame
+        state.nextCoroutineFrame += 1
+        state.executionStackBytes += bytes
+        pending.activation.coroutineFrame = {
+          ticket,
+          bytes,
+          point: frameState.point,
+        }
+        trace.push(
+          Object.freeze({
+            _tag: 'CoroutineFramePush',
+            function: pending.activation.function,
+            point: frameState.point,
+            ticket,
+            span: suspensionSpan(program, frameState.point),
+          }),
+        )
+      } else {
+        existing.point = frameState.point
+      }
+      const frame = pending.activation.coroutineFrame
+      if (frame !== undefined)
+        trace.push(
+          Object.freeze({
+            _tag: 'CoroutineFrameStateTransition',
+            function: pending.activation.function,
+            point: frameState.point,
+            ticket: frame.ticket,
+            span: suspensionSpan(program, frameState.point),
+          }),
+        )
     }
     const origin = context.pending.at(0)?.activation
     if (origin === undefined)
@@ -5403,8 +5566,8 @@ const executeMachine = (
         span: suspensionSpan(program, context.step.origin.point),
       }),
     )
+    return undefined
   }
-
   while (stack.length > 0) {
     const suspended: Array<ActivationRecord> = []
     for (let current = transfer; current !== undefined; current = current.parent)
@@ -5420,146 +5583,7 @@ const executeMachine = (
     if (advanced.done) {
       stack.pop()
       if (advanced.value._tag === 'Blocked') return advanced.value
-      const preparation = transfer?.preparation
-      if (preparation?.activation === activation) {
-        if (preparation.phase === 'Constructor') {
-          if (advanced.value._tag !== 'Value' || advanced.value.value._tag !== 'EffectValue')
-            throw new RangeError('Evaluator continuation allocator constructor returned no Effect')
-          const effect = advanced.value.value
-          const runner = functionFor(program, effect.runner, effect.runnerTypeArguments)
-          if (
-            runner === undefined ||
-            (runner.suspension?.classification ?? 'Synchronous') !== 'Synchronous'
-          )
-            throw new RangeError(
-              'Evaluator continuation allocator runner is not closed synchronous',
-            )
-          const runnerActivation = makeActivation(
-            program,
-            runner,
-            effect.captures,
-            preparation.pending.depth + 1,
-            trace,
-            state,
-          )
-          preparation.phase = 'Runner'
-          preparation.activation = runnerActivation
-          stack.push(runnerActivation)
-          continue
-        }
-        if (advanced.value._tag !== 'Value' || advanced.value.value._tag !== 'EffectOutcomeValue')
-          throw new RangeError('Evaluator continuation allocator runner returned no typed outcome')
-        const allocationOutcome = advanced.value.value
-        if (allocationOutcome.tag === 0) {
-          if (allocationOutcome.payload._tag !== 'AllocationValue')
-            throw new RangeError('Evaluator continuation allocator success returned no Allocation')
-          transfer?.allocations.push(
-            Object.freeze({ relay: preparation.relay, allocation: allocationOutcome.payload }),
-          )
-          if (transfer !== undefined) delete transfer.preparation
-          if (transfer !== undefined && beginAllocatorPreparation(transfer)) continue
-          if (transfer === undefined)
-            throw new RangeError('Evaluator continuation allocation lost its transfer')
-          publishPreparedTransfer(transfer)
-          continue
-        }
-        const context = transfer
-        if (context === undefined)
-          throw new RangeError('Evaluator continuation refusal lost its transfer')
-        const refusalOrdinal = preparation.index + 1
-        const refused = ContinuationTransaction.prepare(
-          context.relays,
-          allocationOutcome.payload,
-          refusalOrdinal,
-        )
-        if (refused._tag !== 'Refused')
-          throw new RangeError('Evaluator allocator refusal prepared a continuation')
-        const tickets = new Map<number, number>()
-        for (const event of refused.events) {
-          if (event._tag === 'Acquire') {
-            const relay = context.relays.at(event.ordinal - 1)
-            const pending = context.pending.find(
-              (candidate) => candidate.relay === relay,
-            )?.activation
-            const allocation = context.allocations.find(
-              (candidate) => candidate.relay === relay,
-            )?.allocation
-            if (relay === undefined || pending === undefined || allocation === undefined)
-              throw new RangeError('Evaluator accepted continuation lost its rollback owner')
-            const ticket = state.nextContinuation
-            state.nextContinuation += 1
-            tickets.set(event.ordinal, ticket)
-            pending.continuationTicket = ticket
-            pending.continuationPoint = relay.descriptor.point
-            pending.continuationAllocation = allocation
-          }
-          if (
-            event._tag !== 'Request' &&
-            event._tag !== 'Reject' &&
-            event._tag !== 'Acquire' &&
-            event._tag !== 'EndAllocatorLoan' &&
-            event._tag !== 'Initialize'
-          )
-            continue
-          const tag =
-            event._tag === 'Request'
-              ? 'ContinuationRequest'
-              : event._tag === 'Reject'
-                ? 'ContinuationReject'
-                : event._tag === 'Acquire'
-                  ? 'ContinuationAcquire'
-                  : event._tag === 'EndAllocatorLoan'
-                    ? 'ContinuationLoanEnd'
-                    : 'ContinuationInitialize'
-          trace.push(
-            Object.freeze({
-              _tag: tag,
-              function:
-                context.relays.at(event.ordinal - 1)?.function.declaration ??
-                preparation.pending.function,
-              point: event.point,
-              ordinal: event.ordinal,
-              ...(event._tag === 'Request'
-                ? { bytes: event.bytes, alignment: event.alignment }
-                : {}),
-              ...(tickets.get(event.ordinal) === undefined
-                ? {}
-                : { ticket: tickets.get(event.ordinal) }),
-              span: suspensionSpan(program, event.point),
-            }) as ContinuationTraceEvent,
-          )
-        }
-        // The intrinsic origin has no caller frame and must not be resumed with allocator failure.
-        // Every relay activation, including already-initialized inner frames and the refusing
-        // current activation, does resume through its ordinary typed-failure path. That executes
-        // source cleanup before releaseActivationContinuation reclaims accepted private storage.
-        const rollbackPending = context.pending.slice(1)
-        const innermost = rollbackPending.at(0)
-        const failureOutcome =
-          innermost?.relay?.descriptor.runner.outcome ?? context.step.origin.deferred.outcome
-        const failureTag = Type.failureMembers(failureOutcome).findIndex(
-          (member) => member.module === 'silk/core' && member.name === 'OutOfMemory',
-        )
-        if (failureTag < 0)
-          throw new RangeError('Evaluator continuation refusal has no OutOfMemory channel')
-        const refusal: Step = Object.freeze({
-          _tag: 'Value',
-          value: Object.freeze({
-            _tag: 'EffectOutcomeValue',
-            type: failureOutcome,
-            tag: failureTag + 1,
-            payload: allocationOutcome.payload,
-          }),
-        })
-        if (!rollbackPending.some((candidate) => candidate.activation === preparation.pending))
-          throw new RangeError('Evaluator continuation refusal lost its pending activation')
-        const survivors = rollbackPending.map((pending) => pending.activation).reverse()
-        transfer = context.parent
-        stack.push(...survivors)
-        resumed = refusal
-        continue
-      }
-      releaseActivationContinuation(activation)
+      releaseActivationFrame(activation)
       if (stack.length === 0 && transfer !== undefined) {
         let next = transfer.pending.shift()
         while (next === undefined && transfer.parent !== undefined) {
@@ -5569,7 +5593,7 @@ const executeMachine = (
         if (next !== undefined) {
           stack.push(next.activation)
           if (
-            next.relay === undefined &&
+            next.state === undefined &&
             advanced.value._tag === 'Value' &&
             advanced.value.value._tag === 'EffectOutcomeValue'
           )
@@ -5583,19 +5607,18 @@ const executeMachine = (
               }),
             )
           if (
-            next.activation.continuationTicket !== undefined &&
-            next.activation.continuationPoint !== undefined &&
+            next.activation.coroutineFrame !== undefined &&
             advanced.value._tag === 'Value' &&
             advanced.value.value._tag === 'EffectOutcomeValue'
           )
             trace.push(
               Object.freeze({
-                _tag: 'ContinuationResume',
+                _tag: 'CoroutineFrameResume',
                 function: next.activation.function,
-                point: next.activation.continuationPoint,
-                ticket: next.activation.continuationTicket,
+                point: next.activation.coroutineFrame.point,
+                ticket: next.activation.coroutineFrame.ticket,
                 outcome: advanced.value.value.tag === 0 ? 'Success' : 'Failure',
-                span: suspensionSpan(program, next.activation.continuationPoint),
+                span: suspensionSpan(program, next.activation.coroutineFrame.point),
               }),
             )
           resumed = advanced.value
@@ -5617,9 +5640,7 @@ const executeMachine = (
       })
       transfer = {
         step,
-        relays: [],
         pending: [Object.freeze({ activation })],
-        allocations: [],
         ...(transfer === undefined ? {} : { parent: transfer }),
       }
       trace.push(
@@ -5635,7 +5656,8 @@ const executeMachine = (
         resumed = step
         continue
       }
-      publishPreparedTransfer(transfer)
+      const storageFailure = publishTransfer(transfer)
+      if (storageFailure !== undefined) return blockedStep(storageFailure)
       continue
     }
     if (request._tag === 'RelayTransferRequest') {
@@ -5644,16 +5666,16 @@ const executeMachine = (
       transfer.pending.push(
         Object.freeze({
           activation,
-          ...(request.relay === undefined ? {} : { relay: request.relay }),
+          ...(request.state === undefined ? {} : { state: request.state }),
         }),
       )
-      if (request.relay !== undefined) transfer.relays.push(request.relay)
       stack.pop()
       if (stack.length > 0) {
         resumed = transfer.step
         continue
       }
-      if (!beginAllocatorPreparation(transfer)) publishPreparedTransfer(transfer)
+      const storageFailure = publishTransfer(transfer)
+      if (storageFailure !== undefined) return blockedStep(storageFailure)
       continue
     }
     let suspendedDepth = 0
@@ -5703,6 +5725,7 @@ const executeMachine = (
 
 export const defaultMaxSteps = 1_000_000
 export const defaultMaxCallDepth = 1_024
+export const defaultMaxExecutionStackBytes = Number.MAX_SAFE_INTEGER
 
 const evaluationLimitOption = (
   name: string,
@@ -5725,6 +5748,8 @@ export interface Options {
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly maxSteps?: number
   readonly maxCallDepth?: number
+  /** Host-only deterministic bound for compiler-private coroutine-frame storage. */
+  readonly maxExecutionStackBytes?: number
 }
 
 /** Executes the lowered program from the discovered entry, replaying MIR operations as a trace. */
@@ -5738,6 +5763,11 @@ export const evaluate = (
     'maxCallDepth',
     options.maxCallDepth,
     defaultMaxCallDepth,
+  )
+  const maxExecutionStackBytes = evaluationLimitOption(
+    'maxExecutionStackBytes',
+    options.maxExecutionStackBytes,
+    defaultMaxExecutionStackBytes,
   )
   const availability = IntrinsicAvailability.select(program.intrinsics, 'Evaluator')
   if (availability._tag === 'Unavailable') {
@@ -5789,10 +5819,12 @@ export const evaluate = (
     nextFrame: 0,
     nextAllocation: 0,
     nextCallable: 0,
-    nextContinuation: 0,
+    nextCoroutineFrame: 0,
     steps: 0,
     maxSteps,
     maxCallDepth,
+    maxExecutionStackBytes,
+    executionStackBytes: 0,
     activeFrames: Object.freeze([]),
     cells: new Map(),
     allocations: new Map(),
@@ -5807,6 +5839,21 @@ export const evaluate = (
     ...(options.osFileSystem === undefined ? {} : { osFileSystem: options.osFileSystem }),
   })
   if (result._tag === 'Blocked') {
+    if (result.reason._tag === 'Trap') {
+      const frozenTrace = Object.freeze([...trace])
+      const history = causalHistory(frozenTrace, 'Trap')
+      return Object.freeze({
+        _tag: 'Trap',
+        classification: 'Trap',
+        entry,
+        status: 2,
+        reason: result.reason.reason,
+        provenance: result.reason.span,
+        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        history,
+        trace: frozenTrace,
+      })
+    }
     return Object.freeze({
       _tag: 'Blocked',
       entry,
@@ -5822,33 +5869,68 @@ export const evaluate = (
   const status = result.value
   const statusCode = Number(status.value)
   if (program.entry._tag === 'EffectEntry' && statusCode !== 0) {
-    const failure = program.entry.failures.find((candidate) => candidate.tag === statusCode)
+    const closedFailure = [...trace]
+      .reverse()
+      .find(
+        (event): event is EffectTraceEvent =>
+          event._tag === 'EffectFailure' && event.phase === 'Closed',
+      )
+    const failure = program.entry.failures.find((candidate) => candidate.tag === closedFailure?.tag)
     if (failure === undefined) {
+      const provenance = argumentSpanFallback(fn)
+      const frozenTrace = Object.freeze([...trace])
+      const history = causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
-        _tag: 'Blocked',
+        _tag: 'Trap',
+        classification: 'Trap',
         entry,
-        reason: Object.freeze({
-          _tag: 'Trap',
-          function: entry,
-          reason: `effect entry returned invalid failure tag ${status.value}`,
-          span: argumentSpanFallback(fn),
-        }),
-        trace: Object.freeze([...trace]),
+        status: 2,
+        reason: 'effect entry returned failure status without a closed typed failure',
+        provenance,
+        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        history,
+        trace: frozenTrace,
       })
     }
+    const frozenTrace = Object.freeze([...trace])
+    const history = causalHistory(frozenTrace, 'TypedFailure', failure.identity)
+    const cause = history.at(-1)
     return Object.freeze({
       _tag: 'UnhandledFailure',
+      classification: 'TypedFailure',
       entry,
+      status: 1,
       tag: failure.tag,
-      report: failure.report,
-      trace: Object.freeze([...trace]),
+      identity: failure.identity,
+      provenance: cause?.provenance ?? argumentSpanFallback(fn),
+      logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+      history,
+      trace: frozenTrace,
     })
   }
+  const frozenTrace = Object.freeze([...trace])
+  const history = causalHistory(frozenTrace, 'Success')
+  const root = frozenTrace.find(
+    (event): event is EntryTraceEvent =>
+      event._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name),
+  )
+  const provenance =
+    [...frozenTrace].reverse().find((event) => event._tag === 'Return')?.span ??
+    root?.span ??
+    argumentSpanFallback(fn)
   return Object.freeze({
     _tag: 'Completed',
+    classification: 'Success',
     entry,
+    status: statusCode,
     result: result.value,
-    trace: Object.freeze([...trace]),
+    provenance,
+    logicalPath:
+      root === undefined
+        ? Object.freeze([])
+        : Object.freeze([Object.freeze({ function: root.function, provenance: root.span })]),
+    history,
+    trace: frozenTrace,
   })
 }
 

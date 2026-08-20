@@ -11,8 +11,8 @@
 //! standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
 //! stdout and stderr captures in [`ProcessOutcome`]. A nonzero exit is ordinary outcome data.
 //!
-//! [`ProcessFailure`] is reserved for failing to spawn, wait, or capture; it carries a stable
-//! portable reason and may retain a provider code. Execution also reports [`OutOfMemory`] when
+//! [`ProcessError`] is reserved for failing to spawn, wait, or capture; it carries a stable
+//! portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`] when
 //! captured output cannot be owned.
 
 // The portable child-process boundary: one blocking execution from structured input to structured
@@ -20,6 +20,7 @@
 // no part of it is ever parsed as a command line, so a space, a quote, or a metacharacter inside an
 // argument reaches the child as data.
 
+import silk.bool as bool
 import silk.bytes {
   Bytes,
   append as bytesAppend,
@@ -28,8 +29,13 @@ import silk.bytes {
   length as bytesLength,
   make as bytesMake
 }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
 import silk.filesystem { Path, rawBytes as pathRawBytes }
+import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }
+import silk.u8 as u8
+import silk.usize as usize
 
 /// The stage of one execution that failed.
 pub struct ProcessOperation {
@@ -48,7 +54,7 @@ pub struct ProcessReason {
 /// # Details
 ///
 /// A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
-pub struct ProcessFailure {
+pub struct ProcessError {
   /// The execution stage that failed.
   pub operation: ProcessOperation
   /// The portable reason callers can recover by.
@@ -56,8 +62,6 @@ pub struct ProcessFailure {
   providerCodeValue: i32
   hasProviderCode: bool
 }
-
-impl Report for ProcessFailure {}
 
 /// Selects the start stage, which covers building the child and reaching its first instruction.
 pub fn spawnOperation() -> ProcessOperation { return ProcessOperation { code: 0 } }
@@ -93,8 +97,8 @@ pub fn other() -> ProcessReason { return ProcessReason { code: 5 } }
 pub fn reasonCode(reason: ProcessReason) -> i32 { return reason.code }
 
 /// Constructs one typed process failure without a provider detail.
-pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessFailure {
-  return ProcessFailure {
+pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError {
+  return ProcessError {
     operation: move operation,
     reason: move reason,
     providerCodeValue: 0,
@@ -107,8 +111,8 @@ pub fn failureWithCode(
   operation: ProcessOperation,
   reason: ProcessReason,
   code: i32
-) -> ProcessFailure {
-  return ProcessFailure {
+) -> ProcessError {
+  return ProcessError {
     operation: move operation,
     reason: move reason,
     providerCodeValue: code,
@@ -117,7 +121,7 @@ pub fn failureWithCode(
 }
 
 /// Returns the provider-defined numeric detail when one was retained.
-pub fn providerCode(error: &ProcessFailure) -> Option<i32> {
+pub fn providerCode(error: &ProcessError) -> Option<i32> {
   if error.hasProviderCode { return some<i32>(error.providerCodeValue) }
   return none<i32>()
 }
@@ -139,7 +143,7 @@ pub struct ProcessRequest {
   directoryValue: Bytes
 }
 
-effect fn terminate(target: &mut Bytes) -> () ! OutOfMemory ? &mut Allocator {
+effect fn terminate(target: &mut Bytes) -> () ! OutOfMemoryError ? &mut Allocator {
   let terminator = [u8.toU8(0)]
   let appended = run bytesAppend(move target, &terminator)
   return ()
@@ -147,7 +151,7 @@ effect fn terminate(target: &mut Bytes) -> () ! OutOfMemory ? &mut Allocator {
 
 /// Builds a request that runs `program` with no arguments, an empty environment, and the caller's
 /// own working directory.
-pub effect fn request(program: &Path) -> ProcessRequest ! OutOfMemory ? &mut Allocator {
+pub effect fn request(program: &Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator {
   let owned = run bytesCopy(pathRawBytes(program))
   return ProcessRequest {
     programValue: move owned,
@@ -164,7 +168,7 @@ pub effect fn request(program: &Path) -> ProcessRequest ! OutOfMemory ? &mut All
 pub effect fn requestWithin(
   program: &Path,
   directory: &Path
-) -> ProcessRequest ! OutOfMemory ? &mut Allocator {
+) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator {
   let mut built = run request(program)
   let appended = run bytesAppend(&mut built.directoryValue, pathRawBytes(directory))
   return move built
@@ -174,7 +178,7 @@ pub effect fn requestWithin(
 pub effect fn addArgument(
   self: &mut ProcessRequest,
   value: &[u8]
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let appended = run bytesAppend(&mut self.argumentValues, value)
   let terminated = run terminate(&mut self.argumentValues)
   self.argumentTotal = self.argumentTotal + usize.ONE
@@ -186,7 +190,7 @@ pub effect fn setVariable(
   self: &mut ProcessRequest,
   name: &[u8],
   value: &[u8]
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let appendedName = run bytesAppend(&mut self.environmentValues, name)
   let separator = [u8.toU8(61)]
   let appendedSeparator = run bytesAppend(&mut self.environmentValues, &separator)
@@ -269,12 +273,12 @@ pub struct ProcessOutcome {
 ///
 /// One `execute` runs the request to completion with the child's standard input closed, and owns
 /// the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
-/// failure to start, to wait, or to capture is `ProcessFailure`.
+/// failure to start, to wait, or to capture is `ProcessError`.
 pub service ChildProcess {
   /// Runs one structured request to completion and captures both output streams.
   effect fn execute(
     request: &ProcessRequest
-  ) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator
+  ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 }
 
 /// Constructs the outcome of a child that returned `code`.
@@ -334,6 +338,6 @@ pub fn errorBytes(outcome: &ProcessOutcome) -> &[u8] {
 /// Builds one service execute effect.
 pub effect fn submit(
   request: &ProcessRequest
-) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator {
+) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator {
   return run ChildProcess.execute(request)
 }

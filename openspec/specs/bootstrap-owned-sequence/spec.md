@@ -13,7 +13,7 @@ collection behavior.
 `Vector<T>` SHALL support creating an empty vector without allocating, appending owned elements
 with amortized geometric growth, and reporting length and capacity. Growth SHALL allocate a
 replacement buffer, move exactly the initialized elements, commit only after every move succeeds,
-and then release the old buffer. Append SHALL fail only with the typed `OutOfMemory` failure of the
+and then release the old buffer. Append SHALL fail only with the typed `OutOfMemoryError` failure of the
 underlying allocator requirement.
 
 #### Scenario: Grow across a reallocation
@@ -24,7 +24,7 @@ underlying allocator requirement.
 #### Scenario: Failed growth preserves the vector
 
 - **WHEN** append requires growth and the replacement allocation fails
-- **THEN** append fails with `OutOfMemory`, the vector retains its prior elements, length, and capacity, and no element or allocation is leaked or dropped twice
+- **THEN** append fails with `OutOfMemoryError`, the vector retains its prior elements, length, and capacity, and no element or allocation is leaked or dropped twice
 
 #### Scenario: Empty vector costs nothing
 
@@ -97,7 +97,7 @@ every comparison and every exchange is decided by run boundaries alone and never
 capacity, or an engine detail. Ordering SHALL move each element at most once per exchange, so no
 element is duplicated, leaked, or dropped twice, and SHALL NOT require the element type to be `Copy`
 to move an element. Ordering allocates a scratch buffer and therefore SHALL carry the typed
-`OutOfMemory` failure and the allocator requirement.
+`OutOfMemoryError` failure and the allocator requirement.
 
 `Vector<T>` SHALL support searching a sorted vector for an element through the same `Order` witness,
 returning an optional index that is present only when a matching element exists. The search SHALL

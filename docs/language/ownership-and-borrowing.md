@@ -69,7 +69,7 @@ pub struct Point {
   pub y: i32
 }
 
-impl Copy for Point
+impl Copy for Point {}
 
 fn sum(point: Point) -> i32 {
   let again = point
@@ -93,12 +93,8 @@ allocate new storage, fail, or require an allocator, and returns a genuinely ind
 raw non-owning pointer may be Copy, but copying that pointer neither copies nor owns its allocation.
 
 **Diagnostics:** Using an affine value where an implicit copy would be required reports `OWN0003`
-and suggests an explicit move when ownership transfer is valid. An invalid `impl Copy` must identify
-the first affine or cleanup-bearing reason; a stable diagnostic code for that declaration error has
-not yet been assigned.
-
-**Current compiler:** The accepted `impl Copy` marker has not yet been reconciled with the current
-nominal-type implementation, which still treats user-defined structs as affine.
+and suggests an explicit move when ownership transfer is valid. An invalid `impl Copy` reports
+`SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
 **Evidence:** [prototype syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
 [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md).
@@ -627,9 +623,8 @@ Passing a fixed array directly where a slice is expected reports `SEM0059` and r
 borrow. A temporary-derived view that escapes its hidden owner reports the applicable returned-view
 or stored-borrow diagnostic at the escape boundary.
 
-**Current compiler:** The compiler currently rejects temporary and indexed slice operands with
-`SEM0056`. Those cases must create or retain the appropriate owner and loan instead; `SEM0056`
-remains appropriate only for operands that cannot denote or produce owned storage.
+The compiler materializes temporary owners and retains indexed-place selectors through HIR and MIR.
+`SEM0056` remains appropriate only for operands that cannot denote or produce owned storage.
 
 **Evidence:** [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
@@ -704,10 +699,6 @@ reports `SEM0054` at the invalid type position. A borrowed binding that outlives
 ownership escape diagnostic at the escaping use. Escape through a callable, Effect, or return
 boundary reports that boundary's specific diagnostic rather than silently extending the owner's
 lifetime.
-
-**Current compiler:** The compiler currently reports `SEM0055` for a direct local borrow expression.
-That restriction must be replaced with the same provenance and loan tracking already used for local
-returned views.
 
 **Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
 [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
@@ -1226,13 +1217,9 @@ identifies the remaining callable parameters. A supplied argument with the wrong
 ordinary argument-type diagnostic. Invalid ownership at construction reports the corresponding
 move or borrow diagnostic.
 
-**Current compiler:** The compiler currently permits only the special case `K = N - 1`, which
-creates a unary callable. A deeper partial application such as `combine(3)` currently reports
-`SEM0079`; this implementation restriction does not match the confirmed rule.
-
-**Conflicting artifact:** The
-[callable specification](../../openspec/specs/bootstrap-callable-values/spec.md) retains the older
-unary-only rule and requires reconciliation after the language-definition pass.
+The compiler represents the complete ordered remaining-parameter prefix and captured trailing
+suffix. Successive direct stages retain capture evaluation order while invocation orders values by
+their original parameter positions.
 
 **Evidence:** [indirect-call acceptance tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts),
 [operator pipeline tests](../../packages/compiler/test/OperatorPipeline.test.ts).
@@ -1457,10 +1444,9 @@ OWN-004. A Copy executable field may be read like any other Copy field. Compiler
 layout choices must not force an otherwise Copy, cleanup-free source value to become affine.
 
 **Diagnostics:** Insufficient access to a stored callable reports `OWN0014`; insufficient access to
-a stored Effect reports `OWN0015`. Direct affine field extraction should report the ordinary
-`OWN0002` partial-move diagnostic. The current compiler instead uses `OWN0013` for executable
-representation fields and treats all representation-bearing nominals as move-only; both behaviors
-require reconciliation with ordinary aggregate ownership.
+a stored Effect reports `OWN0015`. Direct affine field extraction reports the ordinary `OWN0002`
+partial-move diagnostic. Executable representation does not introduce another diagnostic or
+ownership category.
 
 **Evidence:** [nominal callable storage specification](../../openspec/specs/bootstrap-nominal-callable-storage/spec.md),
 [nominal Effect storage specification](../../openspec/specs/bootstrap-nominal-effect-storage/spec.md),

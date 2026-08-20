@@ -9,6 +9,10 @@
 //! may require an [`Allocator`]. Shared and exclusive views borrow only the initialized prefix;
 //! later appends can reallocate, so do not retain a view across a mutation.
 
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.u8 as u8
+import silk.usize as usize
 import silk.vector {
   Vector,
   make as vectorMake,
@@ -30,7 +34,7 @@ pub fn make() -> Bytes {
 }
 
 /// Allocates an owned initialized byte buffer of exactly `length` zero octets.
-pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemory ? &mut Allocator {
+pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   let mut result = make()
   let mut index = usize.ZERO
   while index < length {
@@ -46,14 +50,14 @@ pub fn length(self: &Bytes) -> usize {
 }
 
 /// Copies one borrowed byte sequence into independently owned storage.
-pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemory ? &mut Allocator {
+pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
   let mut result = make()
   let appended = run append(&mut result, values)
   return move result
 }
 
 /// Appends one complete borrowed byte sequence in source order with one bulk copy.
-pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
   let appended = run vectorAppendBytes(&mut self.values, values)
   return ()
 }

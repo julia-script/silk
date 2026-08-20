@@ -6,7 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 
-const source = 'pub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
+const source = 'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 const encoder = new TextEncoder()
 
 const golden = (name: string): string =>

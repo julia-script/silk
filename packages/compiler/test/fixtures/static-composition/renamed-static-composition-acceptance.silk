@@ -1,3 +1,13 @@
+import silk.core {Allocator}
+
+import silk.core {OutOfMemoryError}
+
+import silk.core {SystemAllocator}
+
+import silk.effects as Effect
+
+import silk.layout {Layout}
+
 struct SelectionProblem {
   code: i32
 }
@@ -24,7 +34,7 @@ interface Reader<T> {
   fn decode(value: &T) -> i32
 }
 
-interface CompleteReader<S, Arguments, A, !E, ?R> {
+interface CompleteReader<S, Arguments, A, E, ?R> {
   effect fn decode(self: &S, arguments: Arguments) -> A ! E ? R
 }
 
@@ -46,11 +56,11 @@ impl Reader<ScalarPlan> for ScalarPlan {
   decode: ScalarPlan.numberDecode
 }
 
-impl CompleteReader<ScalarPlan, i32, i32 ! DecodeProblem ? &Pulse> for ScalarPlan {
+impl CompleteReader<ScalarPlan, i32, i32, DecodeProblem ? &Pulse> for ScalarPlan {
   decode: ScalarPlan.completeNumberDecode
 }
 
-fn pendingComplete<T: CompleteReader<T, i32, i32 ! DecodeProblem ? &Pulse>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Pulse> {
+fn pendingComplete<T: CompleteReader<T, i32, i32, DecodeProblem ? &Pulse>>(value: &T) -> Effect<i32 ! DecodeProblem ? &Pulse> {
   return CompleteReader.decode(value, 0)
 }
 
@@ -95,11 +105,11 @@ impl Drop for Guard {
   }
 }
 
-struct Deferred<A, !E, ?R, F: once Effect<A ! E ? R>> {
+struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> {
   operation: F
 }
 
-fn defer<A, !E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
+fn defer<A, E, ?R, F: once Effect<A ! E ? R>>(operation: F) -> Deferred<A, E, R, F> {
   return Deferred<A, E, R> {operation: move operation}
 }
 
@@ -107,9 +117,7 @@ effect fn guarded(guard: Guard) -> i32 {
   return guard.value
 }
 
-effect fn delayed(guard: Guard) -> i32
-! OutOfMemory
-? &mut Allocator {
+effect fn delayed(guard: Guard) -> i32 {
   let base = run Effect.suspend(
     effect {
       return 0
@@ -252,7 +260,7 @@ fn executeNode(value: i32) -> i32 {
 }
 
 effect fn uncalledCleanupCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -261,7 +269,7 @@ effect fn uncalledCleanupCase(value: i32) -> i32
 }
 
 effect fn calledCleanupCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -270,7 +278,7 @@ effect fn calledCleanupCase(value: i32) -> i32
 }
 
 effect fn suspensionCase(value: i32) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
@@ -281,7 +289,7 @@ effect fn suspensionCase(value: i32) -> i32
 effect fn routeNode(
   request: ExecuteNode | DescribeNode | ChooseFaultNode | ReadFaultNode | DeferredDropNode | InvokedDropNode | SuspendedNode,
 ) -> i32
-! OutOfMemory
+! OutOfMemoryError
 ? &mut Allocator {
   return match move request {
     ExecuteNode {value} => executeNode(value)
@@ -294,7 +302,7 @@ effect fn routeNode(
   }
 }
 
-effect fn recoverOutOfMemory(error: OutOfMemory) -> i32 {
+effect fn recoverOutOfMemory(error: OutOfMemoryError) -> i32 {
   return 0
 }
 

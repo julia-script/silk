@@ -13,6 +13,7 @@
 //! A [`ScalarCursor`] is meaningful only for the same unchanged string from which its traversal
 //! began. Start with [`scalarCursor`] and advance only with [`nextCursor`].
 
+import silk.bool as bool
 import silk.bytes {
   Bytes,
   make as bytesMake,
@@ -21,8 +22,17 @@ import silk.bytes {
   asSlice as bytesAsSlice,
   length as bytesLength
 }
+import silk.char as char
+import silk.char { fromU32 as charFromU32 }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.option { None }
 import silk.option { Option, none, some }
+import silk.option { Some }
 import silk.result { Result, failResult, succeed }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 
 /// An owned sequence of valid UTF-8 bytes.
 pub struct String {
@@ -42,7 +52,7 @@ pub struct ScalarCursor {
 
 /// One decoded Unicode scalar and the cursor following it.
 pub struct ScalarStep {
-  scalar: u32
+  scalar: char
   byteOffset: usize
   next: ScalarCursor
 }
@@ -108,6 +118,17 @@ fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
   return none<usize>()
 }
 
+/// Borrows bytes as text without validating their UTF-8 encoding.
+///
+/// # Gotchas
+///
+/// The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
+/// returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
+pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string {
+  unsafe { return Intrinsic.stringFromUtf8Unchecked(values) }
+  return ""
+}
+
 /// Validates a complete byte view and borrows it as text without allocating.
 ///
 /// # Details
@@ -122,10 +143,8 @@ pub fn fromUtf8(values: &[u8]) -> Result<string, InvalidUtf8> {
   if failure <= values.length {
     return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: failure })
   }
-  unsafe {
-    let text = Intrinsic.stringFromUtf8Unchecked(values)
-    return succeed<string, InvalidUtf8>(text)
-  }
+  let text = unsafe fromUtf8Unchecked(values)
+  return succeed<string, InvalidUtf8>(text)
   return failResult<string, InvalidUtf8>(InvalidUtf8 { offset: usize.ZERO })
 }
 
@@ -135,7 +154,7 @@ pub fn make() -> String {
 }
 
 /// Copies valid text into independently owned storage.
-pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
+pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator {
   let source = Intrinsic.stringUtf8Bytes(value)
   let bytes = run bytesCopy(source)
   return String { bytes: move bytes }
@@ -149,7 +168,7 @@ pub effect fn copy(value: string) -> String ! OutOfMemory ? &mut Allocator {
 /// back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
 /// encoder that wants to return its result and let its working buffer go; this validates the same
 /// way and owns the outcome.
-pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemory ? &mut Allocator {
+pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemoryError ? &mut Allocator {
   let failure = match move firstInvalidUtf8(values) {
     Some<usize> { value } => move value
     None {} => values.length + usize.ONE
@@ -167,7 +186,7 @@ pub effect fn copyUtf8(values: &[u8]) -> Result<String, InvalidUtf8> ! OutOfMemo
 // cost is not: composing a message from several pieces is what this API is for, and a copy per
 // piece made that quadratic in the message and linear in allocations.
 /// Appends complete valid text atomically with respect to allocation failure.
-pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemoryError ? &mut Allocator {
   let suffix = Intrinsic.stringUtf8Bytes(value)
   return run bytesAppend(&mut self.bytes, suffix)
 }
@@ -178,7 +197,7 @@ pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemory ? &mu
 ///
 /// The companion to `append` for text a program computed rather than wrote. The appended String is
 /// consumed, so a rendered value composes into a message without the caller keeping it alive.
-pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemoryError ? &mut Allocator {
   let suffix = bytesAsSlice(&value.bytes)
   return run bytesAppend(&mut self.bytes, suffix)
 }
@@ -186,8 +205,7 @@ pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemory 
 /// Borrows the complete owned contents as valid text without allocating.
 pub fn view(self: &String) -> string {
   let bytes = bytesAsSlice(&self.bytes)
-  unsafe { return Intrinsic.stringFromUtf8Unchecked(bytes) }
-  return ""
+  return unsafe fromUtf8Unchecked(bytes)
 }
 
 /// Borrows a string's immutable UTF-8 encoding.
@@ -221,7 +239,7 @@ pub fn cursorByteOffset(cursor: &ScalarCursor) -> usize {
 }
 
 /// Returns the decoded Unicode scalar value for one step.
-pub fn scalarValue(step: &ScalarStep) -> u32 {
+pub fn scalarValue(step: &ScalarStep) -> char {
   return step.scalar
 }
 
@@ -269,9 +287,12 @@ pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<ScalarStep> {
       }
     }
   }
-  return some<ScalarStep>(ScalarStep {
-    scalar: scalar,
-    byteOffset: offset,
-    next: ScalarCursor { byteOffset: offset + width }
-  })
+  return match move charFromU32(scalar) {
+    Some<char> { value: decoded } => some<ScalarStep>(ScalarStep {
+      scalar: decoded,
+      byteOffset: offset,
+      next: ScalarCursor { byteOffset: offset + width }
+    })
+    None {} => none<ScalarStep>()
+  }
 }

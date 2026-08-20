@@ -181,7 +181,7 @@ it.effect('reports only actionable diagnostics for empty and final-expression so
       })),
       [
         { code: 'SEM0006', message: 'Unknown value foo' },
-        { code: 'PAR0004', message: 'Expected return statement' },
+        { code: 'SEM0130', message: 'A reachable path must return i32' },
       ],
     )
   }),
@@ -351,7 +351,9 @@ it.effect('preserves one exact target and layout plan across facade queries and 
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'memory/plan',
-      ascii('pub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
+      ascii(
+        'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+      ),
       'wasm32-unknown-unknown',
     )
     const target = Analysis.targetOf(self)

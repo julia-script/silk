@@ -22,12 +22,27 @@
 //! # Examples
 //! ## Check floating-point boundaries without losing their representation
 //! ```silk
+//! import silk.f64 as f64
+//!
 //! pub fn main() -> i32 {
 //!   if f64.toBits(f64.round(-0.25)) != f64.toBits(-0.0) { return 1 }
 //!   if !f64.isNaN(f64.sqrt(-1.0)) { return 2 }
 //!   return 42
 //! }
 //! ```
+
+import silk.bool as bool
+import silk.f32 as f32
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
 
 /// The largest finite f64.
 pub const MAX: f64 = 1.7976931348623157e308

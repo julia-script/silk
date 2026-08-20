@@ -28,7 +28,7 @@ Silk over one sealed target-neutral intrinsic, and ordinary Effect combinators c
 without learning a second Effect representation. Each concrete suspendable invocation has one
 compiler-shaped coroutine frame whose maximum layout is known statically and whose states reuse the
 same storage. `Effect.suspend` therefore preserves the child's failure and requirement channels; it
-does not add `OutOfMemory` or `Allocator`. Dynamic recursion still consumes finite execution storage,
+does not add `OutOfMemoryError` or `Allocator`. Dynamic recursion still consumes finite execution storage,
 but that storage belongs to the compiler-owned execution stack and exhaustion is a fatal trap rather
 than a typed Effect failure.
 
@@ -65,7 +65,7 @@ recursive result returns.
 #### Current Silk
 
 ```silk,ignore
-effect fn count(value: i32) -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn count(value: i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
   if value == 0 { return 0 }
 
   let inner = run Effect.suspend(count(value - 1))
@@ -117,7 +117,7 @@ Transform the result of a potentially suspending Effect without exposing continu
 ```silk,ignore
 fn increment(value: i32) -> i32 { return value + 1 }
 
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let deferred = Effect.suspend(effect { return 41 })
   return run (move deferred |> Effect.map(increment))
 }
@@ -210,7 +210,7 @@ The current standard library widens the contract:
 ```silk,ignore
 effect fn suspend<A, !E, ?R>(
   deferred: once Effect<A ! E ? R>
-) -> A ! E | OutOfMemory ? R | &mut Allocator
+) -> A ! E | OutOfMemoryError ? R | &mut Allocator
 ```
 
 The current compiler builds separately allocated continuation records for active relays and routes
@@ -506,7 +506,7 @@ scheduling policy undefined.
 ### Rejected source-allocation model
 
 The implemented design currently allocates separate continuation records through a source-selected
-`Allocator` and adds `OutOfMemory ? &mut Allocator` to `Effect.suspend`. It makes every allocation
+`Allocator` and adds `OutOfMemoryError ? &mut Allocator` to `Effect.suspend`. It makes every allocation
 observable and recoverable, but it confuses coroutine-frame placement with Effect business
 dependencies, allocates per active continuation rather than reusing one invocation frame, and lets a
 compiler lowering decision infect otherwise unrelated failure and requirement rows. This proposal
@@ -558,7 +558,7 @@ change rather than an assumption that the current artifacts are authoritative.
 | Revision | Date | Change or decision |
 | --- | --- | --- |
 | 1 | 2026-08-19 | Recovered the recursion-driven intent from the historical discussion and implementation; separated stack-safe transfer from future parking; documented the existing behavior and kept continuation allocation, naming, logical depth, and diagnostics open for review. |
-| 2 | 2026-08-19 | Restored the coroutine-storage decision from the original discussion: one statically shaped reusable frame per invocation, compiler-owned dynamic execution stack, fatal exhaustion, and no `OutOfMemory` or `Allocator` added by `Effect.suspend`; identified the later explicit-allocation OpenSpec and implementation as drift to correct. |
+| 2 | 2026-08-19 | Restored the coroutine-storage decision from the original discussion: one statically shaped reusable frame per invocation, compiler-owned dynamic execution stack, fatal exhaustion, and no `OutOfMemoryError` or `Allocator` added by `Effect.suspend`; identified the later explicit-allocation OpenSpec and implementation as drift to correct. |
 | 3 | 2026-08-19 | Author confirmed SUSP-001–006, including exact preservation of `A ! E ? R`, no public allocator or allocation failure, one reusable statically shaped frame per invocation, and fatal execution-stack exhaustion. |
 | 4 | 2026-08-19 | Author confirmed SUSP-007–010: deferred child start after a complete parent transition, suspension-transparent ordinary combinators, one reusable frame per invocation, and one statically known maximum layout over its possible resume states. |
 | 5 | 2026-08-19 | Author confirmed SUSP-011–015: ordinary affine and borrow rules across stable frame states, complete ownership transitions, exact structured cleanup, execution-owned unobservable frame placement, and no allocator-specific suspension restriction. |

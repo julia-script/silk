@@ -50,6 +50,29 @@ it.effect('assigns distinct canonical identities to same-named declarations acro
   }),
 )
 
+it.effect('keeps same-spelled dependency roles distinct across modules', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `import left
+import right
+service Clock {}
+effect fn compare() -> i32 ? &Clock at left.Audit | &Clock at right.Audit { return 0 }`,
+      ],
+      ['left', 'pub role Audit'],
+      ['right', 'pub role Audit'],
+    ])
+    const declaration = index.modules.find((module) => module.module === 'root')?.declarations.at(0)
+
+    assert.deepEqual(index.diagnostics, [])
+    assert.deepEqual(
+      declaration?.requirementRow.requirements.map((requirement) => requirement.role),
+      ['left::Audit', 'right::Audit'],
+    )
+  }),
+)
+
 it.effect('indexes source services and their operation contracts as distinct canonical facts', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
@@ -372,7 +395,7 @@ pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
   }),
 )
 
-it.effect('rejects reference and slice wrappers around the canonical string view', () =>
+it.effect('resolves references and slices around string through ordinary type facts', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
       [
@@ -384,19 +407,9 @@ it.effect('rejects reference and slice wrappers around the canonical string view
 
     assert.deepEqual(
       declaration?.parameters.map((parameter) => parameter.declaredType._tag),
-      ['Unavailable', 'Unavailable', 'Unavailable'],
+      ['Resolved', 'Resolved', 'Resolved'],
     )
-    assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
-        code: diagnostic.code,
-        reason: diagnostic.reason,
-      })),
-      [
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'reference' } },
-        { code: 'SEM0094', reason: { _tag: 'InvalidStringViewType', form: 'slice' } },
-      ],
-    )
+    assert.deepEqual(index.diagnostics, [])
   }),
 )
 
@@ -422,12 +435,12 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
   }),
 )
 
-it.effect('indexes value, failure-row, and requirement-row binders as distinct kinds', () =>
+it.effect('indexes failure payloads as values and requirements as row binders', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
       [
         'root',
-        'effect fn transform<A, !E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
+        'effect fn transform<A, E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
       ],
     ])
     const declaration = index.modules.at(0)?.declarations.at(0)
@@ -439,14 +452,11 @@ it.effect('indexes value, failure-row, and requirement-row binders as distinct k
       })),
       [
         { name: 'A', kind: 'Value' },
-        { name: 'E', kind: 'FailureRow' },
+        { name: 'E', kind: 'Value' },
         { name: 'R', kind: 'RequirementRow' },
       ],
     )
-    assert.deepEqual(
-      declaration?.failureRow.parameters.map((parameter) => parameter.name),
-      ['E'],
-    )
+    assert.deepEqual(declaration?.failureRow.parameters, [])
     assert.deepEqual(
       declaration?.requirementRow.parameters.map((parameter) => parameter.name),
       ['R'],
@@ -463,7 +473,7 @@ it.effect('indexes value, failure-row, and requirement-row binders as distinct k
     ) {
       assert.deepEqual(
         [parameterEffect.type, returnEffect.type].map((effect) => ({
-          failures: Type.failureRowParameters(effect).map((parameter) => parameter.name),
+          failures: Type.failureMemberParameters(effect).map((parameter) => parameter.name),
           requirements: Type.requirementRowParameters(effect).map((parameter) => parameter.name),
         })),
         [
@@ -481,7 +491,7 @@ it.effect('diagnoses generic row binders used in the wrong channel and unbound r
     const index = yield* collect('root', [
       [
         'root',
-        `effect fn bad<!E, ?R>(left: E, right: R) -> E ! R ? E { return left }
+        `effect fn bad<E, ?R>(left: E, right: R) -> E ! R ? E { return left }
 effect fn unbound() -> i32 ? MissingRow { return 0 }`,
       ],
     ])
@@ -495,8 +505,6 @@ effect fn unbound() -> i32 ? MissingRow { return 0 }`,
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
-        { code: 'SEM0088', reason: 'GenericParameterKindMismatch' },
         { code: 'SEM0001', reason: 'UnknownType' },
       ],
     )
@@ -506,7 +514,7 @@ effect fn unbound() -> i32 ? MissingRow { return 0 }`,
 it.effect('keeps cross-kind duplicate binders attached to the first canonical identity', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
-      ['root', 'effect fn duplicate<A, !A, ?A>(value: A) -> A { return value }'],
+      ['root', 'effect fn duplicate<A, A, ?A>(value: A) -> A { return value }'],
     ])
     const parameters = index.modules.at(0)?.declarations.at(0)?.typeParameters ?? []
 
@@ -537,10 +545,7 @@ it.effect('normalizes effect failure rows while retaining source members', () =>
 
     assert.strictEqual(effect?.functionKind, 'Effect')
     assert.strictEqual(effect?.failureRow.members.length, 3)
-    assert.deepEqual(
-      effect?.failureRow.failures.map((failure) => `${failure.module}.${failure.name}`),
-      ['root.First', 'root.Second'],
-    )
+    assert.deepEqual(effect?.failureRow.failures.map(Type.encode), ['root.First', 'root.Second'])
     assert.strictEqual(effect?.failureRow.available, true)
     assert.strictEqual(plain?.functionKind, 'Ordinary')
     assert.deepEqual(plain?.failureRow.failures, [])
@@ -567,20 +572,18 @@ it.effect('resolves imported failure members and preserves invalid row facts', (
     assert.deepEqual(
       declarations.map((declaration) => ({
         available: declaration.failureRow.available,
-        failures: declaration.failureRow.failures.map(
-          (failure) => `${failure.module}.${failure.name}`,
-        ),
+        failures: declaration.failureRow.failures.map(Type.encode),
       })),
       [
         { available: true, failures: ['errors/Error.Error'] },
-        { available: false, failures: [] },
-        { available: false, failures: [] },
+        { available: true, failures: [] },
+        { available: true, failures: ['i32'] },
         { available: false, failures: [] },
       ],
     )
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0061', 'SEM0061', 'SEM0001'],
+      ['SEM0001'],
     )
   }),
 )
@@ -593,10 +596,7 @@ it.effect('rejects failure rows on ordinary functions without losing the row', (
     const declaration = index.modules.at(0)?.declarations.at(0)
 
     assert.strictEqual(declaration?.functionKind, 'Ordinary')
-    assert.deepEqual(
-      declaration?.failureRow.failures.map((failure) => failure.name),
-      ['Problem'],
-    )
+    assert.deepEqual(declaration?.failureRow.failures.map(Type.encode), ['root.Problem'])
     assert.deepEqual(
       index.diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0062'],
@@ -610,12 +610,13 @@ it.effect('resolves explicit Effect contracts and canonical requirement rows', (
       [
         'root',
         `struct Problem {}
-struct FileSystem {}
-struct Allocator {}
-fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator@Scratch> {
+service FileSystem {}
+service Allocator {}
+role Scratch
+fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }
 }
-effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { return 1 }`,
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { return 1 }`,
       ],
     ])
     const [later, work] = index.modules.at(0)?.declarations ?? []
@@ -624,10 +625,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
     const laterType = later?.returnType._tag === 'Resolved' ? later.returnType.type : undefined
     assert.isTrue(laterType !== undefined && Type.isEffect(laterType))
     if (laterType === undefined || !Type.isEffect(laterType)) return
-    assert.deepEqual(
-      Type.failureMembers(laterType).map((failure) => failure.name),
-      ['Problem'],
-    )
+    assert.deepEqual(Type.failureMembers(laterType).map(Type.encode), ['root.Problem'])
     assert.deepEqual(
       Type.requirementMembers(laterType).map((requirement) => ({
         capability: requirement.capability.name,
@@ -635,7 +633,7 @@ effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator@Scratch { retur
         access: requirement.access,
       })),
       [
-        { capability: 'Allocator', role: 'Scratch', access: 'Exclusive' },
+        { capability: 'Allocator', role: 'root::Scratch', access: 'Exclusive' },
         { capability: 'FileSystem', role: 'DefaultRole', access: 'Shared' },
       ],
     )
@@ -910,7 +908,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
   }),
 )
 
-it.effect('accepts one affine Drop hook and rejects Copy targets and malformed headers', () =>
+it.effect('accepts Drop for unmarked structs and rejects malformed headers', () =>
   Effect.gen(function* () {
     const index = yield* collect('drop-hooks', [
       [
@@ -937,7 +935,7 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
     const malformed = Type.nominal('drop-hooks', 'Malformed')
     const missing = Type.nominal('drop-hooks', 'Missing')
     const fallible = Type.nominal('drop-hooks', 'Fallible')
-    for (const rejected of [copyValue, malformed, missing, fallible]) {
+    for (const rejected of [malformed, missing, fallible]) {
       assert.strictEqual(
         index.modules
           .at(0)
@@ -959,6 +957,13 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
     assert.strictEqual(DeclarationIndex.prove(index, guard, Type.dropCapability)._tag, 'Proved')
     assert.isDefined(DeclarationIndex.witness(index, guard, Type.dropCapability))
     assert.isTrue(DeclarationIndex.conforms(index, guard, Type.dropCapability))
+    for (const accepted of [copyValue, Type.nominal('drop-hooks', 'UnionHolder')]) {
+      assert.strictEqual(
+        DeclarationIndex.prove(index, accepted, Type.dropCapability)._tag,
+        'Proved',
+      )
+      assert.isTrue(DeclarationIndex.conforms(index, accepted, Type.dropCapability))
+    }
     assert.deepEqual(
       index.diagnostics
         .filter((diagnostic) => diagnostic.code === 'SEM0084')
@@ -966,8 +971,6 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
           diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
         ),
       [
-        'Copy type drop-hooks.CopyValue cannot implement Drop',
-        'Copy type drop-hooks.UnionHolder cannot implement Drop',
         'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
         'Drop requires one inline fn drop hook and no operation mappings',
         'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
@@ -984,48 +987,65 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
   }),
 )
 
-it.effect('accepts operation-free Report markers and rejects marker bodies', () =>
+it.effect('publishes Copy only from one valid empty sealed impl', () =>
   Effect.gen(function* () {
-    const valid = yield* collect('report-valid', [
+    const index = yield* collect('copy-property', [
       [
-        'report-valid',
-        `struct SomeError { code: i32 }
-impl Report for SomeError {}
-pub fn main() -> i32 { return 0 }`,
+        'copy-property',
+        `struct Point { x: i32, y: i32 }
+impl Copy for Point {}
+struct Token { value: i32 }
+struct Pair<T> { first: T, second: T }
+impl<T: Copy> Copy for Pair<T> {}
+struct Bad { token: Token }
+impl Copy for Bad {}
+struct Owned { allocation: Allocation }
+impl Copy for Owned {}
+struct Droppable { value: i32 }
+impl Drop for Droppable { fn drop(self: &mut Droppable) -> () { return () } }
+impl Copy for Droppable {}
+service Clock {}
+struct FixedClock {}
+impl Copy for FixedClock {}
+impl Clock for FixedClock {}`,
       ],
     ])
-    assert.deepEqual(valid.diagnostics, [])
-    assert.isTrue(
-      DeclarationIndex.conforms(
-        valid,
-        Type.nominal('report-valid', 'SomeError'),
-        Type.reportCapability,
-      ),
-    )
+    const point = Type.nominal('copy-property', 'Point')
+    const token = Type.nominal('copy-property', 'Token')
+    const pairOf = (element: Type.Type): Type.Nominal =>
+      Type.nominal('copy-property', 'Pair', [element])
 
-    const malformed = yield* collect('report-malformed', [
+    assert.isTrue(DeclarationIndex.copyType(index, point))
+    assert.isTrue(DeclarationIndex.copyType(index, Type.nominal('copy-property', 'FixedClock')))
+    assert.isFalse(DeclarationIndex.copyType(index, token))
+    assert.isTrue(DeclarationIndex.copyType(index, pairOf('i32')))
+    assert.isFalse(DeclarationIndex.copyType(index, pairOf(token)))
+    assert.isTrue(DeclarationIndex.copyType(index, Type.fixedArray(point, 2)))
+    const union = Type.union([point, pairOf('i32')])
+    assert.strictEqual(union._tag, 'Normalized')
+    if (union._tag === 'Normalized') assert.isTrue(DeclarationIndex.copyType(index, union.type))
+
+    assert.deepEqual(
+      index.modules
+        .at(0)
+        ?.conformances.filter(
+          (conformance) =>
+            conformance.capability._tag === 'Resolved' &&
+            Type.equals(conformance.capability.type, Type.copyCapability),
+        )
+        .map((conformance) => conformance.validity._tag),
       [
-        'report-malformed',
-        `struct SomeError { code: i32 }
-fn describe(error: &SomeError) -> i32 { return error.code }
-impl Report for SomeError { report: SomeError.describe }
-pub fn main() -> i32 { return 0 }`,
+        'ValidConformance',
+        'ValidConformance',
+        'InvalidConformance',
+        'InvalidConformance',
+        'InvalidConformance',
+        'ValidConformance',
       ],
-    ])
-    assert.include(
-      malformed.diagnostics
-        .filter((diagnostic) => diagnostic.code === 'SEM0083')
-        .map((diagnostic) =>
-          diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
-        ),
-      'Report is an operation-free marker capability',
     )
-    assert.isFalse(
-      DeclarationIndex.conforms(
-        malformed,
-        Type.nominal('report-malformed', 'SomeError'),
-        Type.reportCapability,
-      ),
+    assert.strictEqual(
+      index.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0083').length,
+      3,
     )
   }),
 )

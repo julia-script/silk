@@ -8,7 +8,7 @@
 //! [`make`] is allocation-free. The first growth reserves four elements and later growth doubles
 //! capacity; [`reserve`] can move that cost ahead of mutation. Growth completes in replacement
 //! storage before committing, so [`append`] and [`reserve`] leave the vector unchanged on
-//! [`OutOfMemory`]. Removing, clearing, and truncating drop exactly the elements they discard while
+//! [`OutOfMemoryError`]. Removing, clearing, and truncating drop exactly the elements they discard while
 //! retaining capacity.
 //!
 //! [`sort`] is stable, deterministic, and supports move-only elements, but allocates scratch space.
@@ -27,7 +27,17 @@
 // through &mut self without a partial move, and the Drop hook destroys exactly the
 // initialized elements before the backing buffer releases.
 
+import silk.core as AllocationFailure
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.layout { Layout }
+import silk.layout { LayoutOverflow }
+import silk.option { Option }
 import silk.order { Order }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u8 as u8
+import silk.usize as usize
 
 /// Allocation-free storage state used by an empty [`Vector`].
 pub struct Empty<T> {
@@ -125,7 +135,7 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
 // Growth is atomic: the replacement buffer exists and holds every element before the vector's
 // storage commits, so a failed allocation leaves the original untouched.
 /// Appends one owned value, growing geometrically when capacity is exhausted.
-pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
     if self.capacity == usize.ZERO {
@@ -164,7 +174,7 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemory ? &m
 pub effect fn appendBytes(
   self: &mut Vector<u8>,
   values: &[u8]
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let count = values.length
   if count == usize.ZERO {
     return ()
@@ -224,7 +234,7 @@ pub effect fn insert<T>(
   self: &mut Vector<T>,
   index: usize,
   value: T
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
     if self.capacity == usize.ZERO {
@@ -280,7 +290,7 @@ fn insertBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize, value: T) 
   return absurd<RawBuffer<T>>()
 }
 
-effect fn overflowed() -> Layout ! OutOfMemory {
+effect fn overflowed() -> Layout ! OutOfMemoryError {
   return run AllocationFailure.outOfMemory()
 }
 
@@ -331,9 +341,11 @@ struct Read<T> {
   value: T
 }
 
+impl<T: Copy> Copy for Read<T> {}
+
 // Checked read for Copy element types: out-of-range access traps identically on every engine.
 /// Copies the element at one index and traps when the index is out of range.
-pub fn get<T>(self: &Vector<T>, index: usize) -> T {
+pub fn get<T: Copy>(self: &Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
   }
@@ -346,7 +358,7 @@ pub fn get<T>(self: &Vector<T>, index: usize) -> T {
   }
 }
 
-fn readAt<T>(buffer: &RawBuffer<T>, index: usize) -> T {
+fn readAt<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe {
     return RawBuffer.read<T>(buffer, index)
   }
@@ -528,7 +540,7 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 pub effect fn reserve<T>(
   self: &mut Vector<T>,
   additional: usize
-) -> () ! OutOfMemory ? &mut Allocator {
+) -> () ! OutOfMemoryError ? &mut Allocator {
   let needed = self.length + additional
   if needed <= self.capacity {
     return ()
@@ -563,7 +575,7 @@ pub effect fn reserve<T>(
 // and never by an address, a capacity, or an engine detail. The same input therefore produces the
 // same output on the evaluator, on LLVM, and on Wasm.
 //
-// Merging cannot happen in place, so the sort allocates and carries `! OutOfMemory ? &mut Allocator`.
+// Merging cannot happen in place, so the sort allocates and carries `! OutOfMemoryError ? &mut Allocator`.
 // An insertion sort would need no allocation and no requirement, but it costs O(n^2), and the two
 // signatures are not source-compatible, so the choice cannot be deferred to a later release.
 //
@@ -583,7 +595,7 @@ struct Applied<T> {
 }
 
 /// Orders the elements in place. Equal elements keep their input order.
-pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemory ? &mut Allocator {
+pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator {
   let count = self.length
   if count <= usize.ONE {
     return ()
@@ -632,7 +644,7 @@ pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemory ? &mut Al
             let indices = asSlice<usize>(&order)
             let after = RawBuffer.view<T>(&owned, indices[right], usize.ONE)
             let before = RawBuffer.view<T>(&owned, indices[left], usize.ONE)
-            takeRight = after[usize.ZERO] < before[usize.ZERO]
+            takeRight = (&after[usize.ZERO]) < (&before[usize.ZERO])
           }
         }
         let mut picked = usize.ZERO
@@ -726,14 +738,14 @@ pub fn binarySearch<T: Order>(self: &Vector<T>, target: T) -> Option<usize> {
   let mut high = self.length
   while low < high {
     let middle = low + (high - low) / two
-    if values[middle] < target {
+    if (&values[middle]) < (&target) {
       low = middle + usize.ONE
     } else {
       high = middle
     }
   }
   if low < self.length {
-    if !(target < values[low]) {
+    if !((&target) < (&values[low])) {
       return Option.some<usize>(low)
     }
   }

@@ -179,7 +179,7 @@ The sealed `Intrinsic` namespace SHALL expose one unsafe native-only byte-input 
 exclusive byte buffer plus explicit reason and native-code outputs and returning `Option<usize>`. A
 present count SHALL be the exact transferred byte count, zero SHALL mean the end of input, and an
 absent result SHALL write the normalized low-level reason and native code. The compiler MUST NOT
-construct or recognize `ReadOutcome`, `StreamReadFailure`, or the `StandardInput` service, and MUST
+construct or recognize `ReadOutcome`, `StreamReadError`, or the `StandardInput` service, and MUST
 NOT admit a second input operation for buffering, decoding, or terminal control.
 
 #### Scenario: Report a refused read
@@ -201,7 +201,7 @@ native-only capture operation taking a stream selector, an offset, and an exclus
 returning `Option<usize>`. The argument and environment blocks SHALL be NUL-terminated entry blocks,
 and an empty working-directory block SHALL mean the caller's own directory. A successful execution
 SHALL retain exactly one capture until the next execution replaces it. The compiler MUST NOT
-construct or recognize `ProcessRequest`, `ProcessOutcome`, `ProcessFailure`, or the `ChildProcess`
+construct or recognize `ProcessRequest`, `ProcessOutcome`, `ProcessError`, or the `ChildProcess`
 service, and MUST NOT admit further operations for shells, streaming, or signal delivery.
 
 #### Scenario: Report a failure to start
@@ -227,7 +227,7 @@ and working-directory lookups each taking an exclusive byte buffer plus explicit
 native-code outputs and returning `Option<usize>`. A present count SHALL be the value's complete byte
 length with the prefix that fits copied into the buffer; an absent result SHALL write the normalized
 low-level reason and native code, where the not-found reason means the value does not exist. The
-compiler MUST NOT construct or recognize `HostInputFailure` or the `HostInput` service, and MUST NOT
+compiler MUST NOT construct or recognize `HostInputError` or the `HostInput` service, and MUST NOT
 admit an operation that sets an environment variable, changes the working directory, or parses
 arguments.
 
@@ -251,19 +251,24 @@ arguments.
 The sealed `Intrinsic` namespace SHALL contain exactly one safe Effect suspension operation whose
 contract transfers one deferred Effect to the compiler-owned execution boundary and later returns
 that Effect's typed outcome. The operation SHALL preserve generic success, failure, and requirement
-rows while explicitly adding `OutOfMemory` and exclusive `Allocator` access for continuation
-storage. It MUST NOT expose a continuation type, callback ABI, scheduler, fiber, pending token,
-target address, or backend frame layout.
+rows exactly and MUST NOT request a source allocator or report private execution-storage exhaustion
+as a typed failure. It MUST NOT expose a continuation type, callback ABI, scheduler, fiber, pending
+token, target address, execution-stack allocator, or backend frame layout.
 
 #### Scenario: Audit the suspension seam
 
 - **WHEN** the deterministic intrinsic catalog and its consumers are inspected
-- **THEN** exactly one suspension operation is present with evaluator, LLVM, and Wasm availability and no public continuation-management operations
+- **THEN** exactly one suspension operation is present with evaluator, LLVM, and Wasm availability, exact channel preservation, and no public continuation-management or allocation operations
 
 #### Scenario: Give a same-named function no privilege
 
 - **WHEN** user source defines `Effect.suspend` or another function with the same spelling as the canonical wrapper
 - **THEN** it receives ordinary function behavior unless its body explicitly calls the sealed intrinsic
+
+#### Scenario: Keep execution storage out of the intrinsic contract
+
+- **WHEN** tooling renders the suspension intrinsic's canonical callable contract
+- **THEN** the result contains only the deferred child's `A ! E ? R` channels and no `OutOfMemoryError` or `Allocator` contribution
 
 ### Requirement: The public suspension API remains ordinary Silk
 

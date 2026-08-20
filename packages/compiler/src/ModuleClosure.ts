@@ -423,11 +423,6 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     )
     loaded.set(name, analysis.module)
     diagnostics.push(analysis.diagnostics)
-    for (const required of Stdlib.requiredModules(
-      analysis.module.syntax.source,
-      analysis.module.syntax.tokens,
-    ))
-      if (!loaded.has(required) && !pending.includes(required)) pending.push(required)
     for (const target of resolvedTargets(analysis.module)) {
       if (!loaded.has(target) && !pending.includes(target)) pending.push(target)
     }

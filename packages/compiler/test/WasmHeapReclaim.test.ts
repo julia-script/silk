@@ -22,7 +22,12 @@ const pagesOf = (instance: WebAssembly.Instance): number => {
  * Each block is 512 payload bytes, so a thousand iterations acquire roughly 1.5 MiB. The heap that
  * serves it stays inside a couple of pages only if released blocks come back.
  */
-const interleaved = `effect fn build() -> i32 ! OutOfMemory {
+const interleaved = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut index = 0
   while index < 1000 {
@@ -43,7 +48,7 @@ const interleaved = `effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -114,7 +119,13 @@ it.effect(
  * before either backend reclaimed anything. This test pins the count Wasm reports, and says
  * nothing about how much memory the engine holds while doing it.
  */
-const counted = `import silk.metrics {
+const counted = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.usize as usize
+import silk.metrics {
   AllocationMetrics,
   copy as copyMetrics,
   make as zeroedMetrics,
@@ -127,7 +138,7 @@ struct CountingAllocator {
   metrics: AllocationMetrics
 }
 
-effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut self.inner)
   let block = run pending
   recordAcquire(&mut self.metrics)
@@ -136,7 +147,7 @@ effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation !
 
 impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
     inner: SystemAllocator.make(),
     metrics: zeroedMetrics()
@@ -165,7 +176,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return usize.toI32(observed.released)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

@@ -73,7 +73,7 @@ const assertTraceShape = (output) => {
     )
     requireInvariant(!trace.includes(`publish:b${ordinal}`), 'rejected owner published', trace)
     requireInvariant(!trace.includes(`child-start:b${ordinal}`), 'rejected child started', trace)
-    requireInvariant(trace.includes('OUTCOME 2 0'), 'OutOfMemory outcome changed', trace)
+    requireInvariant(trace.includes('OUTCOME 2 0'), 'OutOfMemoryError outcome changed', trace)
   }
 
   for (const checkpoint of [1, 2]) {

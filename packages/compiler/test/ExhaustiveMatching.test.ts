@@ -1,7 +1,10 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -11,6 +14,9 @@ import { raise } from './support/raise.js'
 
 const analyze = (id: string, source: string): Elaboration.Result =>
   elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, new TextEncoder().encode(source)))))
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const returnedMatch = (
   result: Elaboration.Result,
@@ -120,10 +126,13 @@ pub fn inspect(event: Token | End) -> i32 {
   return match event { Token {} => 0 End {} => false }
 }`,
   )
-  assert.include(
+  assert.deepEqual(
     incompatible.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0049',
+    ['SEM0040'],
   )
+  const joined = returnedMatch(incompatible).type
+  assert.strictEqual(joined._tag, 'Available')
+  if (joined._tag === 'Available') assert.strictEqual(Type.encode(joined.type), 'bool | i32')
 })
 
 it('retains nested canonical field paths and rejects pattern binding conflicts', () => {
@@ -205,6 +214,180 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
     'InvalidMatchArmOrder',
   )
 })
+
+it('selects exact non-nominal members with whole-value bindings', () => {
+  const result = analyze(
+    'ordinary-members',
+    `pub fn inspect(value: i32 | string) -> i32 {
+  return match value {
+    i32 number => number
+    string text => 0
+  }
+}`,
+  )
+  const match = returnedMatch(result)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(match.members.map(Type.encode), ['i32', 'string'])
+  assert.deepEqual(
+    match.arms.map((arm) =>
+      arm.pattern._tag === 'TypePattern' && arm.pattern.member !== undefined
+        ? Type.encode(arm.pattern.member)
+        : '_',
+    ),
+    ['i32', 'string'],
+  )
+  assert.deepEqual(
+    match.arms.map((arm) =>
+      arm.bindings[0]?.type._tag === 'Available'
+        ? Type.encode(arm.bindings[0].type.type)
+        : 'unavailable',
+    ),
+    ['i32', 'string'],
+  )
+})
+
+it('rejects refutable let and wildcard discard while accepting scoped if-let bindings', () => {
+  const result = analyze(
+    'statement-pattern-diagnostics',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(value: Point | i32) -> i32 {
+  let Point { x, .. } = move value
+  let _ = x
+  if let i32 number = value { return number } else { return 0 }
+}`,
+  )
+
+  assert.include(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0133',
+  )
+  assert.include(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0087',
+  )
+  const statement = result.functions
+    .at(0)
+    ?.statements.find((candidate) => candidate._tag === 'IfLetStatement')
+  assert.strictEqual(statement?._tag, 'IfLetStatement')
+  if (statement?._tag !== 'IfLetStatement') return
+  assert.strictEqual(statement.selection.bindings[0]?.name._tag, 'Present')
+  assert.strictEqual(statement.taken[0]?._tag, 'ReturnStatement')
+})
+
+it.effect('lowers let destructuring and if-let through the shared match operation', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'statement-pattern-runtime',
+      ascii(`pub struct Point { x: i32 y: i32 }
+pub struct Pair { point: Point extra: i32 }
+fn inspect(value: Point | i32) -> i32 {
+  if let Point { x, .. } = move value { return x } else { return 7 }
+}
+fn nested() -> i32 {
+  let pair = Pair { point: Point { x: 1, y: 2 }, extra: 3 }
+  let Pair { point: Point { x, y }, extra } = move pair
+  return x + y + extra
+}
+fn shared(point: Point) -> i32 {
+  let Point { x, .. } = &point
+  return x + point.y
+}
+fn sharedIf(point: Point) -> i32 {
+  if let Point { x, .. } = &point { return x } else { return 0 }
+}
+pub fn main() -> i32 {
+  let point = Point { x: 20, y: 22 }
+  let Point { x, y } = move point
+  return x + y + inspect(1) + nested() + shared(Point { x: 1, y: 2 }) + sharedIf(Point { x: 2, y: 4 })
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const hir = Analysis.hirOf(self, 'statement-pattern-runtime')
+    assert.notStrictEqual(hir, undefined)
+    if (hir === undefined) return
+    assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+    assert.include(Mir.encode(mir), ' retain-bindings ')
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 60n)
+    const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    const main = instance.exports.silk_main
+    if (typeof main !== 'function') throw new RangeError('pattern program lost silk_main')
+    assert.strictEqual(main(), 60)
+  }),
+)
+
+it('keeps statement-pattern loans scoped and move selection consumed on both outcomes', () => {
+  const shared = analyze(
+    'shared-pattern-loan',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(point: Point) -> i32 {
+  let Point { x, .. } = &point
+  let y = point.y
+  return x + y
+}`,
+  )
+  assert.deepEqual(shared.diagnostics, [])
+  assert.deepEqual(ownership(shared).diagnostics, [])
+
+  const exclusive = analyze(
+    'exclusive-pattern-loan',
+    `pub struct Point { x: i32 y: i32 }
+pub fn inspect(point: Point) -> i32 {
+  let mut owned = move point
+  if let Point { x, .. } = &mut owned { let invalid = owned.y } else {}
+  return owned.y
+}`,
+  )
+  assert.include(
+    ownership(exclusive).diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0011',
+  )
+
+  const moved = analyze(
+    'moved-pattern-selection',
+    `pub struct Point { x: i32 }
+fn consume(value: Point | i32) -> i32 { return 0 }
+pub fn inspect(value: Point | i32) -> i32 {
+  if let Point { x } = move value { let selected = x } else {}
+  return consume(move value)
+}`,
+  )
+  assert.include(
+    ownership(moved).diagnostics.map((diagnostic) => diagnostic.code),
+    'OWN0001',
+  )
+})
+
+it.effect(
+  'renormalizes generic selectors at complete applications with source-order collapse',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* Analysis.ofSourceRealized(
+        'generic-pattern-renormalization',
+        ascii(`fn choose<A, B>(value: A | B) -> i32 {
+  return match move value { A first => 1 B second => 2 }
+}
+pub fn main() -> i32 {
+  return choose<i32, i32>(1) + choose<i32, bool>(true)
+}`),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const mir = Analysis.loweredMir(self)
+      assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+      const outcome = Analysis.evaluate(self)
+      assert.strictEqual(outcome._tag, 'Completed')
+      if (outcome._tag !== 'Completed') return
+      assert.strictEqual(outcome.result.value, 3n)
+    }),
+)
 
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {
   const shared = analyze(

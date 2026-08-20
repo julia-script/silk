@@ -63,7 +63,7 @@ const oracle = (
     },
 })
 
-const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).memberKey
+const memberKey = RequirementRow.policy<Type.Nominal | Type.Parameter>(Type.key).collisionKey
 
 it('rejects an empty relation set as an internal invariant violation', () => {
   assert.throws(
@@ -237,7 +237,7 @@ it('coalesces duplicate wanted keys and canonicalizes occurrence origins', () =>
   if (solved._tag === 'Selected') assert.strictEqual(solved.evidence.length, 1)
 })
 
-it('checks explicit selector cardinality and exact stored access before matching', () => {
+it('checks explicit selector cardinality and reports access after matching the key', () => {
   const base = relation(['A'], 10, 'Shared')
   const empty = ProviderSelection.solve({
     relations: [base],
@@ -270,7 +270,7 @@ it('checks explicit selector cardinality and exact stored access before matching
   }
   assert.strictEqual(accessMismatch._tag, 'Rejected')
   if (accessMismatch._tag === 'Rejected')
-    assert.strictEqual(accessMismatch.diagnostics.at(0)?.problem._tag, 'ProviderNoMatch')
+    assert.strictEqual(accessMismatch.diagnostics.at(0)?.problem._tag, 'ProviderAccessMismatch')
 })
 
 it('distinguishes exact provider identity from unique conformance evidence', () => {

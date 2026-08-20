@@ -14,7 +14,9 @@ it.effect(
   'evaluates static and runtime string storage through calls and lexical loan endings',
   () =>
     Effect.gen(function* () {
-      const outcome = yield* evaluate(`fn passthrough(value: string) -> string { return value }
+      const outcome = yield* evaluate(`import silk.u8 as u8
+import silk.usize as usize
+fn passthrough(value: string) -> string { return value }
 pub fn main() -> i32 {
   let mut bytes = [u8.toU8(104), u8.toU8(195), u8.toU8(169)]
   unsafe {

@@ -32,7 +32,7 @@
 - [x] 4.2 Implement insert, reporting whether an entry already existed under an equivalent key.
 - [x] 4.3 Implement lookup, distinguishing presence from absence.
 - [x] 4.4 Implement removal, transferring ownership of the removed value to the caller.
-- [x] 4.5 Implement growth that preserves every prior entry, and fails only with `OutOfMemory`
+- [x] 4.5 Implement growth that preserves every prior entry, and fails only with `OutOfMemoryError`
       leaving the map intact.
 - [x] 4.6 Release owned keys and values exactly once on removal, on overwrite, and on the map's own
       drop while non-empty.

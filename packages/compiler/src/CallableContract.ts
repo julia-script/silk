@@ -18,6 +18,8 @@ export interface CaptureRelationship {
 /** One source/intrinsic-neutral callable schema consumed by common call analysis. */
 export interface CallableContract {
   readonly functionKind: FunctionKind
+  /** Whether invoking the complete callable transfers a caller-owned safety obligation. */
+  readonly unsafe: boolean
   readonly binders: ReadonlyArray<Type.Parameter>
   readonly parameters: ReadonlyArray<Parameter>
   readonly result: Type.Type
@@ -27,6 +29,7 @@ export interface CallableContract {
 
 export const make = (options: {
   readonly functionKind: FunctionKind
+  readonly unsafe?: boolean
   readonly binders?: ReadonlyArray<Type.Parameter>
   readonly parameters?: ReadonlyArray<Parameter>
   readonly result: Type.Type
@@ -35,6 +38,7 @@ export const make = (options: {
 }): CallableContract =>
   Object.freeze({
     functionKind: options.functionKind,
+    unsafe: options.unsafe ?? false,
     binders: Object.freeze(Array.from(options.binders ?? [])),
     parameters: Object.freeze(
       Array.from(options.parameters ?? [], (parameter) => Object.freeze({ ...parameter })),
@@ -49,6 +53,7 @@ export const make = (options: {
 export const key = (self: CallableContract): string =>
   Canonical.record('CallableContract', [
     self.functionKind,
+    self.unsafe ? 'unsafe' : 'safe',
     Canonical.array(self.binders.map(Type.key)),
     Canonical.array(
       self.parameters.map((parameter) =>

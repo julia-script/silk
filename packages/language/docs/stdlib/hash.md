@@ -52,6 +52,14 @@ pub value: u64
 
 The seed value handed to every hash the collection computes.
 
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for HashSeed`
+
+```silk
+impl Copy for HashSeed
+```
+
 <a id="declaration-73696c6b2f686173683a3a73656564"></a>
 
 ## `seed`
@@ -67,7 +75,7 @@ Constructs a seed from one value.
 ## `HashKey`
 
 ```silk
-pub interface HashKey<T>
+pub interface HashKey
 ```
 
 Static hashing contract for a key of a hashed collection.
@@ -89,7 +97,7 @@ collection can neither detect the breakage nor recover from it.
 ### Operation `equals`
 
 ```silk
-fn equals(left: &T, right: &T) -> bool
+operator == fn equals(left: &Self, right: &Self) -> bool
 ```
 
 Reports whether two keys name the same collection entry.
@@ -99,7 +107,7 @@ Reports whether two keys name the same collection entry.
 ### Operation `hash`
 
 ```silk
-fn hash(value: &T, seed: &silk/hash.HashSeed) -> u64
+fn hash(value: &Self, seed: &silk/hash.HashSeed) -> u64
 ```
 
 Computes the key's deterministic 64-bit hash under the collection seed.
@@ -157,6 +165,14 @@ pub value: u64
 
 The integer this key stands for.
 
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for Word`
+
+```silk
+impl Copy for Word
+```
+
 <a id="declaration-73696c6b2f686173683a3a776f7264"></a>
 
 ## `word`
@@ -167,15 +183,15 @@ pub fn word(value: u64) -> Word
 
 Constructs an integer key.
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
 
-## Implementation `silk/hash.HashKey<silk/hash.Word> for Word`
+## Implementation `HashKey for Word`
 
 ```silk
-impl silk/hash.HashKey<silk/hash.Word> for Word
+impl HashKey for Word
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `equals`
 
@@ -183,7 +199,7 @@ impl silk/hash.HashKey<silk/hash.Word> for Word
 equals = Word.wordEquals
 ```
 
-<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
+<a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a31"></a>
 
 ### Operation `hash`
 

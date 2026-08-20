@@ -2,39 +2,57 @@
 
 ## Purpose
 
-Define complete runtime nominal struct values with module-owned construction, typed field access,
+Define complete runtime nominal struct values with field-visible construction, typed field access,
 whole-value affine ownership, aggregate calls and returns, and deterministic cleanup.
 
 ## Requirements
 
-### Requirement: Raw struct construction belongs to the defining module
+### Requirement: Struct construction authority is field-based
 
-A raw struct literal SHALL name one canonical nominal struct and SHALL be legal only in that
-struct's defining module. Other modules MUST construct the value through ordinary visible functions.
-Every literal SHALL initialize every declared field exactly once; source field order MAY differ from
-declaration order, but the resulting value SHALL use canonical declaration order. Unknown,
-duplicate, missing, inaccessible, and mistyped field initializers SHALL remain explicit invalid
-states without creating a partially initialized value.
+Source MAY construct a source-declared nominal struct from any module when every supplied or
+required initialized field is visible at the construction site. A private field SHALL preserve the
+type's construction boundary; visibility of another field or the type name SHALL NOT grant access
+to it. A declarationless opaque nominal type SHALL remain non-constructible.
 
-#### Scenario: Construct every field out of order
+Every literal SHALL initialize every required visible field exactly once. Initializers SHALL
+evaluate in source order, while the complete value SHALL retain canonical declaration field order.
+Unknown, duplicate, missing, inaccessible, or mistyped initializers SHALL remain independently
+queryable and SHALL NOT create a partial value. A missing inaccessible field diagnostic SHALL NOT
+reveal the hidden field's name or type.
 
-- **WHEN** a defining module constructs `Pair { right: 2, left: 1 }` for fields declared as `left` then `right`
-- **THEN** construction succeeds and the semantic value records `left` then `right` under `Pair`'s canonical nominal identity
+#### Scenario: Construct from public fields
 
-#### Scenario: Construct an empty marker
+- **WHEN** an imported struct exposes all of its fields publicly
+- **THEN** another module may construct it with named field initialization
 
-- **WHEN** a defining module evaluates `End {}` for an empty struct
-- **THEN** it creates one complete zero-field nominal value
+#### Scenario: Preserve a private representation field
 
-#### Scenario: Refuse external raw construction
+- **WHEN** one required field is private
+- **THEN** external construction is rejected at that field and a public factory remains usable
 
-- **WHEN** another module attempts `Token { kind: 1 }` for an imported public `Token`
-- **THEN** construction is unavailable with a stable defining-module-boundary diagnostic even if every field is public
+#### Scenario: Preserve reordered initialization
 
-#### Scenario: Preserve an invalid field set
+- **WHEN** a literal supplies visible fields in an order different from their declaration order
+- **THEN** expressions evaluate in source order and the complete value maps them into canonical declaration order
 
-- **WHEN** a literal omits one field, repeats another, or names an unknown field
-- **THEN** each supplied initializer and its exact failure remain queryable and no complete runtime value is produced
+#### Scenario: Reject declarationless opaque construction
+
+- **WHEN** source writes a literal for a nominal runtime type that has no source struct declaration
+- **THEN** construction is rejected without granting it an invented zero-field constructor
+
+### Requirement: Ordinary struct parameters infer from all supplied fields
+
+Omitted ordinary generic arguments SHALL be inferred forward from all supplied field expressions using the same compatibility and conflict rules as function calls. Explicit type arguments SHALL form a prefix, and ambiguity or disagreement SHALL produce deterministic diagnostics.
+
+#### Scenario: Infer one parameter from multiple fields
+
+- **WHEN** `Pair<T>` is constructed with two fields that both resolve to `i32`
+- **THEN** the constructed type is `Pair<i32>` without an explicit argument
+
+#### Scenario: Diagnose conflicting fields
+
+- **WHEN** two fields constrain the same omitted parameter to incompatible types
+- **THEN** analysis reports both field constraints and does not choose by source order
 
 ### Requirement: Field projection is a canonical typed place
 

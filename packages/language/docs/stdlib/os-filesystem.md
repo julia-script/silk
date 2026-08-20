@@ -45,7 +45,7 @@ Native provider state. The root bytes are independently owned and never exposed 
 ## `make`
 
 ```silk
-pub effect fn make(root: string) -> OsFileSystem ! OutOfMemory ? &mut Allocator
+pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.

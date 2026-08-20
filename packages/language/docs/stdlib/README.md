@@ -9,7 +9,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/bool`](./bool.md) | `bool` | 3 | Named primitive Boolean equality and negation operations. |
 | [`silk/box`](./box.md) | `Box` | 7 | One owned heap indirection for recursive data and values whose storage must have a stable size. |
 | [`silk/bytes`](./bytes.md) | `Bytes` | 8 | Owned arbitrary bytes for file contents, process output, and other encoding-neutral data. |
-| [`silk/char`](./char.md) | `char` | 6 | Named equality and scalar-order comparisons for Unicode scalar char values. |
+| [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
 | [`silk/core`](./core.md) | `Allocator` | 12 | Foundational allocation and standard-output services used by higher standard-library actors. |
 | [`silk/effects`](./effects.md) | `Effect` | 25 | Combinators for transforming Effect success, failure, requirement, sequencing, and lifecycle. |
@@ -36,11 +36,11 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_filesystem`](./os-filesystem.md) | `OsFileSystem` | 2 | Native FileSystem provider confined beneath one explicitly owned platform root. |
 | [`silk/os_host_input`](./os-host-input.md) | `OsHostInput` | 2 | Native HostInput provider for the process command line, environment, and working directory. |
 | [`silk/os_standard_input`](./os-standard-input.md) | `OsStandardInput` | 2 | Native StandardInput provider backed by the process standard-input descriptor. |
-| [`silk/raw-buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
+| [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
-| [`silk/string`](./string.md) | `String` | 21 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
+| [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
 | [`silk/u32`](./u32.md) | `u32` | 57 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |
 | [`silk/u64`](./u64.md) | `u64` | 57 | Sixty-four-bit unsigned integers for wide masks, counters, hashes, and exact interchange values. |

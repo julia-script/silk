@@ -84,13 +84,13 @@ contracts:
 
 ```silk
 readFile(&Path)
-  -> Bytes ! FileError | OutOfMemory ? &mut FileSystem | &mut Allocator
+  -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 writeFile(&Path, &[u8])
   -> () ! FileError ? &mut FileSystem
 stat(&Path)
   -> FileInfo | DirectoryInfo ! FileError ? &mut FileSystem
 listDirectory(&Path)
-  -> Vector<DirectoryEntry> ! FileError | OutOfMemory
+  -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError
      ? &mut FileSystem | &mut Allocator
 createDirectory(&Path)
   -> () ! FileError ? &mut FileSystem
@@ -172,7 +172,7 @@ permissions, timestamps, ownership, devices, or host-native metadata.
 numeric provider/native code. It MUST NOT own or borrow a `Path`, text message, provider object, or
 other allocation. Reasons SHALL include `NotFound`, `AlreadyExists`, `PermissionDenied`,
 `InvalidPath`, `WrongType`, `NotEmpty`, `NoSpace`, `TooLarge`, `Unsupported`, and `Other`.
-Allocation exhaustion SHALL remain the separate `OutOfMemory` failure.
+Allocation exhaustion SHALL remain the separate `OutOfMemoryError` failure.
 
 #### Scenario: Translate a missing entry
 
@@ -182,13 +182,13 @@ Allocation exhaustion SHALL remain the separate `OutOfMemory` failure.
 #### Scenario: Keep allocation failure separate
 
 - **WHEN** `readFile` obtains file bytes but cannot allocate the owned `Bytes` result
-- **THEN** it fails with `OutOfMemory` rather than wrapping allocation exhaustion in `FileError`
+- **THEN** it fails with `OutOfMemoryError` rather than wrapping allocation exhaustion in `FileError`
 
 ### Requirement: Recursive and convenience behavior is ordinary source composition
 
 Canonical source SHALL define `createDirectoriesRecursively`, `writeFileWithParents`, and `exists`
 as ordinary functions above the seven service primitives. Recursive parent creation and owned parent
-paths SHALL retain `OutOfMemory ? &mut Allocator` in addition to `&mut FileSystem` and `FileError`.
+paths SHALL retain `OutOfMemoryError ? &mut Allocator` in addition to `&mut FileSystem` and `FileError`.
 `exists` SHALL return `false` only for `NotFound` and MUST propagate every other failure. The service
 MUST NOT add recursive creation, recursive removal, or parent-writing primitives.
 

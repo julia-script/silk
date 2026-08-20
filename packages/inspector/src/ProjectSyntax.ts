@@ -162,9 +162,7 @@ export const hirContract = (contract: Hir.ContractFact): string =>
           ? ` ! ${
               contract.failureRow === undefined
                 ? 'empty'
-                : Type.failureMembers(Type.failureRowArgumentFromRow(contract.failureRow))
-                    .map(hirTypeText)
-                    .join(' | ') || 'empty'
+                : hirTypeText(Type.failureType(contract.failureRow))
             }`
           : ''
       }`
@@ -198,19 +196,17 @@ const hirTypeText = (type: Type.Type): string =>
             ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
             : type._tag === 'EffectType'
               ? `Effect<${hirTypeText(type.success)}${
-                  Type.failureMembers(type).length === 0
+                  Type.failureType(type) === 'never'
                     ? ''
-                    : ` ! ${Type.failureMembers(type).map(hirTypeText).join(' | ')}`
+                    : ` ! ${hirTypeText(Type.failureType(type))}`
                 }> ${type.access.toLowerCase()}`
               : type._tag === 'CallableType'
                 ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
                 : type._tag === 'ReferenceType'
                   ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-                  : type._tag === 'FailureProjectionType'
-                    ? `Row<!${type.parameter.name}>`
-                    : type._tag === 'RepresentedType'
-                      ? Type.encode(type)
-                      : type.members.map(hirTypeText).join(' | ')
+                  : type._tag === 'RepresentedType'
+                    ? Type.encode(type)
+                    : type.members.map(hirTypeText).join(' | ')
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -370,6 +366,17 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       expression(node.initializer, depth + 1, `${path}.i`)
       return
     }
+    if (node._tag === 'PatternBind') {
+      rows.push({
+        key: `${path}-pattern-bind-${span.start}`,
+        depth,
+        label: `let pattern ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
+        span,
+      })
+      expression(node.selection.subject, depth + 1, `${path}.subject`)
+      return
+    }
     if (node._tag === 'If') {
       rows.push({
         key: `${path}-if-${span.start}`,
@@ -378,6 +385,23 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         span,
       })
       expression(node.condition, depth + 1, `${path}.c`)
+      node.taken.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.t${index}`)
+      })
+      node.otherwise.forEach((inner, index) => {
+        statement(inner, depth + 1, `${path}.e${index}`)
+      })
+      return
+    }
+    if (node._tag === 'IfLet') {
+      rows.push({
+        key: `${path}-if-let-${span.start}`,
+        depth,
+        label: `if let ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
+        span,
+      })
+      expression(node.selection.subject, depth + 1, `${path}.subject`)
       node.taken.forEach((inner, index) => {
         statement(inner, depth + 1, `${path}.t${index}`)
       })
@@ -471,14 +495,15 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       })
       return
     }
+    const terminal = node._tag === 'Evaluate' ? 'evaluate' : node._tag.toLowerCase()
     rows.push({
-      key: `${path}-return-${span.start}`,
+      key: `${path}-${terminal}-${span.start}`,
       depth,
-      label: 'return',
+      label: terminal,
       detail: `r${node.region.ordinal}`,
       span,
     })
-    expression(node.expression, depth + 1, `${path}.r`)
+    expression(node.expression, depth + 1, `${path}.${terminal.at(0) ?? 'x'}`)
   }
 
   hir.functions.forEach((fn, index) => {

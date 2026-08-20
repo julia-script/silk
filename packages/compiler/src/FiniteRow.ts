@@ -6,6 +6,11 @@ export interface Policy<Member> {
   readonly collisionKey: (member: Member) => string
   /** The exact stored-member identity used by membership and subtraction. */
   readonly memberKey: (member: Member) => string
+  /**
+   * The identity removed by difference. Domains whose selectors are ordinary members may omit
+   * this; domains such as service requirements can remove a key independently of stored metadata.
+   */
+  readonly differenceKey?: (member: Member) => string
   /** Combines two members with the same collision key. */
   readonly merge: (left: Member, right: Member) => Member
 }
@@ -91,10 +96,14 @@ export const difference = <Member>(
   source: FiniteRow<Member>,
   selected: FiniteRow<Member>,
 ): FiniteRow<Member> =>
-  make(
-    policy,
-    source.members.filter((member) => !has(policy, selected, member)),
-  )
+  (() => {
+    const differenceKey = policy.differenceKey ?? policy.memberKey
+    const selectedKeys = new Set(selected.members.map(differenceKey))
+    return make(
+      policy,
+      source.members.filter((member) => !selectedKeys.has(differenceKey(member))),
+    )
+  })()
 
 /** Deterministic domain encoding in canonical row order. */
 export const encode = <Member>(

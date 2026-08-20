@@ -61,7 +61,7 @@ it.effect('resolves canonical toolchain sources and reports a missing packaged f
     const missingRoot = pathToFileURL(`${root}/missing-toolchain/`).href
     const missingResolver = FileSourceResolver.layer(FileSourceResolver.make(root, missingRoot))
     const missing = yield* Effect.result(
-      SourceResolver.resolveStandardLibrary('silk/vector').pipe(Effect.provide(missingResolver)),
+      SourceResolver.toolchainSources().pipe(Effect.provide(missingResolver)),
     )
     assert.isTrue(Result.isFailure(missing))
     if (Result.isFailure(missing)) {

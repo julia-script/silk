@@ -2,30 +2,35 @@
   {
     "module": "silk/bool",
     "path": "silk/bool.silk",
+    "layer": "portable",
     "namespace": "bool"
   },
   {
     "module": "silk/box",
     "path": "silk/box.silk",
+    "layer": "portable",
     "namespace": "Box"
   },
   {
     "module": "silk/bytes",
     "path": "silk/bytes.silk",
+    "layer": "portable",
     "namespace": "Bytes"
   },
   {
     "module": "silk/char",
     "path": "silk/char.silk",
+    "layer": "portable",
     "namespace": "char"
   },
   {
     "module": "silk/child_process",
     "path": "silk/child_process.silk",
+    "layer": "portable",
     "namespace": "ChildProcess",
     "aliases": [
       "Exited",
-      "ProcessFailure",
+      "ProcessError",
       "ProcessOperation",
       "ProcessOutcome",
       "ProcessReason",
@@ -36,35 +41,40 @@
   {
     "module": "silk/core",
     "path": "silk/core.silk",
+    "layer": "portable",
     "namespace": "Allocator",
     "aliases": [
       "AllocationFailure",
       "NativeStandardStreams",
-      "OutOfMemory",
+      "OutOfMemoryError",
       "StandardStream",
       "StandardStreams",
-      "StreamWriteFailure",
+      "StreamWriteError",
       "SystemAllocator"
     ]
   },
   {
     "module": "silk/effects",
     "path": "silk/effects.silk",
+    "layer": "portable",
     "namespace": "Effect"
   },
   {
     "module": "silk/f32",
     "path": "silk/f32.silk",
+    "layer": "portable",
     "namespace": "f32"
   },
   {
     "module": "silk/f64",
     "path": "silk/f64.silk",
+    "layer": "portable",
     "namespace": "f64"
   },
   {
     "module": "silk/filesystem",
     "path": "silk/filesystem.silk",
+    "layer": "portable",
     "namespace": "FileSystem",
     "aliases": [
       "DirectoryEntry",
@@ -80,176 +90,213 @@
   {
     "module": "silk/format",
     "path": "silk/format.silk",
+    "layer": "portable",
     "namespace": "Format",
-    "aliases": ["NotANumber", "OutOfRange", "ParseFailure"]
+    "aliases": ["NotANumber", "OutOfRange", "ParseError"]
   },
   {
     "module": "silk/hash",
     "path": "silk/hash.silk",
+    "layer": "portable",
     "namespace": "HashKey",
     "aliases": ["HashSeed", "Word"]
   },
   {
     "module": "silk/hash_map",
     "path": "silk/hash_map.silk",
+    "layer": "portable",
     "namespace": "HashMap"
   },
   {
     "module": "silk/hash_set",
     "path": "silk/hash_set.silk",
+    "layer": "portable",
     "namespace": "HashSet"
   },
   {
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
+    "layer": "portable",
     "namespace": "HostInput",
-    "aliases": ["HostInputFailure"]
+    "aliases": ["HostInputError"]
   },
   {
     "module": "silk/i16",
     "path": "silk/i16.silk",
+    "layer": "portable",
     "namespace": "i16"
   },
   {
     "module": "silk/i32",
     "path": "silk/i32.silk",
+    "layer": "portable",
     "namespace": "i32"
   },
   {
     "module": "silk/i64",
     "path": "silk/i64.silk",
+    "layer": "portable",
     "namespace": "i64"
   },
   {
     "module": "silk/i8",
     "path": "silk/i8.silk",
+    "layer": "portable",
     "namespace": "i8"
   },
   {
     "module": "silk/isize",
     "path": "silk/isize.silk",
+    "layer": "portable",
     "namespace": "isize"
   },
   {
     "module": "silk/layout",
     "path": "silk/layout.silk",
+    "layer": "portable",
     "namespace": "Layout",
     "aliases": ["InvalidAlignment", "LayoutOverflow"]
   },
   {
     "module": "silk/logging",
     "path": "silk/logging.silk",
+    "layer": "portable",
     "namespace": "Logger",
     "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
   },
   {
     "module": "silk/metrics",
     "path": "silk/metrics.silk",
+    "layer": "portable",
     "namespace": "AllocationMetrics"
   },
   {
     "module": "silk/numeric",
     "path": "silk/numeric.silk",
+    "layer": "portable",
     "namespace": "Integer"
   },
   {
     "module": "silk/option",
     "path": "silk/option.silk",
+    "layer": "portable",
     "namespace": "Option",
     "aliases": ["None", "Some"]
   },
   {
     "module": "silk/order",
     "path": "silk/order.silk",
+    "layer": "portable",
     "namespace": "Order",
     "aliases": ["Ordering", "Less", "Equal", "Greater"]
   },
   {
     "module": "silk/os_child_process",
     "path": "silk/os_child_process.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
     "namespace": "OsChildProcess"
   },
   {
     "module": "silk/os_filesystem",
     "path": "silk/os_filesystem.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
     "namespace": "OsFileSystem"
   },
   {
     "module": "silk/os_host_input",
     "path": "silk/os_host_input.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
     "namespace": "OsHostInput"
   },
   {
     "module": "silk/os_standard_input",
     "path": "silk/os_standard_input.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
     "namespace": "OsStandardInput"
   },
   {
-    "module": "silk/raw-buffer",
-    "path": "silk/raw-buffer.silk",
+    "module": "silk/raw_buffer",
+    "path": "silk/raw_buffer.silk",
+    "layer": "portable",
     "namespace": "RawBuffer"
   },
   {
     "module": "silk/result",
     "path": "silk/result.silk",
+    "layer": "portable",
     "namespace": "Result"
   },
   {
     "module": "silk/slot",
     "path": "silk/slot.silk",
+    "layer": "portable",
     "namespace": "Slot"
   },
   {
     "module": "silk/standard_input",
     "path": "silk/standard_input.silk",
+    "layer": "portable",
     "namespace": "StandardInput",
-    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadFailure"]
+    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
   },
   {
     "module": "silk/string",
     "path": "silk/string.silk",
+    "layer": "portable",
     "namespace": "String",
     "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
   },
   {
     "module": "silk/u16",
     "path": "silk/u16.silk",
+    "layer": "portable",
     "namespace": "u16"
   },
   {
     "module": "silk/u32",
     "path": "silk/u32.silk",
+    "layer": "portable",
     "namespace": "u32"
   },
   {
     "module": "silk/u64",
     "path": "silk/u64.silk",
+    "layer": "portable",
     "namespace": "u64"
   },
   {
     "module": "silk/u8",
     "path": "silk/u8.silk",
+    "layer": "portable",
     "namespace": "u8"
   },
   {
     "module": "silk/unicode",
     "path": "silk/unicode.silk",
+    "layer": "portable",
     "namespace": "Unicode"
   },
   {
     "module": "silk/unicode_tables",
     "path": "silk/unicode_tables.silk",
+    "layer": "portable",
     "namespace": "UnicodeTables",
     "aliases": ["Decomposition", "PairRecord"]
   },
   {
     "module": "silk/usize",
     "path": "silk/usize.silk",
+    "layer": "portable",
     "namespace": "usize"
   },
   {
     "module": "silk/vector",
     "path": "silk/vector.silk",
+    "layer": "portable",
     "namespace": "Vector"
   }
 ]

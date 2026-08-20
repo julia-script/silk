@@ -80,12 +80,10 @@ it.effect('keeps exact rows compile-time-only and suspendability in the layout d
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/suspending',
-      `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+      `import silk.effects as Effect
+struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move provided, recover)
+  return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -145,7 +143,8 @@ it.effect('shapes nested Effect and callable captures from their concrete enviro
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/nested-executables',
-      `struct Token { value: i32 }
+      `import silk.i32 as i32
+struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
   let token = Token { value: 1 }
@@ -185,7 +184,8 @@ it.effect('preserves local executable identities through recursively nested Effe
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/deep-nested-executables',
-      `struct Deferred<F: once Effect<i32>> { operation: F }
+      `import silk.i32 as i32
+struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
   let deepest = effect { return 1 }
   let transform = i32.add(1)

@@ -6,10 +6,11 @@
 //! must run after a typed outcome. Direct `run` remains clearest for simple sequential code.
 //!
 //! # Details
-//! These operations are ordinary Silk built from a small intrinsic core. Failure rows are nominal
-//! sets. Requirement rows are maps keyed by capability and role, with shared or exclusive access;
+//! These operations are ordinary Silk built from a small intrinsic core. Failure channels contain
+//! ordinary detached types and structural unions. Requirement rows are maps keyed by capability and
+//! role, with shared or exclusive access;
 //! union joins a shared/exclusive collision to exclusive. Membership and `Without<R, S>` compare the
-//! stored access exactly, independently of whether a stronger provider can satisfy a weaker demand.
+//! proper stored access exactly, independently of whether a stronger provider can satisfy a weaker demand.
 //! `Without` is forward-only: its input rows are inferred first, then exact members in `S` are
 //! removed from `R`. For example, `Without<First | Second | Third, First | Third>` is `Second`,
 //! selecting absent `Other` from `First | Second` changes nothing, and
@@ -17,9 +18,9 @@
 //!
 //! Provider selection considers every compatible capability-role member. An omitted selected row
 //! must have exactly one candidate; otherwise the call reports no-match or ambiguity. Put an exact
-//! selected row first, as in `provideMut<&mut Logger@Audit>`, to disambiguate. Shared, exclusive, and
+//! selected key first, as in `provideMut<Logger at Audit>`, to disambiguate. Shared, exclusive, and
 //! owned binding are distinct fixed modes. A provider section such as
-//! `let withLogger = provideMut<&mut Logger>(&mut logger)` retains its unresolved row constraint until
+//! `let withLogger = provideMut<Logger>(&mut logger)` retains its unresolved row constraint until
 //! a statically visible Effect application completes it.
 //!
 //! `once Effect` inputs run at most once; [`retry`] instead accepts a reusable Effect and performs
@@ -29,13 +30,15 @@
 //! # Gotchas
 //! Typed failures are outcomes that combinators can reify and recover. Traps are not: they bypass
 //! [`catchAll`], [`ensuring`], and Drop hooks. [`suspend`] crosses the stack-safe execution boundary
-//! and therefore adds explicit [`OutOfMemory`] and [`Allocator`] channels.
+//! while preserving all three channels exactly; frame exhaustion is fatal.
 
 // Familiar channel transformations derived from the closed compiler core. The core executes one
 // Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
 
-import silk.result { Result, Success, Failure }
+import silk.bool as bool
 import silk.logging { LogError, LogLevel, Logger }
+import silk.result { Result, Success, Failure }
+import silk.usize as usize
 
 /// Dispatches one complete Info message through the explicitly provided Logger.
 pub effect fn log(
@@ -53,75 +56,75 @@ pub effect fn logAt(
 }
 
 /// Reifies one Effect execution into Result data while preserving its requirements.
-pub effect fn result<A, !E, ?R>(
+pub effect fn result<A, E, ?R>(
   protected: once Effect<A ! E ? R>
-) -> Result<A, Row<!E>> ? R {
+) -> Result<A, E> ? R {
   return run Intrinsic.effectResult(move protected)
 }
 
-effect fn raise<!E>(error: Row<!E>) -> never ! E {
+effect fn raise<E>(error: E) -> never ! E {
   fail move error
 }
 
 /// Transforms both the success and typed-failure channels of an Effect.
-pub effect fn mapBoth<A, B, !E, !F, ?R>(
+pub effect fn mapBoth<A, B, E, F, ?R>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> B,
-  onFailure: once fn(Row<!E>) -> Row<!F>
+  onFailure: once fn(E) -> F
 ) -> B ! F ? R {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => onSuccess(move success)
-      Failure<Row<!E>> { error } => run raise(onFailure(move error))
+      Failure<E> { error } => run raise(onFailure(move error))
     }
   }
 }
 
 /// Transforms the success channel of an Effect.
-pub effect fn map<A, B, !E, ?R>(
+pub effect fn map<A, B, E, ?R>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> B
 ) -> B ! E ? R {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => onSuccess(move success)
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
 
 /// Transforms the typed-failure channel of an Effect.
-pub effect fn mapError<A, !E, !F, ?R>(
+pub effect fn mapError<A, E, F, ?R>(
   self: once Effect<A ! E ? R>,
-  onFailure: once fn(Row<!E>) -> Row<!F>
+  onFailure: once fn(E) -> F
 ) -> A ! F ? R {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run raise(onFailure(move error))
+      Failure<E> { error } => run raise(onFailure(move error))
     }
   }
 }
 
 /// Continues an Effect with an effectful success callback.
-pub effect fn flatMap<A, B, !E, !F, ?R, ?S>(
+pub effect fn flatMap<A, B, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> Effect<B ! F ? S>
 ) -> B ! E | F ? R | S {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => run onSuccess(move success)
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
 
 /// Removes one Effect layer from a nested Effect.
-pub effect fn flatten<A, !E, !F, ?R, ?S>(
+pub effect fn flatten<A, E, F, ?R, ?S>(
   self: once Effect<Effect<A ! F ? S> ! E ? R>
 ) -> A ! E | F ? R | S {
   let inner = run self
@@ -156,12 +159,12 @@ pub struct Triple<A, B, C> {
 /// second Effect is ever executed, and the unrun second Effect is released by the ordinary local
 /// cleanup of the frame the propagation leaves.
 ///
-/// Both failure rows and both requirement rows are unioned, so the result is `! E | F ? R | S`. The
+/// Both failure unions and both requirement rows are joined, so the result is `! E | F ? R | S`. The
 /// fields are `pub`, so a caller in another module can project `first` and `second` directly.
 ///
 /// This combinator is fixed-arity by construction. Each operand is a distinct parameter, so no
 /// Effect is ever stored in a collection — see the note on `zip3` for why that matters.
-pub effect fn zip<A, B, !E, !F, ?R, ?S>(
+pub effect fn zip<A, B, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   other: once Effect<B ! F ? S>
 ) -> Pair<A, B> ! E | F ? R | S {
@@ -179,7 +182,7 @@ pub effect fn zip<A, B, !E, !F, ?R, ?S>(
 /// `Vector`; a collection-taking `all` would need a storable Effect representation, which is a
 /// compiler-core change rather than a library one. Distinct parameters keep every Effect in the
 /// hidden-identity specialization path, where it is erased before lowering.
-pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(
+pub effect fn zip3<A, B, C, E, F, G, ?R, ?S, ?T>(
   self: once Effect<A ! E ? R>,
   second: once Effect<B ! F ? S>,
   third: once Effect<C ! G ? T>
@@ -195,15 +198,15 @@ pub effect fn zip3<A, B, C, !E, !F, !G, ?R, ?S, ?T>(
 }
 
 /// Runs an effectful callback while preserving its returned success value.
-pub effect fn tap<A, !E, !F, ?R, ?S>(
+pub effect fn tap<A, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   callback: once fn(A) -> Effect<A ! F ? S>
 ) -> A ! E | F ? R | S {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => run callback(move success)
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
@@ -212,18 +215,18 @@ pub effect fn tap<A, !E, !F, ?R, ?S>(
 ///
 /// # Details
 ///
-/// The handler receives the whole row as one value and always runs on failure, so the protected
-/// row is removed in full and only the handler's own failures remain. Success bypasses the
+/// The handler receives the whole failure type as one value and always runs on failure, so the
+/// protected failure channel is removed in full and only the handler's own failures remain. Success bypasses the
 /// handler. Use `catch<E>` to recover a single member and leave the rest propagating.
-pub effect fn catchAll<A, !E, !F, ?R, ?S>(
+pub effect fn catchAll<A, B, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
-  onFailure: once fn(Row<!E>) -> Effect<A ! F ? S>
-) -> A ! F ? R | S {
+  onFailure: once fn(E) -> Effect<B ! F ? S>
+) -> A | B ! F ? R | S {
   let completed = run result(move self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run onFailure(move error)
+      Failure<E> { error } => run onFailure(move error)
     }
   }
 }
@@ -236,14 +239,14 @@ pub effect fn catchAll<A, !E, !F, ?R, ?S>(
 /// only for that member, its own failures join the result row, and every nonmatching member of
 /// the protected row propagates unchanged as the residual. Success bypasses the handler.
 ///
-/// The residual row is expressed by ordinary row algebra. Runtime dispatch is executable on the
+/// The residual failure is expressed by ordinary union difference. Runtime dispatch is executable on the
 /// evaluator, WebAssembly, and native targets: success bypasses the handler, the selected failure
 /// invokes it once, and every nonmatching failure propagates unchanged. Use [`catchAll`] when the
-/// handler should receive and recover the whole reified failure row.
-pub effect fn catch<S, A, !E, !F, ?R, ?Q>(
+/// handler should receive and recover the complete ordinary failure value.
+pub effect fn catch<S, A, B, E, F, ?R, ?Q>(
   self: once Effect<A ! E ? R>,
-  onFailure: once fn(S) -> Effect<A ! F ? Q>
-) -> A ! Without<E, S> | F ? R | Q
+  onFailure: once fn(S) -> Effect<B ! F ? Q>
+) -> A | B ! Without<E, S> | F ? R | Q
 where S in E {
   return run Intrinsic.catchFailure<S>(move self, move onFailure)
 }
@@ -265,16 +268,16 @@ where S in E {
 ///
 /// A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
 /// every Drop hook.
-pub effect fn ensuring<A, !E, ?R, ?S>(
+pub effect fn ensuring<A, E, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   finalizer: once Effect<() ! never ? S>
 ) -> A ! E ? R | S {
   let completed = run result(move self)
   let finalized = run move finalizer
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
@@ -300,7 +303,7 @@ pub effect fn ensuring<A, !E, ?R, ?S>(
 ///
 /// The name is `ifThenElse` rather than `if` because `if` is a keyword and Silk has no
 /// raw-identifier form, so the declaration itself could not be spelled `if`.
-pub effect fn ifThenElse<A, !E, !F, ?R, ?S>(
+pub effect fn ifThenElse<A, E, F, ?R, ?S>(
   condition: bool,
   onTrue: once fn() -> Effect<A ! E ? R>,
   onFalse: once fn() -> Effect<A ! F ? S>
@@ -313,9 +316,9 @@ pub effect fn ifThenElse<A, !E, !F, ?R, ?S>(
   return run onFalse()
 }
 
-effect fn retryFailure<A, !E, ?R>(
+effect fn retryFailure<A, E, ?R>(
   self: mut Effect<A ! E ? R>,
-  error: Row<!E>,
+  error: E,
   retries: usize
 ) -> A ! E ? R {
   if retries == 0 {
@@ -324,21 +327,21 @@ effect fn retryFailure<A, !E, ?R>(
   return run retryLoop(self, retries - 1)
 }
 
-effect fn retryLoop<A, !E, ?R>(
+effect fn retryLoop<A, E, ?R>(
   self: mut Effect<A ! E ? R>,
   retries: usize
 ) -> A ! E ? R {
   let completed = run result(self)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run retryFailure(self, move error, retries)
+      Failure<E> { error } => run retryFailure(self, move error, retries)
     }
   }
 }
 
 /// Repeats a reusable Effect after typed failure up to the requested count.
-pub effect fn retry<A, !E, ?R>(
+pub effect fn retry<A, E, ?R>(
   self: mut Effect<A ! E ? R>,
   retries: usize
 ) -> A ! E ? R {
@@ -352,7 +355,7 @@ pub effect fn retry<A, !E, ?R>(
 /// The selected row `S` is the first generic argument. Selection may use exact capability identity
 /// or one unique service-conformance witness, but a shared provider selects only a stored shared
 /// requirement. Subtraction removes that exact stored capability-role-access member.
-pub effect fn bindRequirement<?S, A, P, !E, ?R>(
+pub effect fn bindRequirement<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &P
 ) -> A ! E ? Without<R, S>
@@ -368,7 +371,7 @@ where &P provides S from R {
 /// An exclusive provider may satisfy a stored shared or exclusive requirement. The selected row is
 /// still the exact stored member, so providing `&mut P` for a shared `&Logger` removes `&Logger`, not
 /// a synthesized `&mut Logger`.
-pub effect fn bindRequirementMut<?S, A, P, !E, ?R>(
+pub effect fn bindRequirementMut<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> A ! E ? Without<R, S>
@@ -384,7 +387,7 @@ where &mut P provides S from R {
 /// Owned selection accepts shared or exclusive stored requirements. Moving an affine provider makes
 /// the resulting Effect take-once; an ordinary Copy provider is captured by snapshot and remains
 /// repeatable.
-pub effect fn bindRequirementOwned<?S, A, P, !E, ?R>(
+pub effect fn bindRequirementOwned<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: P
 ) -> A ! E ? Without<R, S>
@@ -394,7 +397,7 @@ where P provides S from R {
 }
 
 /// Satisfies one shared typed service requirement with an existing provider.
-pub effect fn provide<?S, A, P, !E, ?R>(
+pub effect fn provide<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &P
 ) -> A ! E ? Without<R, S>
@@ -429,10 +432,10 @@ where &P provides S from R {
 ///
 /// effect fn withLogger() -> i32 ! LogError ? &mut Clock {
 ///   let mut logger = StdoutLogger.stdout()
-///   return run Effect.provideMut<&mut Logger>(read(), &mut logger)
+///   return run Effect.provideMut<Logger>(read(), &mut logger)
 /// }
 /// ```
-pub effect fn provideMut<?S, A, P, !E, ?R>(
+pub effect fn provideMut<?S, A, P, E, ?R>(
   self: once Effect<A ! E ? R>,
   provider: &mut P
 ) -> A ! E ? Without<R, S>
@@ -441,10 +444,10 @@ where &mut P provides S from R {
   return run bound
 }
 
-effect fn acquireProvider<?S, A, P, !E, !F, ?R, ?Q>(
+effect fn acquireProvider<?S, A, P, E, F, ?R, ?Q>(
   self: once Effect<A ! E ? R>,
   acquire: Effect<P ! F ? Q>
-) -> Result<A, Row<!E>> ! F ? Without<R, S> | Q
+) -> Result<A, E> ! F ? Without<R, S> | Q
 where &mut P provides S from R {
   let mut provider = run acquire
   let bound = Intrinsic.bindRequirementMut<S>(result(move self), &mut provider)
@@ -455,29 +458,34 @@ where &mut P provides S from R {
 ///
 /// # Details
 ///
-/// The acquisition runs inside this body, so every execution acquires its own provider and a
+/// The acquisition runs inside the body, so each execution acquires its own provider and a
 /// retried attempt never reuses an earlier one. The provider is released when `acquireProvider`
 /// returns, which is why the provided Effect is reified into Result data before it is bound: a
 /// typed failure then reaches this body as data rather than as a propagation that would leave
 /// the frame — and the acquired provider — behind. The failure is re-raised only after the
 /// provider is gone, so a recovering caller never observes it.
-pub effect fn provideWith<?S, A, P, !E, !F, ?R, ?Q>(
+pub effect fn provideEffect<?S, A, P, E, F, ?R, ?Q>(
   self: once Effect<A ! E ? R>,
   acquire: Effect<P ! F ? Q>
 ) -> A ! E | F ? Without<R, S> | Q
 where &mut P provides S from R {
   let completed = run acquireProvider<S>(move self, acquire)
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
 
-/// Defers one Effect through the compiler-owned stack-safe execution boundary.
-pub effect fn suspend<A, !E, ?R>(
+/// Defers one Effect through stack-safe execution while preserving its channels exactly.
+///
+/// # Details
+///
+/// Suspension adds no allocator requirement or recoverable allocation failure. Coroutine frames
+/// belong to the compiler-owned execution stack, whose exhaustion is a fatal trap.
+pub effect fn suspend<A, E, ?R>(
   deferred: once Effect<A ! E ? R>
-) -> A ! E | OutOfMemory ? R | &mut Allocator {
+) -> A ! E ? R {
   return run Intrinsic.suspendEffect(move deferred)
 }

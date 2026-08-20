@@ -56,13 +56,13 @@ that drains input to completion handles no failure on that path.
 
 ### Requirement: A host error is a typed read failure
 
-A provider that cannot perform a read SHALL return `StreamReadFailure`. The failure SHALL be
+A provider that cannot perform a read SHALL return `StreamReadError`. The failure SHALL be
 distinct from the write-side stream failure and SHALL NOT be used to signal the end of input.
 
 #### Scenario: Surface a refused read
 
 - **WHEN** the host refuses a read
-- **THEN** the operation returns `StreamReadFailure` and the caller's recovery branch observes it
+- **THEN** the operation returns `StreamReadError` and the caller's recovery branch observes it
 
 ### Requirement: The native provider reads through one unsafe OS primitive
 
@@ -70,7 +70,7 @@ Canonical standard-library source SHALL define `OsStandardInput` as an ordinary 
 the process standard-input descriptor through one unsafe `Intrinsic` operation using the same
 `Option<usize>` result with low-level reason and native-code outputs as the OS filesystem
 operations. A zero-length transfer SHALL become `EndOfInput` and an absent result SHALL become
-`StreamReadFailure`. No compiler phase MAY recognize the `StandardInput`, `OsStandardInput`,
+`StreamReadError`. No compiler phase MAY recognize the `StandardInput`, `OsStandardInput`,
 `ReadOutcome`, or `read` spellings to select special behavior.
 
 #### Scenario: Read through the native implementation

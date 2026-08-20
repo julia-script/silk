@@ -60,7 +60,10 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
  * of and a `match` arm is an expression rather than a statement, so a loop that walks ownership
  * down a chain has to swap a sentinel into the place it takes from.
  */
-const prelude = `import silk.box { Box, make as boxMake, get as boxGet, into as boxInto }
+const prelude = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet, into as boxInto }
 
 pub struct End {}
 
@@ -127,7 +130,7 @@ fn drain(chain: Chain) -> i32 {
   return released
 }
 
-effect fn build(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut current = Chain { step: Step { kind: End {} } }
   let mut remaining = depth
   while remaining > 0 {
@@ -140,17 +143,22 @@ effect fn build(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
 }
 `
 
-const program = (body: string, depth: number): string => `${prelude}
+const program = (body: string, depth: number): string => `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${prelude}
 ${body}
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 
 /** Recursive traversal, then an iterative teardown so only the walk can exhaust the stack. */
 const walk = (depth: number): string =>
   program(
-    `effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+    `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
@@ -164,7 +172,10 @@ const walk = (depth: number): string =>
 /** Iterative throughout: build, unlink, release. Nothing here recurses. */
 const drain = (depth: number): string =>
   program(
-    `effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+    `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let released = drain(move built)
@@ -181,7 +192,10 @@ const drain = (depth: number): string =>
  */
 const dropped = (depth: number): string =>
   program(
-    `effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+    `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   drop built
@@ -195,14 +209,19 @@ const dropped = (depth: number): string =>
  * half-built chain is released by the failure path. `drain` cannot be called on it — the value is
  * never named by user code, it exists only inside the cleanup the compiler runs on the way out.
  *
- * Recovering the `OutOfMemory` is the point: at a shallow depth this returns 1, having unwound
+ * Recovering the `OutOfMemoryError` is the point: at a shallow depth this returns 1, having unwound
  * cleanly. Deep, the unwinding is what dies.
  */
-const failedBuild = (depth: number): string => `${prelude}
+const failedBuild = (depth: number): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+${prelude}
 struct QuotaAllocator { remaining: i32 }
 
-effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemory {
-  if self.remaining == 0 { fail OutOfMemory {} }
+effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
   let mut inner = SystemAllocator.make()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
@@ -211,14 +230,14 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! Ou
 
 impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }
 
-effect fn measure(depth: i32) -> i32 ! OutOfMemory {
+effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = QuotaAllocator { remaining: ${Math.floor(depth / 2)} }
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 
@@ -546,7 +565,7 @@ it.effect(
  * program that always drains explicitly still meets recursive `Drop` on its allocation-failure
  * path, at whatever depth construction had reached.
  *
- * Shallow, this recovers the `OutOfMemory` and returns 1. Deep, the recovery never happens.
+ * Shallow, this recovers the `OutOfMemoryError` and returns 1. Deep, the recovery never happens.
  */
 it.effect(
   'has no teardown to offer when construction fails partway down a deep chain',

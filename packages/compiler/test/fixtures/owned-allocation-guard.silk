@@ -1,3 +1,10 @@
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
 // A construction guard over runtime-counted move-only elements, written without any Vector or
 // collection-specific intrinsic: the allocation substrate alone has to carry it.
 //
@@ -6,7 +13,7 @@
 // same storage rather than over a shape invented per test.
 struct Element { value: i32 }
 
-effect fn build(count: usize) -> i32 ! OutOfMemory {
+effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[Element; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -25,7 +32,7 @@ effect fn build(count: usize) -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(build(4), recover)

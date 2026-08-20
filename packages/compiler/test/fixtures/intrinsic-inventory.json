@@ -4882,6 +4882,22 @@
       "identity": "ConvertToIsize"
     },
     {
+      "operation": "Intrinsic.charFromU32",
+      "signature": "fn Intrinsic.charFromU32(value: u32) -> Option<char>",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.fromU32",
+      "identity": "CheckedConvertToChar"
+    },
+    {
+      "operation": "Intrinsic.charToU32",
+      "signature": "fn Intrinsic.charToU32(value: char) -> u32",
+      "unsafe": false,
+      "admission": "Scalar",
+      "consumer": "silk/char.toU32",
+      "identity": "ConvertToU32"
+    },
+    {
       "operation": "Intrinsic.charEquals",
       "signature": "fn Intrinsic.charEquals(left: char, right: char) -> bool",
       "unsafe": false,
@@ -4967,7 +4983,7 @@
       "signature": "unsafe fn Intrinsic.osFileOpen(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.fileOpen",
+      "consumer": "silk/os_filesystem.fileOpen",
       "identity": "OsFileOpen",
       "invariant": "root is an absolute native path; path is normalized provider-absolute; outputs are initialized; traversal rejects symlinks and namespace escape"
     },
@@ -4976,7 +4992,7 @@
       "signature": "unsafe fn Intrinsic.osFileRead(handle: &mut OsHandle, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.fileRead",
+      "consumer": "silk/os_filesystem.fileRead",
       "identity": "OsFileRead",
       "invariant": "handle is a live file; output is initialized writable storage; success reports the exact transferred byte count"
     },
@@ -4985,7 +5001,7 @@
       "signature": "unsafe fn Intrinsic.osFileWrite(handle: &mut OsHandle, input: &[u8], offset: usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.fileWrite",
+      "consumer": "silk/os_filesystem.fileWrite",
       "identity": "OsFileWrite",
       "invariant": "handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial"
     },
@@ -4994,7 +5010,7 @@
       "signature": "unsafe fn Intrinsic.osDirectoryOpen(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<OsHandle>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.directoryOpen",
+      "consumer": "silk/os_filesystem.directoryOpen",
       "identity": "OsDirectoryOpen",
       "invariant": "root and path satisfy confined traversal and outputs are initialized"
     },
@@ -5003,7 +5019,7 @@
       "signature": "unsafe fn Intrinsic.osDirectoryNext(handle: &mut OsHandle, output: &mut [u8], kind: &mut i32, requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.directoryNext",
+      "consumer": "silk/os_filesystem.directoryNext",
       "identity": "OsDirectoryNext",
       "invariant": "handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end"
     },
@@ -5012,7 +5028,7 @@
       "signature": "unsafe fn Intrinsic.osPathInspect(root: &[u8], path: &[u8], kind: &mut i32, byteLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.pathInspect",
+      "consumer": "silk/os_filesystem.pathInspect",
       "identity": "OsPathInspect",
       "invariant": "root and path satisfy confined traversal; kind and byteLength outputs are initialized"
     },
@@ -5021,7 +5037,7 @@
       "signature": "unsafe fn Intrinsic.osDirectoryCreateUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.directoryCreateUnique",
+      "consumer": "silk/os_filesystem.directoryCreateUnique",
       "identity": "OsDirectoryCreateUnique",
       "invariant": "root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity"
     },
@@ -5030,7 +5046,7 @@
       "signature": "unsafe fn Intrinsic.osDirectoryCreate(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.directoryCreate",
+      "consumer": "silk/os_filesystem.directoryCreate",
       "identity": "OsDirectoryCreate",
       "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
     },
@@ -5039,7 +5055,7 @@
       "signature": "unsafe fn Intrinsic.osFileRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.fileRemove",
+      "consumer": "silk/os_filesystem.fileRemove",
       "identity": "OsFileRemove",
       "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
     },
@@ -5048,7 +5064,7 @@
       "signature": "unsafe fn Intrinsic.osDirectoryRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.directoryRemove",
+      "consumer": "silk/os_filesystem.directoryRemove",
       "identity": "OsDirectoryRemove",
       "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
     },
@@ -5057,7 +5073,7 @@
       "signature": "unsafe fn Intrinsic.osHandleClose(handle: OsHandle, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-filesystem.handleClose",
+      "consumer": "silk/os_filesystem.handleClose",
       "identity": "OsHandleClose",
       "invariant": "consumes exactly one live file or directory handle whether close succeeds or fails"
     },
@@ -5066,7 +5082,7 @@
       "signature": "unsafe fn Intrinsic.osStandardInputRead(output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-standard-input.read",
+      "consumer": "silk/os_standard_input.read",
       "identity": "OsStandardInputRead",
       "invariant": "output is initialized writable storage; success reports the exact transferred byte count and zero means end of input"
     },
@@ -5075,7 +5091,7 @@
       "signature": "unsafe fn Intrinsic.osProcessExecute(program: &[u8], arguments: &[u8], environment: &[u8], workingDirectory: &[u8], status: &mut i32, code: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-child-process.execute",
+      "consumer": "silk/os_child_process.execute",
       "identity": "OsProcessExecute",
       "invariant": "arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal"
     },
@@ -5084,7 +5100,7 @@
       "signature": "unsafe fn Intrinsic.osProcessCapture(stream: i32, offset: usize, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-child-process.capture",
+      "consumer": "silk/os_child_process.capture",
       "identity": "OsProcessCapture",
       "invariant": "stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage"
     },
@@ -5093,7 +5109,7 @@
       "signature": "unsafe fn Intrinsic.osHostArgumentCount(count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-host-input.argumentCount",
+      "consumer": "silk/os_host_input.argumentCount",
       "identity": "OsHostArgumentCount",
       "invariant": "count output is initialized and reports the received argument count on success"
     },
@@ -5102,7 +5118,7 @@
       "signature": "unsafe fn Intrinsic.osHostArgument(index: usize, output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-host-input.argument",
+      "consumer": "silk/os_host_input.argument",
       "identity": "OsHostArgument",
       "invariant": "output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason"
     },
@@ -5111,7 +5127,7 @@
       "signature": "unsafe fn Intrinsic.osHostVariable(name: &[u8], output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-host-input.variable",
+      "consumer": "silk/os_host_input.variable",
       "identity": "OsHostVariable",
       "invariant": "output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason"
     },
@@ -5120,7 +5136,7 @@
       "signature": "unsafe fn Intrinsic.osHostWorkingDirectory(output: &mut [u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<Option<usize>>",
       "unsafe": true,
       "admission": "Platform",
-      "consumer": "silk/os-host-input.workingDirectory",
+      "consumer": "silk/os_host_input.workingDirectory",
       "identity": "OsHostWorkingDirectory",
       "invariant": "output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits"
     },
@@ -5134,7 +5150,7 @@
     },
     {
       "operation": "Intrinsic.systemAllocationAcquire",
-      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemory>",
+      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemoryError>",
       "unsafe": false,
       "admission": "Platform",
       "consumer": "silk/core.allocate",
@@ -5142,7 +5158,7 @@
     },
     {
       "operation": "Intrinsic.standardStreamWrite",
-      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteFailure>",
+      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! StreamWriteError>",
       "unsafe": false,
       "admission": "Platform",
       "consumer": "silk/core.writeAll",
@@ -5154,7 +5170,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferFrom<T>(allocation: Allocation, count: usize) -> RawBuffer<T>",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.from",
+      "consumer": "silk/raw_buffer.from",
       "identity": "RawBufferFrom",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5163,7 +5179,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferView<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T]",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.view",
+      "consumer": "silk/raw_buffer.view",
       "identity": "RawBufferView",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5172,7 +5188,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferViewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T]",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.viewMut",
+      "consumer": "silk/raw_buffer.viewMut",
       "identity": "RawBufferViewMut",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5181,7 +5197,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferSlot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T>",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.slot",
+      "consumer": "silk/raw_buffer.slot",
       "identity": "RawBufferSlot",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5190,7 +5206,7 @@
       "signature": "fn Intrinsic.rawBufferCount<T>(buffer: &RawBuffer<T>) -> usize",
       "unsafe": false,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.count",
+      "consumer": "silk/raw_buffer.count",
       "identity": "RawBufferCount"
     },
     {
@@ -5198,7 +5214,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferRead<T>(buffer: &RawBuffer<T>, index: usize) -> T",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.read",
+      "consumer": "silk/raw_buffer.read",
       "identity": "RawBufferRead",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5207,7 +5223,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferCopy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.copy",
+      "consumer": "silk/raw_buffer.copy",
       "identity": "RawBufferCopy",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5216,7 +5232,7 @@
       "signature": "unsafe fn Intrinsic.rawBufferFill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/raw-buffer.fill",
+      "consumer": "silk/raw_buffer.fill",
       "identity": "RawBufferFill",
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
@@ -5258,7 +5274,7 @@
     },
     {
       "operation": "Intrinsic.suspendEffect",
-      "signature": "fn Intrinsic.suspendEffect<A, !E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E | OutOfMemory ? R | &mut Allocator>",
+      "signature": "fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.suspendEffect",
@@ -5266,7 +5282,7 @@
     },
     {
       "operation": "Intrinsic.effectResult",
-      "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, Row<!E>> ? R>",
+      "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, E> ? R>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.result",
@@ -5274,7 +5290,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirement",
-      "signature": "fn Intrinsic.bindRequirement<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirement<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirement",
@@ -5282,7 +5298,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirementMut",
-      "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirementMut",
@@ -5290,7 +5306,7 @@
     },
     {
       "operation": "Intrinsic.bindRequirementOwned",
-      "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, !E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
+      "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.bindRequirementOwned",
@@ -5298,7 +5314,7 @@
     },
     {
       "operation": "Intrinsic.catchFailure",
-      "signature": "fn Intrinsic.catchFailure<S, A, !E, !F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<A ! F ? Q>) -> Effect<A ! Without<E, S> | F ? R | Q>",
+      "signature": "fn Intrinsic.catchFailure<S, A, B, E, F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<B ! F ? Q>) -> Effect<A | B ! Without<E, S> | F ? R | Q>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effects.catchFailure",

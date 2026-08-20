@@ -106,14 +106,15 @@ pub fn main() -> i32 { return choose([], 0) }`)
       ] as const) {
         assert.deepEqual(Analysis.diagnostics(self), [])
         const outcome = Analysis.evaluate(self)
-        assert.strictEqual(outcome._tag, 'Blocked')
-        if (outcome._tag !== 'Blocked') continue
-        assert.strictEqual(outcome.reason._tag, 'Trap')
-        if (outcome.reason._tag !== 'Trap') continue
-        assert.include(outcome.reason.reason, `index ${index}`)
-        assert.include(outcome.reason.reason, `length ${length}`)
-        assert.include(outcome.reason.reason, 'fixed-array-mir/main.choose')
-        assert.isAbove(outcome.reason.span.end, outcome.reason.span.start)
+        assert.strictEqual(outcome._tag, 'Trap')
+        if (outcome._tag !== 'Trap') continue
+        assert.include(outcome.reason, `index ${index}`)
+        assert.include(outcome.reason, `length ${length}`)
+        assert.include(
+          outcome.logicalPath.map((frame) => frame.function.name),
+          'choose',
+        )
+        assert.isAbove(outcome.provenance.end, outcome.provenance.start)
         assert.strictEqual(
           outcome.trace.some((event) => event._tag === 'PlaceRead'),
           false,

@@ -15,6 +15,7 @@ export type Selection =
   | { readonly _tag: 'Available'; readonly inventory: Inventory }
   | {
       readonly _tag: 'Unavailable'
+      readonly operations: ReadonlyArray<string>
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     }
 
@@ -51,6 +52,7 @@ export const select = (
   if (unavailable.size > 0)
     return Object.freeze({
       _tag: 'Unavailable',
+      operations: Object.freeze([...unavailable.keys()].sort()),
       diagnostics: Diagnostic.merge([...unavailable.values()]),
     })
   return Object.freeze({

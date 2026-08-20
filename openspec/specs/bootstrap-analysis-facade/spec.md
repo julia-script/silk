@@ -270,16 +270,17 @@ cleanup edges, transfer targets, and encodings without mutable graph identity.
 
 ### Requirement: Structural union facts are facade queries
 
-The analysis facade SHALL expose source union members, canonical normalized types, `never`, expected
-contexts, injection/widening outcomes and mappings, ownership classification, active-member cleanup,
-instance reachability, target layouts, calling shapes, HIR/MIR conversions, evaluation values and
-events, and backend provenance from one immutable snapshot. Tooling MUST NOT normalize members,
-assign tags, infer conversions, or decode payload storage independently.
+The analysis facade SHALL expose source union members, canonical normalized ordinary types,
+`never`, expected contexts, injection/widening outcomes and exact mappings, ownership
+classification, active-member cleanup, instance reachability, target layouts, calling shapes,
+HIR/MIR conversions, evaluation values and events, and backend provenance from one immutable
+snapshot. Tooling MUST NOT normalize members, assign tags, infer conversions, reconstruct
+executable representations, or decode payload storage independently.
 
 #### Scenario: Query one injection across the pipeline
 
-- **WHEN** a nominal value is contextually returned as a union
-- **THEN** facade queries link its source member through semantic conversion, HIR, ownership, layout, MIR, evaluation, and both backend artifacts
+- **WHEN** a scalar, array, nominal, exact callable, or opaque Effect value is contextually returned as a union
+- **THEN** facade queries link its exact source member through semantic conversion, HIR, ownership, layout, MIR, evaluation, and both backend artifacts
 
 ### Requirement: Union facade answers are immutable and deterministic
 
@@ -600,3 +601,16 @@ and MUST NOT reconstruct intrinsic or wrapper identity from spelling.
 
 - **WHEN** a consumer queries a public numeric wrapper and the concrete intrinsic selected after specialization
 - **THEN** the facade returns one source declaration identity and one distinct intrinsic identity with their relationship preserved
+
+### Requirement: Statement-pattern facts are facade queries
+
+The analysis facade SHALL expose shared pattern syntax and facts, exact member evidence, coverage,
+irrefutability, bindings and scopes, ownership loans and exits, HIR selections, MIR match regions,
+evaluation outcomes, and backend artifacts from one immutable snapshot for match, let, and if-let.
+Position-oriented queries SHALL expose pattern declaration identity, references, presentations,
+completion visibility, and nested statement structure without tooling reconstructing lexical scope.
+
+#### Scenario: Query one if-let binding
+
+- **WHEN** tooling queries the declaration and uses of a taken-body pattern binding
+- **THEN** completion, hover, navigation, semantic occurrences, and statement structure agree on one identity and scope

@@ -61,14 +61,14 @@ pub struct Chain {
   value: i32
 }
 
-effect fn recursiveBuild(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn recursiveBuild(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   if depth == 0 { return Chain { step: End {}, value: 0 } }
   let inner = run recursiveBuild(depth - 1)
   let boxed = run boxMake<Chain>(move inner)
   return Chain { step: Link { next: move boxed }, value: 1 }
 }
 
-effect fn iterativeBuild(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn iterativeBuild(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   let mut current = Chain { step: End {}, value: 0 }
   let mut index = 0
   while index < depth {
@@ -124,14 +124,14 @@ fn walkBox(view: &[Chain]) -> i32 {
   }
 }
 
-effect fn buildOnly() -> i32 ! OutOfMemory {
+effect fn buildOnly() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run recursiveBuild(${depth}) |> Effect.provideMut(&mut allocator)
   iterativeDrop(move built)
   return 42
 }
 
-effect fn walkOnly() -> i32 ! OutOfMemory {
+effect fn walkOnly() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run iterativeBuild(${depth}) |> Effect.provideMut(&mut allocator)
   let answer = walk(&built)
@@ -140,14 +140,14 @@ effect fn walkOnly() -> i32 ! OutOfMemory {
   return 1
 }
 
-effect fn dropOnly() -> i32 ! OutOfMemory {
+effect fn dropOnly() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run iterativeBuild(${depth}) |> Effect.provideMut(&mut allocator)
   drop built
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 2 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(${shape === 'box-build' ? 'buildOnly()' : shape === 'box-walk' ? 'walkOnly()' : 'dropOnly()'}, recover)

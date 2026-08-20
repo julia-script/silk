@@ -117,11 +117,11 @@ pub fn main() -> i32 { return choose(identity(1), missing(2)) }`,
     const flow = projectDataFlow(analysis, outcome)
     const outer = flow.groups.find((group) => group.depth === 0)
 
-    expect(outcome._tag).toBe('Blocked')
+    expect(outcome._tag).toBe('Trap')
     expect(
       flow.nodes.some((item) => item.evaluation !== undefined && item.layer !== 'Evaluated'),
     ).toBe(false)
-    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: Trap')).toBe(true)
+    expect(flow.nodes.some((item) => item.label === 'Evaluation stops: fatal trap')).toBe(true)
     expect(
       flow.edges.some(
         (item) =>

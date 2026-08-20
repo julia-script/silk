@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
@@ -8,6 +9,7 @@ import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -34,9 +36,88 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
   }
 })
 
-it('declares one namespace for every standard-library module', () => {
-  // A module without a manifest namespace is never auto-injected, so qualified use of it cannot
-  // resolve. Every shipped module declares one; option keeps its member aliases alongside.
+it('derives deterministic catalog metadata and enforces portable dependency direction', () => {
+  const byModule = new Map(Stdlib.manifest.map((entry) => [entry.module, entry] as const))
+  for (const entry of Stdlib.manifest) {
+    const source = new TextDecoder().decode(entry.bytes)
+    assert.strictEqual(entry.sourceIdentity, entry.module)
+    assert.strictEqual(entry.documentation, entry.path)
+    assert.strictEqual(createHash('sha256').update(entry.bytes).digest('hex'), entry.digest)
+    assert.deepEqual(
+      entry.runtimeInventory,
+      [
+        ...new Set(
+          [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].flatMap((match) =>
+            match[1] === undefined ? [] : [match[1]],
+          ),
+        ),
+      ].sort(),
+    )
+    if (entry.layer === 'portable') assert.isUndefined(entry.providerTargets)
+    else assert.isAbove(entry.providerTargets?.length ?? 0, 0)
+
+    for (const imported of source.matchAll(/\bimport\s+([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)/g)) {
+      const dependency = byModule.get(imported[1]?.replaceAll('.', '/') ?? '')
+      if (entry.layer === 'portable') assert.notStrictEqual(dependency?.layer, 'target-provider')
+    }
+  }
+})
+
+it('publishes one deterministic matched identity graph over compiler, catalog, sources, and intrinsics', () => {
+  const graph = ToolchainIntegrity.installed()
+  assert.strictEqual(graph.schema, 'silk-toolchain-v1')
+  assert.strictEqual(graph.digest.length, 64)
+  assert.deepEqual(ToolchainIntegrity.validateFrontend(graph), {
+    _tag: 'Matched',
+    graph,
+  })
+  assert.deepEqual(
+    graph.components.map((component) => `${component.kind}:${component.id}`),
+    [...graph.components]
+      .sort((left, right) => left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))
+      .map((component) => `${component.kind}:${component.id}`),
+  )
+})
+
+it('rejects stale catalog metadata and exact source bytes independently', () => {
+  const installed = ToolchainIntegrity.installed()
+  const staleCatalog = ToolchainIntegrity.make(
+    installed.components.map((component) =>
+      component.kind === 'Catalog' ? { ...component, digest: '0'.repeat(64) } : component,
+    ),
+  )
+  const catalogValidation = ToolchainIntegrity.validateFrontend(staleCatalog)
+  assert.strictEqual(catalogValidation._tag, 'Invalid')
+  if (catalogValidation._tag === 'Invalid')
+    assert.isTrue(
+      catalogValidation.failures.some(
+        (failure) => failure.reason._tag === 'DigestMismatch' && failure.reason.kind === 'Catalog',
+      ),
+    )
+
+  const sources = new Map(Stdlib.sources)
+  sources.set('silk/vector', ascii('stale source'))
+  const sourceValidation = ToolchainIntegrity.validateFrontend(installed, sources)
+  assert.strictEqual(sourceValidation._tag, 'Invalid')
+  if (sourceValidation._tag === 'Invalid')
+    assert.isTrue(
+      sourceValidation.failures.some(
+        (failure) =>
+          failure.reason._tag === 'DigestMismatch' && failure.reason.id === 'source/silk/vector',
+      ),
+    )
+})
+
+it('computes browser-safe SHA-256 identities over exact UTF-8 bytes', () => {
+  for (const value of ['', 'silk', 'λ'])
+    assert.strictEqual(
+      ToolchainIntegrity.contentDigest(value),
+      createHash('sha256').update(value).digest('hex'),
+    )
+})
+
+it('declares one discoverable namespace for every standard-library module', () => {
+  // Catalog namespaces drive tooling discovery only; they never enter source scope implicitly.
   assert.deepEqual(
     Stdlib.manifest.filter((entry) => entry.namespace === undefined).map((entry) => entry.module),
     [],
@@ -66,7 +147,7 @@ pub fn main() -> i32 {
   return 0
 }`
 
-/** A namespace genuinely called in code still injects its module. */
+/** A qualified call without an import remains unresolved. */
 const called = `pub fn main() -> i32 {
   let outcome = Result.succeed<i32, i32>(42)
   drop outcome
@@ -96,11 +177,14 @@ it.effect('never injects a namespace named only inside a static literal', () =>
   }),
 )
 
-it.effect('keeps injecting a namespace that one qualified call actually names', () =>
+it.effect('requires an explicit import for a qualified standard-library call', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized('stdlib/called', ascii(called))
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.include(
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0009'],
+    )
+    assert.notInclude(
       Analysis.modules(snapshot).map((module) => module.name),
       'silk/result',
     )
@@ -118,18 +202,26 @@ it.effect('resolves standard-library imports without vendoring source', () =>
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
       [
+        'silk/bool',
         'silk/bytes',
+        'silk/char',
         'silk/core',
+        'silk/f32',
+        'silk/f64',
         'silk/format',
+        'silk/i16',
         'silk/i32',
         'silk/i64',
+        'silk/i8',
+        'silk/isize',
         'silk/layout',
         'silk/option',
         'silk/order',
-        'silk/raw-buffer',
+        'silk/raw_buffer',
         'silk/result',
         'silk/slot',
         'silk/string',
+        'silk/u16',
         'silk/u32',
         'silk/u64',
         'silk/u8',
@@ -230,9 +322,8 @@ it('keeps stdlib-importing artifacts byte-identical across fresh processes', () 
 })
 
 /**
- * `app/helper` genuinely calls the standard library's `Result`, so the closure scan pulls
- * `silk/result` in and its manifest namespace is seeded into every module of the closure —
- * including one that declares a `Result` of its own. Seeding is a prelude, so the declaration wins.
+ * `app/helper` explicitly imports the standard library's `Result`. That ordinary dependency enters
+ * the closure, but its catalog namespace does not enter the root module's scope.
  */
 const shadowingRoot = `import app.helper { helped }
 
@@ -247,7 +338,9 @@ pub fn main() -> i32 {
   return helped()
 }`
 
-const shadowedHelper = `pub fn helped() -> i32 {
+const shadowedHelper = `import silk.result as Result
+
+pub fn helped() -> i32 {
   let outcome = Result.succeed<i32, i32>(42)
   drop outcome
   return 0
@@ -275,10 +368,10 @@ const withHelper = (root: string): Effect.Effect<Analysis.Snapshot> =>
     Effect.provide(SourceResolver.memory(new Map([['app/helper', ascii(shadowedHelper)]]))),
   )
 
-it.effect("lets a module's own declaration shadow a seeded standard-library namespace", () =>
+it.effect('keeps catalog declarations out of an importing sibling module', () =>
   Effect.gen(function* () {
     const snapshot = yield* withHelper(shadowingRoot)
-    // `silk/result` really is in the closure: without shadowing this is the SEM0016 collision.
+    // `silk/result` is in the closure only because the helper imported it.
     assert.include(
       Analysis.modules(snapshot).map((module) => module.name),
       'silk/result',
@@ -290,13 +383,10 @@ it.effect("lets a module's own declaration shadow a seeded standard-library name
     assert.strictEqual(lookup.declaration.canonical._tag, 'Canonical')
     if (lookup.declaration.canonical._tag !== 'Canonical') return
     assert.strictEqual(lookup.declaration.canonical.id.module, 'app/main')
-    // The helper never declared `Result`, so its own seeded binding is untouched.
-    const seeded = Analysis.lookupName(snapshot, 'app/helper', 'Result')
-    assert.notStrictEqual(
-      seeded._tag === 'Resolved' && seeded.declaration.canonical._tag === 'Canonical'
-        ? seeded.declaration.canonical.id.module
-        : undefined,
-      'app/main',
+    const helperImport = Analysis.lookupName(snapshot, 'app/helper', 'Result')
+    assert.deepEqual(
+      helperImport._tag === 'Namespace' ? helperImport.module : helperImport._tag,
+      'silk/result',
     )
   }),
 )

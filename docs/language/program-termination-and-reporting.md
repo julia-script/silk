@@ -81,8 +81,9 @@ status. Application-specific statuses require handling the error explicitly befo
 **Diagnostics:** A valid unhandled entry error receives no compile-time diagnostic. The runtime
 outcome is an unhandled error, not a source diagnostic.
 
-**Current compiler:** It currently returns normalized one-based failure tags, leaking member order
-into machine status. That is an implementation mismatch if this rule is confirmed.
+**Implementation:** Internal entry tags still select the active failure identity, but standalone
+adapters normalize every recognized failure tag to public status `1`; evaluator outcomes expose
+that same public status independently of member order.
 
 **Evidence:** [entry failure rule](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures),
 [current backend contract](../../openspec/specs/bootstrap-backend/spec.md).

@@ -1,6 +1,13 @@
 # Reconcile the stabilized Silk language with the repository
 
-Status: active
+Status: complete
+
+> [!IMPORTANT]
+> This map is the pre-implementation reconciliation snapshot that produced the stabilization
+> roadmap. Its per-rule `Partial`, `Contradicted`, and `Not implemented` classifications describe
+> the compiler at that audit point; they are not current implementation status. See the
+> [post-implementation completion audit](../language-stabilization-implementation/audit.md) for the
+> implemented, synchronized, and verified end state.
 
 ## Destination
 
@@ -78,13 +85,17 @@ handoffs.
   — 15 of 44 rules are fully implemented. Intrinsic target closure is strong; remaining work
   separates catalog/scope/runtime roles, adds source unsafe contracts, removes `Report`, builds one
   structured termination outcome, normalizes statuses, and completes explicit-import tooling.
+- [Explicit Effect suspension implementation](issues/06-effect-suspension.md)
+  — SLP-0009 and its OpenSpec remained valid; reusable compiler-owned coroutine frames now preserve
+  exact channels, ownership, cleanup, logical depth, cross-engine parity, and pay-for-use behavior.
 
-## Not yet specified
+## Result
 
-- Exact milestone or release label for the point at which every confirmed rule must be implemented.
-- Whether diagnostic-only reconciliation should ship inside semantic batches or as a dedicated
-  cross-language diagnostic pass.
-- Which optional LSP warnings should be enabled by default after compiler conformance is restored.
+Every initial stabilization domain has an evidence-backed implementation classification and a
+coherent handoff. The implementation milestone is the **stabilized Silk core** defined by
+[`wayfinder/language-stabilization-implementation/map.md`](../language-stabilization-implementation/map.md).
+Diagnostics ship with the semantic batch that owns their invalid boundary. Optional LSP warnings
+remain non-semantic tooling policy and do not block compiler conformance.
 
 ## Completion condition
 

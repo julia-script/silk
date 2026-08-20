@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
-import * as ContinuationLayout from './ContinuationLayout.js'
+import * as CoroutineFrame from './CoroutineFrame.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -26,6 +26,7 @@ import type * as SourceResolver from './SourceResolver.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
+import type * as Type from './Type.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
@@ -50,7 +51,7 @@ const finalizeMir = (
   const normalized = normalizeMir(program, provisional, options)
   return options.normalizeMir === false
     ? normalized
-    : ContinuationLayout.apply(
+    : CoroutineFrame.apply(
         SuspensionMir.finalize(
           normalized,
           provisional,
@@ -121,6 +122,7 @@ export type Preparation =
   | {
       readonly _tag: 'NoEntry'
       readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
+      readonly requirements?: ReadonlyArray<Type.Requirement>
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
       readonly report: ReadonlyArray<PhaseReport.PhaseReport>
     }
@@ -576,7 +578,6 @@ const instanceViolationDiagnostics = (
     Instances.unlowerableWitnessViolations(discovery, self.index),
     Instances.storedCallableViolations(discovery, self.index),
     Instances.storedEffectViolations(discovery, self.index),
-    Instances.continuationAllocatorViolations(discovery, self.index, self.results),
   )
 
 /** Derives immutable target/runtime facts from one completed frontend. */
@@ -612,6 +613,13 @@ export const realize = (
           message: 'Target-dependent phases are unavailable for invalid source specialization',
         })
       : undefined
+  const returnContractError =
+    specializationError === undefined && Diagnostic.hasReturnContractErrors(baseDiagnostics)
+      ? new AnalysisUnavailable({
+          operation: 'Analysis.realize',
+          message: 'Target-dependent phases are unavailable for an invalid return contract',
+        })
+      : undefined
   // Storage fences (SEM0103/SEM0107) name programs the layout planner cannot serve, so realization
   // stops at the source diagnostic instead of producing an InvalidMir echo of it.
   const instanceFenceError =
@@ -622,7 +630,7 @@ export const realize = (
             'Target-dependent phases are unavailable while a reachable construction stores an unsupported executable representation',
         })
       : undefined
-  const realizationError = specializationError ?? instanceFenceError
+  const realizationError = specializationError ?? returnContractError ?? instanceFenceError
   const targetLayout = measured(
     report,
     'target-layout',
@@ -635,7 +643,12 @@ export const realize = (
           : target._tag === 'Resolved'
             ? Object.freeze({
                 _tag: 'Available',
-                value: Layout.catalog(target.target, self.index, instances),
+                value: Layout.catalog(
+                  target.target,
+                  self.index,
+                  instances,
+                  OpaqueRealization.catalogOf(self),
+                ),
               })
             : Object.freeze({ _tag: 'Unavailable', error: target.error })
       const layout: Targeted<Layout.Plan> =
@@ -738,6 +751,9 @@ export const prepare = (
     return Object.freeze({
       _tag: 'NoEntry',
       reason: discovery.entry.reason,
+      ...(discovery.entry.requirements === undefined
+        ? {}
+        : { requirements: discovery.entry.requirements }),
       diagnostics,
       report: Object.freeze(report),
     })
@@ -766,9 +782,14 @@ export const prepare = (
       if (availability._tag === 'Unavailable')
         return Object.freeze({
           _tag: 'IntrinsicUnavailable' as const,
-          diagnostics: availability.diagnostics,
+          error: Target.unavailableInventory(selection.target, availability.operations),
         })
-      const catalog = Layout.catalog(selection.target, self.index, discovery)
+      const catalog = Layout.catalog(
+        selection.target,
+        self.index,
+        discovery,
+        OpaqueRealization.catalogOf(self),
+      )
       return Object.freeze({
         _tag: 'Available' as const,
         target: selection.target,
@@ -788,8 +809,9 @@ export const prepare = (
     })
   if (targetAndLayout._tag === 'IntrinsicUnavailable')
     return Object.freeze({
-      _tag: 'Rejected',
-      diagnostics: Diagnostic.merge(diagnostics, targetAndLayout.diagnostics),
+      _tag: 'TargetFailed',
+      error: targetAndLayout.error,
+      diagnostics,
       report: Object.freeze(report),
     })
   if (targetAndLayout._tag === 'Unavailable')

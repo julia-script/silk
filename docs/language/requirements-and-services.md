@@ -130,10 +130,9 @@ must name both the contract and operation. For an unknown inline name, it must e
 names match contract operations and suggest an explicit mapping when a differently named actor
 function was intended.
 
-**Current compiler:** Disputed. General conformances currently accept mapped operations only and
-reject inline bodies with `SEM0083`; the restricted `Drop` hook is the sole inline exception. The
-general parser and conformance index must accept both forms before the compiler implements this
-rule.
+**Current compiler:** Aligned. General conformances accept inline bodies, mapped actor functions,
+and mixtures of both forms. Completeness and compatibility are checked through one ordered witness
+table for interfaces and services.
 
 **Evidence:** [earlier actor-function direction](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
 [earlier service mapping requirement](../../openspec/specs/bootstrap-service-declarations/spec.md),
@@ -191,9 +190,8 @@ diagnostic must identify the named type and state that Effect requirements must 
 services. When the named type is an ordinary value type, tooling may suggest passing it explicitly;
 it must not silently synthesize a service declaration or wrapper.
 
-**Current compiler:** Disputed. The compiler currently accepts some nominal structs directly as
-requirement capabilities. Those cases must either declare a real service and provider conformance,
-or become explicit function parameters during implementation reconciliation.
+**Current compiler:** Aligned. Requirement construction admits service declarations and generic
+requirement parameters, while concrete structs and ordinary interfaces receive `SEM0070`.
 
 **Evidence:** [service and requirement decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [service declaration specification](../../openspec/specs/bootstrap-service-declarations/spec.md),
@@ -247,10 +245,9 @@ dependency eligibility itself is relevant. The compiler must not report an “un
 parallel service-conformance diagnostic merely because a service appears in an ordinary interface
 position.
 
-**Current compiler:** Disputed. The compiler currently rejects a service used as an ordinary
-interface constraint with `SEM0083`, and parts of provider matching and service-operation witness
-adaptation follow service-specific paths. Stabilization must reduce those paths to the eligibility
-check plus shared interface machinery rather than preserving divergent behavior.
+**Current compiler:** Aligned. Services and interfaces share contract, conformance, bound,
+specialization, and static-call machinery. The service eligibility bit is consulted only where an
+Effect dependency key is formed.
 
 **Evidence:** [earlier service/interface distinction](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [interface contract specification](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
@@ -323,10 +320,9 @@ identifies the expected service and nominal-role structure. Repeating or reorder
 is normalization, not an error. Tooling may offer to remove redundant entries or show their
 normalized form.
 
-**Current compiler:** Disputed only in source spelling for this rule. The compiler implements
-service-role identity, an implicit `DefaultRole`, and strongest-access union normalization, but
-currently spells a non-default role as `&Clock@Primary`. The intended spelling is
-`&Clock at Primary`; `@` is superseded and should not remain as a compatibility alias.
+**Current compiler:** Aligned. Requirement entries use nominal service-role identity, the implicit
+`DefaultRole`, strongest-access union normalization, and `at` spelling. The superseded `@` role
+spelling is not accepted as a compatibility alias.
 
 **Evidence:** [requirement-row decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [current requirement representation](../../packages/compiler/src/Type.ts),
@@ -367,9 +363,8 @@ infer one finite unambiguous row reports `SEM0089` and identifies the conflictin
 evidence. Preserving a valid row produces no diagnostic even when its concrete services are unknown
 while the generic body is checked.
 
-**Current compiler:** Disputed only where the compiler's current `@Role` spelling appears in a
-concrete specialization or diagnostic. Generic requirement-row binders and finite specialization
-already follow the intended model.
+**Current compiler:** Aligned. Generic requirement-row binders preserve finite normalized rows,
+including nominal roles and access, and concrete specializations and diagnostics use `at` spelling.
 
 **Evidence:** [generic Effect-contract rule](effect-contracts.md#eff-012--ordinary-failure-types-and-generic-requirement-rows-preserve-a-contract),
 [current row inference](../../packages/compiler/src/Elaboration.ts),
@@ -421,9 +416,8 @@ and explains that requirements permit only shared or exclusive service access. P
 shared access for an exclusive requirement reports a provider-access mismatch at the provision
 call. The diagnostic must distinguish insufficient access from missing service conformance.
 
-**Current compiler:** Supported in principle. Requirement rows store shared or exclusive access,
-while provider binding separately supports shared, exclusive, and owned capture. Source diagnostics
-and rendered examples still require migration from `@Role` to `at Role`.
+**Current compiler:** Aligned. Requirement rows store shared or exclusive access independently from
+provider binding, while provision separately supports shared, exclusive, and owned capture.
 
 **Evidence:** [service access decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [provider-binding intrinsics](../../packages/compiler/src/Intrinsic.ts),
@@ -473,16 +467,15 @@ ambiguous without a selector.
 A selector resolves row-key ambiguity only. It does not resolve multiple competing conformance
 witnesses for the same provider and service; conformance coherence must still produce one witness.
 
-**Diagnostics:** No compatible key reports `SEM0123` at the provision call and distinguishes a
-missing row key, missing conformance, and insufficient access when that cause is known. Multiple
-compatible keys report `SEM0125` and list every service-role candidate using `at` spelling.
-Ambiguous conformance evidence for the selected key reports `SEM0127` and identifies the competing
-witnesses.
+**Diagnostics:** A missing row key or missing service conformance reports `SEM0123` at the provision
+call. A selected key whose provider capture has insufficient access reports `SEM0131`, after key
+and conformance selection. Multiple compatible keys report `SEM0125` and list every service-role
+candidate using `at` spelling. Ambiguous conformance evidence for the selected key reports
+`SEM0127` and identifies the competing witnesses.
 
-**Current compiler:** Disputed in explicit-selector shape. Inference, no-match, and ambiguity
-checking already exist, but the compiler currently selects an exact requirement-row member such as
-`&Clock@Primary`, including its access. The intended selector is the access-independent key
-`Clock at Primary`; `@` and access-bearing selectors are superseded.
+**Current compiler:** Aligned. Inferred and explicit selection operate on access-independent
+service-role keys; provider access is checked afterward. Selectors use `Clock` or
+`Clock at Primary`, and access-bearing selectors and the superseded `@` spelling are rejected.
 
 **Evidence:** [provider-selection implementation](../../packages/compiler/src/ProviderSelection.ts),
 [provider-selection diagnostics](../../packages/compiler/src/Diagnostic.ts),
@@ -524,10 +517,8 @@ diagnostic at the second operand. An absent but otherwise valid key is not an er
 itself. Provision remains stricter under SERV-007 and reports `SEM0123` rather than silently
 providing nothing when its selected key is absent.
 
-**Current compiler:** Disputed. Current `Without` compares exact access-bearing requirement members,
-so `Without<&mut Clock, &Clock>` retains `&mut Clock`. It also uses `@` in role-bearing members. Both
-behaviors are superseded: the second operand is an access-independent service-role selector, and
-non-default roles use `at`.
+**Current compiler:** Aligned. `Without` compares access-independent service-role keys, removes the
+complete normalized entry regardless of its retained access, and uses `at` for non-default roles.
 
 **Evidence:** [current generic-row specification](../../openspec/specs/bootstrap-type-generics/spec.md),
 [current type-level subtraction](../../packages/compiler/src/Type.ts),
@@ -599,9 +590,9 @@ borrow, or use of a moved provider receives the ordinary ownership diagnostic at
 conflicting use. Provision-specific no-match and ambiguity diagnostics follow SERV-007. No
 diagnostic is produced merely because the same requirement exists in a nested Effect success value.
 
-**Current compiler:** Partially aligned. Lazy provider capture, lexical execution, ownership, and
-one-layer contracts are implemented. Explicit selector syntax, access-independent subtraction, and
-rendered role spelling require the reconciliations recorded by SERV-007 and SERV-008.
+**Current compiler:** Aligned. Provider capture is lazy and lexical, provision closes one Effect
+layer, selectors and subtraction use access-independent keys, and `flatten` unions and normalizes
+both layers' requirement rows.
 
 **Evidence:** [effect construction and execution](effects-and-execution.md),
 [nested Effect rule](effects-and-execution.md#eff-004--effects-may-be-nested-and-flattening-is-explicit),
@@ -655,11 +646,9 @@ A fatal trap preserves the language-wide rule that structured cleanup is not gua
 requirements compose normally rather than producing service-specific diagnostics. A provider whose
 type does not conform to `K` reports the ordinary conformance mismatch at the acquisition argument.
 
-**Current standard library:** Disputed in naming and some selector details. The existing operation
-is named `Effect.provideWith` and uses an access-bearing selected row. It should become
-`Effect.provideEffect`, use the service-role selector `K`, and retain no compatibility alias in this
-green-field codebase.
+**Current standard library:** `Effect.provideEffect` uses the access-independent service-role
+selector `K`. No compatibility alias is retained in this green-field codebase.
 
 **Evidence:** [current Effect standard library](../../packages/compiler/stdlib/silk/effects.silk),
-[acquired-provider acceptance tests](../../packages/compiler/test/ProvideWithAcceptance.test.ts),
+[acquired-provider acceptance tests](../../packages/compiler/test/ProvideEffectAcceptance.test.ts),
 [provider lifetime decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).

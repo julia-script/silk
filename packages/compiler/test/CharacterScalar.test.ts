@@ -145,24 +145,27 @@ it.effect('reports an operand-type diagnostic for prefix operators over a char o
   }),
 )
 
-it.effect('declares no arithmetic and no integer conversion on the char module', () =>
+it.effect('declares no arithmetic and exposes only explicit integer conversion', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'absent-members',
-      'pub fn sum(left: char, right: char) -> char { return char.add(left, right) }\n' +
-        'pub fn code(value: char) -> u32 { return char.toU32(value) }\n' +
+      'import silk.char as char\npub fn sum(left: char, right: char) -> char { return char.add(left, right) }\n' +
+        'import silk.char as char\npub fn code(value: char) -> u32 { return char.toU32(value) }\n' +
         'pub fn main() -> i32 { return 0 }',
     )
-    assert.deepEqual(codes(snapshot), ['SEM0014', 'SEM0014'])
-    assert.deepEqual(messages(snapshot), [
-      'Module silk/char has no member add',
-      'Module silk/char has no member toU32',
-    ])
-    for (const absent of ['add', 'subtract', 'negate', 'bitAnd', 'toU32', 'checkedToU32'])
+    assert.deepEqual(codes(snapshot), ['SEM0014'])
+    assert.deepEqual(messages(snapshot), ['Module silk/char has no member add'])
+    for (const absent of ['add', 'subtract', 'negate', 'bitAnd', 'checkedToU32'])
       assert.strictEqual(
         Scalar.character.operations.some((operation) => operation.spelling === absent),
         false,
         absent,
+      )
+    for (const present of ['fromU32', 'toU32'])
+      assert.strictEqual(
+        Scalar.character.operations.some((operation) => operation.spelling === present),
+        true,
+        present,
       )
   }),
 )

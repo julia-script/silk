@@ -7,7 +7,7 @@ describe('Content', () => {
     const markup = renderToStaticMarkup(
       <Hover.Content
         markdown={`\`\`\`silk
-pub struct OutOfMemory
+pub struct OutOfMemoryError
 \`\`\`
 
 Allocates **owned storage** through an explicitly provided implementation.`}

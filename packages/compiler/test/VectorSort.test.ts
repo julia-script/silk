@@ -16,15 +16,19 @@ const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-sort-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const program = (body: string): string =>
-  `import silk.vector { Vector, make, append, sort, binarySearch, get, length }
+  `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 ${body}
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -162,9 +166,13 @@ it.effect('sorts every integer width the standard library witnesses', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/widths',
-      `import silk.vector { Vector, make, append, sort, get, length }
+      `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.vector { Vector, make, append, sort, get, length }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut narrow = make<u8>()
   let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
@@ -190,7 +198,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
@@ -308,7 +316,11 @@ it.effect(
  * `tag` the comparison never reads, so the arrangement of the equal elements is visible in the
  * result.
  */
-const stableUserOrder = `import silk.order { Order }
+const stableUserOrder = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }
 
 struct Item {
@@ -320,9 +332,9 @@ fn itemLess(left: &Item, right: &Item) -> bool {
   return left.key < right.key
 }
 
-impl Order<Item> for Item { lessThan: Item.itemLess }
+impl Order for Item { lessThan: Item.itemLess }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut items = make<Item>()
   let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
@@ -340,7 +352,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return folded
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -358,7 +370,12 @@ it.effect('keeps equal elements of a user type in their input order', () =>
  * the comparison, the index permutation, or the final bulk move may duplicate or lose one, so the
  * acquire and release counts have to agree exactly.
  */
-const moveOnlyElements = `import silk.order { Order }
+const moveOnlyElements = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }
 
 struct Tracked {
@@ -370,15 +387,15 @@ fn trackedLess(left: &Tracked, right: &Tracked) -> bool {
   return left.key < right.key
 }
 
-impl Order<Tracked> for Tracked { lessThan: Tracked.trackedLess }
+impl Order for Tracked { lessThan: Tracked.trackedLess }
 
-effect fn hold(key: i32) -> Tracked ! OutOfMemory ? &mut Allocator {
+effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
   let mut payload = make<i32>()
   let filled = run append<i32>(&mut payload, key)
   return Tracked { key: key, payload: move payload }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut items = make<Tracked>()
   let first = run hold(3) |> Effect.provideMut(&mut allocator)
@@ -398,7 +415,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return folded
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 99 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

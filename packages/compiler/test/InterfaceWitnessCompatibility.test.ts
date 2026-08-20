@@ -7,7 +7,7 @@ const decodeError = Type.nominal('test', 'DecodeError')
 const extraError = Type.nominal('test', 'ExtraError')
 const clock = Type.nominal('test', 'Clock')
 const logger = Type.nominal('test', 'Logger')
-const failureParameter = Type.parameter({ module: 'test', name: 'Contract' }, 0, 'E', 'FailureRow')
+const failureParameter = Type.parameter({ module: 'test', name: 'Contract' }, 0, 'E')
 const requirementParameter = Type.parameter(
   { module: 'test', name: 'Contract' },
   1,
@@ -23,13 +23,13 @@ const operand = (
 
 const contract = Object.freeze({
   functionKind: 'Effect' as const,
+  unsafe: false,
   operands: Object.freeze([
     operand('self', Type.reference('Exclusive', schema), true),
     operand('encoded', 'i32'),
   ]),
   success: 'bool' as const,
   failures: Object.freeze([decodeError, extraError]),
-  failureParameters: Object.freeze([]),
   requirements: Object.freeze([
     Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Exclusive' as const }),
     Object.freeze({ capability: logger, role: 'DefaultRole', access: 'Shared' as const }),
@@ -40,13 +40,13 @@ const contract = Object.freeze({
 it('admits a pure witness with smaller rows and weaker receiver and requirement access', () => {
   const witness = Object.freeze({
     functionKind: 'Ordinary' as const,
+    unsafe: false,
     operands: Object.freeze([
       operand('self', Type.reference('Shared', schema), true),
       operand('encoded', 'i32'),
     ]),
     success: 'bool' as const,
     failures: Object.freeze([decodeError]),
-    failureParameters: Object.freeze([]),
     requirements: Object.freeze([
       Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Shared' as const }),
     ]),
@@ -73,13 +73,13 @@ it('reports the first stronger receiver demand before later row demands', () => 
   })
   const witness = Object.freeze({
     functionKind: 'Effect' as const,
+    unsafe: false,
     operands: Object.freeze([
       operand('self', Type.reference('Exclusive', schema), true),
       operand('encoded', 'i32'),
     ]),
     success: 'bool' as const,
     failures: Object.freeze([Type.nominal('test', 'Unpromised')]),
-    failureParameters: Object.freeze([]),
     requirements: Object.freeze([]),
     requirementParameters: Object.freeze([]),
   })
@@ -208,16 +208,33 @@ it('rejects stronger flow and non-exact operand or success types', () => {
   assert.strictEqual(successCompatibility.problem._tag, 'Success')
 })
 
-it('subsumes open rows only when the witness forwards parameters promised by the contract', () => {
+it('admits safer witnesses and rejects unsafe witnesses for safe contracts', () => {
+  const unsafeContract = Object.freeze({ ...contract, unsafe: true })
+  const safeWitness = Object.freeze({ ...contract, unsafe: false })
+  const unsafeWitness = Object.freeze({ ...contract, unsafe: true })
+
+  assert.deepEqual(InterfaceWitnessCompatibility.check(unsafeContract, safeWitness), {
+    _tag: 'Compatible',
+  })
+  const compatibility = InterfaceWitnessCompatibility.check(contract, unsafeWitness)
+  assert.strictEqual(compatibility._tag, 'Incompatible')
+  if (compatibility._tag !== 'Incompatible') return
+  assert.deepEqual(compatibility.problem, { _tag: 'StrongerSafety' })
+  assert.strictEqual(
+    InterfaceWitnessCompatibility.describe(compatibility),
+    'unsafe witness cannot satisfy a safe operation contract',
+  )
+})
+
+it('subsumes generic failure types only when the witness forwards types promised by the contract', () => {
   const openContract = Object.freeze({
     ...contract,
-    failureParameters: Object.freeze([failureParameter]),
+    failures: Object.freeze([failureParameter]),
     requirementParameters: Object.freeze([requirementParameter]),
   })
   const matchingWitness = Object.freeze({
     ...contract,
-    failures: Object.freeze([]),
-    failureParameters: Object.freeze([failureParameter]),
+    failures: Object.freeze([failureParameter]),
     requirements: Object.freeze([]),
     requirementParameters: Object.freeze([requirementParameter]),
   })
@@ -225,19 +242,19 @@ it('subsumes open rows only when the witness forwards parameters promised by the
     _tag: 'Compatible',
   })
 
-  const unknownFailure = Type.parameter({ module: 'test', name: 'Witness' }, 0, 'F', 'FailureRow')
+  const unknownFailure = Type.parameter({ module: 'test', name: 'Witness' }, 0, 'F')
   const failureCompatibility = InterfaceWitnessCompatibility.check(
     openContract,
     Object.freeze({
       ...matchingWitness,
-      failureParameters: Object.freeze([unknownFailure]),
+      failures: Object.freeze([unknownFailure]),
     }),
   )
   assert.strictEqual(failureCompatibility._tag, 'Incompatible')
   if (failureCompatibility._tag !== 'Incompatible') return
   assert.deepEqual(failureCompatibility.problem, {
-    _tag: 'FailureParameter',
-    parameter: unknownFailure,
+    _tag: 'Failure',
+    failure: unknownFailure,
   })
 
   const unknownRequirement = Type.parameter(

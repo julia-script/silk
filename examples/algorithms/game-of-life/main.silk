@@ -1,3 +1,4 @@
+import silk.usize as usize
 fn previous(index: usize) -> usize {
   if index == 0 {
     return 4

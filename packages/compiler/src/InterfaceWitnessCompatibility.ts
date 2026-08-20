@@ -10,10 +10,10 @@ export interface Operand {
 
 export interface Contract {
   readonly functionKind: 'Ordinary' | 'Effect'
+  readonly unsafe: boolean
   readonly operands: ReadonlyArray<Operand>
   readonly success: Type.Type
-  readonly failures: ReadonlyArray<Type.Nominal>
-  readonly failureParameters: ReadonlyArray<Type.Parameter>
+  readonly failures: ReadonlyArray<Type.Type>
   readonly requirements: ReadonlyArray<Type.Requirement>
   readonly requirementParameters: ReadonlyArray<Type.Parameter>
 }
@@ -21,6 +21,7 @@ export interface Contract {
 export interface Witness extends Contract {}
 
 export type Problem =
+  | { readonly _tag: 'StrongerSafety' }
   | {
       readonly _tag: 'StrongerFlow'
       readonly promised: Contract['functionKind']
@@ -50,8 +51,7 @@ export type Problem =
       readonly required: Type.Type
     }
   | { readonly _tag: 'Success'; readonly promised: Type.Type; readonly actual: Type.Type }
-  | { readonly _tag: 'Failure'; readonly failure: Type.Nominal }
-  | { readonly _tag: 'FailureParameter'; readonly parameter: Type.Parameter }
+  | { readonly _tag: 'Failure'; readonly failure: Type.Type }
   | {
       readonly _tag: 'StrongerRequirementAccess'
       readonly requirement: Type.Requirement
@@ -134,6 +134,8 @@ const operandProblem = (
 
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
 export const check = (contract: Contract, witness: Witness): Compatibility => {
+  if (!contract.unsafe && witness.unsafe)
+    return incompatible(Object.freeze({ _tag: 'StrongerSafety' }))
   if (contract.functionKind === 'Ordinary' && witness.functionKind === 'Effect')
     return incompatible(
       Object.freeze({
@@ -170,9 +172,6 @@ export const check = (contract: Contract, witness: Witness): Compatibility => {
   for (const failure of witness.failures)
     if (!contract.failures.some((allowed) => Type.equals(failure, allowed)))
       return incompatible(Object.freeze({ _tag: 'Failure', failure }))
-  for (const parameter of witness.failureParameters)
-    if (!contract.failureParameters.some((allowed) => Type.equals(parameter, allowed)))
-      return incompatible(Object.freeze({ _tag: 'FailureParameter', parameter }))
   for (const requirement of witness.requirements) {
     const matching = contract.requirements.filter(
       (allowed) =>
@@ -204,6 +203,8 @@ export const describe = (self: Compatibility): string | undefined => {
   if (self._tag === 'Compatible') return undefined
   const problem = self.problem
   switch (problem._tag) {
+    case 'StrongerSafety':
+      return 'unsafe witness cannot satisfy a safe operation contract'
     case 'StrongerFlow':
       return `witness flow ${problem.required.toLowerCase()} is stronger than promised ${problem.promised.toLowerCase()} flow`
     case 'OperandArity':
@@ -218,8 +219,6 @@ export const describe = (self: Compatibility): string | undefined => {
       return `witness returns ${Type.encode(problem.actual)} but the interface promises ${Type.encode(problem.promised)}`
     case 'Failure':
       return `witness adds failure ${Type.encode(problem.failure)}`
-    case 'FailureParameter':
-      return `witness adds open failure row ${problem.parameter.name}`
     case 'StrongerRequirementAccess':
       return `witness requires ${problem.requirement.access.toLowerCase()} access to ${Type.encode(problem.requirement.capability)} but the interface promises ${problem.promised.map((access) => access.toLowerCase()).join(' or ')} access`
     case 'Requirement':

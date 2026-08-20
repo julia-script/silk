@@ -51,19 +51,22 @@ pub fn main() -> i32 {
   return parser.parse(40)
 }`
 
-const copiedCapture = `struct Parser<F: fn(i32) -> i32> { parse: F }
+const copiedCapture = `import silk.i32 as i32
+struct Parser<F: fn(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(2) }
   return parser.parse(40)
 }`
 
-const sharedReuse = `struct Parser<F: fn(i32) -> i32> { parse: F }
+const sharedReuse = `import silk.i32 as i32
+struct Parser<F: fn(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(1) }
   return parser.parse(20) + parser.parse(20)
 }`
 
-const nested = `struct Parser<F: fn(i32) -> i32> { parse: F }
+const nested = `import silk.i32 as i32
+struct Parser<F: fn(i32) -> i32> { parse: F }
 struct Boxed<F: fn(i32) -> i32> { inner: Parser<F> }
 fn box<F: fn(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
   return Boxed<F> { inner: move inner }
@@ -124,7 +127,8 @@ pub fn main() -> i32 {
   return apply<i32>(Token<i32> { value: 1 }, 20) + apply<bool>(Token<bool> { value: true }, 22)
 }`
 
-const equalShapeSpecializations = `struct Holder<F: fn(i32) -> i32> { step: F }
+const equalShapeSpecializations = `import silk.i32 as i32
+struct Holder<F: fn(i32) -> i32> { step: F }
 fn apply<T>(marker: T, value: i32) -> i32 {
   let holder = Holder { step: i32.add(1) }
   return holder.step(value)
@@ -167,7 +171,12 @@ pub fn main() -> i32 {
 
 type CleanupExit = 'uncalled' | 'consuming' | 'moved' | 'typed-failure'
 
-const cleanupProgram = (dropBody: string, exit: CleanupExit) => `struct Guard {
+const cleanupProgram = (dropBody: string, exit: CleanupExit) => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -179,7 +188,7 @@ impl Drop for Guard {
 struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -192,14 +201,16 @@ effect fn build() -> i32 ! OutOfMemory {
       : exit === 'moved'
         ? 'return keep(move holder)'
         : exit === 'typed-failure'
-          ? 'fail OutOfMemory {}'
+          ? 'fail OutOfMemoryError {}'
           : 'return 42'
   }
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-const hookOnlyCleanupProgram = (exit: CleanupExit) => `struct Guard<F: once fn(i32) -> i32> {
+const hookOnlyCleanupProgram = (exit: CleanupExit) => `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+struct Guard<F: once fn(i32) -> i32> {
   tag: i32
   marker: F
 }
@@ -215,7 +226,7 @@ fn consume<F: once fn(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
   return value + guard.tag
 }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let guard = Guard { tag: 2, marker: marker }
   let holder = Holder { step: consume(move guard) }
   ${
@@ -224,21 +235,23 @@ effect fn build() -> i32 ! OutOfMemory {
       : exit === 'moved'
         ? 'return keep(move holder)'
         : exit === 'typed-failure'
-          ? 'fail OutOfMemory {}'
+          ? 'fail OutOfMemoryError {}'
           : 'return 42'
   }
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
 
-const typedFailure = `${takeDeclarations}effect fn build() -> i32 ! OutOfMemory {
+const typedFailure = `import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+${takeDeclarations}effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 2 }
   let holder = Holder { step: consume(move token) }
-  fail OutOfMemory {}
+  fail OutOfMemoryError {}
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 42 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const runtimeMatrix = [
@@ -465,12 +478,7 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(trappingWasm), [], exit)
         const trappingEvaluation = Analysis.evaluate(trappingWasm)
-        assert.strictEqual(trappingEvaluation._tag, 'Blocked', exit)
-        assert.strictEqual(
-          trappingEvaluation._tag === 'Blocked' ? trappingEvaluation.reason._tag : undefined,
-          'Trap',
-          exit,
-        )
+        assert.strictEqual(trappingEvaluation._tag, 'Trap', exit)
         assert.strictEqual(
           trappingEvaluation.trace.filter(
             (event) => event._tag === 'Call' && event.target.name.startsWith('drop@impl'),

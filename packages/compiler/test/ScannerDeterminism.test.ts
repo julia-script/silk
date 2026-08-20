@@ -12,6 +12,7 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
   assert.strictEqual(second.status, 0, second.stderr)
   assert.strictEqual(first.stdout, second.stdout)
   const encoded = JSON.parse(first.stdout) as {
+    readonly toolchainIdentity: string
     readonly native: {
       readonly diagnostics: ReadonlyArray<unknown>
       readonly modules: ReadonlyArray<string>
@@ -27,6 +28,7 @@ it('keeps scanner phases, stdlib imports, and artifacts byte-identical across fr
     readonly nativeBytes: string
     readonly wasmBytes: string
   }
+  assert.strictEqual(encoded.toolchainIdentity.length, 64)
   assert.deepEqual(encoded.native.diagnostics, [])
   assert.deepEqual(encoded.wasm.diagnostics, [])
   assert.include(encoded.native.modules, 'silk/vector')

@@ -60,7 +60,13 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** The accepted shape every negative below deviates from in exactly one way. */
-const guarded = (body: string): string => `effect fn store() -> i32 ! OutOfMemory {
+const guarded = (body: string): string => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -71,7 +77,7 @@ ${body}
   }
   return 0
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /**
@@ -85,7 +91,12 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
     const cases: ReadonlyArray<readonly [string, string, string]> = [
       [
         'raw-storage-outside-unsafe',
-        `effect fn store() -> i32 ! OutOfMemory {
+        `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -94,7 +105,7 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
   drop buffer
   return 1
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
         'SEM0082',
       ],
@@ -116,7 +127,8 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'foreign-allocator-conformance',
-        `struct TestAllocator { remaining: i32 }
+        `import silk.core { Allocator }
+struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: Foreign.allocate }
 pub fn main() -> i32 { return 0 }`,
         'SEM0083',
@@ -124,9 +136,10 @@ pub fn main() -> i32 { return 0 }`,
       [
         'drop-hook-on-a-copy-type',
         `struct CopyValue { value: i32 }
+impl Copy for CopyValue {}
 impl Drop for CopyValue { fn drop(self: &mut CopyValue) -> () { return () } }
 pub fn main() -> i32 { return 0 }`,
-        'SEM0084',
+        'SEM0083',
       ],
     ]
 

@@ -6,18 +6,14 @@ import * as SuspensionMir from '../src/SuspensionMir.js'
 
 const encoder = new TextEncoder()
 
-const source = `effect fn delayed() -> i32 ! OutOfMemory ? &mut Allocator {
+const source = `import silk.effects as Effect
+effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 2 })
 }
-effect fn program() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn program() -> i32 {
   return 40 + run delayed()
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
-pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let pending = program() |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move pending, recover)
-}`
+pub fn main() -> i32 { return run program() }`
 
 const snapshot = (input = source) =>
   Analysis.ofSourceRealized('suspension-mir/main', encoder.encode(input), 'wasm32-unknown-unknown')
@@ -36,7 +32,7 @@ const stateful = (
       if (
         fn.id.name.startsWith('program$effect$') &&
         region._tag === 'RunSuspendableEffectRegion' &&
-        region.relay.continuation !== undefined
+        region.relay.state !== undefined
       )
         return [fn, region]
   throw new RangeError(SuspensionMir.summary(program))
@@ -95,9 +91,9 @@ it.effect(
       assert.deepEqual(relay.relay.preserves, ['Child', 'Origin', 'TypedOutcome'])
       assert.strictEqual(relay.complete._tag, 'CompleteInCurrentActivation')
       assert.strictEqual(relay.relay.frame, 'StatefulRelay')
-      assert.isDefined(relay.relay.continuation)
+      assert.isDefined(relay.relay.state)
       assert.deepEqual(
-        relay.relay.continuation?.layout.slots.map((slot) => slot.local.ordinal),
+        relay.relay.state?.slots.map((slot) => slot.local.ordinal),
         relay.liveLocals.map((local) => local.ordinal),
       )
       assert.deepEqual(
@@ -136,7 +132,7 @@ it.effect(
       const self = yield* snapshot()
       const program = Analysis.loweredMir(self)
       const [owner, relay] = stateful(program)
-      const descriptor = relay.relay.continuation
+      const descriptor = relay.relay.state
       assert.isDefined(descriptor)
       if (descriptor === undefined) return
 
@@ -144,46 +140,40 @@ it.effect(
         ...relay,
         relay: Object.freeze({
           ...relay.relay,
-          continuation: Object.freeze({
+          state: Object.freeze({
             ...descriptor,
-            layout: Object.freeze({
-              ...descriptor.layout,
-              slots: Object.freeze(descriptor.layout.slots.slice(1)),
-            }),
+            slots: Object.freeze(descriptor.slots.slice(1)),
           }),
         }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, omitted), 'InvalidContinuation'),
+        hasRule(replaceSuspensionRegion(program, owner, relay, omitted), 'InvalidCoroutineFrame'),
       )
 
-      const firstSlot = descriptor.layout.slots.at(0)
+      const firstSlot = descriptor.slots.at(0)
       if (firstSlot !== undefined) {
         const incompatibleAccess = Object.freeze({
           ...relay,
           relay: Object.freeze({
             ...relay.relay,
-            continuation: Object.freeze({
+            state: Object.freeze({
               ...descriptor,
-              layout: Object.freeze({
-                ...descriptor.layout,
-                slots: Object.freeze([
-                  Object.freeze({
-                    ...firstSlot,
-                    type: Object.freeze({
-                      _tag: firstSlot.type._tag === 'bool' ? 'i32' : 'bool',
-                    }),
+              slots: Object.freeze([
+                Object.freeze({
+                  ...firstSlot,
+                  type: Object.freeze({
+                    _tag: firstSlot.type._tag === 'bool' ? 'i32' : 'bool',
                   }),
-                  ...descriptor.layout.slots.slice(1),
-                ]),
-              }),
+                }),
+                ...descriptor.slots.slice(1),
+              ]),
             }),
           }),
         })
         assert.isTrue(
           hasRule(
             replaceSuspensionRegion(program, owner, relay, incompatibleAccess),
-            'InvalidContinuation',
+            'InvalidCoroutineFrame',
           ),
         )
       }
@@ -193,7 +183,7 @@ it.effect(
         liveLocals: Object.freeze([...relay.liveLocals, ...relay.liveLocals.slice(0, 1)]),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, duplicate), 'InvalidContinuation'),
+        hasRule(replaceSuspensionRegion(program, owner, relay, duplicate), 'InvalidCoroutineFrame'),
       )
 
       const undeclared = Object.freeze({
@@ -204,26 +194,9 @@ it.effect(
         ]),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, undeclared), 'InvalidContinuation'),
-      )
-
-      const incompleteRollback = Object.freeze({
-        ...relay,
-        relay: Object.freeze({
-          ...relay.relay,
-          continuation: Object.freeze({
-            ...descriptor,
-            layout: Object.freeze({
-              ...descriptor.layout,
-              prefixRollbacks: Object.freeze(descriptor.layout.prefixRollbacks.slice(0, -1)),
-            }),
-          }),
-        }),
-      })
-      assert.isTrue(
         hasRule(
-          replaceSuspensionRegion(program, owner, relay, incompleteRollback),
-          'InvalidContinuation',
+          replaceSuspensionRegion(program, owner, relay, undeclared),
+          'InvalidCoroutineFrame',
         ),
       )
 
@@ -231,7 +204,7 @@ it.effect(
         ...relay,
         relay: Object.freeze({
           ...relay.relay,
-          continuation: Object.freeze({
+          state: Object.freeze({
             ...descriptor,
             success: Object.freeze({
               ...descriptor.success,
@@ -241,7 +214,7 @@ it.effect(
         }),
       })
       assert.isTrue(
-        hasRule(replaceSuspensionRegion(program, owner, relay, badResume), 'InvalidContinuation'),
+        hasRule(replaceSuspensionRegion(program, owner, relay, badResume), 'InvalidCoroutineFrame'),
       )
 
       const badRunner = Object.freeze({
@@ -262,36 +235,6 @@ it.effect(
       assert.isTrue(
         hasRule(replaceSuspensionRegion(program, owner, relay, badOutcome), 'InvalidSuspension'),
       )
-
-      assert.strictEqual(relay.completion._tag, 'Propagate')
-      if (relay.completion._tag === 'Propagate') {
-        const firstMapping = relay.completion.failureMappings.at(0)
-        assert.isDefined(firstMapping)
-        if (firstMapping === undefined) return
-        for (const [field, tag] of [
-          ['source', 0],
-          ['source', Number.MAX_SAFE_INTEGER + 1],
-          ['target', 0],
-          ['target', Number.MAX_SAFE_INTEGER + 1],
-        ] as const) {
-          const badMapping = Object.freeze({
-            ...relay,
-            completion: Object.freeze({
-              ...relay.completion,
-              failureMappings: Object.freeze([
-                Object.freeze({ ...firstMapping, [field]: tag }),
-                ...relay.completion.failureMappings.slice(1),
-              ]),
-            }),
-          })
-          assert.isTrue(
-            hasRule(
-              replaceSuspensionRegion(program, owner, relay, badMapping),
-              'InvalidSuspension',
-            ),
-          )
-        }
-      }
 
       const differentOwner = program.functions.find((fn) => fn !== owner)
       assert.isDefined(differentOwner)
@@ -316,7 +259,7 @@ it.effect(
       assert.isTrue(
         hasRule(
           replaceSuspensionRegion(program, owner, relay, noDescriptor),
-          'InvalidContinuation',
+          'InvalidCoroutineFrame',
         ),
       )
 

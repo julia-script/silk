@@ -378,7 +378,7 @@ provenance identically across fresh processes.
 
 ### Requirement: MIR carries canonical logical union types
 
-MIR SHALL represent a union as its normalized ordered nominal member set while referencing the
+MIR SHALL represent a union as its normalized ordered ordinary member set while referencing the
 compiler-selected layout and calling shape for physical facts. Locals, contracts, struct fields,
 arrays, writes, calls, returns, and drops SHALL preserve that logical type. MIR MUST NOT contain
 source spelling order, aliases, backend types, numeric tags chosen outside the layout plan, or
@@ -386,31 +386,37 @@ backend-local control labels.
 
 #### Scenario: Lower an aggregate-contained union
 
-- **WHEN** HIR constructs and transports a struct whose field is `Token | End`
+- **WHEN** HIR constructs and transports a struct whose field is `i32 | Array<i32, 2> | Token`
 - **THEN** MIR retains one canonical logical union type and the program's matching layout-plan entry
 
 ### Requirement: MIR union conversion carries a total member mapping
 
-MIR SHALL lower nominal injection and union widening to an explicit verified conversion operation
-containing source and destination locals, exact source and target logical types, a total canonical
-source-member to target-member mapping, layout/calling-shape references, access mode, and provenance.
-The verifier SHALL reject unsorted or duplicate members, non-containing targets, incomplete or
-incorrect mappings, inconsistent locals or layouts, and conversions that would narrow.
+MIR SHALL lower ordinary-member injection and union widening to an explicit verified conversion
+operation containing source and destination locals, exact represented source and target logical
+types, a total canonical source-member to target-member mapping, layout/calling-shape references,
+access mode, and provenance. The verifier SHALL reject unsorted or duplicate members,
+non-containing targets, incomplete or incorrect mappings, inconsistent locals or layouts, and
+conversions that would narrow.
 
 #### Scenario: Lower nominal injection
 
-- **WHEN** HIR injects `Token` into `Token | End`
-- **THEN** MIR contains one conversion mapping `Token` to its compiler-planned target member
+- **WHEN** HIR injects an ordinary value such as `i32` or `Token` into `i32 | Token`
+- **THEN** MIR contains one conversion mapping its exact source type to the compiler-planned target member
+
+#### Scenario: Lower represented executable injection
+
+- **WHEN** HIR injects an exact callable or opaque Effect value into a compatible union
+- **THEN** MIR preserves its finite representation plan and maps it to the public canonical member
 
 #### Scenario: Lower union widening
 
-- **WHEN** HIR widens `Token | End` to `Token | End | Fault`
+- **WHEN** HIR widens `i32 | Token` to `i32 | Token | Fault`
 - **THEN** MIR maps every source member exactly once while preserving the structured control DAG
 
 #### Scenario: Reject an incomplete widening map
 
-- **WHEN** hand-built MIR omits the `End` mapping from a two-member source union
-- **THEN** verification reports the exact missing member before evaluation or emission
+- **WHEN** malformed MIR omits or duplicates one source member mapping
+- **THEN** verification rejects the conversion before evaluation or backend emission
 
 ### Requirement: Union MIR encoding is deterministic
 
@@ -500,7 +506,7 @@ without universal runtime Effect dispatch.
 
 #### Scenario: Encode a failed append attempt
 
-- **WHEN** Vector growth fails with OutOfMemory inside a retried Effect
+- **WHEN** Vector growth fails with OutOfMemoryError inside a retried Effect
 - **THEN** MIR orders failed acquisition, rollback of attempt-local owners, failure propagation, and retry without a leaked allocation or cyclic MIR edge
 
 ### Requirement: MIR represents typed outcomes in the structured DAG
@@ -526,7 +532,10 @@ Concrete monomorphic slice types SHALL remain logical shared or exclusive slice 
 formation SHALL identify one stable backing place, loan identity, access mode, element type, and
 lexical region; loan endings SHALL be explicit ordered facts on every structured exit. These
 operations SHALL remain inside the existing acyclic operation and region structure, including when
-loops later repeat through lexical outcomes, and MUST NOT expose a source-level raw pointer.
+loops later repeat through lexical outcomes, and MUST NOT expose a source-level raw pointer. Slice
+formation SHALL retain compiler-owned temporary roots and complete field or fixed-array element
+selectors. Runtime element selectors SHALL be bounds checked before address formation, and
+temporary cleanup SHALL occur after the matching loan end.
 
 #### Scenario: Lower a call-scoped borrow
 
@@ -537,6 +546,16 @@ loops later repeat through lexical outcomes, and MUST NOT expose a source-level 
 
 - **WHEN** a loop body forms a call-scoped slice and reaches `continue`
 - **THEN** the loan ends before the loop's lexical repeat outcome without introducing a cyclic MIR edge
+
+#### Scenario: Lower a runtime indexed subplace
+
+- **WHEN** HIR borrows `&mut matrix[index]`
+- **THEN** MIR begins the loan from `matrix` with its checked element selector and never materializes a copied inner array
+
+#### Scenario: Clean a temporary after its loan
+
+- **WHEN** an addressable temporary contains values with cleanup obligations
+- **THEN** MIR orders the matching loan end before the temporary owner's ordinary drop plan
 
 ### Requirement: MIR slice places derive bounds from one slice value
 
@@ -586,7 +605,9 @@ MIR SHALL represent monomorphic callable construction, ordered captures, shared,
 consuming environment access, direct or indirect application, and cleanup as typed operations and
 regions in the existing backend-neutral acyclic control DAG. Verification SHALL reject open generic
 callables, mismatched callable signatures, invalid invocation modes, duplicate capture transfers,
-and cleanup that can occur before a retained dependency is released.
+and cleanup that can occur before a retained dependency is released. Callable environments SHALL
+keep capture evaluation order and original parameter ordinals as separate facts, so backends can
+store captures in construction order and invoke targets in parameter order.
 
 #### Scenario: Lower a reusable arithmetic section
 
@@ -597,6 +618,11 @@ and cleanup that can occur before a retained dependency is released.
 
 - **WHEN** malformed MIR invokes a take-once environment twice
 - **THEN** verification rejects the second application before evaluation or backend emission
+
+#### Scenario: Lower staged positional captures
+
+- **WHEN** a three-parameter callable captures parameter two and then parameter one
+- **THEN** MIR constructs captures in that order and applies them in original parameter order after parameter zero
 
 ### Requirement: MIR run order follows the elaborated operand
 
@@ -626,7 +652,7 @@ inside an unsafe buffer remains an unsafe program invariant rather than a verifi
 #### Scenario: Encode an exhausted construction attempt
 
 - **WHEN** allocation fails before a construction guard receives storage
-- **THEN** MIR carries the `OutOfMemory` branch with cleanup for earlier live owners and no allocation release operation for the rejected request
+- **THEN** MIR carries the `OutOfMemoryError` branch with cleanup for earlier live owners and no allocation release operation for the rejected request
 
 #### Scenario: Encode partial rollback
 
@@ -827,72 +853,73 @@ unsafe obligation.
 
 ### Requirement: MIR represents suspension and continuation state target-neutrally
 
-MIR SHALL first classify each specialized runner and give every explicit suspension origin and
-potential suspendable-run relay a stable target-neutral identity and control-flow form. MIR
-normalization SHALL preserve those forms for suspendable or unknown runners before continuation
-liveness is computed. Final continuation descriptors SHALL then name the exact specialized MIR
-locals live after transfer, including source values and compiler-generated temporaries, together
-with the deferred Effect runner, arguments, typed outcome, resume points, capture access, provider
-references, and cleanup obligations needed after resumption. Descriptors SHALL use canonical
-logical types and compiler-planned layouts while omitting native addresses, WebAssembly table
-indexes, target blocks, branch depths, allocator implementations, scheduler objects, and public
-pending values. Each function's structured control regions SHALL remain acyclic even when the
-module call graph contains suspended self- or mutual-recursion cycles.
+MIR SHALL classify each specialized runner and give every explicit suspension origin and potential
+suspendable-run relay a stable target-neutral identity and control-flow form. MIR normalization
+SHALL preserve those forms for suspendable or unknown runners before coroutine-state liveness is
+computed. Each concrete suspendable invocation SHALL have one coroutine frame descriptor with a
+statically known maximum logical layout over all of its resume states. Every state SHALL name the
+exact specialized MIR locals live after transfer, including source values and compiler-generated
+temporaries, together with the deferred Effect runner, arguments, typed outcome, resume point,
+capture access, provider references, and cleanup obligations needed after resumption. Descriptors
+SHALL use canonical logical types and compiler-planned layouts while omitting native addresses,
+WebAssembly table indexes, target blocks, branch depths, source allocator implementations,
+scheduler objects, and public pending values. Each function's structured control regions SHALL
+remain acyclic even when the module call graph contains suspended self- or mutual-recursion cycles.
 
-`SuspendEffect` SHALL be the only form permitted to originate a fresh transfer identity and
-deferred child. `RunSuspendableEffect` SHALL have distinct synchronous-Complete and relay-Transfer
-success/failure control. Its Complete paths SHALL allocate no caller continuation and enter no
-resume region. Its Transfer path SHALL preserve the incoming child, origin, and typed-outcome
-identity, and MAY prepend only the caller continuation described for that run. A tail relay with no
-resume state MAY relay without a descriptor. Reachable provisional control MUST be finalized before
-evaluation or backend emission.
+`SuspendEffect` SHALL be the only form permitted to originate a fresh deferred-child transfer.
+`RunSuspendableEffect` SHALL have distinct synchronous-Complete and relay-Transfer success/failure
+control. Its Complete paths SHALL enter no resume state. Its Transfer path SHALL preserve the
+incoming child, origin, and typed-outcome identity and SHALL transition the current invocation into
+the exact resume state needed after the child. Repeated transfers by one invocation SHALL reuse its
+frame rather than creating separately owned continuation records. Reachable provisional control
+MUST be finalized before evaluation or backend emission.
 
 #### Scenario: Retain state after a suspended child
 
 - **WHEN** a non-tail Effect keeps an affine owner and a scalar local across a suspended recursive run
-- **THEN** MIR names both live values, their ownership transfer, the child outcome, the resume point, and the exact cleanup obligations without choosing a target ABI
+- **THEN** MIR names both live values, their unique frame fields and state ownership, the child outcome, the resume point, and exact cleanup obligations without choosing a target ABI
 
 #### Scenario: Retain a compiler-generated temporary
 
 - **WHEN** a source expression computes `left + run child` and `child` transfers before completing
-- **THEN** the finalized continuation descriptor retains the specialized MIR local containing `left` even when no source binding directly names that temporary
+- **THEN** the finalized coroutine state retains the specialized MIR local containing `left` even when no source binding directly names that temporary
 
-#### Scenario: Distinguish transfer origin from relay
+#### Scenario: Reuse one invocation frame
 
-- **WHEN** an explicit suspension is reached through an ordinary source combinator whose selected runner can suspend
-- **THEN** the explicit suspension form originates transfer while the combinator's suspendable-run form either completes synchronously or relays that transfer and retains caller state only on the transfer path
+- **WHEN** one concrete Effect invocation can suspend at multiple source points or revisit one point
+- **THEN** MIR describes one maximum frame layout with distinct states rather than a newly allocated continuation owner for each transfer
 
-#### Scenario: Normalize before planning continuation state
+#### Scenario: Normalize before planning coroutine state
 
 - **WHEN** concrete normalization folds or retains an Effect construction and its run
-- **THEN** the finalized descriptor names exactly the surviving post-normalization MIR locals and contains no stale pre-normalization local
+- **THEN** the finalized frame states name exactly the surviving post-normalization MIR locals and contain no stale pre-normalization local
 
 #### Scenario: Encode mutual suspended recursion deterministically
 
 - **WHEN** equivalent mutually recursive Effects are lowered in repeated fresh processes
-- **THEN** their suspension operations, continuation descriptors, resume identities, logical layouts, and cleanup plans encode byte-identically
+- **THEN** their suspension operations, frame descriptors, state identities, logical layouts, and cleanup plans encode byte-identically
 
 ### Requirement: MIR verifies suspension completeness and ownership
 
 MIR verification SHALL reject a suspension whose deferred runner or typed outcome disagrees with
-the call contract; whose resume point is missing or ambiguous; whose post-normalization live local
-is omitted, duplicated, or assigned incompatible access; whose continuation layout is incomplete;
-or whose allocation-refusal, success, and typed-failure plans do not preserve ownership, cleanup,
-loan endings, and propagation. Verification SHALL also reject an orphan continuation descriptor or
-suspendable-run form in a program whose reachable MIR contains no suspension origin. Final MIR
-verification SHALL reject a stale pre-normalization local, an unclassified live temporary,
-incomplete initialization-prefix or path plans, reachable provisional control, a Complete path that
-allocates or enters resume control, an ordinary run that originates transfer, or a relay that
-changes the incoming child, origin, or typed-outcome identity.
+the call contract; whose resume state is missing or ambiguous; whose post-normalization live local
+is omitted, duplicated, or assigned incompatible access; whose maximum frame layout is incomplete;
+or whose success and typed-failure plans do not preserve ownership, cleanup, loan endings, and
+propagation. Verification SHALL also reject an orphan frame descriptor or suspendable-run form in a
+program whose reachable MIR contains no suspension origin. Final MIR verification SHALL reject a
+stale pre-normalization local, an unclassified live temporary, incomplete state initialization,
+reachable provisional control, a Complete path that enters resume control, an ordinary run that
+originates transfer, a relay that changes the incoming child, origin, or typed-outcome identity, or
+any suspension path that introduces source allocator access or typed storage failure.
 
 #### Scenario: Reject a missing live owner
 
-- **WHEN** hand-built MIR suspends while an affine local remains needed after resumption but omits that local from its continuation descriptor
-- **THEN** verification reports the missing continuation ownership before evaluation or backend emission
+- **WHEN** hand-built MIR suspends while an affine local remains needed after resumption but omits that local from its frame state
+- **THEN** verification reports the missing ownership before evaluation or backend emission
 
 #### Scenario: Reject suspension machinery without suspension
 
-- **WHEN** a MIR module contains a continuation descriptor or suspendable-run form but no reachable suspension operation
+- **WHEN** a MIR module contains a coroutine frame descriptor or suspendable-run form but no reachable suspension operation
 - **THEN** verification rejects the unused machinery instead of allowing a hidden runtime cost
 
 #### Scenario: Reject an ordinary run that originates transfer
@@ -900,10 +927,10 @@ changes the incoming child, origin, or typed-outcome identity.
 - **WHEN** hand-built MIR gives `RunSuspendableEffect` a fresh deferred child or transfer identity instead of relaying one produced by `SuspendEffect`
 - **THEN** verification rejects the invalid origin before evaluation or backend emission
 
-#### Scenario: Reject allocation on synchronous completion
+#### Scenario: Reject storage channels in suspension MIR
 
-- **WHEN** a `RunSuspendableEffect` Complete path contains caller-frame initialization, publication, or resume-region entry
-- **THEN** verification rejects the path because synchronous completion remains in the current activation
+- **WHEN** hand-built suspension MIR adds an allocator requirement or an `OutOfMemoryError` outcome solely for coroutine-frame storage
+- **THEN** verification rejects the contract before evaluation or backend emission
 
 ### Requirement: MIR receives only concrete row-contract instances
 
@@ -931,3 +958,77 @@ specialized HIR. MIR verification and encoding SHALL remain deterministic and ba
 
 - **WHEN** a reachable selective catch has a concrete protected row and selected nominal member
 - **THEN** MIR runs the protected Effect once, bypasses the handler on success, invokes it for the selected failure tag, and remaps every other failure into the residual row
+
+### Requirement: MIR lowering requires proven source returns
+
+MIR lowering SHALL accept only executable HIR bodies carrying a complete semantic return proof.
+The MIR verifier SHALL continue to reject malformed compiler-generated or hand-built returns as an
+internal invariant, but a source return mismatch MUST NOT first surface from MIR or a backend.
+
+#### Scenario: Stop a source mismatch before MIR
+
+- **WHEN** an ordinary, effectful, generic, or conformance body violates its resolved return contract
+- **THEN** no MIR function is lowered for that body and the source semantic diagnostic remains the primary failure
+
+### Requirement: MIR realizes and verifies finite Effect composites
+
+MIR SHALL carry a closed composite Effect layout, an operation that packs one exact selected
+alternative, selected-run dispatch, and active-alternative cleanup. Verification SHALL reject an
+unknown alternative, a mismatched source representation, an incompatible normalized contract, or
+cleanup metadata that can release an inactive alternative.
+
+#### Scenario: Pack one selected alternative
+
+- **WHEN** lowering reaches a branch that constructs one member of a finite Effect join
+- **THEN** MIR packs that member with its canonical tag and does not construct the other members
+
+#### Scenario: Clean only the active member
+
+- **WHEN** a composite holding an affine capture is dropped or finishes running
+- **THEN** MIR applies exactly the selected alternative's cleanup plan once
+
+#### Scenario: Encode the composite deterministically
+
+- **WHEN** equivalent joined Effects are lowered repeatedly
+- **THEN** MIR layouts, alternative tags, operations, cleanup plans, and text are identical
+
+### Requirement: MIR lowers statement patterns as verified selections
+
+MIR SHALL lower local and conditional patterns through the compiler-owned match operation rather
+than a second dispatch mechanism. The operation SHALL retain the specialized logical scrutinee,
+canonical selected members, access, binding locals, structured outcomes, cleanup, provenance, and
+whether statement bindings remain live after selection. Verification SHALL reject inconsistent
+member tests, locals, access, coverage, or retained-borrow state.
+
+#### Scenario: Lower an irrefutable let
+
+- **WHEN** HIR contains total nested destructuring
+- **THEN** MIR selects once, creates the declared binding locals, and retains them in the enclosing region
+
+#### Scenario: Lower if-let mismatch
+
+- **WHEN** a conditional pattern is refutable
+- **THEN** MIR contains one source-ordered selected body and one deterministic mismatch body with joined cleanup
+
+### Requirement: MIR lowers marked dispatch and short-circuit control deterministically
+
+MIR lowering SHALL resolve marked operator evidence to the same sealed intrinsic or source witness
+used by ordinary interface specialization. Short-circuit lowering SHALL evaluate the left operand
+first, enter the right region only when required, and join one Boolean result with path-correct
+cleanup and typed Effect behavior. Evaluation, LLVM, and Wasm SHALL consume that same verified
+structure.
+
+#### Scenario: Lower a source operator witness
+
+- **WHEN** a custom operator conformance maps its marked operation to an ordinary source function
+- **THEN** MIR contains one statically selected call with the declared heterogeneous signature
+
+#### Scenario: Skip an effectful right region
+
+- **WHEN** the left Boolean decides a short-circuit expression
+- **THEN** MIR execution skips every operation and cleanup local to the right region while producing the decided Boolean
+
+#### Scenario: Emit engines consistently
+
+- **WHEN** a valid operator and short-circuit corpus is evaluated and emitted for native and Wasm targets
+- **THEN** every engine agrees on results, skipped work, traps, and cleanup order

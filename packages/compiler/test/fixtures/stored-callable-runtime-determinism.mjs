@@ -15,7 +15,9 @@ import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Target from '../../dist/Target.js'
 
-const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+const source = `import silk.i32 as i32
+
+struct Parser<F: fn(i32) -> i32> { parse: F }
 struct Boxed<F: fn(i32) -> i32> { inner: Parser<F> }
 fn box<F: fn(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
   return Boxed<F> { inner: move inner }

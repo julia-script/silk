@@ -91,7 +91,12 @@ const emit = Effect.fnUntraced(function* (
 })
 
 /** A guard whose `Drop` hook runs before its owned `Allocation` field releases. */
-const dropHook = `struct Guard {
+const dropHook = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Guard {
   tag: i32
   storage: Allocation
 }
@@ -100,7 +105,7 @@ impl Drop for Guard {
   fn drop(self: &mut Guard) -> () { return () }
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -109,7 +114,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -120,7 +125,12 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
  * shape the duplicate names in #130 appeared in: many reclaim contexts in one function, several
  * of them asking for the same name.
  */
-const unionCleanup = `import silk.box { Box, make as boxMake, get as boxGet }
+const unionCleanup = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet }
 
 pub struct Leaf {}
 
@@ -138,11 +148,11 @@ pub struct Tree {
   value: i32
 }
 
-effect fn leaf(value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn leaf(value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   return Tree { shape: Shape { kind: Leaf {} }, value: value }
 }
 
-effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   let boxedLeft = run boxMake<Tree>(move left)
   let boxedRight = run boxMake<Tree>(move right)
   return Tree {
@@ -168,13 +178,13 @@ fn boxTotal(view: &[Tree]) -> i32 {
   }
 }
 
-effect fn build() -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
   let left = run branch(run leaf(1), run leaf(2), 4)
   let right = run branch(run leaf(8), run leaf(16), 32)
   return run branch(move left, move right, 64)
 }
 
-effect fn sum() -> i32 ! OutOfMemory {
+effect fn sum() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
@@ -182,7 +192,7 @@ effect fn sum() -> i32 ! OutOfMemory {
   return answer
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 

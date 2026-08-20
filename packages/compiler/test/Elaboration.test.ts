@@ -122,7 +122,7 @@ effect fn bad() -> i32 {
   )
   assert.deepEqual(
     recipeRules.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0068'],
+    ['SEM0068', 'SEM0129'],
   )
 })
 
@@ -130,7 +130,8 @@ it.effect('replaces the caught failure row with the handler row canonically', ()
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://catch-algebra',
-      `struct First {}
+      `import silk.effects as Effect
+struct First {}
 struct HandlerProblem {}
 effect fn risky() -> i32 ! First { fail move First {} }
 effect fn recover(problem: First) -> i32 ! HandlerProblem { fail move HandlerProblem {} }
@@ -204,7 +205,7 @@ fn main() -> i32 {
   )
 })
 
-it('rejects implicit erasure when a join merges distinct Effect construction sites', () => {
+it('retains finite representations when a join merges distinct Effect construction sites', () => {
   const result = analyzeText(
     'effect://identity-erasure',
     `struct First {}
@@ -217,10 +218,7 @@ fn choose(input: First | Second) -> Effect<i32> {
 }`,
   )
 
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0069',
-  )
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('rejects heterogeneous callable joins and unknown-sized owned callable returns', () => {
@@ -265,7 +263,8 @@ it.effect('rejects retry for a take-once Effect', () =>
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://take-retry',
-      `struct Payload {}
+      `import silk.effects as Effect
+struct Payload {}
 effect fn consume(value: Payload) -> i32 { return 1 }
 fn main() -> i32 {
   let payload = Payload {}
@@ -281,7 +280,8 @@ it.effect('derives take-once mapped Effect access and rejects retrying it', () =
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://take-callback-retry',
-      `struct Payload { value: i32 }
+      `import silk.effects as Effect
+struct Payload { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
 fn consume(value: i32, payload: Payload) -> i32 { return value + payload.value }
 fn main() -> i32 {
@@ -311,7 +311,8 @@ it.effect(
     Effect.gen(function* () {
       const result = yield* analyzeWithStdlib(
         'effect://logger-tap',
-        `struct TapLogger {}
+        `import silk.effects as Effect
+service TapLogger {}
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn log(value: i32) -> i32 ? &TapLogger { return value }
 fn main() -> i32 {
@@ -371,12 +372,16 @@ effect fn risky(error: OwnedError) -> i32 ! OwnedError {
 it('subtracts a provided capability role from an Effect contract', () => {
   const result = analyzeText(
     'effect://provide-role',
-    `struct Clock {}
-effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+    `service Clock {}
+role Left
+role Right
+struct FixedClock {}
+impl Clock for FixedClock {}
+effect fn work() -> i32 ? &Clock at Left | &Clock at Right { return 42 }
 fn main() -> i32 {
-  let left = Clock {}
-  let right = Clock {}
-  let recipe = work() |> Intrinsic.bindRequirement<&Clock@Left>(&left) |> Intrinsic.bindRequirement<&Clock@Right>(&right)
+  let left = FixedClock {}
+  let right = FixedClock {}
+  let recipe = work() |> Intrinsic.bindRequirement<Clock at Left>(&left) |> Intrinsic.bindRequirement<Clock at Right>(&right)
   return run recipe
 }`,
   )
@@ -387,10 +392,15 @@ it.effect('requires an explicit role when the same capability has multiple requi
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://ambiguous-provide-role',
-      `struct Clock {}
-effect fn work() -> i32 ? &Clock@Left | &Clock@Right { return 42 }
+      `import silk.effects as Effect
+service Clock {}
+role Left
+role Right
+struct FixedClock {}
+impl Clock for FixedClock {}
+effect fn work() -> i32 ? &Clock at Left | &Clock at Right { return 42 }
 fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock {}
   let recipe = work() |> Effect.provide(&clock)
   return 0
 }`,
@@ -406,10 +416,12 @@ fn main() -> i32 {
 it('requires an exclusive provider for an exclusive capability requirement', () => {
   const result = analyzeText(
     'effect://exclusive-provider',
-    `struct Allocator {}
+    `service Allocator {}
+struct TestAllocator {}
+impl Allocator for TestAllocator {}
 effect fn allocate() -> i32 ? &mut Allocator { return 42 }
 fn main() -> i32 {
-  let allocator = Allocator {}
+  let allocator = TestAllocator {}
   let recipe = allocate() |> Intrinsic.bindRequirement(&allocator)
   return 0
 }`,
@@ -417,17 +429,20 @@ fn main() -> i32 {
 
   assert.include(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0123',
+    'SEM0131',
   )
 })
 
 it('keeps stored access separate from exclusive provider selection and capture access', () => {
   const result = analyzeText(
     'effect://exclusive-provider-shared-requirement',
-    `struct Clock {}
+    `service Clock {}
+struct FixedClock {}
+impl Copy for FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn main() -> i32 {
-  let mut clock = Clock {}
+  let mut clock = FixedClock {}
   let recipe = read() |> Intrinsic.bindRequirementMut(&mut clock)
   return 0
 }`,
@@ -447,7 +462,8 @@ it.effect('rejects a concrete provideMut provider without the required capabilit
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-conformance',
-      new TextEncoder().encode(`struct Clock {}
+      new TextEncoder().encode(`import silk.effects as Effect
+service Clock {}
 struct Wrong {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
@@ -469,10 +485,13 @@ it.effect('type-checks provideMut for a custom service', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/provide-mut-custom-capability',
-      new TextEncoder().encode(`struct Clock {}
+      new TextEncoder().encode(`import silk.effects as Effect
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let mut clock = Clock {}
+  let mut clock = FixedClock {}
   let recipe = Effect.provideMut(read(), &mut clock)
   return run recipe
 }`),
@@ -487,10 +506,13 @@ pub fn main() -> i32 {
 
 it.effect('executes an owned Copy provider binding', () =>
   Effect.gen(function* () {
-    const source = `struct Clock { tick: i32 }
+    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { tick: i32 }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return self.tick }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock { tick: 0 }
+  let clock = FixedClock { tick: 0 }
   return run Intrinsic.bindRequirementOwned(read(), move clock)
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -513,10 +535,13 @@ pub fn main() -> i32 {
 
 it.effect('executes an owned affine provider binding once', () =>
   Effect.gen(function* () {
-    const source = `struct Clock { label: string }
+    const source = `service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock { label: string }
+effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
+impl Clock for FixedClock { value: FixedClock.clockValue }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
-  let clock = Clock { label: "owned" }
+  let clock = FixedClock { label: "owned" }
   return run Intrinsic.bindRequirementOwned(read(), move clock)
 }`
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -540,10 +565,13 @@ pub fn main() -> i32 {
 it('copies a moved Copy provider into a repeatable owned-binding wrapper', () => {
   const result = analyzeText(
     'effect://moved-provider',
-    `struct Clock {}
+    `service Clock {}
+struct FixedClock {}
+impl Copy for FixedClock {}
+impl Clock for FixedClock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
-  let clock = Clock {}
+  let clock = FixedClock {}
   let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   return 0
 }`,
@@ -556,9 +584,20 @@ fn main() -> i32 {
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(recipe?.type._tag, 'Available')
   if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
-  assert.strictEqual(recipe.type.type.access, 'Shared')
   assert.strictEqual(binding?._tag, 'EffectBindRequirement')
   if (binding?._tag !== 'EffectBindRequirement') return
+  assert.deepEqual(
+    {
+      access: recipe.type.type.access,
+      provider: Type.encode(binding.provider.providerType),
+      capture: binding.provider.captureAccess,
+    },
+    {
+      access: 'Shared',
+      provider: 'effect://moved-provider.FixedClock',
+      capture: 'Copy',
+    },
+  )
   assert.strictEqual(binding.provider.selectionAccess, 'Take')
   assert.strictEqual(binding.provider.captureAccess, 'Copy')
 })
@@ -566,12 +605,14 @@ fn main() -> i32 {
 it('takes a moved affine provider into a take-once owned-binding wrapper', () => {
   const result = analyzeText(
     'effect://moved-affine-provider',
-    `struct Token { action: once fn() -> i32 }
-struct Clock { token: Token }
+    `service Clock {}
+struct Token { action: once fn() -> i32 }
+struct FixedClock { token: Token }
+impl Clock for FixedClock {}
 fn tick() -> i32 { return 1 }
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
-  let clock = Clock { token: Token { action: tick } }
+  let clock = FixedClock { token: Token { action: tick } }
   let recipe = read() |> Intrinsic.bindRequirementOwned(move clock)
   return 0
 }`,
@@ -594,12 +635,15 @@ it.effect('keeps per-run provider acquisition distinct and composes its contract
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://provide-with',
-      `struct Clock {}
+      `import silk.effects as Effect
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
 struct OpenError {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
-effect fn acquire() -> Clock ! OpenError { return Clock {} }
+effect fn acquire() -> FixedClock ! OpenError { return FixedClock {} }
 fn main() -> i32 {
-  let recipe = read() |> Effect.provideWith(acquire())
+  let recipe = read() |> Effect.provideEffect(acquire())
   return 0
 }`,
     )
@@ -626,7 +670,11 @@ it.effect('defines allocation as an exclusive service Effect with an affine resu
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'allocation://capability-contract',
-      `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.layout { Layout }
+fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemoryError ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
@@ -642,7 +690,7 @@ fn main() -> i32 {
     if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
     assert.ok(Type.equals(allocation.type.success, Type.allocation))
     assert.deepEqual(Type.failureMembers(allocation.type).map(Type.encode), [
-      'silk/core.OutOfMemory',
+      'silk/core.OutOfMemoryError',
     ])
     assert.deepEqual(
       Type.requirementMembers(allocation.type).map((requirement) => ({
@@ -662,7 +710,12 @@ it.effect('provides Allocator through nominal system and user-authored witnesses
   Effect.gen(function* () {
     const system = yield* analyzeWithStdlib(
       'allocation://nominal-system-provider',
-      `effect fn use(layout: Layout) -> i32 ! OutOfMemory {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -679,12 +732,16 @@ pub fn main() -> i32 { return 0 }`,
 
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',
-      `struct TestAllocator { remaining: i32 }
-effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemory {
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct TestAllocator { remaining: i32 }
+effect fn allocate(self: &mut TestAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }
 impl Allocator for TestAllocator { allocate: TestAllocator.allocate }
-effect fn use(layout: Layout) -> i32 ! OutOfMemory {
+effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
   let mut allocator = TestAllocator { remaining: 1 }
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -701,7 +758,8 @@ it.effect('rejects dynamically shaped or type-incompatible catch handlers', () =
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'effect://bad-handler',
-      `struct Problem {}
+      `import silk.effects as Effect
+struct Problem {}
 struct Other {}
 effect fn risky() -> i32 ! Problem { fail move Problem {} }
 effect fn wrong(problem: Other) -> bool { return true }
@@ -1142,21 +1200,55 @@ it('checks zero-, one-, and two-argument compatible calls', () => {
   assert.strictEqual(two.contract._tag, 'Compatible')
 })
 
-it('forms the one leading section and still diagnoses deeper arity mismatches', () => {
+it('forms every non-empty trailing section and diagnoses only over-application', () => {
   const tooFew = analyzeText('fixture://too-few.silk', tooFewArgumentsSource)
+  const deeper = analyzeText(
+    'fixture://deeper-section.silk',
+    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32, i32) -> i32 { return combine(3) }',
+  )
+  const staged = analyzeText(
+    'fixture://staged-section.silk',
+    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32) -> i32 { return combine(3)(2) }',
+  )
   const tooMany = analyzeText('fixture://too-many.silk', tooManyArgumentsSource)
   const fewSection = functionAt(tooFew, 1).returnedExpression
+  const deeperSection = functionAt(deeper, 1).returnedExpression
+  const stagedSection = functionAt(staged, 1).returnedExpression
   const manyFunction = functionAt(tooMany, 1)
   const manyCall = callFact(manyFunction)
 
   assert.strictEqual(fewSection._tag, 'CallableSection')
   if (fewSection._tag !== 'CallableSection') return
-  assert.strictEqual(fewSection.omittedParameter, 0)
+  assert.deepEqual(fewSection.remainingParameters, [0])
   assert.strictEqual(fewSection.captures.length, 1)
   assert.strictEqual(
     fewSection.type._tag === 'Available' ? Type.encode(fewSection.type.type) : undefined,
     'fn(i32) -> i32',
   )
+  assert.strictEqual(deeperSection._tag, 'CallableSection')
+  if (deeperSection._tag === 'CallableSection') {
+    assert.deepEqual(deeperSection.remainingParameters, [0, 1])
+    assert.deepEqual(
+      deeperSection.captures.map((capture) => capture.parameterOrdinal),
+      [2],
+    )
+    assert.strictEqual(
+      deeperSection.type._tag === 'Available' ? Type.encode(deeperSection.type.type) : undefined,
+      'fn(i32, i32) -> i32',
+    )
+  }
+  assert.strictEqual(stagedSection._tag, 'CallableSection')
+  if (stagedSection._tag === 'CallableSection') {
+    assert.deepEqual(stagedSection.remainingParameters, [0])
+    assert.deepEqual(
+      stagedSection.captures.map((capture) => capture.parameterOrdinal),
+      [2, 1],
+    )
+    assert.strictEqual(
+      stagedSection.type._tag === 'Available' ? Type.encode(stagedSection.type.type) : undefined,
+      'fn(i32) -> i32',
+    )
+  }
   assert.deepEqual(manyCall.contract, {
     _tag: 'ArityMismatch',
     expectedCount: 1,
@@ -1165,7 +1257,11 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
   assert.strictEqual(manyCall.mappings.length, 1)
   assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(manyCall.type, { _tag: 'Unavailable' })
-  assert.deepEqual(tooFew.diagnostics, [])
+  assert.deepEqual(
+    tooFew.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
+  assert.deepEqual(deeper.diagnostics, [])
   assert.deepEqual(
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0007'],
@@ -1285,6 +1381,10 @@ it('does not reinterpret an unknown final value as an invalid assignment place',
       {
         code: 'SEM0006',
         reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
+      },
+      {
+        code: 'SEM0130',
+        reason: { _tag: 'MissingReturn', expected: 'i32' },
       },
     ],
   )
@@ -1498,7 +1598,10 @@ it('types empty parentheses as unit', () => {
   assert.strictEqual(returned._tag, 'Unit')
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(result.syntax.parserDiagnostics, [])
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
 })
 
 it('resolves present callees, accepts unchecked arguments, and withholds damaged calls', () => {
@@ -1659,6 +1762,64 @@ it('analyzes return types, integers, and compatibility independently', () => {
   )
 })
 
+it('proves every reachable return and marks invalid bodies unavailable to execution', () => {
+  const result = analyzeText(
+    'fixture://return-contracts.silk',
+    `fn branch(value: bool) -> i32 {
+  if value { return 1 } else { return 2 }
+}
+fn branchMismatch(value: bool) -> i32 {
+  if value { return 1 } else { return true }
+}
+fn partialBranch(value: bool) -> i32 {
+  if value { return 1 }
+}
+fn mismatch() -> i32 { return true }
+fn missing() -> i32 { let value = 42 }
+effect fn inner() -> i32 { return 42 }
+effect fn nestedMismatch() -> i32 { return inner() }
+effect fn nestedValue() -> Effect<i32> { return inner() }`,
+  )
+
+  assert.deepEqual(
+    result.functions.map((fn) => fn.returnCompatibility._tag),
+    [
+      'Compatible',
+      'Unavailable',
+      'Unavailable',
+      'Unavailable',
+      'Unavailable',
+      'Compatible',
+      'Unavailable',
+      'Compatible',
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
+    [
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'bool' },
+      },
+      { code: 'SEM0130', reason: { _tag: 'MissingReturn', expected: 'i32' } },
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'bool' },
+      },
+      { code: 'SEM0130', reason: { _tag: 'MissingReturn', expected: 'i32' } },
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+      },
+    ],
+  )
+  assert.deepEqual(result.hir.functions.length, result.functions.length)
+  assert.deepEqual(
+    result.hir.functions.at(0)?.statements.map((statement) => statement._tag),
+    ['If'],
+  )
+})
+
 it('preserves existing type and integer edge behavior per function', () => {
   const unknown = functionAt(analyzeText('fixture://unknown-type.silk', unknownTypeSource), 0)
   const damaged = analyzeText('fixture://damaged-type.silk', damagedTypeSource)
@@ -1694,7 +1855,10 @@ it('preserves existing type and integer edge behavior per function', () => {
     ],
   )
   assert.strictEqual(functionAt(missingInteger, 0).returnedExpression._tag, 'Unit')
-  assert.deepEqual(missingInteger.diagnostics, [])
+  assert.deepEqual(
+    missingInteger.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
 })
 
 it('keeps parser and semantic diagnostics in their owning ordered collections', () => {
@@ -1997,7 +2161,8 @@ it.effect('runs the complete composed operand and preserves grouped one-layer ex
   Effect.gen(function* () {
     const ungrouped = yield* analyzeWithStdlib(
       'fixture://ungrouped-run-callable.silk',
-      `effect fn work() -> i32 { return 1 }
+      `import silk.effects as Effect
+effect fn work() -> i32 { return 1 }
 fn main() -> i32 { return run work() |> Effect.retry(2) }`,
     )
     const grouped = analyzeText(
@@ -2029,7 +2194,7 @@ fn main() -> i32 { return run run outer() }`,
   }),
 )
 
-it('diagnoses each invalid callable application at the callable boundary', () => {
+it('diagnoses invalid callable applications while accepting deeper sections', () => {
   const nonCallable = analyzeText(
     'fixture://non-callable-application.silk',
     'fn main() -> i32 { let value = 1 return value(2) }',
@@ -2071,9 +2236,13 @@ fn main() -> i32 { let mut values = [1] let callback = write(&mut values) return
     redundant.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0078',
   )
-  assert.include(
+  assert.notInclude(
     deeper.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0079',
+  )
+  assert.include(
+    deeper.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0129',
   )
 })
 
@@ -2116,6 +2285,97 @@ fn destroy(buffer: RawBuffer<i32>) -> () {
     'SEM0082',
   )
   assert.strictEqual(functionAt(rejected, 0).returnedExpression.type._tag, 'Unavailable')
+})
+
+it('requires invocation-only acknowledgement for unsafe source callables', () => {
+  const accepted = analyzeText(
+    'fixture://unsafe-source-accepted.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn prefixed() -> i32 { return unsafe add(1, 2) }
+fn blocked() -> i32 { unsafe { return add(3, 4) } return 0 }
+unsafe effect fn lazy(value: i32) -> i32 { return value }
+effect fn effectful() -> i32 { let pending = unsafe lazy(5) return run pending }`,
+  )
+  const rejected = analyzeText(
+    'fixture://unsafe-source-rejected.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { return add(1, 2) }`,
+  )
+  const bodyRemainsSafe = analyzeText(
+    'fixture://unsafe-body-remains-safe.silk',
+    `unsafe fn make(bytes: &[u8]) -> string {
+  return Intrinsic.stringFromUtf8Unchecked(bytes)
+}`,
+  )
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.include(
+    rejected.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0082',
+  )
+  assert.include(
+    bodyRemainsSafe.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0082',
+  )
+})
+
+it('preserves unsafe qualification through sections and callable transfers', () => {
+  const section = analyzeText(
+    'fixture://unsafe-section.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { let addTwo = add(2) return unsafe addTwo(3) }`,
+  )
+  const misplaced = analyzeText(
+    'fixture://unsafe-partial-acknowledgement.silk',
+    `unsafe fn add(left: i32, right: i32) -> i32 { return left + right }
+fn main() -> i32 { let addTwo = unsafe add(2) return 0 }`,
+  )
+  const safeToUnsafe = analyzeText(
+    'fixture://safe-to-unsafe-callable.silk',
+    `fn safe(value: i32) -> i32 { return value }
+fn accepts(callback: unsafe fn(i32) -> i32) -> i32 { return unsafe callback(1) }
+fn main() -> i32 { return accepts(safe) }`,
+  )
+  const unsafeToSafe = analyzeText(
+    'fixture://unsafe-to-safe-callable.silk',
+    `unsafe fn risky(value: i32) -> i32 { return value }
+fn accepts(callback: fn(i32) -> i32) -> i32 { return callback(1) }
+fn main() -> i32 { return accepts(risky) }`,
+  )
+
+  assert.deepEqual(section.diagnostics, [])
+  assert.include(
+    misplaced.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0137',
+  )
+  assert.deepEqual(safeToUnsafe.diagnostics, [])
+  assert.include(
+    unsafeToSafe.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0076',
+  )
+})
+
+it('keeps ordinary Effect and ownership checks active around unsafe calls', () => {
+  const effectRequirements = analyzeText(
+    'fixture://unsafe-effect-requirement.silk',
+    `service Clock { fn now() -> i32 }
+unsafe effect fn tick() -> i32 ? &Clock { return Clock.now() }
+fn main() -> i32 { return run unsafe tick() }`,
+  )
+  const typeMismatch = analyzeText(
+    'fixture://unsafe-type-mismatch.silk',
+    `unsafe fn consume(value: i32) -> i32 { return value }
+fn main() -> i32 { return unsafe consume(true) }`,
+  )
+
+  assert.include(
+    effectRequirements.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0071',
+  )
+  assert.include(
+    typeMismatch.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0012',
+  )
 })
 
 it('allows a shared value reborrow from a shared pattern field', () => {

@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as ContinuationLayout from '../src/ContinuationLayout.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -44,7 +44,7 @@ const finalizeSuspension = (
 ): Mir.Module => {
   const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
   const normalized = MirNormalization.normalize(module, provisional)
-  return ContinuationLayout.apply(
+  return CoroutineFrame.apply(
     SuspensionMir.finalize(
       normalized,
       provisional,
@@ -197,7 +197,8 @@ it.effect('binds provider-specialized runs to their exact generated runner and w
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
       'stored-effect-mir/provided-runner',
-      `service Counter { effect fn get() -> i32 ? &Counter }
+      `import silk.effects as Effect
+service Counter { effect fn get() -> i32 ? &Counter }
 service Meter { effect fn read() -> i32 ? &Meter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
@@ -356,12 +357,10 @@ it.effect('retains stored runners across suspension and resume planning', () =>
   Effect.gen(function* () {
     const lowered = yield* lowerStored(
       'stored-effect-mir/suspending',
-      `struct Deferred<F: Effect<i32>> { operation: F }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+      `import silk.effects as Effect
+struct Deferred<F: Effect<i32>> { operation: F }
 effect fn delayed() -> i32 {
-  let mut allocator = SystemAllocator.make()
-  let provided = Effect.suspend(effect { return 42 }) |> Effect.provideMut(&mut allocator)
-  return run Effect.catchAll(move provided, recover)
+  return run Effect.suspend(effect { return 42 })
 }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return run delayed() } }
@@ -414,17 +413,22 @@ it.effect('keeps typed-failure releases on stored Effect propagation paths', () 
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
       'stored-effect-mir/failure-cleanup',
-      `struct Token { value: i32 }
+      `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 1 }
   let deferred = Deferred { operation: effect { return consume(move token) } }
   let mut allocator = SystemAllocator.make()
   let allocation = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
   return 42
 }
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const propagating = module.functions

@@ -17,8 +17,8 @@ begins empty, the working directory is inherited unless [`requestWithin`](#decla
 standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
 stdout and stderr captures in [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65). A nonzero exit is ordinary outcome data.
 
-[`ProcessFailure`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c757265) is reserved for failing to spawn, wait, or capture; it carries a stable
-portable reason and may retain a provider code. Execution also reports [`OutOfMemory`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f7279) when
+[`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) is reserved for failing to spawn, wait, or capture; it carries a stable
+portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) when
 captured output cannot be owned.
 
 Import as `ChildProcess` with `import silk.child_process`.
@@ -65,12 +65,12 @@ pub code: i32
 
 Stable code identifying the portable recovery reason.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c757265"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72"></a>
 
-## `ProcessFailure`
+## `ProcessError`
 
 ```silk
-pub struct ProcessFailure
+pub struct ProcessError
 ```
 
 An allocation-free typed failure to start, to wait for, or to capture one child.
@@ -79,7 +79,7 @@ An allocation-free typed failure to start, to wait for, or to capture one child.
 
 A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c7572653a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a30"></a>
 
 ### Field `operation`
 
@@ -89,7 +89,7 @@ pub operation: ProcessOperation
 
 The execution stage that failed.
 
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734661696c7572653a3a6669656c643a31"></a>
+<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a31"></a>
 
 ### Field `reason`
 
@@ -98,14 +98,6 @@ pub reason: ProcessReason
 ```
 
 The portable reason callers can recover by.
-
-<a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Report for ProcessFailure`
-
-```silk
-impl Report for ProcessFailure
-```
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a737061776e4f7065726174696f6e"></a>
 
@@ -222,7 +214,7 @@ Returns the stable portable reason code.
 ## `failure`
 
 ```silk
-pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessFailure
+pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError
 ```
 
 Constructs one typed process failure without a provider detail.
@@ -232,7 +224,7 @@ Constructs one typed process failure without a provider detail.
 ## `failureWithCode`
 
 ```silk
-pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessFailure
+pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessError
 ```
 
 Constructs one typed process failure that retains a provider-defined numeric detail.
@@ -242,7 +234,7 @@ Constructs one typed process failure that retains a provider-defined numeric det
 ## `providerCode`
 
 ```silk
-pub fn providerCode(error: &silk/child_process.ProcessFailure) -> Option<i32>
+pub fn providerCode(error: &silk/child_process.ProcessError) -> Option<i32>
 ```
 
 Returns the provider-defined numeric detail when one was retained.
@@ -269,7 +261,7 @@ did not name.
 ## `request`
 
 ```silk
-pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemory ? &mut Allocator
+pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
 Builds a request that runs `program` with no arguments, an empty environment, and the caller's
@@ -280,7 +272,7 @@ own working directory.
 ## `requestWithin`
 
 ```silk
-pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemory ? &mut Allocator
+pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
 Builds a request that additionally runs the child in `directory` rather than the caller's own
@@ -291,7 +283,7 @@ working directory.
 ## `addArgument`
 
 ```silk
-pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one argument as exact bytes, after every argument already added.
@@ -301,7 +293,7 @@ Appends one argument as exact bytes, after every argument already added.
 ## `setVariable`
 
 ```silk
-pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemory ? &mut Allocator
+pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one environment entry as the exact bytes `name`, `=`, then `value`.
@@ -496,14 +488,14 @@ Portable blocking child-process contract.
 
 One `execute` runs the request to completion with the child's standard input closed, and owns
 the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
-failure to start, to wait, or to capture is `ProcessFailure`.
+failure to start, to wait, or to capture is `ProcessError`.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f636573733a3a6f7065726174696f6e3a65786563757465"></a>
 
 ### Operation `execute`
 
 ```silk
-effect fn execute(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator
+effect fn execute(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
 Runs one structured request to completion and captures both output streams.
@@ -583,7 +575,7 @@ Borrows the complete captured standard error.
 ## `submit`
 
 ```silk
-pub effect fn submit(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessFailure | OutOfMemory ? &mut ChildProcess | &mut Allocator
+pub effect fn submit(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
 Builds one service execute effect.

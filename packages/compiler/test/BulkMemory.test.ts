@@ -38,7 +38,14 @@ const compileNative = (name: string, source: string, backend?: Backend.Backend) 
  * Copies an initialized prefix between two raw buffers and reads both back. The elements are
  * `i32`, so the moved-from range stays readable exactly as the byte-level backends leave it.
  */
-const copyRange = `effect fn store() -> i32 ! OutOfMemory {
+const copyRange = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let sourceLayout = Layout.of<[i32; 4]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
@@ -67,7 +74,7 @@ const copyRange = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -99,9 +106,16 @@ it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wa
 )
 
 /** Moves a range of move-only records between buffers and drops them from their new home. */
-const moveOnlyCopy = (extra: string) => `struct Guard { storage: Allocation }
+const moveOnlyCopy = (extra: string) => `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+struct Guard { storage: Allocation }
 
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let sourceLayout = Layout.of<[Guard; 2]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
@@ -132,7 +146,7 @@ ${extra}
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -170,16 +184,22 @@ it.effect('moves a range of move-only elements and leaves the source slots empty
     )
     assert.deepEqual(Analysis.diagnostics(stealing), [])
     const blocked = Analysis.evaluate(stealing)
-    assert.strictEqual(blocked._tag, 'Blocked')
-    if (blocked._tag !== 'Blocked') return
-    assert.strictEqual(blocked.reason._tag, 'Trap')
-    if (blocked.reason._tag !== 'Trap') return
-    assert.strictEqual(blocked.reason.reason, 'Slot.take requires live initialized storage')
+    assert.strictEqual(blocked._tag, 'Trap')
+    if (blocked._tag !== 'Trap') return
+    assert.strictEqual(blocked.reason, 'Slot.take requires live initialized storage')
   }),
 )
 
 /** Sets a byte range to one repeated value and reads the touched and untouched bytes back. */
-const fillRange = `effect fn store() -> i32 ! OutOfMemory {
+const fillRange = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u8 as u8
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[u8; 4]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -201,7 +221,7 @@ const fillRange = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -236,7 +256,12 @@ it.effect('fills a byte range identically on the evaluator, LLVM, and Wasm', () 
  * at offset 1. A forward element-by-element copy would smear the first element across the range;
  * the defined move produces the as-if-intermediate-buffer result 1, 1, 2, 3.
  */
-const overlappingCopy = `effect fn store() -> i32 ! OutOfMemory {
+const overlappingCopy = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 4]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -266,7 +291,7 @@ const overlappingCopy = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -359,15 +384,22 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
 )
 
 /** `Bytes.append` copies a borrowed byte sequence in one bulk move rather than byte by byte. */
-const bulkBytes = `fn octet(value: u8) -> u8 { return value }
+const bulkBytes = `import silk.bytes { Bytes }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.u8 as u8
+import silk.usize as usize
+fn octet(value: u8) -> u8 { return value }
 
-effect fn store() -> i32 ! OutOfMemory {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let recipe = build() |> Effect.provideMut(&mut allocator)
   return run recipe
 }
 
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut collected = Bytes.make()
   let first = [octet(1), octet(2), octet(3)]
   let appendedFirst = run Bytes.append(&mut collected, &first)
@@ -378,7 +410,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
   return total * 10 + usize.toI32(Bytes.length(&collected))
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -404,13 +436,18 @@ it.effect('appends borrowed bytes through the copy intrinsic on the evaluator an
 )
 
 /** Vector growth migrates its initialized elements with one copy instead of one per element. */
-const vectorGrowth = `effect fn store() -> i32 ! OutOfMemory {
+const vectorGrowth = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.vector { Vector }
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let recipe = build() |> Effect.provideMut(&mut allocator)
   return run recipe
 }
 
-effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
+effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut values = Vector.make<i32>()
   let mut index = 0
   while index < 9 {
@@ -420,7 +457,7 @@ effect fn build() -> i32 ! OutOfMemory ? &mut Allocator {
   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 4) + Vector.get<i32>(&values, 8)
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -446,7 +483,14 @@ it.effect('grows a vector through one bulk copy per migration on the evaluator a
 )
 
 /** A range that runs past the destination or the source traps identically everywhere. */
-const outOfRange = `effect fn store() -> i32 ! OutOfMemory {
+const outOfRange = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let sourceLayout = Layout.of<[i32; 2]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
@@ -466,7 +510,7 @@ const outOfRange = `effect fn store() -> i32 ! OutOfMemory {
   return 0
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
@@ -479,11 +523,9 @@ it.effect('traps when the copied range runs past the destination', () =>
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Blocked')
-    if (evaluated._tag !== 'Blocked') return
-    assert.strictEqual(evaluated.reason._tag, 'Trap')
-    if (evaluated.reason._tag !== 'Trap') return
-    assert.strictEqual(evaluated.reason.reason, 'RawBuffer copy range is out of bounds')
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag !== 'Trap') return
+    assert.strictEqual(evaluated.reason, 'RawBuffer copy range is out of bounds')
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     assert.throws(() => runWasm(wasm.bytes))

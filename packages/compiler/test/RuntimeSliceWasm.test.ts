@@ -22,7 +22,8 @@ const execute = (bytes: Uint8Array): (() => number) => {
 
 it.effect('uses a private shadow frame for stride-aware exclusive slice replacement', () =>
   Effect.gen(function* () {
-    const source = `struct Pair { left: i32 right: i32 }
+    const source = `import silk.usize as usize
+struct Pair { left: i32 right: i32 }
 fn replace(values: &mut [Pair], index: usize) -> i32 {
   values[index] = Pair { left: 40, right: 2 }
   return usize.toI32(values.length)
@@ -92,7 +93,8 @@ it.effect('passes one typed address-plus-length bundle for multiple and zero-siz
   Effect.gen(function* () {
     const artifact = yield* emit(
       'lengths',
-      `struct Empty {}
+      `import silk.usize as usize
+struct Empty {}
 fn length<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
 fn three() -> i32 { let values = [1, 2, 3] return length(&values) }
 fn six() -> i32 { let values = [1, 2, 3, 4, 5, 6] return length(&values) }

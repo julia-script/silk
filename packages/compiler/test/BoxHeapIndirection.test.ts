@@ -24,7 +24,12 @@ const counts = (
  * the whole change exists to make expressible, and the shape whose release is invisible to every
  * other check the compiler has.
  */
-const tree = `import silk.box { Box, make as boxMake, get as boxGet }
+const tree = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet }
 
 pub struct Leaf {}
 
@@ -42,11 +47,11 @@ pub struct Tree {
   value: i32
 }
 
-effect fn leaf(value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn leaf(value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   return Tree { shape: Shape { kind: Leaf {} }, value: value }
 }
 
-effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn branch(left: Tree, right: Tree, value: i32) -> Tree ! OutOfMemoryError ? &mut Allocator {
   let boxedLeft = run boxMake<Tree>(move left)
   let boxedRight = run boxMake<Tree>(move right)
   return Tree {
@@ -74,7 +79,7 @@ fn boxTotal(view: &[Tree]) -> i32 {
   }
 }
 
-effect fn build() -> Tree ! OutOfMemory ? &mut Allocator {
+effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
   let leftLeft = run leaf(1)
   let leftRight = run leaf(2)
   let left = run branch(move leftLeft, move leftRight, 4)
@@ -84,7 +89,7 @@ effect fn build() -> Tree ! OutOfMemory ? &mut Allocator {
   return run branch(move left, move right, 64)
 }
 
-effect fn sum() -> i32 ! OutOfMemory {
+effect fn sum() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
@@ -92,7 +97,7 @@ effect fn sum() -> i32 ! OutOfMemory {
   return answer
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(sum(), recover) }`
 
@@ -153,9 +158,13 @@ it.effect('carries the same release count through the Wasm backend under both pr
  * borrow, exclusive borrow, and a consuming move. `into` empties the box before handing the value
  * out, so the hook that still runs on the emptied box drops nothing and the storage releases once.
  */
-const accessors = `import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
+const accessors = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.usize as usize
+import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut boxed = run boxMake<i32>(20) |> Effect.provideMut(&mut allocator)
 
@@ -172,7 +181,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return taken + 20
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 3 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 3 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -207,10 +216,13 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
  * value's own hook first, then the box's storage. This is the case `RawBufferCleanup` would
  * abandon if the box did not drop its element.
  */
-const nested = `import silk.box { Box, make as boxMake, into as boxInto }
+const nested = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut values = vectorMake<i32>()
   let first = run vectorAppend<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
@@ -221,7 +233,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
@@ -254,7 +266,11 @@ it.effect('releases an owning value held inside a box', () =>
  * Depth is consumed by the runtime call stack rather than by the cleanup plan, so a long chain
  * releases every link. The plan itself stays one hook call wide however long the chain is.
  */
-const chain = `import silk.box { Box, make as boxMake, into as boxInto }
+const chain = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.box { Box, make as boxMake, into as boxInto }
 
 pub struct End {}
 
@@ -266,7 +282,7 @@ pub struct Chain {
   step: End | Link
 }
 
-effect fn extend(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
+effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
   if depth == 0 {
     return Chain { step: End {} }
   }
@@ -275,14 +291,14 @@ effect fn extend(depth: i32) -> Chain ! OutOfMemory ? &mut Allocator {
   return Chain { step: Link { next: move boxed } }
 }
 
-effect fn build(depth: i32) -> i32 ! OutOfMemory {
+effect fn build(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run extend(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 42
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 1 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(64), recover) }`
 
@@ -374,7 +390,8 @@ it.effect('plans one hook call per box rather than inlining the held value', () 
     const kind = shape?._tag === 'StructCleanup' ? shape.fields.at(0)?.cleanup : undefined
     const branch =
       kind?._tag === 'UnionCleanup'
-        ? kind.cases.find((entry) => entry.member.name === 'Branch')?.cleanup
+        ? kind.cases.find((entry) => Type.isNominal(entry.member) && entry.member.name === 'Branch')
+            ?.cleanup
         : undefined
     const left = branch?._tag === 'StructCleanup' ? branch.fields.at(0)?.cleanup : undefined
     assert.strictEqual(left?._tag, 'HookCleanup')
@@ -409,7 +426,7 @@ pub fn main() -> i32 { return 0 }`
         'ast/expression',
         ascii(
           'import silk.box { Box }\nimport ast.statement\n' +
-            'pub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
+            'import silk.box { Box }\npub struct Expression { body: Box<statement.Statement> value: i32 }\n' +
             'pub fn main() -> i32 { return 0 }',
         ),
       ),
@@ -421,7 +438,7 @@ pub fn main() -> i32 { return 0 }`
               'ast/statement',
               ascii(
                 'import silk.box { Box }\nimport ast.expression\n' +
-                  'pub struct Statement { head: Box<expression.Expression> }',
+                  'import silk.box { Box }\npub struct Statement { head: Box<expression.Expression> }',
               ),
             ],
           ]),

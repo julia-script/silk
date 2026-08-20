@@ -53,7 +53,7 @@ MUST NOT promise finalizer execution after a trap.
 ### Requirement: Standard Effect combinators are library-defined
 
 `map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `ensuring`, `provide`,
-`provideMut`, and `provideWith` SHALL resolve to canonical ordinary Silk declarations. The compiler
+`provideMut`, and `provideEffect` SHALL resolve to canonical ordinary Silk declarations. The compiler
 MUST NOT select their semantics from their names, actors, library origin, or a dedicated combinator
 HIR/MIR operation. Equivalent user code using the compiler-owned Effect core SHALL receive the same
 typing, ownership, execution, and cleanup behavior.

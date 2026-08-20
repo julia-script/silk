@@ -85,11 +85,11 @@ it.effect('reports a final expression separately from its missing terminal retur
           },
         },
         {
-          code: 'PAR0004',
-          message: 'Expected return statement',
+          code: 'SEM0130',
+          message: 'A reachable path must return i32',
           range: {
-            start: { line: 1, character: 11 },
-            end: { line: 1, character: 11 },
+            start: { line: 2, character: 0 },
+            end: { line: 2, character: 1 },
           },
         },
       ],
@@ -180,7 +180,7 @@ pub fn main() -> i32 {
 
 it.effect('uses one source-like effect function hover at declarations and references', () =>
   Effect.gen(function* () {
-    const source = `effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+    const source = `effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   return run Effect.catchAll(store(), recover)
 }`
@@ -189,9 +189,46 @@ pub fn main() -> i32 {
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     assert.deepEqual(declaration?.contents, {
       kind: 'markdown',
-      value: '```silk\neffect fn recover(error: OutOfMemory) -> i32\n```',
+      value: '```silk\neffect fn recover(error: OutOfMemoryError) -> i32\n```',
     })
     assert.deepEqual(reference?.contents, declaration?.contents)
+  }),
+)
+
+it.effect('preserves unsafe callable contracts in hover, signatures, and completion', () =>
+  Effect.gen(function* () {
+    const source = `pub unsafe effect fn read(value: i32) -> i32 { return value }
+pub effect fn main() -> i32 {
+  return run unsafe read(1)
+}`
+    const { document, snapshot } = yield* open(source)
+    const declaration = Document.hover(document, snapshot, positionOf(source, 'read', 0))
+    const reference = Document.hover(document, snapshot, positionOf(source, 'read', 1))
+    assert.deepEqual(declaration?.contents, {
+      kind: 'markdown',
+      value: '```silk\npub unsafe effect fn read(value: i32) -> i32\n```',
+    })
+    assert.deepEqual(reference?.contents, declaration?.contents)
+
+    const signature = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('read(1)') + 'read('.length),
+    )
+    assert.strictEqual(
+      signature?.signatures[0]?.label,
+      'pub unsafe effect fn read(value: i32) -> i32',
+    )
+
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('read(1)') + 2),
+    )
+    assert.include(
+      completion.items.find((item) => item.label === 'read')?.detail ?? '',
+      'unsafe effect fn read',
+    )
   }),
 )
 
@@ -228,7 +265,8 @@ recover(problem)
 
 it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
   Effect.gen(function* () {
-    const source = `struct Problem {}
+    const source = `import silk.effects as Effect
+struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
   let recipe = relay(0)
@@ -250,7 +288,8 @@ pub fn main() -> i32 {
 
 it.effect('returns inferred local type inlay hints in the requested range', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> i32 {
+    const source = `import silk.core { SystemAllocator }
+pub fn main() -> i32 {
   let mut allocator = SystemAllocator.make()
   return 0
 }`
@@ -262,7 +301,7 @@ it.effect('returns inferred local type inlay hints in the requested range', () =
       }),
       [
         {
-          position: { line: 1, character: 19 },
+          position: { line: 2, character: 19 },
           label: ': SystemAllocator',
           kind: 1,
           paddingLeft: false,
@@ -275,7 +314,8 @@ it.effect('returns inferred local type inlay hints in the requested range', () =
 
 it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode snapshots', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> i32 {
+    const source = `import silk.core { SystemAllocator }
+pub fn main() -> i32 {
   let broken = missing()
   // π🙂
   let mut allocator = SystemAllocator.make()
@@ -283,14 +323,14 @@ it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode sn
 }`
     const { document, snapshot } = yield* open(source)
     const range = {
-      start: { line: 3, character: 0 },
-      end: { line: 3, character: 50 },
+      start: { line: 4, character: 0 },
+      end: { line: 4, character: 50 },
     }
     const first = Document.inlayHints(document, snapshot, range)
     assert.deepEqual(Document.inlayHints(document, snapshot, range), first)
     assert.deepEqual(first, [
       {
-        position: { line: 3, character: 19 },
+        position: { line: 4, character: 19 },
         label: ': SystemAllocator',
         kind: 1,
         paddingLeft: false,
@@ -309,12 +349,13 @@ it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode sn
 
 it.effect('completes standard-library namespace and source service operations', () =>
   Effect.gen(function* () {
-    const source = `pub fn main() -> i32 {
+    const source = `import silk.effects as Effect
+pub fn main() -> i32 {
   return Effect.
 }`
     const { document, snapshot } = yield* open(source)
     const completion = Document.completion(document, snapshot, {
-      line: 1,
+      line: 2,
       character: '  return Effect.'.length,
     })
     assert.include(
@@ -326,12 +367,13 @@ it.effect('completes standard-library namespace and source service operations', 
       'pub effect fn catch',
     )
 
-    const allocatorSource = `pub fn main() -> i32 {
+    const allocatorSource = `import silk.core { Allocator }
+pub fn main() -> i32 {
   return Allocator.
 }`
     const allocator = yield* open(allocatorSource)
     const allocatorCompletion = Document.completion(allocator.document, allocator.snapshot, {
-      line: 1,
+      line: 2,
       character: '  return Allocator.'.length,
     })
     assert.include(
@@ -446,9 +488,10 @@ pub fn main() -> i32 { return Effect.catch< }`
   }),
 )
 
-it.effect('lists constants, functions, and structs with fields as document symbols', () =>
+it.effect('lists constants, roles, functions, and structs with fields as document symbols', () =>
   Effect.gen(function* () {
     const source = `pub const defaultAnswer: i32 = 42
+pub role Primary
 pub struct Box { answer: i32 }
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
@@ -457,12 +500,13 @@ pub fn main() -> i32 { return 42 }`
       symbols.map((symbol) => [symbol.name, symbol.kind]),
       [
         ['defaultAnswer', SymbolKind.Constant],
+        ['Primary', SymbolKind.Enum],
         ['Box', SymbolKind.Struct],
         ['main', SymbolKind.Function],
       ],
     )
     assert.deepEqual(
-      symbols[1]?.children?.map((child) => [child.name, child.kind]),
+      symbols[2]?.children?.map((child) => [child.name, child.kind]),
       [['answer', SymbolKind.Field]],
     )
   }),
@@ -515,9 +559,10 @@ pub fn main() -> i32 { return identity(42) }`
   }),
 )
 
-it.effect('navigates declaration names and nominal/generic types but not intrinsics', () =>
+it.effect('navigates local declaration names but not library imports', () =>
   Effect.gen(function* () {
-    const source = `struct Problem {}
+    const source = `import silk.core { SystemAllocator }
+struct Problem {}
 fn recover<T>(error: Problem, value: T) -> T { return value }
 pub fn main() -> i32 {
   let allocator = SystemAllocator.make()
@@ -533,22 +578,22 @@ pub fn main() -> i32 {
       )
 
     assert.deepEqual(definitionAt('Problem')?.targetSelectionRange.start, {
-      line: 0,
+      line: 1,
       character: 7,
     })
     assert.deepEqual(definitionAt('Problem', 1)?.targetSelectionRange.start, {
-      line: 0,
+      line: 1,
       character: 7,
     })
     assert.deepEqual(definitionAt('T', 1)?.targetSelectionRange.start, {
-      line: 1,
+      line: 2,
       character: 11,
     })
     assert.deepEqual(definitionAt('recover', 1)?.targetSelectionRange.start, {
-      line: 1,
+      line: 2,
       character: 3,
     })
-    assert.isUndefined(definitionAt('SystemAllocator'))
+    assert.isUndefined(definitionAt('SystemAllocator', 1))
     assert.isUndefined(definitionAt('make'))
     assert.isUndefined(definitionAt('i32', 1))
   }),
@@ -631,6 +676,7 @@ const toolchainResolver = (
   sources: ReadonlyMap<string, Uint8Array>,
 ): Layer.Layer<SourceResolver.SourceResolver> =>
   Layer.succeed(SourceResolver.SourceResolver, {
+    toolchainSources: SourceResolver.embeddedToolchainSources,
     resolve: (module) => {
       const bytes = sources.get(module)
       return Effect.succeed(
@@ -1105,7 +1151,7 @@ it.effect('offers one quick fix that deletes a redundant alias clause', () =>
     assert.strictEqual(action?.title, 'Remove the redundant alias')
     assert.strictEqual(action?.kind, 'quickfix')
     // The action names the diagnostic it corrects, so the editor attaches it to that lightbulb.
-    assert.strictEqual(action?.diagnostics?.[0]?.code, 'SEM0013')
+    assert.strictEqual(action?.diagnostics?.[0]?.code, 'LSP0002')
     assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
       {
         range: {
@@ -1114,6 +1160,51 @@ it.effect('offers one quick fix that deletes a redundant alias clause', () =>
             redundantAlias,
             redundantAlias.indexOf(' as geometry') + ' as geometry'.length,
           ),
+        },
+        newText: '',
+      },
+    ])
+  }),
+)
+
+it.effect('warns about combinable imports and consolidates them without compiler involvement', () =>
+  Effect.gen(function* () {
+    const source =
+      'import geometry { area }\nimport geometry { perimeter as boundary }\npub fn main() -> i32 { return area(1, 2) }'
+    const { document, snapshot } = yield* openProject(
+      [
+        {
+          module: 'geometry',
+          text: 'pub fn area(width: i32, height: i32) -> i32 { return width * height }\npub fn perimeter(width: i32, height: i32) -> i32 { return width + height }',
+        },
+        { module: 'main', text: source },
+      ],
+      'main',
+    )
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, uriOfModule)
+        .filter((diagnostic) => diagnostic.source === 'silk-lsp')
+        .map((diagnostic) => diagnostic.code),
+      ['LSP0003'],
+    )
+    const action = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    ).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0003')
+    assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
+      {
+        range: {
+          start: { line: 0, character: 0 },
+          end: { line: 0, character: 'import geometry { area }'.length },
+        },
+        newText: 'import geometry { area, perimeter as boundary }',
+      },
+      {
+        range: {
+          start: { line: 1, character: 0 },
+          end: { line: 2, character: 0 },
         },
         newText: '',
       },
@@ -1145,6 +1236,111 @@ const inventoryOf = (
       return [module, ModuleSummary.make(Parser.parse(Lexer.lex(source)))] as const
     }),
   })
+
+it.effect('completes catalog declarations with explicit collision-aware imports', () =>
+  Effect.gen(function* () {
+    const source = 'struct Logger {}\npub fn main() -> i32 { Logg return 0 }'
+    const { document, snapshot } = yield* open(source)
+    const inventory = inventoryOf([
+      { module: 'main', text: source },
+      { module: 'silk/logging', text: 'pub service Logger {}' },
+    ])
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('Logg') + 'Logg'.length),
+      inventory,
+    )
+    const imported = completion.items.find(
+      (item) => item.label === 'Logger' && item.detail === 'Import from silk/logging',
+    )
+    assert.deepEqual(imported?.textEdit, {
+      range: {
+        start: positionAt(source, source.indexOf('Logg')),
+        end: positionAt(source, source.indexOf('Logg') + 'Logg'.length),
+      },
+      newText: 'LoggingLogger',
+    })
+    assert.deepEqual(imported?.additionalTextEdits, [
+      {
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        newText: 'import silk.logging { Logger as LoggingLogger }\n',
+      },
+    ])
+  }),
+)
+
+const applyDocumentEdits = (
+  source: string,
+  edits: ReadonlyArray<{
+    range: { start: { line: number; character: number }; end: { line: number; character: number } }
+    newText: string
+  }>,
+): string => {
+  const offset = (position: { line: number; character: number }): number => {
+    const lines = source.split('\n')
+    return (
+      lines.slice(0, position.line).reduce((total, line) => total + line.length + 1, 0) +
+      position.character
+    )
+  }
+  let revised = source
+  for (const edit of [...edits].sort(
+    (left, right) => offset(right.range.start) - offset(left.range.start),
+  ))
+    revised = `${revised.slice(0, offset(edit.range.start))}${edit.newText}${revised.slice(offset(edit.range.end))}`
+  return revised
+}
+
+it.effect('offers compiling failure propagation and recovery actions', () =>
+  Effect.gen(function* () {
+    const source = `pub struct Problem {}
+effect fn risky() -> i32 ! Problem { fail Problem {} }
+effect fn recover(error: Problem) -> i32 { return 42 }
+pub effect fn main() -> i32 { return run risky() }`
+    const { document, snapshot } = yield* open(source)
+    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    assert.deepEqual(
+      actions.map((action) => action.title),
+      ['Propagate Problem from this Effect', 'Recover this Effect with recover'],
+    )
+    for (const action of actions) {
+      const edits = action.edit?.changes?.[document.uri]
+      assert.isDefined(edits, action.title)
+      if (edits === undefined) continue
+      const revised = applyDocumentEdits(source, edits)
+      const result = yield* Analysis.ofSource('main', encoder.encode(revised))
+      assert.deepEqual(Analysis.diagnostics(result), [], `${action.title}\n${revised}`)
+    }
+  }),
+)
+
+it.effect('offers compiling requirement propagation and provision actions', () =>
+  Effect.gen(function* () {
+    const source = `service Clock { effect fn read() -> i32 ? &Clock }
+struct FixedClock {}
+effect fn read(self: &FixedClock) -> i32 { return 42 }
+impl Clock for FixedClock { read: FixedClock.read }
+pub effect fn main() -> i32 {
+  let provider = FixedClock {}
+  return run Clock.read()
+}`
+    const { document, snapshot } = yield* open(source)
+    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    assert.deepEqual(
+      actions.map((action) => action.title),
+      ['Propagate &Clock from this Effect', 'Provide this Effect with provider'],
+    )
+    for (const action of actions) {
+      const edits = action.edit?.changes?.[document.uri]
+      assert.isDefined(edits, action.title)
+      if (edits === undefined) continue
+      const revised = applyDocumentEdits(source, edits)
+      const result = yield* Analysis.ofSource('main', encoder.encode(revised))
+      assert.deepEqual(Analysis.diagnostics(result), [], `${action.title}\n${revised}`)
+    }
+  }),
+)
 
 it.effect('discovers ambiguous auto-import descriptors and resolves the selected new import', () =>
   Effect.gen(function* () {
@@ -1440,6 +1636,33 @@ pub fn main() -> i32 { return clamp(double(1), 0, 10) }
   }),
 )
 
+it.effect('labels struct construction with visible fields and selects the named initializer', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+pub fn main() -> i32 {
+  let pair = Pair<i32> { first: 1, second: true }
+  return pair.first
+}
+`
+    const { document, snapshot } = yield* open(source)
+    const help = Document.signatureHelp(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('second: true') + 'second:'.length),
+    )
+    assert.strictEqual(help?.signatures[0]?.label, 'struct Pair<A, B> { first: A, second: B }')
+    assert.deepEqual(
+      help?.signatures[0]?.parameters?.map((parameter) => parameter.label),
+      ['first: A', 'second: B'],
+    )
+    assert.strictEqual(help?.activeParameter, 1)
+  }),
+)
+
 /** Decodes the protocol's delta encoding back into absolute, readable tokens. */
 const decodeSemanticTokens = (tokens: {
   readonly data: ReadonlyArray<number>
@@ -1486,6 +1709,45 @@ const semanticTokenAt = (
   const { line, character } = positionOf(source, spelling, occurrence)
   return decoded.find((token) => token.line === line && token.character === character)
 }
+
+it.effect('serves shared-pattern bindings through completion hover navigation and tokens', () =>
+  Effect.gen(function* () {
+    const source = `struct Full { value: i32 }
+pub fn main() -> i32 {
+  let first = Full { value: 40 }
+  let Full { value } = move first
+  let second = Full { value: 2 }
+  if let Full inner = &second { return value + inner.value } else { return value }
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.diagnostics(document, snapshot, () => undefined),
+      [],
+    )
+    const finalUse = positionOf(source, 'value', 6)
+    const completion = Document.completion(document, snapshot, {
+      ...finalUse,
+      character: finalUse.character + 3,
+    })
+    assert.include(
+      completion.items.map((item) => item.label),
+      'value',
+    )
+    const hover = Document.hover(document, snapshot, finalUse)
+    assert.include(
+      typeof hover?.contents === 'object' && 'value' in hover.contents ? hover.contents.value : '',
+      'let value: i32',
+    )
+    assert.deepEqual(
+      Document.definition(document, snapshot, finalUse, () => undefined)?.targetSelectionRange
+        .start,
+      positionOf(source, 'value', 2),
+    )
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    assert.strictEqual(semanticTokenAt(decoded, source, 'value', 2)?.type, 'variable')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'inner', 1)?.type, 'variable')
+  }),
+)
 
 it.effect('colors a type name and a variable name with different token types', () =>
   Effect.gen(function* () {

@@ -12,7 +12,8 @@ const ascii = (value: string): Uint8Array =>
  * transform runs on exactly one of the two arms. `unwrapOr` then answers with the fallback only
  * for the absent option.
  */
-const optionMap = `fn double(value: i32) -> i32 { return value * 2 }
+const optionMap = `import silk.option { Option }
+fn double(value: i32) -> i32 { return value * 2 }
 
 pub fn main() -> i32 {
   let present = Option.some<i32>(20)
@@ -105,7 +106,12 @@ pub fn main() -> i32 {
  * not need, and the absent arm answers with the fallback instead. Three allocations, three
  * releases, no leak and no double drop.
  */
-const moveOnly = `import silk.option { Option }
+const moveOnly = `import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.layout { Layout }
+import silk.option { Option }
 
 struct Token { storage: Allocation }
 
@@ -122,12 +128,12 @@ fn consume(self: Token) -> i32 {
 
 fn identity(self: Token) -> Token { return move self }
 
-effect fn acquire() -> Allocation ! OutOfMemory ? &mut Allocator {
+effect fn acquire() -> Allocation ! OutOfMemoryError ? &mut Allocator {
   let layout = Layout.of<i32>()
   return run Allocator.allocate(move layout)
 }
 
-effect fn build() -> i32 ! OutOfMemory {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let first = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let second = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
@@ -143,7 +149,7 @@ effect fn build() -> i32 ! OutOfMemory {
   return consume(move held) + consume(move recovered) + 14
 }
 
-effect fn recover(error: OutOfMemory) -> i32 { return 0 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 

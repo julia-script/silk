@@ -64,6 +64,7 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
 
   assert.deepEqual(main?.contract, {
     _tag: 'Contract',
+    unsafe: false,
     parameters: [],
     result: 'i32',
     constraints: [],
@@ -81,6 +82,24 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   assert.strictEqual(inner?._tag, 'Call')
   if (inner?._tag !== 'Call') return
   assert.strictEqual(inner.arguments.at(0)?._tag, 'IntegerLiteral')
+})
+
+it('preserves unsafe declaration and section contracts in typed HIR', () => {
+  const result = elaborate(
+    'hir://unsafe-callable.silk',
+    `unsafe fn combine(left: i32, right: i32) -> i32 { return left + right }
+fn staged() -> unsafe fn(i32) -> i32 { return combine(2) }
+pub fn main() -> i32 { let callback = staged() return unsafe callback(40) }`,
+  )
+  const combine = result.hir.functions.at(0)
+  const staged = result.hir.functions.at(1)
+  const section = staged === undefined ? undefined : Hir.returned(staged)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(combine?.contract._tag, 'Contract')
+  assert.strictEqual(combine?.contract._tag === 'Contract' ? combine.contract.unsafe : false, true)
+  assert.strictEqual(section?._tag, 'CallableSection')
+  assert.strictEqual(section?._tag === 'CallableSection' ? section.type.unsafe : false, true)
 })
 
 it('keeps unknown facts explicit with causes instead of typed operations', () => {
@@ -302,7 +321,7 @@ it('diagnoses unknown actors and unknown operations distinctly', () => {
   )
   assert.deepEqual(
     arity.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0079'],
+    ['SEM0007'],
   )
   for (const result of [actor, operation, arity]) {
     const fn = result.hir.functions.at(0)
@@ -357,6 +376,7 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
   const check = result.hir.functions.at(0)
   assert.deepEqual(check?.contract, {
     _tag: 'Contract',
+    unsafe: false,
     parameters: ['bool'],
     result: 'bool',
     constraints: [],
@@ -475,7 +495,8 @@ it.effect('desugars effect functions and source-defined catch calls to hidden ef
   Effect.gen(function* () {
     const result = yield* elaborateWithStdlib(
       'hir://effect.silk',
-      `struct Problem { code: i32 }
+      `import silk.effects as Effect
+struct Problem { code: i32 }
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
 pub fn main() -> i32 {

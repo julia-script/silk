@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Diagnostic from '../src/Diagnostic.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -77,5 +78,57 @@ pub fn main() -> i32 { return 0 }`),
     assert.strictEqual(Type.equals(parameter.type, result.type), true)
     assert.strictEqual(Type.encode(result.type), 'model/Types.End | model/Types.Token')
     assert.strictEqual(parameter.unionSource?.members.length, 2)
+  }),
+)
+
+it.effect('normalizes reordered scalar and array members to one semantic identity', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'union-syntax/ordinary-order',
+      ascii(`fn left(value: i32 | [i32; 2]) -> i32 { return 0 }
+fn right(value: [i32; 2] | i32) -> i32 { return 0 }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const typeOf = (name: string) => {
+      const lookup = Analysis.declarationByName(snapshot, 'union-syntax/ordinary-order', name)
+      const parameter = lookup._tag === 'Resolved' ? lookup.declaration.parameters.at(0) : undefined
+      return parameter?.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
+    }
+    const left = typeOf('left')
+    const right = typeOf('right')
+    assert.isDefined(left)
+    assert.isDefined(right)
+    if (left !== undefined && right !== undefined)
+      assert.strictEqual(Type.equals(left, right), true)
+  }),
+)
+
+it.effect('renormalizes generic union members after specialization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'union-syntax/generic',
+      ascii(`fn select<L, R>(value: L | R) -> i32 { return 42 }
+pub fn main() -> i32 { return select<i32, i32>(42) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('requires executable union members to name a finite representation', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'union-syntax/executable',
+      ascii(`fn invalidCallable(value: fn(i32) -> i32 | i32) -> i32 { return 0 }
+fn invalidEffect(value: Effect<i32> | i32) -> i32 { return 0 }
+pub fn main() -> i32 { return 0 }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [Diagnostic.invalidUnionMemberCode, Diagnostic.invalidUnionMemberCode],
+    )
   }),
 )

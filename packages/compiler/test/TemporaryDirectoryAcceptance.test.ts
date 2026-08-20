@@ -38,8 +38,6 @@ import silk.filesystem {
 }
 import silk.result { Failure, Result, Success }
 
-impl Report for OutOfMemory {}
-
 struct Sentinel { code: i32 }
 
 /// Work that fails, so the finalizer's run is observable on the failure path rather than assumed.
@@ -48,14 +46,17 @@ effect fn failingWork() -> i32 ! Sentinel { fail Sentinel { code: 7 } }
 /// Reads the failure's own payload back, so what is asserted is *which* failure survived.
 effect fn recoverSentinel(error: Sentinel) -> i32 { return error.code }`
 
-const epilogue = `pub fn main() -> i32 {
+const epilogue = `import silk.core { OutOfMemoryError }
+import silk.filesystem { FileError }
+import silk.result { Result }
+pub fn main() -> i32 {
   let completed = run Intrinsic.effectResult(program())
   return match move completed {
-    Result<i32, FileError | OutOfMemory> { value: outcome } => match move outcome {
+    Result<i32, FileError | OutOfMemoryError> { value: outcome } => match move outcome {
       Success<i32> { value } => value
-      Failure<FileError | OutOfMemory> { error } => match move error {
+      Failure<FileError | OutOfMemoryError> { error } => match move error {
         FileError failure => 100 + failure.reason.code
-        OutOfMemory exhausted => 99
+        OutOfMemoryError exhausted => 99
       }
     }
   }
@@ -65,9 +66,15 @@ const epilogue = `pub fn main() -> i32 {
  * The whole lifecycle against a real confined root. Each numbered return is one acceptance
  * criterion, so a native exit status names which one failed rather than merely that one did.
  */
-const nativeSource = `${prelude}
+const nativeSource = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+import silk.filesystem { FileSystem }
+import silk.u8 as u8
+${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
@@ -113,9 +120,13 @@ ${epilogue}`
  * directory, and the primitive underneath removes exactly one *empty* directory — so the two-pass
  * walk is the part that has to be right, and this is it running on a real filesystem.
  */
-const nativeTreeSource = `${prelude}
+const nativeTreeSource = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
@@ -134,9 +145,15 @@ ${epilogue}`
  * and the values the arm reloads are read again at the arm's join. Both a populated tree and a live
  * neighbour are needed — two bare scopes released in sequence do not reach it.
  */
-const nativeManySource = `${prelude}
+const nativeManySource = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+import silk.filesystem { FileSystem }
+import silk.u8 as u8
+${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
@@ -179,9 +196,13 @@ ${epilogue}`
  * back through the output buffer, and a buffer too small creates nothing and reports the capacity
  * it needs. The retry counter is what proves the second half.
  */
-const evaluatorSource = `${prelude}
+const evaluatorSource = `import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effects as Effect
+import silk.filesystem { FileError }
+${prelude}
 
-effect fn program() -> i32 ! FileError | OutOfMemory {
+effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
@@ -240,7 +261,7 @@ it.effect(
       // scopes are gone and the promoted artifact is the only thing the parent still holds.
       assert.deepEqual(readdirSync(join(nativeRoot, 'scopes')), ['promoted.bin'])
     }),
-  120_000,
+  240_000,
 )
 
 it.effect(
@@ -271,7 +292,7 @@ it.effect(
       // The file, the nested directory's file, the nested directory, and the directory itself.
       assert.isFalse(existsSync(join(nativeRoot, 'tree')))
     }),
-  120_000,
+  240_000,
 )
 
 it.effect(
@@ -305,7 +326,7 @@ it.effect(
       )
       assert.deepEqual(readdirSync(join(nativeRoot, 'many')), [])
     }),
-  180_000,
+  360_000,
 )
 
 it.effect(

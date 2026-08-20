@@ -35,7 +35,7 @@ distinct types they can be layered on later, with ill-formed UTF-16 mapping to b
 An index at or past `argumentCount` and an unset variable name are `None`. Asking whether a variable
 is set is an ordinary question with an ordinary negative answer, so a program that probes the
 environment handles no failure on that path — the same reasoning that makes `EndOfInput` outcome
-data rather than a typed failure in `StandardInput`. `HostInputFailure` keeps one meaning: the host
+data rather than a typed failure in `StandardInput`. `HostInputError` keeps one meaning: the host
 could not answer at all.
 
 The working directory has no absent case — a running process always has one — so it returns `Bytes`

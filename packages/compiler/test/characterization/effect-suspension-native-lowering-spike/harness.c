@@ -241,8 +241,8 @@ static void scenario_refusal(int refusal_ordinal) {
     spike_variant_resume(one);
   }
   verify_common(&context);
-  require(context.outcome_tag == SPIKE_OUT_OF_MEMORY, "refusal did not preserve OutOfMemory");
-  require(context.outcome_payload == 0, "OutOfMemory unexpectedly gained a payload");
+  require(context.outcome_tag == SPIKE_OUT_OF_MEMORY, "refusal did not preserve OutOfMemoryError");
+  require(context.outcome_payload == 0, "OutOfMemoryError unexpectedly gained a payload");
   char refused[32];
   char rejected_publish[32];
   char rejected_child[32];

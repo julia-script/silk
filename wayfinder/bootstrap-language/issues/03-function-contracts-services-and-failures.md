@@ -54,7 +54,7 @@ which bootstrap promises no unwinding or cleanup.
 
 Failure payloads must be detached from lexical borrows and service providers. They may own strings,
 paths, vectors, or other self-contained allocations because those values carry their own cleanup
-authority; they may not retain arena-backed or provider-dependent storage. `OutOfMemory` construction
+authority; they may not retain arena-backed or provider-dependent storage. `OutOfMemoryError` construction
 is allocation-free. Accumulating compiler diagnostics remains ordinary program logic rather than a
 hidden failure-channel policy.
 
@@ -96,12 +96,12 @@ borrow or move and removes one capability-role entry from the requirement row. I
 create a cleanup boundary: a borrowed provider follows its lexical owner, while a moved provider is
 owned by the resulting lazy effect and survives until that effect is consumed or dropped.
 
-`Capability.provideWith` accepts an acquisition effect and creates a fresh implementation for every
+`Capability.provideEffect` accepts an acquisition effect and creates a fresh implementation for every
 execution. Acquisition failures and requirements compose with the target effect. Successfully
 acquired owners clean up in reverse acquisition order after success or typed failure. A provider is
 not visible during its own construction. There is no implicit memoization, bootstrap `Layer` graph,
 global container, dependency solver, named `Scope`, or service registry. Because traps do not unwind,
-`provideWith` promises no trap cleanup in the bootstrap runtime.
+`provideEffect` promises no trap cleanup in the bootstrap runtime.
 
 Effect reuse is derived from captures rather than represented by separate reusable and single-shot
 types. Copy captures are snapshotted when the effect is constructed. Shared borrows permit repeated
@@ -131,7 +131,7 @@ names. Their closed compiler core consists of lazy construction, propagating `ru
 `Effect.result` for reifying a completed typed outcome as `Result<A, E>`, and
 `Effect.bindRequirement` for satisfying one capability-role entry while preserving an inferred
 remainder. `mapBoth`, `map`, `mapError`, `flatMap`, `tap`, whole-channel `catch`, `retry`, `provide`,
-and `provideWith` are derived in `packages/compiler/stdlib/silk/effects.silk`. Failure and
+and `provideEffect` are derived in `packages/compiler/stdlib/silk/effects.silk`. Failure and
 requirement row parameters specialize and erase; neither becomes a runtime record. Effect
 parameters use ordinary access bounds—`Effect`, `mut Effect`, and `once Effect`—so reusable APIs
 cannot accidentally accept a take-once computation.

@@ -59,7 +59,7 @@ second `run` is never reached — the combinator does not test for failure or ch
 simply never gets there. The unrun `other` is an owned local of the frame the propagation leaves,
 and the propagation exit releases it exactly as it releases every other local.
 
-This is why the combinator needs no reification. `ensuring` and `provideWith` reify with
+This is why the combinator needs no reification. `ensuring` and `provideEffect` reify with
 `Effect.result` because they have work to do *after* a failure and must not do it on the propagation
 path. `zip` has nothing to do after a failure, so the propagation path is the correct one.
 

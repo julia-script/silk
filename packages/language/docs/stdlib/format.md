@@ -51,17 +51,17 @@ pub struct OutOfRange
 
 A well-formed decimal number whose value does not fit the requested type.
 
-<a id="declaration-73696c6b2f666f726d61743a3a50617273654661696c757265"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a50617273654572726f72"></a>
 
-## `ParseFailure`
+## `ParseError`
 
 ```silk
-pub struct ParseFailure
+pub struct ParseError
 ```
 
 Why decimal text did not produce a value, narrowed with `match`.
 
-<a id="declaration-73696c6b2f666f726d61743a3a50617273654661696c7572653a3a6669656c643a30"></a>
+<a id="declaration-73696c6b2f666f726d61743a3a50617273654572726f723a3a6669656c643a30"></a>
 
 ### Field `reason`
 
@@ -76,7 +76,7 @@ The reason the text was rejected.
 ## `unsignedText`
 
 ```silk
-pub effect fn unsignedText(value: u64) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn unsignedText(value: u64) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Renders an unsigned value as decimal text in freshly owned storage.
@@ -91,7 +91,7 @@ same number as a `u64` are the same bytes.
 ## `signedText`
 
 ```silk
-pub effect fn signedText(value: i64) -> String ! OutOfMemory ? &mut Allocator
+pub effect fn signedText(value: i64) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Renders a signed value as decimal text in freshly owned storage, with a leading `-` when negative.
@@ -106,7 +106,7 @@ it would overflow, while negating one digit of it never does.
 ## `unsignedValue`
 
 ```silk
-pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an unsigned value.
@@ -122,7 +122,7 @@ than after it.
 ## `signedValue`
 
 ```silk
-pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a signed value, accepting one leading `-`.
@@ -137,7 +137,7 @@ is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
 ## `u8Value`
 
 ```silk
-pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseFailure>
+pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
@@ -147,7 +147,7 @@ Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
 ## `u16Value`
 
 ```silk
-pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseFailure>
+pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
@@ -157,7 +157,7 @@ Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
 ## `u32Value`
 
 ```silk
-pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseFailure>
+pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
@@ -167,7 +167,7 @@ Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
 ## `u64Value`
 
 ```silk
-pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseFailure>
+pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
@@ -177,7 +177,7 @@ Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
 ## `usizeValue`
 
 ```silk
-pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseFailure>
+pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot hold.
@@ -187,7 +187,7 @@ Reads complete decimal text as a `usize`, rejecting a value the target's pointer
 ## `i8Value`
 
 ```silk
-pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseFailure>
+pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
@@ -197,7 +197,7 @@ Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8
 ## `i16Value`
 
 ```silk
-pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseFailure>
+pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
@@ -207,7 +207,7 @@ Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`
 ## `i32Value`
 
 ```silk
-pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseFailure>
+pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
@@ -217,7 +217,7 @@ Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`
 ## `i64Value`
 
 ```silk
-pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseFailure>
+pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
@@ -227,7 +227,7 @@ Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`
 ## `isizeValue`
 
 ```silk
-pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseFailure>
+pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot hold.
