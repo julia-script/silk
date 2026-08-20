@@ -764,7 +764,7 @@ export const failureMembers = (self: Effect | FailureRow): ReadonlyArray<Type> =
 
 const isConcreteFailureCarrierMember = (self: Type): boolean => isRuntimeConcrete(self)
 
-/** Selects one nominal member while enforcing the carrier's explicit runtime tag convention. */
+/** Selects one ordinary failure member under the carrier's explicit runtime tag convention. */
 export const failureCarrierMember = (
   self: Type,
   tag: number,
@@ -773,10 +773,6 @@ export const failureCarrierMember = (
   if (!Number.isSafeInteger(tag)) return undefined
   const ordinal = policy === 'ZeroBased' ? tag : tag - 1
   if (ordinal < 0) return undefined
-  if (isNominal(self))
-    return policy === 'ZeroBased' && ordinal === 0 && isConcreteFailureCarrierMember(self)
-      ? self
-      : undefined
   if (isUnion(self))
     return policy === 'ZeroBased' && self.members.every(isConcreteFailureCarrierMember)
       ? self.members.at(ordinal)
@@ -789,12 +785,10 @@ export const failureCarrierMember = (
       ? failures.row.members.at(ordinal)
       : undefined
   }
-  return undefined
+  return policy === 'ZeroBased' && ordinal === 0 && isConcreteFailureCarrierMember(self)
+    ? self
+    : undefined
 }
-
-/** Whole-row parameters projected from one symbolic failure row. */
-export const failureRowParameters = (self: Effect | FailureRow): ReadonlyArray<Parameter> =>
-  RowAlgebra.parameters(failureRowPolicy(), failureRowOf(self)).rows
 
 /** Ordinary type parameters used as symbolic members of one failure union. */
 export const failureMemberParameters = (self: Effect | FailureRow): ReadonlyArray<Parameter> =>

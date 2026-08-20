@@ -139,10 +139,10 @@ export const invalidSliceReborrowCode = 'SEM0058' as const
 export const implicitSliceDecayCode = 'SEM0059' as const
 /** Stable code for a negative decimal literal contextualized as unsigned `usize`. */
 export const usizeNegativeCode = 'SEM0060' as const
-/** Stable code for a non-concrete or non-nominal member of a effect failure row. */
+/** Stable code for a type that cannot inhabit an Effect failure channel. */
 export const invalidFailureTypeCode = 'SEM0061' as const
-/** Stable code for a failure row attached to an ordinary function. */
-export const failureRowOnOrdinaryCode = 'SEM0062' as const
+/** Stable code for a failure channel attached to an ordinary function. */
+export const failureChannelOnOrdinaryCode = 'SEM0062' as const
 export const failOutsideEffectCode = 'SEM0063' as const
 export const undeclaredFailureCode = 'SEM0064' as const
 export const runNonEffectCode = 'SEM0065' as const
@@ -360,7 +360,7 @@ export type Code =
   | typeof implicitSliceDecayCode
   | typeof usizeNegativeCode
   | typeof invalidFailureTypeCode
-  | typeof failureRowOnOrdinaryCode
+  | typeof failureChannelOnOrdinaryCode
   | typeof failOutsideEffectCode
   | typeof undeclaredFailureCode
   | typeof runNonEffectCode
@@ -494,7 +494,7 @@ export type Reason =
     }
   | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
   | { readonly _tag: 'InvalidFailureType'; readonly type: string }
-  | { readonly _tag: 'FailureRowOnOrdinary' }
+  | { readonly _tag: 'FailureChannelOnOrdinary' }
   | { readonly _tag: 'FailOutsideEffect' }
   | { readonly _tag: 'UndeclaredFailure'; readonly type: string }
   | { readonly _tag: 'RunNonEffect'; readonly type: string }
@@ -1760,14 +1760,14 @@ export const usizeNegative = (spelling: string, span: SourceSpan.SourceSpan): Di
     span,
   })
 
-/** Creates the diagnostic for a failure-row member that cannot be an owned nominal error. */
+/** Creates the diagnostic for a type that cannot inhabit an Effect failure channel. */
 export const invalidFailureType = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: invalidFailureTypeCode,
     severity: 'error',
-    message: `Effect failure ${type} must be one concrete nominal type`,
+    message: `Effect failure ${type} must be a detached ordinary value type`,
     reason: Object.freeze({ _tag: 'InvalidFailureType', type }),
     span,
   })
@@ -1784,15 +1784,15 @@ export const invalidRequirementType = (type: string, span: SourceSpan.SourceSpan
     span,
   })
 
-/** Creates the diagnostic for spelling a failure row on a direct ordinary function. */
-export const failureRowOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
+/** Creates the diagnostic for spelling a failure channel on a direct ordinary function. */
+export const failureChannelOnOrdinary = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: failureRowOnOrdinaryCode,
+    code: failureChannelOnOrdinaryCode,
     severity: 'error',
-    message: 'Only effect functions may declare a failure row',
-    reason: Object.freeze({ _tag: 'FailureRowOnOrdinary' }),
+    message: 'Only effect functions may declare a failure channel',
+    reason: Object.freeze({ _tag: 'FailureChannelOnOrdinary' }),
     span,
   })
 

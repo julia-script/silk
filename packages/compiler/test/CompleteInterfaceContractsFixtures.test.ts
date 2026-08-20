@@ -49,6 +49,8 @@ const namedDeclaration = (
     .find((candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name)
 const encodedOperand = (operand: DeclarationIndex.InterfaceOperandFact): string =>
   operand.type._tag === 'Resolved' ? Type.encode(operand.type.type) : operand.type._tag
+const encodedDeclaredType = (declared: DeclarationIndex.DeclaredTypeFact): string =>
+  declared._tag === 'Resolved' ? Type.encode(declared.type) : declared._tag
 
 layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
   it.effect('parses and formats complete kinded interface syntax idempotently', () =>
@@ -79,7 +81,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.strictEqual(declaration?.visibility, 'Public')
       assert.deepEqual(
         declaration?.typeParameters.map((parameter) => parameter.type.kind),
-        ['Value', 'Value', 'Value', 'FailureRow', 'RequirementRow'],
+        ['Value', 'Value', 'Value', 'Value', 'RequirementRow'],
       )
       const contract = declaration?.operationContracts.at(0)
       assert.strictEqual(contract?.functionKind, 'Effect')
@@ -95,8 +97,9 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       )
       assert.deepEqual(
         contract?.failureRow.parameters.map((parameter) => parameter.name),
-        ['E'],
+        [],
       )
+      assert.deepEqual(contract?.failureRow.members.map(encodedDeclaredType), ['E'])
       assert.deepEqual(
         contract?.requirementRow.parameters.map((parameter) => parameter.name),
         ['R'],
@@ -112,6 +115,10 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
         bound.application.operations
           .at(0)
           ?.failureRow.parameters.map((parameter) => parameter.name),
+        [],
+      )
+      assert.deepEqual(
+        bound.application.operations.at(0)?.failureRow.members.map(encodedDeclaredType),
         ['E'],
       )
       assert.deepEqual(

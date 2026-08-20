@@ -115,8 +115,8 @@ There are 157 codes in total.
 | `SEM0058` |  | `A shared slice cannot be reborrowed exclusively` |
 | `SEM0059` |  | `Passing an array as <expected> requires an explicit borrow` |
 | `SEM0060` | Stable code for a negative decimal literal contextualized as unsigned `usize`. | `usize literals cannot be negative` |
-| `SEM0061` | Stable code for a non-concrete or non-nominal member of a effect failure row. | `Effect failure <type> must be one concrete nominal type` |
-| `SEM0062` | Stable code for a failure row attached to an ordinary function. | `Only effect functions may declare a failure row` |
+| `SEM0061` | Stable code for a type that cannot inhabit an Effect failure channel. | `Effect failure <type> must be a detached ordinary value type` |
+| `SEM0062` | Stable code for a failure channel attached to an ordinary function. | `Only effect functions may declare a failure channel` |
 | `SEM0063` |  | `Only effect functions may originate a typed failure` |
 | `SEM0064` |  | `Failure <type> is not declared by this effect function` |
 | `SEM0065` |  | `Cannot run non-effect value <type>` |

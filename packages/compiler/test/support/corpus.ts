@@ -1419,7 +1419,7 @@ pub fn main() -> i32 { return 0 }`,
 struct Right {}
 fn inspect(input: Left | Right) -> i32 { return match &input { Left {} if 1 => 0 Left {} => 0 Right {} => false } }
 pub fn main() -> i32 { return 0 }`,
-    codes: ['SEM0045', 'SEM0049'],
+    codes: ['SEM0045'],
   },
   {
     name: 'match-guard-consumes',

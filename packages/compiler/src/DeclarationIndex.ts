@@ -908,7 +908,7 @@ const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFac
   operation.operands.every((operand) => operand.type._tag === 'Resolved') &&
   operation.success._tag === 'Resolved' &&
   operation.failureRow.members.every(
-    (member) => member._tag === 'Resolved' && Type.isNominal(member.type),
+    (member) => member._tag === 'Resolved' && Type.isTypeArgument(member.type),
   ) &&
   operation.requirementRow.entries.every(
     (entry) =>
@@ -3283,7 +3283,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             SyntaxTree.directToken(operation, 'EffectKeyword') === undefined &&
             failureRow.fact.syntax !== undefined
           )
-            diagnostics.push(Diagnostic.failureRowOnOrdinary(failureRow.fact.syntax.span))
+            diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
           return Object.freeze({
             _tag: 'ServiceOperation',
             id: operationId,
@@ -3380,7 +3380,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       ...constraints.diagnostics,
     )
     if (functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
-      diagnostics.push(Diagnostic.failureRowOnOrdinary(failureRow.fact.syntax.span))
+      diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
     return Object.freeze({
       _tag: 'FunctionDeclaration',
       id,

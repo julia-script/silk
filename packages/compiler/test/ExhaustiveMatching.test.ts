@@ -120,10 +120,13 @@ pub fn inspect(event: Token | End) -> i32 {
   return match event { Token {} => 0 End {} => false }
 }`,
   )
-  assert.include(
+  assert.deepEqual(
     incompatible.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0049',
+    ['SEM0040'],
   )
+  const joined = returnedMatch(incompatible).type
+  assert.strictEqual(joined._tag, 'Available')
+  if (joined._tag === 'Available') assert.strictEqual(Type.encode(joined.type), 'bool | i32')
 })
 
 it('retains nested canonical field paths and rejects pattern binding conflicts', () => {

@@ -4302,7 +4302,7 @@ const solveCallableConstraints = (
         : Diagnostic.invalidEffectHandler(
             wanted._tag === 'NominalMemberConstraint'
               ? 'selected failure is absent or remains underconstrained'
-              : 'selected failure row is not an exact subset of the source row',
+              : 'selected failure type is not an exact subset of the source failure type',
             span,
           ),
     )

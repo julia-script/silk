@@ -24,13 +24,13 @@ any change to `Effect.catch`, `Effect.result`, or the propagation exit.
 
 The alternative is a finalizer that can fail, which forces the combinator to decide what happens
 when both the protected Effect and the finalizer produce a failure. Every answer to that is a
-policy: drop one, prefer one, or widen the failure row to carry both. The first two lose
-information silently, and the third makes `ensuring` change the failure row of everything it wraps —
+policy: drop one, prefer one, or widen the failure type to carry both. The first two lose
+information silently, and the third makes `ensuring` change the failure type of everything it wraps —
 directly contradicting the requirement that it hand on the original failure unchanged.
 
 Typing the finalizer `once Effect<() ! never ? S>` removes the question instead of answering it.
 There is no second outcome, so there is nothing to reconcile, and the return type stays `A ! E ? R | S`
-— the protected Effect's own failure row, widened only in its requirement row by whatever the
+— the protected Effect's own failure type, widened only in its requirement row by whatever the
 finalizer requires. This matches the existing rule that a `Drop` hook carries no failures: cleanup
 that is guaranteed to run is cleanup that cannot fail.
 
@@ -67,16 +67,16 @@ exactly this and was restructured around a reified `Result` for the same reason.
 So `ensuring` reifies first:
 
 ```silk
-pub effect fn ensuring<A, !E, ?R, ?S>(
+pub effect fn ensuring<A, E, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   finalizer: once Effect<() ! never ? S>
 ) -> A ! E ? R | S {
   let completed = run result(move self)
   let finalized = run move finalizer
   return match move completed {
-    Result<A, Row<!E>> { value: outcome } => match move outcome {
+    Result<A, E> { value: outcome } => match move outcome {
       Success<A> { value: success } => move success
-      Failure<Row<!E>> { error } => run raise(move error)
+      Failure<E> { error } => run raise(move error)
     }
   }
 }
@@ -88,7 +88,7 @@ control flow rather than a claim about it. The outcome is re-raised only after t
 returned, so a recovering caller never observes the outcome before the finalizer has run.
 
 Two ownership facts make this safe rather than merely convenient. The finalizer's own run is
-infallible — `! never` means an empty failure row *and* no row parameter — so it publishes no
+infallible — `! never` means an empty failure type — so it publishes no
 propagation exit and cannot strand `completed`, which is live across it. And the owner the protected
 body acquired is released by that body's own exit, not by this frame: the propagation exit excludes
 a run's own consumed operands, so an owner moved in through `ensuring`'s operands is the callee's

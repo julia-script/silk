@@ -87,8 +87,9 @@ ordinary unknown-type diagnostic. Using `?R` in an ordinary value position repor
 identifies the requirement-row kind. Using ordinary `E` as a failure type is valid and must not
 request `!E` or `Row<!E>` syntax.
 
-**Current compiler:** Disputed for failures. It currently treats `!E` as a separate failure-row
-parameter kind. That behavior conflicts with the confirmed Effect contract and must be removed.
+**Current compiler:** Aligned for failure parameters. `E` is an ordinary type parameter; only
+requirement-row, callable-representation, and Effect-representation parameters retain specialized
+kinds in this area.
 
 **Evidence:** [generic Effect contract](effect-contracts.md#eff-012--ordinary-failure-types-and-generic-requirement-rows-preserve-a-contract),
 [current generic specification](../../openspec/specs/bootstrap-type-generics/spec.md),
@@ -1192,9 +1193,9 @@ target. The diagnostic identifies the interface operation and the first incompat
 operand mode/type, result type, failure type, or requirement. Nested Effect mismatches use the
 ordinary type names and never fall through to lowering as invalid MIR.
 
-**Current compiler:** Partially aligned. It checks mapped operand and result compatibility and has
-row-subsumption machinery, but current provider arguments, failure-row kinds, and service-specific
-adaptation must be removed.
+**Current compiler:** Partially aligned. It checks mapped operand and result compatibility and
+compares ordinary failure types without a failure-row parameter kind. Provider arguments and
+service-specific adaptation are reconciled by the interface/service and provision work.
 
 **Evidence:** [complete witness compatibility](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [witness compatibility implementation](../../packages/compiler/src/DeclarationIndex.ts),

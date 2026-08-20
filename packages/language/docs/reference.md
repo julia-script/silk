@@ -242,7 +242,7 @@ initializer.
 
 ```
 [pub] fn name[<TypeParams>](params) [-> ReturnType] { body }
-[pub] effect fn name[<TypeParams>](params) -> Type [! FailureRow] [? RequirementRow] { body }
+[pub] effect fn name[<TypeParams>](params) -> Type [! FailureType] [? RequirementRow] { body }
 ```
 
 An omitted return type means `()`. Parameters are `name: Type` and a trailing comma is allowed.
@@ -377,7 +377,6 @@ only value. `never` is the uninhabited type and joins into any other.
 | `once fn(A) -> B` | consuming callable |
 | `&T` / `&mut T` | shared / exclusive access |
 | `Effect<A ! E ? R>` | effect with its three channels |
-| `Row<!E>` | a failure row reified as ordinary data |
 
 Callable substitution runs one way: `fn` may be used where `mut fn` is expected, and `mut fn` where
 `once fn` is expected, never the reverse.
@@ -412,9 +411,9 @@ Inference is local and deliberately weak.
 
 ### 3.5 Generics
 
-Type parameters are declaration-local. Parameters come in three kinds, distinguished by sigil:
-plain value types, `!E` failure rows, and `?R` requirement rows. Using a row parameter where a
-value type belongs is a kind mismatch.
+Type parameters are declaration-local. Plain parameters such as `T` and `E` are ordinary value
+types. Requirement rows use the distinct `?R` kind. `!` labels an Effect's failure channel; it does
+not declare a generic kind. Using `?R` where an ordinary value type belongs is a kind mismatch.
 
 A generic body is checked once against its canonical parameters, so specialization can never enable
 an operation the declaration did not promise. Specialization is monomorphic and finite: there are
@@ -621,22 +620,25 @@ no continuation capture. An effect is a **typed, lazy computation value** with t
 `Effect<A ! E ? R>`
 
 - `A` — the success type.
-- `! E` — the **failure row**: a normalized, duplicate-free set of nominal types.
+- `! E` — the **failure type**: an ordinary detached owned type or structural union; `never` is
+  empty.
 - `? R` — the **requirement row**: access-qualified capability requirements, each optionally
   carrying a role.
 
-Rows are optional and independent, and multi-member rows are written with `|`.
+The labeled channels are optional and independent, and multi-member unions are written with `|`.
 
-Rows have deterministic finite algebra. Failure rows are sets under nominal identity. Requirement
-rows are keyed by capability and role and store either shared or exclusive access. Union joins a
+Failure types use ordinary structural-union normalization, containment, and difference. Requirement
+rows have their own finite algebra: they are keyed by capability and role and store either shared
+or exclusive access. Requirement union joins a
 shared/exclusive collision to the stronger exclusive entry, while membership, subset, intersection,
 and difference compare the stored access exactly. Provider compatibility is separate: an exclusive
 provider can satisfy a shared demand, but selection returns the original shared member before
 subtraction.
 
-`Without<R, S>` is available in failure- and requirement-row positions. It is forward-computed after
-both operands are independently known; it never infers an unknown operand backwards from an expected
-remainder. Difference is total and supports whole rows:
+`Without<E, S>` subtracts ordinary union alternatives. `Without<R, S>` also operates on requirement
+rows when both operands are requirement-row values. Both forms are forward-computed after their
+operands are independently known; neither infers an unknown operand backwards from an expected
+remainder. Difference is total:
 
 - `Without<First | Second | Third, First | Third>` is `Second`.
 - `Without<First | Second, Other>` is still `First | Second` because an absent member is a no-op.
@@ -662,8 +664,6 @@ pub struct Rejected {
   pub code: i32
 }
 
-impl Report for Rejected {}
-
 effect fn validate(value: i32) -> i32 ! Rejected {
   if value < 0 {
     fail Rejected { code: value }
@@ -684,54 +684,53 @@ pub effect fn main() -> () ! Rejected {
 
 ### 5.3 Propagation
 
-Failure rows propagate by union through composition, and requirement rows propagate by union and are
+Failure types propagate by ordinary union through composition, and requirement rows propagate by union and are
 removed one entry at a time by provision. Propagation is entirely type-directed: an undeclared
 propagation is a compile error rather than a runtime surprise.
 
 ### 5.4 Handling is library code
 
-The compiler owns three sealed primitives at this seam: one that runs a layer and reifies its outcome
-as `Result<A, Row<!E>>` data, one that binds a single capability-role entry, and one that dispatches a
-single selected failure-row member. Their contracts use the same generic row algebra and checked
-constraints as ordinary source declarations.
+The compiler owns three sealed primitives at this seam: one that runs a layer and reifies its
+outcome as `Result<A, E>` data, one that binds a single capability-role entry, and one that
+dispatches a selected failure type. Their contracts use ordinary failure types plus the same checked
+requirement-row constraints as ordinary source declarations.
 
 Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catchAll`, `retry`, `ensuring`,
 `zip`, `zip3`, `provide`, `provideMut`, `provideWith`, and the singleton `catch` wrapper — is
 ordinary Silk source in `effects.silk`. The compiler must not infer their meaning from a name or an
 origin, so a user-defined equivalent gets identical treatment with no registration.
 
-Recovery is therefore just reify, `match`, and re-raise or return. Because a failure row reifies to
-`Row<!E>` — ordinary value data projected to a structural union — a handler can match on it like any
-other value.
+Recovery is therefore just reify, `match`, and re-raise or return. `E` is already ordinary value
+data, so a handler can match on it like any other value.
 
 Selective and whole-row recovery have distinct names and contracts:
 
 ```
-Effect.catchAll(protected, handler)    // whole-row recovery
-Effect.catch<E>(protected, handler)    // member-selective: recovers E, propagates the rest
+Effect.catchAll(protected, handler)    // whole failure-type recovery
+Effect.catch<S>(protected, handler)    // selective: recovers S, propagates the rest
 ```
 
-`Effect.catchAll` takes a handler over the whole reified row `Row<!E>`, discards `!E` in full, and
-replaces it with the handler's own `!F`. `Effect.catch<S>` places the nominal selector first, checks
-`S in E`, gives the handler a value of `S`, and computes `Without<E, S> | F`. Omitting `<S>` infers it
-from the handler's nominal input; it does not select a removed whole-row overload.
+`Effect.catchAll` takes a handler over ordinary `E`, discards `E` in full, and replaces it with the
+handler's own `F`. `Effect.catch<S>` places the selected type first, checks `S in E`, gives the
+handler a value of `S`, and computes `Without<E, S> | F`. `S` may itself be a union. Omitting `<S>`
+infers it from the handler input.
 
 #### Why singleton catch has a sealed dispatch primitive
 
-Row algebra can state the generic result, but ordinary Silk pattern matching still has no residual
-binder that can split one runtime failure value into “selected payload” versus “the same payload under
-the residual row.” `Intrinsic.catchFailure` is the minimal target-neutral dispatch operation. It
-consumes the already-proved membership and concrete specialized rows; it does not infer `S`, filter a
-row, or reconstruct the result type.
+Type algebra can state the generic result, but ordinary Silk pattern matching still has no residual
+binder that can split one runtime union value into “selected payload” versus “the same payload under
+the residual union.” `Intrinsic.catchFailure` is the minimal target-neutral dispatch operation. It
+consumes already-proved membership and concrete specialized types; it does not infer `S`, filter a
+union, or reconstruct the result type.
 
 #### What ships today
 
 `Effect.catch<S>` is executable on the evaluator, WebAssembly, and native targets. The protected
 Effect and handler are formed in ordinary call-evaluation order, then the protected Effect runs once.
-Success bypasses the handler. A failure whose tag names `S` invokes the handler exactly once; every
-other failure keeps its payload and is remapped into the residual row. All targets share that
-specialized MIR behavior and cleanup order. Invalid selectors (`never`, a union, a non-nominal type,
-or a nominal absent from `E`) are rejected during semantic analysis before lowering.
+Success bypasses the handler. A failure belonging to `S` invokes the handler exactly once; every
+other failure keeps its payload and remains in the residual union. All targets share that specialized
+MIR behavior and cleanup order. Invalid selectors (`never` or any type containing an alternative
+absent from `E`) are rejected during semantic analysis before lowering.
 
 `Effect.ensuring` is the cleanup counterpart: it runs a finalizer after the protected Effect
 completes either way, then hands on the original success value or the original typed failure
@@ -741,13 +740,13 @@ already cleaned when the finalizer starts, so the finalizer exits last, in rever
 against the cleanup it wraps.
 
 The finalizer is typed `Effect<() ! never ? S>`. It cannot fail, so there is no second outcome to
-reconcile with the one being preserved, and the failure row of the wrapped Effect is untouched. A
+reconcile with the one being preserved, and the failure type of the wrapped Effect is untouched. A
 release that can fail is recovered into that contract first — `Effect.catchAll(release(), ignore)` —
 which leaves the decision about what a failed release means with the caller. A trap is not an
 outcome: it bypasses the finalizer exactly as it bypasses `catch` and every `Drop` hook.
 
 `Effect.zip` collects instead of transforming: it runs two Effects in order and returns a `Pair`
-holding both success values, with both failure rows and both requirement rows unioned. `Effect.zip3`
+holding both success values, with both failure types and both requirement rows unioned. `Effect.zip3`
 does the same for three operands and returns a `Triple`. Sequencing is the body's own statement
 order — `let first = run self` then `let second = run other` — so a typed failure from the first
 operand propagates out before the second `run` is reached. The second Effect is never executed, and
@@ -810,10 +809,10 @@ pub fn main() -> i32              // exit status is the returned value
 pub effect fn main() -> () ! E    // requirement row must be empty
 ```
 
-Every nominal member of an effectful entry's failure row needs exactly one `impl Report for X {}`
-marker conformance, or the entry is unavailable before lowering. Success is status 0; an unhandled
-failure becomes a normalized non-zero status after its payload is released through the cleanup plan.
-No typed failure or requirement row crosses the machine entry ABI.
+Success is status 0. An unhandled typed failure becomes a normalized runtime error with status 1
+after its payload is released through the cleanup plan. No marker interface is required merely to
+use an ordinary value as an error. No typed failure or requirement row crosses the machine entry
+ABI.
 
 ## 6. Control flow
 

@@ -1161,8 +1161,8 @@ const deferredBlocks = (
  * Run sites in this expression that can propagate a typed failure, stopping at effect blocks:
  * a deferred body's runs propagate out of its own compiled function, not out of this one.
  *
- * A run is fallible when its effect type carries failures OR an open failure row: inside a
- * In a generic body the caller's failures arrive as ordinary symbolic union members, so concrete
+ * A run is fallible when its effect type carries concrete or symbolic failures. In a generic body
+ * the caller's failures arrive as ordinary symbolic union members, so concrete
  * members alone are insufficient to determine whether the run may propagate.
  */
 const fallibleRunSites = (

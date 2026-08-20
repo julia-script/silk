@@ -225,7 +225,7 @@ it('keeps open parameters inside every generic argument non-concrete', () => {
   assert.strictEqual(Type.isConcrete(nominal), false)
   assert.deepEqual(
     Type.parameters(nominal).map((parameter) => parameter.name),
-    ['E', 'A'],
+    ['A', 'E'],
   )
 })
 

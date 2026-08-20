@@ -34,6 +34,7 @@ it('selects failure-carrier members only under their explicit tag convention', (
   const effect = Type.effect('i32', [first, second])
 
   assert.strictEqual(Type.failureCarrierMember(first, 0, 'ZeroBased'), first)
+  assert.strictEqual(Type.failureCarrierMember('i32', 0, 'ZeroBased'), 'i32')
   assert.strictEqual(Type.failureCarrierMember(union, 0, 'ZeroBased'), first)
   assert.strictEqual(Type.failureCarrierMember(union, 1, 'ZeroBased'), second)
   assert.strictEqual(Type.failureCarrierMember(effect, 1, 'OneBased'), first)
