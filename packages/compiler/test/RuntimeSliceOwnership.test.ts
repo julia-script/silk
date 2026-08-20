@@ -126,6 +126,37 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('cleans a hidden temporary owner after its loan ends', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Guard { value: i32 }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { return () }
+}
+fn read(values: &[Guard]) -> i32 { return values[0].value }
+pub fn main() -> i32 { return read(&[Guard { value: 42 }]) }`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.mirOf(self)
+    assert.strictEqual(mir._tag, 'Available')
+    if (mir._tag !== 'Available') return
+    const main = mir.value.functions.find((fn) => fn.id.name === 'main')
+    const operations =
+      main?.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations
+          : region._tag === 'CleanupRegion'
+            ? region.releases
+            : [],
+      ) ?? []
+    const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
+    const cleanup = operations.findIndex(
+      (operation, ordinal) => operation._tag === 'Drop' && ordinal > ending,
+    )
+    assert.isAtLeast(ending, 0)
+    assert.isAbove(cleanup, ending)
+  }),
+)
+
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`fn identity(values: &[i32]) -> &[i32] { return values }

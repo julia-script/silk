@@ -202,6 +202,30 @@ pub fn main() -> i32 { return sum(&[40, 2]) }`
   }),
 )
 
+it.effect('extends a hidden temporary owner through a returned local view', () =>
+  Effect.gen(function* () {
+    const source = `fn identity(values: &[i32]) -> &[i32] { return values }
+pub fn main() -> i32 {
+  let view = identity(&[40, 2])
+  return view[0] + view[1]
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'slices/temporary-returned-view',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('borrows an indexed subplace without copying it on the evaluator and Wasm', () =>
   Effect.gen(function* () {
     const source = `fn edit(values: &mut [i32]) -> () { values[0] = 40 }
