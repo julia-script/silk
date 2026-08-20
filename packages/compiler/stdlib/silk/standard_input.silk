@@ -17,6 +17,10 @@
 // and never writes. The two are separate because a write is all-or-failure while a read is
 // inherently partial and has an end.
 
+import silk.bool as bool
+import silk.u8 as u8
+import silk.usize as usize
+
 /// Failure to complete one standard-input read.
 pub struct StreamReadError {}
 

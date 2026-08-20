@@ -9,6 +9,10 @@
 //! [`LayoutOverflow`] instead of wrapping the aggregate byte size. A [`Layout`] describes storage;
 //! it does not allocate or initialize it.
 
+import silk.option { None }
+import silk.option { Some }
+import silk.usize as usize
+
 /// A byte size paired with a non-zero power-of-two alignment.
 pub struct Layout {
   /// The number of addressable bytes required by the described storage.

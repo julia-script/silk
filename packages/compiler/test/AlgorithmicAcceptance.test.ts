@@ -66,7 +66,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
         'silk/layout',
         'silk/option',
         'silk/order',
-        'silk/raw-buffer',
+        'silk/raw_buffer',
         'silk/result',
         'silk/slot',
         'silk/string',

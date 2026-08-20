@@ -11,7 +11,10 @@
 //! implementations lexically. Allocation failure is typed as [`OutOfMemoryError`], and stream failure as
 //! [`StreamWriteError`].
 
+import silk.bool as bool
 import silk.layout { Layout as LayoutValue }
+import silk.layout { Layout }
+import silk.u8 as u8
 
 /// Reports that an allocator could not satisfy a storage request.
 pub struct OutOfMemoryError {}

@@ -15,26 +15,6 @@
 //! This module implements canonical NFC and NFD, not compatibility normalization (NFKC or NFKD),
 //! locale-sensitive comparison, grapheme segmentation, or case folding.
 
-import silk.result { Result, Success, Failure }
-import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
-import silk.unicode_tables {
-  Decomposition,
-  canonicalComposition,
-  canonicalDecomposition,
-  combiningClass,
-  dataVersion as tableDataVersion,
-  maximumDecompositionLength
-}
-import silk.vector {
-  Vector,
-  make as vectorMake,
-  append as vectorAppend,
-  asSlice as vectorAsSlice,
-  get as vectorGet,
-  length as vectorLength,
-  set as vectorSet,
-  truncate as vectorTruncate
-}
 
 // Unicode policy lives here rather than in the compiler, and it is explicitly invoked. Nothing on
 // this path runs unless a program calls it: ordinary `string` equality still compares exact bytes,
@@ -48,6 +28,33 @@ import silk.vector {
 // borrow has to come from a direct binding and a reference parameter cannot be reborrowed. Moving
 // a Vector is a move of its three fields, not a copy of its storage, so the buffer is built once
 // and handed along.
+
+import silk.bool as bool
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.result { Result, Success, Failure }
+import silk.string { String, InvalidUtf8, copyUtf8, make as stringMake, utf8Bytes }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.unicode_tables {
+  Decomposition,
+  canonicalComposition,
+  canonicalDecomposition,
+  combiningClass,
+  dataVersion as tableDataVersion,
+  maximumDecompositionLength
+}
+import silk.usize as usize
+import silk.vector {
+  Vector,
+  make as vectorMake,
+  append as vectorAppend,
+  asSlice as vectorAsSlice,
+  get as vectorGet,
+  length as vectorLength,
+  set as vectorSet,
+  truncate as vectorTruncate
+}
 
 /// Hangul syllables decompose and compose arithmetically rather than through a table, so UAX #15
 /// names these constants instead of tabulating eleven thousand rows.

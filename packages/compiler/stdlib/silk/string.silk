@@ -13,6 +13,7 @@
 //! A [`ScalarCursor`] is meaningful only for the same unchanged string from which its traversal
 //! began. Start with [`scalarCursor`] and advance only with [`nextCursor`].
 
+import silk.bool as bool
 import silk.bytes {
   Bytes,
   make as bytesMake,
@@ -21,9 +22,17 @@ import silk.bytes {
   asSlice as bytesAsSlice,
   length as bytesLength
 }
-import silk.option { Option, none, some }
-import silk.result { Result, failResult, succeed }
+import silk.char as char
 import silk.char { fromU32 as charFromU32 }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.option { None }
+import silk.option { Option, none, some }
+import silk.option { Some }
+import silk.result { Result, failResult, succeed }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 
 /// An owned sequence of valid UTF-8 bytes.
 pub struct String {

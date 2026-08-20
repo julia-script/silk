@@ -35,8 +35,10 @@
 // Familiar channel transformations derived from the closed compiler core. The core executes one
 // Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
 
-import silk.result { Result, Success, Failure }
+import silk.bool as bool
 import silk.logging { LogError, LogLevel, Logger }
+import silk.result { Result, Success, Failure }
+import silk.usize as usize
 
 /// Dispatches one complete Info message through the explicitly provided Logger.
 pub effect fn log(

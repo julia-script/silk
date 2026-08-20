@@ -15,6 +15,10 @@
 //! elements. Releasing a raw buffer releases its allocation but does not discover and drop values
 //! still stored in it; a container must clear initialized `Slot` values before release.
 
+import silk.slot as Slot
+import silk.u8 as u8
+import silk.usize as usize
+
 /// Adopts an allocation as typed raw storage. The caller proves the count fits the allocation.
 pub fn from<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
   unsafe { return Intrinsic.rawBufferFrom<T>(move allocation, count) }

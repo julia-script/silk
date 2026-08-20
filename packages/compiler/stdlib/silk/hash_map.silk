@@ -41,8 +41,19 @@
 // index a key lands on does not depend on the width of a pointer and the iteration order is the same
 // under the evaluator, under the native backend, and under WebAssembly.
 
+import silk.bool as bool
+import silk.core as AllocationFailure
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
 import silk.hash { HashKey, HashSeed }
+import silk.layout { Layout }
+import silk.layout { LayoutOverflow }
 import silk.option { Option, Some, None }
+import silk.raw_buffer as RawBuffer
+import silk.slot as Slot
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
 
 /// A slot is vacant, and no key was ever placed here.
 const VACANT: u8 = 0

@@ -13,6 +13,7 @@
 //! Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
 //! them rather than inventing a descriptor import; evaluator execution requires an injected adapter.
 
+import silk.i32 as i32
 import silk.option { None, Option, Some, none }
 import silk.standard_input {
   ReadOutcome,
@@ -22,6 +23,9 @@ import silk.standard_input {
   filled,
   readFailure
 }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 
 /// Native provider reading the process standard-input descriptor. It owns no state; the descriptor
 /// belongs to the process rather than to the value.

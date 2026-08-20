@@ -22,6 +22,8 @@
 // A program that never names this module never loads it, so the counts cost nothing until they
 // are read.
 
+import silk.usize as usize
+
 /// The acquire, release, and peak-live counts one allocation provider has observed.
 pub struct AllocationMetrics {
   /// Total successful acquisitions observed by the provider.

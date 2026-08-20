@@ -20,6 +20,18 @@
 // would be declared and mapped yet uncallable. The three-way result is derived here instead, from
 // the two strict comparisons, and is therefore ordinary Silk over the same one-operation bound.
 
+import silk.bool as bool
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
 /// The left value orders before the right value.
 pub struct Less {}
 

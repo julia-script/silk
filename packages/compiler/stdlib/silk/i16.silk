@@ -15,7 +15,25 @@
 //! # Gotchas
 //! [`MIN`] cannot be represented as a positive i16, so ordinary [`negate`] traps for that value.
 
+import silk.bool as bool
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.f32 as f32
+import silk.f64 as f64
+import silk.format as Format
+import silk.format { ParseError }
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
 import silk.option { Option }
+import silk.result { Result }
+import silk.string { String }
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
 
 /// The largest i16. The checked arithmetic intrinsics reject every result above this bound.
 pub const MAX: i16 = 32767

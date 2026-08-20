@@ -6,7 +6,7 @@ import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
 import * as Presentation from '@silk-effect/compiler/Presentation'
 import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
-import * as SourceAction from '@silk-effect/compiler/SourceAction'
+import type * as SourceAction from '@silk-effect/compiler/SourceAction'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
@@ -114,8 +114,7 @@ const owned = (
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.span.sourceId === self.module)
 
-/** Converts the document's own compiler diagnostics into protocol diagnostics. */
-export const diagnostics = (
+const compilerDiagnostics = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   uriOf: (module: string) => string | undefined,
@@ -147,16 +146,120 @@ export const diagnostics = (
   })
 }
 
-/**
- * Names the correction one edit-carrying diagnostic applies.
- *
- * A `Diagnostic.Edit` carries corrected bytes but no prose, so the title comes from the code that
- * emitted it. A code absent from this table carries no edit, so its diagnostic yields no action.
- */
-const correctionTitles: Partial<Record<Diagnostic.Code, string>> = {
-  [Diagnostic.duplicateImportCode]: 'Remove the repeated import',
-  [Diagnostic.redundantAliasCode]: 'Remove the redundant alias',
+interface ImportRedundancy {
+  readonly diagnostic: LspDiagnostic
+  readonly title: string
+  readonly edit: TextEdit
 }
+
+const sourceText = (
+  source: SourceFile.SourceFile,
+  element: SyntaxTree.Element,
+): string | undefined => Option.getOrUndefined(SourceFile.spelling(source, element.span))
+
+const aliasClause = (
+  source: SourceFile.SourceFile,
+  alias: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start = SyntaxTree.directToken(alias, 'AsKeyword')?.span.start ?? alias.span.start
+  while (start > 0 && [0x20, 0x09, 0x0d].includes(source.bytes[start - 1] ?? Number.NaN)) start -= 1
+  return Option.getOrElse(SourceSpan.make(source, start, alias.span.end), () => alias.span)
+}
+
+const importLine = (
+  source: SourceFile.SourceFile,
+  declaration: SyntaxTree.Node,
+): SourceSpan.SourceSpan => {
+  let start =
+    SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
+  while (start > 0 && [0x20, 0x09].includes(source.bytes[start - 1] ?? Number.NaN)) start -= 1
+  let end = declaration.span.end
+  while (end < source.bytes.length && [0x20, 0x09].includes(source.bytes[end] ?? Number.NaN))
+    end += 1
+  const preceding = start === 0 ? undefined : source.bytes[start - 1]
+  const ownsLine = start === 0 || preceding === 0x0a || preceding === 0x0d
+  if (ownsLine && source.bytes[end] === 0x0d) end += 1
+  if (ownsLine && source.bytes[end] === 0x0a) end += 1
+  return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
+}
+
+const importRedundancies = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+): ReadonlyArray<ImportRedundancy> => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return []
+  const source = syntax.source
+  const result: Array<ImportRedundancy> = []
+  const seen = new Set<string>()
+  for (const declaration of SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')) {
+    const normalized = sourceText(source, declaration)?.replace(/\s+/g, ' ').trim()
+    if (normalized !== undefined && seen.has(normalized)) {
+      const span = importLine(source, declaration)
+      result.push({
+        title: 'Remove the repeated import',
+        diagnostic: {
+          range: LineIndex.rangeOf(self.index, declaration.span),
+          severity: DiagnosticSeverity.Warning,
+          code: 'LSP0001',
+          source: 'silk-lsp',
+          message: 'This exact import is repeated',
+        },
+        edit: { range: LineIndex.rangeOf(self.index, span), newText: '' },
+      })
+    } else if (normalized !== undefined) seen.add(normalized)
+
+    const path = SyntaxTree.directNode(declaration, 'ImportPath')
+    const defaultName =
+      path === undefined
+        ? undefined
+        : SyntaxTree.tokens(path)
+            .filter((token) => token.kind === 'Identifier')
+            .at(-1)
+    const aliases = [
+      { owner: declaration, source: defaultName },
+      ...SyntaxTree.directNodes(
+        SyntaxTree.directNode(declaration, 'ImportMemberList') ?? declaration,
+        'ImportMember',
+      ).map((member) => ({ owner: member, source: SyntaxTree.directToken(member, 'Identifier') })),
+    ]
+    for (const candidate of aliases) {
+      const alias = SyntaxTree.directNode(candidate.owner, 'ImportAlias')
+      const local = alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')
+      const original = candidate.source
+      if (
+        alias === undefined ||
+        local === undefined ||
+        original === undefined ||
+        sourceText(source, local) !== sourceText(source, original)
+      )
+        continue
+      const span = aliasClause(source, alias)
+      result.push({
+        title: 'Remove the redundant alias',
+        diagnostic: {
+          range: LineIndex.rangeOf(self.index, span),
+          severity: DiagnosticSeverity.Warning,
+          code: 'LSP0002',
+          source: 'silk-lsp',
+          message: 'This alias does not change the imported name',
+        },
+        edit: { range: LineIndex.rangeOf(self.index, span), newText: '' },
+      })
+    }
+  }
+  return result
+}
+
+/** Publishes compiler errors plus non-semantic import style warnings. */
+export const diagnostics = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  uriOf: (module: string) => string | undefined,
+): ReadonlyArray<LspDiagnostic> => [
+  ...compilerDiagnostics(self, snapshot, uriOf),
+  ...importRedundancies(self, snapshot).map((entry) => entry.diagnostic),
+]
 
 /** Tests whether two protocol ranges share at least one position. */
 const overlaps = (left: Range, right: Range): boolean =>
@@ -239,17 +342,6 @@ const workspaceEdit = (
   return { changes }
 }
 
-const diagnosticPlan = (
-  source: SourceFile.SourceFile,
-  edits: ReadonlyArray<Diagnostic.Edit>,
-): SourceAction.ChangePlan | undefined =>
-  Option.getOrUndefined(
-    SourceAction.changePlan({
-      preconditions: [SourceAction.precondition(source)],
-      changes: [[source.id, edits.map((edit) => SourceAction.edit(edit.span, edit.replacement))]],
-    }),
-  )
-
 /**
  * Offers each machine-applicable edit of the diagnostics touching one range as a quick fix.
  *
@@ -266,28 +358,13 @@ export const codeActions = (
   inventory?: WorkspaceInventory.WorkspaceInventory,
 ): ReadonlyArray<CodeAction> => {
   // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
-  const published = diagnostics(self, snapshot, uriOf)
-  const sourceFile = Analysis.sources(snapshot).get(self.module)
-  return owned(self, snapshot).flatMap((diagnostic, order) => {
-    const title = correctionTitles[diagnostic.code]
+  const published = compilerDiagnostics(self, snapshot, uriOf)
+  const compiler = owned(self, snapshot).flatMap((diagnostic, order) => {
     const source = published[order]
     if (source === undefined || !overlaps(source.range, range)) return []
-    const replacements =
-      title === undefined || sourceFile === undefined
-        ? []
-        : [diagnosticPlan(sourceFile, diagnostic.edits ?? [])].flatMap(
-            (plan): ReadonlyArray<CodeAction> => {
-              if (plan === undefined) return []
-              const edit = workspaceEdit(self, snapshot, plan, uriOf)
-              return edit === undefined
-                ? []
-                : [{ title, kind: CodeActionKind.QuickFix, diagnostics: [source], edit }]
-            },
-          )
-    if (inventory === undefined) return replacements
+    if (inventory === undefined) return []
     const imports = Analysis.autoImportsAt(snapshot, inventory, self.module, diagnostic.span.start)
     return [
-      ...replacements,
       ...imports.flatMap((action): ReadonlyArray<CodeAction> => {
         const plan = Option.getOrUndefined(
           Analysis.resolveAutoImport(
@@ -314,6 +391,20 @@ export const codeActions = (
       }),
     ]
   })
+  const redundancy = importRedundancies(self, snapshot).flatMap(
+    (entry): ReadonlyArray<CodeAction> =>
+      overlaps(entry.diagnostic.range, range)
+        ? [
+            {
+              title: entry.title,
+              kind: CodeActionKind.QuickFix,
+              diagnostics: [entry.diagnostic],
+              edit: { changes: { [self.uri]: [entry.edit] } },
+            },
+          ]
+        : [],
+  )
+  return [...compiler, ...redundancy]
 }
 
 export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {

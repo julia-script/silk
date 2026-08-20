@@ -5,8 +5,6 @@ import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import * as SourceFile from './SourceFile.js'
-import * as SourceSpan from './SourceSpan.js'
-import * as Stdlib from './Stdlib.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
@@ -20,7 +18,6 @@ export type Binding =
       readonly declaration: DeclarationIndex.CanonicalId
     }
   | { readonly _tag: 'IntrinsicActor'; readonly spelling: IntrinsicActor }
-  | { readonly _tag: 'StdlibNamespace'; readonly spelling: string; readonly module: string }
   | {
       readonly _tag: 'ModuleNamespace'
       readonly spelling: string
@@ -111,57 +108,6 @@ const identifiers = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'Identifier',
   )
-const lineFeed = 0x0a
-const carriageReturn = 0x0d
-const isBlank = (byte: number | undefined): boolean =>
-  byte === 0x20 || byte === 0x09 || byte === 0x0d
-const isHorizontalBlank = (byte: number | undefined): boolean => byte === 0x20 || byte === 0x09
-/**
- * Covers the ` as name` clause together with the blanks that separate it from the name it
- * renames, so deleting the span leaves that name alone on a well-formed import.
- */
-const aliasClauseSpan = (
-  source: SourceFile.SourceFile,
-  alias: SyntaxTree.Node,
-): SourceSpan.SourceSpan => {
-  let start = SyntaxTree.directToken(alias, 'AsKeyword')?.span.start ?? alias.span.start
-  while (start > 0 && isBlank(source.bytes[start - 1])) start -= 1
-  return Option.getOrElse(SourceSpan.make(source, start, alias.span.end), () => alias.span)
-}
-/**
- * Covers one import declaration together with the blanks around it, so deleting the span leaves
- * the surrounding declarations on their original lines. The trailing line break joins the span
- * only when the declaration owns its line: a declaration that shares a line with an earlier one
- * would otherwise splice the following line onto that remainder, since Silk has no statement
- * terminator and two declarations on one line parse.
- *
- * Trailing blanks join the span only when nothing but the line break follows them. Blanks that
- * separate this declaration from the next one on the same line belong to that neighbour, which
- * claims them leftward: were both spans to take them, the two spans would overlap and applying
- * every edit of a file together — as a fix-all action does — would delete from stale offsets.
- */
-const importLineSpan = (
-  source: SourceFile.SourceFile,
-  declaration: SyntaxTree.Node,
-): SourceSpan.SourceSpan => {
-  let start =
-    SyntaxTree.directToken(declaration, 'ImportKeyword')?.span.start ?? declaration.span.start
-  while (start > 0 && isHorizontalBlank(source.bytes[start - 1])) start -= 1
-  let end = declaration.span.end
-  let trailing = end
-  while (trailing < source.bytes.length && isHorizontalBlank(source.bytes[trailing])) trailing += 1
-  const following = source.bytes[trailing]
-  const endsLine =
-    trailing === source.bytes.length || following === lineFeed || following === carriageReturn
-  if (endsLine) end = trailing
-  const preceding = start === 0 ? undefined : source.bytes[start - 1]
-  const ownsLine = start === 0 || preceding === lineFeed || preceding === carriageReturn
-  if (ownsLine && endsLine) {
-    if (source.bytes[end] === carriageReturn) end += 1
-    if (source.bytes[end] === lineFeed) end += 1
-  }
-  return Option.getOrElse(SourceSpan.make(source, start, end), () => declaration.span)
-}
 const aliasName = (
   source: SourceFile.SourceFile,
   parent: SyntaxTree.Node,
@@ -169,7 +115,6 @@ const aliasName = (
   | {
       readonly spelling: string
       readonly token: Token.Token
-      readonly clause: SourceSpan.SourceSpan
     }
   | undefined => {
   const alias = SyntaxTree.directNode(parent, 'ImportAlias')
@@ -179,7 +124,6 @@ const aliasName = (
     : Object.freeze({
         spelling: text(source, token),
         token,
-        clause: aliasClauseSpan(source, alias),
       })
 }
 type CanonicalMember = DeclarationIndex.MemberFact & {
@@ -203,7 +147,6 @@ const bindingTarget = (binding: Exclude<Binding, { readonly _tag: 'Unavailable' 
   switch (binding._tag) {
     case 'IntrinsicActor':
       return `intrinsic:${binding.spelling}`
-    case 'StdlibNamespace':
     case 'ModuleNamespace':
       return `module:${binding.module}`
     case 'LocalDeclaration':
@@ -222,42 +165,6 @@ export const resolve = (
     const candidates: Array<Binding> = Intrinsic.all().map((intrinsic) =>
       Object.freeze({ _tag: 'IntrinsicActor', spelling: intrinsic.spelling }),
     )
-    // Seeded standard-library namespaces are a prelude, not bindings this module wrote: nothing in
-    // its source asks for them. A module that declares or imports the spelling itself therefore
-    // takes it, and the prelude entry is dropped rather than collided with — the standard-library
-    // module stays reachable through an ordinary import. Intrinsic actors and `Intrinsic` are
-    // deliberately not part of this tier; they are language bindings and still collide.
-    const prelude: Array<Binding> = []
-    for (const candidate of closure.modules) {
-      const standard = Stdlib.find(candidate.name)
-      if (standard === undefined || candidate.name === module.name) continue
-      for (const namespace of [standard.namespace, ...(standard.aliases ?? [])]) {
-        if (namespace === undefined) continue
-        const declared = DeclarationIndex.member(index, standard.module, namespace)
-        if (
-          declared._tag === 'Resolved' &&
-          (declared.declaration._tag === 'ServiceDeclaration' ||
-            declared.declaration._tag === 'InterfaceDeclaration' ||
-            declared.declaration._tag === 'StructDeclaration') &&
-          declared.declaration.canonical._tag === 'Canonical'
-        )
-          prelude.push(
-            Object.freeze({
-              _tag: 'LocalDeclaration',
-              spelling: namespace,
-              declaration: declared.declaration.canonical.id,
-            }),
-          )
-        else
-          prelude.push(
-            Object.freeze({
-              _tag: 'StdlibNamespace',
-              spelling: namespace,
-              module: standard.module,
-            }),
-          )
-      }
-    }
     const headers = index.modules.find((value) => value.module === module.name)
     for (const declaration of headers?.members ?? [])
       if (declaration.canonical._tag === 'Canonical')
@@ -268,7 +175,6 @@ export const resolve = (
             declaration: declaration.canonical.id,
           }),
         )
-    const seenTargets = new Set<string>()
     const imports: Array<ImportOutcome> = []
     const source = module.syntax.source
     for (const imported of module.imports) {
@@ -283,23 +189,6 @@ export const resolve = (
         continue
       }
       const target = imported.target.module
-      if (seenTargets.has(target)) {
-        const diagnostic = Diagnostic.duplicateImport(
-          target,
-          importLineSpan(source, imported.syntax),
-          imported.path.span,
-        )
-        diagnostics.push(diagnostic)
-        imports.push(
-          Object.freeze({
-            _tag: 'Unavailable',
-            import: imported,
-            cause: Diagnostic.identity(diagnostic),
-          }),
-        )
-        continue
-      }
-      seenTargets.add(target)
       const created: Array<Binding> = []
       const pathNames = identifiers(imported.path)
       const defaultName = pathNames.at(-1)
@@ -315,27 +204,7 @@ export const resolve = (
           explicitAlias?.spelling ??
           (defaultName === undefined ? undefined : text(source, defaultName))
         const localToken = explicitAlias?.token ?? defaultName
-        if (
-          explicitAlias !== undefined &&
-          defaultName !== undefined &&
-          explicitAlias.spelling === text(source, defaultName)
-        ) {
-          const diagnostic = Diagnostic.redundantAlias(
-            explicitAlias.spelling,
-            explicitAlias.clause,
-            explicitAlias.token.span,
-          )
-          diagnostics.push(diagnostic)
-          created.push(
-            Object.freeze({
-              _tag: 'Unavailable',
-              spelling: explicitAlias.spelling,
-              syntax: aliasSyntax ?? imported.syntax,
-              tokens: Object.freeze([explicitAlias.token]),
-              cause: Diagnostic.identity(diagnostic),
-            }),
-          )
-        } else if (local !== undefined && localToken !== undefined)
+        if (local !== undefined && localToken !== undefined)
           created.push(
             Object.freeze({
               _tag: 'ModuleNamespace',
@@ -351,24 +220,6 @@ export const resolve = (
         if (sourceToken === undefined || !SyntaxTree.isAvailableSyntax(member)) continue
         const sourceName = text(source, sourceToken)
         const alias = aliasName(source, member)
-        if (alias !== undefined && alias.spelling === sourceName) {
-          const diagnostic = Diagnostic.redundantAlias(
-            alias.spelling,
-            alias.clause,
-            alias.token.span,
-          )
-          diagnostics.push(diagnostic)
-          created.push(
-            Object.freeze({
-              _tag: 'Unavailable',
-              spelling: alias.spelling,
-              syntax: member,
-              tokens: Object.freeze([sourceToken, alias.token]),
-              cause: Diagnostic.identity(diagnostic),
-            }),
-          )
-          continue
-        }
         const declaration = canonicalDeclaration(index, target, sourceName)
         if (declaration === undefined) {
           const diagnostic = Diagnostic.unknownImportedMember(target, sourceName, sourceToken.span)
@@ -421,15 +272,6 @@ export const resolve = (
         Object.freeze({ _tag: 'Available', import: imported, bindings: Object.freeze(created) }),
       )
     }
-    // Everything the module itself brought into scope is settled by now, so a prelude namespace
-    // joins only where the module left the spelling free. Unavailable bindings claim their spelling
-    // too: a failed `import x { Result }` already carries its own diagnostic, and quietly resolving
-    // that module's `Result` to the standard library would answer a question the source did not ask.
-    // Two prelude entries that claim one spelling still collide with each other: that is a defect in
-    // the shipped manifest, and shadowing is a rule about a module overriding the prelude, not about
-    // the prelude quietly picking among itself.
-    const claimed = new Set(candidates.map((binding) => binding.spelling))
-    for (const binding of prelude) if (!claimed.has(binding.spelling)) candidates.push(binding)
     const grouped = new Map<string, Array<Binding>>()
     for (const binding of candidates) {
       if (binding._tag === 'Unavailable') continue
@@ -512,7 +354,7 @@ export const lookup = (
       ...(declaration === undefined ? {} : { declaration }),
     })
   }
-  if (binding._tag === 'ModuleNamespace' || binding._tag === 'StdlibNamespace')
+  if (binding._tag === 'ModuleNamespace')
     return Object.freeze({ _tag: 'Namespace', spelling, module: binding.module })
   const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
   return declaration === undefined

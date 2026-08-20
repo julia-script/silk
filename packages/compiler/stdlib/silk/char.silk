@@ -10,7 +10,9 @@
 //! byte sequences. These allocation-free functions call the same primitives as the corresponding
 //! operators and introduce no Effect channels.
 
+import silk.bool as bool
 import silk.option { Option }
+import silk.u32 as u32
 
 /// Converts an integer to a Unicode scalar, returning None for surrogates or out-of-range values.
 pub fn fromU32(value: u32) -> Option<char> {

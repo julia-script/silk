@@ -20,6 +20,7 @@
 // no part of it is ever parsed as a command line, so a space, a quote, or a metacharacter inside an
 // argument reaches the child as data.
 
+import silk.bool as bool
 import silk.bytes {
   Bytes,
   append as bytesAppend,
@@ -28,8 +29,13 @@ import silk.bytes {
   length as bytesLength,
   make as bytesMake
 }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
 import silk.filesystem { Path, rawBytes as pathRawBytes }
+import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }
+import silk.u8 as u8
+import silk.usize as usize
 
 /// The stage of one execution that failed.
 pub struct ProcessOperation {

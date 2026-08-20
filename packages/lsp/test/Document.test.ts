@@ -1107,7 +1107,7 @@ it.effect('offers one quick fix that deletes a redundant alias clause', () =>
     assert.strictEqual(action?.title, 'Remove the redundant alias')
     assert.strictEqual(action?.kind, 'quickfix')
     // The action names the diagnostic it corrects, so the editor attaches it to that lightbulb.
-    assert.strictEqual(action?.diagnostics?.[0]?.code, 'SEM0013')
+    assert.strictEqual(action?.diagnostics?.[0]?.code, 'LSP0002')
     assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
       {
         range: {

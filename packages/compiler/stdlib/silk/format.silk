@@ -24,14 +24,26 @@
 // need to prepend. Parsing accumulates *negatively* for signed text, so `i64.MIN` — whose magnitude
 // has no positive counterpart — parses like any other value instead of being a special case.
 
-import silk.result { Result, Success, Failure, failResult, succeed }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.i16 as i16
+import silk.i32 as i32
+import silk.i64 as i64
+import silk.i8 as i8
+import silk.isize as isize
 import silk.option { Option, Some, None }
+import silk.result { Result, Success, Failure, failResult, succeed }
 import silk.string {
   String,
   make as stringMake,
   append as stringAppend,
   utf8Bytes as stringUtf8Bytes
 }
+import silk.u16 as u16
+import silk.u32 as u32
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
 
 const ZERO: u64 = 0
 const ONE: u64 = 1

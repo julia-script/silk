@@ -8,6 +8,8 @@
 //! These functions are thin, allocation-free calls to the same concrete Boolean primitives the
 //! operators use; they add no Effect channels or alternate truth semantics.
 
+
+
 /// Calls the concrete bool equals primitive.
 pub fn equals(left: bool, right: bool) -> bool {
   return Intrinsic.boolEquals(left, right)

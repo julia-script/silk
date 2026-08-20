@@ -144,12 +144,12 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'standardInputRead') return 'silk/os-standard-input.read'
-  if (spelling === 'processExecute') return 'silk/os-child-process.execute'
-  if (spelling === 'processCapture') return 'silk/os-child-process.capture'
+  if (spelling === 'standardInputRead') return 'silk/os_standard_input.read'
+  if (spelling === 'processExecute') return 'silk/os_child_process.execute'
+  if (spelling === 'processCapture') return 'silk/os_child_process.capture'
   if (spelling.startsWith('host'))
-    return `silk/os-host-input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
-  return `silk/os-filesystem.${spelling}`
+    return `silk/os_host_input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
+  return `silk/os_filesystem.${spelling}`
 }
 
 const consumer = (family: string, operation: string): string => {
@@ -159,7 +159,7 @@ const consumer = (family: string, operation: string): string => {
   if (family === 'Host') return 'silk/core.writeAll'
   if (family === 'Os') return osConsumer(operation)
   if (family === 'Place') return 'language:place-replacement'
-  return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}.${operation}`
+  return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`
 }
 
 const builtin = (options: {

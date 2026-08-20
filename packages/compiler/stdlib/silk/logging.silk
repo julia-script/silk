@@ -15,13 +15,17 @@
 //! Logger failures are typed [`LogError`] values and do not imply that a message committed. Bounded
 //! accessors require a committed event and valid byte index; invalid indices trap.
 
+import silk.bool as bool
 import silk.core {
   NativeStandardStreams,
   StreamWriteError,
   send
 }
+import silk.i32 as i32
 import silk.result { Failure, Result, Success }
 import silk.string { utf8Bytes as stringUtf8Bytes }
+import silk.u8 as u8
+import silk.usize as usize
 
 /// A closed bootstrap logging severity.
 pub struct LogLevel {

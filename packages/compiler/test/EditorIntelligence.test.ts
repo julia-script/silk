@@ -228,7 +228,7 @@ pub fn main() -> i32 {
         vectorSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(vectorSource)),
         'RawBuffer.view<T>',
       )
-      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw-buffer')?.source
+      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw_buffer')?.source
       assert.include(
         rawBufferSource === undefined
           ? ''

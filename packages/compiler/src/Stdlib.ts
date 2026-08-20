@@ -1,7 +1,4 @@
-import * as Option from 'effect/Option'
-import * as SourceFile from './SourceFile.js'
 import { modules } from './Stdlib.generated.js'
-import type * as Token from './Token.js'
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'
@@ -14,6 +11,12 @@ export const isReserved = (module: string): boolean =>
 export interface Module {
   readonly module: string
   readonly path: string
+  readonly sourceIdentity: string
+  readonly digest: string
+  readonly documentation: string
+  readonly layer: 'portable' | 'target-provider'
+  readonly providerTargets?: ReadonlyArray<'Evaluator' | 'LLVM' | 'Wasm'>
+  readonly runtimeInventory: ReadonlyArray<string>
   readonly namespace?: string
   readonly aliases?: ReadonlyArray<string>
   readonly sourceUrl: URL
@@ -28,6 +31,12 @@ export const manifest: ReadonlyArray<Module> = Object.freeze(
     Object.freeze({
       module: entry.module,
       path: entry.path,
+      sourceIdentity: entry.sourceIdentity,
+      digest: entry.digest,
+      documentation: entry.documentation,
+      layer: entry.layer,
+      ...('providerTargets' in entry ? { providerTargets: entry.providerTargets } : {}),
+      runtimeInventory: entry.runtimeInventory,
       ...('namespace' in entry ? { namespace: entry.namespace } : {}),
       ...('aliases' in entry ? { aliases: entry.aliases } : {}),
       sourceUrl: new URL(`../stdlib/${entry.path}`, import.meta.url),
@@ -49,51 +58,8 @@ const byNamespace = new Map(
 /** Returns the generated manifest entry for one standard-library module identity. */
 export const find = (module: string): Module | undefined => byModule.get(module)
 
-/** Resolves one canonical source-backed prelude namespace. */
+/** Resolves one canonical source-backed namespace for catalog discovery and tooling. */
 export const findNamespace = (namespace: string): Module | undefined => byNamespace.get(namespace)
-
-/**
- * Token kinds whose bytes are inert prose rather than code: comment trivia and static-literal
- * bodies. A namespace spelled inside one of these never names a qualified actor.
- */
-const inertKinds: ReadonlySet<Token.TokenKind> = new Set<Token.TokenKind>([
-  'LineComment',
-  'DocComment',
-  'ModuleDocComment',
-  'TextLiteral',
-  'ByteStringLiteral',
-  'CharLiteral',
-  'InvalidStaticLiteral',
-])
-
-/**
- * Finds source-backed namespaces referenced as qualified actors in one lexed source file.
- *
- * The scan is lexical, never textual: a namespace counts only when one code token spells it
- * exactly and the very next token is a dot, so `Result.` written inside a comment or a text
- * literal never pulls `silk/result` into the closure. Trivia is not skipped between the two
- * tokens, which keeps `Namespace .member` outside the closure exactly as the byte scan did.
- * One linear pass over the token stream; the manifest is walked once to order the answer.
- */
-export const requiredModules = (
-  source: SourceFile.SourceFile,
-  tokens: ReadonlyArray<Token.Token>,
-): ReadonlyArray<string> => {
-  const required = new Set<string>()
-  for (let index = 0; index + 1 < tokens.length; index += 1) {
-    const token = tokens[index]
-    const next = tokens[index + 1]
-    if (token === undefined || next === undefined) continue
-    if (next.kind !== 'Dot' && next.kind !== 'DotDot') continue
-    if (inertKinds.has(token.kind)) continue
-    const spelling = Option.getOrUndefined(SourceFile.spelling(source, token.span))
-    const entry = spelling === undefined ? undefined : byNamespace.get(spelling)
-    if (entry !== undefined) required.add(entry.module)
-  }
-  return Object.freeze(
-    manifest.flatMap((entry) => (required.has(entry.module) ? [entry.module] : [])),
-  )
-}
 
 /** Every standard-library module's exact source bytes by canonical identity. */
 export const sources: ReadonlyMap<string, Uint8Array> = new Map(

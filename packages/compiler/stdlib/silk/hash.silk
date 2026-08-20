@@ -25,6 +25,9 @@
 // reachable from a generic body through the operator that spells it, and `==` spells `equals`. The
 // hash is reached by naming the bound, which is the one call shape no operator provides.
 
+import silk.bool as bool
+import silk.u64 as u64
+
 /// The value every hash in one collection is computed under.
 ///
 /// # Details

@@ -41,7 +41,7 @@ semantic anchors, add useful semantic links, and pass scoped policy, doctest, an
 - [x] 5.4 Complete the `silk/bytes` documentation pass.
 - [x] 5.5 Complete the `silk/string` documentation pass.
 - [x] 5.6 Complete the `silk/layout` documentation pass.
-- [x] 5.7 Complete the `silk/raw-buffer` documentation pass, clearly separating unsafe caller proofs from checked APIs.
+- [x] 5.7 Complete the `silk/raw_buffer` documentation pass, clearly separating unsafe caller proofs from checked APIs.
 - [x] 5.8 Complete the `silk/slot` documentation pass, clearly separating unsafe caller proofs from checked APIs.
 - [x] 5.9 Complete the `silk/order` documentation pass.
 - [x] 5.10 Complete the `silk/format` documentation pass.

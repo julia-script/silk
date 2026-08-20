@@ -15,6 +15,7 @@
 //! instead of inventing a process host import; evaluator execution requires an injected host
 //! adapter.
 
+import silk.bool as bool
 import silk.bytes {
   Bytes,
   append as bytesAppend,
@@ -46,7 +47,13 @@ import silk.child_process {
   unsupported,
   workingDirectory as requestWorkingDirectory
 }
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.i32 as i32
 import silk.option { None, Option, Some, none }
+import silk.u32 as u32
+import silk.u8 as u8
+import silk.usize as usize
 
 /// Native provider that runs one child through the platform process boundary. It owns no state; a
 /// completed execution's captured streams belong to the outcome it returns.
