@@ -30,33 +30,44 @@ erase different construction sites merely because their public contracts match.
 - **WHEN** an ordinary function performs eager setup and returns `effect { ... }`
 - **THEN** the returned Effect preserves its construction-site identity and captured environment until it is run or dropped
 
-### Requirement: Effect failure rows are normalized owned contracts
+### Requirement: Effect failure channels contain ordinary types
 
-The `!` row SHALL be a deterministic normalized set of canonical nominal types. `fail` SHALL stop
-the current Effect execution with success type `never`, copying a Copy payload or consuming an
-explicitly moved affine payload. Failure payloads MUST be detached owned values with no lexical or
-provider borrow.
+For `Effect<A ! E ? R>`, `E` SHALL be an ordinary detached owned type or normalized structural
+union. The `!` token SHALL label the channel only; it SHALL NOT create a distinct type kind, binder
+form, or value wrapper. `never` SHALL denote the empty failure channel. `fail` SHALL stop the current
+Effect execution with success type `never`, copying a Copy payload or consuming an explicitly moved
+affine payload.
 
 #### Scenario: Fail with a Copy problem
 
 - **WHEN** an Effect executes `fail problem` for a Copy nominal value
 - **THEN** the failure channel receives the copied value without requiring `fail move`
 
-### Requirement: Effect catch subtracts and composes rows
+#### Scenario: Use the same failure union as a value
 
-`Effect.catch(effect, handler)` and `effect |> Effect.catch(handler)` SHALL select one nominal
-failure type `S`, inferred from the handler or supplied as the first explicit argument in
-`Effect.catch<S>`, require singleton `S` to be a checked member of protected failure row `E`, and
-compute the semantic residual as `Without<E, S> | F`, where `F` is the handler's failure row.
-Success bypasses the handler and every nonmatching member belongs to the computed remainder.
-Membership proves a type relationship but SHALL NOT erase a failure without the handling operation.
+- **WHEN** `E` is `NotFoundError | OfflineError`
+- **THEN** the Effect failure channel, a propagated failure value, and a handler parameter all use that same ordinary union without a value conversion
 
-The selected nominal binder `S` SHALL be first so positional-prefix syntax `Effect.catch<Problem>`
-remains an ordinary generic call. A generic declaration MAY retain open `S` as a lifted singleton
-member parameter with assumed membership evidence. At each complete application, whether inferred
-or explicit, `S in E` SHALL require `S` to resolve to exactly one concrete nominal failure type;
-`never`, a structural or multi-member union, and a non-failure value SHALL fail this ordinary
-checked constraint before lowering.
+#### Scenario: Reject a borrowed failure payload
+
+- **WHEN** an Effect attempts to fail with a non-detached lexical borrow
+- **THEN** analysis reports the ordinary ownership violation rather than a failure-kind diagnostic
+
+### Requirement: Selective recovery subtracts ordinary unions
+
+`Effect.catch(effect, handler)` and `effect |> Effect.catch(handler)` SHALL select one ordinary type
+or union `S`, inferred from the handler or supplied as the first explicit argument in
+`Effect.catch<S>`, require nonempty `S` to be wholly contained in protected failure type `E`, pass
+`S` directly to the handler, and compute the semantic residual as `Without<E, S> | F`, where `F` is
+the handler's failure type. Handler success `B` SHALL join protected success `A` as an ordinary
+finite `A | B` union when needed. Success bypasses the handler and every nonmatching alternative
+belongs to the computed remainder. Membership proves a type relationship but SHALL NOT erase a
+failure without the handling operation.
+
+The selected binder `S` SHALL be first so positional-prefix syntax `Effect.catch<ProblemError>`
+remains an ordinary generic call. A generic declaration MAY retain open `S` with assumed membership
+evidence. At each complete application, whether inferred or explicit, `S in E` SHALL require every
+alternative of nonempty `S` to belong to `E` before lowering.
 The whole-row `Effect.catch` alias SHALL be removed; whole-row recovery SHALL use
 `Effect.catchAll`. Singleton `Effect.catch` SHALL be an ordinary wrapper over sealed
 `Intrinsic.catchFailure`, whose callable contract carries the same checked membership and
@@ -70,22 +81,37 @@ the protected Effect SHALL run exactly once, success SHALL bypass the handler, a
 SHALL invoke the handler with its payload, and a nonselected failure SHALL propagate in the residual
 row unchanged. Evaluator, WebAssembly, and native execution SHALL agree on results, failure tags,
 and cleanup order. A syntax, kind, inference, or membership failure SHALL take precedence and prevent
-MIR construction. This change adds no multi-member selector or runtime row dictionary.
+MIR construction. This change adds no runtime type dictionary.
 
-#### Scenario: Type singleton catch through a pipeline
+#### Scenario: Type selective catch through a pipeline
 
 - **WHEN** `relay(0) |> Effect.catch<Problem>(recover)` is analyzed before target availability
-- **THEN** the call contract gives `recover` the nominal `Problem` payload and computes the protected remainder with `Without`
+- **THEN** the call contract gives `recover` the selected `Problem` payload and computes the protected remainder with `Without`
 
 #### Scenario: Infer singleton catch from its handler
 
 - **WHEN** `Effect.catch(effect, recoverProblem)` supplies a handler whose input is nominal `Problem`
 - **THEN** ordinary call inference selects singleton `Problem`, checks `Problem in E`, and computes the same remainder as `Effect.catch<Problem>(effect, recoverProblem)`
 
-#### Scenario: Reject a non-singleton catch selector
+#### Scenario: Reject an invalid catch selector
 
-- **WHEN** explicit arguments or handler inference would select `never`, `First | Third`, or a non-nominal failure payload for `S`
-- **THEN** the common checked-constraint solver reports an invalid failure selector before intrinsic availability and without constructing multi-member dispatch
+- **WHEN** explicit arguments or handler inference would select `never` or a type containing an alternative absent from `E`
+- **THEN** the common checked-constraint solver reports an invalid failure selector before intrinsic availability and without constructing dispatch
+
+#### Scenario: Recover one member with a fallback
+
+- **WHEN** an `Effect<i32 ! NotFoundError | OfflineError>` catches `NotFoundError` with a `string` fallback
+- **THEN** the result is `Effect<i32 | string ! OfflineError>`
+
+#### Scenario: Re-fail an unhandled member
+
+- **WHEN** a catch-all handler matches one failure member and fails again with the unmatched value
+- **THEN** ordinary union narrowing preserves that unmatched member in the output failure channel
+
+#### Scenario: Reject an invalid selected subset
+
+- **WHEN** `S` is `never` or contains an alternative absent from protected failure type `E`
+- **THEN** ordinary type constraints reject the catch before lowering
 
 #### Scenario: Preserve an open failure remainder
 
@@ -127,15 +153,15 @@ MIR construction. This change adds no multi-member selector or runtime row dicti
 - **WHEN** two reachable source applications specialize to one deduplicated wrapper instance containing singleton catch
 - **THEN** both call sites execute through the deduplicated concrete instance without conflating their runtime payloads or outcomes
 
-#### Scenario: Migrate whole-row catch to catchAll
+#### Scenario: Recover the whole ordinary failure value
 
-- **WHEN** source needs executable whole-row recovery with a `Row<!E>` handler rather than one nominal handler input
-- **THEN** it uses `Effect.catchAll`; omitting explicit generic arguments from a nominal-handler `Effect.catch(effect, handler)` instead performs ordinary singleton inference and does not select the removed whole-row alias
+- **WHEN** `Effect.catchAll` protects `Effect<A ! E>`
+- **THEN** its handler accepts ordinary `E` directly and the protected failure type is removed in full
 
-#### Scenario: Preserve singleton dispatch scope
+#### Scenario: Select a failure union
 
-- **WHEN** a caller wants to handle `First | Third` from a larger row
-- **THEN** it composes singleton catches or another source operation while set-to-set `Without` remains only the underlying type algebra in this change
+- **WHEN** a caller catches `FirstError | ThirdError` from a larger ordinary failure union
+- **THEN** both selected alternatives invoke the handler and every unselected alternative propagates unchanged
 
 #### Scenario: Recover through a pipeline
 

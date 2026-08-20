@@ -177,113 +177,62 @@ diagnostics SHALL be deterministic across fresh processes for equivalent source 
 #### Scenario: Repeat specialization artifacts
 - **WHEN** the same multi-specialization program is compiled repeatedly in fresh processes
 - **THEN** its generic facts, instance ordering, layouts, MIR text, and emitted symbols are byte-identical
-### Requirement: Generics distinguish value and contract-row kinds
+### Requirement: Generics distinguish ordinary types from requirement rows
 
-Generic declarations SHALL bind ordinary type parameters, failure-row parameters, and requirement-
-row parameters as distinct canonical kinds. Row binders SHALL use their channel identity in source,
-such as `<A, !E, ?R>`, and MUST NOT be accepted where a value type is required or confused with a
-nominal type of the same spelling.
+Generic declarations SHALL bind ordinary type parameters and requirement-row parameters as distinct
+canonical kinds. A failure parameter `E` SHALL be an ordinary type parameter declared as `E`; the
+`!` token SHALL appear only where an Effect contract labels its failure channel. A requirement-row
+parameter SHALL remain declared as `?R` and SHALL be accepted only in requirement-row positions.
 
-#### Scenario: Bind all Effect channel kinds
+#### Scenario: Reuse a failure parameter as an ordinary value type
 
-- **WHEN** a generic Effect combinator declares value, failure-row, and requirement-row parameters
-- **THEN** its body can use each parameter only in positions accepted by that parameter's kind
+- **WHEN** a generic declaration binds `<E>` and returns `Effect<A ! E>`
+- **THEN** the same canonical `E` may also type a parameter, local, field, handler input, or return value
 
-#### Scenario: Reject a row as a value
+#### Scenario: Reject a requirement row as a value
 
-- **WHEN** a body uses failure-row parameter `E` as a field or ordinary parameter value type
+- **WHEN** a body uses requirement-row parameter `R` as a field or ordinary parameter value type
 - **THEN** analysis reports a deterministic kind mismatch before specialization
 
-### Requirement: Contract rows support finite generic algebra
+### Requirement: Failure algebra is ordinary union algebra
 
-Failure and requirement rows SHALL support normalized union, checked membership and subset
-relations, and kind-preserving difference written `Without<R, S>`. A singleton member SHALL be
-lifted to a singleton row, and a row on the right SHALL remove every exactly matching member.
-Difference SHALL be total: an absent or access-mismatched right-hand member removes nothing.
-Operations that promise to handle or provide a member MUST carry a separate checked constraint;
-such a constraint proves a type relationship but does not itself discharge an Effect requirement or
-failure.
+Failure types SHALL use the same normalized finite structural unions, checked containment, and
+`Without<E, S>` difference as ordinary value types. `never` SHALL be the empty type. A concrete
+selected type or union `S` is contained in `E` only when every alternative in `S` belongs to `E`.
+Difference SHALL remove those alternatives and SHALL be total as a type operation; operations that
+promise to handle a selection MUST carry a separate checked containment constraint.
 
-Failure rows SHALL be finite sets under canonical nominal identity. Requirement rows SHALL be
-finite maps keyed by canonical capability-role identity and labelled with `Shared` or `Exclusive`
-access. Requirement union SHALL join colliding labels to the stronger access. Requirement
-membership, subset, and difference SHALL compare the normalized stored access exactly: a shared and
-an exclusive entry with the same capability-role key are access-mismatched, not interchangeable.
-Provider compatibility is a separate relation and MAY allow an exclusive or owned provider to
-satisfy a shared stored requirement; provider selection MUST return the exact stored entry before
-difference is evaluated.
-Finite-row intersection SHALL retain only exact normalized stored members. For requirements,
-shared intersected with exclusive is empty in either order; only shared/shared and
-exclusive/exclusive retain that respectively labelled entry.
+Open generic containment and difference SHALL remain static compiler facts, specialize
+deterministically, and introduce no runtime dictionary. `Without` SHALL remain forward-computed:
+expected result types MUST NOT infer `E` or `S` backwards. Declaration constraints SHALL be
+assumptions while checking a generic body, and complete applications SHALL substitute and prove
+those assumptions before dependency discovery, ownership specialization, layout, or lowering.
 
-Checked `S in R` SHALL be kind-directed in the common constraint model. An ordinary value-type
-left operand against a failure row SHALL mean singleton nominal membership. While checking a
-generic declaration, an open ordinary parameter SHALL lift to a symbolic singleton member term and
-its declared membership SHALL be available as assumed evidence. At every complete application it
-MUST substitute to one concrete nominal failure member of `R`. A row-kind left operand SHALL mean
-normalized subset in the same row domain. Singleton membership and row subset SHALL produce
-distinct evidence, and invalid concrete selectors such as `never`, structural or multi-member
-unions, references, and non-failure values MUST fail before any operation-specific hook or
-availability check. Membership and subset constraints SHALL only check an independently inferred
-left operand; they MUST NOT enumerate the source row to synthesize one. Provider selection is the
-only constraint in this change that MAY bind an unbound selected row, through its unique-candidate
-rule.
+Requirement rows SHALL retain their existing capability-role keys, access labels, provider
+selection, row union, exact membership, subset, intersection, and difference semantics independently
+of ordinary failure algebra. Requirement union SHALL join colliding labels to the stronger access.
+Requirement membership, subset, intersection, and difference SHALL compare normalized stored access
+exactly. Provider compatibility is separate and MAY allow an exclusive or owned provider to satisfy
+a shared stored requirement; provider selection MUST return the exact stored entry before
+difference. A requirement-row `Without` is also forward-computed and MUST NOT be inverted from an
+expected remainder.
 
-`Without` SHALL be a forward-computed form, not an invertible inference pattern. Each row parameter
-or lifted member parameter used beneath `Without` MUST be fixed independently by an explicit
-generic argument, an exact whole-row occurrence, a supplied value-argument occurrence, or the
-provider-selection unique-candidate rule. Analysis MUST report an underconstrained-row diagnostic
-rather than infer operands backwards from a `Without` result or enumerate a membership/subset
-source row. Substitution MUST renormalize collisions before equality, keys, subset, difference,
-candidate counting, or concretization.
+Open ordinary type expressions and requirement-row expressions SHALL use deterministic definitional
+normal forms. Generic-to-generic substitution MUST compose parameter identity and assumed evidence
+without demanding premature concreteness. Partial application SHALL retain quantified binders,
+constraints, substitutions, and evidence until static application; they remain compile-time
+metadata and never become runtime dictionaries. Callable-constraint semantics SHALL be independent
+of whether a contract originated in Silk source or the sealed intrinsic inventory.
 
-Substituting a symbolic singleton member SHALL yield one of three results: a rewritten residual
-symbolic member when referenced parameters remain open, one concrete domain member when closed and
-valid, or an invalid-singleton result when closed and invalid. Generic-to-generic row substitution
-MUST compose parameter identity and member substitutions rather than demanding premature
-concreteness; the separate constraint/specialization layer MUST substitute and rebind assumed
-evidence without introducing a RowAlgebra-to-evidence dependency.
+#### Scenario: Subtract one ordinary failure alternative
 
-Every symbolic member SHALL retain a well-formedness obligation until it becomes one valid concrete
-member. Normalization and open algebraic simplification MUST preserve that obligation even when the
-visible member expression cancels or is removed. Definitional keys and serialized semantic surfaces
-MUST include residual obligations, and concrete-row consumers MUST receive only rows whose
-obligations have been discharged.
+- **WHEN** `Without<ProblemError | OtherError, ProblemError>` is specialized
+- **THEN** it normalizes to ordinary type `OtherError`
 
-Equal obligation keys from multiple symbolic-member occurrences SHALL coalesce into one semantic
-obligation with a canonical ordered set of source origins. Origins MUST be unioned through
-normalization and substitution but excluded from definitional equality, keys, and serialized module
-identity. Invalid specialization SHALL emit one diagnostic per obligation key, primary at the
-responsible explicit argument or application when available and otherwise at the canonical first
-origin, with every remaining origin attached as an ordered secondary span.
+#### Scenario: Subtract an ordinary failure union
 
-Open expressions SHALL use a deterministic definitional normal form with associative,
-commutative, and idempotent union plus explicitly defined sound reductions; the compiler is not
-required to prove arbitrary extensional equality between different open expression shapes. Once
-substitution closes an expression, equality and keys SHALL use its concrete extensional row.
-
-Declaration constraints SHALL be assumptions while checking that declaration's generic body and
-obligations when the declaration is applied. A callee obligation MAY be discharged only by an
-in-scope assumption that is definitionally equivalent after substitution; this change introduces no
-implicit access weakening, reborrow, subset transitivity, or open-row weakening proof rules. Partial
-application SHALL retain quantified binders, constraints, and evidence in the semantic callable
-value until static application. Those nested callable obligations are distinct from obligations of
-the enclosing instance and SHALL remain compiler metadata without becoming runtime dictionaries.
-Every complete reachable application MUST resolve symbolic evidence and prove its rows finite and
-concrete with every member-well-formedness obligation discharged before row-dependent dependency
-discovery, witness reachability, layout, ownership specialization, or lowering.
-Callable-constraint semantics SHALL be independent of whether the contract originated in Silk
-source or the sealed intrinsic inventory.
-
-#### Scenario: Subtract one failure member
-
-- **WHEN** `Without<Problem | Other, Problem>` is specialized
-- **THEN** it normalizes to the singleton failure row `Other`
-
-#### Scenario: Subtract a failure row from a failure row
-
-- **WHEN** `Without<First | Second | Third, First | Third>` is specialized
-- **THEN** it normalizes to the singleton failure row `Second`
+- **WHEN** `Without<FirstError | SecondError | ThirdError, FirstError | ThirdError>` is specialized
+- **THEN** it normalizes to ordinary type `SecondError`
 
 #### Scenario: Treat an absent difference member as a no-op
 
@@ -315,25 +264,25 @@ source or the sealed intrinsic inventory.
 - **WHEN** a declaration requires `&Logger@DefaultRole` to be a member of a row containing only `&mut Logger@DefaultRole`
 - **THEN** analysis reports an access mismatch even though both entries have the same capability-role key
 
-#### Scenario: Preserve an open difference
+#### Scenario: Preserve an open ordinary difference
 
-- **WHEN** a generic declaration contains `Without<Problem | Rest, Problem>` and `Rest` remains open
-- **THEN** analysis preserves the equivalent definitional form `Without<Rest, Problem>` rather than assuming `Rest` excludes `Problem`
+- **WHEN** a generic declaration contains `Without<ProblemError | E, ProblemError>` and `E` remains open
+- **THEN** analysis preserves the equivalent open ordinary type difference until specialization
 
-#### Scenario: Reject inverse difference inference
+#### Scenario: Reject inverse ordinary difference inference
 
-- **WHEN** the only evidence for `R` is an equation equivalent to `Without<R, Problem> = Other`
-- **THEN** analysis reports that `R` is underconstrained instead of choosing among `Other`, `Problem | Other`, or other inverse solutions
+- **WHEN** the only evidence for `E` is an expected type equivalent to `Without<E, ProblemError> = OtherError`
+- **THEN** analysis reports `E` as underconstrained instead of choosing an inverse solution
 
 #### Scenario: Reject membership-driven selector inference
 
 - **WHEN** the only possible source for ordinary `S` is a checked constraint `S in Problem | Other`
 - **THEN** analysis reports `S` as underconstrained rather than enumerating the source row or selecting either member
 
-#### Scenario: Rewrite a symbolic member through generic forwarding
+#### Scenario: Forward an open selected type through a generic wrapper
 
-- **WHEN** generic `outer<T, !E> where T in E` calls a generic operation whose member parameter `S` is specialized to still-open caller parameter `T`
-- **THEN** row substitution produces a residual symbolic member referring to `T`, the separate constraint layer composes assumed member evidence, and concrete nominal validation is deferred to `outer`'s complete applications
+- **WHEN** generic `outer<T, E> where T in E` calls an operation whose selected type `S` is specialized to still-open caller type `T`
+- **THEN** ordinary type substitution preserves `T`, composes assumed containment evidence, and defers concrete union containment to `outer`'s complete applications
 
 #### Scenario: Rewrite a symbolic requirement member through generic forwarding
 
@@ -350,26 +299,6 @@ source or the sealed intrinsic inventory.
 - **WHEN** residual requirement member `&mut P@Audit` is completely specialized with a non-capability value type
 - **THEN** substitution reports invalid requirement singleton before row normalization or any row-dependent consumer
 
-#### Scenario: Retain validation after identical symbolic subtraction
-
-- **WHEN** open `Without<Singleton(S), Singleton(S)>` simplifies to an empty visible row and a later complete application supplies `S = First | Second`
-- **THEN** the retained member-well-formedness obligation rejects the multi-member substitution instead of accepting the empty result
-
-#### Scenario: Retain validation when subtraction cannot affect the row
-
-- **WHEN** open `Without<never, Singleton(S)>` has an empty left row and a later complete application supplies `S = never`
-- **THEN** the retained member-well-formedness obligation rejects the invalid singleton even though valid subtraction would leave the row empty
-
-#### Scenario: Discover a parameter retained only by member validation
-
-- **WHEN** implicit ordinary `S` occurs only in open `Without<Singleton(S), Singleton(S)>` and the visible expression simplifies to empty
-- **THEN** parameter discovery traverses the retained well-formedness obligation and reports `S` as underconstrained at its source origin
-
-#### Scenario: Merge repeated member-validation origins deterministically
-
-- **WHEN** two distinct occurrences of the same symbolic singleton normalize to one obligation and a complete application substitutes an invalid member
-- **THEN** analysis emits one invalid-singleton diagnostic at the responsible application with both member origins attached in canonical source order, independent of union or substitution order
-
 #### Scenario: Renormalize after substitution collision
 
 - **WHEN** substituting `C = Logger` and `D = Logger` changes `&C | &mut D` into colliding requirement entries
@@ -380,20 +309,25 @@ source or the sealed intrinsic inventory.
 - **WHEN** a generic body calls an operation whose provider-selection obligation is entailed by the body's declared provider-selection constraint
 - **THEN** the body type-checks once over open parameters and forwards symbolic evidence without enumerating the open requirement row
 
-#### Scenario: Carry an open nominal member through a generic wrapper
+#### Scenario: Carry an open selected type through a generic wrapper
 
 - **WHEN** a generic wrapper declares ordinary `S` with `where S in E`, uses `Without<E, S>` in its result, and calls an operation requiring the same membership
-- **THEN** declaration checking lifts `S` to a symbolic singleton member term and forwards assumed member evidence without requiring `S` to be concrete
+- **THEN** declaration checking forwards assumed ordinary containment evidence without requiring `S` to be concrete
 
-#### Scenario: Specialize a generic nominal-member wrapper validly
+#### Scenario: Specialize a generic selected-union wrapper validly
 
-- **WHEN** that wrapper is completely applied with `S = Problem` and concrete `E = Problem | Other`
-- **THEN** specialization converts the symbolic singleton to concrete nominal `Problem`, upgrades assumed membership to concrete member evidence, and computes remainder `Other`
+- **WHEN** that wrapper is completely applied with `S = FirstError | ThirdError` and concrete `E = FirstError | SecondError | ThirdError`
+- **THEN** specialization proves complete containment and computes remainder `SecondError`
 
-#### Scenario: Reject an invalid generic nominal-member specialization
+#### Scenario: Reject an invalid generic selected-type specialization
 
-- **WHEN** that wrapper is completely applied with `S = never`, `S = First | Third`, or another non-nominal value
-- **THEN** specialization reports invalid nominal singleton selection before difference, dependency discovery, or operation-specific availability
+- **WHEN** that wrapper is completely applied with `S = never` or a type containing an alternative absent from `E`
+- **THEN** specialization rejects the selection before difference, dependency discovery, or operation-specific availability
+
+#### Scenario: Check a selected union
+
+- **WHEN** generic `S` is constrained by `S in E` and specializes to `FirstError | ThirdError` within concrete `E`
+- **THEN** the common constraint solver accepts the complete selected subset without lifting `S` into a row kind
 
 #### Scenario: Retain a constraint through partial application
 
@@ -430,24 +364,25 @@ source or the sealed intrinsic inventory.
 - **WHEN** an ordinary Silk declaration and a sealed intrinsic operation have equivalent binders, fixed parameter modes, row expressions, and checked constraints
 - **THEN** calls to both produce the same substitutions, evidence, normalized result, diagnostic identity, and canonical candidate payload, with spans local to each call
 
-#### Scenario: Infer a selected failure remainder
+#### Scenario: Compute a selected failure remainder
 
-- **WHEN** a generic declaration decomposes `Problem | Rest` by selecting `Problem`
-- **THEN** inference binds `Rest` to the normalized unhandled failure members and composes the handler's failures
+- **WHEN** independently known failure type `ProblemError | OtherError` selects `ProblemError`
+- **THEN** ordinary difference computes `OtherError` without inferring either operand from the expected remainder
 
 #### Scenario: Infer a requirement remainder for provide
 
 - **WHEN** a generic provider selects `&Clock@Primary` from `&Clock@Primary | Rest`
 - **THEN** inference binds `Rest` to every other normalized requirement and rejects a provider with incompatible access or role
 
-### Requirement: Row specialization remains erased and deterministic
+### Requirement: Channel specialization remains erased and deterministic
 
-Generic row arguments SHALL be checked once, concretized through the reachable monomorphic
-worklist, included in canonical specialization identity, and erased from runtime representation.
-Equivalent normalized rows MUST produce identical instances and artifacts across fresh processes;
-no row dictionary, type descriptor, capability name, or role string may be required at runtime.
+Generic ordinary failure types and requirement-row arguments SHALL be checked once, concretized
+through the reachable monomorphic worklist, included in canonical specialization identity, and
+erased from runtime representation. Equivalent normalized unions and rows MUST produce identical
+instances and artifacts across fresh processes; no row dictionary, type descriptor, capability
+name, or role string may be required at runtime.
 
 #### Scenario: Reuse equivalent row specializations
 
-- **WHEN** two calls infer the same failure and requirement members in different source orders
+- **WHEN** two calls infer the same ordinary failure union and requirement members in different source orders
 - **THEN** they reach the same canonical specialization and emit no runtime row object
