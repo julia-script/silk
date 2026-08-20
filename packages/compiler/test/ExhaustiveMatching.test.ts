@@ -209,6 +209,38 @@ pub fn select(input: HasLeft | HasRight) -> Left | Right {
   )
 })
 
+it('selects exact non-nominal members with whole-value bindings', () => {
+  const result = analyze(
+    'ordinary-members',
+    `pub fn inspect(value: i32 | string) -> i32 {
+  return match value {
+    i32 number => number
+    string text => 0
+  }
+}`,
+  )
+  const match = returnedMatch(result)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(match.members.map(Type.encode), ['i32', 'string'])
+  assert.deepEqual(
+    match.arms.map((arm) =>
+      arm.pattern._tag === 'TypePattern' && arm.pattern.member !== undefined
+        ? Type.encode(arm.pattern.member)
+        : '_',
+    ),
+    ['i32', 'string'],
+  )
+  assert.deepEqual(
+    match.arms.map((arm) =>
+      arm.bindings[0]?.type._tag === 'Available'
+        ? Type.encode(arm.bindings[0].type.type)
+        : 'unavailable',
+    ),
+    ['i32', 'string'],
+  )
+})
+
 it('keeps borrowed owners live, consumes move matches, and requires mutable exclusive roots', () => {
   const shared = analyze(
     'shared-owner',

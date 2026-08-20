@@ -14,7 +14,7 @@
 ## 3. Ordinary union members and tooling
 
 - [ ] 3.1 Generalize exact selectors and coverage to normalized nominal and non-nominal union members.
-- [ ] 3.2 Require generic member distinctness before specialization and delete specialization-dependent behavior.
+- [ ] 3.2 Substitute and renormalize generic selectors at complete applications, preserving deterministic source-order selection when members collapse.
 - [ ] 3.3 Add completion, hover, navigation, semantic highlighting, structure, and optional irrefutability warnings.
 - [ ] 3.4 Add exhaustive, refutable, ownership, cleanup, union, and engine tests; update specs/docs/diagnostics.
 - [ ] 3.5 Run typecheck, Biome, full tests, native acceptance only for target-specific cleanup, and `pnpm check`.

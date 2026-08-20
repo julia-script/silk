@@ -436,10 +436,10 @@ export type Expression =
       readonly id: Match.MatchId
       readonly access: Match.Access
       readonly scrutinee: Expression
-      readonly members: ReadonlyArray<Type.Nominal>
+      readonly members: ReadonlyArray<Type.Type>
       readonly arms: ReadonlyArray<{
         readonly id: Match.ArmId
-        readonly member?: Type.Nominal
+        readonly member?: Type.Type
         readonly universal: boolean
         readonly bindings: ReadonlyArray<{
           readonly id: Match.BindingId
@@ -454,8 +454,8 @@ export type Expression =
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
         readonly guard?: Expression
         readonly result: Expression
-        readonly before: ReadonlyArray<Type.Nominal>
-        readonly after: ReadonlyArray<Type.Nominal>
+        readonly before: ReadonlyArray<Type.Type>
+        readonly after: ReadonlyArray<Type.Type>
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
       }>
@@ -1135,10 +1135,7 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
 
-const sameMembers = (
-  left: ReadonlyArray<Type.Nominal>,
-  right: ReadonlyArray<Type.Nominal>,
-): boolean =>
+const sameMembers = (left: ReadonlyArray<Type.Type>, right: ReadonlyArray<Type.Type>): boolean =>
   left.length === right.length &&
   left.every((member, index) => Type.equals(member, right[index] ?? member))
 

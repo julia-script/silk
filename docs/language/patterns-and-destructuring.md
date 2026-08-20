@@ -455,33 +455,34 @@ ownership diagnostics at the access expression or binding use.
 [consuming conditional](#patt-008--a-consuming-conditional-consumes-on-both-outcomes),
 [borrowed conditional](#patt-009--a-borrowed-conditional-preserves-its-owner).
 
-## PATT-019 — A selector must be statically distinct in a generic body
+## PATT-019 — Generic selectors renormalize at complete applications
 
 **Status:** Confirmed
 
-A generic body may use a type parameter as a pattern selector only when its declared constraints
-prove that the selector is one distinct member of the scrutinee for every admitted specialization.
-Silk does not postpone pattern overlap, exhaustiveness, or reachability checking until each call.
+A generic body is checked once against its symbolic normalized member set. Every complete
+application substitutes its concrete types and renormalizes the member set and selectors before MIR
+lowering. If two symbolic selectors become the same concrete member, the first matching arm in
+source order selects that member; a later equivalent arm has no runtime tag and produces no new
+source diagnostic during specialization.
 
-```silk,ignore
-fn choose<T>(value: T | End) -> i32 {
+```silk
+fn choose<A, B>(value: A | B) -> i32 {
   return match move value {
-    T selected => 1
-    End {} => 0
+    A selected => 1
+    B selected => 0
   }
 }
 ```
 
-With unconstrained `T`, this is invalid because `T` could specialize to `End`, collapsing the two
-members and changing coverage. A future exclusion or distinctness constraint could make the proof
-expressible.
+`choose<i32, string>` retains two cases. `choose<i32, i32>` carries only `i32`; its first arm wins
+under ordinary source-order matching and the second has no distinct concrete case.
 
-**Boundary:** A concrete alias or fully resolved generic application is valid when it identifies
-one exact member. This rule does not forbid generic payloads such as `Box<T>` when `Box<T>` and every
-other outer member remain canonically distinct for all admitted `T`.
+**Boundary:** Symbolic checking must still prove that each selector belongs to the authored symbolic
+scrutinee and that the authored arms cover it. Complete applications do not rerun source diagnostics
+or invent overlapping runtime tags; they only substitute and normalize already-checked facts.
 
-**Diagnostics:** An underconstrained selector reports the potentially overlapping member and the
-missing distinctness proof. It must not choose behavior from one observed specialization.
+**Diagnostics:** An absent symbolic selector receives the ordinary member-not-in-scrutinee
+diagnostic. Member collapse during a valid complete application produces no compiler diagnostic.
 
 **Evidence:** [generic body checking](generics-interfaces-and-specialization.md#gen-004--a-generic-body-is-checked-once-against-its-declared-contract),
 [finite specialization](generics-interfaces-and-specialization.md#gen-005--every-reachable-generic-application-becomes-finite-monomorphic-code).

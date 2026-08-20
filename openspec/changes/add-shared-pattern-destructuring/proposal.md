@@ -8,7 +8,7 @@ Silk has nominal match forms but no single pattern representation shared by matc
 - Add recursive irrefutable local destructuring with move, shared-borrow, exclusive-borrow, and copy behavior.
 - Keep `let _ = value` from bypassing explicit `drop` for non-unit results.
 - Add statement-form `if let` with success bindings, optional mismatch body, consume-on-both outcomes for moves, loan-scoped borrows, cleanup, and flow diagnostics.
-- Admit exact normalized nominal and non-nominal union member patterns with static coverage, narrowing, and generic distinctness evidence.
+- Admit exact normalized nominal and non-nominal union member patterns with static coverage, narrowing, and deterministic monomorphic renormalization.
 - Leave irrefutable-condition simplification to the language service rather than compiler rejection.
 
 ## Capabilities

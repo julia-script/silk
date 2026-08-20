@@ -36,3 +36,20 @@ Statement-form `if let` SHALL run a success body with bindings and MAY run a mis
 
 - **WHEN** an if-let pattern is statically irrefutable
 - **THEN** the compiler accepts it and any simplification notice is an optional LSP warning
+
+### Requirement: Generic selectors renormalize at complete applications
+
+A generic pattern body SHALL be checked once against its symbolic normalized member set. Every
+complete application SHALL substitute and renormalize the selected members before MIR lowering. If
+distinct symbolic selectors become the same concrete member, the first source-ordered matching arm
+SHALL select that member and later equivalent arms SHALL emit no additional source diagnostic.
+
+#### Scenario: Collapse two generic selectors
+
+- **WHEN** a generic match over `A | B` has source-ordered `A` and `B` arms and specializes with both parameters equal to `i32`
+- **THEN** the concrete match tests one `i32` member, selects the first arm, and retains no duplicate runtime tag
+
+#### Scenario: Preserve distinct generic selectors
+
+- **WHEN** the same match specializes with `A = i32` and `B = string`
+- **THEN** both concrete members retain their source-ordered arms and exhaust the normalized union

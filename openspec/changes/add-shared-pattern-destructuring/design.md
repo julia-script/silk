@@ -13,7 +13,7 @@ Existing match syntax already contains much of the needed structural information
 1. Parse a shared syntax tree and elaborate it against a known scrutinee type into a typed pattern.
 2. Compute coverage, irrefutability, binding types, and access mode in one semantic pass.
 3. Lower let as a pattern proven total; lower if-let as one match plus deterministic ownership join.
-4. Use exact normalized union member evidence and require generic distinctness before lowering.
+4. Use exact normalized union member evidence, then substitute and renormalize selectors for each complete monomorphic application before lowering.
 5. Route standalone wildcard result discard through the expression-statement rule.
 
 ## Risks / Trade-offs

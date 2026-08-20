@@ -4523,15 +4523,10 @@ function lowerExpressionInner(
           candidate.id.span.start === expression.id.span.start &&
           candidate.id.span.end === expression.id.span.end,
       )
-      const specializeMember = (member: Type.Nominal): Type.Nominal | undefined => {
-        const specialized = fn.semantic(member)
-        return Type.isNominal(specialized) ? specialized : undefined
-      }
+      const specializeMember = (member: Type.Type): Type.Type => fn.semantic(member)
       const members = expression.members.flatMap((member) => {
-        const specialized = specializeMember(member)
-        return specialized === undefined ? [] : [specialized]
+        return [specializeMember(member)]
       })
-      if (members.length !== expression.members.length) return undefined
       const arms: Array<Mir.MatchArm> = []
       const armStates = new Map<number, DelayedEffectState>()
       const branchState = delayedEffectState(fn)
@@ -4539,17 +4534,12 @@ function lowerExpressionInner(
         if (!arm.reachable) continue
         restoreDelayedEffectState(fn, branchState)
         const member = arm.member === undefined ? undefined : specializeMember(arm.member)
-        if (arm.member !== undefined && member === undefined) return undefined
         const before = arm.before.flatMap((candidate) => {
-          const specialized = specializeMember(candidate)
-          return specialized === undefined ? [] : [specialized]
+          return [specializeMember(candidate)]
         })
         const after = arm.after.flatMap((candidate) => {
-          const specialized = specializeMember(candidate)
-          return specialized === undefined ? [] : [specialized]
+          return [specializeMember(candidate)]
         })
-        if (before.length !== arm.before.length || after.length !== arm.after.length)
-          return undefined
         const bindings: Array<Mir.MatchBinding> = []
         for (const binding of arm.bindings) {
           const type = fn.type(binding.type)

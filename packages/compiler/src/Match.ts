@@ -61,13 +61,9 @@ const contains = <Member extends Type.Type>(
   member: Member,
 ): boolean => members.some((candidate) => Type.equals(candidate, member))
 
-/** Returns the canonical matchable member set, or `undefined` for a non-nominal type. */
-export const membersOf = (type: Type.Type): ReadonlyArray<Type.Nominal> | undefined =>
-  Type.isNominal(type)
-    ? Object.freeze([type])
-    : Type.isUnion(type) && type.members.every(Type.isNominal)
-      ? type.members
-      : undefined
+/** Returns the canonical exact-member set observed by a pattern decision. */
+export const membersOf = (type: Type.Type): ReadonlyArray<Type.Type> =>
+  Type.isUnion(type) ? type.members : Type.isNever(type) ? Object.freeze([]) : Object.freeze([type])
 
 /** Folds source decisions over one canonical remaining-member set. */
 export const cover = <Member extends Type.Type>(

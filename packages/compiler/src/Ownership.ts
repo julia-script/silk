@@ -320,7 +320,7 @@ export interface MatchOwnership {
   readonly span: SourceSpan.SourceSpan
   readonly arms: ReadonlyArray<{
     readonly id: Match.ArmId
-    readonly member?: Type.Nominal
+    readonly member?: Type.Type
     readonly universal: boolean
     readonly provisionalGuard: boolean
     readonly bindings: ReadonlyArray<BindingSite>

@@ -755,6 +755,8 @@ const collectPattern = (
         )
       if (field.nested !== undefined) collectPattern(field.nested, index, scope, pending)
     }
+  } else if (pattern._tag === 'TypePattern') {
+    collectDeclaredType(pattern.declared, index, scope, pending)
   }
   for (const binding of pattern.bindings)
     if (binding.name._tag === 'Present')

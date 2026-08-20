@@ -366,6 +366,16 @@ export interface PatternFieldFact {
 
 export type PatternFact =
   | {
+      readonly _tag: 'TypePattern'
+      readonly id: Match.PatternId
+      readonly member?: Type.Type
+      readonly declared: DeclarationIndex.DeclaredTypeFact
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly complete: boolean
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'NominalPattern'
       readonly id: Match.PatternId
       readonly target: StructTargetFact
@@ -392,8 +402,8 @@ export interface MatchArmFact {
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly guard?: ExpressionFact
   readonly result: ExpressionFact
-  readonly before: ReadonlyArray<Type.Nominal>
-  readonly after: ReadonlyArray<Type.Nominal>
+  readonly before: ReadonlyArray<Type.Type>
+  readonly after: ReadonlyArray<Type.Type>
   readonly reachable: boolean
   readonly syntax: SyntaxTree.Node
 }
@@ -403,7 +413,7 @@ export interface MatchExpressionFact {
   readonly id: Match.MatchId
   readonly access: Match.Access
   readonly scrutinee: ExpressionFact
-  readonly members: ReadonlyArray<Type.Nominal>
+  readonly members: ReadonlyArray<Type.Type>
   readonly arms: ReadonlyArray<MatchArmFact>
   readonly exhaustive: boolean
   readonly type: ExpressionTypeFact
@@ -2263,6 +2273,42 @@ interface PatternResult {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
+interface PatternTypeResult {
+  readonly type?: Type.Type
+  readonly declared: DeclarationIndex.DeclaredTypeFact
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+}
+
+const resolvePatternType = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+  resolution: ResolutionContext,
+  declaration: DeclarationFact,
+): PatternTypeResult => {
+  const environment = new Map(
+    declaration.typeParameters.flatMap((parameter) =>
+      parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
+    ),
+  )
+  const analyzed = DeclarationIndex.analyzeDeclaredType(source, syntax, environment)
+  const nameResolution: NameResolution.Resolution = Object.freeze({
+    _tag: 'NameResolution',
+    modules: Object.freeze([resolution.scope]),
+    diagnostics: Object.freeze([]),
+  })
+  const resolved = DeclarationIndex.resolveTypeFact(
+    resolution.index,
+    source.id,
+    analyzed.fact,
+    (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
+  )
+  return Object.freeze({
+    ...(resolved.fact._tag === 'Resolved' ? { type: resolved.fact.type } : {}),
+    declared: resolved.fact,
+    diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
+  })
+}
+
 const patternDeclaredName = (
   source: SourceFile.SourceFile,
   syntax: SyntaxTree.Node,
@@ -2307,9 +2353,9 @@ const analyzePattern = (
     // `Member name` binds the entire member payload: no field destructuring, nothing omitted.
     const bindingTargetSyntax =
       SyntaxTree.directNode(node, 'AppliedType') ?? childNode(node, 'TypePath')
-    const bindingTarget = resolveStructTarget(source, bindingTargetSyntax, resolution, declaration)
+    const bindingTarget = resolvePatternType(source, bindingTargetSyntax, resolution, declaration)
     const bindingDiagnostics: Array<Diagnostic.Diagnostic> = [...bindingTarget.diagnostics]
-    const member = bindingTarget.fact._tag === 'Resolved' ? bindingTarget.fact.type : undefined
+    const member = bindingTarget.type
     const bindingToken = node.children.find(
       (element): element is Token.Token =>
         SyntaxTree.isToken(element) && element.kind === 'Identifier',
@@ -2349,16 +2395,13 @@ const analyzePattern = (
     counters.binding += 1
     return Object.freeze({
       fact: Object.freeze({
-        _tag: 'NominalPattern',
+        _tag: 'TypePattern',
         id,
-        target: bindingTarget.fact,
         ...(member === undefined ? {} : { member }),
-        fields: Object.freeze([]),
+        declared: bindingTarget.declared,
         bindings: Object.freeze([wholeBinding]),
         omitted: Object.freeze([]),
-        rest: false,
-        complete:
-          bindingTarget.fact._tag === 'Resolved' && !counters.invalid && isAvailableSyntax(node),
+        complete: member !== undefined && !counters.invalid && isAvailableSyntax(node),
         syntax: node,
       }),
       diagnostics: Object.freeze(bindingDiagnostics),
@@ -2421,7 +2464,9 @@ const analyzePattern = (
       state = Object.freeze({ _tag: 'Unknown', cause: Diagnostic.identity(diagnostic) })
     }
 
-    const nestedNode = SyntaxTree.directNode(fieldNode, 'NominalPattern')
+    const nestedNode =
+      SyntaxTree.directNode(fieldNode, 'NominalPattern') ??
+      SyntaxTree.directNode(fieldNode, 'BindingPattern')
     let nested: PatternFact | undefined
     let binding: PatternBindingFact | undefined
     if (nestedNode !== undefined) {
@@ -2445,7 +2490,7 @@ const analyzePattern = (
           : undefined
       if (
         expected !== undefined &&
-        nested._tag === 'NominalPattern' &&
+        (nested._tag === 'NominalPattern' || nested._tag === 'TypePattern') &&
         nested.member !== undefined &&
         !Type.equals(expected, nested.member)
       ) {
@@ -2536,7 +2581,8 @@ const analyzePattern = (
       (field) =>
         field.state._tag === 'Resolved' &&
         (field.nested === undefined ||
-          (field.nested._tag === 'NominalPattern' && field.nested.complete)),
+          ((field.nested._tag === 'NominalPattern' || field.nested._tag === 'TypePattern') &&
+            field.nested.complete)),
     ) &&
     (rest ||
       struct?.fields.every(
@@ -2599,9 +2645,6 @@ const analyzeMatch = (
       : analyzeExpression(source, scrutineeNode, declarations, declaration, scope, resolution)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...(scrutinee?.diagnostics ?? [])]
   const members = scrutinee?.type === undefined ? undefined : Match.membersOf(scrutinee.type)
-  if (scrutinee?.type !== undefined && members === undefined) {
-    diagnostics.push(Diagnostic.matchScrutineeNotNominal(Type.encode(scrutinee.type), node.span))
-  }
 
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
@@ -2631,7 +2674,8 @@ const analyzeMatch = (
     members ?? Object.freeze([]),
     preliminary.map(({ armNode, pattern }) =>
       Object.freeze({
-        ...(pattern._tag === 'NominalPattern' && pattern.member !== undefined
+        ...((pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
+        pattern.member !== undefined
           ? { member: pattern.member }
           : {}),
         universal: pattern._tag === 'UniversalPattern',
@@ -2643,7 +2687,7 @@ const analyzeMatch = (
     const transition = coverage.transitions.at(ordinal)
     if (transition === undefined) throw new RangeError('Match coverage lost an arm')
     if (
-      pattern._tag === 'NominalPattern' &&
+      (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
       pattern.member !== undefined &&
       members !== undefined &&
       !members.some((member) => Type.equals(member, pattern.member ?? member))
@@ -2814,7 +2858,10 @@ const analyzeMatch = (
     members !== undefined &&
     coverage.exhaustive &&
     arms.every(
-      (arm) => arm.reachable && (arm.pattern._tag !== 'NominalPattern' || arm.pattern.complete),
+      (arm) =>
+        arm.reachable &&
+        ((arm.pattern._tag !== 'NominalPattern' && arm.pattern._tag !== 'TypePattern') ||
+          arm.pattern.complete),
     ) &&
     !unavailableReachableResult &&
     !hasInvalidGuard &&
@@ -10042,7 +10089,10 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       members: fact.members,
       arms: Object.freeze(
         fact.arms.map((arm) => {
-          const member = arm.pattern._tag === 'NominalPattern' ? arm.pattern.member : undefined
+          const member =
+            arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern'
+              ? arm.pattern.member
+              : undefined
           return Object.freeze({
             id: arm.id,
             ...(member === undefined ? {} : { member }),
