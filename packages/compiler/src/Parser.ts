@@ -1314,17 +1314,6 @@ const parseImplicitUnitReturnStatement = (initial: State): NodeResult => {
   })
 }
 
-const parseMissingReturnStatement = (initial: State): NodeResult => {
-  const keyword = missingToken(initial, 'ReturnKeyword')
-  const literal = missingToken(initial, 'DecimalInteger')
-  const expression = syntaxNode(initial, 'IntegerLiteralExpression', [literal])
-  const node = syntaxNode(initial, 'ReturnStatement', [keyword, expression])
-  return Object.freeze({
-    state: addDiagnostic(initial, Diagnostic.missingReturnStatement(node.span)),
-    node,
-  })
-}
-
 const parseFailStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'FailKeyword', ['MoveKeyword', ...expressionStarts])
   const move =
@@ -1569,6 +1558,28 @@ const parseErrorStatement = (initial: State): NodeResult => {
   })
 }
 
+const blockTerminatesSyntactically = (children: ReadonlyArray<SyntaxTree.Element>): boolean => {
+  const statementTerminates = (statement: SyntaxTree.Node): boolean => {
+    if (statement.kind === 'ReturnStatement' || statement.kind === 'FailStatement') return true
+    if (statement.kind === 'UnsafeStatement') {
+      const block = SyntaxTree.directNode(statement, 'Block')
+      return block !== undefined && blockTerminatesSyntactically(block.children)
+    }
+    if (statement.kind !== 'ConditionalStatement') return false
+    const blocks = SyntaxTree.directNodes(statement, 'Block')
+    const taken = blocks.at(0)
+    if (taken === undefined || !blockTerminatesSyntactically(taken.children)) return false
+    const chained = SyntaxTree.directNode(statement, 'ConditionalStatement')
+    if (chained !== undefined) return statementTerminates(chained)
+    const otherwise = blocks.at(1)
+    return otherwise !== undefined && blockTerminatesSyntactically(otherwise.children)
+  }
+  for (const child of children) {
+    if (SyntaxTree.isNode(child) && statementTerminates(child)) return true
+  }
+  return false
+}
+
 function parseBlock(
   initial: State,
   requireReturn: boolean,
@@ -1586,7 +1597,6 @@ function parseBlock(
   ])
   let state = leftBrace.state
   let children: ReadonlyArray<SyntaxTree.Element> = leftBrace.elements
-  let sawReturn = false
 
   let kind = nextSignificantKind(state)
   while (!endsBlock(state)) {
@@ -1614,36 +1624,12 @@ function parseBlock(
                           : startsBlockStatement(state)
                             ? parseExpressionStatement(state)
                             : parseErrorStatement(state)
-    if (
-      kind === 'ReturnKeyword' ||
-      kind === 'FailKeyword' ||
-      (kind === 'UnsafeKeyword' &&
-        SyntaxTree.directNode(statement.node, 'Block')?.children.some(
-          (child) => SyntaxTree.isNode(child) && child.kind === 'ReturnStatement',
-        ))
-    )
-      sawReturn = true
     children = Object.freeze([...children, statement.node])
     state = statement.state
     kind = nextSignificantKind(state)
   }
 
-  if (requireReturn && !sawReturn) {
-    const boundary = nextSignificantKind(state)
-    const statement =
-      boundary === 'RightBrace' ||
-      boundary === 'PubKeyword' ||
-      boundary === 'StructKeyword' ||
-      boundary === 'FnKeyword' ||
-      boundary === 'EffectKeyword' ||
-      boundary === 'ImportKeyword' ||
-      boundary === 'EndOfFile'
-        ? parseMissingReturnStatement(state)
-        : parseReturnStatement(state)
-    children = Object.freeze([...children, statement.node])
-    state = statement.state
-  }
-  if (implicitUnitReturn && !sawReturn) {
+  if ((requireReturn || implicitUnitReturn) && !blockTerminatesSyntactically(children)) {
     const statement = parseImplicitUnitReturnStatement(state)
     children = Object.freeze([...children, statement.node])
   }

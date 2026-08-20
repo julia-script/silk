@@ -211,14 +211,12 @@ fn alsoNotify() {
 `Effect<i32>` from a body declared to produce `i32`, or returning `i32` from a body declared to
 produce `Effect<i32>`, is a type mismatch; neither direction runs, wraps, or flattens automatically.
 
-**Diagnostics:** A wholly missing required return currently uses parser diagnostic `PAR0004`.
-An incompatible returned expression must be diagnosed at that expression with the declared and
-actual types; the general mismatch still lacks one stable semantic code. Effect-specific examples
-and current compiler gaps are recorded under EFF-002.
+**Diagnostics:** Reachable non-unit fallthrough reports `SEM0130` at the closing boundary. An
+incompatible returned expression reports `SEM0129` at that expression with the declared and actual
+types. More specific union or representation diagnostics may explain those specialized joins.
+Effect-specific examples are recorded under EFF-002.
 
-**Current compiler:** The parser currently requires a syntactically trailing `return` in a non-unit
-body even when every reachable `if` arm already returns. The confirmed rule instead makes the
-contract semantic: a trailing return is unnecessary when no reachable path can fall through.
+The contract is semantic: a trailing return is unnecessary when no reachable path can fall through.
 
 **Evidence:** [function syntax](../../openspec/specs/bootstrap-syntax/spec.md),
 [Effect return semantics](effects-and-execution.md#eff-002--an-effect-body-returns-its-success-value),

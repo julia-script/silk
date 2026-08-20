@@ -122,7 +122,7 @@ effect fn bad() -> i32 {
   )
   assert.deepEqual(
     recipeRules.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0068'],
+    ['SEM0068', 'SEM0129'],
   )
 })
 
@@ -626,7 +626,7 @@ it.effect('defines allocation as an exclusive service Effect with an affine resu
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'allocation://capability-contract',
-      `fn allocate(layout: Layout) -> Effect<Allocation ! OutOfMemory ? &mut Allocator> {
+      `fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemory ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
@@ -1165,7 +1165,10 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
   assert.strictEqual(manyCall.mappings.length, 1)
   assert.deepEqual(manyFunction.returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(manyCall.type, { _tag: 'Unavailable' })
-  assert.deepEqual(tooFew.diagnostics, [])
+  assert.deepEqual(
+    tooFew.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
   assert.deepEqual(
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0007'],
@@ -1285,6 +1288,10 @@ it('does not reinterpret an unknown final value as an invalid assignment place',
       {
         code: 'SEM0006',
         reason: { _tag: 'UnknownValueReference', spelling: 'missing' },
+      },
+      {
+        code: 'SEM0130',
+        reason: { _tag: 'MissingReturn', expected: 'i32' },
       },
     ],
   )
@@ -1498,7 +1505,10 @@ it('types empty parentheses as unit', () => {
   assert.strictEqual(returned._tag, 'Unit')
   assert.deepEqual(fact.returnCompatibility, { _tag: 'Unavailable' })
   assert.deepEqual(result.syntax.parserDiagnostics, [])
-  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
 })
 
 it('resolves present callees, accepts unchecked arguments, and withholds damaged calls', () => {
@@ -1659,6 +1669,64 @@ it('analyzes return types, integers, and compatibility independently', () => {
   )
 })
 
+it('proves every reachable return and marks invalid bodies unavailable to execution', () => {
+  const result = analyzeText(
+    'fixture://return-contracts.silk',
+    `fn branch(value: bool) -> i32 {
+  if value { return 1 } else { return 2 }
+}
+fn branchMismatch(value: bool) -> i32 {
+  if value { return 1 } else { return true }
+}
+fn partialBranch(value: bool) -> i32 {
+  if value { return 1 }
+}
+fn mismatch() -> i32 { return true }
+fn missing() -> i32 { let value = 42 }
+effect fn inner() -> i32 { return 42 }
+effect fn nestedMismatch() -> i32 { return inner() }
+effect fn nestedValue() -> Effect<i32> { return inner() }`,
+  )
+
+  assert.deepEqual(
+    result.functions.map((fn) => fn.returnCompatibility._tag),
+    [
+      'Compatible',
+      'Unavailable',
+      'Unavailable',
+      'Unavailable',
+      'Unavailable',
+      'Compatible',
+      'Unavailable',
+      'Compatible',
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
+    [
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'bool' },
+      },
+      { code: 'SEM0130', reason: { _tag: 'MissingReturn', expected: 'i32' } },
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'bool' },
+      },
+      { code: 'SEM0130', reason: { _tag: 'MissingReturn', expected: 'i32' } },
+      {
+        code: 'SEM0129',
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+      },
+    ],
+  )
+  assert.deepEqual(result.hir.functions.length, result.functions.length)
+  assert.deepEqual(
+    result.hir.functions.at(0)?.statements.map((statement) => statement._tag),
+    ['If'],
+  )
+})
+
 it('preserves existing type and integer edge behavior per function', () => {
   const unknown = functionAt(analyzeText('fixture://unknown-type.silk', unknownTypeSource), 0)
   const damaged = analyzeText('fixture://damaged-type.silk', damagedTypeSource)
@@ -1694,7 +1762,10 @@ it('preserves existing type and integer edge behavior per function', () => {
     ],
   )
   assert.strictEqual(functionAt(missingInteger, 0).returnedExpression._tag, 'Unit')
-  assert.deepEqual(missingInteger.diagnostics, [])
+  assert.deepEqual(
+    missingInteger.diagnostics.map((diagnostic) => diagnostic.code),
+    ['SEM0129'],
+  )
 })
 
 it('keeps parser and semantic diagnostics in their owning ordered collections', () => {

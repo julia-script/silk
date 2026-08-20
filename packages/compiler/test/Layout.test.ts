@@ -482,7 +482,9 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'layout/verify-aggregate',
-      ascii('struct Pair { left: i32 right: bool }\npub fn main() -> Pair { return 42 }'),
+      ascii(
+        'struct Pair { left: i32 right: bool }\npub fn main() -> Pair { return Pair { left: 42, right: true } }',
+      ),
       'aarch64-apple-darwin',
     )
     const selected = Analysis.layoutCatalogOf(snapshot)

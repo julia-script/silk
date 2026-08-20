@@ -63,6 +63,21 @@ it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
   )
 })
 
+it('retains invalid return types as a verifier invariant', () => {
+  const [straight] = Mir.samples()
+  const sample = straight ?? raise('expected sample')
+  const fn = sample.functions.at(0) ?? raise('expected sample function')
+  const invalid: Mir.Module = {
+    ...sample,
+    functions: [{ ...fn, result: { _tag: 'bool' } }],
+  }
+
+  assert.include(
+    Mir.verify(invalid).map((violation) => violation.rule),
+    'InvalidReturn',
+  )
+})
+
 it('reports broken graphs deterministically as data', () => {
   const [straight] = Mir.samples()
   const fn = straight?.functions.at(0) ?? raise('expected the sample function')

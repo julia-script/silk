@@ -1527,6 +1527,7 @@ export interface Violation {
     | 'InvalidLexicalOwner'
     | 'InvalidLoopTarget'
     | 'UndeclaredLocal'
+    | 'InvalidReturn'
     | 'InvalidAggregateOperation'
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
@@ -3919,6 +3920,24 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         )
       }
       const outcome = outcomeOf(region)
+      if (outcome?._tag === 'Return') {
+        const returned = fn.localTypes.at(outcome.value.ordinal)
+        if (
+          returned !== undefined &&
+          returned._tag !== 'Bottom' &&
+          !SilkType.equals(semanticType(returned), semanticType(fn.result))
+        ) {
+          violations.push(
+            Object.freeze({
+              _tag: 'Violation',
+              rule: 'InvalidReturn',
+              function: fn.id,
+              region: region.id,
+              detail: `return local ${localText(outcome.value)} has ${SilkType.encode(semanticType(returned))}, expected ${SilkType.encode(semanticType(fn.result))}`,
+            }),
+          )
+        }
+      }
       if (
         (outcome?._tag === 'Repeat' || outcome?._tag === 'Exit') &&
         !isAncestor(region.ownerLoop, outcome.loop)

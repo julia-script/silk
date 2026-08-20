@@ -249,6 +249,60 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects an unrun effectful bound operation at the generic return boundary', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Decoder<T> {
+  effect fn decode(value: &T) -> i32
+}
+struct Schema {}
+effect fn decodeSchema(value: &Schema) -> i32 { return 42 }
+impl Decoder<Schema> for Schema { decode: Schema.decodeSchema }
+effect fn decodeWith<T: Decoder>(value: &T) -> i32 {
+  return Decoder.decode(value)
+}
+pub fn main() -> i32 {
+  let schema = Schema {}
+  return run decodeWith<Schema>(&schema)
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason,
+      })),
+      [
+        {
+          code: 'SEM0129',
+          reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+        },
+      ],
+    )
+    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
+  }),
+)
+
+it.effect('keeps a mapped witness with an invalid body out of target-dependent phases', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`interface Decoder<T> {
+  fn decode(value: &T) -> i32
+}
+struct Schema {}
+fn decodeSchema(value: &Schema) -> i32 { return true }
+impl Decoder<Schema> for Schema { decode: Schema.decodeSchema }
+fn decodeWith<T: Decoder>(value: &T) -> i32 { return Decoder.decode(value) }
+pub fn main() -> i32 {
+  let schema = Schema {}
+  return decodeWith<Schema>(&schema)
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0129'],
+    )
+    assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable')
+  }),
+)
+
 /**
  * `Integer.add` names both the bound's operation and a public function of `silk/numeric`. Inside a
  * body bounded by `Integer` the bound takes the spelling; the module function stays reachable

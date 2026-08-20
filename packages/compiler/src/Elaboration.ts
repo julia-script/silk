@@ -1068,12 +1068,30 @@ const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
 
 const declaredReturnTypesCompatible = (
   declaration: DeclarationFact,
-  source: SemanticType,
-): boolean =>
-  declaration.returnType._tag === 'Resolved' &&
-  (typesCompatible(source, declaration.returnType.type) ||
-    (declaration.opaqueResult !== undefined &&
-      Type.haveSameRepresentationShape(source, declaration.returnType.type)))
+  expression: ExpressionFact,
+): boolean => {
+  if (declaration.returnType._tag !== 'Resolved' || expression.type._tag !== 'Available')
+    return false
+  const source = expression.type.type
+  const target = declaration.returnType.type
+  if (typesCompatible(source, target)) return true
+  if (declaration.opaqueResult !== undefined && Type.haveSameRepresentationShape(source, target))
+    return true
+  if (!Type.isRepresented(target)) return false
+  const contract = Type.isRepresented(source) ? source.contract : source
+  if (!(Type.isCallable(contract) || Type.isEffect(contract))) return false
+  const representation = representationOfExpression(expression)
+  if (representation === undefined) return false
+  const represented = Type.represented(
+    contract,
+    target.representation.requiredBound,
+    representation,
+  )
+  return (
+    represented.representation.admissibility._tag !== 'Unavailable' &&
+    Type.equalsGenericArgument(representation, target.representation.argument)
+  )
+}
 
 const representationJoinDiagnostic = (
   expected: SemanticType,
@@ -8765,27 +8783,6 @@ const analyzeStatements = (
       context.diagnostics.push(...expression.diagnostics)
       if (
         !context.effectBlock &&
-        context.declaration.returnType._tag === 'Resolved' &&
-        expression.type !== undefined &&
-        !declaredReturnTypesCompatible(context.declaration, expression.type)
-      ) {
-        const diagnostic =
-          representationJoinDiagnostic(
-            context.declaration.returnType.type,
-            expression.type,
-            context.declaration.returnType.syntax.span,
-            expressionNode.span,
-            expressionNode.span,
-          ) ??
-          unionConversionDiagnostic(
-            expression.type,
-            context.declaration.returnType.type,
-            expressionNode.span,
-          )
-        if (diagnostic !== undefined) context.diagnostics.push(diagnostic)
-      }
-      if (
-        !context.effectBlock &&
         expression.type !== undefined &&
         Type.isCallable(expression.type) &&
         expression.type.mode !== 'Shared' &&
@@ -8882,6 +8879,96 @@ const analyzeStatements = (
   }
 
   return Object.freeze(facts)
+}
+
+interface ReturnFlow {
+  readonly fallsThrough: boolean
+  readonly returns: ReadonlyArray<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>>
+}
+
+const expressionNever = (expression: ExpressionFact): boolean =>
+  expression.type._tag === 'Available' && Type.isNever(expression.type.type)
+
+const implicitReturn = (
+  statement: Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>,
+): boolean => SyntaxTree.directToken(statement.syntax, 'ReturnKeyword') === undefined
+
+/**
+ * Computes source-level return reachability. Parser-created zero-width unit returns preserve a
+ * recoverable terminal node, but remain ordinary fallthrough for contract checking.
+ */
+const returnFlowOf = (
+  body: ReadonlyArray<StatementFact>,
+  implicitReturnFallsThrough = true,
+): ReturnFlow => {
+  const returns: Array<Extract<StatementFact, { readonly _tag: 'ReturnStatement' }>> = []
+  let fallsThrough = true
+  for (const statement of body) {
+    if (!fallsThrough) break
+    if (statement._tag === 'ReturnStatement') {
+      if (implicitReturn(statement)) {
+        fallsThrough = implicitReturnFallsThrough
+      } else {
+        returns.push(statement)
+        fallsThrough = false
+      }
+      continue
+    }
+    if (
+      statement._tag === 'FailStatement' ||
+      statement._tag === 'BreakStatement' ||
+      statement._tag === 'ContinueStatement'
+    ) {
+      fallsThrough = false
+      continue
+    }
+    if (statement._tag === 'UnsafeStatement') {
+      const nested = returnFlowOf(statement.statements, implicitReturnFallsThrough)
+      returns.push(...nested.returns)
+      fallsThrough = nested.fallsThrough
+      continue
+    }
+    if (statement._tag === 'IfStatement') {
+      if (expressionNever(statement.condition)) {
+        fallsThrough = false
+        continue
+      }
+      const taken = returnFlowOf(statement.taken, implicitReturnFallsThrough)
+      const otherwise = returnFlowOf(statement.otherwise, implicitReturnFallsThrough)
+      returns.push(...taken.returns, ...otherwise.returns)
+      fallsThrough = taken.fallsThrough || otherwise.fallsThrough
+      continue
+    }
+    if (statement._tag === 'WhileStatement') {
+      if (expressionNever(statement.condition)) {
+        fallsThrough = false
+        continue
+      }
+      returns.push(...returnFlowOf(statement.body, implicitReturnFallsThrough).returns)
+      fallsThrough = true
+      continue
+    }
+    if (statement._tag === 'BindStatement') {
+      fallsThrough = !expressionNever(statement.binding.initializer)
+      continue
+    }
+    if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
+      fallsThrough = !expressionNever(statement.expression)
+      continue
+    }
+    fallsThrough = !expressionNever(statement.destination) && !expressionNever(statement.value)
+  }
+  return Object.freeze({ fallsThrough, returns: Object.freeze(returns) })
+}
+
+/** Keeps only statements that can execute, treating an implicit unit completion as a real return. */
+const executableStatements = (body: ReadonlyArray<StatementFact>): ReadonlyArray<StatementFact> => {
+  const reachable: Array<StatementFact> = []
+  for (const statement of body) {
+    reachable.push(statement)
+    if (!returnFlowOf([statement], false).fallsThrough) break
+  }
+  return Object.freeze(reachable)
 }
 
 const analyzeFunctionBody = (
@@ -9052,6 +9139,9 @@ const analyzeFunctionBody = (
       if (statement._tag === 'UnsafeStatement') {
         const nested = terminalOf(statement.statements)
         if (nested !== undefined) return nested
+      } else if (statement._tag === 'IfStatement') {
+        const nested = terminalOf(statement.otherwise) ?? terminalOf(statement.taken)
+        if (nested !== undefined) return nested
       }
     }
     return undefined
@@ -9060,15 +9150,48 @@ const analyzeFunctionBody = (
   if (terminal === undefined)
     throw new RangeError('Semantic analysis expected a terminal statement')
   const expression = terminal.expression
-  const expressionType = expression.type._tag === 'Available' ? expression.type.type : undefined
-
-  const returnCompatibility =
-    terminal._tag === 'ReturnStatement' &&
-    declaration.returnType._tag === 'Resolved' &&
-    expressionType !== undefined &&
-    declaredReturnTypesCompatible(declaration, expressionType)
-      ? compatible
-      : unavailableCompatibility
+  const returnFlow = returnFlowOf(statements)
+  let validReturnContract = declaration.returnType._tag === 'Resolved'
+  if (declaration.returnType._tag === 'Resolved') {
+    for (const returned of returnFlow.returns) {
+      if (returned.expression.type._tag !== 'Available') {
+        validReturnContract = false
+        continue
+      }
+      const actual = returned.expression.type.type
+      if (declaredReturnTypesCompatible(declaration, returned.expression)) continue
+      validReturnContract = false
+      context.diagnostics.push(
+        representationJoinDiagnostic(
+          declaration.returnType.type,
+          actual,
+          declaration.returnType.syntax.span,
+          returned.expression.syntax.span,
+          returned.expression.syntax.span,
+        ) ??
+          unionConversionDiagnostic(
+            actual,
+            declaration.returnType.type,
+            returned.expression.syntax.span,
+          ) ??
+          Diagnostic.returnTypeMismatch(
+            Type.encode(declaration.returnType.type),
+            Type.encode(actual),
+            returned.expression.syntax.span,
+          ),
+      )
+    }
+    if (returnFlow.fallsThrough && !Type.equals(declaration.returnType.type, Type.unit)) {
+      validReturnContract = false
+      context.diagnostics.push(
+        Diagnostic.missingReturn(
+          Type.encode(declaration.returnType.type),
+          SyntaxTree.directToken(blockNode, 'RightBrace')?.span ?? blockNode.span,
+        ),
+      )
+    }
+  }
+  const returnCompatibility = validReturnContract ? compatible : unavailableCompatibility
 
   return Object.freeze({
     fact: Object.freeze({
@@ -10872,7 +10995,7 @@ export const elaborateModule = (input: Input): Result => {
     resultType?: SemanticType,
   ): ReadonlyArray<Hir.Statement> =>
     Object.freeze(
-      facts
+      executableStatements(facts)
         .filter(
           (statement) =>
             !(

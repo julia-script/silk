@@ -58,7 +58,8 @@ are broken” or “Effects are unfinished” in general. Seven cross-cutting ca
 mismatch:
 
 1. failure channels still use a distinct row kind and nominal-only members;
-2. incompatible return expressions can become unavailable HIR without a semantic diagnostic;
+2. incompatible return expressions previously became unavailable HIR without a semantic
+   diagnostic; the return-contract soundness handoff has resolved this seam;
 3. interfaces repeat their provider while services use partly separate witness machinery;
 4. requirement selection and difference use access-bearing `@Role` members instead of
    access-independent service-role keys;
@@ -67,10 +68,10 @@ mismatch:
 6. compatible Effect construction sites cannot yet form one finite composite representation; and
 7. stable logical failure traces and causal reports are incomplete.
 
-GitHub issue 226 is evidence for cause 2, not a new interface rule. The same missing return-contract
-diagnostic occurs without interface dispatch, in both `Effect<i32>`-where-`i32`-is-required and
-`i32`-where-`Effect<i32>`-is-required directions. It should be handled as a frontend soundness bug
-whose interface-dispatched reproduction is one regression case.
+GitHub issue 226 was evidence for cause 2, not a new interface rule. The return-contract soundness
+handoff now diagnoses both `Effect<i32>`-where-`i32`-is-required and
+`i32`-where-`Effect<i32>`-is-required at the source boundary. Its interface-dispatched reproduction
+is retained as a regression case.
 
 The focused current-behavior suite passed: 15 test files and 278 tests covering elaboration, Effect
 runtime and entry, provider selection, selective catch, acquired providers, generic rows, interface
@@ -115,13 +116,13 @@ below; they do not make superseded behavior authoritative.
 | Rule | Semantics | Diagnostics | Current evidence and boundary |
 | --- | --- | --- | --- |
 | EFF-001 | Implemented | Aligned | Effect calls produce lazy `EffectConstruct` facts; execution is reached only through `run`. Runtime tests distinguish construction, execution, and dropping an unrun Effect. |
-| EFF-002 | Partial | Missing | Valid success returns work, but a mismatched return can enter unavailable HIR without a source diagnostic and later cause invalid MIR or a trap. Issue 226 is one dispatched reproduction. |
+| EFF-002 | Implemented | Aligned | Every reachable explicit return and fallthrough path is checked against the resolved contract. `SEM0129`/`SEM0130` stop invalid bodies before target-dependent realization; issue 226 is a dispatched regression. |
 | EFF-003 | Implemented | Aligned | Lowering executes one Effect contract layer. Nested flattening is an ordinary separate library composition tested across evaluator, LLVM, and Wasm. |
-| EFF-004 | Implemented | Partial | Nested Effect success values and explicit double execution work. A nested value used as the declared scalar result still inherits EFF-002's missing diagnostic. |
+| EFF-004 | Implemented | Aligned | Nested Effect success values and explicit double execution work. A nested value used as the declared scalar result receives `SEM0129`; no implicit flattening occurs. |
 | EFF-005 | Implemented | Aligned | Ordinary functions return deferred Effect values and may perform eager work before constructing an `effect {}` body. Stored-Effect runtime tests cover passing, storing, capture, and later execution. |
 | EFF-006 | Implemented | Aligned | Ordinary `run` rejects residual failures with `SEM0066` and requirements with `SEM0071`; provision and recovery can close the channels first. |
 | EFF-007 | Contradicted | Contradicted | Success and requirements exist, but failure `E` is still a separate row kind instead of an ordinary type. Diagnostics enforce the superseded kind distinction. |
-| EFF-008 | Partial | Partial | Effect-function declarations construct one declared Effect layer, but their failure binder and invalid-return boundaries inherit EFF-007 and EFF-002. |
+| EFF-008 | Partial | Partial | Effect-function declarations construct one declared Effect layer and enforce its success contract. Their failure binder still inherits EFF-007's superseded failure-row model. |
 | EFF-009 | Implemented | Partial | Failure and requirement subsumption is used by function and witness compatibility. Messages and source forms still expose the old failure kind and requirement selector model. |
 | EFF-010 | Implemented | Aligned | An omitted effect-function result resolves to `()`; ordinary-function omission remains separate. |
 | EFF-011 | Implemented | Aligned | Omitted failure and requirement channels resolve to `never` and the empty requirement row. |
@@ -163,7 +164,7 @@ below; they do not make superseded behavior authoritative.
 | INTF-002 | Partial | Partial | Interfaces accept bodyless ordinary/effect operation contracts and reject most invalid members. They still use failure-row binders and a parser path shared mechanically, not semantically, with services. |
 | INTF-003 | Contradicted | Contradicted | Bounds mix hidden-provider shorthand with applications that repeat the provider. The confirmed uniform `T: Interface<Arguments>` application is unavailable. |
 | INTF-004 | Not implemented | Missing | The parser/declaration model retains at most one bound per parameter; `+` conjunction has no source representation. |
-| INTF-005 | Partial | Missing | Literal operand ownership, result compatibility, and row subsumption work for mapped witnesses. Old provider/failure forms and EFF-002's missing nested-result diagnostic violate the complete confirmed surface. |
+| INTF-005 | Partial | Partial | Literal operand ownership, result compatibility, row subsumption, and resolved return-contract diagnostics work for mapped witnesses. Old provider/failure forms still violate the complete confirmed surface. |
 | INTF-006 | Partial | Partial | Unique bound operations select static witnesses and ambiguity is detected. Application identity still includes the explicit provider, and selected operator names retain legacy privilege. |
 | IMPL-001 | Contradicted | Contradicted | `impl Interface<Provider, Arguments> for Provider` repeats the provider; implicit `Self` and general inline bodies are unavailable. |
 | IMPL-002 | Partial | Partial | Mapped completeness, duplicates, and unknown members are checked. Inline completeness exists only for the special hook path. |
@@ -204,9 +205,9 @@ agent can easily mistake them for current language authority:
 The audit recommends these independent handoffs. Each should become or revise an SLP/OpenSpec
 change, receive a planning audit, and be implemented before the next dependent handoff begins.
 
-1. **Reject invalid return contracts before lowering.** Add the missing general return mismatch,
-   prohibit unavailable reachable bodies from becoming MIR, cover both ordinary and
-   interface-dispatched nested-Effect cases, and close issue 226 as a regression symptom.
+1. **Resolved — reject invalid return contracts before lowering.** The compiler now reports the
+   general return mismatch and missing-return diagnostics, prevents invalid bodies from reaching
+   target-dependent realization, and covers ordinary and interface-dispatched issue 226 shapes.
 2. **Make failures ordinary types and generalize recovery.** Replace `!E` binders and `Row<!E>`,
    admit every detached owned failure type, preserve union difference over ordinary `E`, generalize
    `catch<S>` to selected unions and `A | B` success, and update the standard library and specs

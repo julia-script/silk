@@ -214,7 +214,9 @@ pub fn main() -> i32 { return 0 }`),
     for (const ordinal of [0, 1, 2, 3]) {
       assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
     }
-    const partial = Analysis.rootAnalysis(invalid).hir.functions.at(4)
+    const partial = Analysis.rootAnalysis(invalid).hir.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'partial',
+    )
     const partialExpression = partial === undefined ? undefined : Hir.returned(partial)
     assert.strictEqual(partialExpression?._tag, 'Move')
     if (partialExpression?._tag === 'Move') {

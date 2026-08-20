@@ -14,13 +14,13 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | Prefix | Phase | Codes |
 | --- | --- | --- |
 | `LEX` | Lexical | 7 |
-| `PAR` | Parser | 4 |
+| `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 125 |
+| `SEM` | Semantic | 127 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 156 codes in total.
+There are 157 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -41,7 +41,6 @@ There are 156 codes in total.
 | `PAR0001` | Stable code for one required token that is absent at its insertion position. | `Expected <describeexpected>` |
 | `PAR0002` | Stable code for one maximal region of unexpected concrete tokens. | `Unexpected <encountered>; expected valid syntax`<br>`Unexpected <encountered>; expected <expectation>`<br>`Unexpected <encountered> while parsing a statement`<br>`Unexpected <encountered> while parsing a <context>` |
 | `PAR0003` | Stable code for a primary-expression template start reserved for future support. | `Template syntax is reserved but not implemented` |
-| `PAR0004` | Stable code for one wholly absent required return statement. | `Expected return statement` |
 
 ## Module (`MOD`)
 
@@ -181,6 +180,8 @@ There are 156 codes in total.
 | `SEM0126` | Stable code for an explicitly or independently selected row that is not exactly one member. | `Selected requirement row has <count> members; exactly one is required` |
 | `SEM0127` | Stable code for a surviving provider candidate with more than one conformance witness. | `More than one conformance witness can provide the selected requirement` |
 | `SEM0128` | Stable code for a surviving provider candidate whose conformance mapping is invalid. | `The provider's conformance mapping is invalid: <reason>` |
+| `SEM0129` | Stable code for an explicit return whose value violates the declaration result. | `Return expected <expected> but received <actual>` |
+| `SEM0130` | Stable code for a reachable non-unit function fallthrough. | `A reachable path must return <expected>` |
 
 ## Ownership (`OWN`)
 

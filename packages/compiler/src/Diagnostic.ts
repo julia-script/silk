@@ -44,9 +44,6 @@ export const unexpectedTokensCode = 'PAR0002' as const
 /** Stable code for a primary-expression template start reserved for future support. */
 export const reservedTemplateSyntaxCode = 'PAR0003' as const
 
-/** Stable code for one wholly absent required return statement. */
-export const missingReturnStatementCode = 'PAR0004' as const
-
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
 
@@ -233,6 +230,10 @@ export const selectedRowCardinalityCode = 'SEM0126' as const
 export const providerConformanceAmbiguityCode = 'SEM0127' as const
 /** Stable code for a surviving provider candidate whose conformance mapping is invalid. */
 export const invalidProviderConformanceCode = 'SEM0128' as const
+/** Stable code for an explicit return whose value violates the declaration result. */
+export const returnTypeMismatchCode = 'SEM0129' as const
+/** Stable code for a reachable non-unit function fallthrough. */
+export const missingReturnCode = 'SEM0130' as const
 /** Stable code for a `typeof` item that resolves to no declaration in scope. */
 export const unresolvedExactRepresentationItemCode = 'SEM0108' as const
 /** Stable code for a `typeof` item whose name belongs to more than one declaration. */
@@ -294,7 +295,6 @@ export type Code =
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
-  | typeof missingReturnStatementCode
   | typeof unknownModuleCode
   | typeof selfImportCode
   | typeof duplicateImportCode
@@ -413,6 +413,8 @@ export type Code =
   | typeof selectedRowCardinalityCode
   | typeof providerConformanceAmbiguityCode
   | typeof invalidProviderConformanceCode
+  | typeof returnTypeMismatchCode
+  | typeof missingReturnCode
   | typeof unresolvedExactRepresentationItemCode
   | typeof ambiguousExactRepresentationItemCode
   | typeof uncallableExactRepresentationItemCode
@@ -479,7 +481,6 @@ export type Reason =
       readonly expected: ReadonlyArray<string>
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
-  | { readonly _tag: 'MissingReturnStatement' }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -669,6 +670,12 @@ export type Reason =
       readonly expected: string
       readonly actual: string
     }
+  | {
+      readonly _tag: 'ReturnTypeMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
+  | { readonly _tag: 'MissingReturn'; readonly expected: string }
   | { readonly _tag: 'NonCallableApplication'; readonly actual: string }
   | {
       readonly _tag: 'IncompatibleCallableSignature'
@@ -1004,6 +1011,13 @@ export const hasInstanceFenceErrors = (diagnostics: ReadonlyArray<Diagnostic>): 
       diagnostic.code === storedRepresentedEffectConstructionCode,
   )
 
+/** Tests whether source return-contract errors must stop every target-dependent phase. */
+export const hasReturnContractErrors = (diagnostics: ReadonlyArray<Diagnostic>): boolean =>
+  diagnostics.some(
+    (diagnostic) =>
+      diagnostic.code === returnTypeMismatchCode || diagnostic.code === missingReturnCode,
+  )
+
 /** Derives the identity of one diagnostic given its ordinal among equals. */
 export const identity = (self: Diagnostic, ordinal = 0): Identity =>
   Object.freeze({
@@ -1311,18 +1325,6 @@ export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic 
     severity: 'error',
     message: 'Template syntax is reserved but not implemented',
     reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
-    span,
-  })
-
-/** Creates the diagnostic for one wholly absent required return statement. */
-export const missingReturnStatement = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'parser',
-    code: missingReturnStatementCode,
-    severity: 'error',
-    message: 'Expected return statement',
-    reason: Object.freeze({ _tag: 'MissingReturnStatement' }),
     span,
   })
 
@@ -2447,6 +2449,34 @@ export const assignmentTypeMismatch = (
     severity: 'error',
     message: `Assignment expected ${expected} but received ${actual}`,
     reason: Object.freeze({ _tag: 'AssignmentTypeMismatch', expected, actual }),
+    span,
+  })
+
+/** Creates the diagnostic for an explicit return that violates its declaration result. */
+export const returnTypeMismatch = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: returnTypeMismatchCode,
+    severity: 'error',
+    message: `Return expected ${expected} but received ${actual}`,
+    reason: Object.freeze({ _tag: 'ReturnTypeMismatch', expected, actual }),
+    span,
+  })
+
+/** Creates the diagnostic for a reachable closing brace in a non-unit body. */
+export const missingReturn = (expected: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingReturnCode,
+    severity: 'error',
+    message: `A reachable path must return ${expected}`,
+    reason: Object.freeze({ _tag: 'MissingReturn', expected }),
     span,
   })
 

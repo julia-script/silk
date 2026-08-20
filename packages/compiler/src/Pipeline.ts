@@ -611,6 +611,13 @@ export const realize = (
           message: 'Target-dependent phases are unavailable for invalid source specialization',
         })
       : undefined
+  const returnContractError =
+    specializationError === undefined && Diagnostic.hasReturnContractErrors(baseDiagnostics)
+      ? new AnalysisUnavailable({
+          operation: 'Analysis.realize',
+          message: 'Target-dependent phases are unavailable for an invalid return contract',
+        })
+      : undefined
   // Storage fences (SEM0103/SEM0107) name programs the layout planner cannot serve, so realization
   // stops at the source diagnostic instead of producing an InvalidMir echo of it.
   const instanceFenceError =
@@ -621,7 +628,7 @@ export const realize = (
             'Target-dependent phases are unavailable while a reachable construction stores an unsupported executable representation',
         })
       : undefined
-  const realizationError = specializationError ?? instanceFenceError
+  const realizationError = specializationError ?? returnContractError ?? instanceFenceError
   const targetLayout = measured(
     report,
     'target-layout',

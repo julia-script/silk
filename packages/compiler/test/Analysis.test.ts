@@ -181,7 +181,7 @@ it.effect('reports only actionable diagnostics for empty and final-expression so
       })),
       [
         { code: 'SEM0006', message: 'Unknown value foo' },
-        { code: 'PAR0004', message: 'Expected return statement' },
+        { code: 'SEM0130', message: 'A reachable path must return i32' },
       ],
     )
   }),

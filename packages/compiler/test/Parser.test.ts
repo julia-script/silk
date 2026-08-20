@@ -1600,7 +1600,7 @@ it('recovers a missing binding name before the equals token', () => {
   assertOriginalTokenTraversal(result)
 })
 
-it('recovers a block with only bindings by inserting the missing return', () => {
+it('preserves non-unit fallthrough as an implicit unit completion for semantic checking', () => {
   const result = parseText(
     'fixture://missing-return.silk',
     'pub fn main() -> i32 { let value = 42 }',
@@ -1613,24 +1613,19 @@ it('recovers a block with only bindings by inserting the missing return', () => 
   const statements = block.children.filter(SyntaxTree.isNode).map((node) => node.kind)
   assert.deepEqual(statements, ['BindingStatement', 'ReturnStatement'])
   const returnStatement = SyntaxTree.directNode(block, 'ReturnStatement')
-  assert.strictEqual(
-    returnStatement?.children.some(
-      (element) => SyntaxTree.isMissingToken(element) && element.expected === 'ReturnKeyword',
-    ),
-    true,
+  assert.notStrictEqual(returnStatement, undefined)
+  assert.notStrictEqual(
+    returnStatement === undefined
+      ? undefined
+      : SyntaxTree.directNode(returnStatement, 'UnitExpression'),
+    undefined,
   )
-  assert.deepEqual(
-    missingLeaves(returnStatement ?? block).map((element) => element.expected),
-    ['ReturnKeyword', 'DecimalInteger'],
-  )
-  assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0004'],
-  )
+  assert.deepEqual(missingLeaves(returnStatement ?? block), [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
 })
 
-it('keeps a final identifier as an expression statement before the missing return', () => {
+it('keeps a final identifier as an expression statement before implicit completion', () => {
   const result = parseText('fixture://missing-return-keyword.silk', 'pub fn main() -> i32 { foo }')
   const declaration = directFunctionDeclarations(result.root).at(0)
   const block = declaration === undefined ? undefined : SyntaxTree.directNode(declaration, 'Block')
@@ -1643,14 +1638,9 @@ it('keeps a final identifier as an expression statement before the missing retur
   if (returned === undefined || expression === undefined) return
   assert.strictEqual(SyntaxTree.directNode(block ?? result.root, 'AssignmentStatement'), undefined)
   assert.notStrictEqual(SyntaxTree.directNode(expression, 'IdentifierExpression'), undefined)
-  assert.deepEqual(
-    missingLeaves(returned).map((element) => element.expected),
-    ['ReturnKeyword', 'DecimalInteger'],
-  )
-  assert.deepEqual(
-    result.parserDiagnostics.map((diagnostic) => diagnostic.code),
-    ['PAR0004'],
-  )
+  assert.notStrictEqual(SyntaxTree.directNode(returned, 'UnitExpression'), undefined)
+  assert.deepEqual(missingLeaves(returned), [])
+  assert.deepEqual(result.parserDiagnostics, [])
   assertOriginalTokenTraversal(result)
 })
 
@@ -1864,9 +1854,7 @@ it('recovers an arm missing its closing brace before the trailing return', () =>
   )
 
   assert.strictEqual(
-    result.parserDiagnostics.every(
-      (diagnostic) => diagnostic.code === 'PAR0001' || diagnostic.code === 'PAR0004',
-    ),
+    result.parserDiagnostics.every((diagnostic) => diagnostic.code === 'PAR0001'),
     true,
   )
   assertOriginalTokenTraversal(result)
