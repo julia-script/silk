@@ -16,5 +16,5 @@
 
 - [x] 3.1 Add ordinary/effectful calls, acknowledgement, missing acknowledgement, values, sections, generics, storage, and conformance tests.
 - [x] 3.2 Prove ownership, Effect, requirement, target, and cleanup diagnostics remain active inside unsafe contexts.
-- [ ] 3.3 Update canonical specs, language docs, diagnostics, and low-level stdlib examples.
-- [ ] 3.4 Run typecheck, Biome, full tests, native acceptance only where low-level target behavior is involved, and `pnpm check`.
+- [x] 3.3 Update canonical specs, language docs, diagnostics, and low-level stdlib examples.
+- [x] 3.4 Run typecheck, Biome, full tests, native acceptance only where low-level target behavior is involved, and `pnpm check`.
