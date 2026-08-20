@@ -125,6 +125,12 @@ it('names the executable, target, and symbol count on success', () => {
         symbol: 'silk_main',
       },
     ],
+    termination: {
+      _tag: 'EntryTermination',
+      success: 'ReturnedStatus',
+      failures: [],
+      logicalFrames: [],
+    },
     diagnostics: [],
     report: [],
   }

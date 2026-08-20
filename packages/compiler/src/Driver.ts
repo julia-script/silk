@@ -55,6 +55,7 @@ export interface Compiled {
   readonly path: string
   readonly target: Target.Target
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly termination: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport>
 }
@@ -255,6 +256,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         path: committed.path,
         target: committed.target,
         symbols: artifact.symbols,
+        termination: artifact.termination,
         diagnostics,
         report: Object.freeze([...report]),
       })
@@ -286,6 +288,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           path: committed.path,
           target: committed.target,
           symbols: artifact.symbols,
+          termination: artifact.termination,
           diagnostics,
           report: Object.freeze([...report]),
         })
@@ -324,6 +327,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           path: finalized.path,
           target: finalized.target,
           symbols: artifact.symbols,
+          termination: artifact.termination,
           diagnostics,
           report: Object.freeze([...report]),
         })
@@ -396,6 +400,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         path: linked.path,
         target: linked.target,
         symbols: artifact.symbols,
+        termination: artifact.termination,
         diagnostics,
         report: Object.freeze([...report]),
       })

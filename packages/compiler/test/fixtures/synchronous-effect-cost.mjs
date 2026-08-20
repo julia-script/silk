@@ -600,7 +600,7 @@ try {
       const evaluatorBehavior =
         evaluated._tag === 'Completed'
           ? Number(evaluated.result.value)
-          : evaluated.reason._tag === 'Trap'
+          : evaluated._tag === 'Trap'
             ? 'trap'
             : evaluated._tag
       if (evaluatorBehavior !== sample.expected) {
@@ -681,7 +681,7 @@ try {
             unnormalizedEvaluator:
               unnormalizedEvaluated._tag === 'Completed'
                 ? Number(unnormalizedEvaluated.result.value)
-                : unnormalizedEvaluated.reason._tag === 'Trap'
+                : unnormalizedEvaluated._tag === 'Trap'
                   ? 'trap'
                   : unnormalizedEvaluated._tag,
             wasm: directWasmBehavior,

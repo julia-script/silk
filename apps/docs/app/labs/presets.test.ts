@@ -562,7 +562,7 @@ describe('preset catalog', () => {
     expect(Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)).toContain(
       'SEM0066',
     )
-    expect(Analysis.evaluate(snapshot)._tag).toBe('Blocked')
+    expect(Analysis.evaluate(snapshot)._tag).toBe('Trap')
   })
 
   it('coordinates every acceptance phase through existing panes', () => {
