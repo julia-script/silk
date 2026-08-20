@@ -888,7 +888,7 @@ and stable diagnostics rather than fabricating usable storage.
 
 #### Scenario: Resolve an independent allocation result
 
-- **WHEN** an Effect allocates through `Allocator@Scratch` and returns the successful owner
+- **WHEN** an Effect allocates through `Allocator at Scratch` and returns the successful owner
 - **THEN** facts expose the requirement and call-scoped exclusive access separately from the self-contained affine result and its possible `OutOfMemoryError`
 
 #### Scenario: Keep a custom provider nominal

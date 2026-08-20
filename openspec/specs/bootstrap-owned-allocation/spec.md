@@ -140,7 +140,7 @@ provider-dependent escaping allocation remains unavailable.
 
 #### Scenario: Select allocator roles ordinarily
 
-- **WHEN** one Effect requires `Allocator@Scratch` and `Allocator@Durable`
+- **WHEN** one Effect requires `Allocator at Scratch` and `Allocator at Durable`
 - **THEN** each allocation resolves through its statically selected general capability slot while both successful owners remain independent of the provider values
 
 ### Requirement: Allocation policy is source-defined over primitive storage operations

@@ -489,7 +489,7 @@ The continuous compiler corpus SHALL compile and execute a deterministic matrix 
 and Effect pipelines through evaluation, native LLVM, and direct WebAssembly. The matrix SHALL
 cover left association and grouping, direct and stored forms, ordinary and effectful entries,
 Copy and affine values, automatic and stored callables, `map`, `flatMap`, `tap`, `catch`, `retry`,
-`provide`, and `provideWith`, including representative combinations rather than only isolated
+`provide`, and `provideEffect`, including representative combinations rather than only isolated
 operators. Equivalent source shapes SHALL produce equal observable outcomes and cleanup; repeated
 analyses SHALL preserve deterministic artifacts.
 

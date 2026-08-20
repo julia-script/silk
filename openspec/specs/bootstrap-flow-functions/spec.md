@@ -192,26 +192,27 @@ captured providers SHALL be reused.
 
 ### Requirement: Provision distinguishes shared borrow, exclusive borrow, and acquisition
 
-Requirement binding SHALL relate whole protected row `R`, exact selected singleton row `S`, and one
+Requirement binding SHALL relate whole protected row `R`, exact selected service-role key `S`, and one
 of three source-spellable provider parameter modes:
 
 - shared `&P provides S from R`;
 - exclusive `&mut P provides S from R`;
 - owned `P provides S from R`.
 
-Shared providers SHALL select only shared stored requirements. Exclusive and owned providers MAY
-satisfy shared or exclusive stored requirements, but selection MUST return the stored member's
-original access and role. For every mode, `P` MUST equal the selected capability or have one unique,
+Shared providers SHALL satisfy only shared stored requirements. Exclusive and owned providers MAY
+satisfy shared or exclusive stored requirements. Selection MUST resolve the service-role key before
+validating its stored access demand. For every mode, `P` MUST equal the selected capability or have one unique,
 valid service-conformance witness.
 
-When `S` is unbound, every compatible capability-role entry SHALL be considered and exactly one
+When `S` is unbound, every compatible service-role key SHALL be considered and exactly one
 candidate MUST remain. Whenever `S` is independently bound—by an explicit row generic argument or
 by another supplied-argument occurrence—the constraint SHALL first require it to normalize to
 exactly one member, then validate that member and its provider match (identity or one unique
 conformance witness). Empty or multi-member
 bound selectors SHALL report selector-cardinality failure before provider matching. Explicit
 disambiguation SHALL name
-the complete access-capability-role entry; there SHALL be no role-only intrinsic filter and an
+the complete service-role key as `Service` or `Service at Role`; access SHALL NOT appear in the
+selector, there SHALL be no role-only intrinsic filter, and an
 expected result row MUST NOT disambiguate selection. No match, multiple inferred members, ambiguous
 conformance, and invalid conformance SHALL have distinct deterministic outcomes before execution.
 When multiple provider constraints share an unbound `S`, analysis SHALL solve them conjunctively by
@@ -260,7 +261,7 @@ or construct the result Effect type.
 `Effect.provide`, and `Effect.provideMut` SHALL be ordinary fixed-mode Silk declarations. Borrowed
 forms SHALL not imply provider ownership or cleanup. Moving an affine owned provider SHALL make the
 result take-once; an owned Copy provider SHALL follow ordinary snapshot and repeatability rules.
-`Effect.provideWith` SHALL acquire a fresh provider implementation `P` per execution, where `P` may
+`Effect.provideEffect` SHALL acquire a fresh provider implementation `P` per execution, where `P` may
 differ from selected capability `C`, bind it through an exclusive provider parameter, and drop every
 successfully acquired owner after success or typed failure without replacing the original outcome.
 
@@ -306,18 +307,18 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Keep same-role multi-capability selection ambiguous
 
-- **WHEN** a provider conforms to `Clock@Primary` and `Logger@Primary` and both occur in the protected row
+- **WHEN** a provider conforms to `Clock at Primary` and `Logger at Primary` and both occur in the protected row
 - **THEN** the shared role name does not choose between them and inferred selection remains ambiguous
 
-#### Scenario: Select an explicit complete shared requirement
+#### Scenario: Select an explicit shared requirement key
 
-- **WHEN** `Intrinsic.bindRequirement<&Logger@Audit>(effect, &provider)` is called
-- **THEN** the first generic argument fixes the exact stored access, capability, and role before provider conformance is validated
+- **WHEN** `Intrinsic.bindRequirement<Logger at Audit>(effect, &provider)` is called
+- **THEN** the first generic argument fixes the exact service-role key before provider conformance and shared access are validated
 
-#### Scenario: Select an explicit complete exclusive requirement in a pipeline
+#### Scenario: Select an explicit exclusive requirement key in a pipeline
 
-- **WHEN** `effect |> Effect.provideMut<&mut Logger@Audit>(&mut provider)` is composed
-- **THEN** the ordinary positional generic prefix fixes `S` while all later type and row binders remain inferred from supplied arguments and constraints
+- **WHEN** `effect |> Effect.provideMut<Logger at Audit>(&mut provider)` is composed
+- **THEN** the ordinary positional generic prefix fixes `S` while the helper validates exclusive access and all later type and row binders remain inferred from supplied arguments and constraints
 
 #### Scenario: Reject an invalid explicit selector cardinality
 
@@ -416,7 +417,7 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Preserve a constraint through a stored provider section
 
-- **WHEN** `let provideLogger = Effect.provideMut<&mut Logger>(&mut logger)` is stored or passed through another function before receiving an Effect
+- **WHEN** `let provideLogger = Effect.provideMut<Logger>(&mut logger)` is stored or passed through another function before receiving an Effect
 - **THEN** its semantic callable value retains the quantified selection obligation and provider capture until static application
 
 #### Scenario: Drop a stored provider section
@@ -426,12 +427,12 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Acquire a conforming implementation
 
-- **WHEN** `provideWith` protects an Effect requiring `Logger` and acquisition produces owned `StdoutLogger` with its own failures and requirements
+- **WHEN** `provideEffect` protects an Effect requiring `Logger` and acquisition produces owned `StdoutLogger` with its own failures and requirements
 - **THEN** exclusive conformance selects `Logger`, acquisition channels compose, and the acquired owner drops before the completed outcome escapes
 
 #### Scenario: Catch outside per-run acquisition
 
-- **WHEN** a failing Effect is wrapped by `provideWith` and then by executable `Effect.catchAll`
+- **WHEN** a failing Effect is wrapped by `provideEffect` and then by executable `Effect.catchAll`
 - **THEN** the per-run provider drops before recovery begins
 
 #### Scenario: Provide one shared service
@@ -446,7 +447,7 @@ successfully acquired owner after success or typed failure without replacing the
 
 #### Scenario: Catch outside per-run acquisition
 
-- **WHEN** a failing Effect is wrapped by `provideWith` and then by `Effect.catch`
+- **WHEN** a failing Effect is wrapped by `provideEffect` and then by `Effect.catch`
 - **THEN** the per-run provider drops before recovery begins
 
 ### Requirement: Traps remain outside Effect failure and cleanup
@@ -626,7 +627,7 @@ runtime. Traps and future interruption MUST NOT be converted into typed `E` valu
 ### Requirement: Standard Effect combinators are library-defined
 
 `map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `provide`, `provideMut`, and
-`provideWith` SHALL resolve to canonical ordinary Silk declarations. The compiler MUST NOT select
+`provideEffect` SHALL resolve to canonical ordinary Silk declarations. The compiler MUST NOT select
 their semantics from their names, actors, library origin, or a dedicated combinator HIR/MIR
 operation. Equivalent user code using the compiler-owned Effect core SHALL receive the same typing,
 ownership, execution, and cleanup behavior.
@@ -804,3 +805,36 @@ A declaration with an unresolved or invalid executable body SHALL be unavailable
 
 - **WHEN** an interface-dispatched operation implementation violates its resolved return contract
 - **THEN** the compiler emits the source semantic diagnostic and neither MIR verification nor a backend reports the primary failure
+
+### Requirement: Requirement identity is keyed independently from access
+
+An Effect requirement SHALL be identified by its canonical service identity plus optional `at` role. Shared, exclusive, and acquired access SHALL be checked as provider compatibility and SHALL NOT create different requirement keys. Requirement union, subtraction, and diagnostics SHALL be deterministic.
+
+#### Scenario: Distinguish two clocks by role
+
+- **WHEN** one Effect requires `Clock at source` and `Clock at destination`
+- **THEN** the row contains two keys and each provision discharges only the selected role
+
+#### Scenario: Reject insufficient provider access
+
+- **WHEN** an exclusive requirement key and conformance match but the provider offers only shared access
+- **THEN** provision reports `SEM0131` without changing the requirement's identity or treating the key as absent
+
+#### Scenario: Select one key before checking access
+
+- **WHEN** an explicit `Clock at Primary` selector names one row key
+- **THEN** provision resolves that key and its conformance before validating the helper's provider access mode
+
+### Requirement: Provision helpers discharge exact keys
+
+`provide`, `provideMut`, acquisition provision, and `provideEffect` SHALL discharge only their exact selected keys and preserve all unrelated failures and requirements. `provideWith` SHALL NOT remain as an alias. `Effect.flatten` SHALL union the requirements of both layers before provision.
+
+#### Scenario: Flatten a repeated requirement
+
+- **WHEN** `Effect.flatten` receives `Effect<Effect<i32 ? &Clock> ? &Clock>`
+- **THEN** the result is `Effect<i32 ? &Clock>` with one normalized key rather than two runtime slots
+
+#### Scenario: Build a provider effectfully
+
+- **WHEN** `provideEffect` obtains a provider from an Effect with its own failure and requirements
+- **THEN** those channels compose normally while the selected provided key is removed from the protected Effect

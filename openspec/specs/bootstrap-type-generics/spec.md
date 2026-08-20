@@ -88,12 +88,12 @@ deterministic diagnostic at the responsible prefix or application.
 
 #### Scenario: Supply a requirement-row prefix and infer the suffix
 
-- **WHEN** `Effect.provideMut<&mut Logger>(effect, &mut provider)` supplies first binder `?S` and leaves later binders implicit
+- **WHEN** `Effect.provideMut<Logger>(effect, &mut provider)` supplies first binder `?S` and leaves later binders implicit
 - **THEN** analysis accepts the requirement-row argument, fixes `S`, and infers the suffix only from `effect`, `provider`, and their checked constraint
 
 #### Scenario: Supply a row prefix through a pipeline
 
-- **WHEN** `effect |> Effect.provideMut<&mut Logger>(&mut provider)` supplies the same first row binder on a trailing-argument section
+- **WHEN** `effect |> Effect.provideMut<Logger>(&mut provider)` supplies the same first row binder on a trailing-argument section
 - **THEN** the section retains the omitted Effect-dependent suffix and completes it from the pipeline input without consulting the expected result
 
 #### Scenario: Lift a failure singleton into a failure-row prefix
@@ -208,14 +208,13 @@ expected result types MUST NOT infer `E` or `S` backwards. Declaration constrain
 assumptions while checking a generic body, and complete applications SHALL substitute and prove
 those assumptions before dependency discovery, ownership specialization, layout, or lowering.
 
-Requirement rows SHALL retain their existing capability-role keys, access labels, provider
-selection, row union, exact membership, subset, intersection, and difference semantics independently
-of ordinary failure algebra. Requirement union SHALL join colliding labels to the stronger access.
-Requirement membership, subset, intersection, and difference SHALL compare normalized stored access
-exactly. Provider compatibility is separate and MAY allow an exclusive or owned provider to satisfy
-a shared stored requirement; provider selection MUST return the exact stored entry before
-difference. A requirement-row `Without` is also forward-computed and MUST NOT be inverted from an
-expected remainder.
+Requirement rows SHALL retain canonical service-role keys and store access demand separately from
+identity. Requirement union SHALL join colliding keys to the stronger access. Requirement
+membership, subset, intersection, and difference SHALL compare service-role keys; `Without<R, K>`
+SHALL remove the complete matching entry regardless of its stored access. Provider compatibility is
+separate and MAY allow an exclusive or owned provider to satisfy a shared stored requirement. A
+requirement-row `Without` is also forward-computed and MUST NOT be inverted from an expected
+remainder.
 
 Open ordinary type expressions and requirement-row expressions SHALL use deterministic definitional
 normal forms. Generic-to-generic substitution MUST compose parameter identity and assumed evidence
@@ -241,28 +240,28 @@ of whether a contract originated in Silk source or the sealed intrinsic inventor
 
 #### Scenario: Join colliding requirement access
 
-- **WHEN** `&Logger@DefaultRole | &mut Logger@DefaultRole` is normalized
-- **THEN** it contains exactly the exclusive entry `&mut Logger@DefaultRole`
+- **WHEN** `&Logger | &mut Logger` is normalized
+- **THEN** it contains exactly the exclusive entry `&mut Logger` for the default role key
 
-#### Scenario: Preserve an exclusive requirement after weaker subtraction
+#### Scenario: Remove an exclusive requirement with an access-independent selector
 
-- **WHEN** `Without<&mut Logger@DefaultRole, &Logger@DefaultRole>` is specialized
-- **THEN** the access labels do not match and the result remains `&mut Logger@DefaultRole`
+- **WHEN** `Without<&mut Logger, Logger>` is specialized
+- **THEN** the complete default-role Logger entry is removed
 
-#### Scenario: Preserve a shared requirement after stronger subtraction
+#### Scenario: Remove a shared requirement with an access-independent selector
 
-- **WHEN** `Without<&Logger@DefaultRole, &mut Logger@DefaultRole>` is specialized
-- **THEN** the access labels do not match and the result remains `&Logger@DefaultRole`
+- **WHEN** `Without<&Logger, Logger>` is specialized
+- **THEN** the complete default-role Logger entry is removed
 
 #### Scenario: Remove the exact stored requirement
 
-- **WHEN** `Without<&mut Logger@DefaultRole | &Clock, &mut Logger@DefaultRole>` is specialized
+- **WHEN** `Without<&mut Logger | &Clock, Logger>` is specialized
 - **THEN** it normalizes to the singleton requirement row `&Clock`
 
-#### Scenario: Reject access-mismatched checked membership
+#### Scenario: Keep access compatibility outside key membership
 
-- **WHEN** a declaration requires `&Logger@DefaultRole` to be a member of a row containing only `&mut Logger@DefaultRole`
-- **THEN** analysis reports an access mismatch even though both entries have the same capability-role key
+- **WHEN** a declaration selects `Logger` from a row containing `&mut Logger`
+- **THEN** key membership succeeds and provider access is validated separately by the consuming operation
 
 #### Scenario: Preserve an open ordinary difference
 
@@ -286,17 +285,17 @@ of whether a contract originated in Silk source or the sealed intrinsic inventor
 
 #### Scenario: Rewrite a symbolic requirement member through generic forwarding
 
-- **WHEN** a generic requirement member `&mut P@Audit` is substituted with still-open caller capability parameter `Q`
-- **THEN** row substitution produces residual `&mut Q@Audit` with fixed exclusive access and resolved `Audit` role, and the retained well-formedness obligation refers to `Q`
+- **WHEN** a generic requirement member `&mut P at Audit` is substituted with still-open caller capability parameter `Q`
+- **THEN** row substitution produces residual `&mut Q at Audit` with fixed exclusive access and resolved `Audit` role, and the retained well-formedness obligation refers to `Q`
 
 #### Scenario: Concretize a valid symbolic requirement member
 
-- **WHEN** residual requirement member `&mut P@Audit` is completely specialized with capability `P = Logger`
-- **THEN** substitution produces exactly concrete member `&mut Logger@Audit` and discharges its member-well-formedness obligation
+- **WHEN** residual requirement member `&mut P at Audit` is completely specialized with capability `P = Logger`
+- **THEN** substitution produces exactly concrete member `&mut Logger at Audit` and discharges its member-well-formedness obligation
 
 #### Scenario: Reject an invalid symbolic requirement member
 
-- **WHEN** residual requirement member `&mut P@Audit` is completely specialized with a non-capability value type
+- **WHEN** residual requirement member `&mut P at Audit` is completely specialized with a non-capability value type
 - **THEN** substitution reports invalid requirement singleton before row normalization or any row-dependent consumer
 
 #### Scenario: Renormalize after substitution collision
@@ -371,7 +370,7 @@ of whether a contract originated in Silk source or the sealed intrinsic inventor
 
 #### Scenario: Infer a requirement remainder for provide
 
-- **WHEN** a generic provider selects `&Clock@Primary` from `&Clock@Primary | Rest`
+- **WHEN** a generic provider selects `Clock at Primary` from `&Clock at Primary | Rest`
 - **THEN** inference binds `Rest` to every other normalized requirement and rejects a provider with incompatible access or role
 
 ### Requirement: Channel specialization remains erased and deterministic
@@ -423,3 +422,26 @@ introduce a separate generic call or specialization identity.
 
 - **WHEN** a generic function calls a qualified operation under a service bound and receives a concrete conforming provider
 - **THEN** the call specializes to the provider's ordinary static witness with no runtime dependency lookup
+
+### Requirement: Requirement selectors name access-independent keys
+
+A requirement-row key SHALL consist of one canonical service identity and one canonical nominal
+role identity. Omitting `at Role` SHALL select `DefaultRole`. Shared and exclusive access SHALL be
+stored as the demand associated with a key and SHALL NOT participate in key identity. Union SHALL
+retain the strongest demand for colliding keys. `Without<R, K>` SHALL accept the selector
+`Service` or `Service at Role` and remove the complete matching key regardless of its demand.
+
+#### Scenario: Merge repeated access demands
+
+- **WHEN** a requirement union contains `&Clock at Primary | &mut Clock at Primary`
+- **THEN** it normalizes to the single key `Clock at Primary` with exclusive demand
+
+#### Scenario: Subtract an exclusive requirement by key
+
+- **WHEN** `Without<&mut Clock at Primary | &Logger, Clock at Primary>` is specialized
+- **THEN** it normalizes to `&Logger`
+
+#### Scenario: Keep independently declared roles distinct
+
+- **WHEN** two modules each declare a visible role named `Primary`
+- **THEN** their canonical identities remain distinct and same-spelled selectors do not collide

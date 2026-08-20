@@ -16,5 +16,5 @@
 
 - [x] 3.1 Add repeated service, role collision, insufficient access, acquisition, effectful provider, and nested-flatten tests.
 - [x] 3.2 Verify ownership loans and cleanup for every provider access mode.
-- [ ] 3.3 Update stdlib source/generated artifacts, diagnostics, canonical specs, docs, and language-service facts.
-- [ ] 3.4 Run typecheck, Biome, evaluator/Wasm tests, native corpus where provider ABI changes, full tests, and `pnpm check`.
+- [x] 3.3 Update stdlib source/generated artifacts, diagnostics, canonical specs, docs, and language-service facts.
+- [x] 3.4 Run typecheck, Biome, evaluator/Wasm tests, native corpus where provider ABI changes, full tests, and `pnpm check`.

@@ -1002,7 +1002,7 @@ terms SHALL produce bounded missing/unexpected nodes without consuming the next 
 
 #### Scenario: Parse a row-generic call prefix
 
-- **WHEN** `effect |> Effect.provideMut<&mut Logger@Audit>(&mut provider)` is parsed
+- **WHEN** `effect |> Effect.provideMut<Logger at Audit>(&mut provider)` is parsed
 - **THEN** the first generic argument remains a requirement-row expression and later omitted generic binders remain absent rather than synthesized syntax
 
 #### Scenario: Recover a malformed constraint locally
