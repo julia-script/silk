@@ -124,7 +124,7 @@ There are 157 codes in total.
 | `SEM0067` |  | `Invalid Effect.catch handler: <detail>` |
 | `SEM0068` |  | `Effect recipe bindings are immutable` |
 | `SEM0069` |  | `Cannot merge Effect values from different construction sites without explicit erasure` |
-| `SEM0070` | Stable code for a non-concrete or non-nominal capability in a requirement row. | `Effect requirement <type> must be one concrete nominal capability type` |
+| `SEM0070` | Stable code for a non-concrete or non-nominal capability in a requirement row. | `Effect requirement <type> must be one concrete service type` |
 | `SEM0071` |  | `Run leaves unsatisfied requirements: <join>` |
 | `SEM0073` |  | `Failure <type> is not detached because it contains a lexical borrow` |
 | `SEM0074` |  | `Invalid Effect provider: <detail>` |
