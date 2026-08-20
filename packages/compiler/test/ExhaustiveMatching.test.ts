@@ -310,6 +310,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
     const mir = Analysis.loweredMir(self)
     assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+    assert.include(Mir.encode(mir), ' retain-bindings ')
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
