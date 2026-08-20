@@ -1,7 +1,7 @@
 # Generalize ordinary structural unions
 
 Type: OpenSpec implementation handoff
-Status: open
+Status: resolved
 Blocked by: 02, 07
 OpenSpec: [generalize-ordinary-structural-unions](../../../openspec/changes/generalize-ordinary-structural-unions/proposal.md)
 

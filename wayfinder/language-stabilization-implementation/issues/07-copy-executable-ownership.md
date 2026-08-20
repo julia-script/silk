@@ -1,7 +1,7 @@
 # Define Copy and executable ownership
 
 Type: OpenSpec implementation handoff
-Status: open
+Status: resolved
 Blocked by: 01
 OpenSpec: [define-copy-and-executable-ownership](../../../openspec/changes/define-copy-and-executable-ownership/proposal.md)
 

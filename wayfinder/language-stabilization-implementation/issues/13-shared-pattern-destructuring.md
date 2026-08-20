@@ -1,7 +1,7 @@
 # Add shared pattern destructuring
 
 Type: OpenSpec implementation handoff
-Status: open
+Status: resolved
 Blocked by: 08, 09
 OpenSpec: [add-shared-pattern-destructuring](../../../openspec/changes/add-shared-pattern-destructuring/proposal.md)
 
