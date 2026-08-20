@@ -1178,21 +1178,38 @@ it('checks zero-, one-, and two-argument compatible calls', () => {
   assert.strictEqual(two.contract._tag, 'Compatible')
 })
 
-it('forms the one leading section and still diagnoses deeper arity mismatches', () => {
+it('forms every non-empty trailing section and diagnoses only over-application', () => {
   const tooFew = analyzeText('fixture://too-few.silk', tooFewArgumentsSource)
+  const deeper = analyzeText(
+    'fixture://deeper-section.silk',
+    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32, i32) -> i32 { return combine(3) }',
+  )
   const tooMany = analyzeText('fixture://too-many.silk', tooManyArgumentsSource)
   const fewSection = functionAt(tooFew, 1).returnedExpression
+  const deeperSection = functionAt(deeper, 1).returnedExpression
   const manyFunction = functionAt(tooMany, 1)
   const manyCall = callFact(manyFunction)
 
   assert.strictEqual(fewSection._tag, 'CallableSection')
   if (fewSection._tag !== 'CallableSection') return
-  assert.strictEqual(fewSection.omittedParameter, 0)
+  assert.deepEqual(fewSection.remainingParameters, [0])
   assert.strictEqual(fewSection.captures.length, 1)
   assert.strictEqual(
     fewSection.type._tag === 'Available' ? Type.encode(fewSection.type.type) : undefined,
     'fn(i32) -> i32',
   )
+  assert.strictEqual(deeperSection._tag, 'CallableSection')
+  if (deeperSection._tag === 'CallableSection') {
+    assert.deepEqual(deeperSection.remainingParameters, [0, 1])
+    assert.deepEqual(
+      deeperSection.captures.map((capture) => capture.parameterOrdinal),
+      [2],
+    )
+    assert.strictEqual(
+      deeperSection.type._tag === 'Available' ? Type.encode(deeperSection.type.type) : undefined,
+      'fn(i32, i32) -> i32',
+    )
+  }
   assert.deepEqual(manyCall.contract, {
     _tag: 'ArityMismatch',
     expectedCount: 1,
@@ -1205,6 +1222,7 @@ it('forms the one leading section and still diagnoses deeper arity mismatches', 
     tooFew.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0129'],
   )
+  assert.deepEqual(deeper.diagnostics, [])
   assert.deepEqual(
     tooMany.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0007'],
@@ -2136,7 +2154,7 @@ fn main() -> i32 { return run run outer() }`,
   }),
 )
 
-it('diagnoses each invalid callable application at the callable boundary', () => {
+it('diagnoses invalid callable applications while accepting deeper sections', () => {
   const nonCallable = analyzeText(
     'fixture://non-callable-application.silk',
     'fn main() -> i32 { let value = 1 return value(2) }',
@@ -2178,9 +2196,13 @@ fn main() -> i32 { let mut values = [1] let callback = write(&mut values) return
     redundant.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0078',
   )
-  assert.include(
+  assert.notInclude(
     deeper.diagnostics.map((diagnostic) => diagnostic.code),
     'SEM0079',
+  )
+  assert.include(
+    deeper.diagnostics.map((diagnostic) => diagnostic.code),
+    'SEM0129',
   )
 })
 

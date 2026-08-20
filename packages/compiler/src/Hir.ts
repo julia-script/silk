@@ -560,7 +560,7 @@ export type Expression =
       readonly _tag: 'CallableSection'
       readonly site: CallableSiteId
       readonly target: CallableTarget
-      readonly omittedParameter: 0
+      readonly remainingParameters: ReadonlyArray<number>
       readonly captures: ReadonlyArray<{
         readonly ordinal: number
         readonly parameterOrdinal: number
@@ -1574,7 +1574,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       } : ${Type.encode(expression.type)} ${spanText(expression.span)}`
     case 'CallableSection':
       return [
-        `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} omitted=p0 target=${
+        `${indent}callable-section site=${executableSiteLabel(expression.site)} mode=${expression.mode.toLowerCase()} remaining=${expression.remainingParameters.map((ordinal) => `p${ordinal}`).join(',')} target=${
           expression.target._tag === 'DeclarationCallableTarget'
             ? `${expression.target.declaration.module}.${expression.target.declaration.name}`
             : `${expression.target.actor}.${expression.target.operation}`

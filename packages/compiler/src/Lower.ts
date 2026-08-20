@@ -603,7 +603,8 @@ const callableApplicationArgument = (
   if (section === undefined) return expression.arguments.at(ordinal)
   const captured = section.captures.find((capture) => capture.parameterOrdinal === ordinal)
   if (captured !== undefined) return captured.value
-  return ordinal === section.omittedParameter ? expression.arguments.at(0) : undefined
+  const argumentOrdinal = section.remainingParameters.indexOf(ordinal)
+  return argumentOrdinal < 0 ? undefined : expression.arguments.at(argumentOrdinal)
 }
 
 const inlineForwardedRequirement = (

@@ -619,7 +619,7 @@ export interface FunctionItemExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** One trailing value retained by an automatic leading-argument section. */
+/** One trailing value retained by an automatic trailing-argument section. */
 export interface CallableCaptureFact {
   readonly _tag: 'CallableCapture'
   readonly ordinal: number
@@ -628,13 +628,13 @@ export interface CallableCaptureFact {
   readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
 }
 
-/** One hidden concrete section construction awaiting parameter zero. */
+/** One hidden concrete section construction awaiting an ordered leading parameter prefix. */
 export interface CallableSectionExpressionFact {
   readonly _tag: 'CallableSection'
   readonly site: Hir.CallableSiteId
   readonly reference: CallReferenceFact
   readonly path: ReferencePathFact
-  readonly omittedParameter: 0
+  readonly remainingParameters: ReadonlyArray<number>
   readonly captures: ReadonlyArray<CallableCaptureFact>
   readonly retainedDependencies: ReadonlyArray<number>
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
@@ -2861,7 +2861,8 @@ const effectCallableApplicationRepresentation = (
   const applicationArgument = (ordinal: number): ExpressionFact | undefined => {
     const captured = callee.captures.find((capture) => capture.parameterOrdinal === ordinal)
     if (captured !== undefined) return captured.expression
-    return ordinal === callee.omittedParameter ? expression.arguments.at(0)?.expression : undefined
+    const argumentOrdinal = callee.remainingParameters.indexOf(ordinal)
+    return argumentOrdinal < 0 ? undefined : expression.arguments.at(argumentOrdinal)?.expression
   }
   return exactEffectDeclarationRepresentation(
     callee.reference.declaration,
@@ -3834,17 +3835,15 @@ function analyzeArguments(
       : builtinParameters.length > 0
         ? builtinParameters
             .slice(
-              builtinParameters.length >= 2 && argumentNodes.length === builtinParameters.length - 1
-                ? 1
+              isSectionArity(builtinParameters.length, argumentNodes.length)
+                ? builtinParameters.length - argumentNodes.length
                 : 0,
             )
             .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
         : (target?.parameters ?? [])
             .slice(
-              target !== undefined &&
-                target.parameters.length >= 2 &&
-                argumentNodes.length === target.parameters.length - 1
-                ? 1
+              target !== undefined && isSectionArity(target.parameters.length, argumentNodes.length)
+                ? target.parameters.length - argumentNodes.length
                 : 0,
             )
             .map((parameter) =>
@@ -4047,6 +4046,9 @@ const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
   )
   return callHeadAvailable && listStructureAvailable
 }
+
+const isSectionArity = (expectedCount: number, actualCount: number): boolean =>
+  actualCount > 0 && actualCount < expectedCount
 
 type SourceCallable = DeclarationFact | DeclarationIndex.ServiceOperationFact
 
@@ -5343,14 +5345,16 @@ interface SectionContractResult {
   readonly valid: boolean
 }
 
-/** A section applies its arguments from the second parameter on: the first one is what it holds. */
+/** A section binds its written arguments to the callable's trailing parameter suffix. */
 const sectionSpecializationSites = (
   contract: CallableContract.CallableContract,
   arguments_: ReadonlyArray<ArgumentFact>,
 ): ReadonlyArray<SpecializationSite> =>
   Object.freeze(
     arguments_.flatMap((argument, ordinal): ReadonlyArray<SpecializationSite> => {
-      const parameter = contract.parameters.at(ordinal + 1)
+      const parameter = contract.parameters.at(
+        contract.parameters.length - arguments_.length + ordinal,
+      )
       return argument.type._tag === 'Available' && parameter !== undefined
         ? [
             Object.freeze({
@@ -5374,9 +5378,10 @@ const analyzeSectionContract = (
   callTypeArguments: CallTypeArgumentsResult,
 ): SectionContractResult => {
   if (reference._tag === 'ResolvedBuiltin') {
+    const captureStart = reference.parameters.length - arguments_.length
     const diagnostics = arguments_.flatMap((argument, ordinal) => {
       if (argument.type._tag !== 'Available') return []
-      const expected = reference.parameters.at(ordinal + 1)
+      const expected = reference.parameters.at(captureStart + ordinal)
       if (expected === undefined || typesCompatible(argument.type.type, expected)) return []
       return [
         Diagnostic.argumentTypeMismatch(
@@ -5425,10 +5430,9 @@ const analyzeSectionContract = (
         ),
       )
     } else {
-      // A section takes a prefix the same way an ordinary call does: what the list writes is
-      // bound, what the supplied arguments determine is inferred, and the parameter the section
-      // still holds open belongs to the captured leading parameter.
-      const leading = callable.parameters.at(0)?.type
+      // A section binds one trailing suffix. Written and inferred type arguments specialize those
+      // captures while every remaining leading parameter stays available to later application.
+      const remaining = callable.parameters.slice(0, callable.parameters.length - arguments_.length)
       const constraintDeferred = callable.constraints.flatMap((constraint) =>
         constraint._tag === 'ProviderSelectionConstraint' &&
         constraint.selected.expression._tag === 'RowParameter'
@@ -5442,7 +5446,7 @@ const analyzeSectionContract = (
         sectionSpecializationSites(callable, arguments_),
         call.span,
         new Set([
-          ...(leading === undefined ? [] : Type.parameters(leading).map(Type.key)),
+          ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
           ...constraintDeferred,
         ]),
       )
@@ -5455,7 +5459,9 @@ const analyzeSectionContract = (
     }
   } else {
     for (const [ordinal, argument] of arguments_.entries()) {
-      const parameter = callable.parameters.at(ordinal + 1)
+      const parameter = callable.parameters.at(
+        callable.parameters.length - arguments_.length + ordinal,
+      )
       if (
         argument.type._tag === 'Available' &&
         parameter !== undefined &&
@@ -5470,9 +5476,9 @@ const analyzeSectionContract = (
         break
       }
     }
-    const leading = callable.parameters.at(0)?.type
+    const remaining = callable.parameters.slice(0, callable.parameters.length - arguments_.length)
     const deferred = new Set([
-      ...(leading === undefined ? [] : Type.parameters(leading).map(Type.key)),
+      ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
       ...callable.constraints.flatMap((constraint) =>
         constraint._tag === 'ProviderSelectionConstraint' &&
         constraint.selected.expression._tag === 'RowParameter'
@@ -5489,7 +5495,9 @@ const analyzeSectionContract = (
     }
   }
   for (const [ordinal, argument] of arguments_.entries()) {
-    const parameter = callable.parameters.at(ordinal + 1)
+    const parameter = callable.parameters.at(
+      callable.parameters.length - arguments_.length + ordinal,
+    )
     if (argument.type._tag !== 'Available' || parameter === undefined) continue
     // An argument already named as contradicting a written type argument is one mistake, and it
     // was reported where the author wrote the type.
@@ -5579,17 +5587,19 @@ const sectionCallableType = (
   >,
   substitution: Type.Substitution,
   mode: Type.CallableMode,
+  argumentCount: number,
 ): Type.Callable | undefined => {
   if (reference._tag === 'ResolvedBuiltin') {
-    const leading = reference.parameters.at(0)
-    return leading === undefined ? undefined : Type.callable([leading], reference.result, mode)
+    const remaining = reference.parameters.slice(0, reference.parameters.length - argumentCount)
+    return remaining.length === 0 ? undefined : Type.callable(remaining, reference.result, mode)
   }
   const contract = resolvedCallableContract(reference)
-  const leading = contract?.parameters.at(0)?.type
   const result = contract?.result
-  if (contract === undefined || leading === undefined || result === undefined) return undefined
+  if (contract === undefined || result === undefined) return undefined
+  const remaining = contract.parameters.slice(0, contract.parameters.length - argumentCount)
+  if (remaining.length === 0) return undefined
   return Type.callable(
-    [Type.substitute(leading, substitution)],
+    remaining.map((parameter) => Type.substitute(parameter.type, substitution)),
     Type.substitute(result, substitution),
     mode,
     contract.constraints.length === 0
@@ -5683,12 +5693,17 @@ const finishCallableSection = (
   caller: DeclarationFact,
 ): ExpressionResult => {
   const contract = analyzeSectionContract(node, reference, argumentsResult.facts, callTypeArguments)
+  const parameterCount =
+    reference._tag === 'ResolvedBuiltin'
+      ? reference.parameters.length
+      : (resolvedCallableContract(reference)?.parameters.length ?? 0)
+  const captureStart = parameterCount - argumentsResult.facts.length
   const captures = Object.freeze(
     argumentsResult.facts.map((argument, ordinal) =>
       Object.freeze({
         _tag: 'CallableCapture' as const,
         ordinal,
-        parameterOrdinal: ordinal + 1,
+        parameterOrdinal: captureStart + ordinal,
         expression: argument.expression,
         access:
           ordinal === 0 &&
@@ -5706,7 +5721,12 @@ const finishCallableSection = (
     ),
   )
   const mode = callableMode(captures)
-  const callable = sectionCallableType(reference, contract.substitution, mode)
+  const callable = sectionCallableType(
+    reference,
+    contract.substitution,
+    mode,
+    argumentsResult.facts.length,
+  )
   const type =
     contract.valid && callable !== undefined
       ? availableExpressionType(callable)
@@ -5718,7 +5738,9 @@ const finishCallableSection = (
       site: executableSite('CallableSiteId', resolution, node),
       reference,
       path: referencePath(node),
-      omittedParameter: 0,
+      remainingParameters: Object.freeze(
+        Array.from({ length: captureStart }, (_, ordinal) => ordinal),
+      ),
       captures,
       retainedDependencies: Object.freeze(
         captures.flatMap((capture) =>
@@ -6459,8 +6481,7 @@ function analyzeBuiltinCall(
   const operation = Intrinsic.findOperation(actorSpelling, operationSpelling)
   if (
     operation?.rule._tag === 'ContractRule' &&
-    operation.rule.contract.parameters.length >= 2 &&
-    argumentsResult.facts.length === operation.rule.contract.parameters.length - 1
+    isSectionArity(operation.rule.contract.parameters.length, argumentsResult.facts.length)
   )
     return finishCallableSection(
       call,
@@ -6575,8 +6596,7 @@ function analyzeBuiltinCall(
   if (
     reference._tag === 'ResolvedBuiltin' &&
     declaredTypeParameters.length === 0 &&
-    reference.parameters.length >= 2 &&
-    argumentsResult.facts.length === reference.parameters.length - 1
+    isSectionArity(reference.parameters.length, argumentsResult.facts.length)
   ) {
     return finishCallableSection(
       call,
@@ -8167,8 +8187,7 @@ function analyzeExpression(
           })
   if (
     reference._tag === 'Resolved' &&
-    reference.declaration.parameters.length >= 2 &&
-    argumentsResult.facts.length === reference.declaration.parameters.length - 1
+    isSectionArity(reference.declaration.parameters.length, argumentsResult.facts.length)
   ) {
     return finishCallableSection(
       node,
@@ -8272,8 +8291,7 @@ const finishDeclarationCall = (
 ): ExpressionResult => {
   if (
     reference._tag === 'Resolved' &&
-    reference.declaration.parameters.length >= 2 &&
-    argumentsResult.facts.length === reference.declaration.parameters.length - 1
+    isSectionArity(reference.declaration.parameters.length, argumentsResult.facts.length)
   ) {
     const section = finishCallableSection(
       node,
@@ -10087,7 +10105,7 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
       _tag: 'CallableSection',
       site: fact.site,
       target,
-      omittedParameter: 0,
+      remainingParameters: fact.remainingParameters,
       captures: Object.freeze(
         fact.captures.map((capture) =>
           Object.freeze({

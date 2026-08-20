@@ -31,6 +31,11 @@ const partial = `fn apply(transform: once fn(i32) -> i32, value: i32) -> i32 {
 
 pub fn main() -> i32 { return apply(i32.add(40), 2) }`
 
+/** A deeper section binds the trailing parameter and awaits the ordered leading pair. */
+const deeper = `fn combine(a: i32, b: i32, c: i32) -> i32 { return a + b + c }
+
+pub fn main() -> i32 { return combine(3)(19, 20) }`
+
 /**
  * A callable parameter forwarded to a further call, so the origin is a `ParameterReference`
  * rather than a function item at the call site. Generic on both ends, so the hidden identity has
@@ -59,6 +64,7 @@ it.effect('calls through a function-typed parameter and agrees on the evaluator 
       ['concrete', concrete],
       ['generic', generic],
       ['partial', partial],
+      ['deeper', deeper],
       ['forwarded', forwarded],
       ['shared', shared],
     ] as const) {

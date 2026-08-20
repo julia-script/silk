@@ -6,7 +6,7 @@ Borrowing is currently limited by implementation-shaped roots, while callable se
 
 - Give temporaries and stable subplaces compiler-owned owner/place identities and carry provenance through projections, locals, calls, and returned views.
 - Admit local shared and exclusive borrow bindings while preserving exclusivity, non-escape, and lexical lifetime rules.
-- Generalize callable sections to every `0 < K < N` supplied leading prefix and allow staged application.
+- Generalize callable sections to every `0 < K < N` supplied trailing suffix and allow staged application.
 - Apply last-invocation loan shortening to reusable callables while preserving explicit drop, consuming calls, escape, and aggregate-storage lifetimes.
 - Update callable representations, ownership, evaluation, MIR, LLVM, Wasm, diagnostics, and formatter behavior together.
 
@@ -23,4 +23,4 @@ Borrowing is currently limited by implementation-shaped roots, while callable se
 
 ## Impact
 
-Depends on `define-copy-and-executable-ownership`. It retires the unary-only section diagnostic and the named-whole-array borrow exceptions. It does not relax exclusive borrowing, allow escaping local loans, or synthesize heap allocation to extend lifetimes.
+Depends on `define-copy-and-executable-ownership`. It retires the unary-only section diagnostic and the named-whole-array borrow exceptions. It does not relax exclusive borrowing, allow escaping local loans, synthesize heap allocation to extend lifetimes, bind argument holes, or reorder parameters.

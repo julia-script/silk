@@ -4,15 +4,15 @@ Borrow roots and callable sections expose limitations of current syntax-shaped o
 
 ## Goals / Non-Goals
 
-**Goals:** stable temporary/subplace roots; local borrow values; generalized sections; last-use loan shortening; engine parity.
+**Goals:** stable temporary/subplace roots; local borrow values; generalized trailing sections; last-use loan shortening; engine parity.
 
-**Non-goals:** non-lexical escaping references, relaxed exclusive access, implicit heap promotion, or arbitrary currying that reorders arguments.
+**Non-goals:** non-lexical escaping references, relaxed exclusive access, implicit heap promotion, argument holes, or arbitrary currying that reorders arguments.
 
 ## Decisions
 
 1. Materialize addressable temporaries and subplaces with compiler-owned stable logical owner IDs.
 2. Carry a provenance chain in semantic facts and MIR places rather than recognizing arrays or names specially.
-3. Represent a section by the source callable plus an ordered list of supplied leading arguments and remaining suffix contract.
+3. Represent a section by the source callable plus an ordered list of supplied trailing arguments and the remaining leading-parameter contract.
 4. Reuse one last-use analysis for Effect runs and callable invocations, with escape/storage as conservative lifetime barriers.
 5. Preserve affine moves and loans when a section is staged; no supplied argument is duplicated.
 

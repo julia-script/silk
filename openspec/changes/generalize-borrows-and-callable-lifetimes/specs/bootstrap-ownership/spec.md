@@ -14,14 +14,19 @@ The compiler SHALL assign stable logical identities to materialized temporaries 
 - **WHEN** a function returns a view borrowed from a local array
 - **THEN** ownership reports that the view would outlive its owner
 
-### Requirement: Callable sections admit every non-empty leading prefix
+### Requirement: Callable sections admit every non-empty trailing suffix
 
-For an `N`-parameter callable, supplying `K` leading arguments where `0 < K < N` SHALL produce a callable awaiting the remaining ordered suffix. Sections MAY be applied in stages and SHALL move or borrow supplied arguments exactly once according to their parameter contracts.
+For an `N`-parameter callable, supplying `K` arguments where `0 < K < N` SHALL bind those arguments to the callable's ordered trailing suffix and produce a callable awaiting the remaining ordered leading parameters. Sections MAY be applied in stages and SHALL move or borrow supplied arguments exactly once according to their parameter contracts. A section SHALL NOT bind holes or reorder parameters.
 
 #### Scenario: Partially apply a binary function
 
 - **WHEN** `add` has two parameters and source evaluates `add(2)`
-- **THEN** the result is a callable accepting the remaining parameter and eventually computing `add(2, value)`
+- **THEN** the result is a callable accepting the remaining parameter and eventually computing `add(value, 2)`
+
+#### Scenario: Stage a multi-parameter section
+
+- **WHEN** `combine(a, b, c)` is applied as `combine(3)(2)(1)`
+- **THEN** each application binds the next trailing parameter exactly once and the final invocation computes `combine(1, 2, 3)`
 
 #### Scenario: End a reusable capture loan at last invocation
 

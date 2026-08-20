@@ -7,7 +7,7 @@
 
 ## 2. Callable sections and lifetimes
 
-- [ ] 2.1 Represent ordered supplied leading prefixes and remaining suffix contracts for every `0 < K < N`.
+- [ ] 2.1 Represent ordered supplied trailing suffixes and remaining leading-parameter contracts for every `0 < K < N`.
 - [ ] 2.2 Implement staged application with exact affine move and borrow behavior.
 - [ ] 2.3 Generalize evaluator, LLVM, Wasm, storage, formatting, signature help, and inspectors.
 - [ ] 2.4 Share last-use loan calculation between Effect runs and callable invocation while retaining escape/storage barriers.
