@@ -108,6 +108,11 @@ MIR construction. This change adds no runtime type dictionary.
 - **WHEN** a catch-all handler matches one failure member and fails again with the unmatched value
 - **THEN** ordinary union narrowing preserves that unmatched member in the output failure channel
 
+#### Scenario: Catch the whole ordinary failure value
+
+- **WHEN** `Effect.catchAll` protects `Effect<A ! E>`
+- **THEN** its handler accepts `E` directly, without `Row<!E>` or another reification wrapper
+
 #### Scenario: Reject an invalid selected subset
 
 - **WHEN** `S` is `never` or contains an alternative absent from protected failure type `E`
