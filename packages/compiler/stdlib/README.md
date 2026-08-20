@@ -31,7 +31,7 @@ The `silk.string` module exposes these operations:
 | `view(self: &String)` | Borrows the complete owned contents as `string` without allocation. |
 | `ownedUtf8Bytes(self: &String)` | Borrows the owned value's immutable bytes without allocation. |
 | `ownedByteLength(self: &String)` | Returns the owned value's initialized byte length without allocation. |
-| `scalarCursor()` and `nextScalar(value, cursor)` | Traverse Unicode scalar values without allocation. Each step carries its starting byte offset and the next opaque cursor. |
+| `scalarCursor()` and `nextScalar(value, cursor)` | Traverse Unicode `char` values without allocation. Each step carries its starting byte offset and the next opaque cursor. |
 
 Conversions between `string`, `String`, and `&[u8]` are explicit. Passing text to a byte-oriented
 API requires `utf8Bytes`; retaining text requires `copy`; borrowing owned text requires `view`.

@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 128 |
+| `SEM` | Semantic | 127 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 157 codes in total.
+There are 156 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -145,7 +145,6 @@ There are 157 codes in total.
 | `SEM0091` |  | `A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter` |
 | `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
-| `SEM0094` | Stable code for wrapping the already-borrowed string view in another reference or slice. | `` `string` is already a borrowed immutable view and cannot be referenced again ``<br>`` `string` cannot be the element of another borrowed slice view `` |
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0096` | Stable code for an effect site or a move inside the conditional right operand of `&&` or `\|\|`. | `The right operand of <operator> must be pure, found <detail>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |

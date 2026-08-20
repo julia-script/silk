@@ -262,16 +262,34 @@ equality and ordering by scalar value.
 **Boundary:** `char` is not an integer type. Arithmetic is unavailable, and conversion to or from
 an integer requires an explicit checked or named operation.
 
+```silk
+import silk.char { fromU32, toU32 }
+import silk.option { Option }
+
+fn checked(value: u32) -> Option<char> {
+  return fromU32(value)
+}
+
+fn scalarNumber(value: char) -> u32 {
+  return toU32(value)
+}
+```
+
+`fromU32` returns `Some<char>` for `0...0xd7ff` and `0xe000...0x10ffff`. It returns
+`None` for surrogate values and larger integers, without truncating or trapping. `toU32` is total
+because every existing `char` is already a valid scalar. Canonical string traversal returns
+`char`; callers choose `toU32` explicitly when they need its integer value.
+
 **Diagnostics:** A literal containing zero or multiple scalar values reports `LEX0007`. Malformed
 escapes and invalid scalar spellings receive their literal diagnostic without constructing a
-partial `char`.
-
-**Current compiler:** String scalar traversal still exposes a `u32` until the standard library has
-the checked `u32`-to-`char` conversion needed to prove the surrogate exclusion.
+partial `char`. Supplying `u32` where `char` is required, or `char` where `u32` is required, uses
+the ordinary type-mismatch diagnostic; `fromU32` represents an invalid integer as `None` rather
+than a diagnostic or trap.
 
 **Evidence:** [character literal specification](../../openspec/specs/bootstrap-lexer/spec.md),
 [character scalar catalog](../../packages/compiler/src/Scalar.ts),
-[character tests](../../packages/compiler/test/CharacterScalar.test.ts).
+[character tests](../../packages/compiler/test/CharacterScalar.test.ts),
+[conversion and engine tests](../../packages/compiler/test/IntegerScalars.test.ts).
 
 ### TEXT-001 — `string` is immutable UTF-8 text and byte strings are byte views
 
@@ -326,10 +344,6 @@ a runtime string view's backing owner merely because the view is nested.
 
 **Diagnostics:** Indexing `string` reports the non-indexable-type diagnostic. Implicit text
 conversions use the enclosing type-mismatch diagnostic.
-
-**Current compiler:** Declaration indexing rejects `&string`, `&mut string`, and `&[string]` with
-`SEM0094`. That special restriction conflicts with this confirmed ordinary-value rule and must be
-removed.
 
 **Evidence:** [string access and conversion specification](../../openspec/specs/bootstrap-string/spec.md),
 [string type diagnostics](../../packages/compiler/test/DeclarationIndex.test.ts).

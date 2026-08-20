@@ -226,7 +226,7 @@ Returns a cursor's explicit UTF-8 byte offset.
 ## `scalarValue`
 
 ```silk
-pub fn scalarValue(step: &silk/string.ScalarStep) -> u32
+pub fn scalarValue(step: &silk/string.ScalarStep) -> char
 ```
 
 Returns the decoded Unicode scalar value for one step.

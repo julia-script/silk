@@ -9,7 +9,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/bool`](./bool.md) | `bool` | 3 | Named primitive Boolean equality and negation operations. |
 | [`silk/box`](./box.md) | `Box` | 7 | One owned heap indirection for recursive data and values whose storage must have a stable size. |
 | [`silk/bytes`](./bytes.md) | `Bytes` | 8 | Owned arbitrary bytes for file contents, process output, and other encoding-neutral data. |
-| [`silk/char`](./char.md) | `char` | 6 | Named equality and scalar-order comparisons for Unicode scalar char values. |
+| [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
 | [`silk/core`](./core.md) | `Allocator` | 12 | Foundational allocation and standard-output services used by higher standard-library actors. |
 | [`silk/effects`](./effects.md) | `Effect` | 25 | Combinators for transforming Effect success, failure, requirement, sequencing, and lifecycle. |
