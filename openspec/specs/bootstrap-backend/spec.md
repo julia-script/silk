@@ -791,16 +791,22 @@ does not contain one.
 ### Requirement: Backends preserve string semantics and presentation
 
 Native LLVM and direct WebAssembly emission SHALL realize the target plan for `string` exactly and
-SHALL agree with evaluation on static text, validated runtime views, explicit UTF-8 bytes, byte
-length, exact equality, calls, returns, and lexical ownership behavior. Debug builds and compiler
-inspection artifacts SHALL retain the logical `string` identity and present valid values as quoted,
-escaped Unicode text; byte slices SHALL remain numeric binary views even when their bytes are valid
-UTF-8.
+SHALL agree with evaluation on static text, validated runtime views, ordinary references to string
+values, explicit UTF-8 bytes, byte length, `char` traversal, checked scalar conversion, exact
+equality, calls, returns, and lexical ownership behavior. Debug builds and compiler inspection
+artifacts SHALL retain the logical `string` and `char` identities and present valid string values as
+quoted, escaped Unicode text; byte slices SHALL remain numeric binary views even when their bytes
+are valid UTF-8.
 
 #### Scenario: Compare engines on non-ASCII text
 
-- **WHEN** a program passes a non-ASCII `string` through calls and observes its bytes and exact equality
+- **WHEN** a program passes a non-ASCII `string` through calls, traverses its scalars, and observes its bytes and exact equality
 - **THEN** evaluation, native execution, and Wasm execution agree on all results without allocating for the view
+
+#### Scenario: Reject invalid scalars identically
+
+- **WHEN** checked scalar conversion receives surrogate and above-range integers
+- **THEN** native and Wasm return the same `None` outcomes as evaluation
 
 #### Scenario: Distinguish text in a debug build
 
