@@ -77,6 +77,11 @@ interface ProvidedRequirement {
   readonly local?: Mir.LocalId
 }
 
+type ExecutableEffectType = Extract<
+  Mir.Type,
+  { readonly _tag: 'EffectValue' | 'EffectComposite' }
+>
+
 const specializeProvider = (
   fn: FunctionLowering,
   provider: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
@@ -133,10 +138,7 @@ class FunctionLowering {
     readonly owner: Instances.Instance,
     readonly instances: ReadonlyArray<Instances.Instance>,
     readonly calls: ReadonlyArray<Instances.CallInstance>,
-    readonly effectResults: ReadonlyMap<
-      string,
-      Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
-    >,
+    readonly effectResults: ReadonlyMap<string, ExecutableEffectType>,
     readonly generatedRunners: Array<GeneratedEffectRunner>,
     readonly opaqueRealizations: OpaqueRealization.Catalog,
     readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
@@ -922,6 +924,7 @@ const witnessEffectValueType = (
 const effectValueByIdentity = (
   layout: Layout.Plan,
   identity: string,
+  owner?: Type.ExecutableSpecializationOwner,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const available = layout.effectEnvironments.filter(
     (
@@ -932,7 +935,16 @@ const effectValueByIdentity = (
   const environment =
     available.find(
       (candidate) => Instances.effectIdentity(candidate.instance, candidate.site) === identity,
-    ) ?? available.find((candidate) => candidate.successEffectIdentity === identity)
+    ) ??
+    available.find((candidate) => candidate.successEffectIdentity === identity) ??
+    available.find(
+      (candidate) =>
+        Hir.effectRepresentationIdentity(candidate.site) === identity &&
+        owner !== undefined &&
+        candidate.instance.declaration.module === owner.declaration.module &&
+        candidate.instance.declaration.name === owner.declaration.name &&
+        sameArguments(candidate.instance.typeArguments, owner.typeArguments),
+    )
   return environment === undefined
     ? undefined
     : Object.freeze({
@@ -941,6 +953,16 @@ const effectValueByIdentity = (
         site: environment.site,
         environment,
       })
+}
+
+const effectCompositeShape = (
+  layout: Layout.Plan,
+  type: Extract<Mir.Type, { readonly _tag: 'EffectComposite' }>,
+): Layout.CallingShape => {
+  const shape = Layout.callingShape(layout, type.type)
+  if (shape?.tree._tag !== 'EffectCompositeShape')
+    throw new RangeError('Effect composite has no canonical calling shape')
+  return shape
 }
 
 const callableValueByIdentity = (
@@ -990,10 +1012,35 @@ const representedValueType = (
   catalog: OpaqueRealization.Catalog,
   type: Type.Type,
   substitution: Type.Substitution,
-): Extract<Mir.Type, { readonly _tag: 'CallableValue' | 'EffectValue' }> | undefined => {
+): Extract<
+  Mir.Type,
+  { readonly _tag: 'CallableValue' | 'EffectValue' | 'EffectComposite' }
+> | undefined => {
   const specialized = Type.substitute(type, substitution)
   if (!Type.isRepresented(specialized)) return undefined
   const representation = specialized.representation.argument
+  if (
+    Type.isCompositeEffectRepresentationArgument(representation) &&
+    Type.isEffect(specialized.contract)
+  ) {
+    const alternatives = representation.alternatives.flatMap((alternative) =>
+      Type.isEffectIdentityArgument(alternative.identity)
+        ? (effectValueByIdentity(
+            layout,
+            alternative.identity.identity,
+            alternative.identity.owner,
+          ) ?? [])
+        : [],
+    )
+    return alternatives.length !== representation.alternatives.length
+      ? undefined
+      : Object.freeze({
+          _tag: 'EffectComposite',
+          type: specialized,
+          contract: specialized.contract,
+          alternatives: Object.freeze(alternatives),
+        })
+  }
   if (Type.isExactRepresentationArgument(representation)) {
     if (
       Type.isCallable(specialized.contract) &&
@@ -1004,7 +1051,11 @@ const representedValueType = (
       Type.isEffect(specialized.contract) &&
       Type.isEffectIdentityArgument(representation.identity)
     )
-      return effectValueByIdentity(layout, representation.identity.identity)
+      return effectValueByIdentity(
+        layout,
+        representation.identity.identity,
+        representation.identity.owner,
+      )
     return undefined
   }
   const opaque = representation
@@ -1464,6 +1515,110 @@ const lowerRunEffectValue = (
   return Object.freeze({ result: destination })
 }
 
+const lowerRunEffectComposite = (
+  fn: FunctionLowering,
+  effect: Mir.LocalId,
+  effectType: Extract<Mir.Type, { readonly _tag: 'EffectComposite' }>,
+  success: Type.Type,
+  span: SourceSpan.SourceSpan,
+  availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
+): LoweredExpression | undefined => {
+  const successType = fn.type(success)
+  if (
+    successType === undefined ||
+    successType._tag === 'EffectOutcome' ||
+    successType._tag === 'EffectValue' ||
+    successType._tag === 'EffectComposite'
+  )
+    return undefined
+  const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+    _tag: 'EffectOutcome',
+    type: effectType.contract,
+  })
+  const outcome = fn.alloc(outcomeType)
+  const destination = fn.alloc(successType)
+  const propagationType =
+    Type.failureMembers(effectType.contract).length === 0 || fn.effectOutcome === undefined
+      ? undefined
+      : fn.type(fn.effectOutcome)
+  if (propagationType !== undefined && propagationType._tag !== 'EffectOutcome') return undefined
+  const alternatives = effectType.alternatives.flatMap((alternative) => {
+    const provided = requirementsFor(availableRequirements, alternative.type)
+    if (provided === undefined) return []
+    const providedRunner =
+      provided.length === 0 ? undefined : ensureProvidedRunner(fn, alternative, provided)
+    if (provided.length > 0 && providedRunner === undefined) return []
+    const runner =
+      providedRunner ??
+      alternative.storage?.realization.runner ??
+      Hir.effectRunnerId(alternative.environment.instance.declaration, alternative.site)
+    const runnerTypeArguments =
+      alternative.storage?.realization.runnerArguments ?? alternative.environment.instance.typeArguments
+    const tagMappings = Type.failureMembers(alternative.type).flatMap((failure, sourceOrdinal) => {
+      const target = Type.failureMembers(effectType.contract).findIndex((candidate) =>
+        Type.equals(candidate, failure),
+      )
+      return target < 0 ? [] : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
+    })
+    return tagMappings.length !== Type.failureMembers(alternative.type).length
+      ? []
+      : [
+          Object.freeze({
+            type: alternative,
+            runner,
+            runnerTypeArguments,
+            tagMappings,
+            arguments: runtimeRequirementArguments(provided),
+          }),
+        ]
+  })
+  if (alternatives.length !== effectType.alternatives.length) return undefined
+  const outerMappings = Type.failureMembers(effectType.contract).flatMap((failure, sourceOrdinal) => {
+    const target =
+      propagationType === undefined
+        ? undefined
+        : Type.failureMembers(propagationType.type).findIndex((candidate) =>
+            Type.equals(candidate, failure),
+          )
+    return target === undefined || target < 0
+      ? []
+      : [Object.freeze({ source: sourceOrdinal + 1, target: target + 1 })]
+  })
+  if (outerMappings.length !== Type.failureMembers(effectType.contract).length) return undefined
+  const propagationShape =
+    propagationType === undefined ? undefined : Layout.callingShape(fn.layout, propagationType.type)
+  const arguments_ = Object.freeze(
+    [
+      ...new Map(
+        alternatives
+          .flatMap((alternative) => alternative.arguments)
+          .map((argument) => [argument.ordinal, argument] as const),
+      ).values(),
+    ].sort((left, right) => left.ordinal - right.ordinal),
+  )
+  fn.emit(
+    Object.freeze({
+      _tag: 'RunEffectComposite',
+      destination,
+      outcome,
+      effect,
+      alternatives: Object.freeze(alternatives),
+      arguments: arguments_,
+      outcomeType,
+      ...(propagationType === undefined ? {} : { propagationType }),
+      tagMappings: Object.freeze(outerMappings),
+      propagationLaneCount: propagationShape?.laneCount ?? 0,
+      ...(Type.failureMembers(effectType.contract).length === 0
+        ? {}
+        : { failureLoanEnds: propagationLoanEnds(fn, span) }),
+      ...(propagationType === undefined ? {} : { releases: propagationReleases(fn, span) }),
+      type: successType,
+      provenance: authored(span),
+    }),
+  )
+  return Object.freeze({ result: destination })
+}
+
 interface ReifiedEffect {
   readonly result: Mir.LocalId
   readonly resultType: Extract<Mir.Type, { readonly _tag: 'Nominal' }>
@@ -1595,7 +1750,8 @@ const callableEffectResult = (
     callable.environment?.callable.typeArguments ??
     callable.storage?.realization.targetArguments ??
     Object.freeze([])
-  return fn.effectResults.get(instanceText(callable.target.declaration, typeArguments))
+  const result = fn.effectResults.get(instanceText(callable.target.declaration, typeArguments))
+  return result?._tag === 'EffectValue' ? result : undefined
 }
 
 const lowerEffectCatch = (
@@ -2457,6 +2613,28 @@ const lowerEffectExecution = (
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.providedRequirements,
 ): LoweredExpression | undefined => {
+  if (subject._tag === 'Match') {
+    return lowerExpression(
+      fn,
+      Object.freeze({
+        ...subject,
+        arms: Object.freeze(
+          subject.arms.map((arm) =>
+            Object.freeze({
+              ...arm,
+              result: Object.freeze({
+                _tag: 'Run' as const,
+                subject: arm.result,
+                type: success,
+                span: arm.result.span,
+              }),
+            }),
+          ),
+        ),
+        type: success,
+      }),
+    )
+  }
   if (subject._tag === 'BindingReference') {
     const storedRecipe = fn.effectRecipes.get(subject.binding.ordinal)
     if (storedRecipe !== undefined)
@@ -2688,7 +2866,17 @@ const lowerEffectExecution = (
 
   const lowered = lowerExpression(fn, subject)
   const loweredType = lowered === undefined ? undefined : fn.localTypes.at(lowered.result.ordinal)
-  if (lowered === undefined || loweredType?._tag !== 'EffectValue') return undefined
+  if (lowered === undefined || loweredType === undefined) return undefined
+  if (loweredType._tag === 'EffectComposite')
+    return lowerRunEffectComposite(
+      fn,
+      lowered.result,
+      loweredType,
+      success,
+      span,
+      availableRequirements,
+    )
+  if (loweredType._tag !== 'EffectValue') return undefined
   return lowerRunEffectValue(fn, lowered.result, loweredType, success, span, availableRequirements)
 }
 
@@ -3535,14 +3723,20 @@ function lowerExpressionInner(
         expression.evaluation === 'LeftThenCallable'
           ? lowerArguments() && lowerCallee()
           : lowerCallee() && lowerArguments()
-      const type =
-        call?.resultEffect === undefined
-          ? fn.type(expression.type)
-          : effectValueByIdentity(fn.layout, call.resultEffect)
-      if (!lowered || type === undefined || callableType === undefined) return undefined
       const definition =
         callable === undefined ? undefined : fn.callableDefinitions.get(callable.ordinal)
       const realizedTarget = target ?? definition?.target
+      const declaredEffectResult =
+        realizedTarget?._tag === 'DeclarationCallableTarget'
+          ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
+          : undefined
+      const type =
+        (call?.resultEffect === undefined
+          ? undefined
+          : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+        declaredEffectResult ??
+        fn.type(expression.type)
+      if (!lowered || type === undefined || callableType === undefined) return undefined
       if (
         realizedTarget?._tag === 'BuiltinCallableTarget' &&
         Scalar.isCheckedOperation(realizedTarget.operation) &&
@@ -3854,6 +4048,17 @@ function lowerExpressionInner(
           if (expression.subject._tag === 'EffectConstruct')
             endLoans(fn, expression.subject.loanEnds, expression.span)
           return Object.freeze({ result: destination })
+        }
+        if (loweredSubject !== undefined && effectValueType?._tag === 'EffectComposite') {
+          const result = lowerRunEffectComposite(
+            fn,
+            loweredSubject.result,
+            effectValueType,
+            expression.type,
+            expression.span,
+          )
+          if (result !== undefined) endRunLoans(fn, expression.span)
+          return result
         }
         if (recipe?._tag === 'EffectBindRequirement' && recipe.protected._tag !== 'BuiltinCall')
           return lowerEffectExecution(fn, recipe, expression.type, expression.span)
@@ -4276,7 +4481,10 @@ function lowerExpressionInner(
       const scrutineeType = fn.type(expression.scrutinee.type)
       const resultType = fn.type(expression.type)
       const scrutineeShape = Layout.callingShape(fn.layout, fn.semantic(expression.scrutinee.type))
-      const resultShape = Layout.callingShape(fn.layout, fn.semantic(expression.type))
+      const resultShape =
+        resultType?._tag === 'EffectComposite'
+          ? effectCompositeShape(fn.layout, resultType)
+          : Layout.callingShape(fn.layout, fn.semantic(expression.type))
       if (
         scrutinee === undefined ||
         (scrutineeType?._tag !== 'Nominal' && scrutineeType?._tag !== 'Union') ||
@@ -4346,9 +4554,34 @@ function lowerExpressionInner(
                   : Object.freeze({ operations, result: lowered.result })
               })()
         if (guardExpression !== undefined && guard === undefined) return undefined
-        const [selectedResult, selectedOperations] = fn.capture(() =>
-          lowerExpression(fn, arm.result),
-        )
+        const [selectedResult, selectedOperations] = fn.capture(() => {
+          const lowered = lowerExpression(fn, arm.result)
+          if (lowered === undefined || resultType._tag !== 'EffectComposite') return lowered
+          const selectedType = fn.localTypes.at(lowered.result.ordinal)
+          if (selectedType?._tag !== 'EffectValue') return undefined
+          const selectedIdentity = Instances.effectIdentity(
+            selectedType.environment.instance,
+            selectedType.site,
+          )
+          const alternative = resultType.alternatives.findIndex(
+            (candidate) =>
+              Instances.effectIdentity(candidate.environment.instance, candidate.site) ===
+              selectedIdentity,
+          )
+          if (alternative < 0) return undefined
+          const packed = fn.alloc(resultType)
+          fn.emit(
+            Object.freeze({
+              _tag: 'PackEffectComposite',
+              destination: packed,
+              source: lowered.result,
+              alternative,
+              type: resultType,
+              provenance: authored(arm.result.span),
+            }),
+          )
+          return Object.freeze({ result: packed })
+        })
         if (selectedResult === undefined) return undefined
         armStates.set(arm.id.ordinal, delayedEffectState(fn))
         const ownedArm = ownership?.arms.find(
@@ -4621,10 +4854,16 @@ function lowerExpressionInner(
         argumentLocals.push(lowered.result)
       }
       const call = fn.call(expression.span)
+      const typeArguments = Object.freeze(
+        call?.target.typeArguments ??
+          expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
+      )
       const type =
         (call?.resultEffect === undefined
           ? undefined
-          : effectValueByIdentity(fn.layout, call.resultEffect)) ?? fn.type(expression.type)
+          : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+        fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
+        fn.type(expression.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.emit(
@@ -4632,10 +4871,7 @@ function lowerExpressionInner(
           _tag: 'Call',
           destination,
           target: expression.target,
-          typeArguments: Object.freeze(
-            call?.target.typeArguments ??
-              expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
-          ),
+          typeArguments,
           arguments: Object.freeze(argumentLocals),
           type,
           provenance: Object.freeze({ span: expression.span, generated: false }),
@@ -5723,6 +5959,11 @@ const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined
 const copyType = (type: Type.Type): boolean =>
   Type.isBuiltin(type) || (Type.isFixedArray(type) && copyType(type.element))
 
+const effectContract = (type: Type.Type): Type.Effect | undefined => {
+  const contract = Type.isRepresented(type) ? type.contract : type
+  return Type.isEffect(contract) ? contract : undefined
+}
+
 const ownerFields = (ownerLoop: Mir.LoopId | undefined): { readonly ownerLoop?: Mir.LoopId } =>
   ownerLoop === undefined ? {} : { ownerLoop }
 
@@ -6106,6 +6347,8 @@ const lowerSequence = (
         ) === undefined) ||
       statement.initializer._tag === 'EffectResult' ||
       statement.initializer._tag === 'EffectBindRequirement' ||
+      (statement.initializer._tag === 'Match' &&
+        effectContract(initializerType ?? 'never') !== undefined) ||
       (statement.initializer._tag === 'BuiltinCall' && Type.isEffect(statement.initializer.type))
     ) {
       fn.effectRecipes.set(statement.binding.ordinal, forwardedResult ?? statement.initializer)
@@ -7011,7 +7254,7 @@ const lowerInstance = (
   index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
-  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction => {
@@ -7073,8 +7316,22 @@ const lowerInstance = (
         )
       : undefined
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
+  const terminalStatement = fn.statements.at(-1)
+  const returnedExpression =
+    terminalStatement?._tag === 'Return' && 'type' in terminalStatement.expression
+      ? terminalStatement.expression
+      : undefined
   const hiddenEffectResult =
     returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
+  const hiddenCompositeResult =
+    returnedExpression === undefined
+      ? undefined
+      : representedValueType(
+          layout,
+          opaqueRealizations,
+          returnedExpression.type,
+          instance.substitution,
+        )
   const specializedEffectResult =
     instance.resultEffect === undefined
       ? undefined
@@ -7082,6 +7339,7 @@ const lowerInstance = (
   const resultType =
     specializedEffectResult ??
     hiddenEffectResult ??
+    hiddenCompositeResult ??
     (contract._tag === 'Contract'
       ? (storedCallableValueType(layout, effectOutcome ?? instance.specialization.result) ??
         storedEffectValueType(layout, effectOutcome ?? instance.specialization.result) ??
@@ -7144,7 +7402,7 @@ const lowerEffectRunner = (
   index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
-  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
@@ -7277,7 +7535,7 @@ const lowerCatchEffectRunner = (
   index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
-  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
@@ -7403,7 +7661,7 @@ const lowerWitnessEffectRunner = (
   index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
-  effectResults: ReadonlyMap<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>,
+  effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
@@ -7513,13 +7771,22 @@ const lowerWitnessEffectRunner = (
             provenance: generated(spec.expression.span),
           }),
         )
-        success = lowerRunEffectValue(
-          lowering,
-          effect,
-          effectType,
-          spec.type.type.success,
-          spec.expression.span,
-        )
+        success =
+          effectType._tag === 'EffectValue'
+            ? lowerRunEffectValue(
+                lowering,
+                effect,
+                effectType,
+                spec.type.type.success,
+                spec.expression.span,
+              )
+            : lowerRunEffectComposite(
+                lowering,
+                effect,
+                effectType,
+                spec.type.type.success,
+                spec.expression.span,
+              )
       }
     } else if (spec.intrinsic?.rule._tag === 'BuiltinRule') {
       const contract = witnessEffectContract(spec.expression)
@@ -7638,14 +7905,14 @@ export const lowerProgram = (
   const staticData = Object.freeze(
     [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
   )
-  const effectResults = new Map<string, Extract<Mir.Type, { readonly _tag: 'EffectValue' }>>()
+  const effectResults = new Map<string, ExecutableEffectType>()
   const generatedRunners: Array<GeneratedEffectRunner> = []
   for (const instance of discovery.instances) {
+    const resultKey = instanceText(instance.key.declaration, instance.key.typeArguments)
     const block = returnedEffectBlock(instance.function)
-    if (block === undefined) continue
-    const type = effectValueType(layout, instance.key, block)
-    if (type !== undefined) {
-      effectResults.set(instanceText(instance.key.declaration, instance.key.typeArguments), type)
+    const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
+    if (type !== undefined && block !== undefined) {
+      effectResults.set(resultKey, type)
       generatedRunners.push(
         Object.freeze({
           _tag: 'BlockEffectRunner',
@@ -7657,7 +7924,19 @@ export const lowerProgram = (
           providedRequirements: Object.freeze([]),
         }),
       )
+      continue
     }
+    const terminal = instance.function.statements.at(-1)
+    const returned =
+      terminal?._tag === 'Return' && 'type' in terminal.expression
+        ? representedValueType(
+            layout,
+            opaqueRealizations,
+            terminal.expression.type,
+            instance.substitution,
+          )
+        : undefined
+    if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
   }
   const functions = discovery.instances.map((instance) =>
     lowerInstance(

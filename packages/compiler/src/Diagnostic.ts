@@ -149,7 +149,6 @@ export const runNonEffectCode = 'SEM0065' as const
 export const unhandledEffectFailuresCode = 'SEM0066' as const
 export const invalidEffectHandlerCode = 'SEM0067' as const
 export const mutableEffectRecipeCode = 'SEM0068' as const
-export const effectIdentityErasureCode = 'SEM0069' as const
 /** Stable code for a non-concrete or non-nominal capability in a requirement row. */
 export const invalidRequirementTypeCode = 'SEM0070' as const
 export const unhandledEffectRequirementsCode = 'SEM0071' as const
@@ -162,6 +161,8 @@ export const redundantUnaryEmptyCallCode = 'SEM0078' as const
 export const deeperUnderApplicationCode = 'SEM0079' as const
 export const callableIdentityErasureCode = 'SEM0080' as const
 export const unknownOwnedCallableReturnCode = 'SEM0081' as const
+/** Stable code for an Effect join whose alternatives cannot be represented as a finite composite. */
+export const nonFiniteEffectJoinCode = 'SEM0132' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -369,7 +370,6 @@ export type Code =
   | typeof unhandledEffectFailuresCode
   | typeof invalidEffectHandlerCode
   | typeof mutableEffectRecipeCode
-  | typeof effectIdentityErasureCode
   | typeof invalidRequirementTypeCode
   | typeof unhandledEffectRequirementsCode
   | typeof providerBackedFailureCode
@@ -381,6 +381,7 @@ export type Code =
   | typeof deeperUnderApplicationCode
   | typeof callableIdentityErasureCode
   | typeof unknownOwnedCallableReturnCode
+  | typeof nonFiniteEffectJoinCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -504,7 +505,7 @@ export type Reason =
   | { readonly _tag: 'UnhandledEffectFailures'; readonly failures: ReadonlyArray<string> }
   | { readonly _tag: 'InvalidEffectHandler'; readonly detail: string }
   | { readonly _tag: 'MutableEffectRecipe' }
-  | { readonly _tag: 'EffectIdentityErasure' }
+  | { readonly _tag: 'NonFiniteEffectJoin'; readonly detail: string }
   | { readonly _tag: 'CallableIdentityErasure' }
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
@@ -2222,15 +2223,17 @@ export const mutableEffectRecipe = (span: SourceSpan.SourceSpan): Diagnostic =>
     span,
   })
 
-export const effectIdentityErasure = (span: SourceSpan.SourceSpan): Diagnostic =>
+export const nonFiniteEffectJoin = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: effectIdentityErasureCode,
+    code: nonFiniteEffectJoinCode,
     severity: 'error',
-    message:
-      'Cannot merge Effect values from different construction sites without explicit erasure',
-    reason: Object.freeze({ _tag: 'EffectIdentityErasure' }),
+    message: `Cannot form a finite Effect join: ${detail}`,
+    reason: Object.freeze({ _tag: 'NonFiniteEffectJoin', detail }),
     span,
   })
 

@@ -701,6 +701,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = byte length ${localText(operation.string)}`
     case 'StringEqualsExact':
       return `${localText(operation.destination)} = exact string ${operation.negated ? 'not equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)}`
+    case 'PackEffectComposite':
+      return `${localText(operation.destination)} = effect choice #${operation.alternative} ${localText(operation.source)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(
         operation.left,
@@ -755,6 +757,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run ${operation.target.name} · propagate ${operation.tagMappings.map((mapping) => `${mapping.source}→${mapping.target}`).join(', ') || 'none'}`
     case 'RunEffectValue':
       return `${localText(operation.destination)} = run ${localText(operation.effect)} with ${operation.runner.name}`
+    case 'RunEffectComposite':
+      return `${localText(operation.destination)} = run effect choice ${localText(operation.effect)}`
     case 'RunStaticEffect':
       return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
     case 'ReifyEffect':
@@ -1032,6 +1036,8 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                       ? `${value.access.toLowerCase()} borrow f${value.frame}.c${value.cell}`
                       : value._tag === 'EffectValue'
                         ? `${typeText(value.type)} recipe ${value.runner.name}`
+                        : value._tag === 'EffectCompositeValue'
+                          ? `effect choice #${value.alternative} ${valueText(value.effect)}`
                         : value._tag === 'CallableBorrowValue'
                           ? `${value.access.toLowerCase()} callable borrow f${value.frame}.c${value.cell}`
                           : value._tag === 'CallableValue'

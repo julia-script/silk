@@ -258,6 +258,19 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'finite-effect-join',
+    source: `struct First {}
+struct Second {}
+fn choose(input: First | Second) -> Effect<i32> {
+  return match move input {
+    First {} => effect { return 41 }
+    Second {} => effect { return 42 }
+  }
+}
+pub fn main() -> i32 { return run choose(First {}) }`,
+    expected: { _tag: 'Completes', result: 41 },
+  },
+  {
     name: 'constrained-callable-forwarding',
     source: constrainedCallableForwarding,
     expected: { _tag: 'Completes', result: 42 },

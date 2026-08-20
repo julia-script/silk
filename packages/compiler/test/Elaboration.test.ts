@@ -204,7 +204,7 @@ fn main() -> i32 {
   )
 })
 
-it('rejects implicit erasure when a join merges distinct Effect construction sites', () => {
+it('retains finite representations when a join merges distinct Effect construction sites', () => {
   const result = analyzeText(
     'effect://identity-erasure',
     `struct First {}
@@ -217,10 +217,7 @@ fn choose(input: First | Second) -> Effect<i32> {
 }`,
   )
 
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0069',
-  )
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('rejects heterogeneous callable joins and unknown-sized owned callable returns', () => {

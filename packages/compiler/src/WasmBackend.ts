@@ -128,6 +128,29 @@ const laneKindsOf = (
   plan: LayoutPlan.Plan,
   type: Mir.Type,
 ): ReadonlyArray<LayoutPlan.CallingLane> => {
+  if (type._tag === 'EffectComposite') {
+    const shape = LayoutPlan.callingShape(plan, type.type)
+    if (shape !== undefined) return shape.lanes
+    const payloadTypes = type.alternatives.flatMap((alternative) =>
+      laneKindsOf(plan, alternative).map((lane) => lane.type),
+    )
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        type: 'i32' as const,
+      }),
+      ...payloadTypes.map((laneType, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type: laneType,
+        }),
+      ),
+    ])
+  }
   if (type._tag === 'EffectValue' && type.storage !== undefined) {
     const shape = LayoutPlan.callingShape(plan, type.storage.type)
     if (shape === undefined) throw new RangeError('Wasm backend lost a stored Effect calling shape')
@@ -3549,6 +3572,33 @@ const emitOperation = (
         throw new RangeError('Wasm Effect environment capture lanes do not match its plan')
       return instructions
     }
+    case 'PackEffectComposite': {
+      const source = slots(operation.source)
+      const destination = slots(operation.destination)
+      const tag = destination.at(0)
+      if (tag === undefined) throw new RangeError('Wasm Effect composite lost its tag lane')
+      const payload = destination.slice(1)
+      const instructions: Array<Instr.Instr> = [
+        Instr.i32Const(operation.alternative),
+        Instr.localSet(tag),
+      ]
+      for (const [ordinal, target] of payload.entries()) {
+        const selected = source.at(ordinal)
+        instructions.push(
+          ...(selected === undefined
+            ? [zeroForType(layout.physicalTypes.at(target) ?? i32)]
+            : [
+                Instr.localGet(selected),
+                ...laneBridge(
+                  layout.physicalTypes.at(selected) ?? i32,
+                  layout.physicalTypes.at(target) ?? i32,
+                ),
+              ]),
+          Instr.localSet(target),
+        )
+      }
+      return instructions
+    }
     case 'PackEffectOutcome': {
       const source = slots(operation.source)
       const destination = slots(operation.destination)
@@ -3783,6 +3833,138 @@ const emitOperation = (
         Instr.localGet(tag),
         Instr.op('i32.eqz'),
         Instr.ifElse(Instr.emptyBlockType, success, failure),
+      ]
+    }
+    case 'RunEffectComposite': {
+      const suspensionRegion = suspension?.regions.get(operation)
+      if (suspensionRegion?._tag === 'SuspendEffectRegion')
+        return suspension?.originate(suspensionRegion) ?? []
+      const compositeSlots = slots(operation.effect)
+      const choice = compositeSlots.at(0)
+      const outcomeSlots = slots(operation.outcome)
+      const destinationSlots = slots(operation.destination)
+      const outcomeTag = outcomeSlots.at(0)
+      if (choice === undefined || outcomeTag === undefined)
+        throw new RangeError('Wasm Effect composite lost its tag lane')
+      const invokeAlternative = (
+        alternative: (typeof operation.alternatives)[number],
+      ): ReadonlyArray<Instr.Instr> => {
+        const captureLanes = laneKindsOf(plan, alternative.type)
+        const sourceOutcomeLanes = laneKindsOf(
+          plan,
+          Object.freeze({ _tag: 'EffectOutcome' as const, type: alternative.type.type }),
+        )
+        const captureInputs = captureLanes.flatMap((lane, ordinal) => {
+          const source = compositeSlots.at(ordinal + 1)
+          if (source === undefined)
+            throw new RangeError('Wasm Effect composite lost an alternative capture lane')
+          return [
+            Instr.localGet(source),
+            ...laneBridge(
+              layout.physicalTypes.at(source) ?? i32,
+              laneValueType(plan, lane),
+            ),
+          ]
+        })
+        const clearUnused = outcomeSlots.slice(sourceOutcomeLanes.length).flatMap((target) => [
+          zeroFor(target),
+          Instr.localSet(target),
+        ])
+        const storeOutcome = [...sourceOutcomeLanes]
+          .map((lane, ordinal) => ({ lane, ordinal }))
+          .reverse()
+          .flatMap(({ lane, ordinal }) => {
+            const target = outcomeSlots.at(ordinal)
+            if (target === undefined)
+              throw new RangeError('Wasm Effect composite outcome exceeds its joined carrier')
+            return [
+              ...laneBridge(
+                laneValueType(plan, lane),
+                layout.physicalTypes.at(target) ?? i32,
+              ),
+              Instr.localSet(target),
+            ]
+          })
+        const remapFailureTag = alternative.tagMappings.flatMap((mapping) => [
+          Instr.localGet(outcomeTag),
+          Instr.i32Const(mapping.source),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.i32Const(mapping.target), Instr.localSet(outcomeTag)],
+            [],
+          ),
+        ])
+        return [
+          ...clearUnused,
+          ...captureInputs,
+          ...alternative.arguments.flatMap((argument) =>
+            slots(argument).map((slot) => Instr.localGet(slot)),
+          ),
+          Instr.call(resolve(alternative.runner, alternative.runnerTypeArguments)),
+          ...storeOutcome,
+          ...remapFailureTag,
+          ...reloadReachableRoots([operation.effect, ...alternative.arguments]),
+        ]
+      }
+      let dispatch: ReadonlyArray<Instr.Instr> = [Instr.op('unreachable')]
+      for (let ordinal = operation.alternatives.length - 1; ordinal >= 0; ordinal -= 1) {
+        const alternative = operation.alternatives.at(ordinal)
+        if (alternative === undefined) continue
+        dispatch = [
+          Instr.localGet(choice),
+          Instr.i32Const(ordinal),
+          Instr.op('i32.eq'),
+          Instr.ifElse(Instr.emptyBlockType, invokeAlternative(alternative), dispatch),
+        ]
+      }
+      const success = copy(
+        outcomeSlots.slice(1, 1 + destinationSlots.length),
+        destinationSlots,
+      )
+      const completion = (() => {
+        if (operation.propagationType === undefined) return success
+        const mapTag = [
+          Instr.i32Const(-1),
+          Instr.localSet(layout.scratch),
+          ...operation.tagMappings.flatMap((mapping) => [
+            Instr.localGet(outcomeTag),
+            Instr.i32Const(mapping.source),
+            Instr.op('i32.eq'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+              [],
+            ),
+          ]),
+        ]
+        const failure = [
+          ...(operation.releases ?? []).flatMap((release) =>
+            releaseInstructions(release.cleanup, release.local),
+          ),
+          ...mapTag,
+          Instr.localGet(layout.scratch),
+          ...failurePayload(
+            outcomeSlots,
+            operation.outcomeType.type,
+            outcomeTag,
+            operation.propagationType.type,
+            operation.tagMappings,
+          ).flat(),
+          Instr.op('return'),
+        ]
+        return [
+          Instr.localGet(outcomeTag),
+          Instr.op('i32.eqz'),
+          Instr.ifElse(Instr.emptyBlockType, success, failure),
+        ]
+      })()
+      return [
+        ...(skipInvocation ? [] : dispatch),
+        ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+          ? []
+          : (suspension?.relay(suspensionRegion) ?? [])),
+        ...completion,
       ]
     }
     case 'ReifyEffect': {

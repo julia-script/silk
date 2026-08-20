@@ -403,6 +403,13 @@ export type CallingShapeNode =
       readonly payloadTypes: ReadonlyArray<Type.Builtin>
       readonly laneCount: number
     }
+  | {
+      readonly _tag: 'EffectCompositeShape'
+      readonly type: Type.Represented
+      readonly alternativeLaneCounts: ReadonlyArray<number>
+      readonly payloadTypes: ReadonlyArray<CallingScalar>
+      readonly laneCount: number
+    }
 
 /** The deterministic backend-neutral calling shape of one reachable logical type. */
 export interface CallingShape {
@@ -2142,7 +2149,13 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
-    if (Type.isRuntimeConcrete(type) && (Type.isEffect(type) || Type.isNever(type)))
+    if (
+      Type.isRuntimeConcrete(type) &&
+      (Type.isEffect(type) ||
+        Type.isNever(type) ||
+        (Type.isRepresented(type) &&
+          Type.isCompositeEffectRepresentationArgument(type.representation.argument)))
+    )
       shaped.set(Type.key(type), type)
   }
   const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
@@ -2377,6 +2390,81 @@ const shapeNode = (
     )
   }
   if (Type.isRepresented(type)) {
+    const argument = type.representation.argument
+    if (
+      Type.isEffect(type.contract) &&
+      Type.isCompositeEffectRepresentationArgument(argument)
+    ) {
+      const alternatives = argument.alternatives.map((alternative) => {
+        if (!Type.isEffectIdentityArgument(alternative.identity))
+          throw new RangeError('Effect composite retained a non-Effect alternative')
+        const identity = alternative.identity
+        const environment = context.effectEnvironments.find(
+          (
+            candidate,
+          ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+            candidate._tag === 'EffectEnvironment' &&
+            Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
+            identity.owner !== undefined &&
+            candidate.instance.declaration.module === identity.owner.declaration.module &&
+            candidate.instance.declaration.name === identity.owner.declaration.name &&
+            candidate.instance.typeArguments.length === identity.owner.typeArguments.length &&
+            candidate.instance.typeArguments.every((value, ordinal) => {
+              const expected = identity.owner?.typeArguments.at(ordinal)
+              return expected !== undefined && Type.equalsGenericArgument(value, expected)
+            }),
+        )
+        if (environment === undefined)
+          throw new RangeError('Effect composite alternative has no concrete environment')
+        const fields = environment.fields.map((field) =>
+          Object.freeze({
+            capture: field.ordinal,
+            shape: executableEnvironmentFieldShape(context, field),
+          }),
+        )
+        return Object.freeze({
+          _tag: 'EffectEnvironmentShape' as const,
+          type: environment.effect,
+          fields: Object.freeze(fields),
+          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+        })
+      })
+      const alternativeLanes = alternatives.map((alternative) => materializeLanes(alternative))
+      const payloadLaneCount = alternativeLanes.reduce(
+        (maximum, lanes) => Math.max(maximum, lanes.length),
+        0,
+      )
+      const payloadTypes = Object.freeze(
+        Array.from({ length: payloadLaneCount }, (_, slot): CallingScalar => {
+          const candidates = alternativeLanes.flatMap((lanes) => {
+            const lane = lanes.at(slot)
+            if (lane === undefined) return []
+            const candidate: Type.Builtin = typeof lane.type === 'string' ? lane.type : 'usize'
+            return [candidate]
+          })
+          return (
+            candidates
+              .sort((left, right) => {
+                const leftScalar = Scalar.find(left)
+                const rightScalar = Scalar.find(right)
+                const pointerBits = target.pointerSize === 4 ? 32 : 64
+                const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
+                const rightBits =
+                  rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
+                return rightBits - leftBits || Type.compare(left, right)
+              })
+              .at(0) ?? 'i32'
+          )
+        }),
+      )
+      return Object.freeze({
+        _tag: 'EffectCompositeShape',
+        type,
+        alternativeLaneCounts: Object.freeze(alternativeLanes.map((lanes) => lanes.length)),
+        payloadTypes,
+        laneCount: payloadTypes.length + 1,
+      })
+    }
     const representation = entries.get(Type.key(type))?.representation
     if (
       representation?._tag !== 'CallableEnvironment' &&
@@ -2639,6 +2727,25 @@ const materializeLanes = (
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
           ]),
           type: node.payloadTypes.at(slot) ?? ('i32' as const),
+        }),
+      ),
+    ])
+  }
+  if (node._tag === 'EffectCompositeShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        type: 'i32' as const,
+      }),
+      ...node.payloadTypes.map((type, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type,
         }),
       ),
     ])

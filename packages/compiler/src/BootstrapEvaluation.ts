@@ -191,6 +191,12 @@ export interface EffectValue {
   readonly captures: ReadonlyArray<Value>
 }
 
+export interface EffectCompositeValue {
+  readonly _tag: 'EffectCompositeValue'
+  readonly alternative: number
+  readonly effect: EffectValue
+}
+
 /** One logical heap block; identity and liveness live in evaluator state, not JS identity. */
 export interface AllocationValue {
   readonly _tag: 'AllocationValue'
@@ -232,6 +238,7 @@ export type Value =
   | EffectBorrowValue
   | CallableBorrowValue
   | EffectValue
+  | EffectCompositeValue
   | CallableValue
   | EffectOutcomeValue
   | AllocationValue
@@ -4532,6 +4539,20 @@ function* executeFunction(
             })
             break
           }
+          case 'PackEffectComposite': {
+            const effect = read(operation.source).value
+            if (effect._tag !== 'EffectValue')
+              throw new RangeError('MIR attempted to pack a non-Effect alternative')
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'EffectCompositeValue',
+                alternative: operation.alternative,
+                effect,
+              }),
+              fromCall: false,
+            })
+            break
+          }
           case 'PackEffectOutcome': {
             const payload = read(operation.source).value
             write(operation.destination, {
@@ -4756,22 +4777,50 @@ function* executeFunction(
             )
             return Object.freeze({ _tag: 'Value', value: propagated })
           }
+          case 'RunEffectComposite':
           case 'RunEffectValue':
           case 'RunStaticEffect': {
-            const captures =
-              operation._tag === 'RunEffectValue'
+            const composite =
+              operation._tag === 'RunEffectComposite'
                 ? (() => {
-                    const effect = read(operation.effect).value
-                    if (effect._tag !== 'EffectValue')
-                      throw new RangeError('MIR attempted to run a non-Effect value')
-                    return effect.captures
+                    const value = read(operation.effect).value
+                    if (value._tag !== 'EffectCompositeValue')
+                      throw new RangeError('MIR attempted to run a non-composite Effect value')
+                    const alternative = operation.alternatives.at(value.alternative)
+                    if (alternative === undefined)
+                      throw new RangeError('MIR Effect composite selected an absent alternative')
+                    return Object.freeze({ value, alternative })
                   })()
-                : operation.captures.map((capture) => read(capture.source).value)
-            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
+                : undefined
+            const captures =
+              composite !== undefined
+                ? composite.value.effect.captures
+                : operation._tag === 'RunEffectValue'
+                  ? (() => {
+                      const effect = read(operation.effect).value
+                      if (effect._tag !== 'EffectValue')
+                        throw new RangeError('MIR attempted to run a non-Effect value')
+                      return effect.captures
+                    })()
+                  : operation._tag === 'RunStaticEffect'
+                    ? operation.captures.map((capture) => read(capture.source).value)
+                    : Object.freeze([])
+            const runner =
+              operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.runner ?? operation.alternatives.at(0)?.runner)
+                : operation.runner
+            const runnerTypeArguments =
+              operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.runnerTypeArguments ??
+                  operation.alternatives.at(0)?.runnerTypeArguments)
+                : operation.runnerTypeArguments
+            if (runner === undefined || runnerTypeArguments === undefined)
+              throw new RangeError('MIR Effect composite has no runnable alternative')
+            const target = functionFor(program, runner, runnerTypeArguments)
             if (target === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
-                target: operation.runner,
+                target: runner,
                 span: operation.provenance.span,
               })
             trace.push(
@@ -4780,7 +4829,7 @@ function* executeFunction(
                 frame: activation.frame,
                 depth: activation.depth,
                 caller: fn.id,
-                target: operation.runner,
+                target: runner,
                 callerInstance: fn.instance,
                 targetInstance: target.instance,
                 span: operation.provenance.span,
@@ -4788,7 +4837,9 @@ function* executeFunction(
             )
             const runnerArguments = Object.freeze([
               ...captures,
-              ...operation.arguments.map((argument) => read(argument).value),
+              ...(operation._tag === 'RunEffectComposite'
+                ? (composite?.alternative.arguments ?? []).map((argument) => read(argument).value)
+                : operation.arguments.map((argument) => read(argument).value)),
             ])
             const result =
               operation._tag === 'RunEffectValue'
@@ -4798,7 +4849,29 @@ function* executeFunction(
             if (result._tag === 'Transfer') return result
             if (result.value._tag !== 'EffectOutcomeValue')
               throw new RangeError('MIR Effect runner returned a non-outcome value')
-            const effectOutcome = result.value
+            const rawOutcome: EffectOutcomeValue = result.value
+            const effectOutcome: EffectOutcomeValue =
+              composite === undefined || rawOutcome.tag === 0
+                ? rawOutcome
+                : (() => {
+                    const mapping = composite.alternative.tagMappings.find(
+                      (candidate) => candidate.source === rawOutcome.tag,
+                    )
+                    if (mapping === undefined)
+                      throw new RangeError('MIR Effect composite has no alternative failure mapping')
+                    return Object.freeze({
+                      _tag: 'EffectOutcomeValue' as const,
+                      type: operation.outcomeType.type,
+                      tag: mapping.target,
+                      payload: repackFailurePayload(
+                        rawOutcome.payload,
+                        composite.alternative.type.type,
+                        rawOutcome.tag,
+                        operation.outcomeType.type,
+                        mapping.target,
+                      ),
+                    })
+                  })()
             write(operation.outcome, { value: effectOutcome, fromCall: true })
             if (effectOutcome.tag === 0) {
               write(operation.destination, { value: effectOutcome.payload, fromCall: true })

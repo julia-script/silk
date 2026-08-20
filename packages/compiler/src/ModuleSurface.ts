@@ -530,6 +530,12 @@ function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecor
       identity: encodeGenericArgumentNode(value.identity),
       contract: encodeTypeNode(value.contract),
     }
+  if (Type.isCompositeEffectRepresentationArgument(value))
+    return {
+      tag: 'CompositeEffectRepresentationArgument',
+      contract: encodeTypeNode(value.contract),
+      alternatives: value.alternatives.map(encodeGenericArgumentNode),
+    }
   if (Type.isUnavailableGenericArgument(value))
     return { tag: 'UnavailableGenericArgument', ...value }
   return { tag: 'TypeArgument', type: encodeTypeNode(value) }
@@ -675,6 +681,26 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
           'exact representation has an invalid identity or contract',
         )
       return Type.exactRepresentationArgument(identity, contract)
+    }
+    case 'CompositeEffectRepresentationArgument': {
+      const contract = decodeTypeNode(encoded.contract)
+      const alternatives = serializedArray(encoded.alternatives, 'composite alternatives').map(
+        decodeGenericArgumentNode,
+      )
+      if (
+        !Type.isEffect(contract) ||
+        alternatives.some(
+          (alternative) =>
+            !Type.isExactRepresentationArgument(alternative) ||
+            !Type.isEffect(alternative.contract) ||
+            !Type.isEffectIdentityArgument(alternative.identity),
+        )
+      )
+        throw new InvalidModuleSurfaceEncoding('composite Effect representation is invalid')
+      return Type.compositeEffectRepresentationArgument(
+        contract,
+        alternatives.filter(Type.isExactRepresentationArgument),
+      )
     }
     case 'UnavailableGenericArgument':
       return Type.unavailableGenericArgument(

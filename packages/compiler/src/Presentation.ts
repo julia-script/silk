@@ -311,6 +311,8 @@ export const genericArgument = (
         ? Type.encodeGenericArgument(self)
         : Type.isExactRepresentationArgument(self)
           ? Type.encodeGenericArgument(self)
+          : Type.isCompositeEffectRepresentationArgument(self)
+            ? Type.encodeGenericArgument(self)
           : Type.isEffectIdentityArgument(self)
             ? `effect@${self.identity}`
             : Type.isCallableIdentityArgument(self)

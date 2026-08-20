@@ -1025,6 +1025,27 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
     }
     let voidType: LlvmType.Type | undefined
     const lanesFor = (type: Mir.Type): ReadonlyArray<Layout.CallingLane> => {
+      if (type._tag === 'EffectComposite') {
+        const payloadTypes = type.alternatives.flatMap((alternative) =>
+          lanesFor(alternative).map((lane) => lane.type),
+        )
+        return Object.freeze([
+          Object.freeze({
+            _tag: 'CallingLane' as const,
+            path: Object.freeze([Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+            type: 'i32' as const,
+          }),
+          ...payloadTypes.map((laneType, slot) =>
+            Object.freeze({
+              _tag: 'CallingLane' as const,
+              path: Object.freeze([
+                Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+              ]),
+              type: laneType,
+            }),
+          ),
+        ])
+      }
       if (type._tag === 'EffectBorrow')
         return Object.freeze([
           Object.freeze({
@@ -1633,6 +1654,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
             ...[...assignments].flatMap(([ordinal, count]) => (count > 1 ? [ordinal] : [])),
             ...continuationLocals,
             ...runtimeContinuationDestinations,
+            ...entry.linear.flatMap((block) =>
+              block.operations.flatMap((operation) =>
+                operation._tag === 'RunEffectComposite'
+                  ? [operation.outcome.ordinal, operation.destination.ordinal]
+                  : [],
+              ),
+            ),
             ...(entry.fn.suspension?.regions ?? []).flatMap((region) =>
               region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
                 ? [
@@ -7017,6 +7045,33 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   locals.set(operation.destination.ordinal, Object.freeze(captured))
                   break
                 }
+                case 'PackEffectComposite': {
+                  const source = [...readLocal(operation.source)]
+                  const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+                  if (sourceType?._tag !== 'EffectValue')
+                    throw new RangeError('LLVM Effect composite lost its selected alternative')
+                  const sourceLanes = lanesFor(sourceType)
+                  const targetLanes = lanesFor(operation.type)
+                  const values: Array<Value.Input> = [
+                    yield* Constant.integerSigned(builder, i32, BigInt(operation.alternative)),
+                  ]
+                  for (const [ordinal, targetLane] of targetLanes.slice(1).entries()) {
+                    const input = source.at(ordinal)
+                    const sourceLane = sourceLanes.at(ordinal)
+                    values.push(
+                      input === undefined || sourceLane === undefined
+                        ? yield* Constant.nullValue(builder, laneType(targetLane))
+                        : yield* coerceLane(
+                            input,
+                            sourceLane,
+                            targetLane,
+                            `effect_composite${operation.destination.ordinal}_${ordinal}`,
+                          ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(values))
+                  break
+                }
                 case 'PackEffectOutcome': {
                   const source = [...readLocal(operation.source)]
                   const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
@@ -7227,6 +7282,259 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                         laneType(callingLane),
                         pointer,
                         `effect_run${operation.destination.ordinal}_${lane}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.destination.ordinal, Object.freeze(loaded))
+                  break
+                }
+                case 'RunEffectComposite': {
+                  const compositeValues = readLocal(operation.effect)
+                  const choice = compositeValues.at(0)
+                  const compositeType = entry.fn.localTypes.at(operation.effect.ordinal)
+                  if (choice === undefined || compositeType?._tag !== 'EffectComposite')
+                    throw new RangeError('LLVM Effect composite lost its tag or representation')
+                  const compositeLanes = lanesFor(compositeType)
+                  const joinedOutcomeLanes = lanesFor(operation.outcomeType)
+                  const following = yield* LlvmBlock.make(
+                    body,
+                    `effect_composite${operation.destination.ordinal}_following`,
+                  )
+                  for (const [alternativeOrdinal, alternative] of operation.alternatives.entries()) {
+                    const selected = yield* LlvmBlock.make(
+                      body,
+                      `effect_composite${operation.destination.ordinal}_alternative${alternativeOrdinal}`,
+                    )
+                    const otherwise = yield* LlvmBlock.make(
+                      body,
+                      `effect_composite${operation.destination.ordinal}_otherwise${alternativeOrdinal}`,
+                    )
+                    const selectedTag = yield* Constant.integerSigned(
+                      builder,
+                      i32,
+                      BigInt(alternativeOrdinal),
+                    )
+                    yield* FunctionBody.conditionalBranch(
+                      body,
+                      yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        choice,
+                        selectedTag,
+                        `effect_composite${operation.destination.ordinal}_is${alternativeOrdinal}`,
+                      ),
+                      selected,
+                      otherwise,
+                    )
+                    yield* LlvmBlock.setInsertionPoint(body, selected)
+                    const target = declared.find((candidate) =>
+                      Mir.matchesInstance(
+                        candidate.fn,
+                        alternative.runner,
+                        alternative.runnerTypeArguments,
+                      ),
+                    )
+                    if (target === undefined)
+                      throw new RangeError(
+                        `Backend cannot resolve Effect composite runner ${alternative.runner.module}.${alternative.runner.name}`,
+                      )
+                    const captureLanes = lanesFor(alternative.type)
+                    const effectArguments: Array<Value.Input> = []
+                    for (const [ordinal, targetLane] of captureLanes.entries()) {
+                      const input = compositeValues.at(ordinal + 1)
+                      const sourceLane = compositeLanes.at(ordinal + 1)
+                      if (input === undefined || sourceLane === undefined)
+                        throw new RangeError('LLVM Effect composite lost a capture lane')
+                      effectArguments.push(
+                        yield* coerceLane(
+                          input,
+                          sourceLane,
+                          targetLane,
+                          `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}_capture${ordinal}`,
+                        ),
+                      )
+                    }
+                    effectArguments.push(
+                      ...alternative.arguments.flatMap((argument) => [...readLocal(argument)]),
+                    )
+                    const called = yield* callValues(
+                      target,
+                      effectArguments,
+                      `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}`,
+                    )
+                    const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> =
+                      Object.freeze({ _tag: 'EffectOutcome', type: alternative.type.type })
+                    const sourceOutcomeLanes = lanesFor(sourceOutcomeType)
+                    const sourceTag = called.at(0)
+                    if (sourceTag === undefined)
+                      throw new RangeError('LLVM Effect composite runner lost its outcome tag')
+                    let mappedTag: Value.Input = sourceTag
+                    for (const [mappingOrdinal, mapping] of alternative.tagMappings.entries()) {
+                      const matches = yield* FunctionBody.integerCompare(
+                        body,
+                        'eq',
+                        sourceTag,
+                        yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
+                        `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}_tag${mappingOrdinal}`,
+                      )
+                      mappedTag = yield* FunctionBody.select(
+                        body,
+                        matches,
+                        yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                        mappedTag,
+                        `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}_mapped${mappingOrdinal}`,
+                      )
+                    }
+                    const joined: Array<Value.Input> = [mappedTag]
+                    for (const [ordinal, targetLane] of joinedOutcomeLanes.slice(1).entries()) {
+                      const input = called.at(ordinal + 1)
+                      const sourceLane = sourceOutcomeLanes.at(ordinal + 1)
+                      joined.push(
+                        input === undefined || sourceLane === undefined
+                          ? yield* Constant.nullValue(builder, laneType(targetLane))
+                          : yield* coerceLane(
+                              input,
+                              sourceLane,
+                              targetLane,
+                              `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}_outcome${ordinal}`,
+                            ),
+                      )
+                    }
+                    yield* storeMutable(operation.outcome, Object.freeze(joined))
+                    yield* FunctionBody.branch(body, following)
+                    yield* LlvmBlock.setInsertionPoint(body, otherwise)
+                  }
+                  if (trapBlock === undefined)
+                    trapBlock = yield* LlvmBlock.make(body, 'effect_composite_invalid_tag')
+                  yield* FunctionBody.branch(body, trapBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, following)
+                  yield* reloadMutableRoots(
+                    `effect_composite${operation.destination.ordinal}_following`,
+                  )
+                  const outcomeStorage = mutableStorage.get(operation.outcome.ordinal)
+                  if (outcomeStorage === undefined)
+                    throw new RangeError('Effect composite outcome is not materialized')
+                  const outcomeValues: Array<Value.Input> = []
+                  for (const [ordinal, pointer] of outcomeStorage.entries()) {
+                    const lane = joinedOutcomeLanes.at(ordinal)
+                    if (lane === undefined)
+                      throw new RangeError('Effect composite outcome lost a lane')
+                    outcomeValues.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        pointer,
+                        `effect_composite${operation.destination.ordinal}_outcome${ordinal}`,
+                      ),
+                    )
+                  }
+                  locals.set(operation.outcome.ordinal, Object.freeze(outcomeValues))
+                  const resultLaneCount = lanesFor(operation.type).length
+                  if (operation.propagationType === undefined) {
+                    locals.set(
+                      operation.destination.ordinal,
+                      Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                    )
+                    break
+                  }
+                  const tag = outcomeValues.at(0)
+                  if (tag === undefined) throw new RangeError('Effect composite outcome lost its tag')
+                  const succeeded = yield* FunctionBody.integerCompare(
+                    body,
+                    'eq',
+                    tag,
+                    yield* Constant.integerSigned(builder, i32, 0n),
+                    `effect_composite_success${operation.destination.ordinal}`,
+                  )
+                  const successBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_composite${operation.destination.ordinal}_success`,
+                  )
+                  const failureBlock = yield* LlvmBlock.make(
+                    body,
+                    `effect_composite${operation.destination.ordinal}_failure`,
+                  )
+                  const completed = yield* LlvmBlock.make(
+                    body,
+                    `effect_composite${operation.destination.ordinal}_completed`,
+                  )
+                  yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
+                  yield* LlvmBlock.setInsertionPoint(body, successBlock)
+                  yield* storeMutable(
+                    operation.destination,
+                    Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+                  )
+                  yield* FunctionBody.branch(body, completed)
+                  yield* LlvmBlock.setInsertionPoint(body, failureBlock)
+                  let propagatedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
+                  for (const [ordinal, mapping] of operation.tagMappings.entries()) {
+                    const matches = yield* FunctionBody.integerCompare(
+                      body,
+                      'eq',
+                      tag,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
+                      `effect_composite_propagation_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                    propagatedTag = yield* FunctionBody.select(
+                      body,
+                      matches,
+                      yield* Constant.integerSigned(builder, i32, BigInt(mapping.target)),
+                      propagatedTag,
+                      `effect_composite_propagated_tag${operation.destination.ordinal}_${ordinal}`,
+                    )
+                  }
+                  for (const release of operation.releases ?? []) {
+                    if (!Ownership.cleanupHasEffect(release.cleanup)) continue
+                    yield* dropThroughPlan(
+                      release.cleanup,
+                      readLocal(release.local),
+                      `effect_composite_release${release.local.ordinal}`,
+                    )
+                  }
+                  const returned: Array<Value.Input> = [
+                    propagatedTag,
+                    ...(yield* failurePayload(
+                      outcomeValues,
+                      operation.outcomeType.type,
+                      tag,
+                      operation.propagationType.type,
+                      operation.tagMappings,
+                      `effect_composite${operation.destination.ordinal}_payload`,
+                    )),
+                  ]
+                  if (entry.suspendable) {
+                    yield* returnStep(0n, Object.freeze(returned), 'propagated_effect_composite_step')
+                  } else {
+                    yield* FunctionBody.returnValue(
+                      body,
+                      returned.length === 1
+                        ? (returned.at(0) ?? propagatedTag)
+                        : yield* FunctionBody.buildAggregate(
+                            body,
+                            entry.resultType,
+                            Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+                            'propagated_effect_composite',
+                          ),
+                    )
+                  }
+                  yield* LlvmBlock.setInsertionPoint(body, completed)
+                  yield* reloadMutableRoots(
+                    `effect_composite${operation.destination.ordinal}_completed`,
+                  )
+                  const destinationStorage = mutableStorage.get(operation.destination.ordinal)
+                  if (destinationStorage === undefined)
+                    throw new RangeError('Effect composite destination is not materialized')
+                  const loaded: Array<Value.Input> = []
+                  for (const [ordinal, pointer] of destinationStorage.entries()) {
+                    const lane = lanesFor(operation.type).at(ordinal)
+                    if (lane === undefined)
+                      throw new RangeError('Effect composite destination lost a lane')
+                    loaded.push(
+                      yield* FunctionBody.load(
+                        body,
+                        laneType(lane),
+                        pointer,
+                        `effect_composite${operation.destination.ordinal}_${ordinal}`,
                       ),
                     )
                   }

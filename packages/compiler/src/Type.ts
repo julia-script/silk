@@ -265,11 +265,19 @@ export interface ExactRepresentationArgument {
   readonly contract: RepresentationBound
 }
 
+/** A closed finite set of exact Effect representations selected by source control flow. */
+export interface CompositeEffectRepresentationArgument {
+  readonly _tag: 'CompositeEffectRepresentationArgument'
+  readonly contract: Effect
+  readonly alternatives: ReadonlyArray<ExactRepresentationArgument>
+}
+
 /** A statically known representation supplied to a representation parameter. */
 export type RepresentationArgument =
   | RepresentationParameterArgument
   | OpaqueRepresentationArgument
   | ExactRepresentationArgument
+  | CompositeEffectRepresentationArgument
 
 /** A deterministic recovery placeholder that never reaches specialization or runtime phases. */
 export interface UnavailableGenericArgument {
@@ -911,6 +919,21 @@ export const exactRepresentationArgument = (
 ): ExactRepresentationArgument =>
   Object.freeze({ _tag: 'ExactRepresentationArgument', identity, contract })
 
+/** Constructs one canonical finite Effect representation from exact alternatives. */
+export const compositeEffectRepresentationArgument = (
+  contract: Effect,
+  alternatives: ReadonlyArray<ExactRepresentationArgument>,
+): CompositeEffectRepresentationArgument =>
+  Object.freeze({
+    _tag: 'CompositeEffectRepresentationArgument',
+    contract,
+    alternatives: Object.freeze(
+      [...new Map(alternatives.map((alternative) => [genericArgumentKey(alternative), alternative])).values()].sort(
+        (left, right) => genericArgumentKey(left).localeCompare(genericArgumentKey(right)),
+      ),
+    ),
+  })
+
 /** Reifies one declaration parameter as an open generic argument of the same kind. */
 export const parameterArgument = (self: Parameter): GenericArgument => {
   switch (self.kind) {
@@ -1062,10 +1085,16 @@ export const isExactRepresentationArgument = (
 ): self is ExactRepresentationArgument =>
   typeof self !== 'string' && self._tag === 'ExactRepresentationArgument'
 
+export const isCompositeEffectRepresentationArgument = (
+  self: GenericArgument,
+): self is CompositeEffectRepresentationArgument =>
+  typeof self !== 'string' && self._tag === 'CompositeEffectRepresentationArgument'
+
 export const isRepresentationArgument = (self: GenericArgument): self is RepresentationArgument =>
   isRepresentationParameterArgument(self) ||
   isOpaqueRepresentationArgument(self) ||
-  isExactRepresentationArgument(self)
+  isExactRepresentationArgument(self) ||
+  isCompositeEffectRepresentationArgument(self)
 
 export const isUnavailableGenericArgument = (
   self: GenericArgument,
@@ -1153,6 +1182,11 @@ export const genericArgumentKey = (self: GenericArgument): string =>
           ])
         : isExactRepresentationArgument(self)
           ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
+          : isCompositeEffectRepresentationArgument(self)
+            ? Canonical.record('CompositeEffectRepresentation', [
+                key(self.contract),
+                Canonical.array(self.alternatives.map(genericArgumentKey)),
+              ])
           : isEffectIdentityArgument(self)
             ? self.owner === undefined
               ? `effect-identity:${self.identity}`
@@ -1173,6 +1207,8 @@ export const encodeGenericArgument = (self: GenericArgument): string =>
         ? `some(${self.family.producer.module}.${self.family.producer.name}#${self.family.binderOrdinal})`
         : isExactRepresentationArgument(self)
           ? `typeof(${encodeRepresentationOrigin(self.identity)})`
+          : isCompositeEffectRepresentationArgument(self)
+            ? `oneof(${self.alternatives.map(encodeGenericArgument).join(', ')})`
           : isEffectIdentityArgument(self)
             ? `effect@${self.identity}`
             : isCallableIdentityArgument(self)
@@ -1748,6 +1784,9 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     } else if (isExactRepresentationArgument(argument)) {
       visitArgument(argument.identity)
       visitType(argument.contract)
+    } else if (isCompositeEffectRepresentationArgument(argument)) {
+      visitType(argument.contract)
+      for (const alternative of argument.alternatives) visitArgument(alternative)
     } else if (isEffectIdentityArgument(argument)) {
       for (const typeArgument of argument.owner?.typeArguments ?? []) visitArgument(typeArgument)
     } else if (isCallableIdentityArgument(argument)) {
@@ -2051,6 +2090,12 @@ const runtimeAvailableGenericArgument = (self: GenericArgument): boolean => {
     return runtimeAvailable(self.contract) && self.arguments.every(runtimeAvailableGenericArgument)
   if (isExactRepresentationArgument(self))
     return runtimeAvailable(self.contract) && runtimeAvailableGenericArgument(self.identity)
+  if (isCompositeEffectRepresentationArgument(self))
+    return (
+      runtimeAvailable(self.contract) &&
+      self.alternatives.length > 0 &&
+      self.alternatives.every(runtimeAvailableGenericArgument)
+    )
   if (isEffectIdentityArgument(self))
     return self.owner?.typeArguments.every(runtimeAvailableGenericArgument) ?? true
   if (isCallableIdentityArgument(self))
@@ -2203,6 +2248,12 @@ const isClosedGenericArgument = (self: GenericArgument): boolean => {
     return isConcrete(self.contract) && self.arguments.every(isClosedGenericArgument)
   if (isExactRepresentationArgument(self))
     return isConcrete(self.contract) && isClosedGenericArgument(self.identity)
+  if (isCompositeEffectRepresentationArgument(self))
+    return (
+      isConcrete(self.contract) &&
+      self.alternatives.length > 0 &&
+      self.alternatives.every(isClosedGenericArgument)
+    )
   if (isEffectIdentityArgument(self))
     return self.owner?.typeArguments.every(isClosedGenericArgument) ?? true
   if (isCallableIdentityArgument(self))
@@ -2286,6 +2337,7 @@ export const containsEffectRepresentation = (self: Type): boolean => {
     return self.arguments.some(
       (argument) =>
         (isExactRepresentationArgument(argument) && isEffectIdentityArgument(argument.identity)) ||
+        isCompositeEffectRepresentationArgument(argument) ||
         (isTypeArgument(argument) && containsEffectRepresentation(argument)),
     )
   if (isFixedArray(self)) return containsEffectRepresentation(self.element)
@@ -2506,6 +2558,22 @@ export const substituteGenericArgument = (
               self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
             )
           })()
+        : isCompositeEffectRepresentationArgument(self)
+          ? (() => {
+              const contract = substitute(self.contract, substitution)
+              if (!isEffect(contract)) return self
+              const alternatives = self.alternatives.flatMap((alternative) => {
+                const specialized = substituteGenericArgument(alternative, substitution)
+                return isExactRepresentationArgument(specialized) &&
+                  isEffect(specialized.contract) &&
+                  isEffectIdentityArgument(specialized.identity)
+                  ? [specialized]
+                  : []
+              })
+              return alternatives.length === self.alternatives.length
+                ? compositeEffectRepresentationArgument(contract, alternatives)
+                : self
+            })()
         : isExactRepresentationArgument(self)
           ? (() => {
               const contract = substitute(self.contract, substitution)
@@ -2592,6 +2660,21 @@ export const specializeExecutableOwner = (
       return (isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)) &&
         (isCallable(contract) || isEffect(contract))
         ? exactRepresentationArgument(identity, contract)
+        : argument
+    }
+    if (isCompositeEffectRepresentationArgument(argument)) {
+      const contract = specializeType(argument.contract)
+      if (!isEffect(contract)) return argument
+      const alternatives = argument.alternatives.flatMap((alternative) => {
+        const specialized = specializeArgument(alternative)
+        return isExactRepresentationArgument(specialized) &&
+          isEffect(specialized.contract) &&
+          isEffectIdentityArgument(specialized.identity)
+          ? [specialized]
+          : []
+      })
+      return alternatives.length === argument.alternatives.length
+        ? compositeEffectRepresentationArgument(contract, alternatives)
         : argument
     }
     if (isEffectIdentityArgument(argument))

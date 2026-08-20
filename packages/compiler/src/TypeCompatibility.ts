@@ -58,6 +58,7 @@ const sourceMembers = (source: Type.Type): ReadonlyArray<Type.Type> | undefined 
 
 /** Checks exact identity, nominal injection, or monotonic union widening without inference. */
 export const check = (source: Type.Type, target: Type.Type): Compatibility => {
+  if (Type.isRepresented(source) && !Type.isRepresented(target)) return check(source.contract, target)
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
   if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
   if (Type.isCallable(source) && Type.isCallable(target)) {

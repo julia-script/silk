@@ -1,4 +1,5 @@
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -113,6 +114,33 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
   if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
   if (contributing.every((type) => Type.equals(type, first))) {
     return Object.freeze({ _tag: 'Joined', type: first })
+  }
+  const effects = contributing.flatMap((type) => {
+    const contract = Type.isRepresented(type) ? type.contract : type
+    return Type.isEffect(contract) ? [contract] : []
+  })
+  if (effects.length === contributing.length) {
+    const success = Type.union(effects.map((effect) => effect.success))
+    if (success._tag !== 'Normalized')
+      return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
+    const failureRow = effects.reduce(
+      (row, effect) => RowAlgebra.union(Type.failureRowPolicy(), row, effect.failureRow),
+      RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    )
+    const requirementRow = effects.reduce(
+      (row, effect) =>
+        RowAlgebra.union(Type.requirementRowPolicy(), row, effect.requirementRow),
+      RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+    )
+    const access = effects.some((effect) => effect.access === 'Take')
+      ? 'Take'
+      : effects.some((effect) => effect.access === 'Exclusive')
+        ? 'Exclusive'
+        : 'Shared'
+    return Object.freeze({
+      _tag: 'Joined',
+      type: Type.effectWithRows(success.type, failureRow, access, requirementRow),
+    })
   }
   for (const [leftOrdinal, left] of contributing.entries()) {
     for (const right of contributing.slice(leftOrdinal + 1)) {

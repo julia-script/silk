@@ -2652,13 +2652,42 @@ const analyzeMatch = (
       arm.guard.type._tag === 'Available' &&
       arm.guard.type.type !== 'bool',
   )
-  const effectSites = arms.flatMap((arm) =>
-    arm.reachable && arm.result._tag === 'EffectBlock'
-      ? [Hir.executableSiteKey(arm.result.site)]
-      : [],
-  )
-  const erasesEffectIdentity = new Set(effectSites).size > 1
-  if (erasesEffectIdentity) diagnostics.push(Diagnostic.effectIdentityErasure(node.span))
+  const joinedEffect =
+    joined._tag === 'Joined'
+      ? Type.isRepresented(joined.type)
+        ? Type.isEffect(joined.type.contract)
+          ? joined.type.contract
+          : undefined
+        : Type.isEffect(joined.type)
+          ? joined.type
+          : undefined
+      : undefined
+  const effectAlternatives =
+    joinedEffect === undefined
+      ? Object.freeze([])
+      : Object.freeze(
+          arms.flatMap((arm) => {
+            if (!arm.reachable) return []
+            const representation = representationOfExpression(arm.result)
+            return representation !== undefined &&
+              Type.isExactRepresentationArgument(representation) &&
+              Type.isEffectIdentityArgument(representation.identity) &&
+              Type.isEffect(representation.contract)
+              ? [representation]
+              : []
+          }),
+        )
+  const reachableEffectArms =
+    joinedEffect === undefined ? 0 : arms.filter((arm) => arm.reachable).length
+  const unavailableEffectComposite =
+    joinedEffect !== undefined && effectAlternatives.length !== reachableEffectArms
+  if (unavailableEffectComposite)
+    diagnostics.push(
+      Diagnostic.nonFiniteEffectJoin(
+        'every reachable alternative must retain one exact static Effect representation',
+        node.span,
+      ),
+    )
   const callableSites = arms.flatMap((arm) =>
     arm.reachable && arm.result._tag === 'CallableSection'
       ? [Hir.executableSiteKey(arm.result.site)]
@@ -2674,10 +2703,21 @@ const analyzeMatch = (
     ) &&
     !unavailableReachableResult &&
     !hasInvalidGuard &&
-    !erasesEffectIdentity &&
+    !unavailableEffectComposite &&
     !erasesCallableIdentity &&
     joined._tag === 'Joined'
-      ? availableExpressionType(joined.type)
+      ? availableExpressionType(
+          joinedEffect === undefined
+            ? joined.type
+            : Type.represented(
+                joinedEffect,
+                joinedEffect,
+                effectAlternatives.length === 1
+                  ? (effectAlternatives.at(0) ??
+                      Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives))
+                  : Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives),
+              ),
+        )
       : unavailableExpressionType
   const fact: MatchExpressionFact = Object.freeze({
     _tag: 'Match',
