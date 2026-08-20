@@ -1,7 +1,7 @@
 # Complete struct construction and inference
 
 Type: OpenSpec implementation handoff
-Status: open
+Status: in progress
 Blocked by: 01
 OpenSpec: [complete-struct-construction-and-inference](../../../openspec/changes/complete-struct-construction-and-inference/proposal.md)
 

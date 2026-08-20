@@ -311,6 +311,7 @@ const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined =
 const fieldCandidates = (
   index: DeclarationIndex.Index,
   type: Type.Nominal | undefined,
+  module: string,
 ): ReadonlyArray<Candidate> => {
   if (type === undefined) return Object.freeze([])
   const declaration = index.modules
@@ -320,7 +321,7 @@ const fieldCandidates = (
     )
   return Object.freeze(
     (declaration?.fields ?? []).flatMap((field) =>
-      field.name._tag !== 'Present'
+      field.name._tag !== 'Present' || (field.visibility === 'Private' && type.module !== module)
         ? []
         : [
             candidate({
@@ -628,7 +629,7 @@ export const complete = (options: {
           state: subject === undefined ? 'Unavailable' : 'Available',
         }),
         replacement: replacement.span,
-        candidates: stable(fieldCandidates(options.index, subject)),
+        candidates: stable(fieldCandidates(options.index, subject, options.module)),
       })
     }
     const lookup =

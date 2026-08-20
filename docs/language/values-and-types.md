@@ -395,15 +395,11 @@ for hidden required fields does not expose their names or types.
 `SEM0024`; incompatible field values `SEM0025`. Inaccessible construction needs one stable semantic
 code that does not reveal hidden field details.
 
-**Current compiler:** Construction outside the defining module reports `SEM0021` even when every
-field is public. That module-wide restriction conflicts with this confirmed visibility rule and
-must be removed.
+**Current compiler:** Aligned. Construction resolves every named initializer to its canonical field,
+checks that field's visibility, and uses `SEM0021` only when a required field is inaccessible.
 
-**Conflicting artifact:** The current
-[struct value specification](../../openspec/specs/bootstrap-struct-values/spec.md) grants raw
-construction only to the defining module and must be reconciled.
-
-**Evidence:** [struct value tests](../../packages/compiler/test/StructValues.test.ts).
+**Evidence:** [struct value tests](../../packages/compiler/test/StructValues.test.ts),
+[struct literal elaboration](../../packages/compiler/src/Elaboration.ts).
 
 ### STRUCT-003 — Field projection follows the declared nominal field
 

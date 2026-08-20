@@ -305,7 +305,7 @@ it('infers an omitted representation by declared kind across interleaved rows', 
 fn make<A, E, ?R, F: once Effect<A ! E ? R>>(
   operation: F
 ) -> Deferred<A, E, R, F> {
-  return Deferred<A, E, R> { operation: move operation }
+  return Deferred<A, E> { operation: move operation }
 }`,
   )
   const returned = result.functions.at(0)?.returnedExpression

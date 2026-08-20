@@ -459,6 +459,11 @@ export type StructInitializerState =
       readonly field: DeclarationIndex.FieldFact
       readonly cause: Diagnostic.Identity
     }
+  | {
+      readonly _tag: 'Inaccessible'
+      readonly field: DeclarationIndex.FieldFact
+      readonly cause: Diagnostic.Identity
+    }
   | { readonly _tag: 'Unavailable' }
 
 export interface StructInitializerFact {
@@ -470,10 +475,18 @@ export interface StructInitializerFact {
   readonly syntax: SyntaxTree.Node
 }
 
+export interface StructTypeArgumentFact {
+  readonly parameter: Type.Parameter
+  readonly argument?: Type.GenericArgument
+  readonly source: 'Explicit' | 'Inferred' | 'Unavailable'
+  readonly origins: ReadonlyArray<SourceSpan.SourceSpan>
+}
+
 export interface StructLiteralExpressionFact {
   readonly _tag: 'StructLiteral'
   readonly target: StructTargetFact
   readonly authorized: boolean
+  readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
   readonly initializers: ReadonlyArray<StructInitializerFact>
   readonly fields: ReadonlyArray<{
     readonly field: DeclarationIndex.FieldFact
@@ -2134,7 +2147,7 @@ const resolveStructTarget = (
   syntax: SyntaxTree.Node,
   resolution: ResolutionContext,
   caller?: DeclarationFact,
-  inferRepresentations = false,
+  inferConstructionArguments = false,
 ): StructTargetResult => {
   const environment = new Map(
     (caller?.typeParameters ?? []).flatMap((parameter) =>
@@ -2147,7 +2160,7 @@ const resolveStructTarget = (
     modules: Object.freeze([resolution.scope]),
     diagnostics: Object.freeze([]),
   })
-  if (inferRepresentations) {
+  if (inferConstructionArguments) {
     const applied = analyzed.fact._tag === 'Applied' ? analyzed.fact : undefined
     const targetFact = applied?.target ?? analyzed.fact
     const path = targetFact._tag === 'Unresolved' ? targetFact.path : undefined
@@ -2177,13 +2190,12 @@ const resolveStructTarget = (
           })
     if (base !== undefined && candidate?._tag === 'StructDeclaration') {
       const supplied = applied?.arguments ?? []
-      const explicitParameters = candidate.typeParameters.filter(
+      const sourceParameters = candidate.typeParameters.filter(
         (parameter) =>
           parameter.type.kind !== 'CallableRepresentation' &&
           parameter.type.kind !== 'EffectRepresentation',
       )
-      const inferredParameterCount = candidate.typeParameters.length - explicitParameters.length
-      if (inferredParameterCount > 0 && supplied.length === explicitParameters.length) {
+      if (supplied.length <= sourceParameters.length) {
         const resolvedArguments = supplied.map((argument) =>
           DeclarationIndex.resolveTypeFact(
             resolution.index,
@@ -2203,6 +2215,7 @@ const resolveStructTarget = (
               return [Type.representationParameterArgument(parameter.type)]
             const resolved = resolvedArguments.at(suppliedOrdinal)
             suppliedOrdinal += 1
+            if (resolved === undefined) return [Type.parameterArgument(parameter.type)]
             if (resolved?.fact._tag !== 'Resolved') return []
             if (parameter.type.kind === 'Value')
               return Type.isTypeArgument(resolved.fact.type) ? [resolved.fact.type] : []
@@ -3143,10 +3156,13 @@ export function representationOfExpression(
   return undefined
 }
 
-interface InferredRepresentation {
-  readonly argument: Type.RepresentationArgument
+interface InferredStructArgument {
+  readonly argument: Type.GenericArgument
   readonly span: SourceSpan.SourceSpan
 }
+
+const isOwnStructArgument = (parameter: Type.Parameter, argument: Type.GenericArgument): boolean =>
+  Type.equalsGenericArgument(Type.parameterArgument(parameter), argument)
 
 const analyzeStructLiteral = (
   source: SourceFile.SourceFile,
@@ -3162,38 +3178,34 @@ const analyzeStructLiteral = (
   const struct = target.fact._tag === 'Resolved' ? target.fact.struct : undefined
   const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
   const nominalLabel = nominal === undefined ? 'unknown struct' : Type.encode(nominal)
-  const inferredRepresentations = new Map<string, InferredRepresentation>()
+  const inferredArguments = new Map<string, InferredStructArgument>()
+  const argumentOrigins = new Map<string, ReadonlyArray<SourceSpan.SourceSpan>>()
+  const explicitArguments = new Set<string>()
   if (struct !== undefined && nominal !== undefined) {
     for (const [ordinal, parameter] of struct.typeParameters.entries()) {
-      if (
-        parameter.type.kind !== 'CallableRepresentation' &&
-        parameter.type.kind !== 'EffectRepresentation'
-      )
-        continue
       const argument = nominal.arguments.at(ordinal)
-      if (argument === undefined || !Type.isRepresentationArgument(argument)) continue
-      const isOwnPlaceholder =
-        Type.isRepresentationParameterArgument(argument) &&
-        Type.key(argument.parameter) === Type.key(parameter.type)
-      if (!isOwnPlaceholder)
-        inferredRepresentations.set(
-          Type.key(parameter.type),
-          Object.freeze({ argument, span: targetSyntax.span }),
-        )
+      if (argument === undefined || isOwnStructArgument(parameter.type, argument)) continue
+      const parameterKey = Type.key(parameter.type)
+      inferredArguments.set(parameterKey, Object.freeze({ argument, span: targetSyntax.span }))
+      argumentOrigins.set(parameterKey, Object.freeze([targetSyntax.span]))
+      explicitArguments.add(parameterKey)
     }
   }
-  const structSubstitution =
-    struct === undefined || nominal === undefined
-      ? new Map<string, SemanticType>()
-      : (Type.substitution(
-          struct.typeParameters.map((parameter) => parameter.type),
-          nominal.arguments,
-        ) ?? new Map())
+  const structSubstitution = new Map<string, Type.GenericArgument>()
+  for (const [parameterKey, inferred] of inferredArguments)
+    structSubstitution.set(parameterKey, inferred.argument)
+  const definingModule = nominal?.module
   const authorized =
-    nominal !== undefined && (nominal.module === source.id || Type.isOutOfMemoryError(nominal))
-  if (nominal !== undefined && !authorized) {
-    diagnostics.push(Diagnostic.externalRawStructLiteral(Type.encode(nominal), node.span))
-  }
+    definingModule !== undefined &&
+    (struct?.fields.every(
+      (field) => field.visibility === 'Public' || definingModule === source.id,
+    ) ??
+      false)
+  const accessDiagnostic =
+    nominal !== undefined && !authorized
+      ? Diagnostic.inaccessibleStructConstruction(Type.encode(nominal), node.span)
+      : undefined
+  if (accessDiagnostic !== undefined) diagnostics.push(accessDiagnostic)
 
   const seen = new Map<string, StructInitializerFact>()
   const initializers = SyntaxTree.directNodes(node, 'StructFieldInitializer').map(
@@ -3247,6 +3259,17 @@ const analyzeStructLiteral = (
             cause: Diagnostic.identity(diagnostic),
           })
         } else if (
+          fieldLookup.field.visibility === 'Private' &&
+          nominal !== undefined &&
+          nominal.module !== source.id &&
+          accessDiagnostic !== undefined
+        ) {
+          state = Object.freeze({
+            _tag: 'Inaccessible',
+            field: fieldLookup.field,
+            cause: Diagnostic.identity(accessDiagnostic),
+          })
+        } else if (
           fieldLookup.field.declaredType._tag === 'Resolved' &&
           expression.type !== undefined
         ) {
@@ -3262,19 +3285,57 @@ const analyzeStructLiteral = (
             : expression.type
           let representationDiagnostic: Diagnostic.Diagnostic | undefined
           if (Type.isRepresented(expectedType)) {
+            const currentSubstitution = new Map(structSubstitution)
+            for (const [parameterKey, inferred] of inferredArguments)
+              currentSubstitution.set(parameterKey, inferred.argument)
+            const candidateSubstitution = new Map(currentSubstitution)
+            if (Type.infer(expectedType.contract, actualValue, candidateSubstitution)) {
+              const siteSubstitution = new Map<string, Type.GenericArgument>()
+              Type.infer(expectedType.contract, actualValue, siteSubstitution)
+              for (const parameter of struct.typeParameters) {
+                if (
+                  parameter.type.kind === 'CallableRepresentation' ||
+                  parameter.type.kind === 'EffectRepresentation'
+                )
+                  continue
+                const parameterKey = Type.key(parameter.type)
+                const inferred = siteSubstitution.get(parameterKey)
+                if (inferred === undefined || isOwnStructArgument(parameter.type, inferred))
+                  continue
+                if (inferredArguments.get(parameterKey) === undefined)
+                  inferredArguments.set(
+                    parameterKey,
+                    Object.freeze({ argument: inferred, span: expressionNode.span }),
+                  )
+                argumentOrigins.set(
+                  parameterKey,
+                  Object.freeze([
+                    ...(argumentOrigins.get(parameterKey) ?? []),
+                    expressionNode.span,
+                  ]),
+                )
+              }
+            }
+            const representationSubstitution = new Map(structSubstitution)
+            for (const [parameterKey, inferred] of inferredArguments)
+              representationSubstitution.set(parameterKey, inferred.argument)
+            const specialized = Type.substitute(expectedType, representationSubstitution)
+            if (!Type.isRepresented(specialized))
+              throw new RangeError('represented struct field lost its representation contract')
+            const specializedExpectedType = specialized
             const actualRepresentation = representationOfExpression(expression.fact)
             const requiredArgument = expectedType.representation.argument
             if (actualRepresentation === undefined) {
               representationDiagnostic = Diagnostic.structFieldTypeMismatch(
                 name,
-                Type.encode(expectedType),
+                Type.encode(specializedExpectedType),
                 Type.encode(expression.type),
                 expressionNode.span,
               )
             } else if (requiredArgument._tag === 'RepresentationParameterArgument') {
               const parameter = requiredArgument.parameter
               const parameterKey = Type.key(parameter)
-              const previousRepresentation = inferredRepresentations.get(parameterKey)
+              const previousRepresentation = inferredArguments.get(parameterKey)
               if (
                 previousRepresentation !== undefined &&
                 !Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
@@ -3290,8 +3351,8 @@ const analyzeStructLiteral = (
                 const represented = Type.represented(
                   Type.isCallable(actualValue) || Type.isEffect(actualValue)
                     ? actualValue
-                    : expectedType.contract,
-                  expectedType.representation.requiredBound,
+                    : specializedExpectedType.contract,
+                  specializedExpectedType.representation.requiredBound,
                   actualRepresentation,
                 )
                 if (represented.representation.admissibility._tag === 'Unavailable') {
@@ -3307,7 +3368,7 @@ const analyzeStructLiteral = (
                       : undefined
                   representationDiagnostic = Diagnostic.incompatibleRepresentationBound(
                     parameter.name,
-                    Type.encode(expectedType.representation.requiredBound),
+                    Type.encode(specializedExpectedType.representation.requiredBound),
                     Type.encode(represented.contract),
                     expressionNode.span,
                     {
@@ -3320,16 +3381,27 @@ const analyzeStructLiteral = (
                     },
                   )
                   if (previousRepresentation === undefined)
-                    inferredRepresentations.set(
+                    inferredArguments.set(
                       parameterKey,
                       Object.freeze({ argument: actualRepresentation, span: expressionNode.span }),
                     )
                 } else if (previousRepresentation === undefined) {
-                  inferredRepresentations.set(
+                  inferredArguments.set(
                     parameterKey,
                     Object.freeze({ argument: actualRepresentation, span: expressionNode.span }),
                   )
                 }
+                if (
+                  previousRepresentation === undefined ||
+                  Type.equalsGenericArgument(previousRepresentation.argument, actualRepresentation)
+                )
+                  argumentOrigins.set(
+                    parameterKey,
+                    Object.freeze([
+                      ...(argumentOrigins.get(parameterKey) ?? []),
+                      expressionNode.span,
+                    ]),
+                  )
               }
             } else if (!Type.equalsGenericArgument(requiredArgument, actualRepresentation)) {
               representationDiagnostic = Diagnostic.structFieldTypeMismatch(
@@ -3341,18 +3413,42 @@ const analyzeStructLiteral = (
             }
           } else {
             const currentSubstitution = new Map(structSubstitution)
-            for (const [parameterKey, inferred] of inferredRepresentations)
+            for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
             if (!Type.infer(expectedType, expression.type, candidateSubstitution)) {
+              const impliedSubstitution = new Map<string, Type.GenericArgument>()
+              if (Type.infer(expectedType, expression.type, impliedSubstitution)) {
+                for (const parameter of struct.typeParameters) {
+                  if (parameter.type.kind !== 'Value') continue
+                  const parameterKey = Type.key(parameter.type)
+                  const previous = inferredArguments.get(parameterKey)
+                  const implied = impliedSubstitution.get(parameterKey)
+                  if (
+                    previous === undefined ||
+                    implied === undefined ||
+                    Type.equalsGenericArgument(previous.argument, implied)
+                  )
+                    continue
+                  representationDiagnostic = Diagnostic.typeArgumentConflict(
+                    nominalLabel,
+                    parameter.type.name,
+                    Type.encodeGenericArgument(previous.argument),
+                    Type.encodeGenericArgument(implied),
+                    expressionNode.span,
+                    previous.span,
+                  )
+                  break
+                }
+              }
               const specializedExpected = Type.substitute(expectedType, currentSubstitution)
               const divergence = Type.firstRepresentationDivergence(
                 specializedExpected,
                 expression.type,
               )
-              if (divergence !== undefined) {
+              if (representationDiagnostic === undefined && divergence !== undefined) {
                 const parameter = struct.typeParameters.find((candidate) => {
-                  const inferred = inferredRepresentations.get(Type.key(candidate.type))
+                  const inferred = inferredArguments.get(Type.key(candidate.type))
                   return (
                     inferred !== undefined &&
                     Type.equalsGenericArgument(inferred.argument, divergence.left)
@@ -3361,7 +3457,7 @@ const analyzeStructLiteral = (
                 const original =
                   parameter === undefined
                     ? undefined
-                    : inferredRepresentations.get(Type.key(parameter.type))
+                    : inferredArguments.get(Type.key(parameter.type))
                 if (parameter !== undefined && original !== undefined)
                   representationDiagnostic = Diagnostic.conflictingInitializerRepresentation(
                     parameter.type.name,
@@ -3372,32 +3468,42 @@ const analyzeStructLiteral = (
                   )
               }
             } else {
+              const siteSubstitution = new Map<string, Type.GenericArgument>()
+              Type.infer(expectedType, expression.type, siteSubstitution)
               for (const parameter of struct.typeParameters) {
-                if (
-                  parameter.type.kind !== 'CallableRepresentation' &&
-                  parameter.type.kind !== 'EffectRepresentation'
-                )
-                  continue
                 const parameterKey = Type.key(parameter.type)
-                const inferred = candidateSubstitution.get(parameterKey)
+                const inferred = siteSubstitution.get(parameterKey)
                 if (
-                  inferredRepresentations.get(parameterKey) === undefined &&
+                  inferredArguments.get(parameterKey) === undefined &&
                   inferred !== undefined &&
-                  Type.isRepresentationArgument(inferred) &&
-                  !(
-                    Type.isRepresentationParameterArgument(inferred) &&
-                    Type.key(inferred.parameter) === parameterKey
-                  )
-                )
-                  inferredRepresentations.set(
+                  !isOwnStructArgument(parameter.type, inferred)
+                ) {
+                  inferredArguments.set(
                     parameterKey,
                     Object.freeze({ argument: inferred, span: expressionNode.span }),
                   )
+                  argumentOrigins.set(parameterKey, Object.freeze([expressionNode.span]))
+                } else if (
+                  inferred !== undefined &&
+                  !isOwnStructArgument(parameter.type, inferred) &&
+                  Type.equalsGenericArgument(
+                    inferredArguments.get(parameterKey)?.argument ?? inferred,
+                    inferred,
+                  )
+                ) {
+                  argumentOrigins.set(
+                    parameterKey,
+                    Object.freeze([
+                      ...(argumentOrigins.get(parameterKey) ?? []),
+                      expressionNode.span,
+                    ]),
+                  )
+                }
               }
             }
           }
           const compatibilitySubstitution = new Map(structSubstitution)
-          for (const [parameterKey, inferred] of inferredRepresentations)
+          for (const [parameterKey, inferred] of inferredArguments)
             compatibilitySubstitution.set(parameterKey, inferred.argument)
           const compatibleExpected = Type.substitute(expectedValue, compatibilitySubstitution)
           const compatibleValue = typesCompatible(actualValue, compatibleExpected)
@@ -3440,31 +3546,19 @@ const analyzeStructLiteral = (
       ? undefined
       : nominal.arguments.map((argument, ordinal): Type.GenericArgument => {
           const parameter = struct.typeParameters.at(ordinal)?.type
-          if (
-            parameter === undefined ||
-            (parameter.kind !== 'CallableRepresentation' &&
-              parameter.kind !== 'EffectRepresentation')
-          )
-            return argument
-          return inferredRepresentations.get(Type.key(parameter))?.argument ?? argument
+          if (parameter === undefined) return argument
+          return inferredArguments.get(Type.key(parameter))?.argument ?? argument
         })
-  const unresolvedRepresentations =
+  const unresolvedParameters =
     struct === undefined || completedArguments === undefined
       ? []
       : struct.typeParameters.flatMap((parameter, ordinal) => {
-          if (
-            parameter.type.kind !== 'CallableRepresentation' &&
-            parameter.type.kind !== 'EffectRepresentation'
-          )
-            return []
           const argument = completedArguments.at(ordinal)
-          return argument !== undefined &&
-            Type.isRepresentationParameterArgument(argument) &&
-            Type.key(argument.parameter) === Type.key(parameter.type)
+          return argument !== undefined && isOwnStructArgument(parameter.type, argument)
             ? [parameter]
             : []
         })
-  for (const parameter of unresolvedRepresentations) {
+  for (const parameter of unresolvedParameters) {
     diagnostics.push(
       Diagnostic.uninferredTypeParameter(nominalLabel, parameter.type.name, parameter.syntax.span),
     )
@@ -3472,7 +3566,7 @@ const analyzeStructLiteral = (
   const completedNominal =
     nominal === undefined ||
     completedArguments === undefined ||
-    unresolvedRepresentations.length > 0 ||
+    unresolvedParameters.length > 0 ||
     (struct !== undefined &&
       Type.substitution(
         struct.typeParameters.map((parameter) => parameter.type),
@@ -3480,6 +3574,26 @@ const analyzeStructLiteral = (
       ) === undefined)
       ? undefined
       : Type.nominal(nominal.module, nominal.name, completedArguments)
+  const typeArguments: ReadonlyArray<StructTypeArgumentFact> = Object.freeze(
+    struct?.typeParameters.map((parameter, ordinal) => {
+      const parameterKey = Type.key(parameter.type)
+      const argument = completedArguments?.at(ordinal)
+      const origins = argumentOrigins.get(parameterKey) ?? Object.freeze([])
+      return Object.freeze({
+        parameter: parameter.type,
+        ...(argument === undefined || isOwnStructArgument(parameter.type, argument)
+          ? {}
+          : { argument }),
+        source:
+          argument === undefined || isOwnStructArgument(parameter.type, argument)
+            ? ('Unavailable' as const)
+            : explicitArguments.has(parameterKey)
+              ? ('Explicit' as const)
+              : ('Inferred' as const),
+        origins,
+      })
+    }) ?? [],
+  )
   const completedTarget: StructTargetFact =
     completedNominal !== undefined && target.fact._tag === 'Resolved'
       ? Object.freeze({ ...target.fact, type: completedNominal })
@@ -3488,6 +3602,7 @@ const analyzeStructLiteral = (
   if (struct !== undefined && completedNominal !== undefined) {
     for (const field of struct.fields) {
       if (field.name._tag !== 'Present' || seen.has(field.name.spelling)) continue
+      if (field.visibility === 'Private' && completedNominal.module !== source.id) continue
       diagnostics.push(
         Diagnostic.missingStructInitializer(
           Type.encode(completedNominal),
@@ -3526,6 +3641,7 @@ const analyzeStructLiteral = (
       _tag: 'StructLiteral',
       target: completedTarget,
       authorized,
+      typeArguments,
       initializers: Object.freeze(initializers),
       fields: Object.freeze(fields),
       type,

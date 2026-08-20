@@ -97,7 +97,7 @@ export const duplicateFieldNameCode = 'SEM0017' as const
 export const expectedTypeCode = 'SEM0018' as const
 export const privateTypeExposureCode = 'SEM0019' as const
 export const inlineRecursiveStructCode = 'SEM0020' as const
-export const externalRawStructLiteralCode = 'SEM0021' as const
+export const inaccessibleStructConstructionCode = 'SEM0021' as const
 export const unknownStructFieldCode = 'SEM0022' as const
 export const duplicateStructInitializerCode = 'SEM0023' as const
 export const missingStructInitializerCode = 'SEM0024' as const
@@ -320,7 +320,7 @@ export type Code =
   | typeof expectedTypeCode
   | typeof privateTypeExposureCode
   | typeof inlineRecursiveStructCode
-  | typeof externalRawStructLiteralCode
+  | typeof inaccessibleStructConstructionCode
   | typeof unknownStructFieldCode
   | typeof duplicateStructInitializerCode
   | typeof missingStructInitializerCode
@@ -704,7 +704,7 @@ export type Reason =
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
   | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
-  | { readonly _tag: 'ExternalRawStructLiteral'; readonly type: string }
+  | { readonly _tag: 'InaccessibleStructConstruction'; readonly type: string }
   | { readonly _tag: 'UnknownStructField'; readonly type: string; readonly field: string }
   | {
       readonly _tag: 'DuplicateStructInitializer'
@@ -1492,14 +1492,17 @@ export const inlineRecursiveStruct = (
     span,
   })
 
-export const externalRawStructLiteral = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
+export const inaccessibleStructConstruction = (
+  type: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: externalRawStructLiteralCode,
+    code: inaccessibleStructConstructionCode,
     severity: 'error',
-    message: `Raw construction of ${type} is limited to its defining module`,
-    reason: Object.freeze({ _tag: 'ExternalRawStructLiteral', type }),
+    message: `Cannot construct ${type} because one or more required fields are not visible`,
+    reason: Object.freeze({ _tag: 'InaccessibleStructConstruction', type }),
     span,
   })
 
@@ -2861,6 +2864,7 @@ export const typeArgumentConflict = (
   written: string,
   implied: string,
   span: SourceSpan.SourceSpan,
+  firstConstraint?: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -2870,6 +2874,13 @@ export const typeArgumentConflict = (
     message: `Type argument ${parameter} of ${target} is ${written}, but the supplied values imply ${implied}`,
     reason: Object.freeze({ _tag: 'TypeArgumentConflict', target, parameter, written, implied }),
     span,
+    ...(firstConstraint === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'type argument first constrained here', span: firstConstraint }),
+          ]),
+        }),
   })
 
 export const polymorphicRecursion = (

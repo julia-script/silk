@@ -386,9 +386,9 @@ conflicting field evidence. A parameter with no field or explicit evidence repor
 parameter diagnostic at the literal. Wrong-kind and explicit-prefix conflicts use the same
 application diagnostics as a generic call. All such failures occur before ownership or lowering.
 
-**Current compiler:** Partially aligned. It already infers omitted callable and Effect
-representation arguments from fields, including through a written prefix, but generally requires
-ordinary nominal arguments to be explicit. The stable rule removes that special case.
+**Current compiler:** Aligned. Construction collects field evidence for omitted ordinary, row, and
+representation parameters after a written prefix, retains every origin, and rejects missing or
+conflicting evidence before HIR lowering.
 
 **Evidence:** [representation inference tests](../../packages/compiler/test/RepresentationInference.test.ts),
 [struct literal elaboration](../../packages/compiler/src/Elaboration.ts),

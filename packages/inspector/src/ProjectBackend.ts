@@ -1385,7 +1385,7 @@ export const structValueRows = (
       dot: literal.target._tag === 'Resolved' ? 'symbol' : 'warning',
       label:
         literal.target._tag === 'Resolved' ? typeText(literal.target.type) : 'unavailable target',
-      detail: literal.authorized ? 'module-owned' : 'not authorized',
+      detail: literal.authorized ? 'fields visible' : 'field access denied',
       span,
       ...(literal.target._tag === 'Resolved' && literal.authorized
         ? {}
@@ -1407,6 +1407,18 @@ export const structValueRows = (
           .map(({ field }) => (field.name._tag === 'Present' ? field.name.spelling : '?'))
           .join(', ') || 'empty',
     })
+    if (literal.typeArguments.length > 0)
+      rows.push({
+        key: `${key}-arguments`,
+        depth: 2,
+        label: 'type arguments',
+        detail: literal.typeArguments
+          .map(
+            (argument) =>
+              `${argument.parameter.name}=${argument.argument === undefined ? '?' : Type.encodeGenericArgument(argument.argument)} (${argument.source.toLowerCase()})`,
+          )
+          .join(', '),
+      })
   }
 
   rows.push({

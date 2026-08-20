@@ -865,7 +865,7 @@ const collectExpression = (
         )
       for (const initializer of expression.initializers) {
         const fieldToken = initializer.token
-        if (initializer.state._tag === 'Resolved')
+        if (initializer.state._tag === 'Resolved' || initializer.state._tag === 'Inaccessible')
           push(
             pending,
             fieldToken?.span,
