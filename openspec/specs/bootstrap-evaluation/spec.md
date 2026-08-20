@@ -7,10 +7,11 @@ Evaluate the first closed, semantically checked Silk program to an exact `i32` r
 ### Requirement: First bootstrap entry point
 
 Bootstrap evaluation SHALL execute the snapshot's lowered MIR program from the entry that instance
-discovery resolved. An ordinary `main() -> i32` SHALL retain its exact completed value. An effectful
+discovery resolved. An ordinary `main() -> ()` SHALL complete with status zero, an ordinary
+`main() -> i32` SHALL retain its exact completed value, and an effectful
 `main() -> () ! E` SHALL be constructed and run once by the lowered entry adapter, producing
-either completed status `0` or deterministic unhandled-failure termination data retaining the
-normalized failure tag and canonical identity. When discovery reports an unavailable entry,
+either completed status `0` or deterministic structured unhandled-failure termination data
+retaining status one, canonical identity, provenance, logical path, and causal history. When discovery reports an unavailable entry,
 evaluation SHALL return a closed `Blocked` outcome carrying that explicit entry reason rather than
 throw, fail, or choose a declaration.
 
@@ -26,8 +27,8 @@ throw, fail, or choose a declaration.
 
 #### Scenario: Retain an unhandled entry failure
 
-- **WHEN** effectful `main` fails with a reportable failure
-- **THEN** evaluation returns deterministic termination data naming its normalized tag and canonical identity
+- **WHEN** effectful `main` fails with a concrete detached owned failure
+- **THEN** evaluation returns deterministic termination data naming status one, its private tag, canonical identity, provenance, logical path, and causal history
 
 #### Scenario: Block a missing main
 
@@ -51,8 +52,9 @@ them, calls evaluate their already-computed argument locals bound positionally t
 parameter locals, drops execute as explicit no-release events for the copyable slice, and each
 function returns its terminator's value, publishing the exact `i32` result on completion.
 Unavailable facts and ownership violations reach evaluation as the explicit generated traps
-lowering inserted; executing a trap SHALL produce a `Blocked` outcome carrying the trap's
-function identity, reason, and provenance rather than a guessed value. Functions absent from the
+lowering inserted; executing a trap SHALL produce a top-level `Trap` outcome carrying its
+classification, reason, provenance, and available logical path rather than a guessed value.
+Functions absent from the
 lowered program MUST NOT affect the outcome.
 
 #### Scenario: Evaluate a literal main
@@ -80,20 +82,20 @@ lowered program MUST NOT affect the outcome.
 - **WHEN** a compatible call contains two nested call arguments
 - **THEN** the first nested expression completes before the second begins and both completed values are then bound to their matching outer parameters
 
-#### Scenario: Block at a lowered trap
+#### Scenario: Trap at a lowered trap
 
 - **WHEN** a reachable function's body was unavailable and lowered to a generated trap
-- **THEN** evaluation is blocked at that trap with its function identity, reason, and causative span
+- **THEN** evaluation returns a fatal-trap outcome with its function identity, reason, and causative span
 
 #### Scenario: Block at an inner unavailable fact
 
 - **WHEN** a body contains an unavailable fact anywhere in its returned expression
-- **THEN** lowering has already turned that body into a generated trap and evaluation blocks there before executing any enclosing target
+- **THEN** lowering has already turned that body into a generated trap and evaluation terminates there before executing any enclosing target
 
 #### Scenario: Block wrong call arity
 
 - **WHEN** a call contract at any nesting depth is an arity mismatch
-- **THEN** the enclosing body's HIR is unavailable, its lowered function traps, and evaluation blocks with that trap's provenance
+- **THEN** the enclosing body's HIR is unavailable, its lowered function traps, and evaluation returns that trap's provenance
 
 #### Scenario: Ignore an unreachable broken function
 
@@ -105,10 +107,10 @@ lowered program MUST NOT affect the outcome.
 - **WHEN** `main` binds `let value = identity(42)` and returns `value`
 - **THEN** the call completes into the binding's local, its drop executes at the exit, and evaluation completes with `42`
 
-#### Scenario: Block a use-after-move program at its trap
+#### Scenario: Trap a use-after-move program at its trap
 
 - **WHEN** a reachable function's ownership verdict is a violation
-- **THEN** its lowered function is a generated trap and evaluation blocks there with the violation's provenance
+- **THEN** its lowered function is a generated trap and evaluation returns fatal termination with the violation's provenance
 
 ### Requirement: Recursive calls execute in distinct activation frames
 
@@ -186,7 +188,7 @@ depending on object identity, wall-clock time, random state, I/O, or process-glo
 #### Scenario: Retain a partial blocked trace
 
 - **WHEN** evaluation reaches a trap after completing earlier nested calls
-- **THEN** the blocked outcome retains the ordered successful events preceding the trap without a binding or return that did not occur
+- **THEN** the trap outcome retains the ordered successful events preceding the trap without a binding or return that did not occur
 
 #### Scenario: Repeat successful evaluation
 
@@ -474,7 +476,7 @@ encoding.
 
 Evaluation SHALL distinguish construction from execution, represent success and owned nominal
 failure explicitly, run one layer, recover exact members, propagate unmatched members, and record
-deterministic ordered flow/failure/cleanup events. Traps SHALL remain separate blocked outcomes.
+deterministic ordered flow/failure/cleanup events. Traps SHALL remain separate fatal outcomes.
 
 #### Scenario: Compare lazy success and recovery
 
@@ -600,7 +602,7 @@ array, allocation, or host string.
 #### Scenario: Trap an out-of-bounds static read
 
 - **WHEN** the runtime index equals or exceeds the static view length
-- **THEN** evaluation blocks with the ordinary indexed-read trap and the indexing span
+- **THEN** evaluation returns the ordinary indexed-read fatal trap and the indexing span
 
 ### Requirement: Evaluation applies the canonical transcendental contract
 

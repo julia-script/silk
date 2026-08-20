@@ -42,17 +42,22 @@ The driver SHALL orchestrate closure loading, header collection, elaboration, ow
 
 ### Requirement: Driver outcomes identify backend and artifact kind
 
-Every successful driver outcome SHALL retain the canonical backend identifier, target, artifact kind, durable path, symbols, diagnostics, and phase report. Reports SHALL include only phases actually executed and SHALL distinguish backend emission from artifact finalization.
+Every successful driver outcome SHALL retain the canonical backend identifier, target, artifact
+kind, durable path, symbols, target-neutral entry termination contract, diagnostics, and phase
+report. The termination contract SHALL expose success policy, typed-failure identities and private
+tags, and logical-frame metadata as data without rendering it or creating ambient output. Reports
+SHALL include only phases actually executed and SHALL distinguish backend emission from artifact
+finalization.
 
 #### Scenario: Report a direct Wasm build
 
 - **WHEN** the direct WebAssembly backend successfully produces a durable module
-- **THEN** the outcome identifies backend `wasm`, target `wasm32-unknown-unknown`, artifact kind WebAssembly module, its destination, and no Clang phases
+- **THEN** the outcome identifies backend `wasm`, target `wasm32-unknown-unknown`, artifact kind WebAssembly module, its destination, structured termination contract, and no Clang phases
 
 #### Scenario: Report an LLVM Wasm build
 
 - **WHEN** LLVM successfully produces a durable WebAssembly module
-- **THEN** the outcome identifies backend `llvm`, the same canonical target, the WebAssembly module kind, and the executed LLVM finalization phases
+- **THEN** the outcome identifies backend `llvm`, the same canonical target, the WebAssembly module kind, structured termination contract, and the executed LLVM finalization phases
 
 ### Requirement: The differential harness is a continuous check
 

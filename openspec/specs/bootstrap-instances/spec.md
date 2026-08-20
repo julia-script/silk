@@ -8,10 +8,11 @@ generic language inherits, degenerate while the slice has no type or contract-ro
 ## Requirements
 ### Requirement: Instances are discovered from the entry by a recorded worklist
 
-Instance discovery SHALL start from one of the root module's two valid user entries: a unique
-zero-parameter public ordinary `main() -> i32`, or a unique zero-parameter public
-`effect fn main() -> () ! E` whose requirement row is empty and whose failure members all conform
-to `Report`. Discovery SHALL retain the selected entry kind and normalized failure metadata and
+Instance discovery SHALL start from one of the root module's three valid user entries: a unique
+zero-parameter public ordinary `main() -> ()`, a unique zero-parameter public ordinary
+`main() -> i32`, or a unique zero-parameter public `effect fn main() -> () ! E` whose requirement
+row is empty and whose failure members are concrete detached owned values. Discovery SHALL retain
+the selected entry kind and normalized failure metadata and
 SHALL follow resolved local and cross-module calls in HIR transitively. The deterministic worklist
 SHALL record an instance before following it, so directly and mutually recursive programs terminate
 with each canonical instance discovered exactly once, in deterministic discovery order.
@@ -25,7 +26,7 @@ whether or not their modules are imported.
 
 #### Scenario: Discover an effectful entry chain
 
-- **WHEN** effectful `main` runs one reachable effect function and can fail with one reportable type
+- **WHEN** effectful `main` runs one reachable effect function and can fail with one concrete detached owned type
 - **THEN** discovery records `main`, the reachable function, the failure runtime type, and its cleanup hooks deterministically
 
 #### Scenario: Discover a cross-module call chain
@@ -62,8 +63,8 @@ the same instance.
 ### Requirement: An unavailable entry stays explicit
 
 When the root module has no unique valid entry — missing, ambiguous, generic, parameterized,
-ordinary with a non-`i32` result, effectful with a non-`()` result, effectful with unresolved
-requirements, or effectful with an unreportable failure — discovery SHALL report an explicitly
+ordinary with a result other than `()` or `i32`, effectful with a non-`()` result, or effectful with
+unresolved requirements — discovery SHALL report an explicitly
 unavailable entry with its reason and SHALL record no instances, rather than choosing a declaration
 or failing.
 
@@ -71,11 +72,6 @@ or failing.
 
 - **WHEN** the root module declares no `main`
 - **THEN** discovery reports an unavailable entry with a missing-entry reason and an empty instance list
-
-#### Scenario: Report an unreportable effect entry
-
-- **WHEN** the root module's effectful `main` has a failure without `Report` conformance
-- **THEN** discovery reports an unavailable entry with an unreportable-failure reason and an empty instance list
 
 #### Scenario: Report an open effect entry
 

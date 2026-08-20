@@ -2,139 +2,107 @@
 
 ## Purpose
 
-Define how a closed Silk executable runs an effectful user entry, reports an unhandled typed
-failure, releases its owned payload, and converts the closed outcome to a platform status.
+Define how a closed Silk executable runs its selected user entry, represents success, unhandled
+typed failure, and fatal trap, and adapts that target-neutral outcome to each host boundary.
 
 ## Requirements
 
-### Requirement: Executables accept an effectful unit entry
+### Requirement: Entrypoints use the confirmed public shapes and statuses
 
-A root module SHALL be executable when it declares exactly one public, non-generic,
-zero-parameter `effect fn main() -> () ! E` whose requirement row is empty and whose failure row
-is closed. Calling the entry SHALL construct its lazy Effect, and the generated host adapter SHALL
-run exactly that Effect exactly once. The existing public, non-generic, zero-parameter ordinary
-`main() -> i32` form SHALL retain its direct exit-status behavior.
+The compiler SHALL accept exactly public, non-generic, zero-parameter ordinary `main() -> ()`,
+ordinary `main() -> i32`, and effectful `main() -> () ! E ? never`. It SHALL map ordinary unit and
+Effect success to status zero, every unhandled typed failure to status one, and only ordinary
+`i32` success to its returned custom status. A private, invalidly shaped, or open entry SHALL be
+rejected before lowering with its exact entry reason.
 
-#### Scenario: Complete an effectful entry
+#### Scenario: Run an ordinary unit entry
 
-- **WHEN** `pub effect fn main() -> ()` returns `()`
-- **THEN** the generated adapter runs the Effect once and the executable exits with status `0`
+- **WHEN** a public ordinary `main` explicitly returns `()`
+- **THEN** the program is a valid entry and terminates successfully with status zero
 
-#### Scenario: Preserve an ordinary status entry
+#### Scenario: Preserve an ordinary custom status
 
-- **WHEN** `pub fn main() -> i32` returns `42`
-- **THEN** the executable exits with status `42` without applying effectful termination semantics
+- **WHEN** a public ordinary `main() -> i32` returns one concrete status
+- **THEN** the program terminates with that exact status without applying Effect termination policy
 
-#### Scenario: Reject unresolved entry requirements
+#### Scenario: Run an effect entry exactly once
 
-- **WHEN** an effectful `main` retains any capability requirement
-- **THEN** entry discovery reports an unavailable entry and no runtime artifact is produced
+- **WHEN** a public effectful `main` succeeds with `()` and retains no requirements
+- **THEN** the compiler constructs and runs that Effect exactly once and terminates with status zero
 
-### Requirement: Entry failures require explicit reportability
+#### Scenario: Diagnose a private entry accurately
 
-The compiler SHALL expose a compiler-sealed marker capability named `Report`. Every nominal member
-of an effectful entry's failure row MUST have exactly one valid `Report` conformance. A valid
-bootstrap conformance SHALL be an operation-free marker declaration. Missing, malformed, or
-ambiguous reportability SHALL make the entry unavailable before MIR lowering.
+- **WHEN** a correctly typed `main` is not public
+- **THEN** entry discovery reports the visibility error rather than claiming its return type is unresolved
 
-#### Scenario: Accept a reportable failure
+#### Scenario: Reject unresolved entry dependencies
 
-- **WHEN** `SomeError` has a valid `impl Report for SomeError {}` and effectful `main` declares `! SomeError`
-- **THEN** entry discovery retains `SomeError` as an ordered reportable failure
+- **WHEN** an effectful `main` retains one or more requirement keys
+- **THEN** compilation lists every unresolved dependency and does not begin execution
 
-#### Scenario: Reject an unreportable failure
+### Requirement: Termination is structured target-neutral data
 
-- **WHEN** effectful `main` declares `! SomeError` without a valid `Report` conformance
-- **THEN** entry discovery reports that the entry has an unreportable failure and records no instances
+Success, unhandled typed failure, and fatal trap SHALL produce one target-neutral outcome carrying
+classification, public status, failure identity or trap reason, source provenance, stable logical
+call path, and causal recovery history where present. Any concrete detached owned failure value
+SHALL be entry-eligible without marker conformance. Ordinary propagation MUST NOT duplicate a
+cause. Typed-failure propagation SHALL complete ordinary cleanup, including cleaning the terminal
+payload exactly once at entry; a trap remains outside typed recovery and promises no cleanup.
+Standalone adapters MAY render this data, while embedding hosts SHALL receive data without ambient
+output.
 
-### Requirement: The host adapter closes typed entry outcomes
+#### Scenario: Close an arbitrary concrete failure
 
-The generated host adapter SHALL branch on the effect entry's explicit typed outcome. Success SHALL
-become status `0`. An unhandled typed failure SHALL select its normalized one-based failure tag,
-release the complete owned failure payload through its compiler-planned cleanup, and produce a
-closed failure termination. No typed failure or requirement row MAY cross the machine entry ABI.
+- **WHEN** effectful `main` fails with a concrete detached owned value that implements no marker interface
+- **THEN** entry closure cleans its payload exactly once and returns an unhandled-failure outcome with status one and its canonical identity
 
-#### Scenario: Close one failure
+#### Scenario: Retain causal recovery history
 
-- **WHEN** effectful `main` fails with its first normalized reportable failure member
-- **THEN** the adapter releases that payload and produces failure termination tag `1`
+- **WHEN** a selected recovery handler fails while handling an earlier typed failure
+- **THEN** the new failure is primary and the earlier failure remains one recovered cause without propagation duplicates
 
-#### Scenario: Close a later failure deterministically
+#### Scenario: Preserve a failure trace through suspension
 
-- **WHEN** effectful `main` fails with normalized failure member `n`
-- **THEN** repeated builds and runs produce failure termination tag `n` and the same cleanup behavior
+- **WHEN** an unhandled typed failure crosses suspended logical invocations in an optimized build
+- **THEN** evaluator, native, and Wasm termination metadata retain the stable logical path rather than compiler driver or coroutine frames
 
-#### Scenario: Run a failure Drop hook
+#### Scenario: Keep traps outside typed recovery
 
-- **WHEN** the unhandled failure payload owns a type with a reachable Drop hook
-- **THEN** the adapter invokes that hook exactly once before returning across the machine boundary
+- **WHEN** execution reaches a fatal trap
+- **THEN** the outcome is classified as a trap, `Effect.catch` cannot recover it, and no successful source cleanup is claimed
 
-### Requirement: Native failures are reported and normalized
+### Requirement: Generated adapters are target-specific and pay for use
 
-For a native executable, the compiler-owned runtime shim SHALL map an effect failure termination to
-the exact colorless UTF-8 line `Error: <canonical-failure-identity>\n` on standard error and process
-status `1`. The canonical identity SHALL be selected from compiler-provided ordered metadata, not
-runtime reflection. A complete failed write SHALL produce operational status `2`. The report MUST
-NOT include uninitialized padding, raw addresses, or an implicit structural dump of the payload.
+The compiler SHALL derive each private target adapter and runtime linkage from the reachable entry,
+failure, host-input, stream, and suspension inventory. A native standalone adapter SHALL normalize
+every recognized unhandled typed failure to status one and render its canonical identity to the
+diagnostic stream; a failed complete render SHALL use operational status two. Direct WebAssembly
+SHALL remain import-free and return the private normalized tag paired with the artifact's structured
+termination metadata. Process arguments SHALL be captured only when reachable host-input operations
+request them. No source-visible console, scheduler, allocator, dependency container, or provider
+SHALL become ambient through entry adaptation.
 
-#### Scenario: Report an unhandled failure
+#### Scenario: Keep a trivial adapter minimal
 
-- **WHEN** effectful `main` fails with reportable `app.SomeError`
-- **THEN** the native executable writes `Error: app.SomeError\n` to standard error and exits with status `1`
+- **WHEN** a closed trivial entry reaches no reporting output, host input, suspension, or runtime service
+- **THEN** its artifact contains no console, command-line, scheduler, allocator, provider-container, or unrelated adapter machinery
 
-#### Scenario: Keep failure reports deterministic
+#### Scenario: Render a standalone typed failure
 
-- **WHEN** equivalent failed programs are compiled and run repeatedly
-- **THEN** their report bytes and exit status are identical
+- **WHEN** a native effect entry fails with canonical identity `app.SomeError`
+- **THEN** the adapter writes `Error: app.SomeError\n` to its diagnostic stream and exits with status one
 
-#### Scenario: Classify a broken standard error write
+#### Scenario: Classify a broken diagnostic write
 
-- **WHEN** the shim cannot write the complete failure report to standard error
-- **THEN** it exits with operational status `2`
+- **WHEN** the native adapter cannot complete the failure report write
+- **THEN** it exits with operational status two without changing the original typed-failure data
 
-### Requirement: Standalone WebAssembly retains host-reportable termination
+#### Scenario: Keep direct WebAssembly import-free
 
-A standalone WebAssembly artifact SHALL keep its import-free boundary. Its exported `silk_main`
-SHALL return `0` for effect success or the normalized one-based failure tag for an unhandled typed
-failure, and the backend artifact SHALL retain the matching ordered canonical failure identities so
-a host can render the same report. The module SHALL NOT invent a standard-error import.
+- **WHEN** a closed effect entry is emitted directly to WebAssembly
+- **THEN** `silk_main` returns its private closed tag, the artifact retains matching structured termination metadata, and no standard-error import is added
 
-#### Scenario: Return a WebAssembly failure tag
+#### Scenario: Capture command-line state only on demand
 
-- **WHEN** direct WebAssembly execution reaches the second normalized entry failure
-- **THEN** `silk_main` returns `2` and the artifact's second report identity names that failure
-
-### Requirement: Traps bypass typed entry termination
-
-Arithmetic traps, bounds traps, compiler-generated impossible-state traps, and violated unsafe
-contracts SHALL remain abnormal termination. The host adapter MUST NOT render them as reportable
-typed failures or claim that typed-failure cleanup completed.
-
-#### Scenario: Bypass reporting for a trap
-
-- **WHEN** effectful `main` traps while running
-- **THEN** execution terminates abnormally without a `Report` failure line or typed-failure status
-
-### Requirement: The native entry receives the process command line
-
-The compiler-owned native runtime shim's entry point SHALL receive the process argument count and
-argument vector and retain them for the host-input runtime before running the user entry. Silk `main`
-SHALL keep its zero-parameter, empty-requirement-row shape in both its effectful and its ordinary
-status form: a program SHALL reach its arguments through a service rather than through the entry
-signature. Retaining the command line MUST NOT change any termination status, report byte, or
-cleanup behavior, and MUST NOT make the entry unavailable for a program that reads no host input.
-
-#### Scenario: Keep a zero-parameter entry
-
-- **WHEN** a program reads its command line through the host-input service
-- **THEN** its `main` still declares no parameters and no requirement row, and entry discovery accepts it unchanged
-
-#### Scenario: Preserve every status with arguments present
-
-- **WHEN** a program that reads no host input is run with arguments
-- **THEN** it exits `0` on success, `1` with the same report bytes on a reported typed failure, and `2` on a failed standard-error write
-
-#### Scenario: Leave standalone WebAssembly unchanged
-
-- **WHEN** a standalone WebAssembly artifact is produced
-- **THEN** it keeps its import-free boundary and its exported `silk_main` contract, with no process-input import and no entry parameters
+- **WHEN** reachable code uses host-input argument operations
+- **THEN** the native adapter receives and stores the process command line without changing Silk `main`'s zero-parameter contract

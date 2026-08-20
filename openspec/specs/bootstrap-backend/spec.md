@@ -27,8 +27,8 @@ moves, calls, drops, returns, branches, traps, and generated entry termination m
 operations — and SHALL realize every scalar representation from the MIR layout table exactly. It
 SHALL emit LLVM bitcode directly, without loading `libLLVM`, using the LLVM C API, or requiring a
 compiler-private native FFI. The artifact SHALL record the canonical target, each instance's
-deterministic symbol, the explicit machine entry symbol `silk_main`, and ordered effect-entry report
-identities when present. Function order MUST NOT select the machine entry. Identical target-aware
+deterministic symbol, the explicit machine entry symbol `silk_main`, and the target-neutral entry
+termination contract when present. Function order MUST NOT select the machine entry. Identical target-aware
 MIR programs and requests SHALL produce byte-identical bitcode across fresh processes, gated by a
 committed digest.
 
@@ -39,8 +39,8 @@ committed digest.
 
 #### Scenario: Lower an effectful entry adapter
 
-- **WHEN** MIR selects an effectful `()` entry with two reportable failures
-- **THEN** bitcode contains a zero-parameter scalar `silk_main` adapter that returns `0` or the normalized one-based failure tag and the artifact records both canonical report identities
+- **WHEN** MIR selects an effectful `()` entry with two concrete failures
+- **THEN** bitcode contains a zero-parameter scalar `silk_main` adapter that returns its private closed tag and the artifact records both canonical identities, public status policy, and logical-frame metadata
 
 #### Scenario: Ignore function order for entry naming
 
@@ -60,9 +60,9 @@ committed digest.
 ### Requirement: Direct WebAssembly closes effectful entry outcomes
 
 The direct WebAssembly backend SHALL emit the same explicit `silk_main` adapter semantics as the
-LLVM backend without adding host imports: `0` for success and the normalized one-based failure tag
-for an unhandled typed failure after payload cleanup. Its artifact SHALL retain the ordered canonical
-report identities.
+LLVM backend without adding host imports: `0` for success and the private normalized failure tag
+for an unhandled typed failure after payload cleanup. Its artifact SHALL retain the target-neutral
+termination contract containing public status policy, canonical identities, and logical metadata.
 
 #### Scenario: Emit an import-free effect entry
 
