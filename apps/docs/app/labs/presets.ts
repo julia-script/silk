@@ -2735,7 +2735,7 @@ pub fn main() -> i32 {
   ),
   one(
     'syntax',
-    'fail · Invalid union member',
+    'ok · Never disappears from a union',
     `fn broken(value: i32 | never) -> i32 {
   return 0
 }
@@ -2843,7 +2843,7 @@ pub fn main() -> i32 {
 }
 `,
   ),
-  // The full contract: an effectful operation binding ordinary, failure-row, and requirement-row
+  // The full contract: an effectful operation binding ordinary failure types and requirement-row
   // arguments, dispatched through the bound and run under a provided requirement. `decodeWith`
   // runs the bound call explicitly rather than returning it: tail propagation of a bound-dispatched
   // effectful operation lowers to invalid MIR (#226). Keep the explicit `run` until that is fixed.
@@ -2858,7 +2858,7 @@ pub struct Schema {
 
 struct Clock {}
 
-interface Decoder<S, Arguments, A, !E, ?R> {
+interface Decoder<S, Arguments, A, E, ?R> {
   effect fn decode(self: &S, encoded: Arguments) -> A ! E ? R
 }
 
@@ -2871,7 +2871,7 @@ effect fn schemaDecode(self: &Schema, encoded: i32) -> i32
   return encoded + self.offset
 }
 
-impl Decoder<Schema, i32, i32 ! DecodeError ? &Clock> for Schema {
+impl Decoder<Schema, i32, i32, DecodeError ? &Clock> for Schema {
   decode: Schema.schemaDecode
 }
 
@@ -2883,7 +2883,7 @@ effect fn recover(problem: DecodeError) -> i32 {
   return 0
 }
 
-effect fn decodeWith<T: Decoder<T, i32, i32 ! DecodeError ? &Clock>>(schema: &T, encoded: i32) -> i32
+effect fn decodeWith<T: Decoder<T, i32, i32, DecodeError ? &Clock>>(schema: &T, encoded: i32) -> i32
 ! DecodeError
 ? &Clock {
   let value = run Decoder.decode(schema, encoded)
