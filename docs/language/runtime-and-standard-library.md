@@ -585,10 +585,9 @@ through the program-entry diagnostics. Missing private adapter support is a brok
 Unhandled typed failures and fatal traps retain their distinct runtime behavior rather than being
 reported as source validation errors.
 
-**Current compiler:** Disputed where the obsolete operation-free `Report` marker still gates effect
-entries and where failure-member ordinals and incomplete rendering do not yet implement the
-confirmed termination-report rules. Automatic execution and requirement closure already follow the
-intended shape.
+**Implementation:** Entry discovery, generated MIR, evaluator outcomes, and backend termination
+contracts share the same entry inventory. The private native adapter is derived from that inventory;
+a trivial closed entry links no stream, command-line, scheduler, allocator, or provider machinery.
 
 **Evidence:** [program entry](program-entry.md),
 [entry termination specification](../../openspec/specs/bootstrap-entry-termination/spec.md),

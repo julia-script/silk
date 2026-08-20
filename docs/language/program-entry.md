@@ -43,15 +43,8 @@ effect fn main() {
 ordinary missing-result diagnostic rather than entry-specific unit inference. No stable diagnostic
 code is currently assigned.
 
-**Current compiler:** The compiler currently reports:
-
-```text
-No entry point: `main` must declare a resolved return type
-```
-
-The return type is resolved. Entry discovery groups private visibility together with unresolved
-typing under one `UntypedEntry` reason, so the message hides the actionable requirement. The source
-diagnostic should say that `main` must be public, or that the root module has no public entry.
+**Implementation:** Entry discovery retains private visibility as its own reason, and the CLI
+reports `No entry point: \`main\` must be public`.
 
 **Evidence:** [entry-instance requirements](../../openspec/specs/bootstrap-instances/spec.md),
 [entry selection](../../packages/compiler/src/Instances.ts),
@@ -132,17 +125,9 @@ failure types and payloads receive the ordinary typed-failure diagnostics at the
 process-report rules are defined in
 [program termination and reporting](program-termination-and-reporting.md).
 
-**Current compiler:** Disputed. `silk check` currently accepts the example above, but `silk build`
-rejects it during entry discovery with:
-
-```text
-No entry point: every effectful `main` failure must conform to `Report`
-```
-
-Entry discovery requires the compiler-sealed, operation-free `Report` marker even though the marker
-contributes no formatting or runtime behavior. That requirement is not part of the stabilized
-language rule and must be removed during implementation reconciliation; analysis and build must
-also agree on entry validity.
+**Implementation:** Analysis, entry discovery, evaluation, and backend planning accept the example
+without marker conformance. The retained failure metadata contains its canonical type identity and
+ordinary cleanup plan.
 
 **Evidence:** [entry-instance requirements](../../openspec/specs/bootstrap-instances/spec.md),
 [effect-entry runtime tests](../../packages/compiler/test/EffectEntry.test.ts).
@@ -235,11 +220,7 @@ missing-result diagnostic.
 **Evidence:** [confirmed stabilization decision](README.md),
 [program-termination proposal](../../proposals/0011-program-termination-and-diagnostic-reports/proposal.md).
 
-## Implementation reconciliation
-
 Exact process-report behavior is defined in
 [program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass
-will assign stable codes to invalid entry shapes. Removing the obsolete `Report` marker from
-the compiler, standard library, specifications, tests, and generated documentation belongs to the
-later implementation-reconciliation pass. Default entry providers require a separate language
-proposal before they can become current semantics.
+will assign stable codes to invalid entry shapes. Default entry providers require a separate
+language proposal before they can become current semantics.

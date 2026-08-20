@@ -1520,7 +1520,7 @@ selection.
 | Explicit call arguments | Older type-system decision requires all arguments or none; current compiler accepts an ordered prefix. | Keep the current ordered-prefix model for calls and struct literals; the older rule is superseded. |
 | Provider application | `Decoder<Schema> for Schema` repeats the provider while `T: Decoder` hides an application. | Give every interface implicit `Self`; write only additional interface arguments and bind the provider after `for` or to the left of a bound. |
 | Generic operator calls | Current tests and elaboration infer bound operations from names such as `add`. | Use SLP-0004's explicit operator-eligibility declaration. |
-| Service conformance | Current witness logic has service-specific operation and special `Report` paths. | Keep only dependency eligibility special; reuse interface conformance afterward and remove `Report`. |
+| Service conformance | A service first passes dependency eligibility, then uses ordinary conformance proof and operation selection. | Keep only dependency eligibility special; do not introduce service-only witness behavior. |
 | Inline implementations | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function. | Implement the already confirmed general inline-or-mapped rule. |
 
 IMPL-005 resolves the former conformance-visibility question: conformances have no independently

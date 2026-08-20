@@ -437,10 +437,10 @@ ownership diagnostics identify double cleanup, use after move, or an invalid imp
 When a typed failure reaches the generated entry boundary, its runtime report includes the failure
 identity and available logical Effect trace after cleanup has completed.
 
-**Current compiler:** Partially aligned. The evaluator retains a deterministic execution trace on
-an unhandled effect-entry failure, and existing entry tests confirm that payload cleanup runs before
-the failure is exposed. The stable source-level trace policy and causal presentation of a handler
-failure remain unimplemented.
+**Implementation:** The evaluator returns an explicit causal history and source-level logical path
+on terminal outcomes. Generated entry cleanup still releases the owned payload exactly once before
+the failure becomes a host outcome. Physical entry adapters and coroutine-resume helpers are not
+logical source frames.
 
 **Evidence:** [ownership cleanup rule](ownership-and-borrowing.md#cleanup-001--cleanup-follows-ownership),
 [effect finalization contract](../../packages/compiler/stdlib/silk/effects.silk),
