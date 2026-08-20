@@ -63,8 +63,8 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   const main = result.hir.functions.at(1)
 
   assert.deepEqual(main?.contract, {
-      _tag: 'Contract',
-      unsafe: false,
+    _tag: 'Contract',
+    unsafe: false,
     parameters: [],
     result: 'i32',
     constraints: [],
@@ -82,6 +82,24 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   assert.strictEqual(inner?._tag, 'Call')
   if (inner?._tag !== 'Call') return
   assert.strictEqual(inner.arguments.at(0)?._tag, 'IntegerLiteral')
+})
+
+it('preserves unsafe declaration and section contracts in typed HIR', () => {
+  const result = elaborate(
+    'hir://unsafe-callable.silk',
+    `unsafe fn combine(left: i32, right: i32) -> i32 { return left + right }
+fn staged() -> unsafe fn(i32) -> i32 { return combine(2) }
+pub fn main() -> i32 { let callback = staged() return unsafe callback(40) }`,
+  )
+  const combine = result.hir.functions.at(0)
+  const staged = result.hir.functions.at(1)
+  const section = staged === undefined ? undefined : Hir.returned(staged)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(combine?.contract._tag, 'Contract')
+  assert.strictEqual(combine?.contract._tag === 'Contract' ? combine.contract.unsafe : false, true)
+  assert.strictEqual(section?._tag, 'CallableSection')
+  assert.strictEqual(section?._tag === 'CallableSection' ? section.type.unsafe : false, true)
 })
 
 it('keeps unknown facts explicit with causes instead of typed operations', () => {
@@ -357,8 +375,8 @@ pub fn main() -> i32 { if check(true) { return 1 } return 0 }`,
   assert.deepEqual(result.diagnostics, [])
   const check = result.hir.functions.at(0)
   assert.deepEqual(check?.contract, {
-      _tag: 'Contract',
-      unsafe: false,
+    _tag: 'Contract',
+    unsafe: false,
     parameters: ['bool'],
     result: 'bool',
     constraints: [],

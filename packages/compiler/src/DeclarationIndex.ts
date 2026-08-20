@@ -4009,6 +4009,9 @@ const resolveExactRepresentation = (
       parameter._tag === 'Resolved' ? [Type.substitute(parameter.type, substitution)] : [],
     ),
     Type.substitute(declaredReturn.fact.type, substitution),
+    'Shared',
+    undefined,
+    declaration.unsafe,
   )
   const identity = Type.callableIdentityArgument(
     `declaration:${canonical.module}:${canonical.name}`,
@@ -4096,6 +4099,8 @@ const resolveDeclaredType = (
         ),
         result.fact.type,
         fact.mode,
+        undefined,
+        fact.unsafe,
       )
       return Object.freeze({
         fact: Object.freeze({

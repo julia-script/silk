@@ -2535,6 +2535,7 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
               }),
             ]),
           }),
+      self.unsafe,
     )
   if (isEffect(self)) {
     const success = substitute(self.success, substitution)

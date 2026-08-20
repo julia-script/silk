@@ -401,14 +401,20 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
   const owner = { module: 'work', name: 'apply' }
   const parameter = Type.parameter(owner, 0, 'T')
   const shared = Type.callable([parameter, 'bool'], parameter)
+  const unsafe = Type.callable([parameter, 'bool'], parameter, 'Shared', undefined, true)
   const exclusive = Type.callable([parameter, 'bool'], parameter, 'Exclusive')
   const once = Type.callable([parameter, 'bool'], parameter, 'Take')
   const substitution = new Map([[Type.key(parameter), 'i32' as const]])
 
   assert.strictEqual(Type.encode(shared), 'fn(T, bool) -> T')
+  assert.strictEqual(Type.encode(unsafe), 'unsafe fn(T, bool) -> T')
   assert.strictEqual(Type.encode(exclusive), 'mut fn(T, bool) -> T')
   assert.strictEqual(Type.encode(once), 'once fn(T, bool) -> T')
   assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(i32, bool) -> i32')
+  assert.strictEqual(
+    Type.encode(Type.substitute(unsafe, substitution)),
+    'unsafe fn(i32, bool) -> i32',
+  )
   assert.deepEqual(Type.parameters(shared), [parameter])
   assert.strictEqual(
     TypeCompatibility.isCompatible(TypeCompatibility.check(shared, exclusive)),
@@ -424,6 +430,8 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
     TypeCompatibility.isCompatible(TypeCompatibility.check(once, exclusive)),
     false,
   )
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(shared, unsafe)), true)
+  assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(unsafe, shared)), false)
 })
 
 it('normalizes finite rows and applies total exact set operations deterministically', () => {

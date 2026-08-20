@@ -219,6 +219,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
     const assumed = Constraint.assumed(wanted, new Map())
     const contract = CallableContract.make({
       functionKind: 'Effect',
+      unsafe: true,
       binders: [selectedParameter, providerParameter, sourceParameter],
       parameters: [
         {
@@ -258,6 +259,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
             unreachable('expected a valid source span'),
         ],
       },
+      true,
     )
 
     const decoded = yield* ModuleSurface.decodeSemanticType(
@@ -266,6 +268,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
     assert.strictEqual(Type.key(decoded), Type.key(callable))
     assert.isTrue(Type.isCallable(decoded))
     if (!Type.isCallable(decoded)) return
+    assert.strictEqual(decoded.unsafe, true)
     assert.deepEqual(decoded.schema?.origins, [])
     assert.deepEqual(decoded.schema?.constraintKeys, callable.schema?.constraintKeys)
     assert.deepEqual(decoded.schema?.evidenceKeys, callable.schema?.evidenceKeys)
