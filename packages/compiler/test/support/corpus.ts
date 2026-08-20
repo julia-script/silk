@@ -266,6 +266,17 @@ pub fn main() -> i32 { return combine(3)(2)(1) }`,
     expected: { _tag: 'Completes', result: 123 },
   },
   {
+    name: 'runtime-indexed-subplace-borrow',
+    source: `fn edit(values: &mut [i32]) -> () { values[0] = 40 }
+fn change(index: usize) -> i32 {
+  let mut matrix = [[1, 2], [3, 4]]
+  edit(&mut matrix[index])
+  return matrix[index][0] + matrix[index][1]
+}
+pub fn main() -> i32 { return change(0) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'finite-effect-join',
     source: `struct First {}
 struct Second {}

@@ -4933,66 +4933,142 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                   const rootType = entry.fn.localTypes.at(operation.root.ordinal)
                   const rootSemantic =
                     rootType === undefined ? undefined : Mir.semanticType(rootType)
-                  const staticSelectors = operation.selectors.map((selector): Layout.Selector => {
-                    if (selector._tag === 'FieldSelector') return selector.field
-                    if (selector._tag === 'ElementSelector' && selector.index._tag === 'Proven')
-                      return Object.freeze({
-                        _tag: 'ElementSelector',
-                        index: selector.index.value,
-                      })
-                    throw new RangeError(
-                      'LLVM borrow formation requires a statically selected place',
-                    )
-                  })
-                  if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
-                    const address = readLocal(operation.root).at(0)
-                    const offset = Layout.laneOffset(
-                      program.layout,
-                      rootSemantic.target,
-                      staticSelectors,
-                    )
-                    if (address === undefined || offset === undefined) {
-                      throw new RangeError('LLVM projected borrow lost its reference address')
+                  if (rootSemantic === undefined)
+                    throw new RangeError('LLVM borrow formation lost its root type')
+                  let selected = SilkType.isReference(rootSemantic)
+                    ? rootSemantic.target
+                    : rootSemantic
+                  let staticOffset = 0
+                  const dynamicOffsets: Array<{
+                    readonly local: Mir.LocalId
+                    readonly stride: number
+                    readonly length: number
+                    readonly span: SourceSpan.SourceSpan
+                  }> = []
+                  for (const selector of operation.selectors) {
+                    const selectedLayout = Layout.entry(program.layout, selected)
+                    if (selector._tag === 'FieldSelector') {
+                      if (selectedLayout?.representation._tag !== 'Aggregate')
+                        throw new RangeError('LLVM borrow field lost its aggregate layout')
+                      const field = selectedLayout.representation.fields.find(
+                        (candidate) =>
+                          candidate.id.ordinal === selector.field.ordinal &&
+                          candidate.id.struct.sourceId === selector.field.struct.sourceId &&
+                          candidate.id.struct.ordinal === selector.field.struct.ordinal,
+                      )
+                      if (field === undefined)
+                        throw new RangeError('LLVM borrow field lost its field layout')
+                      staticOffset += field.offset
+                      selected = field.type
+                      continue
                     }
-                    if (operation.type._tag !== 'Reference') {
-                      throw new RangeError(
-                        'LLVM projected reference borrow produced a non-reference',
+                    if (
+                      selector._tag !== 'ElementSelector' ||
+                      selectedLayout?.representation._tag !== 'Repeated'
+                    )
+                      throw new RangeError('LLVM borrow element lost its repeated layout')
+                    if (selector.index._tag === 'Proven') {
+                      staticOffset += selector.index.value * selectedLayout.representation.stride
+                    } else {
+                      dynamicOffsets.push(
+                        Object.freeze({
+                          local: selector.index.local,
+                          stride: selectedLayout.representation.stride,
+                          length: selector.length,
+                          span: selector.provenance.span,
+                        }),
                       )
                     }
-                    const base = yield* FunctionBody.cast(
+                    selected = selectedLayout.representation.element
+                  }
+                  let dynamicOffset: Value.Input | undefined
+                  for (const [ordinal, offset] of dynamicOffsets.entries()) {
+                    const index = readScalar(offset.local)
+                    const length = yield* Constant.integerUnsigned(
+                      builder,
+                      usizeType ?? i32,
+                      BigInt(offset.length),
+                    )
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      index,
+                      length,
+                      `borrow${checkOrdinal}_${ordinal}_in_bounds`,
+                    )
+                    yield* locate(offset.span, yield* Value.instruction(body, inBounds))
+                    const continuation = yield* LlvmBlock.make(
+                      body,
+                      `borrow${checkOrdinal}_${ordinal}_ok`,
+                    )
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continuation)
+                    const scaled = yield* FunctionBody.binary(
+                      body,
+                      'mul',
+                      index,
+                      yield* Constant.integerUnsigned(
+                        builder,
+                        usizeType ?? i32,
+                        BigInt(offset.stride),
+                      ),
+                      `borrow${operation.destination.ordinal}_${ordinal}_scaled`,
+                    )
+                    dynamicOffset =
+                      dynamicOffset === undefined
+                        ? scaled
+                        : yield* FunctionBody.binary(
+                            body,
+                            'add',
+                            dynamicOffset,
+                            scaled,
+                            `borrow${operation.destination.ordinal}_${ordinal}_offset`,
+                          )
+                  }
+                  if (staticOffset !== 0) {
+                    const constant = yield* Constant.integerUnsigned(
+                      builder,
+                      usizeType ?? i32,
+                      BigInt(staticOffset),
+                    )
+                    dynamicOffset =
+                      dynamicOffset === undefined
+                        ? constant
+                        : yield* FunctionBody.binary(
+                            body,
+                            'add',
+                            dynamicOffset,
+                            constant,
+                            `borrow${operation.destination.ordinal}_static_offset`,
+                          )
+                  }
+                  let rootBase: Value.Input | undefined
+                  if (SilkType.isReference(rootSemantic)) {
+                    const address = readLocal(operation.root).at(0)
+                    if (address === undefined)
+                      throw new RangeError('LLVM projected borrow lost its reference address')
+                    rootBase = yield* FunctionBody.cast(
                       body,
                       'inttoptr',
                       address,
                       pointer,
                       `borrow${operation.destination.ordinal}_base`,
                     )
-                    locals.set(
-                      operation.destination.ordinal,
-                      Object.freeze([
-                        yield* constantBytePointer(
-                          base,
-                          offset,
-                          `borrow${operation.destination.ordinal}_projected`,
-                        ),
-                      ]),
-                    )
-                    break
+                  } else {
+                    yield* materializeAddressRoot(operation.root)
+                    rootBase = addressStorage.get(operation.root.ordinal)
                   }
-                  yield* materializeAddressRoot(operation.root)
-                  const base = addressStorage.get(operation.root.ordinal)
-                  if (base === undefined)
+                  if (rootBase === undefined)
                     throw new RangeError('LLVM borrow formation lost its root')
-                  const rootOffset =
-                    rootSemantic === undefined
-                      ? undefined
-                      : Layout.laneOffset(program.layout, rootSemantic, staticSelectors)
-                  if (rootOffset === undefined)
-                    throw new RangeError('LLVM borrow formation lost its projected root offset')
-                  const projected = yield* constantBytePointer(
-                    base,
-                    rootOffset,
-                    `borrow${operation.destination.ordinal}_projected`,
-                  )
+                  const projected =
+                    dynamicOffset === undefined
+                      ? rootBase
+                      : yield* bytePointer(
+                          rootBase,
+                          dynamicOffset,
+                          `borrow${operation.destination.ordinal}_projected`,
+                        )
                   if (operation.type._tag === 'Reference') {
                     locals.set(operation.destination.ordinal, Object.freeze([projected]))
                     break
@@ -8058,7 +8134,10 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
                   if (target === undefined)
                     throw new RangeError('Backend callable application lost its hidden identity')
-                  const captureValues: Array<Value.Input> = []
+                  const captureGroups: Array<{
+                    readonly parameterOrdinal: number
+                    readonly values: ReadonlyArray<Value.Input>
+                  }> = []
                   if (operation.callable !== undefined) {
                     if (sourceType?._tag !== 'CallableValue')
                       throw new RangeError('Stored callable application lost its identity')
@@ -8069,8 +8148,13 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       if (shape === undefined)
                         throw new RangeError('Callable capture lost its semantic calling shape')
                       if (field.representation === 'Value') {
-                        captureValues.push(
-                          ...environmentValues.slice(cursor, cursor + shape.laneCount),
+                        captureGroups.push(
+                          Object.freeze({
+                            parameterOrdinal: field.parameterOrdinal,
+                            values: Object.freeze(
+                              environmentValues.slice(cursor, cursor + shape.laneCount),
+                            ),
+                          }),
                         )
                         cursor += shape.laneCount
                         continue
@@ -8079,11 +8163,12 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                       if (base === undefined)
                         throw new RangeError('Callable borrowed environment lost its pointer')
                       cursor += 1
+                      const values: Array<Value.Input> = []
                       for (const [laneOrdinal, lane] of shape.lanes.entries()) {
                         const offset = Layout.laneOffset(program.layout, field.type, lane.path)
                         if (offset === undefined)
                           throw new RangeError('Callable borrowed capture lost its lane offset')
-                        captureValues.push(
+                        values.push(
                           yield* FunctionBody.load(
                             body,
                             laneType(lane),
@@ -8096,16 +8181,26 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                           ),
                         )
                       }
+                      captureGroups.push(
+                        Object.freeze({
+                          parameterOrdinal: field.parameterOrdinal,
+                          values: Object.freeze(values),
+                        }),
+                      )
                     }
                   } else {
                     for (const capture of operation.captures) {
-                      if (capture.access === 'Copy' || capture.access === 'Take') {
-                        captureValues.push(...readLocal(capture.source))
-                        continue
-                      }
-                      captureValues.push(...readLocal(capture.source))
+                      captureGroups.push(
+                        Object.freeze({
+                          parameterOrdinal: capture.parameterOrdinal,
+                          values: readLocal(capture.source),
+                        }),
+                      )
                     }
                   }
+                  const captureValues = [...captureGroups]
+                    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+                    .flatMap((capture) => [...capture.values])
                   if (target._tag === 'BuiltinCallableTarget') {
                     const supplied = Object.freeze([
                       ...operation.arguments.flatMap((argument) => [...readLocal(argument)]),

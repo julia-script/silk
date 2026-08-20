@@ -4233,7 +4233,10 @@ const emitOperation = (
         operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
       if (target === undefined)
         throw new RangeError('Wasm callable application lost its hidden identity')
-      const captureOperands: Array<Instr.Instr> = []
+      const captureGroups: Array<{
+        readonly parameterOrdinal: number
+        readonly operands: ReadonlyArray<Instr.Instr>
+      }> = []
       if (operation.callable !== undefined) {
         if (sourceType?._tag !== 'CallableValue')
           throw new RangeError('Wasm stored callable lost its identity')
@@ -4246,10 +4249,15 @@ const emitOperation = (
           if (shape === undefined)
             throw new RangeError('Wasm callable capture lost its calling shape')
           if (field.representation === 'Value') {
-            captureOperands.push(
-              ...environmentSlots
-                .slice(cursor, cursor + shape.laneCount)
-                .map((slot) => Instr.localGet(slot)),
+            captureGroups.push(
+              Object.freeze({
+                parameterOrdinal: field.parameterOrdinal,
+                operands: Object.freeze(
+                  environmentSlots
+                    .slice(cursor, cursor + shape.laneCount)
+                    .map((slot) => Instr.localGet(slot)),
+                ),
+              }),
             )
             cursor += shape.laneCount
             continue
@@ -4258,27 +4266,38 @@ const emitOperation = (
           if (pointer === undefined || memory === undefined)
             throw new RangeError('Wasm borrowed callable capture lost its pointer')
           cursor += 1
+          const operands: Array<Instr.Instr> = []
           for (const lane of shape.lanes) {
             const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
             if (offset === undefined)
               throw new RangeError('Wasm borrowed callable capture lost its lane offset')
-            captureOperands.push(
+            operands.push(
               Instr.localGet(pointer),
               Instr.i32Const(offset),
               Instr.op('i32.add'),
               Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
             )
           }
+          captureGroups.push(
+            Object.freeze({
+              parameterOrdinal: field.parameterOrdinal,
+              operands: Object.freeze(operands),
+            }),
+          )
         }
       } else {
         for (const capture of operation.captures) {
-          if (capture.access === 'Copy' || capture.access === 'Take') {
-            captureOperands.push(...slots(capture.source).map((slot) => Instr.localGet(slot)))
-            continue
-          }
-          captureOperands.push(...slots(capture.source).map((slot) => Instr.localGet(slot)))
+          captureGroups.push(
+            Object.freeze({
+              parameterOrdinal: capture.parameterOrdinal,
+              operands: Object.freeze(slots(capture.source).map((slot) => Instr.localGet(slot))),
+            }),
+          )
         }
       }
+      const captureOperands = [...captureGroups]
+        .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+        .flatMap((capture) => [...capture.operands])
       if (target._tag === 'BuiltinCallableTarget') {
         const operandSlots = [
           ...operation.arguments.flatMap((argument) => [...slots(argument)]),
