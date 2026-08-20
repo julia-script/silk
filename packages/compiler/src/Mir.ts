@@ -2713,9 +2713,7 @@ const cleanupMatchesSemanticType = (
             candidate.instance.typeArguments.length === identity.owner.typeArguments.length &&
             candidate.instance.typeArguments.every((argument, argumentOrdinal) => {
               const expected = identity.owner?.typeArguments.at(argumentOrdinal)
-              return (
-                expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
-              )
+              return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
             }),
         )
         const selected = cleanup.alternatives.at(ordinal)
@@ -3598,11 +3596,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
 type PropagatingRun = Extract<
   Operation,
   {
-    readonly _tag:
-      | 'RunEffect'
-      | 'RunEffectValue'
-      | 'RunEffectComposite'
-      | 'RunStaticEffect'
+    readonly _tag: 'RunEffect' | 'RunEffectValue' | 'RunEffectComposite' | 'RunStaticEffect'
   }
 >
 
@@ -5703,8 +5697,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selected === undefined ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !SilkType.equals(source.type, selected.type) ||
-            !Hir.sameExecutableSite(source.site, selected.site) ||
-            !Hir.sameExecutableSite(source.site, operation.type.alternatives.at(operation.alternative)?.site ?? source.site)
+            !Hir.sameExecutableSite(source.site, selected.site)
           )
             violations.push(
               Object.freeze({
@@ -5922,11 +5915,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             operation.alternatives.every((alternative, ordinal) => {
               const expected = effect.alternatives.at(ordinal)
               const runner = self.functions.find((candidate) =>
-                matchesInstance(
-                  candidate,
-                  alternative.runner,
-                  alternative.runnerTypeArguments,
-                ),
+                matchesInstance(candidate, alternative.runner, alternative.runnerTypeArguments),
               )
               const sourceFailures = SilkType.failureMembers(alternative.type.type)
               const mappingsValid =

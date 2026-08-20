@@ -309,22 +309,21 @@ storage design.
 identify the observable contract, access, ownership, or lifetime difference at the branch that
 introduces it; hidden construction identity is not a sufficient error reason.
 
-**Current compiler:** Disputed. The compiler currently reports `SEM0069` when compatible Effects
-from different construction sites meet, and existing static-representation specifications require
-that rejection. Those restrictions are superseded by this rule. Implementation reconciliation must
-introduce a finite composite realization or an equivalent allocation-free lowering across the
-evaluator, LLVM, and direct WebAssembly.
+**Current compiler:** Aligned. A finite compatible join retains every exact alternative behind one
+closed tagged representation. Its layout is the maximum statically required by those alternatives;
+constructing it stores only the selected alternative, running it dispatches only to that runner,
+and dropping it cleans only that alternative's captures. Evaluation, native LLVM, and direct
+WebAssembly implement the same allocation-free rule.
 
-`SEM0107` may continue to fence an otherwise valid storage shape while one backend lacks its
-concrete layout, but that fence records incomplete implementation support rather than invalid
-language semantics.
+An incompatible or non-finite join reports `SEM0132` at the responsible join and explains the
+contract, access, ownership, lifetime, or finite-representation boundary that failed.
 
-**Evidence:** [superseded flow restriction](../../openspec/specs/bootstrap-flow-functions/spec.md),
-[superseded static-join restriction](../../openspec/specs/bootstrap-representation-parameters/spec.md),
+**Evidence:** [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+[representation-parameter specification](../../openspec/specs/bootstrap-representation-parameters/spec.md),
 [callable-value specification](../../openspec/specs/bootstrap-callable-values/spec.md),
 [nominal Effect storage specification](../../openspec/specs/bootstrap-nominal-effect-storage/spec.md),
-[current identity-erasure test](../../packages/compiler/test/Elaboration.test.ts),
-[representation storage tests](../../packages/compiler/test/RepresentationFence.test.ts).
+[finite-join elaboration test](../../packages/compiler/test/Elaboration.test.ts),
+[cross-engine join tests](../../packages/compiler/test/EffectJoin.test.ts).
 
 Typed-failure compatibility, requirement membership, and Effect execution access intentionally
 remain for their own reference areas.
