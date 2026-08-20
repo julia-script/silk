@@ -21,10 +21,9 @@ effect fn openClock() -> Clock ! OutOfMemory {
 }`
 
 /**
- * A generic effect body whose failure channel is a row *parameter*, holding an affine owner across
- * a run that the parameter lets fail. `Ownership.fallibleRunSites` treats such a run as infallible,
- * because it reads the run's own `failures` list, which is empty here while `failureParameters` is
- * not — so no propagation exit is published for it.
+ * A generic effect body whose failure channel is a generic type, holding an affine owner across a
+ * run that the type lets fail. `Ownership.fallibleRunSites` used to inspect only concrete members,
+ * so no propagation exit was published for it.
  *
  * Issue #68 reads that as a leak in every body of this shape. Measured, this one is not: the owner
  * is released on the failing path as well as the succeeding one, and the counts balance. The two

@@ -1458,7 +1458,6 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
       return record('EffectType', [
         declaredType(value.success),
         array(value.failures.map(declaredType)),
-        array(value.failureParameters.map(type)),
         array(
           value.requirements.map((requirement) =>
             record('Requirement', [

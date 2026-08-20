@@ -825,10 +825,6 @@ export type Reason =
       readonly problem:
         | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
         | {
-            readonly _tag: 'AmbiguousFailureRemainder'
-            readonly parameters: ReadonlyArray<string>
-          }
-        | {
             readonly _tag: 'AbsentRequirementMember'
             readonly capability: string
             readonly role: string
@@ -851,7 +847,6 @@ export type Reason =
             readonly _tag: 'AmbiguousRequirementRemainder'
             readonly parameters: ReadonlyArray<string>
           }
-        | { readonly _tag: 'NonFiniteFailureRow' }
         | { readonly _tag: 'NonFiniteRequirementRow' }
     }
   | {
@@ -2774,9 +2769,7 @@ type ContractRowInferenceProblem = Extract<
 const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): string => {
   switch (problem._tag) {
     case 'AbsentFailureMember':
-      return `Failure row does not contain selected member ${problem.member}`
-    case 'AmbiguousFailureRemainder':
-      return `Failure row remainder is ambiguous across ${problem.parameters.join(', ')}`
+      return `Failure type does not contain selected member ${problem.member}`
     case 'AbsentRequirementMember':
       // Two complete templates rather than one with the access marker interpolated, so the
       // generated diagnostic catalog pins both wordings this problem can report.
@@ -2789,8 +2782,6 @@ const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): stri
       return `Requirement ${problem.capability}@${problem.role} has access ${problem.actual.join(' or ')}, expected ${problem.expected}`
     case 'AmbiguousRequirementRemainder':
       return `Requirement row remainder is ambiguous across ${problem.parameters.join(', ')}`
-    case 'NonFiniteFailureRow':
-      return 'Failure row specialization is not finite and concrete'
     case 'NonFiniteRequirementRow':
       return 'Requirement row specialization is not finite and concrete'
   }

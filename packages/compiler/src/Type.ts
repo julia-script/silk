@@ -314,10 +314,6 @@ export type Substitution = ReadonlyMap<string, GenericArgument>
 export type RowInferenceFailure =
   | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
   | {
-      readonly _tag: 'AmbiguousFailureRemainder'
-      readonly parameters: ReadonlyArray<string>
-    }
-  | {
       readonly _tag: 'AbsentRequirementMember'
       readonly capability: string
       readonly role: string
@@ -340,7 +336,6 @@ export type RowInferenceFailure =
       readonly _tag: 'AmbiguousRequirementRemainder'
       readonly parameters: ReadonlyArray<string>
     }
-  | { readonly _tag: 'NonFiniteFailureRow' }
   | { readonly _tag: 'NonFiniteRequirementRow' }
 
 /** A compiler-private lazy effect contract. Effect values never cross the executable ABI. */
@@ -439,7 +434,7 @@ export const resultFailure = (error: Type): Nominal => nominal('silk/result', 'F
 export const result = (value: Type, error: Type): Nominal =>
   nominal('silk/result', 'Result', [value, error])
 
-/** Projects a closed normalized failure row to its ordinary runtime value sum. */
+/** Normalizes one or more ordinary failure types to their runtime value union. */
 export const failureValue = (failures: ReadonlyArray<Type>): Type => {
   const only = failures.at(0)
   if (failures.length === 1 && only !== undefined) return only
@@ -1615,16 +1610,7 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
     return (
       leftRank <= rightRank &&
       haveSameRepresentationShape(left.success, right.success) &&
-      failureMembers(left).length === failureMembers(right).length &&
-      failureMembers(left).every((failure, ordinal) => {
-        const compared = failureMembers(right).at(ordinal)
-        return compared !== undefined && haveSameRepresentationShape(failure, compared)
-      }) &&
-      failureRowParameters(left).length === failureRowParameters(right).length &&
-      failureRowParameters(left).every((parameter_, ordinal) => {
-        const compared = failureRowParameters(right).at(ordinal)
-        return compared !== undefined && equals(parameter_, compared)
-      }) &&
+      haveSameRepresentationShape(failureType(left), failureType(right)) &&
       requirementMembers(left).length === requirementMembers(right).length &&
       requirementMembers(left).every((requirement, ordinal) => {
         const compared = requirementMembers(right).at(ordinal)
@@ -2832,7 +2818,7 @@ const inferFailureRow = (
     (failure, supplied, trial) => inferType(failure, supplied, trial, memberContext),
     (remaining, trial) => {
       void trial
-      return remaining.length === 0 && failureRowParameters(actual).length === 0
+      return remaining.length === 0
     },
   )
   if (matched === undefined) return false
@@ -3052,17 +3038,14 @@ export const rowInferenceFailure = (
     return rowInferenceFailure(pattern.result, actual.result)
   }
   if (!isEffect(pattern) || !isEffect(actual)) return undefined
-  if (failureRowParameters(actual).length !== 0)
-    return Object.freeze({ _tag: 'NonFiniteFailureRow' })
   if (requirementRowParameters(actual).length !== 0)
     return Object.freeze({ _tag: 'NonFiniteRequirementRow' })
-  if (failureRowParameters(pattern).length > 1)
-    return Object.freeze({
-      _tag: 'AmbiguousFailureRemainder',
-      parameters: Object.freeze(failureRowParameters(pattern).map((parameter_) => parameter_.name)),
-    })
-  for (const failure of failureMembers(pattern)) {
-    if (!failureMembers(actual).some((supplied) => infer(failure, supplied, new Map())))
+  for (const failure of [...failureMembers(pattern), ...failureMemberParameters(pattern)]) {
+    if (
+      ![...failureMembers(actual), ...failureMemberParameters(actual)].some((supplied) =>
+        infer(failure, supplied, new Map()),
+      )
+    )
       return Object.freeze({ _tag: 'AbsentFailureMember', member: encode(failure) })
   }
   if (requirementRowParameters(pattern).length > 1)

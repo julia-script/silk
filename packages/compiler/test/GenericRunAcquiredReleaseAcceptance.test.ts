@@ -25,10 +25,9 @@ effect fn openClock() -> Clock ! OutOfMemory {
  * channel is a row parameter — the shape `provideWith` had before #67 restructured it around a
  * reified `Result`.
  *
- * This is the leak issue #68 describes. `fallibleRunSites` read only the run's own `failures`
- * list, which is empty inside a generic body while `failureParameters` is not, so the run counted
- * as infallible, no propagation exit was published for it, and `held` was stranded whenever the
- * specialized row let `self` fail.
+ * This is the leak issue #68 describes. `fallibleRunSites` used to inspect only concrete failure
+ * members, so a generic failure type counted as infallible, no propagation exit was published for
+ * it, and `held` was stranded whenever the specialized type let `self` fail.
  *
  * The companion `GenericRunReleaseAcceptance` covers the neighbouring shape where the owner is
  * *passed in* rather than acquired; that one never leaked, and pins that the caller does not also

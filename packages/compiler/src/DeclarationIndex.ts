@@ -230,7 +230,6 @@ export type DeclaredTypeFact =
       readonly access: Type.Effect['access']
       readonly success: DeclaredTypeFact
       readonly failures: ReadonlyArray<DeclaredTypeFact>
-      readonly failureParameters: ReadonlyArray<Type.Parameter>
       readonly requirements: ReadonlyArray<{
         readonly capability: DeclaredTypeFact
         readonly role: string
@@ -784,16 +783,7 @@ const substituteRowExpressionFact = (
   }
 }
 
-const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow =>
-  Type.failureRowParameters(effect).reduce<Type.FailureRow>(
-    (row, parameter) =>
-      RowAlgebra.union(
-        Type.failureRowPolicy(),
-        row,
-        RowAlgebra.parameter<Type.Type, Type.Parameter, Type.FailureMemberShape>(parameter),
-      ),
-    RowAlgebra.concrete(Type.failureRowPolicy(), Type.failureMembers(effect)),
-  )
+const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow => effect.failureRow
 
 const requirementRowFromEffect = (effect: Type.Effect): Type.RequirementsRow =>
   Type.requirementRowParameters(effect).reduce<Type.RequirementsRow>(
@@ -821,16 +811,11 @@ const substituteFailureRowFact = (
     members,
     expression: substituteRowExpressionFact(fact.expression, substitution),
     row: failureRowFromEffect(rows),
-    parameters: Type.failureRowParameters(rows),
+    parameters: Object.freeze([]),
     failures: Type.failureMembers(rows),
-    available:
-      Type.failureRowParameters(rows).length === 0 &&
-      members.every(
-        (member) =>
-          member._tag === 'Resolved' &&
-          Type.isNominal(member.type) &&
-          Type.isRuntimeConcrete(member.type),
-      ),
+    available: members.every(
+      (member) => member._tag === 'Resolved' && Type.isTypeArgument(member.type),
+    ),
   })
 }
 
@@ -1913,7 +1898,6 @@ export const analyzeDeclaredType = (
           access,
           success: success ?? Object.freeze({ _tag: 'Unavailable', syntax: list }),
           failures: Object.freeze(failures.map((failure) => failure.fact)),
-          failureParameters: Object.freeze([]),
           requirements: Object.freeze(
             requirements.map((requirement) =>
               Object.freeze({
@@ -4620,8 +4604,10 @@ const interfaceWitnessCompatibility = (
       functionKind: contract.functionKind,
       operands: Object.freeze(contractOperands),
       success: contract.success.type,
-      failures: contract.failureRow.failures,
-      failureParameters: contract.failureRow.parameters,
+      failures: Object.freeze([
+        ...contract.failureRow.failures,
+        ...Type.failureMemberParameters(contract.failureRow.row),
+      ]),
       requirements: contract.requirementRow.requirements,
       requirementParameters: contract.requirementRow.parameters,
     }),
@@ -4629,8 +4615,10 @@ const interfaceWitnessCompatibility = (
       functionKind: implementation.functionKind,
       operands: Object.freeze(witnessOperands),
       success: Type.substitute(implementation.returnType.type, substitution),
-      failures: Type.failureMembers(witnessRows),
-      failureParameters: Type.failureRowParameters(witnessRows),
+      failures: Object.freeze([
+        ...Type.failureMembers(witnessRows),
+        ...Type.failureMemberParameters(witnessRows),
+      ]),
       requirements: Type.requirementMembers(witnessRows),
       requirementParameters: Type.requirementRowParameters(witnessRows),
     }),
@@ -4655,8 +4643,10 @@ const sealedWitnessCompatibility = (
       functionKind: contract.functionKind,
       operands: Object.freeze(operands),
       success: contract.success.type,
-      failures: contract.failureRow.failures,
-      failureParameters: contract.failureRow.parameters,
+      failures: Object.freeze([
+        ...contract.failureRow.failures,
+        ...Type.failureMemberParameters(contract.failureRow.row),
+      ]),
       requirements: contract.requirementRow.requirements,
       requirementParameters: contract.requirementRow.parameters,
     }),
@@ -4669,7 +4659,6 @@ const sealedWitnessCompatibility = (
       ),
       success: result,
       failures: Object.freeze([]),
-      failureParameters: Object.freeze([]),
       requirements: Object.freeze([]),
       requirementParameters: Object.freeze([]),
     }),
@@ -6320,13 +6309,14 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           const validFailures =
             Type.isEffect(implementationRows) &&
             Type.isEffect(contractRows) &&
-            Type.failureMembers(implementationRows).every((failure) =>
-              Type.failureMembers(contractRows).some((allowed) => Type.equals(failure, allowed)),
-            ) &&
-            Type.failureRowParameters(implementationRows).every((parameter) =>
-              Type.failureRowParameters(contractRows).some((allowed) =>
-                Type.equals(parameter, allowed),
-              ),
+            [
+              ...Type.failureMembers(implementationRows),
+              ...Type.failureMemberParameters(implementationRows),
+            ].every((failure) =>
+              [
+                ...Type.failureMembers(contractRows),
+                ...Type.failureMemberParameters(contractRows),
+              ].some((allowed) => Type.equals(failure, allowed)),
             )
           const contractRequirements = !Type.isEffect(contractRows)
             ? []

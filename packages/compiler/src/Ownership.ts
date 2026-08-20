@@ -1162,9 +1162,8 @@ const deferredBlocks = (
  * a deferred body's runs propagate out of its own compiled function, not out of this one.
  *
  * A run is fallible when its effect type carries failures OR an open failure row: inside a
- * generic body the caller's failures arrive as a row *parameter*, so `failures` is empty while
- * `failureParameters` is not, and specialization can substitute a row that really does fail.
- * Reading `failures` alone leaves every owner live at such a run without a release.
+ * In a generic body the caller's failures arrive as ordinary symbolic union members, so concrete
+ * members alone are insufficient to determine whether the run may propagate.
  */
 const fallibleRunSites = (
   expression: Hir.Expression,
@@ -1177,8 +1176,7 @@ const fallibleRunSites = (
     typeof subjectType === 'object' &&
     subjectType !== null &&
     (subjectType as { readonly _tag?: string })._tag === 'EffectType' &&
-    (Type.failureMembers(subjectType as Type.Effect).length > 0 ||
-      Type.failureRowParameters(subjectType as Type.Effect).length > 0)
+    !Type.isNever(Type.failureType(subjectType as Type.Effect))
   return fallible ? [expression, ...nested] : nested
 }
 

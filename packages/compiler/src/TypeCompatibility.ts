@@ -79,14 +79,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     const targetRank = target.access === 'Shared' ? 0 : target.access === 'Exclusive' ? 1 : 2
     const sameOutputs =
       Type.equals(source.success, target.success) &&
-      Type.failureMembers(source).length === Type.failureMembers(target).length &&
-      Type.failureMembers(source).every((failure, index) =>
-        Type.equals(failure, Type.failureMembers(target).at(index) ?? 'never'),
-      ) &&
-      Type.failureRowParameters(source).length === Type.failureRowParameters(target).length &&
-      Type.failureRowParameters(source).every((parameter, index) =>
-        Type.equals(parameter, Type.failureRowParameters(target).at(index) ?? 'never'),
-      )
+      Type.equals(Type.failureType(source), Type.failureType(target))
     const compatibleRequirements =
       Type.requirementMembers(source).length === Type.requirementMembers(target).length &&
       Type.requirementMembers(source).every((requirement, index) => {

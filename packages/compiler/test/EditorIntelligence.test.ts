@@ -724,7 +724,7 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
-        '! Problem',
+        'Problem',
       )
       assert.strictEqual(
         Presentation.genericArgument(
