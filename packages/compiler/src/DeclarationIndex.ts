@@ -1069,6 +1069,23 @@ const interfaceApplication = (
   })
 }
 
+/** The operation-free application carried by the compiler-sealed `Copy` property. */
+const copyApplication = (provider: Type.Type): InterfaceApplicationFact =>
+  Object.freeze({
+    _tag: 'InterfaceApplication',
+    declaration: Object.freeze({
+      _tag: 'CanonicalDeclarationId',
+      module: Type.copyCapability.module,
+      name: Type.copyCapability.name,
+    }),
+    capability: Type.copyCapability,
+    provider,
+    providerMatches: Type.isTypeArgument(provider),
+    visibility: 'Public',
+    operations: Object.freeze([]),
+    available: Type.isTypeArgument(provider),
+  })
+
 /**
  * One interface application a conditional conformance must prove before it admits a witness.
  *
@@ -4769,6 +4786,16 @@ const resolveBounds = (
               ? undefined
               : memberByNominal(modules, unresolvedCapability)
           if (
+            unresolvedCapability !== undefined &&
+            Type.equals(unresolvedCapability, Type.copyCapability)
+          )
+            return Object.freeze({
+              _tag: 'ResolvedBound' as const,
+              spelling: bound.spelling,
+              path: bound.path,
+              application: copyApplication(parameter.type),
+            })
+          if (
             unresolvedCapability === undefined ||
             (declaration?._tag !== 'InterfaceDeclaration' &&
               declaration?._tag !== 'ServiceDeclaration') ||
@@ -4854,7 +4881,11 @@ const declaredRequirements = (
       if (requirement.capability._tag !== 'Resolved') return []
       const capability = requirement.capability.type
       if (!Type.isNominal(capability)) return []
-      if (memberByNominal(modules, capability) === undefined) return []
+      if (
+        !Type.equals(capability, Type.copyCapability) &&
+        memberByNominal(modules, capability) === undefined
+      )
+        return []
       return Object.freeze([Object.freeze({ capability, provider: requirement.parameter })])
     }),
   )
@@ -6276,36 +6307,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
     }),
   )
 
-  const copyMemo = new Map<string, boolean>()
   const containsPositionRestrictedBorrow = Type.containsPositionRestrictedBorrow
-  const isCopyType = (type: Type.Type, visiting = new Set<string>()): boolean => {
-    if (Type.isBuiltin(type) || Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
-      return true
-    if (Type.isFixedArray(type)) return isCopyType(type.element, visiting)
-    if (Type.isUnion(type)) return type.members.every((member) => isCopyType(member, visiting))
-    if (Type.equals(type, Type.unit)) return true
-    if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
-    const key = Type.key(type)
-    const remembered = copyMemo.get(key)
-    if (remembered !== undefined) return remembered
-    if (visiting.has(key)) return false
-    const declaration = modules
-      .flatMap((module) => module.structs)
-      .find(
-        (struct) =>
-          struct.canonical._tag === 'Canonical' &&
-          struct.canonical.id.module === type.module &&
-          struct.canonical.id.name === type.name,
-      )
-    if (declaration === undefined) return false
-    const next = new Set(visiting).add(key)
-    const result = declaration.fields.every(
-      (field) =>
-        field.declaredType._tag === 'Resolved' && isCopyType(field.declaredType.type, next),
-    )
-    copyMemo.set(key, result)
-    return result
-  }
 
   const invalidConformances = new Set<ConformanceFact>()
   const inferredWitnessArguments = new Map<
@@ -6395,7 +6397,9 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
         if (!Type.isNominal(applied)) return true
         const declaration = memberByNominal(modules, applied)
         return (
-          declaration?._tag !== 'InterfaceDeclaration' && declaration?._tag !== 'ServiceDeclaration'
+          !Type.equals(applied, Type.copyCapability) &&
+          declaration?._tag !== 'InterfaceDeclaration' &&
+          declaration?._tag !== 'ServiceDeclaration'
         )
       })
       if (unstatedRequirement !== undefined) {
@@ -6612,6 +6616,23 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
 
       if (!Type.isNominal(provider)) continue
 
+      if (Type.equals(capability, Type.copyCapability)) {
+        if (
+          Type.isIntrinsicNominal(provider) ||
+          provider.module !== conformance.module ||
+          conformance.operations.length !== 0 ||
+          conformance.hook !== undefined
+        ) {
+          diagnostics.push(
+            invalidDiagnostic(
+              'Copy requires one empty impl on a struct declared in the same module',
+              conformance.syntax.span,
+            ),
+          )
+        }
+        continue
+      }
+
       if (Type.equals(capability, Type.dropCapability)) {
         const hook = conformance.hook
         if (conformance.operations.length !== 0 || hook === undefined) {
@@ -6650,17 +6671,6 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
               Diagnostic.invalidDropHook(
                 'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
                 hook.syntax.span,
-              ),
-            ),
-          )
-        } else if (Type.isConcrete(provider) && isCopyType(provider)) {
-          // A parametric provider's Copy-ness depends on its arguments, so the prohibition is
-          // enforced per instantiation during monomorphization instead of at the header.
-          diagnostics.push(
-            rejectConformance(
-              Diagnostic.invalidDropHook(
-                `Copy type ${Type.encode(provider)} cannot implement Drop`,
-                conformance.syntax.span,
               ),
             ),
           )
@@ -6703,6 +6713,56 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
       ),
     }),
   )
+
+  // Copy syntax is validated above; now validate the property over the complete provisional field
+  // graph before any downstream phase can observe the conformances as evidence.
+  const provisionalCopyIndex: Index = Object.freeze({
+    _tag: 'DeclarationIndex',
+    stage: 'Complete',
+    modules: Object.freeze(modules),
+    diagnostics: Object.freeze([]),
+  })
+  const invalidCopyKeys = new Set<string>()
+  for (const module of modules) {
+    for (const conformance of module.conformances) {
+      if (
+        conformance.validity._tag !== 'ValidConformance' ||
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.equals(conformance.capability.type, Type.copyCapability) ||
+        conformance.provider._tag !== 'Resolved'
+      )
+        continue
+      const proof = copyProof(
+        provisionalCopyIndex,
+        conformance.provider.type,
+        copyAssumptions(conformance),
+      )
+      if (proof._tag === 'Copy') continue
+      invalidCopyKeys.add(`${module.module}\u0000${conformance.ordinal}`)
+      diagnostics.push(
+        Diagnostic.invalidConformance(
+          `Copy cannot be implemented for ${Type.encode(conformance.provider.type)}: ${proof.reason}`,
+          conformance.syntax.span,
+        ),
+      )
+    }
+  }
+  if (invalidCopyKeys.size > 0)
+    modules = modules.map((module) =>
+      Object.freeze({
+        ...module,
+        conformances: Object.freeze(
+          module.conformances.map((conformance) =>
+            invalidCopyKeys.has(`${module.module}\u0000${conformance.ordinal}`)
+              ? Object.freeze({
+                  ...conformance,
+                  validity: Object.freeze({ _tag: 'InvalidConformance' as const }),
+                })
+              : conformance,
+          ),
+        ),
+      }),
+    )
 
   for (const module of modules) {
     for (const member of module.members) {
@@ -7044,6 +7104,137 @@ const conformanceCandidates = (
     ),
   )
 
+/** The deterministic result of asking the compiler's one `Copy` authority. */
+export type CopyProof =
+  | { readonly _tag: 'Copy' }
+  | { readonly _tag: 'NotCopy'; readonly reason: string }
+  | { readonly _tag: 'UnavailableCopy'; readonly reason: string }
+
+const provedCopy: CopyProof = Object.freeze({ _tag: 'Copy' })
+
+const copyAssumptions = (conformance: ConformanceFact): ReadonlySet<string> =>
+  new Set(
+    conformance.requirements.flatMap((requirement) =>
+      requirement.capability._tag === 'Resolved' &&
+      Type.equals(requirement.capability.type, Type.copyCapability)
+        ? [Type.key(requirement.parameter)]
+        : [],
+    ),
+  )
+
+const hasDropConformance = (self: Index, provider: Type.Type): boolean =>
+  conformanceCandidates(self, ConformanceGoal.make(Type.dropCapability, provider)).length > 0
+
+/**
+ * Proves whether one semantic type duplicates without user code or cleanup.
+ *
+ * Nominal fields never imply the answer on their own: an admitted empty `impl Copy` opens the
+ * proof, and every reachable field must then close it. Parameters close only through an explicit
+ * `Copy` bound. Cycles and damaged executable representations remain unavailable instead of being
+ * guessed affine or Copy.
+ */
+export const copyProof = (
+  self: Index,
+  type: Type.Type,
+  assumptions: ReadonlySet<string> = new Set(),
+  active: ReadonlySet<string> = new Set(),
+): CopyProof => {
+  if (
+    Type.isBuiltin(type) ||
+    Type.isString(type) ||
+    Type.isNever(type) ||
+    Type.equals(type, Type.unit)
+  )
+    return provedCopy
+  if (Type.isReference(type) || Type.isSlice(type))
+    return type.access === 'Shared'
+      ? provedCopy
+      : Object.freeze({ _tag: 'NotCopy', reason: 'exclusive borrows are affine' })
+  if (Type.isParameter(type))
+    return assumptions.has(Type.key(type))
+      ? provedCopy
+      : Object.freeze({ _tag: 'NotCopy', reason: `${type.name} has no Copy bound` })
+  if (Type.isFixedArray(type)) return copyProof(self, type.element, assumptions, active)
+  if (Type.isUnion(type)) {
+    for (const member of type.members) {
+      const proof = copyProof(self, member, assumptions, active)
+      if (proof._tag !== 'Copy') return proof
+    }
+    return provedCopy
+  }
+  if (Type.isRepresented(type))
+    return Object.freeze({
+      _tag: 'UnavailableCopy',
+      reason: 'executable Copy depends on its concrete realized captures',
+    })
+  if (Type.isCallable(type) || Type.isEffect(type))
+    return Object.freeze({
+      _tag: 'UnavailableCopy',
+      reason: 'an open executable contract does not identify its captures',
+    })
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type))
+    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is compiler-affine` })
+
+  const key = Type.key(type)
+  if (active.has(key))
+    return Object.freeze({
+      _tag: 'UnavailableCopy',
+      reason: `recursive Copy proof for ${Type.encode(type)}`,
+    })
+  const candidates = conformanceCandidates(
+    self,
+    ConformanceGoal.make(Type.copyCapability, type),
+  )
+  const selected = candidates.at(0)
+  if (candidates.length !== 1 || selected === undefined)
+    return Object.freeze({
+      _tag: candidates.length === 0 ? 'NotCopy' : 'UnavailableCopy',
+      reason:
+        candidates.length === 0
+          ? `${Type.encode(type)} has no valid Copy impl`
+          : `${Type.encode(type)} has conflicting Copy evidence`,
+    })
+  if (hasDropConformance(self, type))
+    return Object.freeze({
+      _tag: 'NotCopy',
+      reason: `${Type.encode(type)} also implements Drop`,
+    })
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration')
+    return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is not a struct` })
+  if (declaration.dependency._tag === 'Unavailable')
+    return Object.freeze({
+      _tag: 'UnavailableCopy',
+      reason: `stored fields of ${Type.encode(type)} are unavailable`,
+    })
+  const substitution =
+    Type.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const nestedAssumptions = new Set([...assumptions, ...copyAssumptions(selected.conformance)])
+  const nestedActive = new Set(active).add(key)
+  for (const field of declaration.fields) {
+    if (field.declaredType._tag !== 'Resolved')
+      return Object.freeze({
+        _tag: 'UnavailableCopy',
+        reason: `a stored field of ${Type.encode(type)} is unresolved`,
+      })
+    const fieldType = Type.substitute(field.declaredType.type, substitution)
+    const proof = copyProof(self, fieldType, nestedAssumptions, nestedActive)
+    if (proof._tag !== 'Copy')
+      return Object.freeze({
+        ...proof,
+        reason: `field ${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`} (${Type.encode(fieldType)}): ${proof.reason}`,
+      })
+  }
+  return provedCopy
+}
+
 const provedGoal = (
   goal: ConformanceGoal.ConformanceGoal,
   selection: ConformanceGoal.Selection,
@@ -7085,6 +7276,33 @@ const proveGoal = (
   if (active.some((entry) => ConformanceGoal.key(entry) === goalKey))
     return unprovedGoal(goal, Object.freeze({ _tag: 'ActiveCycle' as const }), active)
   const proof = ((): ConformanceGoal.Proof => {
+    if (Type.equals(goal.capability, Type.copyCapability)) {
+      const copy = copyProof(self, goal.provider)
+      if (copy._tag !== 'Copy')
+        return unprovedGoal(
+          goal,
+          Object.freeze({ _tag: 'UnavailableWitness' as const, reason: copy.reason }),
+          active,
+        )
+      const candidate = conformanceCandidates(self, goal).at(0)
+      return candidate === undefined
+        ? provedGoal(goal, Object.freeze({ _tag: 'IntrinsicSelection' as const }), [], [])
+        : provedGoal(
+            goal,
+            Object.freeze({
+              _tag: 'SourceSelection' as const,
+              module: candidate.module,
+              ordinal: candidate.conformance.ordinal,
+            }),
+            candidate.conformance.typeParameters
+              .filter((parameter) => parameter.duplicateOf === undefined)
+              .map(
+                (parameter) =>
+                  candidate.substitution.get(Type.key(parameter.type)) ?? parameter.type,
+              ),
+            [],
+          )
+    }
     if (Type.isNominal(goal.provider)) {
       if (Type.equals(goal.provider, goal.capability))
         return provedGoal(goal, Object.freeze({ _tag: 'IdentitySelection' as const }), [], [])
@@ -7176,7 +7394,9 @@ const selectedConformance = (
 
 /** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
 export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
-  contractByCapability(self, capability) !== undefined
+  Type.equals(capability, Type.copyCapability)
+    ? copyType(self, provider)
+    : contractByCapability(self, capability) !== undefined
     ? prove(self, provider, capability)._tag === 'Proved'
     : witness(self, provider, capability) !== undefined
 
@@ -7680,33 +7900,8 @@ export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefine
 export const copyType = (
   self: Index,
   type: Type.Type,
-  visiting: ReadonlySet<string> = new Set(),
-): boolean => {
-  if (Type.isBuiltin(type) || Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
-    return true
-  if (Type.isFixedArray(type)) return copyType(self, type.element, visiting)
-  if (Type.equals(type, Type.unit)) return true
-  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return false
-  const key = Type.key(type)
-  if (visiting.has(key)) return false
-  const declaration = byCanonical(self, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
-  if (declaration?._tag !== 'StructDeclaration') return false
-  const substitution =
-    Type.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      type.arguments,
-    ) ?? new Map()
-  const next = new Set(visiting).add(key)
-  return declaration.fields.every(
-    (field) =>
-      field.declaredType._tag === 'Resolved' &&
-      copyType(self, Type.substitute(field.declaredType.type, substitution), next),
-  )
-}
+  assumptions: ReadonlySet<string> = new Set(),
+): boolean => copyProof(self, type, assumptions)._tag === 'Copy'
 
 /** Tests whether a value of this type can retain lexical storage through its fields. */
 export const containsLexicalBorrow = (

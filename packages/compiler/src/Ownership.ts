@@ -342,30 +342,17 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
-const categoryOf = (type: DeclarationIndex.SemanticType | undefined): OwnershipCategory =>
+const categoryOf = (
+  index: DeclarationIndex.Index,
+  type: DeclarationIndex.SemanticType | undefined,
+  assumptions: ReadonlySet<string> = new Set(),
+): OwnershipCategory =>
   type === undefined ||
-  Type.isBuiltin(type) ||
-  Type.isString(type) ||
-  Type.isNever(type) ||
-  Type.isOutOfMemoryError(type)
+  (Type.isEffect(type) && type.access === 'Shared') ||
+  (Type.isCallable(type) && type.mode === 'Shared') ||
+  DeclarationIndex.copyType(index, type, assumptions)
     ? copyable
-    : Type.isSlice(type)
-      ? type.access === 'Shared'
-        ? copyable
-        : Object.freeze({ _tag: 'MoveOnly', type })
-      : Type.isReference(type)
-        ? type.access === 'Shared'
-          ? copyable
-          : Object.freeze({ _tag: 'MoveOnly', type })
-        : Type.isFixedArray(type)
-          ? categoryOf(type.element)._tag === 'Copyable'
-            ? copyable
-            : Object.freeze({ _tag: 'MoveOnly', type })
-          : Type.isEffect(type) && type.access === 'Shared'
-            ? copyable
-            : Type.isCallable(type) && type.mode === 'Shared'
-              ? copyable
-              : Object.freeze({ _tag: 'MoveOnly', type })
+    : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -389,6 +376,7 @@ interface MutableBinding {
 
 interface CheckState {
   readonly index: DeclarationIndex.Index
+  readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
   readonly diagnostics: Array<Diagnostic.Diagnostic>
@@ -753,7 +741,10 @@ const checkExpression = (
     }
     case 'Project': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
         state.diagnostics.push(
           representationFieldExtraction(expression, expression.span) ??
             Diagnostic.partialMove(expression.span),
@@ -764,7 +755,10 @@ const checkExpression = (
     case 'IndexPlace': {
       checkExpression(state, live, expression.subject, false, guard, escaping)
       checkExpression(state, live, expression.index, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
       }
       return
@@ -786,7 +780,10 @@ const checkExpression = (
     case 'SliceIndexPlace': {
       checkExpression(state, live, expression.slice, false, guard, escaping)
       checkExpression(state, live, expression.index, false, guard, escaping)
-      if (consuming && categoryOf(expression.type)._tag === 'MoveOnly') {
+      if (
+        consuming &&
+        categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+      ) {
         state.diagnostics.push(Diagnostic.borrowedMove(expression.span))
       }
       return
@@ -987,7 +984,9 @@ const checkExpression = (
         scrutineeSite === undefined ? undefined : state.bindings.get(siteKey(scrutineeSite))
       if (expression.access === 'Copy') {
         checkExpression(state, live, expression.scrutinee, false, guard, false)
-        if (categoryOf(scrutineeType)._tag === 'MoveOnly') {
+        if (
+          categoryOf(state.index, scrutineeType, state.copyAssumptions)._tag === 'MoveOnly'
+        ) {
           state.diagnostics.push(
             Diagnostic.explicitMoveRequired(scrutineeBinding?.name ?? '?', expression.span),
           )
@@ -1030,7 +1029,7 @@ const checkExpression = (
             mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
             liveFrom: pattern.span,
             liveTo: arm.span,
-            category: categoryOf(pattern.type),
+            category: categoryOf(state.index, pattern.type, state.copyAssumptions),
             type: pattern.type,
             matchAccess: pattern.access,
           }
@@ -1053,7 +1052,10 @@ const checkExpression = (
                 }),
                 ...arm.bindings.flatMap((binding) => {
                   const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-                  return armLive.has(siteKey(site)) && categoryOf(binding.type)._tag === 'MoveOnly'
+                  return (
+                    armLive.has(siteKey(site)) &&
+                    categoryOf(state.index, binding.type, state.copyAssumptions)._tag === 'MoveOnly'
+                  )
                     ? [
                         Object.freeze({
                           path: binding.path,
@@ -1230,7 +1232,11 @@ const borrowedPlaceAccess = (
   return undefined
 }
 
-const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
+const analyzeLoans = (
+  fn: Elaboration.FunctionFact,
+  index: DeclarationIndex.Index,
+  copyAssumptions: ReadonlySet<string>,
+): LoanAnalysis => {
   const loans: Array<LoanFact> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
 
@@ -1580,7 +1586,8 @@ const analyzeLoans = (fn: Elaboration.FunctionFact): LoanAnalysis => {
   }
 
   const naturalAccess = (expression: Elaboration.ExpressionFact): 'Read' | 'Move' =>
-    expression.type._tag === 'Available' && categoryOf(expression.type.type)._tag === 'MoveOnly'
+    expression.type._tag === 'Available' &&
+    categoryOf(index, expression.type.type, copyAssumptions)._tag === 'MoveOnly'
       ? 'Move'
       : 'Read'
 
@@ -2506,14 +2513,26 @@ const checkFunction = (
   semantic?: Elaboration.FunctionFact,
 ): CheckedFunction => {
   const declaration = fn.declaration
+  const copyAssumptions = new Set(
+    declaration.typeParameters.flatMap((parameter) =>
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' &&
+          Type.equals(bound.application.capability, Type.copyCapability),
+      )
+        ? [Type.key(parameter.type)]
+        : [],
+    ),
+  )
   const loanAnalysis =
     semantic === undefined
       ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
-      : analyzeLoans(semantic)
+      : analyzeLoans(semantic, index, copyAssumptions)
   const replacements =
     semantic === undefined ? Object.freeze([]) : borrowedReplacements(semantic, index)
   const state: CheckState = {
     index,
+    copyAssumptions,
     bindings: new Map(),
     order: [],
     diagnostics: [...loanAnalysis.diagnostics],
@@ -2536,7 +2555,7 @@ const checkFunction = (
           : 'Immutable',
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
-      category: categoryOf(type),
+      category: categoryOf(index, type, copyAssumptions),
       ...(type === undefined ? {} : { type }),
     }
     const key = siteKey(binding.site)
@@ -2675,7 +2694,7 @@ const checkFunction = (
           mutability: statement.mutability,
           liveFrom: statement.span,
           liveTo: enclosingSpan,
-          category: categoryOf(type),
+          category: categoryOf(index, type, copyAssumptions),
           ...(type === undefined ? {} : { type }),
           ...(environment === undefined || type === undefined || !Type.isCallable(type)
             ? {}

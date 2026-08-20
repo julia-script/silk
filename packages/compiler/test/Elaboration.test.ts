@@ -433,6 +433,7 @@ it('keeps stored access separate from exclusive provider selection and capture a
     'effect://exclusive-provider-shared-requirement',
     `service Clock {}
 struct FixedClock {}
+impl Copy for FixedClock {}
 impl Clock for FixedClock {}
 effect fn read() -> i32 ? &Clock { return 42 }
 fn main() -> i32 {
@@ -559,6 +560,7 @@ it('copies a moved Copy provider into a repeatable owned-binding wrapper', () =>
     'effect://moved-provider',
     `service Clock {}
 struct FixedClock {}
+impl Copy for FixedClock {}
 impl Clock for FixedClock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 fn main() -> i32 {
@@ -575,9 +577,20 @@ fn main() -> i32 {
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(recipe?.type._tag, 'Available')
   if (recipe?.type._tag !== 'Available' || !Type.isEffect(recipe.type.type)) return
-  assert.strictEqual(recipe.type.type.access, 'Shared')
   assert.strictEqual(binding?._tag, 'EffectBindRequirement')
   if (binding?._tag !== 'EffectBindRequirement') return
+  assert.deepEqual(
+    {
+      access: recipe.type.type.access,
+      provider: Type.encode(binding.provider.providerType),
+      capture: binding.provider.captureAccess,
+    },
+    {
+      access: 'Shared',
+      provider: 'effect://moved-provider.FixedClock',
+      capture: 'Copy',
+    },
+  )
   assert.strictEqual(binding.provider.selectionAccess, 'Take')
   assert.strictEqual(binding.provider.captureAccess, 'Copy')
 })

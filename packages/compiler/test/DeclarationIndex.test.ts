@@ -918,7 +918,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
   }),
 )
 
-it.effect('accepts one affine Drop hook and rejects Copy targets and malformed headers', () =>
+it.effect('accepts Drop for unmarked structs and rejects malformed headers', () =>
   Effect.gen(function* () {
     const index = yield* collect('drop-hooks', [
       [
@@ -945,7 +945,7 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
     const malformed = Type.nominal('drop-hooks', 'Malformed')
     const missing = Type.nominal('drop-hooks', 'Missing')
     const fallible = Type.nominal('drop-hooks', 'Fallible')
-    for (const rejected of [copyValue, malformed, missing, fallible]) {
+    for (const rejected of [malformed, missing, fallible]) {
       assert.strictEqual(
         index.modules
           .at(0)
@@ -967,6 +967,10 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
     assert.strictEqual(DeclarationIndex.prove(index, guard, Type.dropCapability)._tag, 'Proved')
     assert.isDefined(DeclarationIndex.witness(index, guard, Type.dropCapability))
     assert.isTrue(DeclarationIndex.conforms(index, guard, Type.dropCapability))
+    for (const accepted of [copyValue, Type.nominal('drop-hooks', 'UnionHolder')]) {
+      assert.strictEqual(DeclarationIndex.prove(index, accepted, Type.dropCapability)._tag, 'Proved')
+      assert.isTrue(DeclarationIndex.conforms(index, accepted, Type.dropCapability))
+    }
     assert.deepEqual(
       index.diagnostics
         .filter((diagnostic) => diagnostic.code === 'SEM0084')
@@ -974,8 +978,6 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
           diagnostic.reason._tag === 'InvalidDropHook' ? diagnostic.reason.detail : undefined,
         ),
       [
-        'Copy type drop-hooks.CopyValue cannot implement Drop',
-        'Copy type drop-hooks.UnionHolder cannot implement Drop',
         'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
         'Drop requires one inline fn drop hook and no operation mappings',
         'the hook must be fn drop(self: &mut Provider) -> () with no generics, failures, or requirements',
@@ -988,6 +990,62 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
           diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
         ),
       'duplicate Drop implementation for drop-hooks.Guard',
+    )
+  }),
+)
+
+it.effect('publishes Copy only from one valid empty sealed impl', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('copy-property', [
+      [
+        'copy-property',
+        `struct Point { x: i32, y: i32 }
+impl Copy for Point {}
+struct Token { value: i32 }
+struct Pair<T> { first: T, second: T }
+impl<T: Copy> Copy for Pair<T> {}
+struct Bad { token: Token }
+impl Copy for Bad {}
+struct Owned { allocation: Allocation }
+impl Copy for Owned {}
+struct Droppable { value: i32 }
+impl Drop for Droppable { fn drop(self: &mut Droppable) -> () { return () } }
+impl Copy for Droppable {}
+service Clock {}
+struct FixedClock {}
+impl Copy for FixedClock {}
+impl Clock for FixedClock {}`,
+      ],
+    ])
+    const point = Type.nominal('copy-property', 'Point')
+    const token = Type.nominal('copy-property', 'Token')
+    const pairOf = (element: Type.Type): Type.Nominal =>
+      Type.nominal('copy-property', 'Pair', [element])
+
+    assert.isTrue(DeclarationIndex.copyType(index, point))
+    assert.isTrue(DeclarationIndex.copyType(index, Type.nominal('copy-property', 'FixedClock')))
+    assert.isFalse(DeclarationIndex.copyType(index, token))
+    assert.isTrue(DeclarationIndex.copyType(index, pairOf('i32')))
+    assert.isFalse(DeclarationIndex.copyType(index, pairOf(token)))
+    assert.isTrue(DeclarationIndex.copyType(index, Type.fixedArray(point, 2)))
+    const union = Type.union([point, pairOf('i32')])
+    assert.strictEqual(union._tag, 'Normalized')
+    if (union._tag === 'Normalized') assert.isTrue(DeclarationIndex.copyType(index, union.type))
+
+    assert.deepEqual(
+      index.modules
+        .at(0)
+        ?.conformances.filter(
+          (conformance) =>
+            conformance.capability._tag === 'Resolved' &&
+            Type.equals(conformance.capability.type, Type.copyCapability),
+        )
+        .map((conformance) => conformance.validity._tag),
+      ['ValidConformance', 'ValidConformance', 'InvalidConformance', 'InvalidConformance', 'InvalidConformance', 'ValidConformance'],
+    )
+    assert.strictEqual(
+      index.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0083').length,
+      3,
     )
   }),
 )

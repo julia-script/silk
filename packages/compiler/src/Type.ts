@@ -422,6 +422,8 @@ export const allocation: Nominal = nominal('silk/core', 'Allocation')
 export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
+/** Compiler-sealed zero-operation property proving that values duplicate without user code. */
+export const copyCapability: Nominal = nominal('silk/core', 'Copy')
 /** The nominal system-backed implementation of the Allocator capability. */
 export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
 /** The canonical empty success value used by effect-free cleanup operations. */
@@ -481,6 +483,7 @@ export const isSlot = (
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
+  [copyCapability.name, copyCapability],
   [dropCapability.name, dropCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],

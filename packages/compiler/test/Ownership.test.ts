@@ -398,6 +398,7 @@ it('copies an owned Copy provider so its bound Effect remains repeatable', () =>
   const facts = check(
     'ownership://copied-provider.silk',
     `struct Clock { tick: i32 }
+impl Copy for Clock {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 pub fn main() -> i32 {
   let clock = Clock { tick: 0 }
