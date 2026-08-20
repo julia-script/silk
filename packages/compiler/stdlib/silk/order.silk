@@ -43,7 +43,7 @@ pub struct Ordering {
 /// rather than declared, so a witness can never disagree with itself about which values are equal.
 pub interface Order {
   /// Reports whether `left` orders strictly before `right`.
-  fn lessThan(left: &Self, right: &Self) -> bool
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 impl Order for u8 { lessThan: Intrinsic.u8LessThan }
@@ -64,10 +64,10 @@ impl Order for isize { lessThan: Intrinsic.isizeLessThan }
 /// Reads both operands twice without moving either, so the result is the same whichever order a
 /// caller evaluates the operands in.
 pub fn compare<T: Order>(left: T, right: T) -> Ordering {
-  if left < right {
+  if (&left) < (&right) {
     return Ordering { value: Less {} }
   }
-  if right < left {
+  if (&right) < (&left) {
     return Ordering { value: Greater {} }
   }
   return Ordering { value: Equal {} }
@@ -75,15 +75,15 @@ pub fn compare<T: Order>(left: T, right: T) -> Ordering {
 
 /// Reports whether one value orders strictly before another.
 pub fn less<T: Order>(left: T, right: T) -> bool {
-  return left < right
+  return (&left) < (&right)
 }
 
 /// Reports whether neither value orders before the other.
 pub fn equal<T: Order>(left: T, right: T) -> bool {
-  if left < right {
+  if (&left) < (&right) {
     return false
   }
-  return !(right < left)
+  return !((&right) < (&left))
 }
 
 /// Reports whether an ordering is `Less`.

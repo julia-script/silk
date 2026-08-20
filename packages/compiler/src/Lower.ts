@@ -4077,7 +4077,12 @@ function lowerExpressionInner(
             endLoans(fn, fn.effectLoanEnds.get(storedBinding) ?? [], expression.span)
             fn.effectLoanEnds.delete(storedBinding)
           }
-          if (expression.subject._tag === 'EffectConstruct')
+          if (
+            expression.subject._tag === 'EffectConstruct' ||
+            ((expression.subject._tag === 'BuiltinCall' ||
+              expression.subject._tag === 'BoundOperationCall') &&
+              expression.subject.witnessEffectSite !== undefined)
+          )
             endLoans(fn, expression.subject.loanEnds, expression.span)
           return Object.freeze({ result: destination })
         }
@@ -5659,7 +5664,7 @@ function lowerExpressionInner(
             provenance: Object.freeze({ span: expression.span, generated: false }),
           }),
         )
-        return { result: destination }
+        return finishBuiltin(destination)
       }
       if (!Mir.isBinaryOperator(expression.operation)) return undefined
       const [left, right] = argumentLocals
@@ -5678,7 +5683,7 @@ function lowerExpressionInner(
           provenance: Object.freeze({ span: expression.span, generated: false }),
         }),
       )
-      return { result: destination }
+      return finishBuiltin(destination)
     }
     case 'Unavailable':
       return undefined
@@ -6104,6 +6109,19 @@ const lowerBorrowSelectors = (
         Object.freeze({
           _tag: 'FieldSelector',
           field: selector.field,
+          provenance: authored(selector.span),
+        }),
+      )
+      continue
+    }
+    if (selector._tag === 'SliceIndex') {
+      const index = lowerExpression(fn, selector.index)
+      if (index === undefined) return undefined
+      lowered.push(
+        Object.freeze({
+          _tag: 'SliceElementSelector',
+          index: index.result,
+          access: selector.slice.access,
           provenance: authored(selector.span),
         }),
       )

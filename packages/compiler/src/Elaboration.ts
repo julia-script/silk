@@ -192,7 +192,7 @@ export type CallReferenceFact =
       readonly spelling: string
       readonly token: Token.Token
       readonly capability: Type.Nominal
-      readonly provider: Type.Parameter
+      readonly provider: Type.Type
       readonly operation: string
       readonly declaration: DeclarationIndex.ServiceOperationFact
       readonly interfaceContract: DeclarationIndex.InterfaceOperationApplicationFact
@@ -276,6 +276,12 @@ export type BorrowSelectorFact =
       readonly index: ExpressionFact
       readonly array: Type.FixedArray
       readonly bounds: Extract<BoundsFact, { readonly _tag: 'Proven' | 'Runtime' }>
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'SliceIndex'
+      readonly index: ExpressionFact
+      readonly slice: Type.Slice
       readonly span: SourceSpan.SourceSpan
     }
 
@@ -665,7 +671,7 @@ export interface OperatorExpressionFact {
  */
 export interface InterfaceOperationFact {
   readonly capability: Type.Nominal
-  readonly provider: Type.Parameter
+  readonly provider: Type.Type
   readonly operation: string
   readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
 }
@@ -1818,6 +1824,27 @@ const borrowRoot = (subject: ExpressionFact): BorrowRootFact | undefined => {
               index: subject.index,
               array: subject.array,
               bounds: subject.bounds,
+              span: subject.syntax.span,
+            }),
+          ]),
+        })
+  }
+  if (
+    subject._tag === 'IndexProjection' &&
+    subject.slice !== undefined &&
+    subject.bounds._tag === 'RuntimeSlice'
+  ) {
+    const root = borrowRoot(subject.subject)
+    return root === undefined
+      ? undefined
+      : Object.freeze({
+          ...root,
+          path: Object.freeze([
+            ...root.path,
+            Object.freeze({
+              _tag: 'SliceIndex' as const,
+              index: subject.index,
+              slice: subject.slice,
               span: subject.syntax.span,
             }),
           ]),
@@ -7061,12 +7088,22 @@ const analyzeGroupedExpression = (
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
+  borrowAllowed = false,
 ): ExpressionResult => {
   const child = node.children.find(isExpressionNode)
   const expression =
     child === undefined
       ? undefined
-      : analyzeExpression(source, child, declarations, declaration, scope, resolution, expected)
+      : analyzeExpression(
+          source,
+          child,
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          expected,
+          borrowAllowed,
+        )
   if (expression === undefined) {
     return Object.freeze({
       fact: Object.freeze({
@@ -7151,6 +7188,205 @@ const analyzeShortCircuitExpression = (
   })
 }
 
+interface OperatorContractSelection extends InterfaceOperationFact {
+  readonly declaration: DeclarationIndex.ServiceOperationFact
+  readonly parameters: ReadonlyArray<SemanticType>
+  readonly result: SemanticType
+  readonly label: string
+}
+
+const operatorContractSelection = (
+  capability: Type.Nominal,
+  provider: Type.Type,
+  operation: DeclarationIndex.InterfaceOperationApplicationFact,
+): OperatorContractSelection | undefined => {
+  const contract = interfaceOperationContract(operation)
+  const name = operation.declaration.name
+  if (contract === undefined || name._tag !== 'Present') return undefined
+  return Object.freeze({
+    capability,
+    provider,
+    operation: name.spelling,
+    contract: operation,
+    declaration: contract.declaration,
+    parameters: contract.parameters,
+    result: contract.result,
+    label: `${Type.encode(capability)}.${name.spelling}`,
+  })
+}
+
+const boundOperatorSelections = (
+  declaration: DeclarationFact,
+  operator: Operator.Eligible,
+): ReadonlyArray<OperatorContractSelection> =>
+  Object.freeze(
+    declaration.typeParameters.flatMap((parameter) =>
+      parameter.bounds.flatMap((bound) =>
+        bound._tag !== 'ResolvedBound'
+          ? []
+          : bound.application.operations.flatMap((operation) => {
+              if (operation.declaration.operator?.operator !== operator) return []
+              const selected = operatorContractSelection(
+                bound.application.capability,
+                parameter.type,
+                operation,
+              )
+              return selected === undefined ? [] : [selected]
+            }),
+      ),
+    ),
+  )
+
+const concreteOperatorSelections = (
+  index: DeclarationIndex.Index,
+  module: string,
+  operator: Operator.Eligible,
+): ReadonlyArray<OperatorContractSelection> => {
+  const interfaces = index.modules.flatMap((headers) => headers.interfaces)
+  const selections = index.modules.flatMap((headers) =>
+    headers.conformances.flatMap((conformance) => {
+      if (
+        conformance.validity._tag !== 'ValidConformance' ||
+        conformance.coherence._tag !== 'Coherent' ||
+        conformance.termination._tag !== 'Terminating' ||
+        conformance.capability._tag !== 'Resolved' ||
+        conformance.provider._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type)
+      )
+        return []
+      const capability = conformance.capability.type
+      const provider = conformance.provider.type
+      const interface_ = interfaces.find(
+        (candidate) =>
+          candidate.canonical._tag === 'Canonical' &&
+          candidate.canonical.id.module === capability.module &&
+          candidate.canonical.id.name === capability.name &&
+          (candidate.visibility === 'Public' || candidate.canonical.id.module === module),
+      )
+      if (interface_ === undefined) return []
+      const proof = DeclarationIndex.prove(index, provider, capability)
+      if (
+        proof._tag !== 'Proved' ||
+        proof.selection._tag !== 'SourceSelection' ||
+        proof.selection.module !== conformance.module ||
+        proof.selection.ordinal !== conformance.ordinal
+      )
+        return []
+      const application = DeclarationIndex.interfaceApplication(interface_, capability, provider)
+      if (application?.available !== true) return []
+      return application.operations.flatMap((operation) => {
+        if (operation.declaration.operator?.operator !== operator) return []
+        const selected = operatorContractSelection(capability, provider, operation)
+        return selected === undefined ? [] : [selected]
+      })
+    }),
+  )
+  const unique = new Map<string, OperatorContractSelection>()
+  for (const selection of selections)
+    unique.set(
+      `${Type.key(selection.capability)}\u0000${Type.key(selection.provider)}\u0000${selection.operation}`,
+      selection,
+    )
+  return Object.freeze([...unique.values()])
+}
+
+const operatorSelectionMatches = (
+  selection: OperatorContractSelection,
+  arguments_: ReadonlyArray<ArgumentFact>,
+): boolean =>
+  selection.parameters.length === arguments_.length &&
+  arguments_.every((argument, ordinal) => {
+    const expected = selection.parameters.at(ordinal)
+    return (
+      expected !== undefined &&
+      argument.type._tag === 'Available' &&
+      (typesCompatible(argument.type.type, expected) ||
+        contextualIntegerCompatible(argument.expression, expected))
+    )
+  })
+
+const finishInterfaceOperator = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  operator: Operator.Eligible,
+  operatorToken: Token.Token,
+  operandNodes: ReadonlyArray<SyntaxTree.Node>,
+  declarations: ReadonlyArray<DeclarationFact>,
+  declaration: DeclarationFact,
+  scope: Scope,
+  resolution: ResolutionContext,
+  selection: OperatorContractSelection,
+): ExpressionResult => {
+  const argumentsResult = analyzeArgumentNodes(
+    source,
+    node,
+    operandNodes,
+    declarations,
+    declaration,
+    scope,
+    resolution,
+    selection.parameters,
+  )
+  const arguments_ = Object.freeze(
+    argumentsResult.facts.map((argument) => {
+      let expression = argument.expression
+      while (expression._tag === 'Grouped') expression = expression.expression
+      return expression === argument.expression
+        ? argument
+        : Object.freeze({ ...argument, expression, syntax: expression.syntax })
+    }),
+  )
+  const reference: CallReferenceFact = Object.freeze({
+    _tag: 'ResolvedBoundOperation',
+    spelling: selection.label,
+    token: operatorToken,
+    capability: selection.capability,
+    provider: selection.provider,
+    operation: selection.operation,
+    declaration: selection.declaration,
+    interfaceContract: selection.contract,
+    parameters: selection.parameters,
+    result: selection.result,
+  })
+  const contract = analyzeCallContract(node, reference, arguments_, true)
+  const type =
+    contract.fact._tag === 'Compatible'
+      ? availableExpressionType(selection.result)
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'Operator',
+      operator,
+      reference,
+      arguments: arguments_,
+      mappings: Object.freeze(
+        selection.parameters.flatMap((expected, ordinal) => {
+          const argument = arguments_.at(ordinal)
+          return argument === undefined
+            ? []
+            : [
+                Object.freeze({
+                  _tag: 'BuiltinArgumentMapping' as const,
+                  argument,
+                  ordinal,
+                  expected,
+                }),
+              ]
+        }),
+      ),
+      contract: contract.fact,
+      interfaceOperation: selection,
+      ...(selection.contract.functionKind === 'Effect'
+        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
+        : {}),
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([...argumentsResult.diagnostics, ...contract.diagnostics]),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
 const analyzeOperatorExpression = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -7187,7 +7423,11 @@ const analyzeOperatorExpression = (
     )
   }
   const initialExpected =
-    typeof expected === 'string' && Scalar.isSpelling(expected) && node.kind === 'InfixExpression'
+    typeof expected === 'string' &&
+    Scalar.isSpelling(expected) &&
+    node.kind === 'InfixExpression' &&
+    operator !== undefined &&
+    !Operator.isPredicate(operator)
       ? Object.freeze(operandNodes.map(() => expected))
       : Object.freeze([])
   let argumentsResult = analyzeArgumentNodes(
@@ -7244,38 +7484,67 @@ const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
-  const boundOperand =
-    selectedFirstType?._tag === 'Available' && Type.isParameter(selectedFirstType.type)
-      ? selectedFirstType.type
-      : undefined
-  const interfaceOperation =
-    boundOperand === undefined
-      ? undefined
-      : declaration.typeParameters.flatMap((parameter): ReadonlyArray<InterfaceOperationFact> => {
-          // Every operation the bound declares is callable on a bound-typed operand, so an operator
-          // stays generic exactly when the bound's contract names the operation it spells.
-          if (!Type.equals(parameter.type, boundOperand)) return []
-          const operationName = `${operator.slice(0, 1).toLowerCase()}${operator.slice(1)}`
-          return parameter.bounds.flatMap((bound): ReadonlyArray<InterfaceOperationFact> => {
-            if (bound._tag !== 'ResolvedBound') return []
-            const contract = bound.application.operations.find(
-              (operation) =>
-                operation.declaration.name._tag === 'Present' &&
-                operation.declaration.name.spelling === operationName,
-            )
-            return contract === undefined
-              ? []
-              : [
-                  Object.freeze({
-                    capability: bound.application.capability,
-                    provider: boundOperand,
-                    operation: operationName,
-                    contract,
-                  }),
-                ]
-          })
-        })[0]
-  const genericInterface = interfaceOperation !== undefined
+  const builtinOperand =
+    selectedFirstType?._tag === 'Available' &&
+    (Type.isString(selectedFirstType.type) || Scalar.isSpelling(selectedFirstType.type))
+  if (!builtinOperand) {
+    const candidates = [
+      ...boundOperatorSelections(declaration, operator),
+      ...concreteOperatorSelections(resolution.index, source.id, operator),
+    ].filter((candidate) => operatorSelectionMatches(candidate, argumentsResult.facts))
+    if (candidates.length === 1) {
+      const candidate = candidates.at(0)
+      if (candidate !== undefined)
+        return finishInterfaceOperator(
+          source,
+          node,
+          operator,
+          operatorToken,
+          operandNodes,
+          declarations,
+          declaration,
+          scope,
+          resolution,
+          candidate,
+        )
+    }
+    const operatorSpelling = spelling(source, operatorToken)
+    const operandTypes = argumentsResult.facts.flatMap((argument) =>
+      argument.type._tag === 'Available' ? [Type.encode(argument.type.type)] : [],
+    )
+    const diagnostic =
+      candidates.length > 1
+        ? Diagnostic.ambiguousOperator(
+            operatorSpelling,
+            candidates.map((candidate) => candidate.label),
+            operatorToken.span,
+          )
+        : Diagnostic.operatorNotApplicable(operatorSpelling, operandTypes, operatorToken.span)
+    const reference: CallReferenceFact = Object.freeze({
+      _tag: 'Missing',
+      spelling: operatorSpelling,
+      token: operatorToken,
+      cause: Diagnostic.identity(diagnostic),
+    })
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'Operator',
+        operator,
+        reference,
+        arguments: argumentsResult.facts,
+        mappings: Object.freeze([]),
+        contract: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: node }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        type: unavailableExpressionType,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([...argumentsResult.diagnostics, diagnostic]),
+      type: undefined,
+    })
+  }
   const selectedActor: Operator.Actor =
     selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)
       ? 'string'
@@ -7285,38 +7554,8 @@ const analyzeOperatorExpression = (
   const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation, 'Primitive')
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
-  const genericType = selectedFirstType?._tag === 'Available' ? selectedFirstType.type : undefined
-  // A bound operator's contract is the compiler-known operation with the stand-in actor replaced by
-  // the bound parameter. Only the positions that carry the actor's own type become generic, so a
-  // comparison the bound declares keeps its `bool` result instead of widening to the parameter.
-  const actorType: SemanticType | undefined = Scalar.isSpelling(target.actor)
-    ? target.actor
-    : undefined
-  const overActor = (type: SemanticType): SemanticType =>
-    genericType !== undefined && actorType !== undefined && Type.equals(type, actorType)
-      ? genericType
-      : type
-  const operatorParameters = genericInterface
-    ? Object.freeze(
-        signature.parameters.length === operandNodes.length
-          ? signature.parameters.map(overActor)
-          : operandNodes.map(() => genericType ?? signature.result),
-      )
-    : signature.parameters
-  const interfaceResult = (() => {
-    const contract = interfaceOperation?.contract
-    if (contract?.success._tag !== 'Resolved') return undefined
-    return contract.functionKind === 'Ordinary'
-      ? contract.success.type
-      : Type.effectWithRows(
-          contract.success.type,
-          contract.failureRow.row,
-          'Shared',
-          contract.requirementRow.row,
-        )
-  })()
-  const operatorResult =
-    interfaceResult ?? (genericInterface ? overActor(signature.result) : signature.result)
+  const operatorParameters = signature.parameters
+  const operatorResult = signature.result
   const reference: CallReferenceFact = Object.freeze({
     _tag: 'ResolvedBuiltin',
     spelling: `${target.actor}.${target.operation}`,
@@ -7345,10 +7584,6 @@ const analyzeOperatorExpression = (
       arguments: argumentsResult.facts,
       mappings: builtinArgumentMappings(reference, argumentsResult.facts),
       contract: contract.fact,
-      ...(interfaceOperation === undefined ? {} : { interfaceOperation }),
-      ...(interfaceOperation?.contract.functionKind === 'Effect'
-        ? { witnessEffectSite: executableSite('EffectSiteId', resolution, node) }
-        : {}),
       type: expressionType,
       syntax: node,
     }),
@@ -8173,6 +8408,7 @@ function analyzeExpression(
       scope,
       resolution,
       expected,
+      borrowAllowed,
     )
   }
 
@@ -10702,6 +10938,21 @@ const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.Express
           Object.freeze({
             _tag: 'Field',
             field: selector.field,
+            span: selector.span,
+          }),
+        )
+        continue
+      }
+      if (selector._tag === 'SliceIndex') {
+        const index = hirExpression(selector.index)
+        if (index._tag === 'Unavailable') {
+          return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+        }
+        selectors.push(
+          Object.freeze({
+            _tag: 'SliceIndex',
+            index,
+            slice: selector.slice,
             span: selector.span,
           }),
         )

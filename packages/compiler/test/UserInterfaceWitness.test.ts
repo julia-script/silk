@@ -29,8 +29,8 @@ const evaluatedValue = (name: string, source: string) =>
  * shared borrow, because the interface declares that ownership explicitly.
  */
 const twoOperations = `interface Blend {
-  fn add(left: &Self, right: &Self) -> Self
-  fn lessThan(left: &Self, right: &Self) -> bool
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -52,10 +52,10 @@ impl Blend for Cell {
 
 /// Reaches both mapped operations: the comparison decides the branch and the sum is the result.
 fn merged<T: Blend>(left: T, right: T) -> T {
-  if left < right {
-    return left + right
+  if (&left) < (&right) {
+    return (&left) + (&right)
   }
-  return right + left
+  return (&right) + (&left)
 }
 `
 
@@ -80,8 +80,8 @@ it.effect('rejects a conformance that leaves one operation unmapped, naming it',
     const snapshot = yield* analyzed(
       'user-witness/missing-operation',
       `interface Blend {
-  fn add(left: &Self, right: &Self) -> Self
-  fn lessThan(left: &Self, right: &Self) -> bool
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -108,8 +108,8 @@ it.effect('rejects a bounded specialization at a type whose conformance is incom
     const snapshot = yield* analyzed(
       'user-witness/incomplete-specialization',
       `interface Blend {
-  fn add(left: &Self, right: &Self) -> Self
-  fn lessThan(left: &Self, right: &Self) -> bool
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell {
@@ -125,7 +125,7 @@ impl Blend for Cell {
 }
 
 fn ordered<T: Blend>(left: T, right: T) -> bool {
-  return left < right
+  return (&left) < (&right)
 }
 
 pub fn main() -> i32 {

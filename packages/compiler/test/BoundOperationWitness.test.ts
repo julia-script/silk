@@ -65,7 +65,7 @@ const twoEngineValue = (name: string, source: string) =>
  * bound and can only be answered by the provider's own function.
  */
 const userKey = `interface Keyed {
-  fn equals(left: &Self, right: &Self) -> bool
+  operator == fn equals(left: &Self, right: &Self) -> bool
   fn digest(left: &Self, right: &Self) -> u64
 }
 
@@ -191,7 +191,7 @@ it.effect('requires explicit moves for operator-spelled value operands', () =>
     const snapshot = yield* analyzed(
       'bound-operation-witness/operator-value-ownership',
       `interface Combined {
-  fn add(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
 }
 
 struct Token { code: i32 }
@@ -295,7 +295,7 @@ it.effect('weakens implicit operator borrows to a source witness demand', () =>
     const value = yield* evaluatedValue(
       'bound-operation-witness/weaker-operator-access',
       `interface Combined {
-  fn add(left: &mut Self, right: &mut Self) -> Self
+  operator + fn add(left: &mut Self, right: &mut Self) -> Self
 }
 
 struct Cell { code: i32 }
@@ -306,7 +306,11 @@ fn cellAdd(left: &Cell, right: &Cell) -> Cell {
 
 impl Combined for Cell { add: Cell.cellAdd }
 
-fn combine<T: Combined>(left: T, right: T) -> T { return left + right }
+fn combine<T: Combined>(left: T, right: T) -> T {
+  let mut ownedLeft = move left
+  let mut ownedRight = move right
+  return (&mut ownedLeft) + (&mut ownedRight)
+}
 
 pub fn main() -> i32 {
   let out = combine<Cell>(Cell { code: 20 }, Cell { code: 22 })
@@ -324,14 +328,20 @@ struct Fixed {}
 effect fn read(self: &Fixed, number: i32) -> i32 { return number }
 impl Counter for Fixed { read: Fixed.read }
 
-interface Combined { fn add(left: &mut Self, right: &mut Self) -> i32 }
+interface Combined { operator + fn add(left: &mut Self, right: &mut Self) -> i32 }
 struct Cell { code: i32 }
 fn cellAdd(left: &Cell, right: &Cell) -> i32 { return left.code + right.code }
 impl Combined for Cell { add: Cell.cellAdd }
 
 effect fn branch<Self: Combined>(flag: bool, left: Self, right: Self) -> i32 {
   let fixed = Fixed {}
-  let pending = Intrinsic.bindRequirement<Counter>(Counter.read(left + right), &fixed)
+  let mut ownedLeft = move left
+  let mut ownedRight = move right
+  let number = (&mut ownedLeft) + (&mut ownedRight)
+  let pending = Intrinsic.bindRequirement<Counter>(
+    Counter.read(number),
+    &fixed,
+  )
   if flag {
     return run move pending
   }
@@ -612,7 +622,7 @@ it.effect('wraps an operator-spelled pure source witness in Effect', () =>
     const value = yield* evaluatedValue(
       'bound-operation-witness/effect-operator-boundary',
       `interface Combined {
-  effect fn add(left: &Self, right: &Self) -> Self
+  operator + effect fn add(left: &Self, right: &Self) -> Self
 }
 
 struct Cell { code: i32 }
@@ -622,7 +632,7 @@ fn cellAdd(left: &Cell, right: &Cell) -> Cell {
 }
 
 impl Combined for Cell { add: Cell.cellAdd }
-fn combined<T: Combined>(left: T, right: T) -> T { return run (left + right) }
+fn combined<T: Combined>(left: T, right: T) -> T { return run ((&left) + (&right)) }
 
 pub fn main() -> i32 {
   let cell = combined<Cell>(Cell { code: 20 }, Cell { code: 1 })
@@ -638,7 +648,7 @@ it.effect('lets one bound operation select an intrinsic witness and a source wit
     const value = yield* evaluatedValue(
       'bound-operation-witness/mixed-witnesses',
       `interface Ranked {
-  fn lessThan(left: &Self, right: &Self) -> bool
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
 struct Cell { weight: i32 }
@@ -650,7 +660,7 @@ fn cellLessThan(left: &Cell, right: &Cell) -> bool {
 impl Ranked for Cell { lessThan: Cell.cellLessThan }
 impl Ranked for i32 { lessThan: Intrinsic.i32LessThan }
 
-fn ranksBelow<T: Ranked>(left: T, right: T) -> bool { return left < right }
+fn ranksBelow<T: Ranked>(left: T, right: T) -> bool { return (&left) < (&right) }
 
 pub fn main() -> i32 {
   if ranksBelow<Cell>(Cell { weight: 20 }, Cell { weight: 22 }) {
@@ -703,7 +713,7 @@ it.effect('keeps the operator-spelled half of the same conformance unchanged', (
       'bound-operation-witness/both-spellings',
       `${userKey}
 fn probe<T: Keyed>(left: T, right: T) -> u64 {
-  if left == right { return 0 }
+  if (&left) == (&right) { return 0 }
   return Keyed.digest(&left, &right)
 }
 

@@ -24,8 +24,8 @@ const describe = (outcome: unknown): string =>
  * `subtract` — over the canonical parameter, once, before any concrete argument exists.
  */
 const twoOperations = `pub interface Arith {
-  fn add(left: Self, right: Self) -> Self
-  fn subtract(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
 impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
@@ -46,8 +46,8 @@ it.effect('calls every operation of a two-operation bound in one generic body', 
 it.effect('specializes one two-operation bound per conforming provider', () =>
   Effect.gen(function* () {
     const { self, outcome } = yield* evaluate(`pub interface Arith {
-  fn add(left: Self, right: Self) -> Self
-  fn subtract(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
 impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 impl Arith for u8 { add: Intrinsic.u8Add subtract: Intrinsic.u8Subtract }
@@ -69,12 +69,12 @@ pub fn main() -> i32 {
  * results in `bool`, so the operator keeps the operation's own declared result.
  */
 const comparisonBound = `pub interface Ranked {
-  fn lessThan(left: &Self, right: &Self) -> bool
-  fn subtract(left: Self, right: Self) -> Self
+  operator < fn lessThan(left: &Self, right: &Self) -> bool
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
 impl Ranked for i32 { lessThan: Intrinsic.i32LessThan subtract: Intrinsic.i32Subtract }
 pub fn gap<T: Ranked>(left: T, right: T) -> T {
-  if left < right { return move right - move left }
+  if (&left) < (&right) { return move right - move left }
   return move left - move right
 }
 pub fn main() -> i32 { return gap(2, 44) }`
@@ -91,8 +91,8 @@ it.effect('keeps a bound comparison at its declared result type', () =>
 it.effect('rejects a type argument whose witness omits one bound operation', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Arith {
-  fn add(left: Self, right: Self) -> Self
-  fn subtract(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
 impl Arith for i32 { add: Intrinsic.i32Add }
 pub fn combine<T: Arith>(left: T, right: T, offset: T) -> T {
@@ -109,8 +109,8 @@ it.effect('checks a bound against a type argument an explicit prefix wrote', () 
     // A substitution seeded from a written prefix is still a substitution: what it binds faces the
     // same conformance check an inferred binding does.
     const declarations = `pub interface Arith {
-  fn add(left: Self, right: Self) -> Self
-  fn subtract(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
+  operator - fn subtract(left: Self, right: Self) -> Self
 }
 impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
 struct Plain { value: i32 }
@@ -162,11 +162,13 @@ pub fn main() -> i32 {
 it.effect('rejects a type argument with no witness for the bound', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`pub interface Arith {
-  fn add(left: &Self, right: &Self) -> Self
-  fn subtract(left: &Self, right: &Self) -> Self
+  operator + fn add(left: &Self, right: &Self) -> Self
+  operator - fn subtract(left: &Self, right: &Self) -> Self
 }
 impl Arith for i32 { add: Intrinsic.i32Add subtract: Intrinsic.i32Subtract }
-pub fn combine<T: Arith>(left: T, right: T) -> T { return (left + right) - left }
+pub fn combine<T: Arith>(left: T, right: T) -> T {
+  return &((&left) + (&right)) - (&left)
+}
 pub fn main() -> i32 {
   let wide = combine<i64>(40, 44)
   return 0

@@ -59,7 +59,7 @@ pub fn seed(value: u64) -> HashSeed {
 /// collection can neither detect the breakage nor recover from it.
 pub interface HashKey {
   /// Reports whether two keys name the same collection entry.
-  fn equals(left: &Self, right: &Self) -> bool
+  operator == fn equals(left: &Self, right: &Self) -> bool
   /// Computes the key's deterministic 64-bit hash under the collection seed.
   fn hash(value: &Self, seed: &HashSeed) -> u64
 }

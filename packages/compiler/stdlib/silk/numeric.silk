@@ -18,7 +18,7 @@
 /// effect requirements, provider slots, or runtime dispatch.
 pub interface Integer {
   /// Adds two values using the concrete primitive integer operation.
-  fn add(left: Self, right: Self) -> Self
+  operator + fn add(left: Self, right: Self) -> Self
 }
 
 impl Integer for u8 { add: Intrinsic.u8Add }

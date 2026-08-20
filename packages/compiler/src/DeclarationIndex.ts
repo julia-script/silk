@@ -10,6 +10,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
+import * as Operator from './Operator.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
@@ -21,7 +22,7 @@ import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as TargetConstant from './TargetConstant.js'
-import type * as Token from './Token.js'
+import * as Token from './Token.js'
 import * as Type from './Type.js'
 
 /** The semantic types recognized in declaration and executable analysis. */
@@ -575,6 +576,11 @@ export interface ServiceOperationFact {
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
+  readonly operator?: {
+    readonly operator: Operator.Eligible
+    readonly token: Token.Token
+    readonly syntax: SyntaxTree.Node
+  }
   readonly name: DeclaredName
   readonly returnType: ReturnTypeFact
   readonly opaqueResult?: OpaqueResultFact
@@ -1035,7 +1041,7 @@ const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFac
         (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
   )
 
-const interfaceApplication = (
+export const interfaceApplication = (
   declaration: ContractFact,
   capability: Type.Nominal,
   provider: Type.Type,
@@ -3501,6 +3507,15 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
           const constraints = collectConstraints(source, operation, environment)
           const body = SyntaxTree.directNode(operation, 'Block')
           const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+          const operatorSyntax = SyntaxTree.directNode(operation, 'OperatorMarker')
+          const operatorToken = operatorSyntax?.children.find(
+            (element): element is Token.Token =>
+              SyntaxTree.isToken(element) && Operator.isDeclarationToken(element.kind),
+          )
+          const selectedOperator =
+            operatorToken === undefined
+              ? undefined
+              : Operator.declaration(operatorToken.kind, parameterFacts.length)
           diagnostics.push(
             ...parameters.flatMap((parameter) => parameter.diagnostics),
             ...duplicateParameterDiagnostics(parameterFacts),
@@ -3509,6 +3524,18 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             ...requirementRow.diagnostics,
             ...constraints.diagnostics,
           )
+          if (operatorSyntax !== undefined) {
+            const detail =
+              node.kind !== 'InterfaceDeclaration'
+                ? 'only interface operations may declare an operator'
+                : operationTypeParameters.facts.length > 0
+                  ? 'operator operations cannot declare operation-local type parameters'
+                  : selectedOperator === undefined
+                    ? `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
+                    : undefined
+            if (detail !== undefined)
+              diagnostics.push(Diagnostic.invalidOperatorContract(detail, operatorSyntax.span))
+          }
           if (body !== undefined)
             diagnostics.push(
               Diagnostic.invalidServiceDeclaration(
@@ -3532,6 +3559,19 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             typeParameters: operationTypeParameters.facts,
             parameterCount: parameterFacts.length,
             parameters: parameterFacts,
+            ...(operatorSyntax !== undefined &&
+            operatorToken !== undefined &&
+            selectedOperator !== undefined &&
+            node.kind === 'InterfaceDeclaration' &&
+            operationTypeParameters.facts.length === 0
+              ? {
+                  operator: Object.freeze({
+                    operator: selectedOperator,
+                    token: operatorToken,
+                    syntax: operatorSyntax,
+                  }),
+                }
+              : {}),
             name: operationName,
             returnType: returnType.fact,
             ...(returnType.opaqueResult === undefined

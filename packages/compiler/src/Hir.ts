@@ -283,6 +283,12 @@ export type BorrowSelector =
       readonly bounds: BoundsMode
       readonly span: SourceSpan.SourceSpan
     }
+  | {
+      readonly _tag: 'SliceIndex'
+      readonly index: Expression
+      readonly slice: Type.Slice
+      readonly span: SourceSpan.SourceSpan
+    }
 
 /** One selector in a writable place, retained in source evaluation order. */
 export type WriteSelector =
@@ -723,7 +729,7 @@ export type Expression =
        */
       readonly interfaceOperation?: {
         readonly capability: Type.Nominal
-        readonly provider: Type.Parameter
+        readonly provider: Type.Type
         readonly operation: string
         readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
       }

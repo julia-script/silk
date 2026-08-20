@@ -65,7 +65,7 @@ pub fn main() -> i32 {
  * is the half an operator spells; the digest is declared and mapped so the conformance is complete.
  */
 const userKey = `interface HashKey {
-  fn equals(left: &Self, right: &Self) -> bool
+  operator == fn equals(left: &Self, right: &Self) -> bool
   fn digest(left: &Self, right: &Self) -> u64
 }
 
@@ -81,7 +81,7 @@ it.effect('reaches the operator-spelled half of a two-operation bound at a user 
     const value = yield* evaluatedValue(
       'hash-key-bound/user-equivalence',
       `${userKey}
-fn same<T: HashKey>(left: T, right: T) -> bool { return left == right }
+fn same<T: HashKey>(left: T, right: T) -> bool { return (&left) == (&right) }
 pub fn main() -> i32 {
   if same<Cell>(Cell { weight: 1 }, Cell { weight: 1 }) { return 42 }
   return 1

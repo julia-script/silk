@@ -97,10 +97,8 @@ collection can neither detect the breakage nor recover from it.
 ### Operation `equals`
 
 ```silk
-fn equals(left: &Self, right: &Self) -> bool
+operator == fn equals(left: &Self, right: &Self) -> bool
 ```
-
-Reports whether two keys name the same collection entry.
 
 <a id="declaration-73696c6b2f686173683a3a486173684b65793a3a6f7065726174696f6e3a68617368"></a>
 

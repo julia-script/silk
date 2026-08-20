@@ -2626,11 +2626,44 @@ const serviceOperationFollowing: ReadonlyArray<Token.TokenKind> = Object.freeze(
   ...topLevelFollowing,
 ])
 
+const startsServiceOperation = (state: State): boolean =>
+  nextSignificantKind(state) === 'FnKeyword' ||
+  nextSignificantKind(state) === 'EffectKeyword' ||
+  hasContextualSpelling(state, 'operator')
+
+const parseOperatorMarker = (initial: State): NodeResult => {
+  const keyword = expect(initial, 'Identifier', [
+    ...Operator.declarationTokenKinds,
+    'EffectKeyword',
+    'FnKeyword',
+    ...serviceOperationFollowing,
+  ])
+  const kind = nextSignificantKind(keyword.state)
+  const token =
+    kind !== undefined && Operator.isDeclarationToken(kind)
+      ? expect(keyword.state, kind, ['EffectKeyword', 'FnKeyword', ...serviceOperationFollowing])
+      : expect(keyword.state, 'Star', ['EffectKeyword', 'FnKeyword', ...serviceOperationFollowing])
+  return Object.freeze({
+    state: token.state,
+    node: syntaxNode(token.state, 'OperatorMarker', [...keyword.elements, ...token.elements]),
+  })
+}
+
 const parseServiceOperation = (initial: State): NodeResult => {
+  const operatorMarker = hasContextualSpelling(initial, 'operator')
+    ? parseOperatorMarker(initial)
+    : undefined
   const effectKeyword =
-    nextSignificantKind(initial) === 'EffectKeyword'
-      ? expect(initial, 'EffectKeyword', ['FnKeyword', 'Identifier', ...serviceOperationFollowing])
-      : Object.freeze({ state: initial, elements: Object.freeze([]) })
+    nextSignificantKind(operatorMarker?.state ?? initial) === 'EffectKeyword'
+      ? expect(operatorMarker?.state ?? initial, 'EffectKeyword', [
+          'FnKeyword',
+          'Identifier',
+          ...serviceOperationFollowing,
+        ])
+      : Object.freeze({
+          state: operatorMarker?.state ?? initial,
+          elements: Object.freeze([]),
+        })
   const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
     'Identifier',
     'LeftParenthesis',
@@ -2670,6 +2703,7 @@ const parseServiceOperation = (initial: State): NodeResult => {
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ServiceOperation', [
+      ...(operatorMarker === undefined ? [] : [operatorMarker.node]),
       ...effectKeyword.elements,
       ...fnKeyword.elements,
       ...name.elements,
@@ -2692,7 +2726,8 @@ const parseServiceInvalidMember = (initial: State): NodeResult => {
   while (
     token !== undefined &&
     token.kind !== 'EndOfFile' &&
-    !serviceOperationFollowing.includes(token.kind)
+    !serviceOperationFollowing.includes(token.kind) &&
+    !hasContextualSpelling(state, 'operator')
   ) {
     unexpected = Object.freeze([...unexpected, token])
     state = advance(state)
@@ -2756,10 +2791,9 @@ const parseServiceDeclaration = (initial: State): NodeResult => {
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
   ) {
-    const operation =
-      nextSignificantKind(state) === 'FnKeyword' || nextSignificantKind(state) === 'EffectKeyword'
-        ? parseServiceOperation(state)
-        : parseServiceInvalidMember(state)
+    const operation = startsServiceOperation(state)
+      ? parseServiceOperation(state)
+      : parseServiceInvalidMember(state)
     children = Object.freeze([...children, operation.node])
     if (operation.state.index === state.index) break
     state = operation.state
@@ -2807,10 +2841,9 @@ const parseInterfaceDeclaration = (initial: State): NodeResult => {
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
   ) {
-    const operation =
-      nextSignificantKind(state) === 'FnKeyword' || nextSignificantKind(state) === 'EffectKeyword'
-        ? parseServiceOperation(state)
-        : parseServiceInvalidMember(state)
+    const operation = startsServiceOperation(state)
+      ? parseServiceOperation(state)
+      : parseServiceInvalidMember(state)
     children = Object.freeze([...children, operation.node])
     if (operation.state.index === state.index) break
     state = operation.state

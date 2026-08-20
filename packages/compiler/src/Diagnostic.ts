@@ -164,6 +164,12 @@ export const unknownOwnedCallableReturnCode = 'SEM0081' as const
 export const nonFiniteEffectJoinCode = 'SEM0132' as const
 /** Stable code for a refutable pattern in an unconditional local binding. */
 export const refutableLetPatternCode = 'SEM0133' as const
+/** Stable code for an operator marker that cannot describe its interface operation. */
+export const invalidOperatorContractCode = 'SEM0134' as const
+/** Stable code for operator syntax with no marked operation accepting its operands. */
+export const operatorNotApplicableCode = 'SEM0135' as const
+/** Stable code for operator syntax matched by more than one marked operation. */
+export const ambiguousOperatorCode = 'SEM0136' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -376,6 +382,9 @@ export type Code =
   | typeof unknownOwnedCallableReturnCode
   | typeof nonFiniteEffectJoinCode
   | typeof refutableLetPatternCode
+  | typeof invalidOperatorContractCode
+  | typeof operatorNotApplicableCode
+  | typeof ambiguousOperatorCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -501,6 +510,17 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
+  | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
+  | {
+      readonly _tag: 'OperatorNotApplicable'
+      readonly operator: string
+      readonly operands: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'AmbiguousOperator'
+      readonly operator: string
+      readonly candidates: ReadonlyArray<string>
+    }
   | {
       readonly _tag: 'AmbiguousBoundOperation'
       readonly spelling: string
@@ -1196,6 +1216,53 @@ export const invalidConstant = (detail: string, span: SourceSpan.SourceSpan): Di
     severity: 'error',
     message: `Invalid constant: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidConstant', detail }),
+    span,
+  })
+
+/** Creates the declaration diagnostic for an invalid interface operator marker. */
+export const invalidOperatorContract = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidOperatorContractCode,
+    severity: 'error',
+    message: `Invalid operator contract: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidOperatorContract', detail }),
+    span,
+  })
+
+/** Creates the operator-site diagnostic when no marked operation accepts the operands. */
+export const operatorNotApplicable = (
+  operator: string,
+  operands: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: operatorNotApplicableCode,
+    severity: 'error',
+    message: `Operator ${operator} does not accept (${operands.join(', ')})`,
+    reason: Object.freeze({ _tag: 'OperatorNotApplicable', operator, operands }),
+    span,
+  })
+
+/** Creates the operator-site diagnostic when static conformance leaves multiple candidates. */
+export const ambiguousOperator = (
+  operator: string,
+  candidates: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousOperatorCode,
+    severity: 'error',
+    message: `Operator ${operator} is ambiguous between ${candidates.join(', ')}`,
+    reason: Object.freeze({ _tag: 'AmbiguousOperator', operator, candidates }),
     span,
   })
 

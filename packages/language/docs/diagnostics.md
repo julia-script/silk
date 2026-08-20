@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 126 |
+| `SEM` | Semantic | 129 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 155 codes in total.
+There are 158 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -181,6 +181,9 @@ There are 155 codes in total.
 | `SEM0131` | Stable code for a provider whose key matches but whose access cannot satisfy the requirement. | `<toLowerCase> provider access cannot satisfy an <toLowerCase> requirement` |
 | `SEM0132` | Stable code for an Effect join whose alternatives cannot be represented as a finite composite. | `Cannot form a finite Effect join: <detail>` |
 | `SEM0133` | Stable code for a refutable pattern in an unconditional local binding. | `Let pattern is refutable for <actual>; it does not cover <join>. Use if let or match` |
+| `SEM0134` | Stable code for an operator marker that cannot describe its interface operation. | `Invalid operator contract: <detail>` |
+| `SEM0135` | Stable code for operator syntax with no marked operation accepting its operands. | `Operator <operator> does not accept (<join>)` |
+| `SEM0136` | Stable code for operator syntax matched by more than one marked operation. | `Operator <operator> is ambiguous between <join>` |
 
 ## Ownership (`OWN`)
 

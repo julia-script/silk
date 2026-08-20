@@ -40,10 +40,8 @@ effect requirements, provider slots, or runtime dispatch.
 ### Operation `add`
 
 ```silk
-fn add(left: Self, right: Self) -> Self
+operator + fn add(left: Self, right: Self) -> Self
 ```
-
-Adds two values using the concrete primitive integer operation.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a30"></a>
 

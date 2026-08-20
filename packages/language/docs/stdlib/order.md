@@ -90,10 +90,8 @@ rather than declared, so a witness can never disagree with itself about which va
 ### Operation `lessThan`
 
 ```silk
-fn lessThan(left: &Self, right: &Self) -> bool
+operator < fn lessThan(left: &Self, right: &Self) -> bool
 ```
-
-Reports whether `left` orders strictly before `right`.
 
 <a id="declaration-73696c6b2f6f726465723a3a696d706c656d656e746174696f6e3a30"></a>
 

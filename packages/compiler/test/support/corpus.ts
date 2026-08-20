@@ -481,6 +481,28 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'operator-interface-contract',
+    source: `struct Vector { value: i32 }
+fn scale(left: Vector, right: i32) -> Vector {
+  return Vector { value: left.value * right }
+}
+fn dot(left: Vector, right: Vector) -> i32 {
+  return left.value * right.value
+}
+interface Multiply<Right, Output> {
+  operator * fn multiply(left: Self, right: Right) -> Output
+}
+impl Multiply<i32, Vector> for Vector { multiply: Vector.scale }
+impl Multiply<Vector, i32> for Vector { multiply: Vector.dot }
+fn doubled<T: Multiply<i32, T>>(value: T) -> T { return move value * 2 }
+pub fn main() -> i32 {
+  let scaled = doubled(Vector { value: 21 })
+  let unit = Vector { value: 1 }
+  return move scaled * move unit
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'closed-operator-surface',
     source: `pub fn main() -> i32 {
 if 6 * 7 != 42 { return 0 }

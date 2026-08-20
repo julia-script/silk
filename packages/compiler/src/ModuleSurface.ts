@@ -1764,6 +1764,7 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     declarationIdOrdinal(value.id),
     serviceOperationState(value.state),
     value.functionKind,
+    optional(value.operator?.operator),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),
     array(value.parameters.map(parameter)),

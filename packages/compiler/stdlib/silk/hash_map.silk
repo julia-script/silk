@@ -412,7 +412,7 @@ pub effect fn insert<K: HashKey, V>(
       if state == OCCUPIED {
         let held = RawBuffer.view<Entry<K, V>>(&owned.entries, index, usize.ONE)
         if held[usize.ZERO].hash == hashed {
-          if held[usize.ZERO].key == key {
+          if (&held[usize.ZERO].key) == (&key) {
             found = index
             break
           }
@@ -484,7 +484,7 @@ pub fn contains<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> bool {
     if state == OCCUPIED {
       let held = entryAt<K, V>(self, index)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].key == key {
+        if (&held[usize.ZERO].key) == (&key) {
           return true
         }
       }
@@ -516,7 +516,7 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
     if state == OCCUPIED {
       let held = entryAt<K, V>(self, index)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].key == key {
+        if (&held[usize.ZERO].key) == (&key) {
           return Option.some<usize>(index)
         }
       }
@@ -548,7 +548,7 @@ pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V
     if state == OCCUPIED {
       let held = entryAt<K, V>(self, index)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].key == key {
+        if (&held[usize.ZERO].key) == (&key) {
           return partValue<K, V>(readEntry<K, V>(self, index))
         }
       }
@@ -584,7 +584,7 @@ pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
     if state == OCCUPIED {
       let held = RawBuffer.view<Entry<K, V>>(&owned.entries, index, usize.ONE)
       if held[usize.ZERO].hash == hashed {
-        if held[usize.ZERO].key == key {
+        if (&held[usize.ZERO].key) == (&key) {
           found = index
           break
         }
