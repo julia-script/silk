@@ -282,7 +282,11 @@ const printBlock = (
 ): FormatDocument.Document => {
   const open = tokenOf(node, 'LeftBrace')
   const close = tokenOf(node, 'RightBrace')
-  const statements = directNodes(node)
+  const statements = directNodes(node).filter(
+    (statement) =>
+      statement.kind !== 'ReturnStatement' ||
+      directTokens(statement).some((token) => token.kind === 'ReturnKeyword'),
+  )
   if (statements.length === 0) {
     return FormatDocument.concat(printToken(context, open, prefix), printToken(context, close))
   }

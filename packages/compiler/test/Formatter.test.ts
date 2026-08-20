@@ -161,6 +161,25 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
   }),
 )
 
+it.effect('omits semantic fallthrough completion nodes from formatted source', () =>
+  Effect.gen(function* () {
+    const source = 'fn missing()->i32 { let value=42 } pub fn main()->() {}'
+    const first = yield* Formatter.format(parse('memory://implicit-returns.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `fn missing() -> i32 {
+  let value = 42
+}
+
+pub fn main() -> () {}
+`,
+    )
+    const second = yield* Formatter.format(parse('memory://implicit-returns.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)
+
 it.effect(
   'formats callable contracts, postfix calls, pipelines, and run precedence idempotently',
   () =>

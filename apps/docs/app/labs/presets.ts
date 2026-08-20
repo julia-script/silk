@@ -1162,7 +1162,14 @@ pub fn other() -> i32 {
   return missing
 }
 `),
-  one('syntax', 'fail · Missing return keyword', 'pub fn main() -> i32 { missing }'),
+  one(
+    'syntax',
+    'fail · Missing return keyword',
+    `pub fn main() -> i32 {
+  missing
+}
+`,
+  ),
   one(
     'syntax',
     'fail · Duplicate parameter',
