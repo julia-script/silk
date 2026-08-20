@@ -56,7 +56,7 @@ adds no intrinsic, no HIR or MIR operation, no diagnostic code, and no compiler-
 recognition.
 
 It introduces no fallible finalizer, no interruption (Silk has none), and no trap recovery. It does
-not change `Effect.catch`, `Effect.result`, `provideWith`, or the propagation exit.
+not change `Effect.catch`, `Effect.result`, `provideEffect`, or the propagation exit.
 
 `Effect.ensuring` is the cleanup mechanism a scoped temporary directory is specified to use — `make`
 composed with `ensuring(release)` rather than a `Drop` hook — which is why the fallible-release

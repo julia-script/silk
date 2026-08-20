@@ -87,9 +87,9 @@ return run compilation`,
   {
     title: 'Acquire a fresh provider for every run',
     note:
-      'provideWith acquires and drops a fresh provider owner for each execution. Allocation results remain self-contained.',
+      'provideEffect acquires and drops a fresh provider owner for each execution. Allocation results remain self-contained.',
     source: `let promoted = Effect.map(Compiler.compile, Artifact.promote)
-let withScratch = Effect.provideWith<&mut Allocator@Scratch>(
+let withScratch = Effect.provideEffect<Allocator at Scratch>(
   promoted,
   Scratch.acquire,
 )
@@ -200,7 +200,7 @@ return run compilation`,
       'This chain is a reusable recipe. Provider acquisition and Drop occur independently on every run.',
     source: `let compilation = Compiler.compile(move request)
   |> Effect.map(Artifact.promote)
-  |> Effect.provideWith<&mut Allocator@Scratch>(Scratch.acquire)
+  |> Effect.provideEffect<Allocator at Scratch>(Scratch.acquire)
 
 return run compilation`,
   },

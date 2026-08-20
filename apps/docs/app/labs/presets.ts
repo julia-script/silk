@@ -713,7 +713,7 @@ fn increment(value: i32) -> i32 {
 
 pub fn main() -> i32 {
   let program = read()
-    |> Effect.provideWith(acquireClock())
+    |> Effect.provideEffect(acquireClock())
     |> Effect.map(increment)
     |> Effect.map(increment)
   return run program
@@ -2949,7 +2949,7 @@ effect fn decodeWith<T: Decoder<i32, i32, DecodeError ? &Clock>>(schema: &T, enc
 pub fn main() -> i32 {
   let schema = Schema {offset: 2}
   let recipe = decodeWith<Schema>(&schema, 40)
-    |> Effect.provideWith(acquireClock())
+    |> Effect.provideEffect(acquireClock())
     |> Effect.catchAll(recover)
   return run recipe
 }

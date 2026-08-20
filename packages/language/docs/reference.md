@@ -696,7 +696,7 @@ dispatches a selected failure type. Their contracts use ordinary failure types p
 requirement-row constraints as ordinary source declarations.
 
 Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catchAll`, `retry`, `ensuring`,
-`zip`, `zip3`, `provide`, `provideMut`, `provideWith`, and the singleton `catch` wrapper — is
+`zip`, `zip3`, `provide`, `provideMut`, `provideEffect`, and the singleton `catch` wrapper — is
 ordinary Silk source in `effects.silk`. The compiler must not infer their meaning from a name or an
 origin, so a user-defined equivalent gets identical treatment with no registration.
 
@@ -763,9 +763,9 @@ operand statically known. A caller combining more than three Effects nests: `zip
 
 ### 5.5 Provision
 
-`provide`, `provideMut`, and `provideWith` each remove exactly one capability-role entry and preserve
+`provide`, `provideMut`, and `provideEffect` each remove exactly one capability-role entry and preserve
 every remaining one. Provision accepts any provider with a valid conformance; no compiler phase
-consults a closed list of service names. `provideWith` acquires inside its own body, so each
+consults a closed list of service names. `provideEffect` acquires inside its own body, so each
 execution — including a retry — gets a fresh provider, and it reifies the inner computation to a
 result first so that a typed failure arrives as data before the provider is released.
 

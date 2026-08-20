@@ -11,8 +11,13 @@ An Effect requirement SHALL be identified by its canonical service identity plus
 
 #### Scenario: Reject insufficient provider access
 
-- **WHEN** an exclusive requirement is matched with only shared provider access
-- **THEN** provision reports an access mismatch without changing the requirement's identity
+- **WHEN** an exclusive requirement key and conformance match but the provider offers only shared access
+- **THEN** provision reports `SEM0131` without changing the requirement's identity or treating the key as absent
+
+#### Scenario: Select one key before checking access
+
+- **WHEN** an explicit `Clock at Primary` selector names one row key
+- **THEN** provision resolves that key and its conformance before validating the helper's provider access mode
 
 ### Requirement: Provision helpers discharge exact keys
 

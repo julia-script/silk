@@ -130,7 +130,7 @@ pub fn main() -> i32 {
   let handled = risky() |> Effect.catchAll(recover)
   let clock = FixedClock {}
   let provided = read() |> Effect.provide(&clock)
-  let acquired = read() |> Effect.provideWith(acquire())
+  let acquired = read() |> Effect.provideEffect(acquire())
   let retriedValue = run retried
   let handledValue = run handled
   let providedValue = run provided
@@ -357,6 +357,24 @@ pub fn main() -> i32 { return 42 }`
     assert.strictEqual(
       suspended?.type._tag === 'Available' ? Type.encode(suspended.type.type) : undefined,
       `once Effect<i32 ! ${module}.Problem ? &${module}.Clock>`,
+    )
+  }),
+)
+
+it.effect('does not retain provideWith as a compatibility alias', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'effect/no-provide-with-alias',
+      encoder.encode(`service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
+effect fn read() -> i32 ? &Clock { return 1 }
+effect fn acquire() -> FixedClock { return FixedClock {} }
+pub fn main() -> i32 { return run (read() |> Effect.provideWith(acquire())) }`),
+    )
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0014',
     )
   }),
 )

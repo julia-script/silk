@@ -11,6 +11,7 @@ export type ItemKind =
   | 'Service'
   | 'Interface'
   | 'Constant'
+  | 'Role'
   | 'Parameter'
   | 'TypeParameter'
   | 'Field'
@@ -100,7 +101,9 @@ const targetOf = (
             ? 'Service'
             : lookup.declaration._tag === 'InterfaceDeclaration'
               ? 'Interface'
-              : 'Constant',
+              : lookup.declaration._tag === 'RoleDeclaration'
+                ? 'Role'
+                : 'Constant',
   })
 }
 
@@ -236,7 +239,9 @@ const memberItem = (
         ? Presentation.structDeclaration(member)
         : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
           ? Presentation.serviceDeclaration(member)
-          : Presentation.constantDeclaration(member)
+          : member._tag === 'RoleDeclaration'
+            ? Presentation.roleDeclaration(member)
+            : Presentation.constantDeclaration(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -268,7 +273,9 @@ const memberItem = (
             ? 'Service'
             : member._tag === 'InterfaceDeclaration'
               ? 'Interface'
-              : 'Constant',
+              : member._tag === 'RoleDeclaration'
+                ? 'Role'
+                : 'Constant',
     name: nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),

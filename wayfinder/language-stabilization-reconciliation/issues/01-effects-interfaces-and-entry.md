@@ -95,7 +95,7 @@ below; they do not make superseded behavior authoritative.
   [`effects.silk`](../../../packages/compiler/stdlib/silk/effects.silk),
   [`ProviderSelection.ts`](../../../packages/compiler/src/ProviderSelection.ts),
   [`ProviderSelection.test.ts`](../../../packages/compiler/test/ProviderSelection.test.ts), and
-  [`ProvideWithAcceptance.test.ts`](../../../packages/compiler/test/ProvideWithAcceptance.test.ts).
+  [`ProvideEffectAcceptance.test.ts`](../../../packages/compiler/test/ProvideEffectAcceptance.test.ts).
 - Interfaces and conformances:
   [`Parser.ts`](../../../packages/compiler/src/Parser.ts),
   [`DeclarationIndex.ts`](../../../packages/compiler/src/DeclarationIndex.ts),
@@ -154,7 +154,7 @@ below; they do not make superseded behavior authoritative.
 | SERV-007 | Partial | Partial | Unique inference, no-match, ambiguity, conformance, and access checks exist. Explicit selection names an access-bearing row member rather than the service-role key. |
 | SERV-008 | Contradicted | Contradicted | `Without` compares exact stored access, so a shared selector does not remove the exclusive entry for the same service-role key. Main specs explicitly require this superseded behavior. |
 | SERV-009 | Partial | Partial | Provision is lazy, lexical, ownership-aware, and one-layer. It inherits the wrong selector, difference, and role syntax. |
-| SERV-010 | Partial | Partial | Fresh per-run acquisition and scoped cleanup exist as `Effect.provideWith`; the confirmed API name `provideEffect` and key-based selector are absent. |
+| SERV-010 | Implemented | Implemented | Fresh per-run acquisition and scoped cleanup use `Effect.provideEffect` with key-based selectors. |
 
 ### Interfaces and conformances
 
@@ -219,8 +219,8 @@ change, receive a planning audit, and be implemented before the next dependent h
    add bound conjunction, enforce provider-module locality, preserve endpoint-only visibility, and
    retain overlap/termination/static-proof behavior.
 5. **Normalize requirement keys and provision APIs.** Introduce `at`, key-based selectors and
-   subtraction, access compatibility as a separate provider relation, and rename `provideWith` to
-   `provideEffect` with no compatibility alias.
+   subtraction, access compatibility as a separate provider relation, and expose `provideEffect`
+   with no compatibility alias.
 6. **Align entry discovery and terminal failures.** Accept explicit ordinary `()`, diagnose private
    `main` accurately, remove `Report`, list unresolved requirements, and implement the confirmed
    status and report minimum.

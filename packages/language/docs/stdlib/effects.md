@@ -16,7 +16,7 @@ These operations are ordinary Silk built from a small intrinsic core. Failure ch
 ordinary detached types and structural unions. Requirement rows are maps keyed by capability and
 role, with shared or exclusive access;
 union joins a shared/exclusive collision to exclusive. Membership and `Without<R, S>` compare the
-stored access exactly, independently of whether a stronger provider can satisfy a weaker demand.
+proper stored access exactly, independently of whether a stronger provider can satisfy a weaker demand.
 `Without` is forward-only: its input rows are inferred first, then exact members in `S` are
 removed from `R`. For example, `Without<First | Second | Third, First | Third>` is `Second`,
 selecting absent `Other` from `First | Second` changes nothing, and
@@ -24,9 +24,9 @@ selecting absent `Other` from `First | Second` changes nothing, and
 
 Provider selection considers every compatible capability-role member. An omitted selected row
 must have exactly one candidate; otherwise the call reports no-match or ambiguity. Put an exact
-selected row first, as in `provideMut<&mut Logger@Audit>`, to disambiguate. Shared, exclusive, and
+selected key first, as in `provideMut<Logger at Audit>`, to disambiguate. Shared, exclusive, and
 owned binding are distinct fixed modes. A provider section such as
-`let withLogger = provideMut<&mut Logger>(&mut logger)` retains its unresolved row constraint until
+`let withLogger = provideMut<Logger>(&mut logger)` retains its unresolved row constraint until
 a statically visible Effect application completes it.
 
 `once Effect` inputs run at most once; [`retry`](#declaration-73696c6b2f656666656374733a3a7265747279) instead accepts a reusable Effect and performs
@@ -441,23 +441,23 @@ effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
 
 effect fn withLogger() -> i32 ! LogError ? &mut Clock {
   let mut logger = StdoutLogger.stdout()
-  return run Effect.provideMut<&mut Logger>(read(), &mut logger)
+  return run Effect.provideMut<Logger>(read(), &mut logger)
 }
 ```
 
-<a id="declaration-73696c6b2f656666656374733a3a70726f7669646557697468"></a>
+<a id="declaration-73696c6b2f656666656374733a3a70726f76696465456666656374"></a>
 
-## `provideWith`
+## `provideEffect`
 
 ```silk
-pub effect fn provideWith<?S, A, P, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
+pub effect fn provideEffect<?S, A, P, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
 ```
 
 Acquires and lexically provides one typed service requirement.
 
 ### Details
 
-The acquisition runs inside this body, so every execution acquires its own provider and a
+The acquisition runs inside the body, so each execution acquires its own provider and a
 retried attempt never reuses an earlier one. The provider is released when `acquireProvider`
 returns, which is why the provided Effect is reified into Result data before it is bound: a
 typed failure then reaches this body as data rather than as a propagation that would leave

@@ -58,7 +58,7 @@ operation, and no compiler-side name recognition.
 ### Requirement: Standard Effect combinators are library-defined
 
 `map`, `mapError`, `mapBoth`, `flatMap`, `tap`, `catch`, `retry`, `ensuring`, `zip`, `zip3`,
-`provide`, `provideMut`, and `provideWith` SHALL resolve to canonical ordinary Silk declarations. The
+`provide`, `provideMut`, and `provideEffect` SHALL resolve to canonical ordinary Silk declarations. The
 compiler MUST NOT select their semantics from their names, actors, library origin, or a dedicated
 combinator HIR/MIR operation. Equivalent user code using the compiler-owned Effect core SHALL
 receive the same typing, ownership, execution, and cleanup behavior.

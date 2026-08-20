@@ -110,6 +110,8 @@ const declaredTypeText = (fact: DeclarationIndex.DeclaredTypeFact): string =>
       : 'unavailable'
 
 const memberSignature = (member: DeclarationIndex.MemberFact): string => {
+  if (member._tag === 'RoleDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}role`
   const parameters =
     member.typeParameters.length === 0
       ? ''

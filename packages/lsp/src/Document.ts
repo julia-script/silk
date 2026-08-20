@@ -942,6 +942,16 @@ export const symbols = (
         },
       ]
     }
+    if (member._tag === 'RoleDeclaration') {
+      return [
+        {
+          name: member.name.spelling,
+          kind: SymbolKind.Enum,
+          range,
+          selectionRange,
+        },
+      ]
+    }
     const fields = member.fields.flatMap((field) =>
       field.name._tag === 'Present'
         ? [

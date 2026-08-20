@@ -446,9 +446,10 @@ pub fn main() -> i32 { return Effect.catch< }`
   }),
 )
 
-it.effect('lists constants, functions, and structs with fields as document symbols', () =>
+it.effect('lists constants, roles, functions, and structs with fields as document symbols', () =>
   Effect.gen(function* () {
     const source = `pub const defaultAnswer: i32 = 42
+pub role Primary
 pub struct Box { answer: i32 }
 pub fn main() -> i32 { return 42 }`
     const { document, snapshot } = yield* open(source)
@@ -457,12 +458,13 @@ pub fn main() -> i32 { return 42 }`
       symbols.map((symbol) => [symbol.name, symbol.kind]),
       [
         ['defaultAnswer', SymbolKind.Constant],
+        ['Primary', SymbolKind.Enum],
         ['Box', SymbolKind.Struct],
         ['main', SymbolKind.Function],
       ],
     )
     assert.deepEqual(
-      symbols[1]?.children?.map((child) => [child.name, child.kind]),
+      symbols[2]?.children?.map((child) => [child.name, child.kind]),
       [['answer', SymbolKind.Field]],
     )
   }),

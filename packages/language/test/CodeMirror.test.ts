@@ -9,9 +9,9 @@ const spellings = (doc: string, category: string): ReadonlyArray<string> =>
   rangesFor(doc, category).map((range) => doc.slice(range.from, range.to))
 
 it('classifies keywords, identifiers, numbers, and operators', () => {
-  const doc = 'pub fn main() -> i32 { return 42 }'
-  assert.deepStrictEqual(spellings(doc, 'keyword'), ['pub', 'fn', 'return'])
-  assert.deepStrictEqual(spellings(doc, 'identifier'), ['main'])
+  const doc = 'pub role Primary pub fn main() -> i32 { return 42 }'
+  assert.deepStrictEqual(spellings(doc, 'keyword'), ['pub', 'role', 'pub', 'fn', 'return'])
+  assert.deepStrictEqual(spellings(doc, 'identifier'), ['Primary', 'main'])
   assert.deepStrictEqual(spellings(doc, 'type'), ['i32'])
   assert.deepStrictEqual(spellings(doc, 'number'), ['42'])
   assert.include(spellings(doc, 'operator'), '->')

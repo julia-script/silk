@@ -82,8 +82,8 @@ const flattenRowsSource = `struct Outer { code: i32 }
 struct Inner { code: i32 }
 service Clock {}
 service Meter {}
-effect fn inner() -> i32 ! Inner ? &Meter { return 21 }
-effect fn outer() -> Effect<i32 ! Inner ? &Meter> ! Outer ? &Clock { return inner() }
+effect fn inner() -> i32 ! Inner ? &Clock | &Meter { return 21 }
+effect fn outer() -> Effect<i32 ! Inner ? &Clock | &Meter> ! Outer ? &Clock { return inner() }
 pub fn main() -> i32 {
   let nested = outer()
   let flattened = Effect.flatten(move nested)
@@ -687,8 +687,8 @@ it.effect('unions both failure rows and both requirement rows through flatten', 
         : [],
     )
     assert.deepEqual(encoded, [
-      `Effect<i32 ! ${module}.Inner ? &${module}.Meter>`,
-      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
+      `Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter>`,
+      `Effect<Effect<i32 ! ${module}.Inner ? &${module}.Clock | &${module}.Meter> ! ${module}.Outer ? &${module}.Clock>`,
       `Effect<i32 ! ${module}.Inner | ${module}.Outer ? &${module}.Clock | &${module}.Meter>`,
     ])
   }),

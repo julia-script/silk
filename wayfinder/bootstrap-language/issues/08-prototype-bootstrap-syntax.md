@@ -26,7 +26,7 @@ may not omit `return`.
 ```silk
 pub effect fn compile(request: own Request) -> Artifact
   ! FileError | ProcessError | OutOfMemoryError
-  ? &FileSystem | &mut Allocator@Scratch
+  ? &FileSystem | &mut Allocator at Scratch
 {
   let source = run FileSystem.read(&request.sourcePath)
   let syntax = run Parser.parse(source)
@@ -39,8 +39,8 @@ return run computation
 
 The compact contract rows are part of the accepted surface. `!` introduces the normalized union of
 owned abortive failure types. `?` introduces the normalized set of capability requirements, with
-`&` for shared access, `&mut` for exclusive access, and `@Role` selecting a nominal compile-time
-role. `pub role Scratch` declares such a role. Omitting `@Role` selects `DefaultRole`; roles are
+`&` for shared access, `&mut` for exclusive access, and `at Role` selecting a nominal compile-time
+role. `pub role Scratch` declares such a role. Omitting `at Role` selects `DefaultRole`; roles are
 never strings or runtime lookup keys.
 
 Actor operations remain qualified and data-first. Named functions are ordinary values. For every
@@ -89,17 +89,17 @@ fn risky<T>(value: T, selector: i32) -> Effect<T ! Problem> {
 used only when ownership actually transfers from a non-Copy binding.
 
 Provision is specialization of an effect value rather than a new lexical block syntax.
-`effect |> Effect.provide<&Capability@Role>(&provider)` captures an existing implementation and
+`effect |> Effect.provide<Capability at Role>(&provider)` captures an existing implementation and
 removes that exact capability-role entry from the effect's requirement row. Because the open
 function is itself a value, callers can branch and specialize it before supplying affine inputs.
 
 ```silk
 let fsCompilation = Compiler.compile(move diskRequest)
-  |> Effect.provideMut<&mut Allocator@Scratch>(&mut scratch)
+  |> Effect.provideMut<Allocator at Scratch>(&mut scratch)
   |> FileSystem.provide(&fileSystem)
 
 let memoryCompilation = Compiler.compile(move memoryRequest)
-  |> Effect.provideMut<&mut Allocator@Scratch>(&mut scratch)
+  |> Effect.provideMut<Allocator at Scratch>(&mut scratch)
   |> FileSystem.provide(&virtualFileSystem)
 
 let diskArtifact = run fsCompilation
@@ -109,7 +109,7 @@ return run memoryCompilation
 A borrowed provider constrains the specialized effect's lifetime. A moved provider is owned by the
 specialized effect and is cleaned when that effect is consumed or dropped. `provide` is not a
 per-execution cleanup boundary.
-`effect |> Effect.provideWith<&mut Capability@Role>(acquisitionEffect)` is the separate operation
+`effect |> Effect.provideEffect<Capability at Role>(acquisitionEffect)` is the separate operation
 for acquiring a fresh provider on every execution. Its acquisition requirements and failures
 compose with the target effect, and successful provider owners clean up in reverse acquisition
 order after success or typed failure. Traps abort without a cleanup guarantee; cancellation and

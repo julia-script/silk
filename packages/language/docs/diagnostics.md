@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 3 |
 | `MOD` | Module | 4 |
-| `SEM` | Semantic | 127 |
+| `SEM` | Semantic | 128 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 157 codes in total.
+There are 158 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -182,6 +182,7 @@ There are 157 codes in total.
 | `SEM0128` | Stable code for a surviving provider candidate whose conformance mapping is invalid. | `The provider's conformance mapping is invalid: <reason>` |
 | `SEM0129` | Stable code for an explicit return whose value violates the declaration result. | `Return expected <expected> but received <actual>` |
 | `SEM0130` | Stable code for a reachable non-unit function fallthrough. | `A reachable path must return <expected>` |
+| `SEM0131` | Stable code for a provider whose key matches but whose access cannot satisfy the requirement. | `<toLowerCase> provider access cannot satisfy an <toLowerCase> requirement` |
 
 ## Ownership (`OWN`)
 

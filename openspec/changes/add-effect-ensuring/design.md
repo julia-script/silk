@@ -61,7 +61,7 @@ does not own.
 
 `ensuring` could have been written to run the finalizer on the propagation path. That is the shape
 that leaks: a typed failure propagating out of the protected Effect leaves its frame behind, and any
-owner still live at that run is stranded unless a propagation exit releases it. `provideWith` hit
+owner still live at that run is stranded unless a propagation exit releases it. `provideEffect` hit
 exactly this and was restructured around a reified `Result` for the same reason.
 
 So `ensuring` reifies first:
@@ -103,7 +103,7 @@ never returns and the finalizer is never reached. The bypass is structural, not 
 ## Risks / Trade-offs
 
 The reification costs one `Result` materialization per protected Effect on both paths, including
-the successful one. This is the same cost `map`, `flatMap`, `tap`, `catch`, and `provideWith`
+the successful one. This is the same cost `map`, `flatMap`, `tap`, `catch`, and `provideEffect`
 already pay, and the alternative — running the finalizer on the propagation path — is the shape that
 leaks, so the trade is not actually open.
 

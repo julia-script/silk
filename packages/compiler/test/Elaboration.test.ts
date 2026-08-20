@@ -625,7 +625,7 @@ struct OpenError {}
 effect fn read() -> i32 ? &mut Clock { return 42 }
 effect fn acquire() -> FixedClock ! OpenError { return FixedClock {} }
 fn main() -> i32 {
-  let recipe = read() |> Effect.provideWith(acquire())
+  let recipe = read() |> Effect.provideEffect(acquire())
   return 0
 }`,
     )

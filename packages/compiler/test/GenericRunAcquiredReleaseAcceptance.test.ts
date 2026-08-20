@@ -22,7 +22,7 @@ effect fn openClock() -> Clock ! OutOfMemoryError {
 
 /**
  * A generic effect body that *acquires* an owner and then holds it across a run whose failure
- * channel is a row parameter — the shape `provideWith` had before #67 restructured it around a
+ * channel is a row parameter — the shape `provideEffect` had before #67 restructured it around a
  * reified `Result`.
  *
  * This is the leak issue #68 describes. `fallibleRunSites` used to inspect only concrete failure

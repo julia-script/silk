@@ -29,7 +29,7 @@ const twoExecutions = `${provider}
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { return 21 }
 
 effect fn work() -> i32 ! OutOfMemoryError {
-  let provided = read() |> Effect.provideWith(openClock())
+  let provided = read() |> Effect.provideEffect(openClock())
   let first = run provided
   let second = run provided
   return first + second
@@ -49,7 +49,7 @@ const threeAttempts = `${provider}
 effect fn read() -> i32 ! OutOfMemoryError ? &mut Clock { fail OutOfMemoryError {} }
 
 effect fn work() -> i32 ! OutOfMemoryError {
-  let provided = read() |> Effect.provideWith(openClock())
+  let provided = read() |> Effect.provideEffect(openClock())
   let retried = provided |> Effect.retry(2)
   return run retried
 }
@@ -98,7 +98,7 @@ const acceptAcrossEngines = (
     assert.strictEqual((instance.exports.silk_main as () => number)(), expected, `${name} wasm`)
   })
 
-it.effect('acquires one provider for each execution of a provideWith Effect', () =>
+it.effect('acquires one provider for each execution of a provideEffect Effect', () =>
   acceptAcrossEngines('two-executions', twoExecutions, 42, [
     'AllocationAcquire',
     'AllocationRelease',

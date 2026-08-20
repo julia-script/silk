@@ -13,6 +13,7 @@ export const keywords: Record<KeywordKind, string> = {
   StructKeyword: 'struct',
   ServiceKeyword: 'service',
   InterfaceKeyword: 'interface',
+  RoleKeyword: 'role',
   FnKeyword: 'fn',
   EffectKeyword: 'effect',
   RunKeyword: 'run',

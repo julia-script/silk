@@ -38,7 +38,7 @@ provided. Public containers do not expose or retain an allocator, and static opt
 a reclaim ticket when its origin is known.
 
 As revised in issue 03, every service requirement is keyed by a nominal capability and nominal role
-pair. The notation `Allocator@Durable` and `Allocator@Scratch` here is semantic notation only; issue
+pair. The notation `Allocator at Durable` and `Allocator at Scratch` here is semantic notation only; issue
 08 owns its spelling. A function may require both roles simultaneously and select one for each
 allocation. It may also be generic over a role. An omitted role denotes `DefaultRole`, never the sole
 implementation that happens to be visible. This mechanism applies uniformly to every service, not

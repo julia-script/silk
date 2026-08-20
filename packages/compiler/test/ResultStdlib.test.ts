@@ -245,7 +245,7 @@ effect fn makeClock() -> FixedClock { return FixedClock { value: 42 } }
 pub fn main() -> i32 {
   let clock = FixedClock { value: 42 }
   let direct = run read() |> Effect.provide(&clock)
-  let acquired = run read() |> Effect.provideWith(makeClock())
+  let acquired = run read() |> Effect.provideEffect(makeClock())
   return direct + acquired - 42
 }`
 
