@@ -119,6 +119,8 @@ export interface ReferenceValue {
   readonly frame: number
   readonly cell: number
   readonly selectors: ReadonlyArray<Mir.PlaceSelector>
+  /** Selector ordinals captured in the frame where the loan formed. */
+  readonly indexes: ReadonlyArray<number>
 }
 
 export interface UnionValue {
@@ -1022,7 +1024,9 @@ function* executeFunction(
     if (found === undefined)
       throw new RangeError('MIR reference points at a missing evaluator cell')
     let selected = found.value
-    for (const selector of reference.selectors) {
+    for (const [ordinal, selector] of reference.selectors.entries()) {
+      const index = reference.indexes.at(ordinal)
+      if (index === undefined) throw new RangeError('MIR reference omitted a captured selector')
       if (selector._tag === 'FieldSelector') {
         if (selected._tag !== 'AggregateValue')
           throw new RangeError('MIR reference selector points at a non-struct value')
@@ -1036,12 +1040,20 @@ function* executeFunction(
         selected = field.value
         continue
       }
-      if (selector._tag !== 'ElementSelector' || selected._tag !== 'ArrayValue')
+      if (selector._tag === 'SliceElementSelector') {
+        if (selected._tag !== 'SliceValue' || selected.ticket !== undefined)
+          throw new RangeError('MIR raw reference selector points at an unsupported slice')
+        const backing = cell(selected).value
+        if (backing._tag !== 'ArrayValue')
+          throw new RangeError('MIR slice reference lost its array backing')
+        const element = backing.elements.at(selected.base + index)
+        if (element === undefined)
+          throw new RangeError('MIR slice reference is outside its backing')
+        selected = element
+        continue
+      }
+      if (selected._tag !== 'ArrayValue')
         throw new RangeError('MIR reference selector points at an unsupported place')
-      const index =
-        selector.index._tag === 'Proven'
-          ? selector.index.value
-          : Number(readInteger(selector.index.local, 'usize').value)
       const element = selected.elements.at(index)
       if (element === undefined) throw new RangeError('MIR reference selector lost its element')
       selected = element
@@ -1222,6 +1234,7 @@ function* executeFunction(
           frame,
           cell: localOrdinal,
           selectors: Object.freeze([]),
+          indexes: Object.freeze([]),
         })
         const result = yield* callFunction(target, [reference], provenance.span)
         if (result._tag === 'Blocked') return result
@@ -1847,6 +1860,7 @@ function* executeFunction(
     | { readonly _tag: 'Blocked'; readonly step: Step } => {
     let selected = read(root).value
     let effectiveSelectors = selectors
+    let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
     const indexes: Array<number> = []
     // A reference root reads through the borrow: the place lives on the referenced cell.
     if (selected._tag === 'ReferenceValue') {
@@ -1854,9 +1868,10 @@ function* executeFunction(
       if (target === undefined)
         throw new RangeError('MIR reference points at a missing evaluator cell')
       effectiveSelectors = Object.freeze([...selected.selectors, ...selectors])
+      capturedIndexes = selected.indexes
       selected = target.value
     }
-    for (const selector of effectiveSelectors) {
+    for (const [ordinal, selector] of effectiveSelectors.entries()) {
       if (selector._tag === 'FieldSelector') {
         if (selected._tag !== 'AggregateValue') {
           throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
@@ -1877,7 +1892,9 @@ function* executeFunction(
         if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
           throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
         }
-        const exactIndex = readInteger(selector.index, 'usize').value
+        const captured = capturedIndexes.at(ordinal)
+        const exactIndex =
+          captured === undefined ? readInteger(selector.index, 'usize').value : BigInt(captured)
         if (exactIndex >= BigInt(selected.length)) {
           return {
             _tag: 'Blocked',
@@ -1929,9 +1946,10 @@ function* executeFunction(
         throw new RangeError('MIR verifier allowed an element selector on a non-array value')
       }
       const index =
-        selector.index._tag === 'Proven'
+        capturedIndexes.at(ordinal) ??
+        (selector.index._tag === 'Proven'
           ? selector.index.value
-          : Number(readInteger(selector.index.local, 'usize').value)
+          : Number(readInteger(selector.index.local, 'usize').value))
       if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
         return {
           _tag: 'Blocked',
@@ -2043,21 +2061,7 @@ function* executeFunction(
     const target = state.cells.get(key)
     if (target === undefined) throw new RangeError('OS intrinsic output references a missing cell')
     state.cells.set(key, {
-      value: replacePlace(
-        target.value,
-        reference.selectors,
-        Object.freeze(
-          reference.selectors.map((selector) => {
-            if (selector._tag === 'FieldSelector') return selector.field.ordinal
-            if (selector._tag === 'ElementSelector')
-              return selector.index._tag === 'Proven'
-                ? selector.index.value
-                : Number(readInteger(selector.index.local, 'usize').value)
-            throw new RangeError('OS intrinsic output cannot target a slice element')
-          }),
-        ),
-        replacement,
-      ),
+      value: replacePlace(target.value, reference.selectors, reference.indexes, replacement),
       fromCall: target.fromCall,
     })
   }
@@ -2593,6 +2597,16 @@ function* executeFunction(
             state.activeLoans.add(borrowKey(operation.borrow))
             const source = read(operation.root)
             if (operation.type._tag === 'Reference') {
+              const capturedIndexes = Object.freeze(
+                operation.selectors.map((selector) => {
+                  if (selector._tag === 'FieldSelector') return selector.field.ordinal
+                  if (selector._tag === 'SliceElementSelector')
+                    return Number(readInteger(selector.index, 'usize').value)
+                  return selector.index._tag === 'Proven'
+                    ? selector.index.value
+                    : Number(readInteger(selector.index.local, 'usize').value)
+                }),
+              )
               const inherited =
                 source.value._tag === 'ReferenceValue'
                   ? source.value
@@ -2601,6 +2615,7 @@ function* executeFunction(
                       frame,
                       cell: operation.root.ordinal,
                       selectors: Object.freeze([]),
+                      indexes: Object.freeze([]),
                     })
               const key = cellKey(inherited.frame, inherited.cell)
               if (!state.cells.has(key)) state.cells.set(key, source)
@@ -2610,6 +2625,7 @@ function* executeFunction(
                   frame: inherited.frame,
                   cell: inherited.cell,
                   selectors: Object.freeze([...inherited.selectors, ...operation.selectors]),
+                  indexes: Object.freeze([...inherited.indexes, ...capturedIndexes]),
                 }),
                 fromCall: source.fromCall,
               })
@@ -4271,15 +4287,17 @@ function* executeFunction(
           case 'ReadPlace': {
             let selected = read(operation.root).value
             let effectiveSelectors = operation.selectors
+            let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
             const selectors: Array<PlaceReadTraceEvent['selectors'][number]> = []
             if (selected._tag === 'ReferenceValue') {
               const target = state.cells.get(cellKey(selected.frame, selected.cell))
               if (target === undefined)
                 throw new RangeError('MIR reference points at a missing evaluator cell')
               effectiveSelectors = Object.freeze([...selected.selectors, ...operation.selectors])
+              capturedIndexes = selected.indexes
               selected = target.value
             }
-            for (const selector of effectiveSelectors) {
+            for (const [ordinal, selector] of effectiveSelectors.entries()) {
               if (selector._tag === 'FieldSelector') {
                 if (selected._tag !== 'AggregateValue') {
                   throw new RangeError(
@@ -4303,7 +4321,11 @@ function* executeFunction(
                 if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
                   throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
                 }
-                const exactIndex = readInteger(selector.index, 'usize').value
+                const captured = capturedIndexes.at(ordinal)
+                const exactIndex =
+                  captured === undefined
+                    ? readInteger(selector.index, 'usize').value
+                    : BigInt(captured)
                 if (exactIndex >= BigInt(selected.length)) {
                   return blockedStep({
                     _tag: 'Trap',
@@ -4375,9 +4397,10 @@ function* executeFunction(
                 )
               }
               const index =
-                selector.index._tag === 'Proven'
+                capturedIndexes.at(ordinal) ??
+                (selector.index._tag === 'Proven'
                   ? selector.index.value
-                  : Number(readInteger(selector.index.local, 'usize').value)
+                  : Number(readInteger(selector.index.local, 'usize').value))
               if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
                 return blockedStep({
                   _tag: 'Trap',

@@ -4935,6 +4935,97 @@ const emitProgram = (program: Mir.Module, request: CodegenRequest) =>
                     rootType === undefined ? undefined : Mir.semanticType(rootType)
                   if (rootSemantic === undefined)
                     throw new RangeError('LLVM borrow formation lost its root type')
+                  if (SilkType.isSlice(rootSemantic)) {
+                    const [selector, ...suffixSelectors] = operation.selectors
+                    const [base, length] = readLocal(operation.root)
+                    if (
+                      selector?._tag !== 'SliceElementSelector' ||
+                      base === undefined ||
+                      length === undefined ||
+                      operation.type._tag !== 'Reference'
+                    ) {
+                      throw new RangeError('LLVM slice borrow lost its canonical lanes')
+                    }
+                    if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'trap')
+                    const index = readScalar(selector.index)
+                    const inBounds = yield* FunctionBody.integerCompare(
+                      body,
+                      'ult',
+                      index,
+                      length,
+                      `borrow${checkOrdinal}_in_bounds`,
+                    )
+                    yield* locate(
+                      selector.provenance.span,
+                      yield* Value.instruction(body, inBounds),
+                    )
+                    const continuation = yield* LlvmBlock.make(body, `borrow${checkOrdinal}_ok`)
+                    yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
+                    yield* LlvmBlock.setInsertionPoint(body, continuation)
+                    const sliceLayout = Layout.entry(program.layout, rootSemantic)
+                    if (sliceLayout?.representation._tag !== 'Slice') {
+                      throw new RangeError('LLVM slice borrow lost its compiler layout')
+                    }
+                    const elementOffset = yield* FunctionBody.binary(
+                      body,
+                      'mul',
+                      index,
+                      yield* Constant.integerUnsigned(
+                        builder,
+                        usizeType ?? i32,
+                        BigInt(sliceLayout.representation.stride),
+                      ),
+                      `borrow${operation.destination.ordinal}_element_offset`,
+                    )
+                    const staticSelectors: Array<Layout.Selector> = []
+                    for (const candidate of suffixSelectors) {
+                      if (candidate._tag === 'FieldSelector') {
+                        staticSelectors.push(candidate.field)
+                      } else if (
+                        candidate._tag === 'ElementSelector' &&
+                        candidate.index._tag === 'Proven'
+                      ) {
+                        staticSelectors.push(
+                          Object.freeze({
+                            _tag: 'ElementSelector',
+                            index: candidate.index.value,
+                          }),
+                        )
+                      } else {
+                        throw new RangeError('LLVM nested runtime slice borrow is not canonical')
+                      }
+                    }
+                    const staticOffset = Layout.laneOffset(
+                      program.layout,
+                      rootSemantic.element,
+                      staticSelectors,
+                    )
+                    if (staticOffset === undefined) {
+                      throw new RangeError('LLVM slice borrow lost its selected layout')
+                    }
+                    const offset =
+                      staticOffset === 0
+                        ? elementOffset
+                        : yield* FunctionBody.binary(
+                            body,
+                            'add',
+                            elementOffset,
+                            yield* Constant.integerUnsigned(
+                              builder,
+                              usizeType ?? i32,
+                              BigInt(staticOffset),
+                            ),
+                            `borrow${operation.destination.ordinal}_static_offset`,
+                          )
+                    const projected = yield* bytePointer(
+                      base,
+                      offset,
+                      `borrow${operation.destination.ordinal}_projected`,
+                    )
+                    locals.set(operation.destination.ordinal, Object.freeze([projected]))
+                    checkOrdinal += 1
+                    break
+                  }
                   let selected = SilkType.isReference(rootSemantic)
                     ? rootSemantic.target
                     : rootSemantic

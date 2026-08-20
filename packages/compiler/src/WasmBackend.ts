@@ -3139,6 +3139,53 @@ const emitOperation = (
       } else {
         const rootType = layout.types.at(operation.root.ordinal)
         const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+        if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
+          const [selector, ...suffixSelectors] = operation.selectors
+          const [base, length] = slots(operation.root)
+          const [address] = slots(operation.destination)
+          if (
+            selector?._tag !== 'SliceElementSelector' ||
+            base === undefined ||
+            length === undefined ||
+            address === undefined ||
+            operation.type._tag !== 'Reference'
+          ) {
+            throw new RangeError('Wasm slice borrow lost its canonical lanes')
+          }
+          const sliceLayout = LayoutPlan.entry(plan, rootSemantic)
+          if (sliceLayout?.representation._tag !== 'Slice') {
+            throw new RangeError('Wasm slice borrow lost its compiler layout')
+          }
+          const staticSelectors: Array<LayoutPlan.Selector> = []
+          for (const candidate of suffixSelectors) {
+            if (candidate._tag === 'FieldSelector') {
+              staticSelectors.push(candidate.field)
+            } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+              staticSelectors.push(
+                Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
+              )
+            } else {
+              throw new RangeError('Wasm nested runtime slice borrow is not canonical')
+            }
+          }
+          const staticOffset = LayoutPlan.laneOffset(plan, rootSemantic.element, staticSelectors)
+          if (staticOffset === undefined) {
+            throw new RangeError('Wasm slice borrow lost its selected layout')
+          }
+          return [
+            Instr.localGet(scalar(selector.index)),
+            Instr.localGet(length),
+            Instr.op('i32.lt_u'),
+            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+            Instr.localGet(base),
+            Instr.localGet(scalar(selector.index)),
+            Instr.i32Const(sliceLayout.representation.stride),
+            Instr.op('i32.mul'),
+            Instr.op('i32.add'),
+            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+            Instr.localSet(address),
+          ]
+        }
         let selected =
           rootSemantic !== undefined && SilkType.isReference(rootSemantic)
             ? rootSemantic.target

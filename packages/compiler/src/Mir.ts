@@ -2231,7 +2231,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'Move':
       return [operation.destination, operation.source]
     case 'BeginLoan':
-      return [operation.destination, operation.root]
+      return [operation.destination, operation.root, ...selectorLocals(operation.selectors)]
     case 'EndLoan':
       return [operation.slice]
     case 'SliceLength':
