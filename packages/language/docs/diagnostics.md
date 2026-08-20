@@ -123,7 +123,6 @@ There are 158 codes in total.
 | `SEM0066` |  | `Run leaves unhandled failures: <join>` |
 | `SEM0067` |  | `Invalid Effect.catch handler: <detail>` |
 | `SEM0068` |  | `Effect recipe bindings are immutable` |
-| `SEM0069` |  | `Cannot merge Effect values from different construction sites without explicit erasure` |
 | `SEM0070` | Stable code for a non-concrete or non-nominal capability in a requirement row. | `Effect requirement <type> must be one concrete service type` |
 | `SEM0071` |  | `Run leaves unsatisfied requirements: <join>` |
 | `SEM0073` |  | `Failure <type> is not detached because it contains a lexical borrow` |
@@ -183,6 +182,7 @@ There are 158 codes in total.
 | `SEM0129` | Stable code for an explicit return whose value violates the declaration result. | `Return expected <expected> but received <actual>` |
 | `SEM0130` | Stable code for a reachable non-unit function fallthrough. | `A reachable path must return <expected>` |
 | `SEM0131` | Stable code for a provider whose key matches but whose access cannot satisfy the requirement. | `<toLowerCase> provider access cannot satisfy an <toLowerCase> requirement` |
+| `SEM0132` | Stable code for an Effect join whose alternatives cannot be represented as a finite composite. | `Cannot form a finite Effect join: <detail>` |
 
 ## Ownership (`OWN`)
 
