@@ -415,8 +415,8 @@ conversions that would narrow.
 
 #### Scenario: Reject an incomplete widening map
 
-- **WHEN** hand-built MIR omits the `End` mapping from a two-member source union
-- **THEN** verification reports the exact missing member before evaluation or emission
+- **WHEN** malformed MIR omits or duplicates one source member mapping
+- **THEN** verification rejects the conversion before evaluation or backend emission
 
 ### Requirement: Union MIR encoding is deterministic
 
