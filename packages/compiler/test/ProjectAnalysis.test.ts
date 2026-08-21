@@ -238,8 +238,7 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     assert.strictEqual(current.syntaxRevisions.get('shared/Core')?._tag, 'Reused')
     const changed = current.syntaxRevisions.get('app/A')
     assert.strictEqual(changed?._tag, 'Changed')
-    if (changed?._tag === 'Changed')
-      assert.notStrictEqual(changed.previous, changed.current)
+    if (changed?._tag === 'Changed') assert.notStrictEqual(changed.previous, changed.current)
 
     const previousView = ProjectAnalysis.view(previous, 'app/A')
     const currentView = ProjectAnalysis.view(current, 'app/A')
