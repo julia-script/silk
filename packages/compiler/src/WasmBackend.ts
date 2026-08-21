@@ -1591,9 +1591,6 @@ const layoutOf = (
   }
 }
 
-const suspensionPointKey = (point: Mir.SuspensionPointId): string =>
-  `${Instances.keyText(point.owner)}\u0000${point.sourceId}\u0000${point.spanStart}\u0000${point.spanEnd}\u0000${point.ordinal}`
-
 const suspensionOperationInputs = (
   operation: Extract<
     Mir.Operation,
@@ -5593,7 +5590,7 @@ const emitBody = (
           originate: (
             region: Extract<Mir.SuspensionRegion, { readonly _tag: 'SuspendEffectRegion' }>,
           ) => {
-            const child = suspensionRuntime.origins.get(suspensionPointKey(region.point))
+            const child = suspensionRuntime.origins.get(Backend.suspensionPointKey(region.point))
             if (child === undefined) throw new RangeError('Wasm suspension origin lost child id')
             const inputs = suspensionOperationInputs(region.operation)
             const lanes = inputs.flatMap((local) => layout.lanes.at(local.ordinal) ?? [])
@@ -5628,8 +5625,8 @@ const emitBody = (
               Instr.ifElse(Instr.emptyBlockType, returnTransfer(), []),
             ]
             if (descriptor === undefined) return transfer
-            const targetLayout = suspensionRuntime.layouts.get(suspensionPointKey(descriptor.point))
-            const resume = suspensionRuntime.resumes.get(suspensionPointKey(descriptor.point))
+            const targetLayout = suspensionRuntime.layouts.get(Backend.suspensionPointKey(descriptor.point))
+            const resume = suspensionRuntime.resumes.get(Backend.suspensionPointKey(descriptor.point))
             const scratch = layout.suspensionScratch
             if (targetLayout === undefined || resume === undefined || scratch === undefined)
               throw new RangeError('Wasm stateful relay lost its layout or dispatch identity')
@@ -5807,8 +5804,8 @@ const emitBody = (
     const dispatch = (fn.suspension?.regions ?? []).flatMap((region) => {
       if (region._tag !== 'RunSuspendableEffectRegion' || region.relay.state === undefined)
         return []
-      const id = suspensionRuntime.resumes.get(suspensionPointKey(region.point))
-      const targetLayout = suspensionRuntime.layouts.get(suspensionPointKey(region.point))
+      const id = suspensionRuntime.resumes.get(Backend.suspensionPointKey(region.point))
+      const targetLayout = suspensionRuntime.layouts.get(Backend.suspensionPointKey(region.point))
       const owner = regions.get(region.ownerRegion.ordinal)
       if (id === undefined || targetLayout === undefined || owner?._tag !== 'OperationRegion')
         throw new RangeError('Wasm resume dispatch lost its continuation region')
@@ -6006,7 +6003,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ),
       )
       .sort((left, right) =>
-        suspensionPointKey(left.region.point).localeCompare(suspensionPointKey(right.region.point)),
+        Backend.suspensionPointKey(left.region.point).localeCompare(Backend.suspensionPointKey(right.region.point)),
       )
     const resumeRecords = program.functions
       .flatMap((fn) =>
@@ -6017,17 +6014,17 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ),
       )
       .sort((left, right) =>
-        suspensionPointKey(left.region.point).localeCompare(suspensionPointKey(right.region.point)),
+        Backend.suspensionPointKey(left.region.point).localeCompare(Backend.suspensionPointKey(right.region.point)),
       )
     const originIds = new Map(
       originRecords.map((record, ordinal) => [
-        suspensionPointKey(record.region.point),
+        Backend.suspensionPointKey(record.region.point),
         ordinal + 1,
       ]),
     )
     const resumeIds = new Map(
       resumeRecords.map((record, ordinal) => [
-        suspensionPointKey(record.region.point),
+        Backend.suspensionPointKey(record.region.point),
         ordinal + 1,
       ]),
     )
@@ -6039,7 +6036,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     )
     const coroutineFrameStates = new Map(
       (program.coroutineFrames?.entries ?? []).flatMap((entry) =>
-        entry.states.map((state) => [suspensionPointKey(state.point), state] as const),
+        entry.states.map((state) => [Backend.suspensionPointKey(state.point), state] as const),
       ),
     )
     const transferHeaderSize = program.layout.target.pointerSize * 3
