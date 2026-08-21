@@ -960,8 +960,7 @@ export const compareAccess = (
 export const requirementSatisfies = (
   supplied: { readonly access: 'Shared' | 'Exclusive' | 'Take' },
   required: { readonly access: 'Shared' | 'Exclusive' },
-): boolean =>
-  compareAccess(supplied.access, required.access)
+): boolean => compareAccess(supplied.access, required.access)
 
 /**
  * Intersects two uses of one representation contract. The result keeps the most restrictive
@@ -2314,14 +2313,22 @@ export const someSubterm = (self: Type, predicate: (type: Type) => boolean): boo
   if (predicate(self)) return true
   if (isReference(self)) return someSubterm(self.target, predicate)
   if (isSlice(self)) return someSubterm(self.element, predicate)
-  if (isNominal(self)) return self.arguments.filter(isTypeArgument).some((argument) => someSubterm(argument, predicate))
+  if (isNominal(self))
+    return self.arguments
+      .filter(isTypeArgument)
+      .some((argument) => someSubterm(argument, predicate))
   if (isFixedArray(self)) return someSubterm(self.element, predicate)
   if (isCallable(self))
-    return self.parameters.some((parameter_) => someSubterm(parameter_, predicate)) || someSubterm(self.result, predicate)
+    return (
+      self.parameters.some((parameter_) => someSubterm(parameter_, predicate)) ||
+      someSubterm(self.result, predicate)
+    )
   if (isEffect(self))
     return (
       someSubterm(self.success, predicate) ||
-      RowAlgebra.concreteMembers(failureRowPolicy(), self.failureRow).some((member) => someSubterm(member, predicate))
+      RowAlgebra.concreteMembers(failureRowPolicy(), self.failureRow).some((member) =>
+        someSubterm(member, predicate),
+      )
     )
   if (isRepresented(self)) return someSubterm(self.contract, predicate)
   if (isUnion(self)) return self.members.some((member) => someSubterm(member, predicate))

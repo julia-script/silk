@@ -175,8 +175,7 @@ export const check = (contract: Contract, witness: Witness): Compatibility => {
         Type.equals(requirement.capability, allowed.capability) &&
         requirement.role === allowed.role,
     )
-    if (matching.some((allowed) => Type.compareAccess(requirement.access, allowed.access)))
-      continue
+    if (matching.some((allowed) => Type.compareAccess(requirement.access, allowed.access))) continue
     if (matching.length > 0)
       return incompatible(
         Object.freeze({
