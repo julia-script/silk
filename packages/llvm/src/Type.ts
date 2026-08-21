@@ -9,8 +9,10 @@ import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
+import * as ResolveActor from './internal/resolveActor.js'
+import * as Table from './internal/Table.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
-import { invalidInput, invalidState, type LlvmError, wrappedFailure } from './LlvmError.js'
+import { invalidInput, type LlvmError, wrappedFailure } from './LlvmError.js'
 
 /**
  * Opaque builder-owned identity for a structurally interned LLVM type.
@@ -96,21 +98,6 @@ const keyForDescription = (description: TypeDescription.Description): string => 
 }
 
 /** @internal */
-const handleAt = (
-  state: Pick<BuilderState.MutableState, 'typeHandles'>,
-  index: number,
-  operation: string,
-): Result.Result<Type, LlvmError> => {
-  const handle = state.typeHandles[index]
-  if (handle === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Type table handle is missing', state: index }),
-    )
-  }
-  return Result.succeed(handle)
-}
-
-/** @internal */
 const intern = Effect.fn('Type.intern')(function* (
   builder: Builder.Builder,
   description: TypeDescription.Description,
@@ -118,14 +105,15 @@ const intern = Effect.fn('Type.intern')(function* (
   return yield* BuilderState.mutate(builder, 'Type.intern', (state, owner) =>
     Result.gen(function* () {
       const key = keyForDescription(description)
-      const found = state.typeKeys.get(key)
-      if (found !== undefined) return yield* handleAt(state, found, 'Type.intern')
-      const index = state.types.length
-      const handle = Handle.make('Type', owner, index)
-      state.types.push(description)
-      state.typeHandles.push(handle)
-      state.typeKeys.set(key, index)
-      return handle
+      const interned = yield* Table.intern(
+        state.types,
+        'Type.intern',
+        'Type',
+        key,
+        description,
+        (index) => Handle.make('Type', owner, index),
+      )
+      return interned.handle
     }),
   )
 })
@@ -490,17 +478,19 @@ export const namedStructure = Effect.fn('Type.namedStructure')(function* (
     Result.gen(function* () {
       const key = CanonicalKey.bytes(value)
       const found = state.namedTypes.get(key)
-      if (found !== undefined) return yield* handleAt(state, found, 'Type.namedStructure')
-      const index = state.types.length
+      if (found !== undefined) {
+        return yield* Table.handleAt(state.types, found, 'Type.namedStructure', 'Type')
+      }
+      const index = state.types.descriptions.length
       const handle = Handle.make('Type', owner, index)
       const description: TypeDescription.Description = Object.freeze({
         _tag: 'NamedStructure',
         name: value,
         body: undefined,
       })
-      state.types.push(description)
-      state.typeHandles.push(handle)
-      state.typeKeys.set(keyForDescription(description), index)
+      state.types.descriptions.push(description)
+      state.types.handles.push(handle)
+      state.types.keys.set(keyForDescription(description), index)
       state.namedTypes.set(key, index)
       return handle
     }),
@@ -522,7 +512,7 @@ export const setNamedBody = Effect.fn('Type.setNamedBody')(function* (
   yield* BuilderState.mutate(builder, 'Type.setNamedBody', (state, owner) =>
     Result.gen(function* () {
       const index = yield* Handle.resolve(builder, owner, self, 'Type', 'Type.setNamedBody')
-      const description = state.types[index]
+      const description = state.types.descriptions[index]
       if (description?._tag !== 'NamedStructure') {
         return yield* Result.fail(
           invalidInput({
@@ -541,7 +531,7 @@ export const setNamedBody = Effect.fn('Type.setNamedBody')(function* (
           }),
         )
       }
-      state.types[index] = Object.freeze({
+      state.types.descriptions[index] = Object.freeze({
         ...description,
         body: Object.freeze({
           fields: yield* indices(builder, owner, fields, 'Type.setNamedBody'),
@@ -611,13 +601,14 @@ const inspect = <A>(
 ) =>
   BuilderState.mutate(builder, operation, (state, owner) =>
     Result.gen(function* () {
-      const index = yield* Handle.resolve(builder, owner, self, 'Type', operation)
-      const description = state.types[index]
-      if (description === undefined) {
-        return yield* Result.fail(
-          invalidState({ operation, message: 'Type table entry is missing', state: self }),
-        )
-      }
+      const { index, description } = yield* ResolveActor.resolve(
+        builder,
+        owner,
+        self,
+        'Type',
+        state.types,
+        operation,
+      )
       return yield* f(description, state, index)
     }),
   )
@@ -681,7 +672,7 @@ export const childType = Effect.fn('Type.childType')(function* (
           }),
         )
       }
-      return yield* handleAt(state, description.child, 'Type.childType')
+      return yield* Table.handleAt(state.types, description.child, 'Type.childType', 'Type')
     }),
   )
 })
@@ -709,10 +700,15 @@ export const functionSignature = Effect.fn('Type.functionSignature')(function* (
       }
       const parameters: Array<Type> = []
       for (const index of description.parameters) {
-        parameters.push(yield* handleAt(state, index, 'Type.functionSignature'))
+        parameters.push(yield* Table.handleAt(state.types, index, 'Type.functionSignature', 'Type'))
       }
       return Object.freeze({
-        returnType: yield* handleAt(state, description.returnType, 'Type.functionSignature'),
+        returnType: yield* Table.handleAt(
+          state.types,
+          description.returnType,
+          'Type.functionSignature',
+          'Type',
+        ),
         parameters: Object.freeze(parameters),
         variadic: description.variadic,
       })
@@ -743,7 +739,9 @@ export const aggregateShape = Effect.fn('Type.aggregateShape')(function* (
     Result.gen(function* () {
       if (description._tag === 'Array' || description._tag === 'Vector') {
         return Object.freeze({
-          fields: Object.freeze([yield* handleAt(state, description.child, 'Type.aggregateShape')]),
+          fields: Object.freeze([
+            yield* Table.handleAt(state.types, description.child, 'Type.aggregateShape', 'Type'),
+          ]),
           packed: false,
           scalable: description._tag === 'Vector' && description.scalable,
           length: description._tag === 'Array' ? description.length : BigInt(description.length),
@@ -766,7 +764,7 @@ export const aggregateShape = Effect.fn('Type.aggregateShape')(function* (
       }
       const fields: Array<Type> = []
       for (const index of body.fields) {
-        fields.push(yield* handleAt(state, index, 'Type.aggregateShape'))
+        fields.push(yield* Table.handleAt(state.types, index, 'Type.aggregateShape', 'Type'))
       }
       return Object.freeze({
         fields: Object.freeze(fields),
@@ -811,7 +809,7 @@ const layoutOf = (
 ): { readonly size: bigint; readonly alignment: Alignment.Alignment } => {
   if (visiting.has(index)) throw new Error('recursive type has no finite inline size')
   visiting.add(index)
-  const description = state.types[index]
+  const description = state.types.descriptions[index]
   if (description === undefined) throw new Error('missing type table entry')
   try {
     if (description._tag === 'Integer') {

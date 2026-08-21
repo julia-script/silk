@@ -7,6 +7,7 @@ import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
+import * as Table from './internal/Table.js'
 import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Type from './Type.js'
 
@@ -59,14 +60,6 @@ export interface FunctionSetEntries {
 }
 
 /** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
-
-/** @internal */
 const descriptionKey = (description: AttributeDescription.Description): string => {
   const name = CanonicalKey.bytes(description.name)
   switch (description._tag) {
@@ -87,36 +80,6 @@ const descriptionKey = (description: AttributeDescription.Description): string =
 }
 
 /** @internal */
-const handleAt = (
-  handles: ReadonlyArray<Attribute>,
-  index: number,
-  operation: string,
-): Result.Result<Attribute, LlvmError> => {
-  const handle = handles[index]
-  if (handle === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Attribute table handle is missing', state: index }),
-    )
-  }
-  return Result.succeed(handle)
-}
-
-/** @internal */
-const setHandleAt = (
-  handles: ReadonlyArray<Set>,
-  index: number,
-  operation: string,
-): Result.Result<Set, LlvmError> => {
-  const handle = handles[index]
-  if (handle === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Attribute-set handle is missing', state: index }),
-    )
-  }
-  return Result.succeed(handle)
-}
-
-/** @internal */
 const intern = Effect.fn('Attribute.intern')(function* (
   builder: Builder.Builder,
   description: AttributeDescription.Description,
@@ -124,16 +87,15 @@ const intern = Effect.fn('Attribute.intern')(function* (
   return yield* BuilderState.mutate(builder, 'Attribute.intern', (state, owner) =>
     Result.gen(function* () {
       const key = descriptionKey(description)
-      const found = state.attributeKeys.get(key)
-      if (found !== undefined) {
-        return yield* handleAt(state.attributeHandles, found, 'Attribute.intern')
-      }
-      const index = state.attributes.length
-      const handle = Handle.make('Attribute', owner, index)
-      state.attributes.push(description)
-      state.attributeHandles.push(handle)
-      state.attributeKeys.set(key, index)
-      return handle
+      const interned = yield* Table.intern(
+        state.attributes,
+        'Attribute.intern',
+        'Attribute',
+        key,
+        description,
+        (index) => Handle.make('Attribute', owner, index),
+      )
+      return interned.handle
     }),
   )
 })
@@ -143,7 +105,7 @@ const validateName = Effect.fnUntraced(function* (
   name: ByteString.ByteString | Uint8Array | string,
   operation: string,
 ): Effect.fn.Return<ByteString.ByteString, LlvmError> {
-  const value = bytes(name)
+  const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
     return yield* Effect.fail(
       invalidInput({ operation, message: 'An LLVM attribute requires a name', input: name }),
@@ -229,7 +191,7 @@ export const string = Effect.fn('Attribute.string')(function* (
   const attributeName = yield* validateName(name, 'Attribute.string')
   return yield* intern(
     builder,
-    Object.freeze({ _tag: 'String', name: attributeName, value: bytes(value) }),
+    Object.freeze({ _tag: 'String', name: attributeName, value: ByteString.coerce(value) }),
   )
 })
 
@@ -267,14 +229,14 @@ const internSet = Effect.fn('Attribute.internSet')(function* (
   return yield* BuilderState.mutate(builder, 'Attribute.set', (state, owner) =>
     Result.gen(function* () {
       const ordered = [...new Set(attributeIndices)].sort((left, right) => {
-        const leftDescription = state.attributes[left]
-        const rightDescription = state.attributes[right]
+        const leftDescription = state.attributes.descriptions[left]
+        const rightDescription = state.attributes.descriptions[right]
         if (leftDescription === undefined || rightDescription === undefined) return left - right
         return descriptionKey(leftDescription).localeCompare(descriptionKey(rightDescription))
       })
       const names = new Map<string, number>()
       for (const index of ordered) {
-        const description = state.attributes[index]
+        const description = state.attributes.descriptions[index]
         if (description === undefined) {
           return yield* Result.fail(
             invalidState({
@@ -299,16 +261,15 @@ const internSet = Effect.fn('Attribute.internSet')(function* (
       }
       const values = Object.freeze(ordered)
       const key = CanonicalKey.sequence(values.map(CanonicalKey.integer))
-      const found = state.attributeSetKeys.get(key)
-      if (found !== undefined) {
-        return yield* setHandleAt(state.attributeSetHandles, found, 'Attribute.set')
-      }
-      const index = state.attributeSets.length
-      const handle = Handle.make('AttributeSet', owner, index)
-      state.attributeSets.push(values)
-      state.attributeSetHandles.push(handle)
-      state.attributeSetKeys.set(key, index)
-      return handle
+      const interned = yield* Table.intern(
+        state.attributeSets,
+        'Attribute.set',
+        'AttributeSet',
+        key,
+        values,
+        (index) => Handle.make('AttributeSet', owner, index),
+      )
+      return interned.handle
     }),
   )
 })
@@ -380,7 +341,7 @@ export const add = Effect.fn('Attribute.add')(function* (
         'Attribute',
         'Attribute.add',
       )
-      const existing = state.attributeSets[setIndex]
+      const existing = state.attributeSets.descriptions[setIndex]
       if (existing === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -423,7 +384,7 @@ export const remove = Effect.fn('Attribute.remove')(function* (
         'Attribute',
         'Attribute.remove',
       )
-      const existing = state.attributeSets[setIndex]
+      const existing = state.attributeSets.descriptions[setIndex]
       if (existing === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -452,7 +413,7 @@ export const entries = Effect.fn('Attribute.entries')(function* (
   return yield* BuilderState.mutate(builder, 'Attribute.entries', (state, owner) =>
     Result.gen(function* () {
       const index = yield* Handle.resolve(builder, owner, self, 'AttributeSet', 'Attribute.entries')
-      const values = state.attributeSets[index]
+      const values = state.attributeSets.descriptions[index]
       if (values === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -464,7 +425,9 @@ export const entries = Effect.fn('Attribute.entries')(function* (
       }
       const entries: Array<Attribute> = []
       for (const value of values) {
-        entries.push(yield* handleAt(state.attributeHandles, value, 'Attribute.entries'))
+        entries.push(
+          yield* Table.handleAt(state.attributes, value, 'Attribute.entries', 'Attribute'),
+        )
       }
       return Object.freeze(entries)
     }),
@@ -524,17 +487,15 @@ export const functionSet = Effect.fn('Attribute.functionSet')(function* (
         CanonicalKey.integer(returnIndex),
         CanonicalKey.sequence(parameterIndices.map(CanonicalKey.integer)),
       ])
-      const found = state.functionAttributeSetKeys.get(key)
-      if (found !== undefined) {
-        const handle = state.functionAttributeSetHandles[found]
-        if (handle !== undefined) return handle
-      }
-      const index = state.functionAttributeSets.length
-      const handle = Handle.make('FunctionAttributeSet', owner, index)
-      state.functionAttributeSets.push(description)
-      state.functionAttributeSetHandles.push(handle)
-      state.functionAttributeSetKeys.set(key, index)
-      return handle
+      const interned = yield* Table.intern(
+        state.functionAttributeSets,
+        'Attribute.functionSet',
+        'FunctionAttributeSet',
+        key,
+        description,
+        (index) => Handle.make('FunctionAttributeSet', owner, index),
+      )
+      return interned.handle
     }),
   )
 })
@@ -558,19 +519,19 @@ export const functionSetEntries = Effect.fn('Attribute.functionSetEntries')(func
         'FunctionAttributeSet',
         'Attribute.functionSetEntries',
       )
-      const description = state.functionAttributeSets[index]
+      const description = state.functionAttributeSets.descriptions[index]
       const functionAttributes =
         description === undefined
           ? undefined
-          : state.attributeSetHandles[description.functionAttributes]
+          : state.attributeSets.handles[description.functionAttributes]
       const returnAttributes =
         description === undefined
           ? undefined
-          : state.attributeSetHandles[description.returnAttributes]
+          : state.attributeSets.handles[description.returnAttributes]
       const parameterAttributes =
         description === undefined
           ? []
-          : description.parameterAttributes.map((setIndex) => state.attributeSetHandles[setIndex])
+          : description.parameterAttributes.map((setIndex) => state.attributeSets.handles[setIndex])
       if (
         description === undefined ||
         functionAttributes === undefined ||

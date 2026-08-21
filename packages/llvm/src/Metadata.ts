@@ -10,16 +10,13 @@ import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
 import * as MetadataDescription from './internal/MetadataDescription.js'
-import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
+import type { Metadata } from './internal/MetadataHandle.js'
+import * as MetadataTable from './internal/MetadataTable.js'
+import * as ResolveActor from './internal/resolveActor.js'
+import { invalidInput, type LlvmError } from './LlvmError.js'
 import type * as Variable from './Variable.js'
 
-/**
- * Opaque builder-owned identity for a metadata string, tuple, constant, or debug node.
- *
- * @category metadata
- * @since 0.0.0
- */
-export interface Metadata extends Handle.Handle<'Metadata'> {}
+export type { Metadata }
 
 /**
  * Debug metadata constructors return absence when the builder is in strip mode.
@@ -164,34 +161,13 @@ export interface GlobalVariableOptions extends VariableOptions {
 }
 
 /** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
-
-/** @internal */
 const metadataKey = (node: MetadataDescription.Node): string =>
   JSON.stringify(node, (_name, value) => (typeof value === 'bigint' ? `bigint:${value}` : value))
 
 /** @internal */
-const allocate = (
-  state: BuilderState.MutableState,
-  owner: BuilderState.State['owner'],
-  entry: MetadataDescription.Entry,
-): Metadata => {
-  const index = state.metadata.length
-  const handle = Handle.make('Metadata', owner, index)
-  state.metadata.push(entry)
-  state.metadataHandles.push(handle)
-  return handle
-}
-
-/** @internal */
 const resolve = (
   builder: Builder.Builder,
-  state: BuilderState.MutableState | BuilderState.Snapshot,
+  state: BuilderState.MutableState,
   owner: BuilderState.State['owner'],
   self: Metadata,
   operation: string,
@@ -199,16 +175,10 @@ const resolve = (
   { readonly index: number; readonly entry: MetadataDescription.Entry },
   LlvmError
 > =>
-  Result.gen(function* () {
-    const index = yield* Handle.resolve(builder, owner, self, 'Metadata', operation)
-    const entry = state.metadata[index]
-    if (entry === undefined) {
-      return yield* Result.fail(
-        invalidState({ operation, message: 'Metadata table entry is missing', state: self }),
-      )
-    }
-    return { index, entry }
-  })
+  Result.map(
+    ResolveActor.resolve(builder, owner, self, 'Metadata', state.metadata.entries, operation),
+    ({ index, description }) => ({ index, entry: description }),
+  )
 
 /**
  * Resolves optional metadata to its table index for low-level actor and serializer integrations.
@@ -254,16 +224,20 @@ const node = (
 ): Metadata => {
   if (!value.distinct) {
     const key = metadataKey(value)
-    const existing = state.metadataNodeKeys.get(key)
+    const existing = state.metadata.nodeKeys.get(key)
     if (existing !== undefined) {
-      const handle = state.metadataHandles[existing]
+      const handle = state.metadata.entries.handles[existing]
       if (handle !== undefined) return handle
     }
-    const handle = allocate(state, owner, Object.freeze({ _tag: 'Node', value }))
-    state.metadataNodeKeys.set(key, state.metadata.length - 1)
+    const handle = MetadataTable.allocate(
+      state.metadata,
+      owner,
+      Object.freeze({ _tag: 'Node', value }),
+    )
+    state.metadata.nodeKeys.set(key, state.metadata.entries.descriptions.length - 1)
     return handle
   }
-  return allocate(state, owner, Object.freeze({ _tag: 'Node', value }))
+  return MetadataTable.allocate(state.metadata, owner, Object.freeze({ _tag: 'Node', value }))
 }
 
 /** @internal */
@@ -295,16 +269,20 @@ export const string = Effect.fn('Metadata.string')(function* (
   builder: Builder.Builder,
   value: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Metadata, LlvmError> {
-  const content = bytes(value)
+  const content = ByteString.coerce(value)
   return yield* BuilderState.mutate(builder, 'Metadata.string', (state, owner) => {
     const key = CanonicalKey.bytes(content)
-    const existing = state.metadataStringKeys.get(key)
+    const existing = state.metadata.entries.keys.get(key)
     if (existing !== undefined) {
-      const handle = state.metadataHandles[existing]
+      const handle = state.metadata.entries.handles[existing]
       if (handle !== undefined) return Result.succeed(handle)
     }
-    const handle = allocate(state, owner, Object.freeze({ _tag: 'String', value: content }))
-    state.metadataStringKeys.set(key, state.metadata.length - 1)
+    const handle = MetadataTable.allocate(
+      state.metadata,
+      owner,
+      Object.freeze({ _tag: 'String', value: content }),
+    )
+    state.metadata.entries.keys.set(key, state.metadata.entries.descriptions.length - 1)
     return Result.succeed(handle)
   })
 })
@@ -414,7 +392,7 @@ export const local = Effect.fn('Metadata.local')(function* (
   builder: Builder.Builder,
   label: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Optional, LlvmError> {
-  const value = bytes(label)
+  const value = ByteString.coerce(label)
   return yield* debugNode(builder, 'Metadata.local', () =>
     Object.freeze({ _tag: 'Local', distinct: true, label: value }),
   )
@@ -457,7 +435,11 @@ export const forward = Effect.fn('Metadata.forward')(function* (
     Result.succeed(
       state.strip
         ? undefined
-        : allocate(state, owner, { _tag: 'Forward', category, target: undefined }),
+        : MetadataTable.allocate(state.metadata, owner, {
+            _tag: 'Forward',
+            category,
+            target: undefined,
+          }),
     ),
   )
 })
@@ -1280,7 +1262,7 @@ export const named = Effect.fn('Metadata.named')(function* (
   name: ByteString.ByteString | Uint8Array | string,
   operands: ReadonlyArray<Metadata>,
 ): Effect.fn.Return<void, LlvmError> {
-  const finalName = bytes(name)
+  const finalName = ByteString.coerce(name)
   yield* BuilderState.mutate(builder, 'Metadata.named', (state, owner) =>
     Result.gen(function* () {
       if (state.strip) return
@@ -1300,13 +1282,13 @@ export const named = Effect.fn('Metadata.named')(function* (
       }
       const resolved = Object.freeze(mutableResolved)
       const key = CanonicalKey.bytes(finalName)
-      const existing = state.namedMetadataKeys.get(key)
+      const existing = state.metadata.namedKeys.get(key)
       const description = Object.freeze({ name: finalName, operands: resolved })
       if (existing === undefined) {
-        state.namedMetadataKeys.set(key, state.namedMetadata.length)
-        state.namedMetadata.push(description)
+        state.metadata.namedKeys.set(key, state.metadata.named.length)
+        state.metadata.named.push(description)
       } else {
-        state.namedMetadata[existing] = description
+        state.metadata.named[existing] = description
       }
     }),
   )

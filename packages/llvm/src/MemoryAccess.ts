@@ -2,7 +2,6 @@ import * as Effect from 'effect/Effect'
 import { dual } from 'effect/Function'
 import type * as Alignment from './Alignment.js'
 import { defaultAlignment } from './Alignment.js'
-import * as MemoryAccessEncoding from './internal/MemoryAccessEncoding.js'
 import { invalidInput, type LlvmError } from './LlvmError.js'
 
 /**
@@ -269,11 +268,32 @@ export const renderOrdering = (ordering: AtomicOrdering): string =>
  * @category memory access
  * @since 0.0.0
  */
+/** @internal */
+class AlignmentEncodingFailure extends Error {
+  constructor(readonly alignment: Alignment.Alignment) {
+    super('LLVM instruction alignment exceeds the 6-bit bitcode encoding')
+    this.name = 'AlignmentEncodingFailure'
+  }
+}
+
+/** @internal */
+export const encodeAlignment = (alignment: Alignment.Alignment): number => {
+  if (alignment.byteUnits === undefined) return 0
+  let value = alignment.byteUnits
+  let exponent = 0
+  while (value > 1n) {
+    value >>= 1n
+    exponent += 1
+  }
+  if (exponent > 62) throw new AlignmentEncodingFailure(alignment)
+  return exponent + 1
+}
+
 export const alignmentCode = Effect.fn('MemoryAccess.alignmentCode')(function* (
   alignment: Alignment.Alignment,
 ): Effect.fn.Return<number, LlvmError> {
   return yield* Effect.try({
-    try: () => MemoryAccessEncoding.alignmentCode(alignment),
+    try: () => encodeAlignment(alignment),
     catch: () =>
       invalidInput({
         operation: 'MemoryAccess.alignmentCode',

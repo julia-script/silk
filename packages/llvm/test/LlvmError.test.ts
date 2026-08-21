@@ -23,8 +23,8 @@ it.effect('is yieldable and recoverable by its LLVM-specific tag', () =>
 
 it('distinguishes state diagnostics from genuine JavaScript causal ancestry', () => {
   const state = invalidState({
-    operation: 'Builder.validateHandle',
-    message: 'The handle belongs to a different LLVM builder',
+    operation: 'Global.rename',
+    message: 'The Global handle belongs to a different LLVM builder',
     state: { expected: 'first', actual: 'second' },
   })
   const cause = new RangeError('encoder overflow')

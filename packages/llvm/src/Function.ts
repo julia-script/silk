@@ -14,6 +14,7 @@ import * as FunctionBodyState from './internal/FunctionBodyState.js'
 import type * as GlobalDescription from './internal/GlobalDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
+import * as ResolveActor from './internal/resolveActor.js'
 import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import * as Metadata from './Metadata.js'
 import type * as Type from './Type.js'
@@ -55,18 +56,6 @@ export interface Properties {
 }
 
 /** @internal */
-const bytes = (
-  value: ByteString.ByteString | Uint8Array | string | undefined,
-): ByteString.ByteString =>
-  value === undefined
-    ? ByteString.empty
-    : typeof value === 'string'
-      ? ByteString.fromString(value)
-      : value instanceof Uint8Array
-        ? ByteString.fromUint8Array(value)
-        : value
-
-/** @internal */
 const optionalConstant = (
   builder: Builder.Builder,
   owner: BuilderState.State['owner'],
@@ -83,7 +72,7 @@ const handleAt = (
   index: number,
   operation: string,
 ): Result.Result<Function, LlvmError> => {
-  const handle = state.functionHandles[index]
+  const handle = state.globals.functions.handles[index]
   if (handle === undefined) {
     return Result.fail(
       invalidState({ operation, message: 'Function table handle is missing', state: index }),
@@ -124,11 +113,11 @@ export const declare = Effect.fn('Function.declare')(function* (
   type: Type.Type,
   options: Options = {},
 ): Effect.fn.Return<Function, LlvmError> {
-  const globalName = bytes(name)
+  const globalName = ByteString.coerceOrEmpty(name)
   return yield* BuilderState.mutate(builder, 'Function.declare', (state, owner) =>
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Function.declare')
-      if (state.types[typeIndex]?._tag !== 'Function') {
+      if (state.types.descriptions[typeIndex]?._tag !== 'Function') {
         return yield* Result.fail(
           invalidInput({
             operation: 'Function.declare',
@@ -162,12 +151,14 @@ export const declare = Effect.fn('Function.declare')(function* (
               'Function.declare',
             )
       if (globalName.bytes.length > 0) {
-        const occupied = state.globalNames.get(CanonicalKey.bytes(globalName))
+        const occupied = state.globals.entries.keys.get(CanonicalKey.bytes(globalName))
         if (occupied !== undefined) {
           const global =
-            state.globals[yield* GlobalState.resolveIndex(state, occupied, 'Function.declare')]
+            state.globals.entries.descriptions[
+              yield* GlobalState.resolveIndex(state, occupied, 'Function.declare')
+            ]
           if (global?.kind === 'Function') {
-            const existing = state.functions[global.actorIndex]
+            const existing = state.globals.functions.descriptions[global.actorIndex]
             if (
               existing !== undefined &&
               compatible(existing, typeIndex, callingConvention, attributes)
@@ -184,7 +175,7 @@ export const declare = Effect.fn('Function.declare')(function* (
           )
         }
       }
-      const index = state.functions.length
+      const index = state.globals.functions.descriptions.length
       const allocated = yield* GlobalState.allocate(
         state,
         owner,
@@ -195,14 +186,14 @@ export const declare = Effect.fn('Function.declare')(function* (
         'Function.declare',
       )
       const handle = Handle.make('Function', owner, index)
-      state.functions.push(
+      state.globals.functions.descriptions.push(
         Object.freeze({
           _tag: 'Function',
           global: allocated.index,
           type: typeIndex,
           callingConvention,
           attributes,
-          garbageCollector: bytes(options.garbageCollector),
+          garbageCollector: ByteString.coerceOrEmpty(options.garbageCollector),
           prefix: yield* optionalConstant(builder, owner, options.prefix, 'Function.declare'),
           prologue: yield* optionalConstant(builder, owner, options.prologue, 'Function.declare'),
           personality: yield* optionalConstant(
@@ -215,7 +206,7 @@ export const declare = Effect.fn('Function.declare')(function* (
           body: undefined,
         }),
       )
-      state.functionHandles.push(handle)
+      state.globals.functions.handles.push(handle)
       return handle
     }),
   )
@@ -246,7 +237,7 @@ export const fromGlobal = Effect.fn('Function.fromGlobal')(function* (
         return yield* handleAt(state, resolved.description.actorIndex, 'Function.fromGlobal')
       }
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Function.fromGlobal')
-      if (state.types[typeIndex]?._tag !== 'Function') {
+      if (state.types.descriptions[typeIndex]?._tag !== 'Function') {
         return yield* Result.fail(
           invalidInput({
             operation: 'Function.fromGlobal',
@@ -255,9 +246,9 @@ export const fromGlobal = Effect.fn('Function.fromGlobal')(function* (
           }),
         )
       }
-      const index = state.functions.length
+      const index = state.globals.functions.descriptions.length
       const handle = Handle.make('Function', owner, index)
-      state.functions.push(
+      state.globals.functions.descriptions.push(
         Object.freeze({
           _tag: 'Function',
           global: resolved.index,
@@ -281,8 +272,8 @@ export const fromGlobal = Effect.fn('Function.fromGlobal')(function* (
           body: undefined,
         }),
       )
-      state.functionHandles.push(handle)
-      state.globals[resolved.index] = Object.freeze({
+      state.globals.functions.handles.push(handle)
+      state.globals.entries.descriptions[resolved.index] = Object.freeze({
         ...resolved.description,
         kind: 'Function',
         actorIndex: index,
@@ -304,17 +295,14 @@ export const global = Effect.fn('Function.global')(function* (
 ): Effect.fn.Return<Global.Global, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Function.global', (state, owner) =>
     Result.gen(function* () {
-      const index = yield* Handle.resolve(builder, owner, self, 'Function', 'Function.global')
-      const description = state.functions[index]
-      if (description === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'Function.global',
-            message: 'Function is missing',
-            state: self,
-          }),
-        )
-      }
+      const { description } = yield* ResolveActor.resolve(
+        builder,
+        owner,
+        self,
+        'Function',
+        state.globals.functions,
+        'Function.global',
+      )
       return yield* GlobalState.handleAt(state, description.global, 'Function.global')
     }),
   )
@@ -340,7 +328,7 @@ export const setAttributes = Effect.fn('Function.setAttributes')(function* (
         'Function',
         'Function.setAttributes',
       )
-      const description = state.functions[index]
+      const description = state.globals.functions.descriptions[index]
       if (description === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -350,7 +338,7 @@ export const setAttributes = Effect.fn('Function.setAttributes')(function* (
           }),
         )
       }
-      state.functions[index] = Object.freeze({
+      state.globals.functions.descriptions[index] = Object.freeze({
         ...description,
         attributes:
           attributes === undefined
@@ -388,7 +376,7 @@ export const setSubprogram = Effect.fn('Function.setSubprogram')(function* (
         'Function',
         'Function.setSubprogram',
       )
-      const description = state.functions[functionIndex]
+      const description = state.globals.functions.descriptions[functionIndex]
       if (description === undefined) {
         return yield* Result.fail(
           invalidState({
@@ -406,8 +394,8 @@ export const setSubprogram = Effect.fn('Function.setSubprogram')(function* (
         'Function.setSubprogram',
       )
       if (metadataIndex === undefined) return
-      const attachments = state.globalMetadata[description.global] ?? []
-      state.globalMetadata[description.global] = Object.freeze([
+      const attachments = state.globals.attachments[description.global] ?? []
+      state.globals.attachments[description.global] = Object.freeze([
         ...attachments.filter((attachment) => attachment.kind !== 'dbg'),
         Object.freeze({ kind: 'dbg', metadata: metadataIndex }),
       ])
@@ -427,15 +415,20 @@ export const properties = Effect.fn('Function.properties')(function* (
 ): Effect.fn.Return<Properties, LlvmError> {
   return yield* BuilderState.mutate(builder, 'Function.properties', (state, owner) =>
     Result.gen(function* () {
-      const index = yield* Handle.resolve(builder, owner, self, 'Function', 'Function.properties')
-      const description = state.functions[index]
-      const type = description === undefined ? undefined : state.typeHandles[description.type]
+      const { description } = yield* ResolveActor.resolve(
+        builder,
+        owner,
+        self,
+        'Function',
+        state.globals.functions,
+        'Function.properties',
+      )
+      const type = state.types.handles[description.type]
       const attributes =
-        description?.attributes === undefined
+        description.attributes === undefined
           ? undefined
-          : state.functionAttributeSetHandles[description.attributes]
+          : state.functionAttributeSets.handles[description.attributes]
       if (
-        description === undefined ||
         type === undefined ||
         (description.attributes !== undefined && attributes === undefined)
       ) {
@@ -524,8 +517,9 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
           'Function',
           'Function.buildBody',
         )
-        const description = state.functions[functionIndex]
-        const signature = description === undefined ? undefined : state.types[description.type]
+        const description = state.globals.functions.descriptions[functionIndex]
+        const signature =
+          description === undefined ? undefined : state.types.descriptions[description.type]
         if (description === undefined || signature?._tag !== 'Function') {
           return yield* Result.fail(
             invalidState({
@@ -572,7 +566,7 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
           const snapshot = yield* FunctionBodyState.validate(body)
           yield* BuilderState.mutate(builder, 'Function.buildBody.commit', (state) =>
             Result.gen(function* () {
-              const description = state.functions[acquired.functionIndex]
+              const description = state.globals.functions.descriptions[acquired.functionIndex]
               if (description === undefined || description.body !== undefined) {
                 return yield* Result.fail(
                   invalidInput({
@@ -582,7 +576,7 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
                   }),
                 )
               }
-              state.functions[acquired.functionIndex] = Object.freeze({
+              state.globals.functions.descriptions[acquired.functionIndex] = Object.freeze({
                 ...description,
                 body: snapshot,
               })

@@ -8,6 +8,7 @@ import * as BuilderState from './internal/BuilderState.js'
 import type * as GlobalDescription from './internal/GlobalDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
+import * as ResolveActor from './internal/resolveActor.js'
 import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Metadata from './Metadata.js'
 import type * as Type from './Type.js'
@@ -58,35 +59,12 @@ export interface Properties {
 }
 
 /** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
-
-/** @internal */
-const descriptionAt = (
-  state: BuilderState.MutableState,
-  index: number,
-  operation: string,
-): Result.Result<GlobalDescription.VariableDescription, LlvmError> => {
-  const description = state.variables[index]
-  if (description === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Variable table entry is missing', state: index }),
-    )
-  }
-  return Result.succeed(description)
-}
-
-/** @internal */
 const handleAt = (
   state: BuilderState.MutableState,
   index: number,
   operation: string,
 ): Result.Result<Variable, LlvmError> => {
-  const handle = state.variableHandles[index]
+  const handle = state.globals.variables.handles[index]
   if (handle === undefined) {
     return Result.fail(
       invalidState({ operation, message: 'Variable table handle is missing', state: index }),
@@ -107,10 +85,16 @@ const resolve = (
   LlvmError
 > =>
   Result.gen(function* () {
-    const index = yield* Handle.resolve(builder, owner, self, 'Variable', operation)
-    const description = yield* descriptionAt(state, index, operation)
+    const { index, description } = yield* ResolveActor.resolve(
+      builder,
+      owner,
+      self,
+      'Variable',
+      state.globals.variables,
+      operation,
+    )
     const globalIndex = yield* GlobalState.resolveIndex(state, description.global, operation)
-    const global = state.globals[globalIndex]
+    const global = state.globals.entries.descriptions[globalIndex]
     if (global?.kind !== 'Variable' || global.actorIndex !== index || global.deleted) {
       return yield* Result.fail(
         invalidState({ operation, message: 'Variable handle is no longer active', state: self }),
@@ -131,7 +115,7 @@ const initializerIndex = (
   Result.gen(function* () {
     if (initializer === undefined) return undefined
     const index = yield* Handle.resolve(builder, owner, initializer, 'Constant', operation)
-    const constant = state.constants[index]
+    const constant = state.constants.descriptions[index]
     if (constant?.type !== valueType) {
       return yield* Result.fail(
         invalidInput({
@@ -167,8 +151,8 @@ const setGlobalDebugExpressions = (
   global: number,
   expressions: ReadonlyArray<number>,
 ): void => {
-  const attachments = state.globalMetadata[global] ?? []
-  state.globalMetadata[global] = Object.freeze([
+  const attachments = state.globals.attachments[global] ?? []
+  state.globals.attachments[global] = Object.freeze([
     ...attachments.filter((attachment) => attachment.kind !== 'dbg'),
     ...expressions.map((metadata) => Object.freeze({ kind: 'dbg' as const, metadata })),
   ])
@@ -221,11 +205,11 @@ export const make = Effect.fn('Variable.make')(function* (
         options.initializer,
         'Variable.make',
       )
-      const index = state.variables.length
+      const index = state.globals.variables.descriptions.length
       const allocated = yield* GlobalState.allocate(
         state,
         owner,
-        bytes(name),
+        ByteString.coerce(name),
         'Variable',
         index,
         options,
@@ -239,7 +223,7 @@ export const make = Effect.fn('Variable.make')(function* (
         options.debugExpressions,
         'Variable.make',
       )
-      state.variables.push(
+      state.globals.variables.descriptions.push(
         Object.freeze({
           _tag: 'Variable',
           global: allocated.index,
@@ -252,7 +236,7 @@ export const make = Effect.fn('Variable.make')(function* (
         }),
       )
       setGlobalDebugExpressions(state, allocated.index, debugExpressions)
-      state.variableHandles.push(handle)
+      state.globals.variables.handles.push(handle)
       return handle
     }),
   )
@@ -289,7 +273,7 @@ export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
         'Type',
         'Variable.fromGlobal',
       )
-      const index = state.variables.length
+      const index = state.globals.variables.descriptions.length
       const handle = Handle.make('Variable', owner, index)
       const debugExpressions = yield* debugExpressionIndices(
         builder,
@@ -298,7 +282,7 @@ export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
         options.debugExpressions,
         'Variable.fromGlobal',
       )
-      state.variables.push(
+      state.globals.variables.descriptions.push(
         Object.freeze({
           _tag: 'Variable',
           global: resolved.index,
@@ -318,8 +302,8 @@ export const fromGlobal = Effect.fn('Variable.fromGlobal')(function* (
         }),
       )
       setGlobalDebugExpressions(state, resolved.index, debugExpressions)
-      state.variableHandles.push(handle)
-      state.globals[resolved.index] = Object.freeze({
+      state.globals.variables.handles.push(handle)
+      state.globals.entries.descriptions[resolved.index] = Object.freeze({
         ...resolved.description,
         kind: 'Variable',
         actorIndex: index,
@@ -367,7 +351,7 @@ export const setInitializer = Effect.fn('Variable.setInitializer')(function* (
         self,
         'Variable.setInitializer',
       )
-      state.variables[index] = Object.freeze({
+      state.globals.variables.descriptions[index] = Object.freeze({
         ...description,
         initializer: yield* initializerIndex(
           builder,
@@ -412,7 +396,7 @@ export const configure = Effect.fn('Variable.configure')(function* (
               options.debugExpressions,
               'Variable.configure',
             )
-      state.variables[index] = Object.freeze({
+      state.globals.variables.descriptions[index] = Object.freeze({
         ...description,
         constant: options.constant ?? description.constant,
         threadLocal: options.threadLocal ?? description.threadLocal,
@@ -438,11 +422,11 @@ export const properties = Effect.fn('Variable.properties')(function* (
     Result.gen(function* () {
       const description = (yield* resolve(builder, state, owner, self, 'Variable.properties'))
         .description
-      const valueType = state.typeHandles[description.valueType]
+      const valueType = state.types.handles[description.valueType]
       const initializer =
         description.initializer === undefined
           ? undefined
-          : state.constantHandles[description.initializer]
+          : state.constants.handles[description.initializer]
       if (
         valueType === undefined ||
         (description.initializer !== undefined && initializer === undefined)
@@ -463,7 +447,7 @@ export const properties = Effect.fn('Variable.properties')(function* (
         externallyInitialized: description.externallyInitialized,
         debugExpressions: Object.freeze(
           description.debugExpressions.flatMap((index) => {
-            const metadata = state.metadataHandles[index]
+            const metadata = state.metadata.entries.handles[index]
             return metadata === undefined ? [] : [metadata]
           }),
         ),

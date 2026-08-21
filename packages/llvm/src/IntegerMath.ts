@@ -118,6 +118,13 @@ export const withExact: {
 /**
  * Encodes flags for the corresponding LLVM instruction-record field.
  *
+ * **Gotchas**
+ *
+ * `nuw` (`noUnsignedWrap`) and `exact` both occupy bit 0. This matches LLVM's optional-flag
+ * encoding, where they are mutually exclusive: `nuw`/`nsw` apply only to add, sub, mul, and shl,
+ * while `exact` applies only to udiv, sdiv, lshr, and ashr. {@link FunctionBody.binary} enforces the
+ * same opcode split, so the shared bit is unambiguous.
+ *
  * @category integer math
  * @since 0.0.0
  */
