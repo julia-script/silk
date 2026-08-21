@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as Diagnostic from './Diagnostic.js'
+import { stronglyConnected } from './internal/Graph.js'
 import * as ImportPath from './ImportPath.js'
 import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
@@ -301,57 +302,20 @@ const resolvedTargets = (module: Module): ReadonlyArray<string> =>
 
 /** Computes strongly connected components of size > 1 over resolved imports, deterministically. */
 const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray<string>> => {
-  const names = modules.map((module) => module.name)
   const edges = new Map(modules.map((module) => [module.name, resolvedTargets(module)]))
-  const index = new Map<string, number>()
-  const lowLink = new Map<string, number>()
-  const onStack = new Set<string>()
-  const stack: Array<string> = []
-  const components: Array<ReadonlyArray<string>> = []
-  let counter = 0
-
-  const connect = (name: string): void => {
-    index.set(name, counter)
-    lowLink.set(name, counter)
-    counter += 1
-    stack.push(name)
-    onStack.add(name)
-
-    for (const target of edges.get(name) ?? []) {
-      if (!edges.has(target)) continue
-      if (!index.has(target)) {
-        connect(target)
-        lowLink.set(name, Math.min(lowLink.get(name) ?? 0, lowLink.get(target) ?? 0))
-      } else if (onStack.has(target)) {
-        lowLink.set(name, Math.min(lowLink.get(name) ?? 0, index.get(target) ?? 0))
-      }
-    }
-
-    if (lowLink.get(name) === index.get(name)) {
-      const component: Array<string> = []
-      let member = stack.pop()
-      while (member !== undefined) {
-        onStack.delete(member)
-        component.push(member)
-        if (member === name) break
-        member = stack.pop()
-      }
-      if (component.length > 1) components.push(Object.freeze(component.sort()))
-    }
-  }
-
-  for (const name of names) {
-    if (!index.has(name)) connect(name)
-  }
-
   return Object.freeze(
-    components.sort((left, right) =>
-      (left.at(0) ?? '') < (right.at(0) ?? '')
-        ? -1
-        : (left.at(0) ?? '') > (right.at(0) ?? '')
-          ? 1
-          : 0,
-    ),
+    stronglyConnected(
+      modules.map((m) => m.name),
+      (name) => edges.get(name) ?? [],
+    )
+      .filter((component) => component.length > 1)
+      .sort((left, right) =>
+        (left.at(0) ?? '') < (right.at(0) ?? '')
+          ? -1
+          : (left.at(0) ?? '') > (right.at(0) ?? '')
+            ? 1
+            : 0,
+      ),
   )
 }
 
