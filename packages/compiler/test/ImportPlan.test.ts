@@ -32,6 +32,29 @@ const applyAliased = (text: string, localSpelling: string): string | undefined =
   return output
 }
 
+const applyNamespace = (
+  source: string,
+  module = 'silk/effect',
+  spelling = 'Effect',
+  localSpelling?: string,
+): { readonly output: string; readonly localSpelling: string } | undefined => {
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make('main', ascii(source))))
+  const plan = Option.getOrUndefined(
+    ImportPlan.namespace({
+      syntax,
+      module,
+      spelling,
+      ...(localSpelling === undefined ? {} : { localSpelling }),
+    }),
+  )
+  if (plan === undefined) return undefined
+  let output = source
+  const edits = plan.change?.changes.get('main') ?? []
+  for (const edit of edits.toReversed())
+    output = `${output.slice(0, edit.span.start)}${edit.replacement}${output.slice(edit.span.end)}`
+  return { output, localSpelling: plan.localSpelling }
+}
+
 it('inserts a new selected-member import before declarations', () => {
   assert.strictEqual(
     apply('fn main() -> i32 { return 1 }'),
@@ -101,5 +124,42 @@ it('renders a collision-selected local alias for new and existing module imports
       'LoggingLogger',
     ),
     'import silk.logging { LogError, Logger as LoggingLogger }\nstruct Logger {}\npub fn main() -> i32 { return 0 }',
+  )
+})
+
+it('inserts, extends, and reuses explicit namespace imports', () => {
+  assert.deepEqual(applyNamespace('fn main() -> i32 { return 1 }'), {
+    output: 'import silk.effect as Effect\nfn main() -> i32 { return 1 }',
+    localSpelling: 'Effect',
+  })
+  assert.deepEqual(applyNamespace('import silk.effect { map }\nfn main() -> i32 { return 1 }'), {
+    output: 'import silk.effect as Effect { map }\nfn main() -> i32 { return 1 }',
+    localSpelling: 'Effect',
+  })
+  assert.deepEqual(applyNamespace('import silk.effect as Effect\nfn main() -> i32 { return 1 }'), {
+    output: 'import silk.effect as Effect\nfn main() -> i32 { return 1 }',
+    localSpelling: 'Effect',
+  })
+})
+
+it('uses and preserves a deterministic collision alias for namespace imports', () => {
+  assert.deepEqual(
+    applyNamespace(
+      'struct Effect {}\nfn main() -> i32 { return 1 }',
+      'silk/effect',
+      'Effect',
+      'SilkEffect',
+    ),
+    {
+      output: 'import silk.effect as SilkEffect\nstruct Effect {}\nfn main() -> i32 { return 1 }',
+      localSpelling: 'SilkEffect',
+    },
+  )
+  assert.deepEqual(
+    applyNamespace('import silk.effect as Operations\nfn main() -> i32 { return 1 }'),
+    {
+      output: 'import silk.effect as Operations\nfn main() -> i32 { return 1 }',
+      localSpelling: 'Operations',
+    },
   )
 })

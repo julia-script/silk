@@ -13,7 +13,7 @@ const ascii = (value: string): Uint8Array =>
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const source = `import silk.effects as Effect
+const source = `import silk.effect as Effect
 import silk.i32 as i32
 struct Problem { code: i32 }
 effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
@@ -41,7 +41,7 @@ const exclusiveCaptureSource = `pub fn main() -> i32 {
   let second = run pending
   return first * 10 + second
 }`
-const retrySource = `import silk.effects as Effect
+const retrySource = `import silk.effect as Effect
 import silk.i32 as i32
 struct Problem { code: i32 }
 effect fn retrying() -> i32 ! Problem {
@@ -70,11 +70,11 @@ pub fn main() -> i32 {
   let provided = read() |> Intrinsic.bindRequirement<Clock at Primary>(&clock)
   return run provided
 }`
-const callableMapSource = `import silk.effects as Effect
+const callableMapSource = `import silk.effect as Effect
 import silk.i32 as i32
 effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(40)) }`
-const ofSource = `import silk.effects as Effect
+const ofSource = `import silk.effect as Effect
 struct Token { value: i32 }
 pub fn main() -> i32 {
   let copied = Effect.of(20)
@@ -85,17 +85,17 @@ pub fn main() -> i32 {
 }`
 const flattenPrelude = `effect fn inner(value: i32) -> i32 { return value * 2 }
 effect fn outer(value: i32) -> Effect<i32> { return inner(value) }`
-const flattenSource = `import silk.effects as Effect
+const flattenSource = `import silk.effect as Effect
 ${flattenPrelude}
 pub fn main() -> i32 {
   let nested = outer(21)
   let flattened = Effect.flatten(move nested)
   return run flattened
 }`
-const flattenPipedSource = `import silk.effects as Effect
+const flattenPipedSource = `import silk.effect as Effect
 ${flattenPrelude}
 pub fn main() -> i32 { return run (outer(21) |> Effect.flatten) }`
-const flattenRowsSource = `import silk.effects as Effect
+const flattenRowsSource = `import silk.effect as Effect
 struct Outer { code: i32 }
 struct Inner { code: i32 }
 service Clock {}
@@ -119,7 +119,7 @@ const pipelineSources = [
   {
     name: 'grouped',
     expected: 42,
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -129,7 +129,7 @@ pub fn main() -> i32 {
   {
     name: 'reverse',
     expected: 42,
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -142,7 +142,7 @@ pub fn main() -> i32 {
   {
     name: 'provided-last',
     expected: 42,
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -155,7 +155,7 @@ pub fn main() -> i32 {
   {
     name: 'data-first',
     expected: 42,
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -165,7 +165,7 @@ pub fn main() -> i32 {
   {
     name: 'stored',
     expected: 42,
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -176,7 +176,7 @@ pub fn main() -> i32 {
 }`,
   },
 ] as const
-const effectOperatorPipelineSource = `import silk.effects as Effect
+const effectOperatorPipelineSource = `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -186,7 +186,7 @@ pub fn main() -> i32 {
     |> Effect.map(double)
     |> Effect.provide(&clock)
 }`
-const storedEffectOperatorPipelineSource = `import silk.effects as Effect
+const storedEffectOperatorPipelineSource = `import silk.effect as Effect
 ${pipelinePrelude}
 pub fn main() -> i32 {
   let clock = FixedClock { marker: 0 }
@@ -196,7 +196,7 @@ pub fn main() -> i32 {
   let provided = mapped |> Effect.provide(&clock)
   return run provided
 }`
-const recoveryPipelineSource = `import silk.effects as Effect
+const recoveryPipelineSource = `import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn failValue() -> i32 ! Problem { fail Problem { code: 21 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code }
@@ -210,7 +210,7 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catchAll(recover)',
   'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
-const outOfMemoryErrorSource = `import silk.effects as Effect
+const outOfMemoryErrorSource = `import silk.effect as Effect
 import silk.core { OutOfMemoryError }
 
 effect fn exhaust() -> i32 ! OutOfMemoryError {
@@ -254,7 +254,7 @@ pub fn main() -> i32 {
 const droppedHigherOrderEffectSource = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Payload { storage: Allocation }
 impl Drop for Payload {
@@ -670,7 +670,7 @@ it.effect('lifts Copy and affine values through ordinary Effect.of source', () =
       ofSource.indexOf('Effect.of') + 'Effect.'.length,
     )
     assert.strictEqual(occurrence?.role, 'Value')
-    assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+    assert.strictEqual(occurrence?.declaration?.module, 'silk/effect')
     assert.include(
       occurrence === undefined
         ? ''
@@ -781,7 +781,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
       flattenSource.indexOf('Effect.flatten') + 'Effect.'.length,
     )
     assert.strictEqual(occurrence?.role, 'Value')
-    assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+    assert.strictEqual(occurrence?.declaration?.module, 'silk/effect')
     assert.include(
       occurrence === undefined
         ? ''
@@ -803,7 +803,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
     )
     assert.deepEqual(constructed, [
       { module, name: 'outer' },
-      { module: 'silk/effects', name: 'flatten' },
+      { module: 'silk/effect', name: 'flatten' },
     ])
 
     const intrinsics = new Set(

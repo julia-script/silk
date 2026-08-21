@@ -495,7 +495,7 @@ it.effect('desugars effect functions and source-defined catch calls to hidden ef
   Effect.gen(function* () {
     const result = yield* elaborateWithStdlib(
       'hir://effect.silk',
-      `import silk.effects as Effect
+      `import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn risky() -> i32 ! Problem { fail move Problem { code: 41 } }
 effect fn recover(problem: Problem) -> i32 { return problem.code + 1 }
@@ -528,7 +528,7 @@ pub fn main() -> i32 {
       'EffectConstruct',
     )
     if (binding?._tag === 'Bind' && binding.initializer._tag === 'EffectConstruct') {
-      assert.strictEqual(binding.initializer.target.module, 'silk/effects')
+      assert.strictEqual(binding.initializer.target.module, 'silk/effect')
       assert.strictEqual(binding.initializer.target.name, 'catchAll')
       assert.strictEqual(binding.initializer.arguments.at(0)?._tag, 'EffectConstruct')
     }

@@ -394,7 +394,7 @@ pub fn main() -> i32 {
 const consuming = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
@@ -412,7 +412,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `import silk.effects as Effect
+const provided = `import silk.effect as Effect
 service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
@@ -582,7 +582,7 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   ): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface()}
 effect fn cycle() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
@@ -644,7 +644,7 @@ pub fn main() -> i32 {
     return `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface(kind)}
 effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
@@ -743,7 +743,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
   const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface(kind)}
 effect fn delayed(guard: Guard) -> i32 {
@@ -913,7 +913,7 @@ pub fn main() -> i32 {
   const leakHolds = (count: number): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
@@ -928,7 +928,7 @@ pub fn main() -> i32 {
   const suspendCycles = (count: number): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface()}
 effect fn delayed(guard: Guard) -> i32 {

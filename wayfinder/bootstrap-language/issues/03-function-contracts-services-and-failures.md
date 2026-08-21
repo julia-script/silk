@@ -131,7 +131,7 @@ names. Their closed compiler core consists of lazy construction, propagating `ru
 `Effect.result` for reifying a completed typed outcome as `Result<A, E>`, and
 `Effect.bindRequirement` for satisfying one capability-role entry while preserving an inferred
 remainder. `mapBoth`, `map`, `mapError`, `flatMap`, `tap`, whole-channel `catch`, `retry`, `provide`,
-and `provideEffect` are derived in `packages/compiler/stdlib/silk/effects.silk`. Failure and
+and `provideEffect` are derived in `packages/compiler/stdlib/silk/effect.silk`. Failure and
 requirement row parameters specialize and erase; neither becomes a runtime record. Effect
 parameters use ordinary access bounds—`Effect`, `mut Effect`, and `once Effect`—so reusable APIs
 cannot accidentally accept a take-once computation.

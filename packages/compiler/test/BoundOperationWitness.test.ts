@@ -253,7 +253,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* twoEngineValue(
         'bound-operation-witness/fallible-weaker-access',
-        `import silk.effects as Effect
+        `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 pub struct Problem { code: i32 }
@@ -370,7 +370,7 @@ pub fn main() -> i32 {
 it.effect('widens a pure source witness to the exact interface Effect contract', () =>
   Effect.gen(function* () {
     const module = 'bound-operation-witness/pure-effect-boundary'
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 pub struct Problem {}
@@ -499,7 +499,7 @@ it.effect('widens a smaller Effect witness row at the interface boundary', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'bound-operation-witness/smaller-effect-row',
-      `import silk.effects as Effect
+      `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 pub struct Problem {}
@@ -545,7 +545,7 @@ it.effect('retains exact caller requirements while widening witness access and r
     const module = 'bound-operation-witness/requirement-access-widening'
     const snapshot = yield* analyzed(
       module,
-      `import silk.effects as Effect
+      `import silk.effect as Effect
 service Clock {}
 service Meter {}
 struct FixedClock { token: i32 }

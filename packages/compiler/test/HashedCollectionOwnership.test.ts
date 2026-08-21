@@ -100,7 +100,7 @@ fn release(tag: i32, storage: Allocation) -> i32 {
 const program = (body: string): string =>
   `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 ${owners}
 
 effect fn build() -> i32 ! OutOfMemoryError {

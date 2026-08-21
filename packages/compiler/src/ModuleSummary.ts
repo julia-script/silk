@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as ImportPath from './ImportPath.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as SyntaxFile from './SyntaxFile.js'
@@ -57,7 +58,7 @@ const importModule = (
 ): string | undefined => {
   const path = SyntaxTree.directNode(declaration, 'ImportPath')
   if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) return undefined
-  const segments = SyntaxTree.tokens(path).filter((token) => token.kind === 'Identifier')
+  const segments = ImportPath.segments(path)
   if (segments.length === 0) return undefined
   return segments.map((segment) => spelling(source, segment)).join('/')
 }

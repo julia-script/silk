@@ -247,7 +247,7 @@ the protected Effect succeeds with `A` and the handler succeeds with `B`, the re
 success type is the normalized union `A | B`.
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 struct NotFoundError {}
 
@@ -291,7 +291,7 @@ diagnostic code for this general mismatch is not yet assigned.
 **Current compiler:** Aligned. `Effect.catch` and `Effect.catchAll` use separate protected and
 handler success types and normalize the result to `A | B`.
 
-**Evidence:** [current recovery signatures](../../packages/compiler/stdlib/silk/effects.silk),
+**Evidence:** [current recovery signatures](../../packages/compiler/stdlib/silk/effect.silk),
 [earlier union decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [selective recovery tests](../../packages/compiler/test/SelectiveCatch.test.ts).
 
@@ -313,7 +313,7 @@ Success and failure types use ordinary union normalization. Requirement rows ret
 capability, access, and role normalization.
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 struct NotFoundError {}
 struct InvalidInputError {}
@@ -387,7 +387,7 @@ unselected value to return, and the selected payload is still needed by the hand
 `Selected` or `Unselected` case also lets generic code branch without knowing every concrete member
 of either union.
 
-**Evidence:** [set-to-set `Without` behavior](../../packages/compiler/stdlib/silk/effects.silk),
+**Evidence:** [set-to-set `Without` behavior](../../packages/compiler/stdlib/silk/effect.silk),
 [current singleton recovery path](../../packages/compiler/test/SelectiveCatch.test.ts),
 [current singleton-only specification](../../openspec/specs/bootstrap-flow-functions/spec.md).
 
@@ -443,7 +443,7 @@ the failure becomes a host outcome. Physical entry adapters and coroutine-resume
 logical source frames.
 
 **Evidence:** [ownership cleanup rule](ownership-and-borrowing.md#cleanup-001--cleanup-follows-ownership),
-[effect finalization contract](../../packages/compiler/stdlib/silk/effects.silk),
+[effect finalization contract](../../packages/compiler/stdlib/silk/effect.silk),
 [effect-entry trace and cleanup tests](../../packages/compiler/test/EffectEntry.test.ts).
 
 ## FAIL-007 — A trap is fatal and remains outside Effect outcomes

@@ -278,7 +278,7 @@ An effectful entry point returns `()` and reports success as exit status 0. An u
 becomes a non-zero status.
 
 Failures are handled with ordinary library functions rather than special syntax — `Effect.catch`,
-`Effect.catchAll`, and `Effect.retry` are written in Silk in `effects.silk`, not built into the
+`Effect.catchAll`, and `Effect.retry` are written in Silk in `effect.silk`, not built into the
 compiler. The requirement row (`?`) works the same way for capabilities such as an allocator or a
 logger: a caller supplies them with `provide`, and the row shrinks as they are supplied.
 

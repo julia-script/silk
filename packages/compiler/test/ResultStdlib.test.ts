@@ -25,7 +25,7 @@ pub fn main() -> i32 {
 const affinePayload = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure, succeed }
 
@@ -64,7 +64,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
-const reifiedEffect = `import silk.effects as Effect
+const reifiedEffect = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
@@ -97,7 +97,7 @@ pub fn main() -> i32 {
 const reifiedRequirement = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure }
 
@@ -128,7 +128,7 @@ fn release(storage: Allocation) -> i32 {
 
 pub fn main() -> i32 { return run build() }`
 
-const reifiedTrap = `import silk.effects as Effect
+const reifiedTrap = `import silk.effect as Effect
 import silk.result { Result }
 
 effect fn explode() -> i32 {
@@ -160,7 +160,7 @@ pub fn main() -> i32 {
   return run closed
 }`
 
-const sourceDefinedMaps = `import silk.effects as Effect
+const sourceDefinedMaps = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
@@ -186,7 +186,7 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 42
 }`
 
-const sourceDefinedEffectfulCombinators = `import silk.effects as Effect
+const sourceDefinedEffectfulCombinators = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 struct First { code: i32 }
@@ -226,7 +226,7 @@ pub fn main() -> i32 {
   return observeBoth(move chained) + observeBoth(move observed) + observeSecond(move recovered) - 82
 }`
 
-const sourceDefinedRetry = `import silk.effects as Effect
+const sourceDefinedRetry = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 
 struct Problem { code: i32 }
@@ -249,7 +249,7 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure) - 2
 }`
 
-const sourceDefinedProvide = `import silk.effects as Effect
+const sourceDefinedProvide = `import silk.effect as Effect
 service Clock { effect fn value() -> i32 ? &mut Clock }
 struct FixedClock { value: i32 }
 effect fn clockValue(self: &mut FixedClock) -> i32 { return self.value }

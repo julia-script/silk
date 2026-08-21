@@ -51,7 +51,7 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
  */
 const spelledTwoWays = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
@@ -97,7 +97,7 @@ it.effect(
  */
 const comparedDirectly = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
@@ -130,7 +130,7 @@ it.effect(
 
 const decomposing = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view, ownedByteLength }
 import silk.unicode { normalizeNfd }
 
@@ -170,7 +170,7 @@ it.effect(
 
 const composing = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
@@ -307,7 +307,7 @@ pub fn main() -> i32 {
 const allocationFailure = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }

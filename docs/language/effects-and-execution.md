@@ -213,7 +213,7 @@ handler can fail, or a provision operation whose acquisition has requirements, d
 boundary unless those new channels are also eliminated.
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 struct ProblemError {}
 

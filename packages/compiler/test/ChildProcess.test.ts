@@ -73,7 +73,7 @@ impl ChildProcess for Broken { execute: Broken.brokenExecute }
 `
 
 const imports = `import silk.bytes { append as bytesAppend, make as bytesMake }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.child_process {

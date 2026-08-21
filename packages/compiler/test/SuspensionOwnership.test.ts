@@ -29,7 +29,7 @@ const plansFor = (
 const source = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Owner { value: i32 }
 effect fn delayed(value: i32) -> i32 {

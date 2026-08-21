@@ -170,6 +170,20 @@ it.effect('records cycles and exact dotted-to-canonical import provenance', () =
   }),
 )
 
+it.effect('maps reserved contextual path segments to canonical module identities', () =>
+  Effect.gen(function* () {
+    const closure = yield* fixture('app/Main', [
+      ['app/Main', `import toolkit.effect.helpers as Helpers\n${fn}`],
+      ['toolkit/effect/helpers', 'pub fn answer() -> i32 { return 42 }'],
+    ])
+    const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)
+    assert.strictEqual(imported?.sourceSpelling, 'toolkit.effect.helpers')
+    assert.strictEqual(imported?.canonicalTarget, 'toolkit/effect/helpers')
+    assert.strictEqual(imported?.target._tag, 'Resolved')
+    assert.deepEqual(closure.diagnostics, [])
+  }),
+)
+
 it.effect('preserves case and rejects malformed explicit root identities', () =>
   Effect.gen(function* () {
     const mismatch = yield* fixture('app/Main', [

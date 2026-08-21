@@ -30,7 +30,7 @@ const assertRunsEverywhere = Effect.fnUntraced(function* (
 
 const ownedAndScalars = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u32 as u32
 import silk.string {
   ScalarCursor,
@@ -113,7 +113,7 @@ it.effect(
 const allocationFailure = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.string { copy, append, view, ownedByteLength }
 

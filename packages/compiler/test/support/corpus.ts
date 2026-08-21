@@ -78,7 +78,7 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
-export const constrainedCallableForwarding = `import silk.effects as Effect
+export const constrainedCallableForwarding = `import silk.effect as Effect
 service Counter {
   effect fn get() -> i32 ? &Counter
 }
@@ -98,7 +98,7 @@ pub fn main() -> i32 {
 }`
 
 /** Failure payloads retain member bits while rows change their widest physical carrier lane. */
-export const heterogeneousFailurePayload = `import silk.effects as Effect
+export const heterogeneousFailurePayload = `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Small { code: i32 }
 struct Wide { code: f64 }
@@ -124,7 +124,7 @@ export const heterogeneousOwnedFailurePayload = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
@@ -161,7 +161,7 @@ export const heterogeneousOwnedFailureResultDrop = `import silk.core { Allocator
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
@@ -305,7 +305,7 @@ pub fn main() -> i32 { return run choose(First {}) }`,
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct First {}
 struct Second {}
@@ -801,7 +801,7 @@ pub fn main() -> i32 {
     name: 'string-owned-scalars',
     source: `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u32 as u32
 import silk.string {
   ScalarCursor,
@@ -858,7 +858,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     name: 'unicode-compared-directly',
     source: `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
@@ -963,7 +963,7 @@ pub fn main() -> i32 {
     name: 'hashed-map-growth',
     source: `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32 as i32
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
@@ -1003,7 +1003,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     name: 'vector-growth-reads',
     source: `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -1039,7 +1039,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
 
@@ -1080,7 +1080,7 @@ pub fn main() -> i32 {
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -1115,7 +1115,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.f64 as f64
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
@@ -1149,7 +1149,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     name: 'bytes-parity',
     source: `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
@@ -1204,7 +1204,7 @@ pub fn main() -> i32 {
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -1263,7 +1263,7 @@ pub fn main() -> i32 {
   // exclusive capture persists, and the third attempt's count is the exit (3, not 42).
   {
     name: 'effect-retry-captures',
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
@@ -1286,7 +1286,7 @@ pub fn main() -> i32 {
   // every attempt, and the recovery answers with the failure exit (7).
   {
     name: 'suspension-retry-failure',
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn attempt() -> i32 ! Problem {
   let observed = run Effect.suspend(effect { return 1 })
@@ -1303,7 +1303,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'suspension-repeated-states',
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 effect fn twice() -> i32 {
   let left = run Effect.suspend(effect { return 40 })
   let right = run Effect.suspend(effect { return 2 })
@@ -1339,7 +1339,7 @@ pub fn main() -> i32 { return run twice() }`,
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -1373,7 +1373,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -1455,7 +1455,7 @@ pub fn main() -> i32 {
   // compile/link test.
   {
     name: 'effect-selective-catch',
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 effect fn risky(mode: i32) -> i32 ! Selected | Residual {
@@ -1478,7 +1478,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'effect-selective-catch-direct-stored',
-    source: `import silk.effects as Effect
+    source: `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 effect fn risky() -> i32 ! Selected | Residual { fail Selected { code: 10 } }

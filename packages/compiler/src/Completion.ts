@@ -342,7 +342,19 @@ const typeCandidates = (
   scope: NameResolution.ModuleScope | undefined,
   fn: Elaboration.FunctionFact | undefined,
 ): ReadonlyArray<Candidate> => {
-  const candidates: Array<Candidate> = []
+  const candidates: Array<Candidate> = [
+    candidate({
+      identity: syntax('Effect'),
+      kind: 'Type',
+      label: 'Effect',
+      detail: Object.freeze({
+        _tag: 'IntrinsicActorPresentation',
+        name: 'Effect',
+        text: 'builtin type Effect<A ! E ? R>',
+      }),
+      sortGroup: 1,
+    }),
+  ]
   for (const scalar of Scalar.all())
     candidates.push(
       candidate({
@@ -646,7 +658,7 @@ export const complete = (options: {
           candidates: stable([
             ...actorCandidates(intrinsic),
             ...(intrinsic.spelling === 'Effect'
-              ? namespaceCandidates(options.index, 'silk/effects')
+              ? namespaceCandidates(options.index, 'silk/effect')
               : []),
           ]),
         })

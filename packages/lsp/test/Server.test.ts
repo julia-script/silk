@@ -118,7 +118,7 @@ pub fn main() -> i32 {
     )
 
     const completionUri = 'file:///silk-lsp-e2e/completion.silk'
-    const completionText = `import silk.effects as Effect
+    const completionText = `import silk.effect as Effect
 
 pub fn main() -> i32 {
   return Effect.
@@ -648,7 +648,7 @@ pub fn main() -> i32 { return identity(42) }`,
     }>
     assert.deepEqual(shadowed[0]?.targetSelectionRange.start, { line: 5, character: 8 })
 
-    const latest = `import silk.effects as Effect
+    const latest = `import silk.effect as Effect
 import silk.i32 as i32
 
 // π🙂

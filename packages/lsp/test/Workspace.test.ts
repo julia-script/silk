@@ -356,7 +356,7 @@ it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
   Effect.gen(function* () {
     const root = project()
     const source = `import silk.core { Allocator, OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 
 pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run Effect.suspend(effect { return 42 })
@@ -370,18 +370,18 @@ pub fn main() -> i32 { return 42 }`
     const snapshot = yield* Workspace.analyze(document, [])
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-    const librarySource = Analysis.sources(snapshot).get('silk/effects')
+    const librarySource = Analysis.sources(snapshot).get('silk/effect')
     assert.isDefined(librarySource)
     if (librarySource === undefined) return
     assert.strictEqual(librarySource.origin._tag, 'ToolchainFile')
     const libraryUri = yield* Workspace.uriOf(librarySource, [document])
-    assert.strictEqual(libraryUri, Stdlib.find('silk/effects')?.sourceUrl.href)
+    assert.strictEqual(libraryUri, Stdlib.find('silk/effect')?.sourceUrl.href)
 
     const definition = Document.definition(
       document,
       snapshot,
       { line: 4, character: source.split('\n')[4]?.indexOf('suspend') ?? 0 },
-      (module) => (module === 'silk/effects' ? libraryUri : undefined),
+      (module) => (module === 'silk/effect' ? libraryUri : undefined),
     )
     assert.strictEqual(definition?.targetUri, libraryUri)
     const libraryLines = decoder.decode(SourceFile.toUint8Array(librarySource)).split('\n')

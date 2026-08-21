@@ -201,6 +201,20 @@ export const grammar: Grammar = {
     },
     { name: 'comment.line.double-slash.silk', match: '//[^\\n]*' },
     {
+      // Import paths accept keyword tokens contextually, so classify every path segment as a
+      // namespace before the general keyword rules can color spellings such as `effect`.
+      name: 'meta.import.silk',
+      begin: '\\b(import)\\s+',
+      end: '(?=\\s*(?:as\\b|\\{))|$',
+      beginCaptures: {
+        '1': { name: 'storage.type.silk' },
+      },
+      patterns: [
+        { name: 'entity.name.namespace.silk', match: '\\b[A-Za-z_][A-Za-z0-9_]*\\b' },
+        { name: 'punctuation.silk', match: '\\.' },
+      ],
+    },
+    {
       // Color `fn` and the declaration name together so themes can style entity.name.function.
       match: '\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)',
       captures: {

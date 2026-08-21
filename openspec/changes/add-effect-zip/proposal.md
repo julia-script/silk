@@ -1,6 +1,6 @@
 ## Why
 
-`silk/effects` has no combinator that runs several Effects and keeps every result. A caller who
+`silk/effect` has no combinator that runs several Effects and keeps every result. A caller who
 needs two success values writes a `flatMap` whose callback closes over the first value and returns
 the second Effect, then builds the pair by hand inside that callback — the combination is spelled
 out at every call site, and the closed combinator list in `bootstrap-flow-functions` omits `zip`
@@ -47,7 +47,7 @@ propagation leaves.
 
 ## Impact
 
-The change affects canonical standard-library source (`silk/effects`), the compiler-shipped source
+The change affects canonical standard-library source (`silk/effect`), the compiler-shipped source
 table generated from it, the generated standard-library documentation page, the language reference's
 combinator list, and acceptance tests. It adds no intrinsic, no HIR or MIR operation, no diagnostic
 code, and no compiler-side name recognition.

@@ -705,7 +705,7 @@ The same rule applies to `Effect`, `Vector`, `Result`, filesystem services, targ
 primitive actor operations:
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32
 ```
 
@@ -718,7 +718,7 @@ Tooling may add missing imports automatically; auto-import is a source edit, not
 
 A foundational type spelling does not create an ordinary nominal declaration in the module scope.
 Therefore `import silk.i32` may bind actor namespace `i32` while type positions continue to use the
-closed language spelling `i32`; `import silk.effects as Effect` behaves similarly beside Effect
+closed language spelling `i32`; `import silk.effect as Effect` behaves similarly beside Effect
 type syntax. This does not create general separate type and value namespaces for user declarations.
 
 **Diagnostics:** Naming an unimported standard-library namespace uses the ordinary unknown-name

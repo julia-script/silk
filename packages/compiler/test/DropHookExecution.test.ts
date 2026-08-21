@@ -9,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
 const fallthrough = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -37,7 +37,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const earlyDrop = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -66,7 +66,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const failurePropagation = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -107,7 +107,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const recursiveReturn = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -178,7 +178,7 @@ it.effect('runs Drop hooks before field cleanup exactly once on every structured
 const parametric = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard<T> {
   value: T

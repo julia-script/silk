@@ -4,12 +4,14 @@ import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as Formatter from '@silk-effect/compiler/Formatter'
+import * as ImportPath from '@silk-effect/compiler/ImportPath'
 import * as ImportPlan from '@silk-effect/compiler/ImportPlan'
 import * as Presentation from '@silk-effect/compiler/Presentation'
 import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
 import type * as SourceAction from '@silk-effect/compiler/SourceAction'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
+import * as Stdlib from '@silk-effect/compiler/Stdlib'
 import type * as SyntaxFile from '@silk-effect/compiler/SyntaxFile'
 import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import type * as Token from '@silk-effect/compiler/Token'
@@ -257,12 +259,7 @@ const importRedundancies = (
         }
       }
     }
-    const defaultName =
-      path === undefined
-        ? undefined
-        : SyntaxTree.tokens(path)
-            .filter((token) => token.kind === 'Identifier')
-            .at(-1)
+    const defaultName = path === undefined ? undefined : ImportPath.segments(path).at(-1)
     const aliases = [
       { owner: declaration, source: defaultName },
       ...SyntaxTree.directNodes(
@@ -483,7 +480,7 @@ const handledEffectEdit = (
     const plan = Option.getOrUndefined(
       ImportPlan.make({
         syntax,
-        module: 'silk/effects',
+        module: 'silk/effect',
         spelling: imported,
         localSpelling,
       }),
@@ -1325,11 +1322,15 @@ export const completion = (
   if (syntax === undefined) return { isIncomplete: false, items: [...items] }
   const visible = new Set(items.map((item) => item.label))
   const imported = new Set<string>()
+  const importedNamespaces = new Map<string, string>()
   for (const entry of Analysis.moduleScope(snapshot, self.module)?.imports ?? []) {
     if (entry._tag !== 'Available') continue
-    for (const binding of entry.bindings)
+    for (const binding of entry.bindings) {
       if (binding._tag === 'ImportedMember')
         imported.add(`${binding.declaration.module}:${binding.sourceSpelling}`)
+      else if (binding._tag === 'ModuleNamespace')
+        importedNamespaces.set(binding.module, binding.spelling)
+    }
   }
   const capitalize = (value: string): string =>
     value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`
@@ -1348,6 +1349,17 @@ export const completion = (
     }
     return selected
   }
+  const namespaceAlias = (module: string): string => {
+    const base = module.split('/').map(capitalize).join('') || 'Imported'
+    let selected = base
+    let suffix = 2
+    while (visible.has(selected)) {
+      selected = `${base}${suffix}`
+      suffix += 1
+    }
+    visible.add(selected)
+    return selected
+  }
   const completionItemKind = (candidate: WorkspaceInventory.Candidate): CompletionItemKind => {
     switch (candidate.exported.declarationKind) {
       case 'Function':
@@ -1361,6 +1373,51 @@ export const completion = (
         return CompletionItemKind.Interface
     }
   }
+  const partial = Option.getOrElse(SourceFile.spelling(syntax.source, result.replacement), () => '')
+  const namespaces =
+    result.context._tag !== 'ExpressionContext'
+      ? []
+      : Stdlib.manifest.flatMap((entry, ordinal): ReadonlyArray<CompletionItem> => {
+          if (
+            entry.namespace === undefined ||
+            entry.module === self.module ||
+            partial.length === 0 ||
+            !entry.namespace.startsWith(partial) ||
+            importedNamespaces.has(entry.module)
+          )
+            return []
+          const localSpelling = visible.has(entry.namespace)
+            ? namespaceAlias(entry.module)
+            : entry.namespace
+          const plan = Option.getOrUndefined(
+            ImportPlan.namespace({
+              syntax,
+              module: entry.module,
+              spelling: entry.namespace,
+              localSpelling,
+            }),
+          )
+          if (plan === undefined) return []
+          const edits = plan.change?.changes.get(self.module) ?? []
+          return [
+            {
+              label: entry.namespace,
+              labelDetails: { description: entry.module },
+              kind: CompletionItemKind.Module,
+              detail: `Import namespace from ${entry.module}`,
+              sortText: `18-${String(ordinal).padStart(5, '0')}-${entry.module}`,
+              textEdit: { range, newText: plan.localSpelling },
+              ...(edits.length === 0
+                ? {}
+                : {
+                    additionalTextEdits: edits.map((edit) => ({
+                      range: LineIndex.rangeOf(self.index, edit.span),
+                      newText: edit.replacement,
+                    })),
+                  }),
+            },
+          ]
+        })
   const catalog = [...inventory.byName.values()]
     .flat()
     .filter(
@@ -1397,7 +1454,7 @@ export const completion = (
         },
       ]
     })
-  return { isIncomplete: false, items: [...items, ...catalog] }
+  return { isIncomplete: false, items: [...items, ...namespaces, ...catalog] }
 }
 
 /** Returns the document's top-level declarations as symbols. */
@@ -1650,13 +1707,22 @@ export const semanticTokens = (
   const byStart = new Map<number, SemanticOccurrence.SemanticOccurrence>()
   for (const occurrence of occurrences)
     if (!byStart.has(occurrence.span.start)) byStart.set(occurrence.span.start, occurrence)
+  const importPathSegmentStarts = new Set(
+    SyntaxTree.directNodes(syntax.root, 'ImportDeclaration').flatMap((declaration) => {
+      const path = SyntaxTree.directNode(declaration, 'ImportPath')
+      return path === undefined
+        ? []
+        : ImportPath.segments(path).map((segment) => segment.span.start)
+    }),
+  )
   const data: Array<number> = []
   let previousLine = 0
   let previousCharacter = 0
   for (const token of SyntaxTree.tokens(syntax.root)) {
     const occurrence = byStart.get(token.span.start)
-    const type =
-      occurrence !== undefined && token.kind === 'Identifier'
+    const type = importPathSegmentStarts.has(token.span.start)
+      ? SemanticTokenTypes.namespace
+      : occurrence !== undefined && token.kind === 'Identifier'
         ? occurrenceTokenType(snapshot, occurrence)
         : lexicalTokenType(token.kind)
     if (type === undefined) continue

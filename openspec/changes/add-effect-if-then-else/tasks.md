@@ -1,6 +1,6 @@
 ## 1. Combinator
 
-- [x] 1.1 Add `Effect.ifThenElse` to canonical `silk/effects` source, taking the two branches as
+- [x] 1.1 Add `Effect.ifThenElse` to canonical `silk/effect` source, taking the two branches as
       suspended `once fn() -> Effect<...>` arms and invoking only the arm the condition selects.
 - [x] 1.2 Release the unselected arm with an explicit `drop move`, so the affine obligation for the
       arm that is never invoked is discharged in the source.

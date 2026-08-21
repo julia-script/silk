@@ -134,7 +134,7 @@ const fill = (map: string): string =>
 const ordered = (seed: number, digest: number): string =>
   `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.hash { HashKey }
 import silk.hash { Word }
 import silk.u64 as u64

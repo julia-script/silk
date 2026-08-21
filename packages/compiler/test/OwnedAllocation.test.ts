@@ -9,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
 const source = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -36,7 +36,7 @@ pub fn main() -> i32 {
 const sharedReadSource = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -62,7 +62,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const nonCopyReadSource = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -94,7 +94,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const unionReadSource = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -126,7 +126,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const moveOnlyUnionReadSource = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -164,7 +164,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const unsafeProgram = (body: string, layout = '[i32; 2]'): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot

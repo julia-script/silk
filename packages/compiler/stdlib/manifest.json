@@ -54,8 +54,8 @@
     ]
   },
   {
-    "module": "silk/effects",
-    "path": "silk/effects.silk",
+    "module": "silk/effect",
+    "path": "silk/effect.silk",
     "layer": "portable",
     "namespace": "Effect"
   },

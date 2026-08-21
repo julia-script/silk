@@ -53,7 +53,7 @@ One completed outcome: either a success carrying `A` or a failure carrying `F`.
 
 `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 failure row into ordinary value data, which is what lets the failure combinators in
-`silk.effects` be written as ordinary Silk source instead of compiler built-ins.
+`silk.effect` be written as ordinary Silk source instead of compiler built-ins.
 
 <a id="declaration-73696c6b2f726573756c743a3a73756363656564"></a>
 

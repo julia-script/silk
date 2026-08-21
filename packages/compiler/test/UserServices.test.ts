@@ -22,7 +22,7 @@ const snapshot = (source: string, target?: string) =>
 const evaluate = (source: string) =>
   Effect.map(snapshot(source), (self) => ({ self, outcome: Analysis.evaluate(self) }))
 
-const sharedSource = `import silk.effects as Effect
+const sharedSource = `import silk.effect as Effect
 service Counter {
   effect fn get() -> i32 ? &Counter
 }
@@ -54,7 +54,7 @@ it.effect(
   'specializes a conditional generic service witness and its unused proof dependency',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.effects as Effect
+      const source = `import silk.effect as Effect
 interface Marker { fn mark(value: &Self) -> i32 }
 
 struct Token {}
@@ -197,7 +197,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('dispatches an exclusive source service and preserves provider mutation', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -252,7 +252,7 @@ for (const provider of [
     `transfers ${provider.label} Effect recipes and protected borrows through move aliases`,
     () =>
       Effect.gen(function* () {
-        const source = `import silk.effects as Effect
+        const source = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 struct Token { value: i32 }
 service Counter {
@@ -341,7 +341,7 @@ pub fn main() -> i32 {
 
 it.effect('dispatches an owned source service provider exactly once', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -444,7 +444,7 @@ it.effect('keeps a synchronous service with an allocator requirement synchronous
   Effect.gen(function* () {
     const source = `import silk.core { Allocator }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 service Value {
   effect fn read() -> i32 ? &mut Value | &mut Allocator
 }
@@ -514,7 +514,7 @@ it.effect('releases an owned source provider after the protected Effect complete
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Problem { code: i32 }
 service Value { effect fn read() -> i32 ? &mut Value }
 struct Provider { storage: Allocation }
@@ -583,7 +583,7 @@ pub fn main() -> i32 {
 
 it.effect('uses a nested provider override only for its lexical provision', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
 service Value {
   effect fn get() -> i32 ? &Value
 }
@@ -656,7 +656,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('ends the provider loan after the provided effect completes', () =>
   Effect.gen(function* () {
-    const { self, outcome } = yield* evaluate(`import silk.effects as Effect
+    const { self, outcome } = yield* evaluate(`import silk.effect as Effect
 service Value {
   effect fn get() -> i32 ? &Value
 }

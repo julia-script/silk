@@ -18,7 +18,7 @@ afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 const source = `import silk.core as StandardStream
 import silk.core { NativeStandardStreams }
 import silk.core { StreamWriteError }
-import silk.effects as Effect
+import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
@@ -181,7 +181,7 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
       encoder.encode(`import silk.core as StandardStream
 import silk.core { StandardStreams }
 import silk.core { StreamWriteError }
-import silk.effects as Effect
+import silk.effect as Effect
 struct MemoryStreams { writes: i32 }
 effect fn record(
   self: &mut MemoryStreams,

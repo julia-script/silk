@@ -252,7 +252,7 @@ The compiler distinguishes an unknown member from a known private member. Import
 collisions but never change canonical identity. Redundant aliases and exact duplicate imports are
 valid no-ops that tooling may simplify.
 
-Standard-library modules use the same visible source rule: `import silk.effects as Effect` exposes
+Standard-library modules use the same visible source rule: `import silk.effect as Effect` exposes
 the ordinary `Effect` actor, while `Effect<A ! E ? R>` remains language type syntax. Auto-import
 inserts source rather than creating a hidden prelude binding.
 

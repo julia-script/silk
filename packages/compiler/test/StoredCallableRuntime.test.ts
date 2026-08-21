@@ -174,7 +174,7 @@ type CleanupExit = 'uncalled' | 'consuming' | 'moved' | 'typed-failure'
 const cleanupProgram = (dropBody: string, exit: CleanupExit) => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -209,7 +209,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 const hookOnlyCleanupProgram = (exit: CleanupExit) => `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Guard<F: once fn(i32) -> i32> {
   tag: i32
   marker: F
@@ -245,7 +245,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const cleanupExits = ['uncalled', 'consuming', 'moved', 'typed-failure'] as const
 
 const typedFailure = `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${takeDeclarations}effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 2 }
   let holder = Holder { step: consume(move token) }

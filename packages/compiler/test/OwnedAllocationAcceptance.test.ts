@@ -63,7 +63,7 @@ const ascii = (value: string): Uint8Array =>
 const guarded = (body: string): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 effect fn store() -> i32 ! OutOfMemoryError {
@@ -94,7 +94,7 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
         `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

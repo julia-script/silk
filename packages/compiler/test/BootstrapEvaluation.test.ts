@@ -112,7 +112,7 @@ it.effect('dispatches an arbitrary source service through a provided source witn
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'memory/evaluation',
-      ascii(`import silk.effects as Effect
+      ascii(`import silk.effect as Effect
 service Counter {
   effect fn get() -> i32 ? &Counter
 }
@@ -262,15 +262,15 @@ pub fn main() -> i32 {
 
 it.effect('maps, flatMaps, and taps Effect successes through ordinary callable values', () =>
   Effect.gen(function* () {
-    const mapped = yield* evaluateSource(`import silk.effects as Effect
+    const mapped = yield* evaluateSource(`import silk.effect as Effect
 import silk.i32 as i32
 effect fn succeed(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(2) |> Effect.map(i32.add(2)) }`)
-    const flatMapped = yield* evaluateSource(`import silk.effects as Effect
+    const flatMapped = yield* evaluateSource(`import silk.effect as Effect
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run succeed(21) |> Effect.flatMap(double) }`)
-    const tapped = yield* evaluateSource(`import silk.effects as Effect
+    const tapped = yield* evaluateSource(`import silk.effect as Effect
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn observe(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
@@ -288,7 +288,7 @@ pub fn main() -> i32 { return run succeed(42) |> Effect.tap(observe) }`)
 
 it.effect('keeps an Effect returned from map nested until a second run', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.effects as Effect
+    const outcome = yield* evaluateSource(`import silk.effect as Effect
 effect fn succeed(value: i32) -> i32 { return value }
 effect fn double(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
@@ -300,7 +300,7 @@ pub fn main() -> i32 { return run (run (succeed(21) |> Effect.map(double))) }`)
 
 it.effect('retains an exclusive mapper environment across repeated mapped Effect runs', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 effect fn succeed(value: i32) -> i32 { return value }
 fn increment(value: i32, state: &mut [i32]) -> i32 {
   state[0] = state[0] + 1
@@ -329,7 +329,7 @@ pub fn main() -> i32 {
         (event) =>
           event._tag === 'CallableApply' &&
           event.mode === 'Exclusive' &&
-          event.function.module === 'silk/effects',
+          event.function.module === 'silk/effect',
       ).length,
       2,
     )
@@ -338,7 +338,7 @@ pub fn main() -> i32 {
 
 it.effect('drops an unrun mapped Effect owned callback environment exactly once', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.effects as Effect
+    const outcome = yield* evaluateSource(`import silk.effect as Effect
 struct Token { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
 fn consume(value: i32, token: Token) -> i32 { return value + token.value }
@@ -358,7 +358,7 @@ pub fn main() -> i32 {
 
 it.effect('catches a typed failure through an automatic effect-handler section', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.effects as Effect
+    const outcome = yield* evaluateSource(`import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn failNow() -> i32 ! Problem { fail Problem { code: 41 } }
 effect fn recover(problem: Problem, adjustment: i32) -> i32 {
@@ -426,7 +426,7 @@ pub fn main() -> i32 {
 
 it.effect('catches one exact owned effect failure without using traps', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.effects as Effect
+    const outcome = yield* evaluateSource(`import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn risky(value: i32) -> i32 ! Problem {
   if value == 0 { fail move Problem { code: 41 } }
@@ -518,7 +518,7 @@ fn other() -> i32 { return main() }`,
 
 it.effect('unwinds a typed failure through recursive effect activations', () =>
   Effect.gen(function* () {
-    const outcome = yield* evaluateSource(`import silk.effects as Effect
+    const outcome = yield* evaluateSource(`import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn countdown(value: i32) -> i32 ! Problem {
   if value == 0 { fail Problem { code: 41 } }

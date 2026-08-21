@@ -1,7 +1,7 @@
 export const ownedAllocatorSuspensionSuccess = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure }
 struct OwnedAllocator { storage: Allocation }
@@ -45,7 +45,7 @@ pub fn main() -> i32 {
 export const ownedAllocatorSuspensionFailure = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure }
 struct Problem { code: i32 }
@@ -99,7 +99,7 @@ pub fn main() -> i32 {
 export const auditAllocatorSuspension = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 role SharedAudit
 role ExclusiveAudit
 struct AuditAllocator { tag: i32 }
@@ -123,7 +123,7 @@ export const ownedProviderSuspendedSuccess = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 service Counter {
   effect fn increment() -> i32 ? &mut Counter
 }
@@ -156,7 +156,7 @@ export const ownedProviderSuspendedFailure = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Problem { code: i32 }
 service Value {
   effect fn read() -> i32 ! Problem ? &mut Value
@@ -187,7 +187,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(Effect.provideMut(program(), &mut allocator), recover)
 }`
 
-export const mixedServiceProviderSuspension = `import silk.effects as Effect
+export const mixedServiceProviderSuspension = `import silk.effect as Effect
 service Value {
   effect fn read() -> i32 ? &mut Value
 }

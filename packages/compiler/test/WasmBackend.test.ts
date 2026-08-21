@@ -108,7 +108,7 @@ pub fn main() -> i32 {
 
 it.effect('preserves borrow roots carried by returned Effect environment lanes', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 struct Token { value: i32 }
 service Counter { effect fn read(token: &mut Token) -> i32 ? &mut Counter }
 struct Cell { value: i32 }

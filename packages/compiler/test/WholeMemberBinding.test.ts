@@ -40,7 +40,7 @@ const run = (label: string, text: string) =>
 const layoutExtract = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
 import silk.raw_buffer as RawBuffer
@@ -75,7 +75,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const affineExtract = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Empty {}
 struct Full { storage: Allocation }

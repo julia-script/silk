@@ -118,7 +118,7 @@ effect fn recoverB(problem: B) -> i32 { return problem.code + 2 }
 effect fn recoverRow(problem: A | B) -> i32 { return 99 }
 `
 
-const runtimeMatrixSource = `import silk.effects as Effect
+const runtimeMatrixSource = `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 effect fn risky(mode: i32) -> i32 ! Selected | Residual {
@@ -142,7 +142,7 @@ const cleanupPreamble = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
 import silk.layout { Layout }
-import silk.effects as Effect
+import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 struct HandlerProblem { code: i32 }
@@ -175,7 +175,7 @@ effect fn recoverResidual(problem: Residual) -> i32 { return problem.code + 2 }
 effect fn recoverAny(problem: Residual | HandlerProblem) -> i32 { return 30 }
 `
 
-const borrowedMatchSource = (catch_: string): string => `import silk.effects as Effect
+const borrowedMatchSource = (catch_: string): string => `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Token { value: i32 }
 struct Left {}
@@ -195,7 +195,7 @@ fn choose(choice: Left | Right) -> i32 {
 }
 pub fn main() -> i32 { return choose(Left {}) + choose(Right {}) }`
 
-const borrowedResidualMatchSource = (catch_: string): string => `import silk.effects as Effect
+const borrowedResidualMatchSource = (catch_: string): string => `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 struct Token { value: i32 }
@@ -221,7 +221,7 @@ pub fn main() -> i32 {
   return (run move left) + (run move right)
 }`
 
-const runFailureLoanSource = `import silk.effects as Effect
+const runFailureLoanSource = `import silk.effect as Effect
 struct Residual { code: i32 }
 struct Token { value: i32 }
 effect fn risky(value: i32) -> i32 ! Residual {
@@ -249,7 +249,7 @@ pub fn main() -> i32 {
   return (run move first) + (run move second)
 }`
 
-const infallibleRunLoanSource = `import silk.effects as Effect
+const infallibleRunLoanSource = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 struct Token { value: i32 }
 effect fn succeed(value: i32) -> i32 { return value }
@@ -270,7 +270,7 @@ pub fn main() -> i32 {
 
 it.effect('recovers one member and leaves the other in the result failure row', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverA)
@@ -285,7 +285,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
 
 it.effect('infers the singleton selector from the handler parameter', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch(risky(flag), recoverA)
@@ -300,7 +300,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
 
 it.effect('forwards nominal-member evidence through an open generic wrapper', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn select<S, A, E>(
   self: once Effect<A ! E>,
@@ -341,7 +341,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('executes a reachable direct intrinsic through the ordinary target inventory', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 ${preamble}
 effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
 pub fn main() -> i32 {
@@ -387,7 +387,7 @@ pub fn main() -> i32 {
 it.effect('releases an owned handler captured by a stored direct intrinsic', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${cleanupPreamble}
 effect fn direct() -> i32 ! OutOfMemoryError {
   let guard = run makeGuard(1)
@@ -416,7 +416,7 @@ pub fn main() -> i32 { return run Effect.catchAll(direct(), recoverAllocation) }
 
 it.effect('is independent of the authored failure-row member order', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn left() -> i32 ! A | B { fail A { code: 10 } }
 effect fn right() -> i32 ! B | A { fail A { code: 10 } }
@@ -438,7 +438,7 @@ pub fn main() -> i32 { return (run completedLeft()) + (run completedRight()) }
 
 it.effect('deduplicates nested generic wrapper runners reached from multiple source calls', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn select<S, A, E>(
   self: once Effect<A ! E>,
@@ -477,7 +477,7 @@ pub fn main() -> i32 { return (run completed(true)) + (run completed(false)) }
 
 it.effect('unions handler failures with the nonselected remainder', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 pub struct C { code: i32 }
 effect fn recoverAWithFailure(problem: A) -> i32 ! C { fail C { code: problem.code } }
@@ -495,7 +495,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverRest) 
 
 it.effect('reports the unrecovered member as still present in the result row', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 pub fn main() -> i32 {
   return run Effect.catch<A>(risky(true), recoverA)
@@ -509,13 +509,13 @@ it.effect('catch and catchAll produce different result types on the same input',
   Effect.gen(function* () {
     // Same protected Effect, same recovery site, only the operation differs. catchAll erases the
     // whole row, so running it where no failure may escape is accepted.
-    const wholeRow = yield* analyze(`import silk.effects as Effect
+    const wholeRow = yield* analyze(`import silk.effect as Effect
 ${preamble}
 pub fn main() -> i32 { return run Effect.catchAll(risky(true), recoverRow) }`)
     assert.deepEqual(codes(wholeRow), [])
 
     // The selective form keeps B, so the identical run site now has a failure left to handle.
-    const selective = yield* analyze(`import silk.effects as Effect
+    const selective = yield* analyze(`import silk.effect as Effect
 ${preamble}
 pub fn main() -> i32 { return run Effect.catch<A>(risky(true), recoverA) }`)
     assert.deepEqual(codes(selective), ['SEM0066'])
@@ -524,7 +524,7 @@ pub fn main() -> i32 { return run Effect.catch<A>(risky(true), recoverA) }`)
 
 it.effect('records the protected, selected, handler, and residual rows as facts', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverA)
@@ -566,7 +566,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
 
 it.effect('rejects a selector the protected Effect cannot fail with', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 struct C { code: i32 }
 effect fn recoverC(problem: C) -> i32 { return 0 }
@@ -580,7 +580,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('rejects a handler that does not accept the selected member', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn selective(flag: bool) -> i32 ! B {
   return run Effect.catch<A>(risky(flag), recoverB)
@@ -596,7 +596,7 @@ for (const [name, selected, handler] of [
 ] as const) {
   it.effect(`rejects a ${name} before availability`, () =>
     Effect.gen(function* () {
-      const self = yield* analyze(`import silk.effects as Effect
+      const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn recoverNever(problem: never) -> i32 { return 0 }
 effect fn recoverUnion(problem: A | B) -> i32 { return 0 }
@@ -613,7 +613,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('accepts a nonempty selected failure union', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn recoverUnion(problem: A | B) -> i32 { return 0 }
 effect fn recovered(flag: bool) -> i32 {
@@ -629,7 +629,7 @@ pub fn main() -> i32 { return run recovered(true) }`)
 
 it.effect('joins different protected and handler success types as an ordinary union', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 struct ProblemError {}
 effect fn risky() -> i32 ! ProblemError { fail ProblemError {} }
 effect fn recover(problem: ProblemError) -> string { return "fallback" }
@@ -647,7 +647,7 @@ pub fn main() -> i32 {
 
 it.effect('carries an ordinary string directly through the failure channel', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 effect fn failText() -> i32 ! string { fail "oops" }
 effect fn recoverText(error: string) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(failText(), recoverText) }`)
@@ -688,7 +688,7 @@ pub fn main() -> i32 { return 0 }`)
  */
 it.effect('regression: narrowing a two-member row by contract still reports the mismatch', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn handleA(self: once Effect<i32 ! A>) -> i32 {
   return run Effect.catchAll(move self, recoverA)
@@ -703,7 +703,7 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`)
 
 it.effect('executes the direct selector form', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
 pub fn main() -> i32 {
@@ -725,7 +725,7 @@ for (const [label, catch_] of [
     `retains borrowed handler captures through inline, stored, and branched ${label} execution`,
     () =>
       Effect.gen(function* () {
-        const source = `import silk.effects as Effect
+        const source = `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Token { value: i32 }
 effect fn risky(shouldFail: bool) -> i32 ! Selected {
@@ -1529,7 +1529,7 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
 it.effect('does not let an unreachable loan ending follow failure propagation', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
-      `import silk.effects as Effect
+      `import silk.effect as Effect
 struct Selected { code: i32 }
 struct Residual { code: i32 }
 struct Token { value: i32 }
@@ -1648,7 +1648,7 @@ pub fn main() -> i32 {
 
 it.effect('executes the pipelined form and propagates the nonselected member', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effects as Effect
+    const self = yield* analyze(`import silk.effect as Effect
 ${preamble}
 effect fn recoverRest(problem: B) -> i32 { return problem.code + 3 }
 pub fn main() -> i32 {
@@ -1953,7 +1953,7 @@ it.effect('releases a reified owned residual directly from a floating union carr
 it.effect('preserves structured prefixes while propagating zero-based union failure tags', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyze(
-      `import silk.effects as Effect
+      `import silk.effect as Effect
 struct A { code: i32 }
 struct B { code: i32 }
 struct C { code: i32 }
@@ -2271,7 +2271,7 @@ it.effect('releases catch-owned handlers and live owners once before recovery', 
       [
         'success-bypass',
         `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
   let selected = Effect.catch<Selected>(succeed(), recoverSelectedWithGuard(move guard))
@@ -2285,7 +2285,7 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
       [
         'residual-propagation',
         `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
   return run Effect.catch<Selected>(failResidual(), recoverSelected)
@@ -2298,7 +2298,7 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
       [
         'handler-failure',
         `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | HandlerProblem | OutOfMemoryError {
   let guard = run makeGuard(1)
   return run Effect.catch<Selected>(failSelected(), failFromHandler)
@@ -2331,12 +2331,12 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
 
 it.effect('catch and catchAll no longer share a doc comment', () =>
   Effect.gen(function* () {
-    const bytes = Stdlib.sources.get('silk/effects')
-    if (bytes === undefined) unreachable('silk/effects source is missing')
+    const bytes = Stdlib.sources.get('silk/effect')
+    if (bytes === undefined) unreachable('silk/effect source is missing')
     const effects = new TextDecoder().decode(bytes)
     const docOf = (name: string): string => {
       const declaration = effects.indexOf(`pub effect fn ${name}<`)
-      if (declaration < 0) unreachable(`${name} is missing from silk/effects`)
+      if (declaration < 0) unreachable(`${name} is missing from silk/effect`)
       const before = effects.slice(0, declaration).split('\n')
       const lines: Array<string> = []
       for (let index = before.length - 2; index >= 0; index -= 1) {

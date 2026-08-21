@@ -293,6 +293,26 @@
       "match": "//[^\\n]*"
     },
     {
+      "name": "meta.import.silk",
+      "begin": "\\b(import)\\s+",
+      "end": "(?=\\s*(?:as\\b|\\{))|$",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.silk"
+        }
+      },
+      "patterns": [
+        {
+          "name": "entity.name.namespace.silk",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "punctuation.silk",
+          "match": "\\."
+        }
+      ]
+    },
+    {
       "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": {

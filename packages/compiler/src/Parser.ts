@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as ImportPath from './ImportPath.js'
 import type * as Lexer from './Lexer.js'
 import * as Operator from './Operator.js'
 import * as SourceFile from './SourceFile.js'
@@ -158,6 +159,71 @@ const expect = (
   const missing = missingToken(state, expected)
   return Object.freeze({
     state: addDiagnostic(state, Diagnostic.missingToken(expected, missing.span)),
+    elements: Object.freeze([...elements, missing]),
+  })
+}
+
+const expectImportPathSegment = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+  afterDot: boolean,
+): ElementsResult => {
+  const leading = consumeTrivia(initial)
+  let state = leading.state
+  let elements = leading.elements
+  let token = currentToken(state)
+
+  const isAcceptedSegment = (candidate: Token.Token): boolean =>
+    ImportPath.isSegmentKind(candidate.kind) &&
+    (afterDot ||
+      !following.includes(candidate.kind) ||
+      ['Dot', 'AsKeyword', 'LeftBrace', 'EndOfFile'].includes(
+        significantKindAfter(state, 1) ?? 'EndOfFile',
+      ))
+
+  if (token !== undefined && isAcceptedSegment(token)) {
+    return Object.freeze({
+      state: synchronize(advance(state)),
+      elements: Object.freeze([...elements, token]),
+    })
+  }
+
+  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  while (
+    token !== undefined &&
+    token.kind !== 'EndOfFile' &&
+    !isAcceptedSegment(token) &&
+    !following.includes(token.kind)
+  ) {
+    unexpected = Object.freeze([...unexpected, token])
+    state = advance(state)
+    token = currentToken(state)
+  }
+
+  if (unexpected.length > 0) {
+    const error = syntaxNode(state, 'Error', unexpected)
+    state = addDiagnostic(
+      state,
+      Diagnostic.unexpectedTokens(
+        unexpected.map((item) => item.kind),
+        'syntax',
+        ['module path segment'],
+        error.span,
+      ),
+    )
+    elements = Object.freeze([...elements, error])
+  }
+
+  if (token !== undefined && isAcceptedSegment(token)) {
+    return Object.freeze({
+      state: synchronize(advance(state)),
+      elements: Object.freeze([...elements, token]),
+    })
+  }
+
+  const missing = missingToken(state, 'Identifier')
+  return Object.freeze({
+    state: addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span)),
     elements: Object.freeze([...elements, missing]),
   })
 }
@@ -2479,22 +2545,20 @@ const parseImportAlias = (initial: State): NodeResult => {
 }
 
 const parseImportPath = (initial: State): NodeResult => {
-  const first = expect(initial, 'Identifier', [
-    'Dot',
-    'AsKeyword',
-    'LeftBrace',
-    ...topLevelFollowing,
-  ])
+  const first = expectImportPathSegment(
+    initial,
+    ['Dot', 'AsKeyword', 'LeftBrace', ...topLevelFollowing],
+    false,
+  )
   let state = first.state
   let children: ReadonlyArray<SyntaxTree.Element> = first.elements
   while (nextSignificantKind(state) === 'Dot') {
     const dot = expect(state, 'Dot', ['Identifier', 'AsKeyword', 'LeftBrace', ...topLevelFollowing])
-    const segment = expect(dot.state, 'Identifier', [
-      'Dot',
-      'AsKeyword',
-      'LeftBrace',
-      ...topLevelFollowing,
-    ])
+    const segment = expectImportPathSegment(
+      dot.state,
+      ['Dot', 'AsKeyword', 'LeftBrace', ...topLevelFollowing],
+      true,
+    )
     children = Object.freeze([...children, ...dot.elements, ...segment.elements])
     state = segment.state
   }
@@ -2555,15 +2619,32 @@ const parseImportDeclaration = (initial: State): NodeResult => {
   const path = parseImportPath(keyword.state)
   let state = path.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([...keyword.elements, path.node])
+  let hasAlias = false
+  let hasMembers = false
   if (nextSignificantKind(state) === 'AsKeyword') {
     const alias = parseImportAlias(state)
     state = alias.state
     children = Object.freeze([...children, alias.node])
+    hasAlias = true
   }
   if (nextSignificantKind(state) === 'LeftBrace') {
     const members = parseImportMemberList(state)
     state = members.state
     children = Object.freeze([...children, members.node])
+    hasMembers = true
+  }
+  const finalSegment = ImportPath.segments(path.node).at(-1)
+  if (
+    finalSegment !== undefined &&
+    ImportPath.isReservedSegment(finalSegment) &&
+    !hasAlias &&
+    !hasMembers
+  ) {
+    const spelling = Option.getOrElse(
+      SourceFile.spelling(state.lexical.source, finalSegment.span),
+      () => '<reserved>',
+    )
+    state = addDiagnostic(state, Diagnostic.reservedImportBinding(spelling, finalSegment.span))
   }
   return Object.freeze({ state, node: syntaxNode(state, 'ImportDeclaration', children) })
 }

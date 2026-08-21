@@ -418,7 +418,7 @@ where &P provides S from R {
 /// ## Remove Logger and preserve Clock
 ///
 /// ```silk
-/// import silk.effects as Effect
+/// import silk.effect as Effect
 /// import silk.logging { Logger, LogError, StdoutLogger }
 ///
 /// service Clock {

@@ -17,7 +17,7 @@ const encoder = new TextEncoder()
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
-const memorySource = String.raw`import silk.effects as Effect
+const memorySource = String.raw`import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { LogError }
 import silk.logging { LogLevel }
@@ -60,7 +60,7 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const hir = Analysis.hirOf(self, 'silk/effects')
+    const hir = Analysis.hirOf(self, 'silk/effect')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logging.Logger.log')
     const lowered = Analysis.loweredMir(self)
     assert.strictEqual(Mir.encode(lowered), golden('logging.mir.txt'))
@@ -72,7 +72,7 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
 
 it.effect('composes direct, piped, stored, tapped, flat-mapped, caught, and provided logs', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effects as Effect
+    const self = yield* snapshot(`import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { LogError }
 import silk.logging { LogLevel }
@@ -114,7 +114,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
 it.effect('accepts a user-authored Logger implementation without compiler registration', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effects as Effect
+    const self = yield* snapshot(`import silk.effect as Effect
 import silk.logging { LogError }
 import silk.logging { LogLevel }
 import silk.logging { Logger }
@@ -145,7 +145,7 @@ pub effect fn main() -> () ! LogError {
 
 it.effect('keeps missing providers and invalid message inputs explicit', () =>
   Effect.gen(function* () {
-    const missing = yield* snapshot(`import silk.effects as Effect
+    const missing = yield* snapshot(`import silk.effect as Effect
 import silk.logging { LogError }
 pub effect fn main() -> () ! LogError {
   return run Effect.log("missing")
@@ -155,14 +155,14 @@ pub effect fn main() -> () ! LogError {
       'SEM0071',
     )
 
-    const invalidMessage = yield* snapshot(`import silk.effects as Effect
+    const invalidMessage = yield* snapshot(`import silk.effect as Effect
 pub fn main() -> i32 {
   let effect = Effect.log(42)
   return 0
 }`)
     assert.isAbove(Analysis.diagnostics(invalidMessage).length, 0)
 
-    const invalidLevel = yield* snapshot(`import silk.effects as Effect
+    const invalidLevel = yield* snapshot(`import silk.effect as Effect
 pub fn main() -> i32 {
   let effect = Effect.logAt(42, "message")
   return 0
@@ -173,7 +173,7 @@ pub fn main() -> i32 {
 
 it.effect('stops after deterministic provider failure without recording the rejected message', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effects as Effect
+    const self = yield* snapshot(`import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { LogError }
 import silk.logging { attempts, length }
@@ -198,7 +198,7 @@ pub fn main() -> i32 {
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const capacity = yield* snapshot(`import silk.effects as Effect
+    const capacity = yield* snapshot(`import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { LogError }
 import silk.logging { attempts, length }
@@ -239,7 +239,7 @@ it.effect('keeps evaluator native and direct Wasm behavior aligned', () =>
 
 it.effect('adapts complete messages to stdout without making formatting semantic', () =>
   Effect.gen(function* () {
-    const source = String.raw`import silk.effects as Effect
+    const source = String.raw`import silk.effect as Effect
 import silk.logging { LogError }
 import silk.logging { LogLevel }
 import silk.logging { StdoutLogger }
@@ -270,7 +270,7 @@ pub effect fn main() -> () ! LogError {
 it.effect('provideMut removes the Logger requirement and preserves Clock', () =>
   Effect.gen(function* () {
     const program = (bind: string) => `import silk.logging { StdoutLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, LogError }
 
 struct Clock {}
@@ -322,7 +322,7 @@ pub effect fn main() -> ()
     assertUnsatisfiedClock(directPipeline, '(read() |> Intrinsic.bindRequirementMut(&mut logger))')
 
     const executablePipeline = yield* snapshot(`import silk.logging { InMemoryLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, LogError }
 pub effect fn main() -> () ! LogError {
   let mut logger = InMemoryLogger.memory()
@@ -332,7 +332,7 @@ pub effect fn main() -> () ! LogError {
     assert.strictEqual(Analysis.evaluate(executablePipeline)._tag, 'Completed')
 
     const storedIntrinsic = yield* snapshot(`import silk.logging { InMemoryLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, LogError }
 pub effect fn main() -> () ! LogError {
   let mut logger = InMemoryLogger.memory()
@@ -347,7 +347,7 @@ pub effect fn main() -> () ! LogError {
 it.effect('forwards provider-selection evidence only from an exact enclosing constraint', () =>
   Effect.gen(function* () {
     const wrapper = (constraint: string) => `import silk.logging { StdoutLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, LogError }
 
 effect fn bind<?S, A, P, E, ?R>(
@@ -435,7 +435,7 @@ it.effect('applies direct constrained sections through local move aliases', () =
       ['multiple hops', 'let first = move direct\n  let mut bind = move first'],
     ] as const) {
       const frontend = yield* snapshot(`import silk.logging { InMemoryLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger }
 
 effect fn read() -> i32 ? &mut Logger { return 42 }
@@ -469,7 +469,7 @@ pub fn main() -> i32 {
 it.effect('rejects a callable relay whose leading binding has observable work', () =>
   Effect.gen(function* () {
     const frontend = yield* snapshot(`import silk.logging { InMemoryLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger }
 
 fn observeThenForward<F>(value: F) -> F {
@@ -510,7 +510,7 @@ it.effect('erases dropped constrained provider sections without materializing a 
       ],
     ] as const) {
       const frontend = yield* snapshot(`import silk.logging { InMemoryLogger }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger }
 
 fn forward<F>(value: F) -> F { return move value }
@@ -541,7 +541,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const cases = [
-        `import silk.effects as Effect
+        `import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { Logger }
 fn store<F>(value: F) -> [F; 1] {
@@ -552,7 +552,7 @@ pub fn main() -> i32 {
   let escaped = store(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
-        `import silk.effects as Effect
+        `import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { Logger }
 fn consume<F>(value: F) -> () { return () }
@@ -561,7 +561,7 @@ pub fn main() -> i32 {
   let consumed = consume(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
-        `import silk.effects as Effect
+        `import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { Logger }
 fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F, value: once Effect<A ! E ? R>) -> Effect<A ! E> {
@@ -574,7 +574,7 @@ pub fn main() -> i32 {
 }`,
       ]
       for (const [ordinal, body] of cases.entries()) {
-        const frontend = yield* snapshot(`import silk.effects as Effect
+        const frontend = yield* snapshot(`import silk.effect as Effect
 import silk.logging { Logger, LogError }
 ${body}`)
         assert.include(

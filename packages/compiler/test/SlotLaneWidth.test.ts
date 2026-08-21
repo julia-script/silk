@@ -42,7 +42,7 @@ const cases: ReadonlyArray<Case> = [
 const program = (entry: Case): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.${entry.element} as ${entry.element}
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
@@ -102,7 +102,7 @@ for (const entry of cases) {
 const reported = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot

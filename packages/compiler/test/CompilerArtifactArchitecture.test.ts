@@ -57,7 +57,7 @@ it.effect(
 
 it.effect('keeps synchronous Effect core artifacts free of concurrency runtime ABI', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 service Clock { effect fn value() -> i32 ? &Clock }
 struct FixedClock { value: i32 }

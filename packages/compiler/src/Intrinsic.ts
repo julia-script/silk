@@ -154,7 +154,7 @@ const osConsumer = (spelling: string): string => {
 
 const consumer = (family: string, operation: string): string => {
   if (Scalar.isSpelling(family)) return `silk/${family}.${operation}`
-  if (family === 'Effect') return `silk/effects.${operation}`
+  if (family === 'Effect') return `silk/effect.${operation}`
   if (family === 'Storage') return 'silk/core.allocate'
   if (family === 'Host') return 'silk/core.writeAll'
   if (family === 'Os') return osConsumer(operation)

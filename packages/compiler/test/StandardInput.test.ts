@@ -78,7 +78,7 @@ ${body}`
 it.effect('reads a known byte sequence from a test provider and reports its count', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.effects as Effect
+      scriptedSource(`import silk.effect as Effect
 import silk.standard_input { StreamReadError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -107,7 +107,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports the end of input as data rather than a typed failure', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.effects as Effect
+      scriptedSource(`import silk.effect as Effect
 import silk.standard_input { StreamReadError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -137,7 +137,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports the true committed count of a partial read, not the buffer length', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.effects as Effect
+      scriptedSource(`import silk.effect as Effect
 import silk.standard_input { StreamReadError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -172,7 +172,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('routes a provider error into the typed failure channel', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.effects as Effect
+      scriptedSource(`import silk.effect as Effect
 import silk.standard_input { StreamReadError }
 import silk.u8 as u8
 effect fn program() -> i32 ! StreamReadError {
@@ -193,7 +193,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
   }),
 )
 
-const nativeSource = `import silk.effects as Effect
+const nativeSource = `import silk.effect as Effect
 import silk.os_standard_input { OsStandardInput }
 import silk.standard_input { StreamReadError }
 import silk.u8 as u8

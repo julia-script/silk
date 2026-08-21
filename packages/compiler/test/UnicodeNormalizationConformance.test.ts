@@ -100,7 +100,7 @@ const saturation = 250
 const program = (cases: ReadonlyArray<Case>): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.result { Result, Success, Failure }

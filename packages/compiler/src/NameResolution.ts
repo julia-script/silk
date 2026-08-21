@@ -1,6 +1,7 @@
 import * as Option from 'effect/Option'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as ImportPath from './ImportPath.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
@@ -190,7 +191,7 @@ export const resolve = (
       }
       const target = imported.target.module
       const created: Array<Binding> = []
-      const pathNames = identifiers(imported.path)
+      const pathNames = ImportPath.segments(imported.path)
       const defaultName = pathNames.at(-1)
       const aliasSyntax = SyntaxTree.directNode(imported.syntax, 'ImportAlias')
       const explicitAlias = aliasName(source, imported.syntax)
@@ -200,10 +201,14 @@ export const resolve = (
         continue
       }
       if (list === undefined || explicitAlias !== undefined) {
+        const implicitName =
+          defaultName === undefined || ImportPath.isReservedSegment(defaultName)
+            ? undefined
+            : defaultName
         const local =
           explicitAlias?.spelling ??
-          (defaultName === undefined ? undefined : text(source, defaultName))
-        const localToken = explicitAlias?.token ?? defaultName
+          (implicitName === undefined ? undefined : text(source, implicitName))
+        const localToken = explicitAlias?.token ?? implicitName
         if (local !== undefined && localToken !== undefined)
           created.push(
             Object.freeze({

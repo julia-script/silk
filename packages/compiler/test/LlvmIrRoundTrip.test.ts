@@ -94,7 +94,7 @@ const emit = Effect.fnUntraced(function* (
 const dropHook = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
   tag: i32
@@ -128,7 +128,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 const unionCleanup = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet }
 

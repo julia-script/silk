@@ -94,7 +94,7 @@ pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk")
 
 const owned = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string {
   copy,
   append,
@@ -148,7 +148,7 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
 const appendRollback = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.string { String, copy, append, view, ownedByteLength }
 

@@ -141,7 +141,7 @@ provided explicitly before the entry Effect completes. The compiler does not cur
 an implementation for a missing requirement.
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 service Clock {}
 

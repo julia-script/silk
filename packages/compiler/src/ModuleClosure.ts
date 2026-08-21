@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as Diagnostic from './Diagnostic.js'
+import * as ImportPath from './ImportPath.js'
 import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
@@ -168,10 +169,7 @@ const parseModule = (
   const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
-    const tokens =
-      path?.children.filter(
-        (child): child is Token.Token => SyntaxTree.isToken(child) && child.kind === 'Identifier',
-      ) ?? []
+    const tokens = path === undefined ? [] : ImportPath.segments(path)
     if (path === undefined || tokens.length === 0 || !SyntaxTree.isAvailableSyntax(path)) {
       return [Object.freeze({ syntax: element, path: path ?? element })]
     }

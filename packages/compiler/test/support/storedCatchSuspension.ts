@@ -1,5 +1,5 @@
 /** A stored catch wrapper that preserves a suspended typed-failure contract exactly. */
-export const storedCatchSuspension = `import silk.effects as Effect
+export const storedCatchSuspension = `import silk.effect as Effect
 struct Problem { code: i32 }
 effect fn delayed() -> i32 ! Problem {
   let value = run Effect.suspend(effect { return 2 })

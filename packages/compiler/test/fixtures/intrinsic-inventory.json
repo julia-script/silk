@@ -5277,7 +5277,7 @@
       "signature": "fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.suspendEffect",
+      "consumer": "silk/effect.suspendEffect",
       "identity": "EffectSuspend"
     },
     {
@@ -5285,7 +5285,7 @@
       "signature": "fn Intrinsic.effectResult(protected: Effect<A ! E ? R>) -> Effect<Result<A, E> ? R>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.result",
+      "consumer": "silk/effect.result",
       "identity": "EffectRule.Result"
     },
     {
@@ -5293,7 +5293,7 @@
       "signature": "fn Intrinsic.bindRequirement<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.bindRequirement",
+      "consumer": "silk/effect.bindRequirement",
       "identity": "ContractRule.BindRequirement"
     },
     {
@@ -5301,7 +5301,7 @@
       "signature": "fn Intrinsic.bindRequirementMut<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: &mut P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.bindRequirementMut",
+      "consumer": "silk/effect.bindRequirementMut",
       "identity": "ContractRule.BindRequirement"
     },
     {
@@ -5309,7 +5309,7 @@
       "signature": "fn Intrinsic.bindRequirementOwned<?S, A, P, E, ?R>(protected: once Effect<A ! E ? R>, provider: P) -> Effect<A ! E ? Without<R, S>>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.bindRequirementOwned",
+      "consumer": "silk/effect.bindRequirementOwned",
       "identity": "ContractRule.BindRequirement"
     },
     {
@@ -5317,7 +5317,7 @@
       "signature": "fn Intrinsic.catchFailure<S, A, B, E, F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<B ! F ? Q>) -> Effect<A | B ! Without<E, S> | F ? R | Q>",
       "unsafe": false,
       "admission": "Effect",
-      "consumer": "silk/effects.catchFailure",
+      "consumer": "silk/effect.catchFailure",
       "identity": "ContractRule.CatchFailure"
     },
     {

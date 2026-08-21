@@ -4105,7 +4105,7 @@ function analyzeArguments(
     if (qualifier._tag === 'Intrinsic') {
       const library =
         qualifierSpelling === 'Effect'
-          ? DeclarationIndex.lookup(resolution.index, 'silk/effects', memberSpelling)
+          ? DeclarationIndex.lookup(resolution.index, 'silk/effect', memberSpelling)
           : undefined
       if (
         library?._tag === 'Resolved' &&
@@ -5608,7 +5608,7 @@ const resolvedFunctionReference = (
   const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
   if (qualifierLookup._tag === 'Intrinsic') {
     if (qualifier === 'Effect') {
-      const library = DeclarationIndex.lookup(resolution.index, 'silk/effects', member)
+      const library = DeclarationIndex.lookup(resolution.index, 'silk/effect', member)
       if (
         library._tag === 'Resolved' &&
         library.declaration._tag === 'FunctionDeclaration' &&

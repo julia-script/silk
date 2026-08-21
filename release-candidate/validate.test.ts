@@ -289,6 +289,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Formatter',
       './Hir',
       './HostInput',
+      './ImportPath',
       './ImportPlan',
       './Instances',
       './InterfaceWitnessCompatibility',
@@ -349,7 +350,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(true)
-    expect(existsSync(resolve(packedRoot, 'stdlib/silk/effects.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/effect.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'))).toBe(true)
@@ -366,7 +367,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     for (const entry of sourceStdlibManifest) {
       expect(existsSync(resolve(packedRoot, 'stdlib', entry.path))).toBe(true)
     }
-    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effects.silk'), 'utf8')).toContain(
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effect.silk'), 'utf8')).toContain(
       'pub effect fn mapBoth',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/logging.silk'), 'utf8')).toContain(
@@ -723,6 +724,7 @@ console.log(
       'Formatter',
       'Hir',
       'HostInput',
+      'ImportPath',
       'ImportPlan',
       'Instances',
       'InterfaceWitnessCompatibility',

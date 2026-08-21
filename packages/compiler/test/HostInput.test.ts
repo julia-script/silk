@@ -191,7 +191,7 @@ it.effect('returns the command-line arguments in the order the process received 
       scriptedSource(`import silk.bytes { Bytes }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -231,7 +231,7 @@ it.effect('reports an argument past the end and an unset variable as absence, no
     const self = yield* snapshot(
       scriptedSource(`import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
@@ -272,7 +272,7 @@ it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', (
     const self = yield* snapshot(
       scriptedSource(`import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
@@ -314,7 +314,7 @@ it.effect('routes an in-source provider error into the typed failure channel', (
   Effect.gen(function* () {
     const self = yield* snapshot(
       scriptedSource(`import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
   let mut provider = Broken {}
@@ -335,7 +335,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 
 const nativeProgram = nativeSource(`import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
@@ -412,7 +412,7 @@ it.effect('copies a value longer than the provider buffer completely', () =>
     const self = yield* snapshot(
       nativeSource(`import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
@@ -536,7 +536,7 @@ it.effect(
       const source = nativeSource(`import silk.bytes { Bytes }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8

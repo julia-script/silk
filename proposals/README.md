@@ -46,3 +46,6 @@ SLP (direction and coherence)
   — Draft; author-confirmed direction for ordinary and effect entry statuses, unhandled typed-error
   reports, logical traces, fatal traps, and standalone versus embedded hosts, pending Candidate
   preparation.
+- [SLP-0012: Reserved module path segments and explicit namespace completion](0012-reserved-module-path-segments/proposal.md)
+  — Accepted direction; admits reserved import-path segments, adopts `silk.effect`, and makes
+  catalog namespaces explicit partial-spelling auto-import candidates outside type contexts.

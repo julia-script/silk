@@ -13,7 +13,7 @@ const exampleSource = readFileSync(
 const portableProvider = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.filesystem {
@@ -250,7 +250,7 @@ it.effect('constructs and resolves normalized provider-absolute Paths', () =>
   Effect.gen(function* () {
     const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
 import silk.option { None, Option, Some }
@@ -321,7 +321,7 @@ pub fn main() -> i32 {
 it.effect('rejects malformed paths and lexical root escape before service provision', () => {
   const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError, joinUtf8, make, resolve }
 
 effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
@@ -384,7 +384,7 @@ it.effect('preserves Path allocation failure without publishing partial owned st
   const source = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.layout { Layout }
 import silk.filesystem { make }

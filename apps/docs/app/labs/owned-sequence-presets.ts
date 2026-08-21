@@ -2,7 +2,7 @@ export const vectorGrowthSource = `import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -56,7 +56,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -142,7 +142,7 @@ export const vectorDestructionOrderSource = `import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -198,7 +198,7 @@ export const vectorEarlyDropSource = `import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -255,7 +255,7 @@ import silk.core {OutOfMemoryError}
 
 import silk.core {SystemAllocator}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.usize as usize
 

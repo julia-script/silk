@@ -123,6 +123,14 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'impl'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'for'), 'storage.type.silk')
   assert.include(scopesAt('impl Allocator for Mine { unsafe {} }', 'unsafe'), 'storage.type.silk')
+  const effectImport = 'import silk.effect as Effect'
+  assert.include(scopesAt(effectImport, 'import'), 'storage.type.silk')
+  assert.include(scopesAt(effectImport, 'effect'), 'entity.name.namespace.silk')
+  assert.notInclude(scopesAt(effectImport, 'effect'), 'storage.type.silk')
+  assert.deepStrictEqual(
+    scopesAt(effectImport, 'effect'),
+    scopesAt('import silk.vector { Vector }', 'vector'),
+  )
   assert.include(
     scopesAt('impl Allocator for Mine { unsafe {} }', 'Allocator'),
     'entity.name.type.silk',

@@ -59,6 +59,27 @@ it.effect('binds namespace aliases and selected members to canonical calls', () 
   }),
 )
 
+it.effect('binds the singular Effect module only through an explicit namespace import', () =>
+  Effect.gen(function* () {
+    const imported = yield* snapshot('app/Main', {
+      'app/Main': 'import silk.effect as Effect\npub fn main() -> i32 { return 1 }',
+    })
+    assert.deepEqual(Analysis.lookupName(imported, 'app/Main', 'Effect'), {
+      _tag: 'Namespace',
+      spelling: 'Effect',
+      module: 'silk/effect',
+    })
+
+    const absent = yield* snapshot('app/Main', {
+      'app/Main': 'pub fn main() -> i32 { return 1 }',
+    })
+    assert.deepEqual(Analysis.lookupName(absent, 'app/Main', 'Effect'), {
+      _tag: 'Missing',
+      spelling: 'Effect',
+    })
+  }),
+)
+
 it.effect('resolves imported pipelines identically across targets and repeated snapshots', () =>
   Effect.gen(function* () {
     const sources = {

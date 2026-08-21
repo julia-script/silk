@@ -261,7 +261,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Retry with persistent capture',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -296,7 +296,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Existing provider capture',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 role Primary
 
@@ -332,7 +332,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Suspended state resumes',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -353,7 +353,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Suspended map and flatMap',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -388,7 +388,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Stack-safe suspended recursion',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -412,7 +412,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Portable Logger provider',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -471,7 +471,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.layout {Layout}
 
@@ -514,7 +514,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.layout {Layout}
 
@@ -553,7 +553,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.layout {Layout}
 
@@ -594,7 +594,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.layout {Layout}
 
@@ -628,7 +628,7 @@ import silk.core {SystemAllocator}
 
 import silk.core {OutOfMemoryError}
 
-import silk.effects as Effect
+import silk.effect as Effect
 
 import silk.layout {Layout}
 
@@ -677,7 +677,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Typed Effect recovery',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -714,7 +714,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped success composition',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -758,7 +758,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped failure recovery',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -800,7 +800,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Piped acquired provider',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -991,7 +991,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Callable map section',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -1008,7 +1008,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Effectful Logger tap',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 service TapLogger {
   effect fn value() -> i32 ? &TapLogger
@@ -1048,7 +1048,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Mutable mapped callback',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -1075,7 +1075,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'fail · Take-once retry rejection',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -1104,7 +1104,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Nested map result',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -1125,7 +1125,7 @@ pub fn main() -> i32 {
   one(
     'effects',
     'ok · Ungrouped run composes first',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 
@@ -3096,7 +3096,7 @@ pub fn main() -> i32 {
   one(
     'interfaces',
     'ok · Effectful contract with failure and requirement rows',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 
 import silk.i32 as i32
 

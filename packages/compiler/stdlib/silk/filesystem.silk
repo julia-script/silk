@@ -29,7 +29,7 @@ import silk.bytes {
 }
 import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }
 import silk.result { Failure, Result, Success }

@@ -194,6 +194,10 @@
       "types": "./dist/ImportPlan.d.ts",
       "import": "./dist/ImportPlan.js"
     },
+    "./ImportPath": {
+      "types": "./dist/ImportPath.d.ts",
+      "import": "./dist/ImportPath.js"
+    },
     "./OsFileSystemHost": {
       "types": "./dist/OsFileSystemHost.d.ts",
       "import": "./dist/OsFileSystemHost.js"

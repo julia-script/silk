@@ -52,7 +52,7 @@ effect fn bumpTen() -> i32 ? &mut Counter {
 }`
 
 /** Effect fn arms: only the selected arm's Effect is constructed and run. */
-const selecting = (condition: string) => `import silk.effects as Effect
+const selecting = (condition: string) => `import silk.effect as Effect
 ${counter}
 
 pub fn main() -> i32 {
@@ -74,7 +74,7 @@ pub fn main() -> i32 {
 const eager = (condition: string) => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${counter}
 
@@ -121,7 +121,7 @@ pub fn main() -> i32 {
 }`
 
 /** Distinct requirement rows on the two arms; the caller discharges both. */
-const requirements = (condition: string) => `import silk.effects as Effect
+const requirements = (condition: string) => `import silk.effect as Effect
 service Alpha { effect fn alpha() -> i32 ? &Alpha }
 service Beta { effect fn beta() -> i32 ? &Beta }
 
@@ -157,7 +157,7 @@ pub fn main() -> i32 {
  * empty side. Selecting the fallible arm hands its failure to the caller's recovery; selecting the
  * infallible one produces no failure to recover.
  */
-const failures = (condition: string) => `import silk.effects as Effect
+const failures = (condition: string) => `import silk.effect as Effect
 struct Problem { code: i32 }
 
 effect fn risky() -> i32 ! Problem { fail Problem { code: 6 } }
@@ -288,7 +288,7 @@ it.effect(
  */
 it.effect('rejects a capturing value where a zero-arity arm is required', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 struct Clock { value: i32 }
 
 effect fn hold(held: Clock) -> i32 { return held.value }
@@ -318,7 +318,7 @@ pub fn main() -> i32 {
  */
 it.effect('accepts the same reusable function in both arms', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 effect fn same() -> i32 { return 8 }
 
 pub fn main() -> i32 { return run Effect.ifThenElse(true, same, same) }`

@@ -100,7 +100,7 @@ const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
 
 const normalizing = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc, normalizeNfd }
 

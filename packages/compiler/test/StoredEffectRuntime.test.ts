@@ -215,7 +215,7 @@ pub fn main() -> i32 {
 const consuming = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { value: i32 storage: Allocation }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
@@ -233,7 +233,7 @@ pub fn main() -> i32 {
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-const provided = `import silk.effects as Effect
+const provided = `import silk.effect as Effect
 service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
@@ -246,7 +246,7 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`
 
-const providedMoved = `import silk.effects as Effect
+const providedMoved = `import silk.effect as Effect
 service Counter { effect fn get() -> i32 ? &Counter }
 struct Fixed { value: i32 }
 effect fn get(self: &Fixed) -> i32 { return self.value }
@@ -308,7 +308,7 @@ type CleanupExit = 'unrun' | 'failure'
 const cleanupProgram = (exit: CleanupExit): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Problem { code: i32 }
 struct Guard { tag: i32 storage: Allocation }
@@ -391,7 +391,7 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
 const suspending = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard { tag: i32 storage: Allocation }
 impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }

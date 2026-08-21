@@ -8,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
 /** A user-authored allocator that always refuses, exercising the failure half of dispatch. */
 const refusing = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
 
@@ -37,7 +37,7 @@ pub fn main() -> i32 {
 const delegating = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { tag: i32 }
 
@@ -131,7 +131,7 @@ const ordinalProgram = (
 ): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
 
@@ -210,7 +210,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
 const countedQuota = (quota: number): string => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
 
@@ -288,7 +288,7 @@ it.effect('runs a counted quota allocator identically on the evaluator and Wasm'
 const forwardedProvider = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct CountingAllocator { hits: i32 }
 

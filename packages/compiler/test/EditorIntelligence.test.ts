@@ -164,7 +164,7 @@ pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 })
 
 it.effect('links public Effect operations to visible standard-library source', () => {
-  const source = `import silk.effects as Effect
+  const source = `import silk.effect as Effect
 fn increment(value: i32) -> i32 { return value + 1 }
 effect fn answer() -> i32 { return 41 }
 pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
@@ -172,7 +172,7 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
     Effect.map((snapshot) => {
       const occurrence = occurrenceAt(snapshot, source, 'map')
       assert.strictEqual(occurrence?.role, 'Value')
-      assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+      assert.strictEqual(occurrence?.declaration?.module, 'silk/effect')
       assert.strictEqual(
         documentationText(
           snapshot,
@@ -300,7 +300,7 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the source-defined logging surface', () => {
-  const source = `import silk.effects as Effect
+  const source = `import silk.effect as Effect
 import silk.logging { InMemoryLogger }
 import silk.logging { LogError }
 import silk.logging { LogLevel }
@@ -324,7 +324,7 @@ pub fn main() -> i32 {
       assert.strictEqual(logger?.declaration?.module, 'silk/logging')
 
       for (const [spelling, module, ordinal] of [
-        ['logAt', 'silk/effects', 0],
+        ['logAt', 'silk/effect', 0],
         ['log(', 'silk/logging', 0],
         ['warning', 'silk/logging', 0],
         ['memory', 'silk/logging', 1],

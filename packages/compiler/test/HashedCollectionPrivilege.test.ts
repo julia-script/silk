@@ -29,7 +29,7 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 /** A program that inserts, grows, looks up and removes, so the whole map is lowered, not a corner. */
 const usingAMap = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32 as i32
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, contains, get, insert, length, make, remove }

@@ -92,7 +92,7 @@ below; they do not make superseded behavior authoritative.
   [`DeclarationIndex.ts`](../../../packages/compiler/src/DeclarationIndex.ts), and
   [`TypeGenerics.test.ts`](../../../packages/compiler/test/TypeGenerics.test.ts).
 - Services, provision, and provider selection:
-  [`effects.silk`](../../../packages/compiler/stdlib/silk/effects.silk),
+  [`effect.silk`](../../../packages/compiler/stdlib/silk/effect.silk),
   [`ProviderSelection.ts`](../../../packages/compiler/src/ProviderSelection.ts),
   [`ProviderSelection.test.ts`](../../../packages/compiler/test/ProviderSelection.test.ts), and
   [`ProvideEffectAcceptance.test.ts`](../../../packages/compiler/test/ProvideEffectAcceptance.test.ts).
@@ -194,7 +194,7 @@ agent can easily mistake them for current language authority:
 
 | Superseded model | Current artifact evidence |
 | --- | --- |
-| `!E` as a separate kind, nominal-only failure members, exact row difference | [`bootstrap-type-generics`](../../../openspec/specs/bootstrap-type-generics/spec.md), [`bootstrap-flow-functions`](../../../openspec/specs/bootstrap-flow-functions/spec.md), and `effects.silk` |
+| `!E` as a separate kind, nominal-only failure members, exact row difference | [`bootstrap-type-generics`](../../../openspec/specs/bootstrap-type-generics/spec.md), [`bootstrap-flow-functions`](../../../openspec/specs/bootstrap-flow-functions/spec.md), and `effect.silk` |
 | Explicit/repeated interface provider and service-specific conformance behavior | [`bootstrap-complete-interface-contracts`](../../../openspec/specs/bootstrap-complete-interface-contracts/spec.md), [`bootstrap-service-declarations`](../../../openspec/specs/bootstrap-service-declarations/spec.md), conditional-conformance specs, parser, and declaration index |
 | Access-bearing `@Role` selectors and subtraction | `bootstrap-type-generics`, `bootstrap-flow-functions`, provider-selection tests, and standard-library signatures |
 | Required `Report`, ordinary `i32`-only entry, and member-ordinal failure tags | [`bootstrap-instances`](../../../openspec/specs/bootstrap-instances/spec.md) and [`bootstrap-entry-termination`](../../../openspec/specs/bootstrap-entry-termination/spec.md) |

@@ -92,7 +92,7 @@ it.effect(
         'os-filesystem/list-runner',
         ascii(`import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.os_filesystem { OsFileSystem, make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pathRoot }
 import silk.vector { Vector }
@@ -139,7 +139,7 @@ it.effect(
     Effect.gen(function* () {
       const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.os_filesystem { make as osMake }
@@ -252,7 +252,7 @@ it.effect('retries oversized directory entries without advancing and sorts compl
   Effect.gen(function* () {
     const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.os_filesystem { make as osMake }
 import silk.filesystem { DirectoryEntry, FileError, FileSystem, root as pathRoot, view as pathView }
@@ -579,7 +579,7 @@ it.effect(
     Effect.gen(function* () {
       const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize

@@ -18,7 +18,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 const program = (body: string): string =>
   `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
@@ -168,7 +168,7 @@ it.effect('sorts every integer width the standard library witnesses', () =>
       'vector-sort/widths',
       `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.vector { Vector, make, append, sort, get, length }
 
@@ -318,7 +318,7 @@ it.effect(
  */
 const stableUserOrder = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }
@@ -373,7 +373,7 @@ it.effect('keeps equal elements of a user type in their input order', () =>
 const moveOnlyElements = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.order { Order }
 import silk.vector { Vector, make, append, asSlice, sort, length }

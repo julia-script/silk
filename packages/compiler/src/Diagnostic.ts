@@ -44,6 +44,9 @@ export const unexpectedTokensCode = 'PAR0002' as const
 /** Stable code for a primary-expression template start reserved for future support. */
 export const reservedTemplateSyntaxCode = 'PAR0003' as const
 
+/** Stable code for an import whose reserved final path segment cannot form an implicit binding. */
+export const reservedImportBindingCode = 'PAR0004' as const
+
 /** Stable code for an import naming a module absent from the supplied sources. */
 export const unknownModuleCode = 'MOD0001' as const
 
@@ -298,6 +301,7 @@ export type Code =
   | typeof missingTokenCode
   | typeof unexpectedTokensCode
   | typeof reservedTemplateSyntaxCode
+  | typeof reservedImportBindingCode
   | typeof unknownModuleCode
   | typeof selfImportCode
   | typeof reservedModuleIdentityCode
@@ -484,6 +488,7 @@ export type Reason =
       readonly expected: ReadonlyArray<string>
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
+  | { readonly _tag: 'ReservedImportBinding'; readonly spelling: string }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -1342,6 +1347,18 @@ export const reservedTemplateSyntax = (span: SourceSpan.SourceSpan): Diagnostic 
     severity: 'error',
     message: 'Template syntax is reserved but not implemented',
     reason: Object.freeze({ _tag: 'ReservedTemplateSyntax' }),
+    span,
+  })
+
+/** Creates the diagnostic for a reserved final import segment without a usable binding form. */
+export const reservedImportBinding = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'parser',
+    code: reservedImportBindingCode,
+    severity: 'error',
+    message: `Reserved module segment ${spelling} requires an explicit alias or selected-member list`,
+    reason: Object.freeze({ _tag: 'ReservedImportBinding', spelling }),
     span,
   })
 

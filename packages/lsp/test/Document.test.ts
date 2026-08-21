@@ -265,7 +265,7 @@ recover(problem)
 
 it.effect('distinguishes Effect, catch, and a nominal type argument', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 struct Problem {}
 effect fn recover(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
@@ -280,7 +280,7 @@ pub fn main() -> i32 {
         ? hover.contents.value
         : undefined
     }
-    assert.strictEqual(text('Effect'), '```silk\nimport silk/effects as Effect\n```')
+    assert.strictEqual(text('Effect'), '```silk\nimport silk/effect as Effect\n```')
     assert.include(text('catch') ?? '', 'pub effect fn catch')
     assert.strictEqual(text('Problem', 1), '```silk\nstruct Problem\n```')
   }),
@@ -349,7 +349,7 @@ pub fn main() -> i32 {
 
 it.effect('completes standard-library namespace and source service operations', () =>
   Effect.gen(function* () {
-    const source = `import silk.effects as Effect
+    const source = `import silk.effect as Effect
 pub fn main() -> i32 {
   return Effect.
 }`
@@ -1270,6 +1270,98 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
   }),
 )
 
+it.effect('completes partial and complete Effect spellings with a namespace import', () =>
+  Effect.gen(function* () {
+    for (const spelling of ['Eff', 'Effect']) {
+      const source = `pub fn main() -> i32 { ${spelling} return 0 }`
+      const { document, snapshot } = yield* open(source)
+      const completion = Document.completion(
+        document,
+        snapshot,
+        positionAt(source, source.indexOf(spelling) + spelling.length),
+        inventoryOf([{ module: 'main', text: source }]),
+      )
+      const imported = completion.items.find(
+        (item) => item.label === 'Effect' && item.detail === 'Import namespace from silk/effect',
+      )
+      assert.deepEqual(imported?.textEdit, {
+        range: {
+          start: positionAt(source, source.indexOf(spelling)),
+          end: positionAt(source, source.indexOf(spelling) + spelling.length),
+        },
+        newText: 'Effect',
+      })
+      assert.deepEqual(imported?.additionalTextEdits, [
+        {
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+          newText: 'import silk.effect as Effect\n',
+        },
+      ])
+    }
+  }),
+)
+
+it.effect('keeps Effect type completion import-free', () =>
+  Effect.gen(function* () {
+    const source = 'fn retain(value: Eff) -> i32 { return 0 }'
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.indexOf('Eff') + 'Eff'.length),
+      inventoryOf([{ module: 'main', text: source }]),
+    )
+    const effect = completion.items.find((item) => item.label === 'Effect')
+    assert.isDefined(effect)
+    assert.isUndefined(effect?.additionalTextEdits)
+    assert.notInclude(
+      completion.items.map((item) => item.detail),
+      'Import namespace from silk/effect',
+    )
+  }),
+)
+
+it.effect('aliases a colliding Effect namespace completion deterministically', () =>
+  Effect.gen(function* () {
+    const source = 'struct Effect {}\npub fn main() -> i32 { Eff return 0 }'
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
+      inventoryOf([{ module: 'main', text: source }]),
+    )
+    const imported = completion.items.find(
+      (item) => item.detail === 'Import namespace from silk/effect',
+    )
+    assert.strictEqual(imported?.textEdit?.newText, 'SilkEffect')
+    assert.strictEqual(
+      imported?.additionalTextEdits?.[0]?.newText,
+      'import silk.effect as SilkEffect\n',
+    )
+  }),
+)
+
+it.effect('does not duplicate an existing equivalent Effect namespace import', () =>
+  Effect.gen(function* () {
+    const source = 'import silk.effect as Effect\npub fn main() -> i32 { Eff return 0 }'
+    const { document, snapshot } = yield* open(source)
+    const completion = Document.completion(
+      document,
+      snapshot,
+      positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
+      inventoryOf([{ module: 'main', text: source }]),
+    )
+    assert.strictEqual(
+      completion.items.filter((item) => item.detail === 'Import namespace from silk/effect').length,
+      0,
+    )
+    const effect = completion.items.find((item) => item.label === 'Effect')
+    assert.isDefined(effect)
+    assert.isUndefined(effect?.additionalTextEdits)
+  }),
+)
+
 const applyDocumentEdits = (
   source: string,
   edits: ReadonlyArray<{
@@ -1766,6 +1858,20 @@ pub fn main() -> i32 {
     // The lexer's own kinds carry the rest, so a keyword never depends on a resolved name.
     assert.strictEqual(semanticTokenAt(decoded, source, 'pub')?.type, 'keyword')
     assert.strictEqual(semanticTokenAt(decoded, source, 'main')?.type, 'function')
+  }),
+)
+
+it.effect('colors contextual import path segments as namespaces', () =>
+  Effect.gen(function* () {
+    const source = `import silk.vector { Vector }
+import silk.effect as Effect
+effect fn value() -> i32 { return 1 }
+`
+    const { document, snapshot } = yield* open(source)
+    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
+    assert.strictEqual(semanticTokenAt(decoded, source, 'effect')?.type, 'namespace')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'vector')?.type, 'namespace')
+    assert.strictEqual(semanticTokenAt(decoded, source, 'effect', 1)?.type, 'keyword')
   }),
 )
 

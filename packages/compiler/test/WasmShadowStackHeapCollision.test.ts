@@ -154,7 +154,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 `
 
 const program = (body: string, depth: number): string => `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${prelude}
 ${body}
 
@@ -167,7 +167,7 @@ const walk = (depth: number): string =>
   program(
     `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
@@ -184,7 +184,7 @@ const unwalked = (depth: number): string =>
   program(
     `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
@@ -538,7 +538,7 @@ it.effect(
 const lanes = Object.freeze(Array.from({ length: 16 }, (_, index) => index))
 const allocatingCross = (depth: number): string => `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 ${prelude}
 pub struct Wide {
 ${lanes.map((lane) => `  lane${lane}: i32`).join('\n')}

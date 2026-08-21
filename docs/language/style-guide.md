@@ -75,7 +75,7 @@ waiting for its remaining leading arguments, so the same convention supports ope
 value:
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 let specialized = Effect.provide(computation, &clock)
 let piped = computation |> Effect.provide(&clock)
@@ -142,7 +142,7 @@ data-first convention in STYLE-002.
 Prefer this form in ordinary examples:
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 
 let provided = computation |> Effect.provide(&clock)
 return run provided

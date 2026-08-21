@@ -28,7 +28,7 @@ const watOperationNames = (wat: string): ReadonlyArray<string> =>
  */
 const growth = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -121,7 +121,7 @@ it.effect(
 
 const lexicalViews = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { make, append, asSlice, asMutSlice }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -176,7 +176,7 @@ it.effect(
 const failedGrowth = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length, capacity }
 
@@ -258,7 +258,7 @@ it.effect(
 
 const elementReleaseOrder = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, capacity }
 
 struct Entry {
@@ -333,7 +333,7 @@ it.effect('drops initialized elements in order before releasing vector storage',
 
 const transferredEarlyDrop = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append }
 
 struct Entry {
@@ -411,7 +411,7 @@ it.effect('reads a zero-sized Copy element through a shared vector on the evalua
   Effect.gen(function* () {
     const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, get }
 struct Marker {}
 impl Copy for Marker {}
@@ -448,7 +448,7 @@ it.effect(
     Effect.gen(function* () {
       const source = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.vector { Vector, make, append, get }
 struct Step { value: i32 }
@@ -507,7 +507,7 @@ it.effect('rejects a shared vector read when one union member is move-only', () 
     const source = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get }
 struct Guard { storage: Allocation }
@@ -577,7 +577,7 @@ const recordedValues = (
 
 const popShrinks = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
 import silk.vector { Vector, make, append, get, length, capacity, pop }
@@ -615,7 +615,7 @@ it.effect(
 )
 
 const popEmpty = `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
 import silk.vector { Vector, make, append, length, pop }
@@ -645,7 +645,7 @@ it.effect(
 const removeShifts = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, remove }
 
 effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? &mut Allocator {
@@ -683,7 +683,7 @@ it.effect(
 const clearKeepsCapacity = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, length, capacity, clear }
 
 effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? &mut Allocator {
@@ -728,7 +728,7 @@ it.effect(
 const setDropsOldElement = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, length, set }
 
 struct Entry {
@@ -779,7 +779,7 @@ it.effect(
 const truncateReleasesTail = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, length, capacity, truncate }
 
 struct Entry {
@@ -831,7 +831,7 @@ it.effect(
 const moveOnlyRoundTrip = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
 import silk.vector { Vector, make, append, length, pop, remove }
@@ -907,7 +907,7 @@ it.effect(
 const failedReserve = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length, capacity, reserve }
 
@@ -976,7 +976,7 @@ it.effect(
 // is why index 0 and the index that triggers the next growth were the ones that read back zero.
 const moveOnlyElementZero = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice }
 
 struct Entry {
@@ -1007,7 +1007,7 @@ it.effect(
 const moveOnlyAppendSequence = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length }
 
 struct Entry {
@@ -1050,7 +1050,7 @@ it.effect(
 const moveOnlyGrowthSequence = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length, capacity }
 
 struct Entry {
@@ -1098,7 +1098,7 @@ it.effect(
 const moveOnlyBytesField = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length }
 import silk.bytes { Bytes, make as bytesMake }
 

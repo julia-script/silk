@@ -8,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
 
 const parity = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 import silk.bytes { Bytes, copy, append, asMutSlice, asSlice, length }
@@ -91,7 +91,7 @@ it.effect(
 const failedCopy = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.bytes { Bytes, copy }
 

@@ -133,7 +133,7 @@ pub fn main() -> i32 {
 ```
 
 The type spellings `i32` and `Effect<A ! E ? R>` remain language syntax. Importing `silk.i32` or
-`silk.effects as Effect` creates an ordinary value namespace containing actor operations; it does
+`silk.effect as Effect` creates an ordinary value namespace containing actor operations; it does
 not define or replace the language type.
 
 Canonical standard-library modules occupy the reserved `silk.*` distribution identity. Project
@@ -382,7 +382,7 @@ runtime do not automatically provide an allocator, logger, filesystem, clock, ho
 stream, or other service merely because an official implementation ships with the toolchain.
 
 ```silk,ignore
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, StdoutLogger }
 
 effect fn program() -> () ? &mut Logger {

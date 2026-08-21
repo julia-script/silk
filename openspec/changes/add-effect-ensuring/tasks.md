@@ -1,6 +1,6 @@
 ## 1. Combinator
 
-- [x] 1.1 Add `Effect.ensuring` to canonical `silk/effects` source, reifying the protected Effect
+- [x] 1.1 Add `Effect.ensuring` to canonical `silk/effect` source, reifying the protected Effect
       with `Effect.result` before running the finalizer so the finalizer exits after the protected
       Effect's local cleanup rather than on its propagation path.
 - [x] 1.2 Type the finalizer `once Effect<() ! never ? S>` and return `A ! E ? R | S`, so the

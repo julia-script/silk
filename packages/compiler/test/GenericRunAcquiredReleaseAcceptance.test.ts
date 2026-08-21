@@ -13,7 +13,7 @@ const ascii = (value: string): Uint8Array =>
 const provider = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 struct Clock { storage: Allocation }
 
@@ -50,7 +50,7 @@ effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemoryError 
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
 const failingRun = `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${generic}
 
 effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }
@@ -63,7 +63,7 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
 const succeedingRun = `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${generic}
 
 effect fn fine() -> i32 ! OutOfMemoryError { return 7 }
@@ -80,7 +80,7 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  * as a growing imbalance rather than a single missing release.
  */
 const retriedRun = `import silk.core { OutOfMemoryError }
-import silk.effects as Effect
+import silk.effect as Effect
 ${generic}
 
 effect fn failing() -> i32 ! OutOfMemoryError { fail OutOfMemoryError {} }

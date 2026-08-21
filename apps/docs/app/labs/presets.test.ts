@@ -351,7 +351,7 @@ describe('preset catalog', () => {
     const wasm = snapshotOf(loggingPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
     expect(Analysis.modules(native).map((module) => module.name)).toContain('silk/logging')
-    expect(Analysis.hirOf(native, 'silk/effects')).toBeDefined()
+    expect(Analysis.hirOf(native, 'silk/effect')).toBeDefined()
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')

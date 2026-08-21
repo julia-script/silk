@@ -18,7 +18,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 const allocated = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.usize as usize
 import silk.vector { Vector, make, append, length }

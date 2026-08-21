@@ -94,7 +94,7 @@ pub fn main() -> i32 {
   `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -128,7 +128,7 @@ effect fn storage() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
-  `import silk.effects as Effect
+  `import silk.effect as Effect
 import silk.i32 as i32
 struct Problem {}
 service Clock {}
@@ -171,7 +171,7 @@ pub fn main() -> i32 {
   }
   return false
 }`,
-  `import silk.effects as Effect
+  `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 struct ResultProblem {}
 effect fn succeed() -> i32 ! ResultProblem { return 42 }
@@ -203,7 +203,7 @@ pub fn main() -> i32 { return 42 }`,
   `import silk.core as StandardStream
 import silk.core { NativeStandardStreams }
 import silk.core { StreamWriteError }
-import silk.effects as Effect
+import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
   let mut native = NativeStandardStreams.native()
   let stdout = StandardStream.stdout()
@@ -383,7 +383,7 @@ it.effect('does not retain provideWith as a compatibility alias', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'effect/no-provide-with-alias',
-      encoder.encode(`import silk.effects as Effect
+      encoder.encode(`import silk.effect as Effect
 service Clock {}
 struct FixedClock {}
 impl Clock for FixedClock {}

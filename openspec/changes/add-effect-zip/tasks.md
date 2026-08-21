@@ -1,6 +1,6 @@
 ## 1. Combinators
 
-- [x] 1.1 Add `Pair<A, B>` and `Triple<A, B, C>` to canonical `silk/effects` source with public
+- [x] 1.1 Add `Pair<A, B>` and `Triple<A, B, C>` to canonical `silk/effect` source with public
       fields, so a caller in another module can project the collected values.
 - [x] 1.2 Add `Effect.zip` as ordinary Silk: run each operand with a plain `run` statement in
       declaration order, so short-circuiting follows from the propagation exit rather than from a

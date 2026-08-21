@@ -14,13 +14,13 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | Prefix | Phase | Codes |
 | --- | --- | --- |
 | `LEX` | Lexical | 7 |
-| `PAR` | Parser | 3 |
+| `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
 | `SEM` | Semantic | 129 |
 | `OWN` | Ownership | 14 |
 | `LAY` | Layout | 1 |
 
-There are 157 codes in total.
+There are 158 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -41,6 +41,7 @@ There are 157 codes in total.
 | `PAR0001` | Stable code for one required token that is absent at its insertion position. | `Expected <describeexpected>` |
 | `PAR0002` | Stable code for one maximal region of unexpected concrete tokens. | `Unexpected <encountered>; expected valid syntax`<br>`Unexpected <encountered>; expected <expectation>`<br>`Unexpected <encountered> while parsing a statement`<br>`Unexpected <encountered> while parsing a <context>` |
 | `PAR0003` | Stable code for a primary-expression template start reserved for future support. | `Template syntax is reserved but not implemented` |
+| `PAR0004` | Stable code for an import whose reserved final path segment cannot form an implicit binding. | `Reserved module segment <spelling> requires an explicit alias or selected-member list` |
 
 ## Module (`MOD`)
 

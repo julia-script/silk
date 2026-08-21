@@ -47,7 +47,7 @@ declaration fails, not merely a qualified call. `ifThenElse` names both arms, an
 
 ## Impact
 
-The change affects canonical standard-library source (`silk/effects`), the compiler-shipped source
+The change affects canonical standard-library source (`silk/effect`), the compiler-shipped source
 table generated from it, the generated standard-library documentation page, and acceptance tests. It
 adds no intrinsic, no HIR or MIR operation, no diagnostic code, and no compiler-side name
 recognition.

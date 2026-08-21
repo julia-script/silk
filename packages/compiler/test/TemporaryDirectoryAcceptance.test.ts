@@ -68,7 +68,7 @@ pub fn main() -> i32 {
  */
 const nativeSource = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
@@ -122,7 +122,7 @@ ${epilogue}`
  */
 const nativeTreeSource = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 ${prelude}
 
@@ -147,7 +147,7 @@ ${epilogue}`
  */
 const nativeManySource = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
 import silk.u8 as u8
@@ -198,7 +198,7 @@ ${epilogue}`
  */
 const evaluatorSource = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.filesystem { FileError }
 ${prelude}
 

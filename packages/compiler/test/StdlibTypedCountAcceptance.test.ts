@@ -55,7 +55,7 @@ it('declares the shared usize counts once and ships no private counted identity'
  */
 const growth = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -138,7 +138,7 @@ it.effect(
  */
 const scalars = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u32 as u32
 import silk.string {
   ScalarCursor,

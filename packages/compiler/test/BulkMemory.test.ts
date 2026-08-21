@@ -41,7 +41,7 @@ const compileNative = (name: string, source: string, backend?: Backend.Backend) 
 const copyRange = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -109,7 +109,7 @@ it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wa
 const moveOnlyCopy = (extra: string) => `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -194,7 +194,7 @@ it.effect('moves a range of move-only elements and leaves the source slots empty
 const fillRange = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
@@ -259,7 +259,7 @@ it.effect('fills a byte range identically on the evaluator, LLVM, and Wasm', () 
 const overlappingCopy = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -388,7 +388,7 @@ const bulkBytes = `import silk.bytes { Bytes }
 import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
 fn octet(value: u8) -> u8 { return value }
@@ -439,7 +439,7 @@ it.effect('appends borrowed bytes through the copy intrinsic on the evaluator an
 const vectorGrowth = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.vector { Vector }
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
@@ -486,7 +486,7 @@ it.effect('grows a vector through one bulk copy per migration on the evaluator a
 const outOfRange = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot

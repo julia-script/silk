@@ -125,6 +125,9 @@ it('declares one discoverable namespace for every standard-library module', () =
   assert.strictEqual(Stdlib.findNamespace('Option')?.module, 'silk/option')
   assert.strictEqual(Stdlib.findNamespace('Result')?.module, 'silk/result')
   assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')
+  assert.strictEqual(Stdlib.findNamespace('Effect')?.module, 'silk/effect')
+  assert.isDefined(Stdlib.find('silk/effect'))
+  assert.isUndefined(Stdlib.find('silk/effects'))
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
 })
 

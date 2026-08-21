@@ -13,7 +13,7 @@ const ascii = (value: string): Uint8Array =>
 const provider = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 import silk.metrics {
   AllocationMetrics,
@@ -50,7 +50,7 @@ fn published(self: &CountingAllocator) -> AllocationMetrics {
 const counted = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -135,7 +135,7 @@ it.effect(
 const peakSurvivesDrops = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -211,7 +211,7 @@ it.effect(
 const unmetered = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

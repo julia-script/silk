@@ -1,4 +1,5 @@
 import * as Option from 'effect/Option'
+import * as ImportPath from './ImportPath.js'
 import * as SourceAction from './SourceAction.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -13,6 +14,20 @@ export interface Request {
   readonly localSpelling?: string
 }
 
+export interface NamespaceRequest {
+  readonly syntax: SyntaxFile.SyntaxFile
+  readonly module: string
+  readonly spelling: string
+  /** Local namespace used when the preferred spelling collides with an existing name. */
+  readonly localSpelling?: string
+}
+
+export interface NamespacePlan {
+  readonly _tag: 'NamespaceImportPlan'
+  readonly localSpelling: string
+  readonly change?: SourceAction.ChangePlan
+}
+
 const renderedMember = (spelling: string, localSpelling: string): string =>
   spelling === localSpelling ? spelling : `${spelling} as ${localSpelling}`
 
@@ -25,7 +40,7 @@ const pathOf = (
 ): string | undefined => {
   const path = SyntaxTree.directNode(declaration, 'ImportPath')
   if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) return undefined
-  const names = SyntaxTree.tokens(path).filter((token) => token.kind === 'Identifier')
+  const names = ImportPath.segments(path)
   if (names.length === 0) return undefined
   return names.map((name) => text(source, name)).join('/')
 }
@@ -151,6 +166,66 @@ const newImport = (
   return insertion(syntax.source, offset, replacement)
 }
 
+const importInsertionPoint = (
+  syntax: SyntaxFile.SyntaxFile,
+): { readonly offset: number; readonly prefix: string; readonly suffix: string } => {
+  const imports = SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')
+  const newline = newlineOf(syntax.source)
+  const last = imports.at(-1)
+  let leadingModuleDocumentationEnd = 0
+  let sawModuleDocumentation = false
+  for (const token of syntax.tokens) {
+    if (token.kind === 'ModuleDocComment') {
+      sawModuleDocumentation = true
+      leadingModuleDocumentationEnd = token.span.end
+      continue
+    }
+    if (sawModuleDocumentation && token.kind === 'Whitespace') {
+      leadingModuleDocumentationEnd = token.span.end
+      continue
+    }
+    break
+  }
+  return Object.freeze({
+    offset:
+      last?.span.end ??
+      (sawModuleDocumentation
+        ? leadingModuleDocumentationEnd
+        : (syntax.root.children.at(0)?.span.start ?? 0)),
+    prefix: last === undefined ? '' : newline,
+    suffix: last === undefined ? newline : '',
+  })
+}
+
+const newNamespaceImport = (
+  syntax: SyntaxFile.SyntaxFile,
+  module: string,
+  localSpelling: string,
+): SourceAction.Edit | undefined => {
+  const point = importInsertionPoint(syntax)
+  const sourceModule = module.split('/').join('.')
+  return insertion(
+    syntax.source,
+    point.offset,
+    `${point.prefix}import ${sourceModule} as ${localSpelling}${point.suffix}`,
+  )
+}
+
+const namespaceBinding = (
+  source: SourceFile.SourceFile,
+  declaration: SyntaxTree.Node,
+): string | undefined => {
+  const alias = SyntaxTree.directNode(declaration, 'ImportAlias')
+  if (alias !== undefined) {
+    const token = SyntaxTree.directToken(alias, 'Identifier')
+    return token === undefined ? undefined : text(source, token)
+  }
+  if (SyntaxTree.directNode(declaration, 'ImportMemberList') !== undefined) return undefined
+  const path = SyntaxTree.directNode(declaration, 'ImportPath')
+  const finalSegment = path === undefined ? undefined : ImportPath.segments(path).at(-1)
+  return finalSegment?.kind === 'Identifier' ? text(source, finalSegment) : undefined
+}
+
 /** Plans one selected-member import without rewriting unrelated syntax or trivia. */
 export const make = (request: Request): Option.Option<SourceAction.ChangePlan> => {
   const localSpelling = request.localSpelling ?? request.spelling
@@ -175,4 +250,56 @@ export const make = (request: Request): Option.Option<SourceAction.ChangePlan> =
     preconditions: [SourceAction.precondition(request.syntax.source)],
     changes: [[request.syntax.source.id, [edit]]],
   })
+}
+
+/** Plans or reuses one explicit module-namespace import. */
+export const namespace = (request: NamespaceRequest): Option.Option<NamespacePlan> => {
+  const localSpelling = request.localSpelling ?? request.spelling
+  const imports = SyntaxTree.directNodes(request.syntax.root, 'ImportDeclaration')
+  const matching = imports.filter(
+    (declaration) => pathOf(request.syntax.source, declaration) === request.module,
+  )
+  if (matching.length > 1) return Option.none()
+  const declaration = matching.at(0)
+  if (declaration !== undefined) {
+    if (!SyntaxTree.isAvailableSyntax(declaration)) return Option.none()
+    const existing = namespaceBinding(request.syntax.source, declaration)
+    if (existing !== undefined)
+      return Option.some(Object.freeze({ _tag: 'NamespaceImportPlan', localSpelling: existing }))
+    const path = SyntaxTree.directNode(declaration, 'ImportPath')
+    const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
+    if (path === undefined || list === undefined) return Option.none()
+    const edit = insertion(request.syntax.source, path.span.end, ` as ${localSpelling}`)
+    if (edit === undefined) return Option.none()
+    const change = Option.getOrUndefined(
+      SourceAction.changePlan({
+        preconditions: [SourceAction.precondition(request.syntax.source)],
+        changes: [[request.syntax.source.id, [edit]]],
+      }),
+    )
+    if (change === undefined) return Option.none()
+    return Option.some(
+      Object.freeze({
+        _tag: 'NamespaceImportPlan',
+        localSpelling,
+        change,
+      }),
+    )
+  }
+  const edit = newNamespaceImport(request.syntax, request.module, localSpelling)
+  if (edit === undefined) return Option.none()
+  const change = Option.getOrUndefined(
+    SourceAction.changePlan({
+      preconditions: [SourceAction.precondition(request.syntax.source)],
+      changes: [[request.syntax.source.id, [edit]]],
+    }),
+  )
+  if (change === undefined) return Option.none()
+  return Option.some(
+    Object.freeze({
+      _tag: 'NamespaceImportPlan',
+      localSpelling,
+      change,
+    }),
+  )
 }

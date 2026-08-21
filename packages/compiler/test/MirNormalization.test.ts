@@ -6,7 +6,7 @@ import * as MirNormalization from '../src/MirNormalization.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 
 const encoder = new TextEncoder()
-const source = `import silk.effects as Effect
+const source = `import silk.effect as Effect
 import silk.result { Result, Success, Failure }
 effect fn succeed(value: i32) -> i32 { return value }
 fn addOne(value: i32) -> i32 { return value + 1 }
@@ -92,7 +92,7 @@ it.effect('retains concrete suspendable runs without a global suspension mode', 
   Effect.gen(function* () {
     const raw = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-suspendable',
-      encoder.encode(`import silk.effects as Effect
+      encoder.encode(`import silk.effect as Effect
 effect fn delayed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -156,7 +156,7 @@ it.effect('retains suspendable reification and effect-entry closure control', ()
   Effect.gen(function* () {
     const reified = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-reify-suspendable',
-      encoder.encode(`import silk.effects as Effect
+      encoder.encode(`import silk.effect as Effect
 effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
@@ -241,7 +241,7 @@ it.effect('retains a provider-specialized suspendable runner', () =>
   Effect.gen(function* () {
     const self = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-provided-suspendable',
-      encoder.encode(`import silk.effects as Effect
+      encoder.encode(`import silk.effect as Effect
 service Value {
   effect fn get() -> i32 ? &Value
 }

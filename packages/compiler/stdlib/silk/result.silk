@@ -32,7 +32,7 @@ pub struct Failure<F> {
 ///
 /// `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 /// failure row into ordinary value data, which is what lets the failure combinators in
-/// `silk.effects` be written as ordinary Silk source instead of compiler built-ins.
+/// `silk.effect` be written as ordinary Silk source instead of compiler built-ins.
 pub struct Result<A, F> {
   /// The completed outcome, narrowed with `match`.
   value: Success<A> | Failure<F>

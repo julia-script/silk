@@ -701,7 +701,7 @@ requirement-row constraints as ordinary source declarations.
 
 Everything else — `map`, `mapError`, `flatMap`, `flatten`, `tap`, `catchAll`, `retry`, `ensuring`,
 `zip`, `zip3`, `provide`, `provideMut`, `provideEffect`, and the singleton `catch` wrapper — is
-ordinary Silk source in `effects.silk`. The compiler must not infer their meaning from a name or an
+ordinary Silk source in `effect.silk`. The compiler must not infer their meaning from a name or an
 origin, so a user-defined equivalent gets identical treatment with no registration.
 
 Recovery is therefore just reify, `match`, and re-raise or return. `E` is already ordinary value
@@ -786,7 +786,7 @@ Here `StdoutLogger` conforms to `Logger`. The explicit selected row removes `&mu
 preserving `&mut Clock`, independently of canonical row order:
 
 ```silk
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.logging { Logger, LogError, StdoutLogger }
 
 service Clock {

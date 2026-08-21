@@ -11,7 +11,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const repository = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))))
 
-const source = `import silk.effects as Effect
+const source = `import silk.effect as Effect
 pub effect fn postpone<A, E, ?R>(
   deferred: once Effect<A ! E ? R>
 ) -> A ! E ? R {
@@ -35,7 +35,7 @@ it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels'
     if (occurrence?.resolution._tag === 'Available') {
       assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
     }
-    assert.strictEqual(occurrence?.declaration?.module, 'silk/effects')
+    assert.strictEqual(occurrence?.declaration?.module, 'silk/effect')
     assert.include(
       occurrence === undefined
         ? ''
@@ -43,10 +43,10 @@ it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels'
       'pub effect fn suspend<A, E, ?R>',
     )
 
-    const analyzed = Analysis.syntaxOf(snapshot, 'silk/effects')?.source
+    const analyzed = Analysis.syntaxOf(snapshot, 'silk/effect')?.source
     assert.isDefined(analyzed)
     const analyzedBytes = analyzed === undefined ? undefined : SourceFile.toUint8Array(analyzed)
-    assert.deepEqual(analyzedBytes, Stdlib.find('silk/effects')?.bytes)
+    assert.deepEqual(analyzedBytes, Stdlib.find('silk/effect')?.bytes)
     assert.include(
       analyzedBytes === undefined ? '' : decoder.decode(analyzedBytes),
       'return run Intrinsic.suspendEffect(move deferred)',

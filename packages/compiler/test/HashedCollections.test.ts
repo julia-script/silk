@@ -81,7 +81,7 @@ import silk.usize as usize`
 const program = (imports: string, body: string): string =>
   `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 ${imports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -195,7 +195,7 @@ it.effect('leaves the map intact when the growth allocation fails', () =>
       `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.hash { HashKey }
 import silk.hash { Word }
 import silk.hash_map { HashMap }
@@ -370,7 +370,7 @@ it.effect('refuses a key type that has no HashKey witness', () =>
       'hashed-collections/no-witness',
       `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.hash { HashKey }
 ${mapImports}
 

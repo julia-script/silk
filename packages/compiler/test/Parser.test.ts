@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Option from 'effect/Option'
+import * as ImportPath from '../src/ImportPath.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -339,7 +340,7 @@ it('bounds damaged effect-block recovery before the following declaration', () =
 it('parses Effect.retry in direct and pipeline insertion forms', () => {
   const result = parseText(
     'memory://effect-retry.silk',
-    `import silk.effects as Effect
+    `import silk.effect as Effect
 fn main() -> i32 {
   let direct = Effect.retry(work(), policy)
   let piped = work() |> Effect.retry(policy)
@@ -361,7 +362,7 @@ fn main() -> i32 {
 })
 
 it('rejects the removed bare role-selector argument without retaining role syntax', () => {
-  const source = `import silk.effects as Effect
+  const source = `import silk.effect as Effect
 fn main() -> i32 {
   let selected = work() |> Effect.provideMut(&mut provider, @Audit)
   return 0
@@ -515,7 +516,7 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit selected requirement row in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'import silk.effects as Effect\nfn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
+    'import silk.effect as Effect\nfn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -1398,6 +1399,57 @@ pub fn main() -> i32 { return 42 }`
   assertOriginalTokenTraversal(result)
 })
 
+it('parses reserved import-path segments without changing their token kinds', () => {
+  const source = `import silk.effect as Effect
+import toolkit.effect.helpers as Helpers
+import silk.effect { map }
+fn main() -> i32 { return 42 }`
+  const result = parseText('fixture://reserved-import-paths.silk', source)
+  const paths = SyntaxTree.directNodes(result.root, 'ImportDeclaration').map((declaration) =>
+    SyntaxTree.directNode(declaration, 'ImportPath'),
+  )
+  assert.deepEqual(
+    paths.map((path) =>
+      path === undefined ? [] : ImportPath.segments(path).map((token) => token.kind),
+    ),
+    [
+      ['Identifier', 'EffectKeyword'],
+      ['Identifier', 'EffectKeyword', 'Identifier'],
+      ['Identifier', 'EffectKeyword'],
+    ],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+})
+
+it('diagnoses a reserved final import segment without a usable binding form', () => {
+  const source = 'import silk.effect\nfn main() -> i32 { return 42 }'
+  const result = parseText('fixture://reserved-import-binding.silk', source)
+  assert.strictEqual(SyntaxTree.directNodes(result.root, 'ImportDeclaration').length, 1)
+  assert.strictEqual(SyntaxTree.directNodes(result.root, 'FunctionDeclaration').length, 1)
+  assert.deepEqual(
+    result.parserDiagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+    })),
+    [
+      {
+        code: 'PAR0004',
+        reason: { _tag: 'ReservedImportBinding', spelling: 'effect' },
+      },
+    ],
+  )
+  assertOriginalTokenTraversal(result)
+})
+
+it('keeps reserved-word token classification outside contextual import paths', () => {
+  const result = Lexer.lex(SourceFile.make('fixture://reserved-binding-name.silk', ascii('effect')))
+  assert.deepEqual(
+    result.tokens.map((token) => token.kind),
+    ['EffectKeyword', 'EndOfFile'],
+  )
+})
+
 it('parses private functions without fabricating a public modifier', () => {
   const result = parseText('fixture://private.silk', 'fn helper() -> i32 { return 42 }')
   const declaration = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
@@ -1972,7 +2024,7 @@ it('parses complete callable pipelines left-to-right', () => {
   const source =
     'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
     'import silk.bool as bool\npub fn flag() -> bool { return true |> bool.not }\n' +
-    'import silk.effects as Effect\npub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
+    'import silk.effect as Effect\npub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -2110,7 +2162,7 @@ fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
 })
 
 it('gives pipelines a complete callable expression and run the complete following expression', () => {
-  const source = `import silk.effects as Effect
+  const source = `import silk.effect as Effect
 fn use(attempt: Effect<i32>, operation: fn(i32) -> i32) -> i32 {
   let a = 1 |> operation
   let b = 2 |> (operation)

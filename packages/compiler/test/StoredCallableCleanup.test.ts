@@ -288,7 +288,7 @@ it.effect('releases a stored callable on a typed-failure exit', () =>
       `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.layout { Layout }
 ${takeCapture}effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()

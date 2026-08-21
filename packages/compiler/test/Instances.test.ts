@@ -378,7 +378,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const composed = Analysis.loweredMir(
-        yield* snapshot(`import silk.effects as Effect
+        yield* snapshot(`import silk.effect as Effect
 effect fn work() -> i32 { return 41 }
 pub fn main() -> i32 { return run work() |> Effect.retry(2) }`),
       )

@@ -27,7 +27,7 @@ const counts = (
 const tree = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet }
 
@@ -160,7 +160,7 @@ it.effect('carries the same release count through the Wasm backend under both pr
  */
 const accessors = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
@@ -218,7 +218,7 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
  */
 const nested = `import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
@@ -269,7 +269,7 @@ it.effect('releases an owning value held inside a box', () =>
 const chain = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.box { Box, make as boxMake, into as boxInto }
 
 pub struct End {}

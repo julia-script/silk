@@ -179,7 +179,7 @@ const programOf = (checks: ReadonlyArray<Check>): string => {
   return `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 ${prelude}
 ${checks.map((check) => check.declaration).join('\n\n')}
 
@@ -363,7 +363,7 @@ it.effect('reports which byte stopped a read and which values do not fit', () =>
 const messageProgram = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32 as i32
 import silk.usize as usize
 import silk.string { String, copy, append, appendOwned, ownedUtf8Bytes, utf8Bytes }
@@ -438,7 +438,7 @@ it.effect('composes a diagnostic message from runtime values and releases every 
 const exhaustedProgram = `import silk.core { Allocator }
 import silk.core { OutOfMemoryError }
 import silk.core { SystemAllocator }
-import silk.effects as Effect
+import silk.effect as Effect
 import silk.i32 as i32
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
