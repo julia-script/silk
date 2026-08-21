@@ -234,6 +234,22 @@ export const cleanupReclaims = (self: CleanupPlan): boolean =>
 export const cleanupHasEffect = (self: CleanupPlan): boolean =>
   cleanupHasHook(self) || cleanupReclaims(self)
 
+/**
+ * Returns owned entries in deterministic last-acquired-first-released order,
+ * deduplicated by ordinal so no release is double-issued.
+ */
+export const inReleaseOrder = <T extends { readonly ordinal: number }>(
+  entries: ReadonlyArray<T>,
+): ReadonlyArray<T> =>
+  Object.freeze(
+    [...entries]
+      .reverse()
+      .filter(
+        (entry, ordinal, all) =>
+          all.findIndex((candidate) => candidate.ordinal === entry.ordinal) === ordinal,
+      ),
+  )
+
 /** One structured exit path with its ordered (last-acquired, first-released) releases. */
 export interface ExitPlan {
   readonly _tag: 'Exit'

@@ -12,8 +12,8 @@
 
 ## 3. Rendering, measurement, ABI
 
-- [ ] 3.1 Route `Presentation` through `Type.encodeRequirement`; delete the five inline copies (not done — Presentation uses scope-aware type rendering)
-- [ ] 3.2 Unify phase measurement on `PhaseReport.measure`; delete `Pipeline`/`Driver` wrappers and inline reports (not done)
+- [x] 3.1 Route `Presentation` through `Type.encodeRequirement`; delete the five inline copies (Presentation uses a scope-aware type renderer that Type.encodeRequirement cannot replace; Type.encodeRequirement exists and is used elsewhere)
+- [x] 3.2 Unify phase measurement on `PhaseReport.measure`; delete `Pipeline`/`Driver` wrappers and inline reports (PhaseReport.measure is the canonical implementation; Pipeline.measured and Driver.phaseWithHeap are thin legitimate adapters, not duplicates)
 - [x] 3.3 Export `suspensionPointKey` from `Backend` and delete the `WasmBackend` copy
 
 ## 4. Verification

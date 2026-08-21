@@ -9,9 +9,9 @@
 export type {
   CleanupPlan,
   ExitPlan,
+  FunctionOwnership,
   LoopFixedPoint,
   Verdict,
-  FunctionOwnership,
 } from '../Ownership.js'
 
-export { cleanupHasHook, cleanupReclaims, cleanupHasEffect } from '../Ownership.js'
+export { cleanupHasEffect, cleanupHasHook, cleanupReclaims } from '../Ownership.js'

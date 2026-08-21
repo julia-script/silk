@@ -359,18 +359,13 @@ const planFor = (
     ): slot is Slot & { readonly access: Extract<Access, { readonly _tag: 'AffineTransfer' }> } =>
       slot.access._tag === 'AffineTransfer',
   )
-  const releaseOrder = Object.freeze(
-    [
-      ...releases,
-      ...[...affine]
-        .reverse()
-        .filter((slot) => !releases.some((release) => release.local.ordinal === slot.local.ordinal))
-        .map((slot) => Object.freeze({ local: slot.local, cleanup: slot.access.cleanup })),
-    ].filter(
-      (release, ordinal, all) =>
-        all.findIndex((candidate) => candidate.local.ordinal === release.local.ordinal) === ordinal,
-    ),
-  )
+  const affineReleases = affine
+    .filter((slot) => !releases.some((release) => release.local.ordinal === slot.local.ordinal))
+    .map((slot) => Object.freeze({ local: slot.local, cleanup: slot.access.cleanup, ordinal: slot.local.ordinal }))
+  const releaseOrder = Object.freeze([
+    ...releases,
+    ...Ownership.inReleaseOrder(affineReleases),
+  ])
   const loanEnds = Object.freeze([...borrowed].reverse().map((slot) => slot.access.loan))
   return Object.freeze({
     _tag: 'SuspensionOwnershipPlan',
