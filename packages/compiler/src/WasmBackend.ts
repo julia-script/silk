@@ -5625,8 +5625,12 @@ const emitBody = (
               Instr.ifElse(Instr.emptyBlockType, returnTransfer(), []),
             ]
             if (descriptor === undefined) return transfer
-            const targetLayout = suspensionRuntime.layouts.get(Backend.suspensionPointKey(descriptor.point))
-            const resume = suspensionRuntime.resumes.get(Backend.suspensionPointKey(descriptor.point))
+            const targetLayout = suspensionRuntime.layouts.get(
+              Backend.suspensionPointKey(descriptor.point),
+            )
+            const resume = suspensionRuntime.resumes.get(
+              Backend.suspensionPointKey(descriptor.point),
+            )
             const scratch = layout.suspensionScratch
             if (targetLayout === undefined || resume === undefined || scratch === undefined)
               throw new RangeError('Wasm stateful relay lost its layout or dispatch identity')
@@ -6003,7 +6007,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ),
       )
       .sort((left, right) =>
-        Backend.suspensionPointKey(left.region.point).localeCompare(Backend.suspensionPointKey(right.region.point)),
+        Backend.suspensionPointKey(left.region.point).localeCompare(
+          Backend.suspensionPointKey(right.region.point),
+        ),
       )
     const resumeRecords = program.functions
       .flatMap((fn) =>
@@ -6014,7 +6020,9 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ),
       )
       .sort((left, right) =>
-        Backend.suspensionPointKey(left.region.point).localeCompare(Backend.suspensionPointKey(right.region.point)),
+        Backend.suspensionPointKey(left.region.point).localeCompare(
+          Backend.suspensionPointKey(right.region.point),
+        ),
       )
     const originIds = new Map(
       originRecords.map((record, ordinal) => [

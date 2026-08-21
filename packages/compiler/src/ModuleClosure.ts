@@ -176,7 +176,7 @@ const parseModule = (
     if (joined === undefined) {
       return [Object.freeze({ syntax: element, path })]
     }
-    const sourceSpelling = joined.split("/").join(".")
+    const sourceSpelling = joined.split('/').join('.')
     const canonicalTarget = joined
     const tokens = ImportPath.segments(path)
     const token = tokens.at(0)
