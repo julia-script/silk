@@ -81,9 +81,6 @@ const operandShape = (type: Type.Type): OperandShape => {
   return Object.freeze({ _tag: 'Value', access: 'Take', type })
 }
 
-const accessRank = (access: Access): number =>
-  access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
-
 const incompatible = (problem: Problem): Compatibility =>
   Object.freeze({ _tag: 'Incompatible', problem })
 
@@ -95,7 +92,7 @@ const operandProblem = (
   const promised = operandShape(contract.type)
   const required = operandShape(witness.type)
   if (promised._tag === required._tag) {
-    if (accessRank(required.access) > accessRank(promised.access))
+    if (Type.accessRank(required.access) > Type.accessRank(promised.access))
       return Object.freeze({
         _tag: 'StrongerOperandAccess',
         ordinal,
@@ -114,7 +111,7 @@ const operandProblem = (
       })
     return undefined
   }
-  if (accessRank(required.access) > accessRank(promised.access))
+  if (Type.accessRank(required.access) > Type.accessRank(promised.access))
     return Object.freeze({
       _tag: 'StrongerOperandAccess',
       ordinal,
@@ -178,8 +175,7 @@ export const check = (contract: Contract, witness: Witness): Compatibility => {
         Type.equals(requirement.capability, allowed.capability) &&
         requirement.role === allowed.role,
     )
-    if (matching.some((allowed) => accessRank(requirement.access) <= accessRank(allowed.access)))
-      continue
+    if (matching.some((allowed) => Type.compareAccess(requirement.access, allowed.access))) continue
     if (matching.length > 0)
       return incompatible(
         Object.freeze({

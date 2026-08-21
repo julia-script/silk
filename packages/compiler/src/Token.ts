@@ -156,7 +156,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Dot: '`.`',
   DotDot: '`..`',
   Arrow: '`->`',
-  Invalid: 'valid token',
+  Invalid: 'invalid byte',
   EndOfFile: 'end of file',
 })
 

@@ -63,11 +63,9 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
   if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
   if (Type.isCallable(source) && Type.isCallable(target)) {
-    const sourceRank = source.mode === 'Shared' ? 0 : source.mode === 'Exclusive' ? 1 : 2
-    const targetRank = target.mode === 'Shared' ? 0 : target.mode === 'Exclusive' ? 1 : 2
     if (
       (!source.unsafe || target.unsafe) &&
-      sourceRank <= targetRank &&
+      Type.compareAccess(source.mode, target.mode) &&
       source.parameters.length === target.parameters.length &&
       source.parameters.every((parameter, index) =>
         Type.equals(parameter, target.parameters.at(index) ?? 'never'),
@@ -78,8 +76,6 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     }
   }
   if (Type.isEffect(source) && Type.isEffect(target)) {
-    const sourceRank = source.access === 'Shared' ? 0 : source.access === 'Exclusive' ? 1 : 2
-    const targetRank = target.access === 'Shared' ? 0 : target.access === 'Exclusive' ? 1 : 2
     const sameOutputs =
       Type.equals(source.success, target.success) &&
       Type.equals(Type.failureType(source), Type.failureType(target))
@@ -91,7 +87,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
           expected !== undefined &&
           Type.equals(requirement.capability, expected.capability) &&
           requirement.role === expected.role &&
-          (requirement.access === expected.access || expected.access === 'Exclusive')
+          Type.requirementSatisfies(requirement, expected)
         )
       }) &&
       Type.requirementRowParameters(source).length ===
@@ -99,7 +95,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       Type.requirementRowParameters(source).every((parameter, index) =>
         Type.equals(parameter, Type.requirementRowParameters(target).at(index) ?? 'never'),
       )
-    if (sourceRank <= targetRank && sameOutputs && compatibleRequirements)
+    if (Type.compareAccess(source.access, target.access) && sameOutputs && compatibleRequirements)
       return Object.freeze({ _tag: 'EffectAccess', source, target })
   }
   const members = sourceMembers(source)
