@@ -85,6 +85,12 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
 
 const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
   ['as', 'AsKeyword'],
+  ['fn', 'FnKeyword'],
+  ['let', 'LetKeyword'],
+  ['move', 'MoveKeyword'],
+  ['pub', 'PubKeyword'],
+  ['return', 'ReturnKeyword'],
+  ['import', 'ImportKeyword'],
   ['run', 'RunKeyword'],
   ['fail', 'FailKeyword'],
   ['drop', 'DropKeyword'],
@@ -123,58 +129,8 @@ const matchesSpelling = (
 }
 
 const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
-  if (end - start === 2 && bytes[start] === 0x66 && bytes[start + 1] === 0x6e) {
-    return 'FnKeyword'
-  }
   for (const [spelling, kind] of keywordSpellings) {
     if (matchesSpelling(bytes, start, end, spelling)) return kind
-  }
-  if (
-    end - start === 3 &&
-    bytes[start] === 0x6c &&
-    bytes[start + 1] === 0x65 &&
-    bytes[start + 2] === 0x74
-  ) {
-    return 'LetKeyword'
-  }
-  if (
-    end - start === 4 &&
-    bytes[start] === 0x6d &&
-    bytes[start + 1] === 0x6f &&
-    bytes[start + 2] === 0x76 &&
-    bytes[start + 3] === 0x65
-  ) {
-    return 'MoveKeyword'
-  }
-  if (
-    end - start === 3 &&
-    bytes[start] === 0x70 &&
-    bytes[start + 1] === 0x75 &&
-    bytes[start + 2] === 0x62
-  ) {
-    return 'PubKeyword'
-  }
-  if (
-    end - start === 6 &&
-    bytes[start] === 0x72 &&
-    bytes[start + 1] === 0x65 &&
-    bytes[start + 2] === 0x74 &&
-    bytes[start + 3] === 0x75 &&
-    bytes[start + 4] === 0x72 &&
-    bytes[start + 5] === 0x6e
-  ) {
-    return 'ReturnKeyword'
-  }
-  if (
-    end - start === 6 &&
-    bytes[start] === 0x69 &&
-    bytes[start + 1] === 0x6d &&
-    bytes[start + 2] === 0x70 &&
-    bytes[start + 3] === 0x6f &&
-    bytes[start + 4] === 0x72 &&
-    bytes[start + 5] === 0x74
-  ) {
-    return 'ImportKeyword'
   }
   return 'Identifier'
 }
