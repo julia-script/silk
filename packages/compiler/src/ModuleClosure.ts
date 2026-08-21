@@ -2,8 +2,8 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as Diagnostic from './Diagnostic.js'
-import { stronglyConnected } from './internal/Graph.js'
 import * as ImportPath from './ImportPath.js'
+import { stronglyConnected } from './internal/Graph.js'
 import * as Lexer from './Lexer.js'
 import * as Parser from './Parser.js'
 import * as SourceFile from './SourceFile.js'
@@ -127,18 +127,6 @@ const canonicalRoots = (
       left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
     ),
   )
-}
-
-const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => {
-  const bytes = Option.getOrThrowWith(
-    SourceFile.slice(source, token.span),
-    () => new RangeError(`Import token span does not belong to source ${source.id}`),
-  )
-  return Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
-}
-
-const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
-  SyntaxTree.unavailableElement(parent.children, parent)
 
 interface ParsedModule {
   readonly name: string

@@ -1,5 +1,4 @@
 import * as ByteClass from './internal/ByteClass.js'
-import { scalarCount } from './internal/Escape.js'
 import type * as Token from './Token.js'
 
 /** The semantic category selected by a static-literal modifier and delimiter. */
