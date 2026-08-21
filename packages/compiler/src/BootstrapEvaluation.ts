@@ -2912,10 +2912,11 @@ function* executeFunction(
               if (state.standardStreams === undefined) return undefined
               try {
                 return state.standardStreams.writeAll(destination, bytes)
-              } catch {
+              } catch (cause) {
                 return Object.freeze({
                   _tag: 'WriteFailure' as const,
                   message: 'standard stream provider threw',
+                  cause,
                 })
               }
             })()
@@ -3339,8 +3340,12 @@ function* executeFunction(
                 status()
                 commit(integerValue('i32', 1))
               }
-            } catch {
-              const failure: OsFileSystemHost.Failure = { _tag: 'Failure', reason: 'Other' }
+            } catch (cause) {
+              const failure: OsFileSystemHost.Failure = {
+                _tag: 'Failure',
+                reason: 'Other',
+                ...(cause instanceof Error ? { cause } : {}),
+              } as OsFileSystemHost.Failure
               status(failure)
               commit(
                 operation.type._tag === 'Union'

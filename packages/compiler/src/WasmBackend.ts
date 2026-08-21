@@ -6133,7 +6133,17 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       privateExecutionStackPages < 1 ||
       privateExecutionStackPages > 65536
     ) {
-      throw new RangeError('privateExecutionStackPages must be an integer from 1 through 65536')
+      return yield* Effect.fail(
+        new Backend.BackendError({
+          operation: 'Backend.emit',
+          backend: 'Wasm',
+          message: 'privateExecutionStackPages must be an integer from 1 through 65536',
+          reason: {
+            _tag: 'UnsupportedMir',
+            detail: 'privateExecutionStackPages must be an integer from 1 through 65536',
+          },
+        }),
+      )
     }
     const coroutineFrameMemory = suspensionEnabled
       ? yield* Memory.make(

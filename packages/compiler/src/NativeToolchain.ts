@@ -434,19 +434,8 @@ export const compileShim = (
   })
 }
 
-/** The nominal native-linker service contract. */
-export interface NativeLinker {
-  readonly link: (
-    toolchain: Toolchain,
-    target: Target.Target,
-    objects: ReadonlyArray<PathArtifact>,
-    libraries: ReadonlyArray<string>,
-    destination: string,
-  ) => Executable | ToolchainFailure
-}
-
 /** The bootstrap linker driving the pinned Clang link driver with structured arguments. */
-export const ClangLinker: NativeLinker = Object.freeze({
+export const ClangLinker = Object.freeze({
   link: (
     toolchain: Toolchain,
     target: Target.Target,
