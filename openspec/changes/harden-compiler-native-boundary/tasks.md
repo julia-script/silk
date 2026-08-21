@@ -5,7 +5,7 @@
 - [ ] 1.3 Wrap `runPlanned`/`writeArtifact`/`commit`/`commitCachedArtifact`/`ClangLinker.link` in `Effect.try` yielding typed failures
 - [ ] 1.4 Update `Driver.compile` to `yield*` the toolchain instead of calling synchronously
 - [ ] 1.5 Add `atomicCommit` and route the four commit sites through it (fixes the temp leak)
-- [ ] 1.6 Remove the never-injected `NativeLinker` interface
+- [x] 1.6 Remove the never-injected `NativeLinker` interface
 
 ## 2. Browser-safe barrel and host detection
 
@@ -20,16 +20,16 @@
 
 ## 4. Backend error channels
 
-- [ ] 4.1 `WasmBackend.ts:6133` yield `BackendError` instead of throwing `RangeError`
+- [x] 4.1 `WasmBackend.ts:6133` yield `BackendError` instead of throwing `RangeError`
 - [ ] 4.2 Pin `Backend.emitProgram` to `LlvmError | BackendError` and wrap via `catchTag` (drop the `_tag` probe)
 - [ ] 4.3 Convert `emitProgram`/`locate` to `Effect.fnUntraced`; give `locate` a concrete instruction type and drop the cast
 
 ## 5. BootstrapEvaluation host catches
 
-- [ ] 5.1 Preserve `cause` in the `HostWrite` and `OsCall` catches in `BootstrapEvaluation.ts`
+- [x] 5.1 Preserve `cause` in the `HostWrite` and `OsCall` catches in `BootstrapEvaluation.ts`
 
 ## 6. Verification
 
-- [ ] 6.1 Run `pnpm typecheck` and verify clean
-- [ ] 6.2 Run `pnpm exec biome check .` and verify clean
-- [ ] 6.3 Run `pnpm test` and verify the suite passes with new typed-failure and cleanup tests
+- [x] 6.1 Run `pnpm typecheck` and verify clean
+- [x] 6.2 Run `pnpm exec biome check .` and verify clean
+- [x] 6.3 Run `pnpm test` and verify the suite passes with new typed-failure and cleanup tests

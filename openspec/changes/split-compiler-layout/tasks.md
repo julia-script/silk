@@ -10,9 +10,9 @@
 
 ## 3. Split Layout.ts
 
-- [ ] 3.1 Extract CallingShape.ts
-- [ ] 3.2 Extract LayoutVerify.ts
-- [ ] 3.3 Extract LayoutEncode.ts and verify goldens
+- [x] 3.1 Extract CallingShape.ts
+- [x] 3.2 Extract LayoutVerify.ts
+- [x] 3.3 Extract LayoutEncode.ts and verify goldens
 
 ## 4. Rename realization module
 
@@ -21,6 +21,6 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run pnpm typecheck and verify clean
-- [ ] 5.2 Run pnpm exec biome check . and verify clean
-- [ ] 5.3 Run pnpm test
+- [x] 5.1 Run pnpm typecheck and verify clean
+- [x] 5.2 Run pnpm exec biome check . and verify clean
+- [x] 5.3 Run pnpm test

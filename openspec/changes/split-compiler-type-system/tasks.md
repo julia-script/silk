@@ -1,12 +1,12 @@
 ## 1. Type inference extraction
 
-- [ ] 1.1 Extract `TypeInference.ts` from `Type.ts:2806-3367` and re-export `infer`/`inferOpenGenericArguments`
+- [x] 1.1 Extract `TypeInference.ts` from `Type.ts:2806-3367` and re-export `infer`/`inferOpenGenericArguments`
 - [ ] 1.2 Verify generic-inference and type tests pass
 
 ## 2. Instances split
 
-- [ ] 2.1 Extract `InstanceDiagnostics.ts` (the five violation checks)
-- [ ] 2.2 Extract `ExecutableOrigin.ts` (origin, callables, effects, suspension, reachability)
+- [x] 2.1 Extract `InstanceDiagnostics.ts` (the five violation checks)
+- [x] 2.2 Extract `ExecutableOrigin.ts` (origin, callables, effects, suspension, reachability)
 - [ ] 2.3 Verify instance/discovery and conformance tests pass
 
 ## 3. Pipeline split and realize/prepare dedup
@@ -17,6 +17,6 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Run `pnpm typecheck` and verify clean
-- [ ] 4.2 Run `pnpm exec biome check .` and verify clean
-- [ ] 4.3 Run `pnpm test`
+- [x] 4.1 Run `pnpm typecheck` and verify clean
+- [x] 4.2 Run `pnpm exec biome check .` and verify clean
+- [x] 4.3 Run `pnpm test`

@@ -14,10 +14,10 @@
 
 - [ ] 3.1 Add `argumentBorrowId`/`loanEndsOf` and replace the six-plus inline copies
 - [ ] 3.2 Route all five access-reduction sites through `strongestEffectAccess`
-- [ ] 3.3 Replace the two `as SyntaxTree.Node` casts with a bound `arms.at(0)`
+- [x] 3.3 Replace the two `as SyntaxTree.Node` casts with a bound `arms.at(0)`
 
 ## 4. Verification
 
-- [ ] 4.1 Run `pnpm typecheck` and verify clean
-- [ ] 4.2 Run `pnpm exec biome check .` and verify clean
-- [ ] 4.3 Run `pnpm test`
+- [x] 4.1 Run `pnpm typecheck` and verify clean
+- [x] 4.2 Run `pnpm exec biome check .` and verify clean
+- [x] 4.3 Run `pnpm test`

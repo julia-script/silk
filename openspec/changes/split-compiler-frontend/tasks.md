@@ -15,10 +15,10 @@
 ## 3. Lookahead and keyword unification
 
 - [ ] 3.1 Add one trivia-skipping `peek(n)` and convert the two statement lookahead predicates
-- [ ] 3.2 Move `fn`/`let`/`move`/`pub`/`return`/`import` into `keywordSpellings` and delete the manual block
+- [x] 3.2 Move `fn`/`let`/`move`/`pub`/`return`/`import` into `keywordSpellings` and delete the manual block
 
 ## 4. Verification
 
-- [ ] 4.1 Run `pnpm typecheck` and verify clean
-- [ ] 4.2 Run `pnpm exec biome check .` and verify clean
-- [ ] 4.3 Run `pnpm test` and verify parser golden/span suites pass
+- [x] 4.1 Run `pnpm typecheck` and verify clean
+- [x] 4.2 Run `pnpm exec biome check .` and verify clean
+- [x] 4.3 Run `pnpm test` and verify parser golden/span suites pass
