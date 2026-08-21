@@ -1,12 +1,13 @@
 import type * as CompilerDocBlock from '@silk-effect/compiler/DocBlock'
 import type * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as Result from 'effect/Result'
 import type {
   BlockContent,
   ListItem as MarkdownListItem,
   PhrasingContent,
   RootContent,
 } from 'mdast'
-import { fromMarkdown } from 'mdast-util-from-markdown'
+import * as CommonMark from './internal/CommonMark.js'
 
 /** A JSON-safe half-open byte range in the original Silk source. */
 export interface SourceRange {
@@ -100,58 +101,11 @@ export interface Document {
   readonly fallback: boolean
 }
 
-interface Normalized {
-  readonly markdown: string
-  readonly offsets: ReadonlyArray<number>
-}
-
-const decoder = new TextDecoder()
-const encoder = new TextEncoder()
-
-const contentStart = (source: SourceFile.SourceFile, start: number, end: number): number =>
-  start + 3 < end && source.bytes[start + 3] === 0x20 ? start + 4 : start + 3
-
-const normalize = (source: SourceFile.SourceFile, block: CompilerDocBlock.DocBlock): Normalized => {
-  let markdown = ''
-  const offsets: Array<number> = []
-  for (const [index, comment] of block.comments.entries()) {
-    const start = contentStart(source, comment.span.start, comment.span.end)
-    if (index > 0) {
-      offsets[markdown.length] = block.comments[index - 1]?.span.end ?? start
-      markdown += '\n'
-      offsets[markdown.length] = start
-    }
-    const value = decoder.decode(Uint8Array.from(source.bytes.slice(start, comment.span.end)))
-    let byteOffset = start
-    for (const character of value) {
-      for (let unit = 0; unit < character.length; unit += 1)
-        offsets[markdown.length + unit] = byteOffset
-      markdown += character
-      byteOffset += encoder.encode(character).length
-      offsets[markdown.length] = byteOffset
-    }
-  }
-  offsets[markdown.length] ??= block.span.end
-  return Object.freeze({ markdown, offsets: Object.freeze(offsets) })
-}
-
 const sourceRange = (
   block: CompilerDocBlock.DocBlock,
-  normalized: Normalized,
+  normalized: CommonMark.Normalized,
   position: RootContent['position'],
-): SourceRange => {
-  const startOffset = position?.start.offset
-  const endOffset = position?.end.offset
-  return Object.freeze({
-    sourceId: block.span.sourceId,
-    start:
-      startOffset === undefined
-        ? block.span.start
-        : (normalized.offsets[startOffset] ?? block.span.start),
-    end:
-      endOffset === undefined ? block.span.end : (normalized.offsets[endOffset] ?? block.span.end),
-  })
-}
+): SourceRange => CommonMark.sourceRange(block, normalized, position)
 
 const splitSymbolLinks = (value: string, source: SourceRange): ReadonlyArray<Inline> => {
   const result: Array<Inline> = []
@@ -173,7 +127,7 @@ const splitSymbolLinks = (value: string, source: SourceRange): ReadonlyArray<Inl
 const inlineChildren = (
   nodes: ReadonlyArray<PhrasingContent>,
   block: CompilerDocBlock.DocBlock,
-  normalized: Normalized,
+  normalized: CommonMark.Normalized,
 ): ReadonlyArray<Inline> => {
   const raw = nodes.flatMap((node) => inline(node, block, normalized))
   const result: Array<Inline> = []
@@ -215,7 +169,7 @@ const inlineChildren = (
 const inline = (
   node: PhrasingContent,
   block: CompilerDocBlock.DocBlock,
-  normalized: Normalized,
+  normalized: CommonMark.Normalized,
 ): ReadonlyArray<Inline> => {
   const source = sourceRange(block, normalized, node.position)
   switch (node.type) {
@@ -292,14 +246,14 @@ const inline = (
 const listItem = (
   node: MarkdownListItem,
   block: CompilerDocBlock.DocBlock,
-  normalized: Normalized,
+  normalized: CommonMark.Normalized,
 ): ReadonlyArray<Block> =>
   Object.freeze(node.children.flatMap((child) => blocks(child, block, normalized)))
 
 const blocks = (
   node: RootContent | BlockContent,
   block: CompilerDocBlock.DocBlock,
-  normalized: Normalized,
+  normalized: CommonMark.Normalized,
 ): ReadonlyArray<Block> => {
   const source = sourceRange(block, normalized, node.position)
   switch (node.type) {
@@ -417,7 +371,10 @@ const markExamples = (input: ReadonlyArray<Block>): ReadonlyArray<Block> => {
   return Object.freeze(result)
 }
 
-const fallback = (block: CompilerDocBlock.DocBlock, normalized: Normalized): Document => {
+const fallback = (
+  block: CompilerDocBlock.DocBlock,
+  normalized: CommonMark.Normalized,
+): Document => {
   const source = Object.freeze({
     sourceId: block.span.sourceId,
     start: block.span.start,
@@ -447,9 +404,19 @@ export const parse = (
   sourceFile: SourceFile.SourceFile,
   block: CompilerDocBlock.DocBlock,
 ): Document => {
-  const normalized = normalize(sourceFile, block)
-  try {
-    const root = fromMarkdown(normalized.markdown)
+  const normalizedResult = CommonMark.normalize(sourceFile, block)
+  if (Result.isFailure(normalizedResult)) {
+    const normalized: CommonMark.Normalized = Object.freeze({
+      markdown: '',
+      offsets: Object.freeze([]),
+      lines: Object.freeze([]),
+    })
+    return fallback(block, normalized)
+  }
+  const normalized = normalizedResult.success
+  const rootResult = CommonMark.parse(normalized)
+  if (Result.isSuccess(rootResult)) {
+    const root = rootResult.success
     const parsed = markExamples(
       Object.freeze(root.children.flatMap((child) => blocks(child, block, normalized))),
     )
@@ -477,9 +444,8 @@ export const parse = (
       examples: Object.freeze(examples),
       fallback: false,
     })
-  } catch {
-    return fallback(block, normalized)
   }
+  return fallback(block, normalized)
 }
 
 export type Resolver = (spelling: string) => LinkTarget | undefined

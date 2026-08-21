@@ -101,3 +101,61 @@ it('attaches operation documentation through a contextual operator marker', () =
     ['/// Adds two values.'],
   )
 })
+
+it('inventories only documentable blocks in physical source order', () => {
+  const source = `//! Module docs.
+/// Struct docs.
+pub struct Box<
+  /// Type parameter docs.
+  T,
+> {
+  /// Field docs.
+  pub value: T
+}
+/// Function docs.
+pub fn unwrap(
+  /// Value parameter docs.
+  box: Box<i32>,
+) -> i32 {
+  /// Statement-local docs are not API documentation.
+  let value = box.value
+  return value
+}
+/// Interface docs.
+interface Read {
+  /// Service operation docs.
+  fn read() -> i32
+}
+/// Conformance docs.
+impl Read for Box<i32> {
+  /// Implementation operation docs.
+  read: unwrap
+}
+/// Unattached docs.
+
+pub const answer: i32 = 42
+//! Nonleading module-like trivia.
+pub const next: i32 = 43
+pub const trailing: i32 = 44 /// \`\`\`silk
+/// pub fn injected()->i32{return 1}
+/// \`\`\`
+pub const afterTrailing: i32 = 45
+`
+  const syntax = parse(source)
+  assert.deepEqual(
+    DocBlock.all(syntax).map((block) => spellings(block, source)),
+    [
+      ['//! Module docs.'],
+      ['/// Struct docs.'],
+      ['/// Type parameter docs.'],
+      ['/// Field docs.'],
+      ['/// Function docs.'],
+      ['/// Value parameter docs.'],
+      ['/// Interface docs.'],
+      ['/// Service operation docs.'],
+      ['/// Conformance docs.'],
+      ['/// Implementation operation docs.'],
+    ],
+  )
+  assert.isUndefined(DocBlock.ofNode(syntax, requiredNode(syntax, 'BindingStatement')))
+})

@@ -40,6 +40,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@silk-effect/formatter": "workspace:*",
     "@silk-effect/llvm": "workspace:*",
     "@silk-effect/wasm": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",

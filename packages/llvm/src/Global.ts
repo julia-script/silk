@@ -71,14 +71,6 @@ export interface Properties extends GlobalDescription.Common {
   readonly kind: GlobalDescription.GlobalDescription['kind']
 }
 
-/** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
-
 /**
  * Looks up an active global by its exact byte name.
  *
@@ -118,13 +110,13 @@ export const lookup = Effect.fn('Global.lookup')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Global | undefined, LlvmError> {
-  const value = bytes(name)
+  const value = ByteString.coerce(name)
   return yield* BuilderState.mutate(builder, 'Global.lookup', (state) =>
     Result.gen(function* () {
-      const index = state.globalNames.get(CanonicalKey.bytes(value))
+      const index = state.globals.entries.keys.get(CanonicalKey.bytes(value))
       if (index === undefined) return undefined
       const resolved = yield* GlobalState.resolveIndex(state, index, 'Global.lookup')
-      const description = state.globals[resolved]
+      const description = state.globals.entries.descriptions[resolved]
       return description === undefined || description.deleted
         ? undefined
         : yield* GlobalState.handleAt(state, resolved, 'Global.lookup')
@@ -219,7 +211,7 @@ export const rename = Effect.fn('Global.rename')(function* (
   self: Global,
   nextName: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<void, LlvmError> {
-  const requested = bytes(nextName)
+  const requested = ByteString.coerce(nextName)
   yield* BuilderState.mutate(builder, 'Global.rename', (state, owner) =>
     Result.gen(function* () {
       const { description, index } = yield* GlobalState.resolve(
@@ -239,7 +231,7 @@ export const rename = Effect.fn('Global.rename')(function* (
         )
       }
       const nextKey = CanonicalKey.bytes(requested)
-      const occupied = state.globalNames.get(nextKey)
+      const occupied = state.globals.entries.keys.get(nextKey)
       if (
         occupied !== undefined &&
         (yield* GlobalState.resolveIndex(state, occupied, 'Global.rename')) !== index
@@ -252,9 +244,9 @@ export const rename = Effect.fn('Global.rename')(function* (
           }),
         )
       }
-      state.globalNames.delete(CanonicalKey.bytes(description.name))
-      state.globalNames.set(nextKey, index)
-      state.globals[index] = Object.freeze({ ...description, name: requested })
+      state.globals.entries.keys.delete(CanonicalKey.bytes(description.name))
+      state.globals.entries.keys.set(nextKey, index)
+      state.globals.entries.descriptions[index] = Object.freeze({ ...description, name: requested })
     }),
   )
 })
@@ -279,7 +271,7 @@ export const configure = Effect.fn('Global.configure')(function* (
         self,
         'Global.configure',
       )
-      state.globals[index] = Object.freeze({
+      state.globals.entries.descriptions[index] = Object.freeze({
         ...description,
         addressSpace: options.addressSpace ?? description.addressSpace,
         linkage: options.linkage ?? description.linkage,
@@ -324,8 +316,8 @@ export const attachMetadata = Effect.fn('Global.attachMetadata')(function* (
         'Global.attachMetadata',
       )
       if (metadataIndex === undefined) return
-      const current = state.globalMetadata[index] ?? []
-      state.globalMetadata[index] = Object.freeze([
+      const current = state.globals.attachments[index] ?? []
+      state.globals.attachments[index] = Object.freeze([
         ...current.filter((attachment) => attachment.kind !== kind),
         Object.freeze({ kind, metadata: metadataIndex }),
       ])
@@ -359,8 +351,8 @@ export const replace = Effect.fn('Global.replace')(function* (
         'Global.replace',
       )
       if (source.index === target.index) return
-      state.globalNames.delete(CanonicalKey.bytes(source.description.name))
-      state.globals[source.index] = Object.freeze({
+      state.globals.entries.keys.delete(CanonicalKey.bytes(source.description.name))
+      state.globals.entries.descriptions[source.index] = Object.freeze({
         ...source.description,
         replacement: target.index,
         deleted: true,
@@ -388,8 +380,8 @@ export const remove = Effect.fn('Global.remove')(function* (
         self,
         'Global.remove',
       )
-      state.globalNames.delete(CanonicalKey.bytes(description.name))
-      state.globals[index] = Object.freeze({ ...description, deleted: true })
+      state.globals.entries.keys.delete(CanonicalKey.bytes(description.name))
+      state.globals.entries.descriptions[index] = Object.freeze({ ...description, deleted: true })
     }),
   )
 })

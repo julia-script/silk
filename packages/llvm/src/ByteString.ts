@@ -80,6 +80,33 @@ export const fromString = (value: string): ByteString => {
 export const empty: ByteString = fromNumbers([])
 
 /**
+ * Coerces a UTF-8 string, typed array, or existing byte string into an immutable byte string.
+ *
+ * **When to use**
+ *
+ * Use at public byte-oriented boundaries that accept any of the three spellings. UTF-8 strings are
+ * encoded, typed arrays are copied, and existing {@link ByteString} values pass through unchanged.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const coerce = (value: ByteString | Uint8Array | string): ByteString =>
+  typeof value === 'string'
+    ? fromString(value)
+    : value instanceof Uint8Array
+      ? fromUint8Array(value)
+      : value
+
+/**
+ * Coerces an optional value into a byte string, mapping `undefined` to {@link empty}.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export const coerceOrEmpty = (value: ByteString | Uint8Array | string | undefined): ByteString =>
+  value === undefined ? empty : coerce(value)
+
+/**
  * Returns a defensive copy suitable for passing across a mutable boundary.
  *
  * @category byte strings
@@ -96,21 +123,6 @@ export const toUint8Array = (self: ByteString): Uint8Array => Uint8Array.from(se
 export const equals = (self: ByteString, other: ByteString): boolean => {
   if (self.bytes.length !== other.bytes.length) return false
   return self.bytes.every((byte, index) => byte === other.bytes[index])
-}
-
-/**
- * A stable 32-bit FNV-1a hash.
- *
- * @category byte strings
- * @since 0.0.0
- */
-export const hash = (self: ByteString): number => {
-  let value = 0x811c9dc5
-  for (const byte of self.bytes) {
-    value ^= byte
-    value = Math.imul(value, 0x01000193) >>> 0
-  }
-  return value
 }
 
 /** @internal */

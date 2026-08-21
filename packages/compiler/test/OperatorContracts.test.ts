@@ -3,10 +3,10 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 
 const encoder = new TextEncoder()
 
@@ -169,7 +169,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('formats the contextual marker before ordinary and effect contracts', () =>
   Effect.gen(function* () {
-    const ordinary = yield* Formatter.format(
+    const ordinary = yield* SyntaxFormatter.format(
       parse(
         'operator-contracts/format',
         'interface M{operator   * fn  mul(left:Self,right:i32)->Self}',
@@ -179,7 +179,7 @@ it.effect('formats the contextual marker before ordinary and effect contracts', 
       new TextDecoder().decode(FormattedDocument.toUint8Array(ordinary)),
       'interface M {\n  operator * fn mul(left: Self, right: i32) -> Self\n}\n',
     )
-    const effectful = yield* Formatter.format(
+    const effectful = yield* SyntaxFormatter.format(
       parse(
         'operator-contracts/effect-format',
         'interface M{operator * effect fn mul(left:Self,right:i32)->Self}',

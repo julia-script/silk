@@ -15,6 +15,25 @@ export interface DocBlock {
   readonly span: SourceSpan.SourceSpan
 }
 
+const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
+  'StructDeclaration',
+  'ServiceDeclaration',
+  'InterfaceDeclaration',
+  'RoleDeclaration',
+  'ConstantDeclaration',
+  'ImplDeclaration',
+  'FunctionDeclaration',
+  'StructField',
+  'TypeParameter',
+  'ParameterDeclaration',
+  'ServiceOperation',
+  'ImplOperation',
+])
+
+/** Tests whether one concrete-syntax kind participates in Silk's documentation model. */
+export const isDocumentableKind = (kind: SyntaxTree.NodeKind): boolean =>
+  documentableKinds.has(kind)
+
 const isTrivia = (token: Token.Token): boolean =>
   token.kind === 'Whitespace' ||
   token.kind === 'LineComment' ||
@@ -35,6 +54,17 @@ const lineBreaks = (source: SourceFile.SourceFile, token: Token.Token): number =
     index += 1
   }
   return count
+}
+
+const startsLine = (source: SourceFile.SourceFile, token: Token.Token): boolean => {
+  let index = token.span.start
+  while (index > 0) {
+    const byte = source.bytes[index - 1]
+    if (byte === 0x0a || byte === 0x0d) return true
+    if (byte !== 0x20 && byte !== 0x09) return false
+    index -= 1
+  }
+  return true
 }
 
 const make = (
@@ -69,18 +99,15 @@ const attachedAtEnd = (
   if (trailing?.kind !== 'Whitespace' || lineBreaks(source, trailing) !== 1) return undefined
   index -= 1
   const last = leading[index]
-  if (last?.kind !== commentKind) return undefined
+  if (last?.kind !== commentKind || !startsLine(source, last)) return undefined
   const comments: Array<Token.Token> = [last]
   index -= 1
   while (index >= 1) {
     const whitespace = leading[index]
     const comment = leading[index - 1]
-    if (
-      whitespace?.kind !== 'Whitespace' ||
-      lineBreaks(source, whitespace) !== 1 ||
-      comment?.kind !== commentKind
-    )
-      break
+    if (whitespace?.kind !== 'Whitespace' || lineBreaks(source, whitespace) !== 1) break
+    if (comment?.kind !== commentKind) break
+    if (!startsLine(source, comment)) return undefined
     comments.unshift(comment)
     index -= 2
   }
@@ -108,18 +135,15 @@ const moduleAtStart = (
   leading: ReadonlyArray<Token.Token>,
 ): DocBlock | undefined => {
   const first = leading.at(0)
-  if (first?.kind !== 'ModuleDocComment') return undefined
+  if (first?.kind !== 'ModuleDocComment' || !startsLine(source, first)) return undefined
   const comments: Array<Token.Token> = [first]
   let index = 1
   while (index + 1 < leading.length) {
     const whitespace = leading[index]
     const comment = leading[index + 1]
-    if (
-      whitespace?.kind !== 'Whitespace' ||
-      lineBreaks(source, whitespace) !== 1 ||
-      comment?.kind !== 'ModuleDocComment'
-    )
-      break
+    if (whitespace?.kind !== 'Whitespace' || lineBreaks(source, whitespace) !== 1) break
+    if (comment?.kind !== 'ModuleDocComment') break
+    if (!startsLine(source, comment)) return undefined
     comments.push(comment)
     index += 2
   }
@@ -131,7 +155,7 @@ export const ofNode = (
   syntax: SyntaxFile.SyntaxFile,
   node: SyntaxTree.Node,
 ): DocBlock | undefined =>
-  node.span.sourceId === syntax.source.id
+  isDocumentableKind(node.kind) && node.span.sourceId === syntax.source.id
     ? attachedAtEnd(syntax.source, directLeadingTrivia(node), 'Declaration')
     : undefined
 
@@ -143,4 +167,32 @@ export const ofModule = (syntax: SyntaxFile.SyntaxFile): DocBlock | undefined =>
     leading.push(token)
   }
   return moduleAtStart(syntax.source, leading)
+}
+
+/** Returns every source-owned documentation block in physical source order. */
+export const all = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<DocBlock> => {
+  const blocks: Array<DocBlock> = []
+  const module = ofModule(syntax)
+  if (module !== undefined) blocks.push(module)
+
+  const visit = (node: SyntaxTree.Node): void => {
+    if (isDocumentableKind(node.kind)) {
+      const block = ofNode(syntax, node)
+      if (block !== undefined) blocks.push(block)
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(syntax.root)
+
+  const seen = new Set<string>()
+  return Object.freeze(
+    blocks
+      .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)
+      .filter((block) => {
+        const key = `${block.span.sourceId}:${block.span.start}:${block.span.end}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }),
+  )
 }

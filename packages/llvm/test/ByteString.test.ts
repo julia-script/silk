@@ -8,7 +8,6 @@ it('copies input bytes and compares by byte content', () => {
 
   assert.deepEqual(ByteString.toUint8Array(value), Uint8Array.of(0x61, 0x62))
   assert.strictEqual(ByteString.equals(value, ByteString.fromString('ab')), true)
-  assert.strictEqual(ByteString.hash(value), ByteString.hash(ByteString.fromString('ab')))
 })
 
 it('encodes UTF-8 and applies LLVM byte escaping', () => {

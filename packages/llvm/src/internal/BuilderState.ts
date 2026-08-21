@@ -1,22 +1,22 @@
 import * as Effect from 'effect/Effect'
 import type * as Result from 'effect/Result'
 import type * as Semaphore from 'effect/Semaphore'
-import type * as Alias from '../Alias.js'
 import type * as Attribute from '../Attribute.js'
 import type * as Builder from '../Builder.js'
 import type * as ByteString from '../ByteString.js'
 import type * as Constant from '../Constant.js'
 import type * as DataLayout from '../DataLayout.js'
-import type * as FunctionActor from '../Function.js'
 import type * as Global from '../Global.js'
 import { invalidState, type LlvmError } from '../LlvmError.js'
 import type * as Type from '../Type.js'
-import type * as Variable from '../Variable.js'
 import type * as AttributeDescription from './AttributeDescription.js'
 import type * as ConstantDescription from './ConstantDescription.js'
 import type * as GlobalDescription from './GlobalDescription.js'
+import * as GlobalTable from './GlobalTable.js'
 import type * as MetadataDescription from './MetadataDescription.js'
+import * as MetadataTable from './MetadataTable.js'
 import type * as OwnedHandle from './OwnedHandle.js'
+import * as Table from './Table.js'
 import type * as TypeDescription from './TypeDescription.js'
 
 export interface MutableState {
@@ -27,43 +27,20 @@ export interface MutableState {
   dataLayout: ByteString.ByteString
   layout: DataLayout.DataLayout
   moduleAssembly: Array<ByteString.ByteString>
-  nextHandle: number
   strings: Array<ByteString.ByteString>
   stringKeys: Map<string, number>
-  types: Array<TypeDescription.Description>
-  typeHandles: Array<Type.Type>
-  typeKeys: Map<string, number>
+  types: Table.Table<TypeDescription.Description, Type.Type>
   namedTypes: Map<string, number>
-  attributes: Array<AttributeDescription.Description>
-  attributeHandles: Array<Attribute.Attribute>
-  attributeKeys: Map<string, number>
-  attributeSets: Array<ReadonlyArray<number>>
-  attributeSetHandles: Array<Attribute.Set>
-  attributeSetKeys: Map<string, number>
-  functionAttributeSets: Array<AttributeDescription.FunctionSetDescription>
-  functionAttributeSetHandles: Array<Attribute.FunctionSet>
-  functionAttributeSetKeys: Map<string, number>
-  constants: Array<ConstantDescription.Description>
-  constantHandles: Array<Constant.Constant>
-  constantKeys: Map<string, number>
-  globals: Array<GlobalDescription.GlobalDescription>
-  globalHandles: Array<Global.Global>
-  globalNames: Map<string, number>
-  nextAnonymousGlobal: number
-  variables: Array<GlobalDescription.VariableDescription>
-  variableHandles: Array<Variable.Variable>
-  aliases: Array<GlobalDescription.AliasDescription>
-  aliasHandles: Array<Alias.Alias>
-  functions: Array<GlobalDescription.FunctionDescription>
-  functionHandles: Array<FunctionActor.Function>
+  attributes: Table.Table<AttributeDescription.Description, Attribute.Attribute>
+  attributeSets: Table.Table<ReadonlyArray<number>, Attribute.Set>
+  functionAttributeSets: Table.Table<
+    AttributeDescription.FunctionSetDescription,
+    Attribute.FunctionSet
+  >
+  constants: Table.Table<ConstantDescription.Description, Constant.Constant>
+  globals: GlobalTable.GlobalTable
   buildingFunctions: Set<number>
-  metadata: Array<MetadataDescription.Entry>
-  metadataHandles: Array<import('../Metadata.js').Metadata>
-  metadataStringKeys: Map<string, number>
-  metadataNodeKeys: Map<string, number>
-  namedMetadata: Array<MetadataDescription.Named>
-  namedMetadataKeys: Map<string, number>
-  globalMetadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
+  metadata: MetadataTable.MetadataTable
 }
 
 export interface State {
@@ -81,7 +58,6 @@ export interface Snapshot {
   readonly dataLayout: ByteString.ByteString
   readonly layout: DataLayout.DataLayout
   readonly moduleAssembly: ReadonlyArray<ByteString.ByteString>
-  readonly nextHandle: number
   readonly strings: ReadonlyArray<ByteString.ByteString>
   readonly types: ReadonlyArray<TypeDescription.Description>
   readonly typeHandles: ReadonlyArray<Type.Type>
@@ -150,25 +126,22 @@ export const snapshot = Effect.fnUntraced(function* (
         dataLayout: state.value.dataLayout,
         layout: state.value.layout,
         moduleAssembly: Object.freeze([...state.value.moduleAssembly]),
-        nextHandle: state.value.nextHandle,
         strings: Object.freeze([...state.value.strings]),
-        types: Object.freeze([...state.value.types]),
-        typeHandles: Object.freeze([...state.value.typeHandles]),
-        attributes: Object.freeze([...state.value.attributes]),
-        attributeSets: Object.freeze([...state.value.attributeSets]),
-        functionAttributeSets: Object.freeze([...state.value.functionAttributeSets]),
-        constants: Object.freeze([...state.value.constants]),
-        constantHandles: Object.freeze([...state.value.constantHandles]),
-        globals: Object.freeze([...state.value.globals]),
-        globalHandles: Object.freeze([...state.value.globalHandles]),
-        variables: Object.freeze([...state.value.variables]),
-        aliases: Object.freeze([...state.value.aliases]),
-        functions: Object.freeze([...state.value.functions]),
-        metadata: Object.freeze([...state.value.metadata]),
-        namedMetadata: Object.freeze([...state.value.namedMetadata]),
-        globalMetadata: Object.freeze(
-          state.value.globalMetadata.map((attachments) => Object.freeze([...attachments])),
-        ),
+        types: Table.freeze(state.value.types).descriptions,
+        typeHandles: Table.freeze(state.value.types).handles,
+        attributes: Table.freeze(state.value.attributes).descriptions,
+        attributeSets: Table.freeze(state.value.attributeSets).descriptions,
+        functionAttributeSets: Table.freeze(state.value.functionAttributeSets).descriptions,
+        constants: Table.freeze(state.value.constants).descriptions,
+        constantHandles: Table.freeze(state.value.constants).handles,
+        globals: GlobalTable.freeze(state.value.globals).globals,
+        globalHandles: GlobalTable.freeze(state.value.globals).globalHandles,
+        variables: GlobalTable.freeze(state.value.globals).variables,
+        aliases: GlobalTable.freeze(state.value.globals).aliases,
+        functions: GlobalTable.freeze(state.value.globals).functions,
+        metadata: MetadataTable.freeze(state.value.metadata).descriptions,
+        namedMetadata: MetadataTable.freeze(state.value.metadata).named,
+        globalMetadata: GlobalTable.freeze(state.value.globals).attachments,
       })),
     ),
   )

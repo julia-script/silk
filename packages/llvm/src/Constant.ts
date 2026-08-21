@@ -10,8 +10,9 @@ import type * as ConstantDescription from './internal/ConstantDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
+import * as Table from './internal/Table.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
-import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
+import { invalidInput, type LlvmError } from './LlvmError.js'
 import * as Type from './Type.js'
 
 /**
@@ -56,14 +57,6 @@ export interface AssemblyOptions {
   readonly intelDialect?: boolean
   readonly canThrow?: boolean
 }
-
-/** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
 
 /** @internal */
 const descriptionKey = (description: ConstantDescription.Description): string => {
@@ -142,36 +135,6 @@ const descriptionKey = (description: ConstantDescription.Description): string =>
 }
 
 /** @internal */
-const handleAt = (
-  handles: ReadonlyArray<Constant>,
-  index: number,
-  operation: string,
-): Result.Result<Constant, LlvmError> => {
-  const handle = handles[index]
-  if (handle === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Constant table handle is missing', state: index }),
-    )
-  }
-  return Result.succeed(handle)
-}
-
-/** @internal */
-const typeHandleAt = (
-  handles: ReadonlyArray<Type.Type>,
-  index: number,
-  operation: string,
-): Result.Result<Type.Type, LlvmError> => {
-  const handle = handles[index]
-  if (handle === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Type table handle is missing', state: index }),
-    )
-  }
-  return Result.succeed(handle)
-}
-
-/** @internal */
 const intern = Effect.fn('Constant.intern')(function* (
   builder: Builder.Builder,
   description: ConstantDescription.Description,
@@ -179,48 +142,18 @@ const intern = Effect.fn('Constant.intern')(function* (
   return yield* BuilderState.mutate(builder, 'Constant.intern', (state, owner) =>
     Result.gen(function* () {
       const key = descriptionKey(description)
-      const found = state.constantKeys.get(key)
-      if (found !== undefined)
-        return yield* handleAt(state.constantHandles, found, 'Constant.intern')
-      const index = state.constants.length
-      const handle = Handle.make('Constant', owner, index)
-      state.constants.push(description)
-      state.constantHandles.push(handle)
-      state.constantKeys.set(key, index)
-      return handle
+      const interned = yield* Table.intern(
+        state.constants,
+        'Constant.intern',
+        'Constant',
+        key,
+        description,
+        (index) => Handle.make('Constant', owner, index),
+      )
+      return interned.handle
     }),
   )
 })
-
-/** @internal */
-const typeDescription = (
-  state: BuilderState.MutableState,
-  index: number,
-  operation: string,
-): Result.Result<TypeDescription.Description, LlvmError> => {
-  const description = state.types[index]
-  if (description === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Type table entry is missing', state: index }),
-    )
-  }
-  return Result.succeed(description)
-}
-
-/** @internal */
-const constantDescription = (
-  state: BuilderState.MutableState,
-  index: number,
-  operation: string,
-): Result.Result<ConstantDescription.Description, LlvmError> => {
-  const description = state.constants[index]
-  if (description === undefined) {
-    return Result.fail(
-      invalidState({ operation, message: 'Constant table entry is missing', state: index }),
-    )
-  }
-  return Result.succeed(description)
-}
 
 /** @internal */
 const integerOf = Effect.fn('Constant.integerOf')(function* (
@@ -232,7 +165,12 @@ const integerOf = Effect.fn('Constant.integerOf')(function* (
   const description = yield* BuilderState.mutate(builder, 'Constant.integer', (state, owner) =>
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.integer')
-      const typeValue = yield* typeDescription(state, typeIndex, 'Constant.integer')
+      const typeValue = yield* Table.descriptionAt(
+        state.types,
+        typeIndex,
+        'Constant.integer',
+        'Type',
+      )
       if (typeValue._tag !== 'Integer') {
         return yield* Result.fail(
           invalidInput({
@@ -416,7 +354,12 @@ export const floatingRaw = Effect.fn('Constant.floatingRaw')(function* (
   const description = yield* BuilderState.mutate(builder, 'Constant.floatingRaw', (state, owner) =>
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.floatingRaw')
-      const typeValue = yield* typeDescription(state, typeIndex, 'Constant.floatingRaw')
+      const typeValue = yield* Table.descriptionAt(
+        state.types,
+        typeIndex,
+        'Constant.floatingRaw',
+        'Type',
+      )
       if (typeValue._tag !== 'Simple' || typeValue.tag !== formatTypeTag[format]) {
         return yield* Result.fail(
           invalidInput({
@@ -599,7 +542,7 @@ export const string = Effect.fn('Constant.string')(function* (
   value: ByteString.ByteString | Uint8Array | string,
   options: { readonly nullTerminated?: boolean } = {},
 ): Effect.fn.Return<Constant, LlvmError> {
-  const input = bytes(value)
+  const input = ByteString.coerce(value)
   const contents = options.nullTerminated
     ? ByteString.concat([input, ByteString.fromUint8Array(Uint8Array.of(0))])
     : input
@@ -626,7 +569,12 @@ export const aggregate = Effect.fn('Constant.aggregate')(function* (
   const description = yield* BuilderState.mutate(builder, 'Constant.aggregate', (state, owner) =>
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.aggregate')
-      const typeValue = yield* typeDescription(state, typeIndex, 'Constant.aggregate')
+      const typeValue = yield* Table.descriptionAt(
+        state.types,
+        typeIndex,
+        'Constant.aggregate',
+        'Type',
+      )
       const mutableElementIndices: Array<number> = []
       for (const element of elements) {
         mutableElementIndices.push(
@@ -669,10 +617,11 @@ export const aggregate = Effect.fn('Constant.aggregate')(function* (
         kind = body.packed ? 'packed-structure' : 'structure'
       }
       for (let index = 0; index < elementIndices.length; index += 1) {
-        const element = yield* constantDescription(
-          state,
+        const element = yield* Table.descriptionAt(
+          state.constants,
           elementIndices[index] ?? -1,
           'Constant.aggregate',
+          'Constant',
         )
         if (element.type !== expected[index]) {
           return yield* Result.fail(
@@ -710,8 +659,13 @@ export const splat = Effect.fn('Constant.splat')(function* (
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.splat')
       const valueIndex = yield* Handle.resolve(builder, owner, value, 'Constant', 'Constant.splat')
-      const typeValue = yield* typeDescription(state, typeIndex, 'Constant.splat')
-      const constantValue = yield* constantDescription(state, valueIndex, 'Constant.splat')
+      const typeValue = yield* Table.descriptionAt(state.types, typeIndex, 'Constant.splat', 'Type')
+      const constantValue = yield* Table.descriptionAt(
+        state.constants,
+        valueIndex,
+        'Constant.splat',
+        'Constant',
+      )
       if (typeValue._tag !== 'Vector' || constantValue.type !== typeValue.child) {
         return yield* Result.fail(
           invalidInput({
@@ -765,7 +719,7 @@ export const blockAddress = Effect.fn('Constant.blockAddress')(function* (
         'Function',
         'Constant.blockAddress',
       )
-      const body = state.functions[functionIndex]?.body
+      const body = state.globals.functions.descriptions[functionIndex]?.body
       if (body !== undefined && block >= body.blocks.length) {
         return yield* Result.fail(
           invalidInput({
@@ -782,7 +736,12 @@ export const blockAddress = Effect.fn('Constant.blockAddress')(function* (
         'Constant',
         'Constant.blockAddress',
       )
-      const type = (yield* constantDescription(state, referenceIndex, 'Constant.blockAddress')).type
+      const type = (yield* Table.descriptionAt(
+        state.constants,
+        referenceIndex,
+        'Constant.blockAddress',
+        'Constant',
+      )).type
       return Object.freeze({
         _tag: 'BlockAddress' as const,
         type,
@@ -814,7 +773,12 @@ const functionReference = Effect.fn('Constant.functionReference')(function* (
         _tag: 'FunctionReference' as const,
         kind,
         function: referenceIndex,
-        type: (yield* constantDescription(state, referenceIndex, `Constant.${kind}`)).type,
+        type: (yield* Table.descriptionAt(
+          state.constants,
+          referenceIndex,
+          `Constant.${kind}`,
+          'Constant',
+        )).type,
       })
     }),
   )
@@ -853,9 +817,9 @@ const castScalar = (
   index: number,
 ): Result.Result<TypeDescription.Description, LlvmError> =>
   Result.gen(function* () {
-    const description = yield* typeDescription(state, index, 'Constant.cast')
+    const description = yield* Table.descriptionAt(state.types, index, 'Constant.cast', 'Type')
     return description._tag === 'Vector'
-      ? yield* typeDescription(state, description.child, 'Constant.cast')
+      ? yield* Table.descriptionAt(state.types, description.child, 'Constant.cast', 'Type')
       : description
   })
 
@@ -897,9 +861,24 @@ export const cast = Effect.fn('Constant.cast')(function* (
     Result.gen(function* () {
       const valueIndex = yield* Handle.resolve(builder, owner, value, 'Constant', 'Constant.cast')
       const destinationIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.cast')
-      const sourceIndex = (yield* constantDescription(state, valueIndex, 'Constant.cast')).type
-      const sourceType = yield* typeDescription(state, sourceIndex, 'Constant.cast')
-      const destinationType = yield* typeDescription(state, destinationIndex, 'Constant.cast')
+      const sourceIndex = (yield* Table.descriptionAt(
+        state.constants,
+        valueIndex,
+        'Constant.cast',
+        'Constant',
+      )).type
+      const sourceType = yield* Table.descriptionAt(
+        state.types,
+        sourceIndex,
+        'Constant.cast',
+        'Type',
+      )
+      const destinationType = yield* Table.descriptionAt(
+        state.types,
+        destinationIndex,
+        'Constant.cast',
+        'Type',
+      )
       const sourceScalar = yield* castScalar(state, sourceIndex)
       const destinationScalar = yield* castScalar(state, destinationIndex)
       const sameVectorShape =
@@ -963,8 +942,18 @@ export const binary = Effect.fn('Constant.binary')(function* (
     Result.gen(function* () {
       const leftIndex = yield* Handle.resolve(builder, owner, left, 'Constant', 'Constant.binary')
       const rightIndex = yield* Handle.resolve(builder, owner, right, 'Constant', 'Constant.binary')
-      const leftValue = yield* constantDescription(state, leftIndex, 'Constant.binary')
-      const rightValue = yield* constantDescription(state, rightIndex, 'Constant.binary')
+      const leftValue = yield* Table.descriptionAt(
+        state.constants,
+        leftIndex,
+        'Constant.binary',
+        'Constant',
+      )
+      const rightValue = yield* Table.descriptionAt(
+        state.constants,
+        rightIndex,
+        'Constant.binary',
+        'Constant',
+      )
       if (leftValue.type !== rightValue.type) {
         return yield* Result.fail(
           invalidInput({
@@ -1040,11 +1029,26 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
           'Constant',
           'Constant.getElementPtr',
         )
-        const baseValue = yield* constantDescription(state, baseIndex, 'Constant.getElementPtr')
-        const baseType = yield* typeDescription(state, baseValue.type, 'Constant.getElementPtr')
+        const baseValue = yield* Table.descriptionAt(
+          state.constants,
+          baseIndex,
+          'Constant.getElementPtr',
+          'Constant',
+        )
+        const baseType = yield* Table.descriptionAt(
+          state.types,
+          baseValue.type,
+          'Constant.getElementPtr',
+          'Type',
+        )
         const basePointer =
           baseType._tag === 'Vector'
-            ? yield* typeDescription(state, baseType.child, 'Constant.getElementPtr')
+            ? yield* Table.descriptionAt(
+                state.types,
+                baseType.child,
+                'Constant.getElementPtr',
+                'Type',
+              )
             : baseType
         if (basePointer._tag !== 'Pointer') {
           return yield* Result.fail(
@@ -1083,15 +1087,26 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
             : undefined
         for (let position = 0; position < indexValues.length; position += 1) {
           const index = indexValues[position]
-          const indexValue = yield* constantDescription(
-            state,
+          const indexValue = yield* Table.descriptionAt(
+            state.constants,
             index ?? -1,
             'Constant.getElementPtr',
+            'Constant',
           )
-          const indexType = yield* typeDescription(state, indexValue.type, 'Constant.getElementPtr')
+          const indexType = yield* Table.descriptionAt(
+            state.types,
+            indexValue.type,
+            'Constant.getElementPtr',
+            'Type',
+          )
           const scalar =
             indexType._tag === 'Vector'
-              ? yield* typeDescription(state, indexType.child, 'Constant.getElementPtr')
+              ? yield* Table.descriptionAt(
+                  state.types,
+                  indexType.child,
+                  'Constant.getElementPtr',
+                  'Type',
+                )
               : indexType
           if (scalar._tag !== 'Integer') {
             return yield* Result.fail(
@@ -1119,7 +1134,12 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
             vector = shape
           }
           if (position === 0) continue
-          const aggregate = yield* typeDescription(state, current, 'Constant.getElementPtr')
+          const aggregate = yield* Table.descriptionAt(
+            state.types,
+            current,
+            'Constant.getElementPtr',
+            'Type',
+          )
           if (aggregate._tag === 'Array' || aggregate._tag === 'Vector') {
             current = aggregate.child
             continue
@@ -1147,7 +1167,12 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
           }
           current = field
         }
-        const result = yield* typeDescription(state, resultTypeIndex, 'Constant.getElementPtr')
+        const result = yield* Table.descriptionAt(
+          state.types,
+          resultTypeIndex,
+          'Constant.getElementPtr',
+          'Type',
+        )
         const expectedPointerIndex = baseType._tag === 'Vector' ? baseType.child : baseValue.type
         const validResult =
           vector === undefined
@@ -1200,8 +1225,8 @@ export const assembly = Effect.fn('Constant.assembly')(function* (
     Object.freeze({
       _tag: 'Assembly',
       type: typeIndex,
-      assembly: bytes(assembly),
-      constraints: bytes(constraints),
+      assembly: ByteString.coerce(assembly),
+      constraints: ByteString.coerce(constraints),
       sideEffect: options.sideEffect ?? false,
       alignStack: options.alignStack ?? false,
       intelDialect: options.intelDialect ?? false,
@@ -1223,8 +1248,13 @@ export const typeOf = Effect.fn('Constant.typeOf')(function* (
   return yield* BuilderState.mutate(builder, 'Constant.typeOf', (state, owner) =>
     Result.gen(function* () {
       const index = yield* Handle.resolve(builder, owner, self, 'Constant', 'Constant.typeOf')
-      const description = yield* constantDescription(state, index, 'Constant.typeOf')
-      return yield* typeHandleAt(state.typeHandles, description.type, 'Constant.typeOf')
+      const description = yield* Table.descriptionAt(
+        state.constants,
+        index,
+        'Constant.typeOf',
+        'Constant',
+      )
+      return yield* Table.handleAt(state.types, description.type, 'Constant.typeOf', 'Type')
     }),
   )
 })
@@ -1242,7 +1272,7 @@ export const tag = Effect.fn('Constant.tag')(function* (
   return yield* BuilderState.mutate(builder, 'Constant.tag', (state, owner) =>
     Result.gen(function* () {
       const index = yield* Handle.resolve(builder, owner, self, 'Constant', 'Constant.tag')
-      return (yield* constantDescription(state, index, 'Constant.tag'))._tag
+      return (yield* Table.descriptionAt(state.constants, index, 'Constant.tag', 'Constant'))._tag
     }),
   )
 })
@@ -1266,7 +1296,12 @@ export const integerBitPattern = Effect.fn('Constant.integerBitPattern')(functio
         'Constant',
         'Constant.integerBitPattern',
       )
-      const description = yield* constantDescription(state, index, 'Constant.integerBitPattern')
+      const description = yield* Table.descriptionAt(
+        state.constants,
+        index,
+        'Constant.integerBitPattern',
+        'Constant',
+      )
       if (description._tag !== 'Integer') {
         return yield* Result.fail(
           invalidInput({
@@ -1294,7 +1329,12 @@ export const floatingBits = Effect.fn('Constant.floatingBits')(function* (
   return yield* BuilderState.mutate(builder, 'Constant.floatingBits', (state, owner) =>
     Result.gen(function* () {
       const index = yield* Handle.resolve(builder, owner, self, 'Constant', 'Constant.floatingBits')
-      const description = yield* constantDescription(state, index, 'Constant.floatingBits')
+      const description = yield* Table.descriptionAt(
+        state.constants,
+        index,
+        'Constant.floatingBits',
+        'Constant',
+      )
       if (description._tag !== 'Float') {
         return yield* Result.fail(
           invalidInput({

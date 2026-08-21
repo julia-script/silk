@@ -12,15 +12,15 @@ import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
 /** Expected refusal when source recovery prevents semantics-preserving formatting. */
-export class FormatterError extends Data.TaggedError('FormatterError')<{
-  readonly operation: 'Formatter.format'
+export class SyntaxFormatterError extends Data.TaggedError('SyntaxFormatterError')<{
+  readonly operation: 'SyntaxFormatter.format' | 'SyntaxFormatter.validate'
   readonly sourceId: string
   readonly message: string
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly reason: { readonly _tag: 'DamagedSyntax' }
 }> {}
 
-class FormatterImplementationError extends Error {}
+class SyntaxFormatterImplementationError extends Error {}
 
 const isTrivia = (kind: Token.TokenKind): boolean =>
   kind === 'Whitespace' ||
@@ -57,7 +57,8 @@ const makeContext = (syntax: SyntaxFile.SyntaxFile): Context => {
 const bytes = (context: Context, token: Token.Token): Uint8Array =>
   Option.getOrThrowWith(
     SourceFile.slice(context.syntax.source, token.span),
-    () => new FormatterImplementationError(`Token span is outside ${context.syntax.source.id}`),
+    () =>
+      new SyntaxFormatterImplementationError(`Token span is outside ${context.syntax.source.id}`),
   )
 
 const lineBreaks = (context: Context, tokens: ReadonlyArray<Token.Token>): number => {
@@ -172,7 +173,7 @@ const tokenOf = (node: SyntaxTree.Node, kind: Token.TokenKind, occurrence = 0): 
     if (found === occurrence) return token
     found += 1
   }
-  throw new FormatterImplementationError(`${node.kind} has no ${kind} token ${occurrence}`)
+  throw new SyntaxFormatterImplementationError(`${node.kind} has no ${kind} token ${occurrence}`)
 }
 
 const nodeOf = (
@@ -186,7 +187,7 @@ const nodeOf = (
     if (found === occurrence) return child
     found += 1
   }
-  throw new FormatterImplementationError(`${node.kind} has no ${kind} node ${occurrence}`)
+  throw new SyntaxFormatterImplementationError(`${node.kind} has no ${kind} node ${occurrence}`)
 }
 
 const commaTokens = (node: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
@@ -495,7 +496,7 @@ const printFunctionDeclaration = (
     directTokens(node).find((token) => token.kind === 'Identifier') ??
     directTokens(node).find((token) => token.kind === 'DropKeyword')
   if (name === undefined)
-    throw new FormatterImplementationError('FunctionDeclaration has no function name')
+    throw new SyntaxFormatterImplementationError('FunctionDeclaration has no function name')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
       ? []
@@ -763,7 +764,9 @@ const printNode = (
     case 'OperatorMarker':
       return printTokenSequence(context, node, prefix, FormatDocument.text(' '), preserveBlank)
     case 'ServiceInvalidMember':
-      throw new FormatterImplementationError('Damaged service member reached the syntax printer')
+      throw new SyntaxFormatterImplementationError(
+        'Damaged service member reached the syntax printer',
+      )
     case 'ConstantDeclaration':
       return printConstantDeclaration(context, node, prefix)
     case 'ImplDeclaration':
@@ -890,14 +893,15 @@ const printNode = (
       const members = directNodes(node)
       const separators = directTokens(node).filter((token) => token.kind === 'Pipe')
       const first = members.at(0)
-      if (first === undefined) throw new FormatterImplementationError('UnionType has no members')
+      if (first === undefined)
+        throw new SyntaxFormatterImplementationError('UnionType has no members')
       const documents: Array<FormatDocument.Document> = [
         printNode(context, first, prefix, preserveBlank),
       ]
       for (const [index, separator] of separators.entries()) {
         const member = members.at(index + 1)
         if (member === undefined)
-          throw new FormatterImplementationError('UnionType has no member after separator')
+          throw new SyntaxFormatterImplementationError('UnionType has no member after separator')
         documents.push(
           printToken(context, separator, FormatDocument.text(' ')),
           printNode(context, member, FormatDocument.text(' ')),
@@ -945,10 +949,7 @@ const printNode = (
         ),
       )
     case 'RequirementRow': {
-      const members = directNodes(node).filter(
-        (child) =>
-          child.kind === 'Requirement' || child.kind === 'TypePath' || child.kind === 'RowWithout',
-      )
+      const members = directNodes(node)
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Question'), prefix, preserveBlank),
         ...members.map((member, ordinal) =>
@@ -1389,7 +1390,7 @@ const printNode = (
     case 'PrefixExpression': {
       const operator = directTokens(node)[0]
       if (operator === undefined)
-        throw new FormatterImplementationError('PrefixExpression has no operator')
+        throw new SyntaxFormatterImplementationError('PrefixExpression has no operator')
       return FormatDocument.concat(
         printToken(context, operator, prefix, preserveBlank),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'IdentifierExpression')),
@@ -1399,7 +1400,7 @@ const printNode = (
       const nodes = directNodes(node)
       const operator = directTokens(node)[0]
       if (operator === undefined)
-        throw new FormatterImplementationError('InfixExpression has no operator')
+        throw new SyntaxFormatterImplementationError('InfixExpression has no operator')
       return FormatDocument.concat(
         printNode(context, nodes[0] ?? nodeOf(node, 'IdentifierExpression'), prefix, preserveBlank),
         printToken(context, operator, FormatDocument.text(' ')),
@@ -1437,31 +1438,45 @@ const printNode = (
       )
     case 'ErrorStatement':
     case 'Error':
-      throw new FormatterImplementationError('Damaged Error node reached the syntax printer')
+      throw new SyntaxFormatterImplementationError('Damaged Error node reached the syntax printer')
   }
 }
 
 const changed = (source: ReadonlyArray<number>, formatted: Uint8Array): boolean =>
   source.length !== formatted.length || source.some((byte, index) => byte !== formatted[index])
 
-/** Formats one complete lossless syntax artifact with Silk's canonical public policy. */
-export const format = Effect.fn('Formatter.format')(function* (
+const validateFor = Effect.fnUntraced(function* (
   syntax: SyntaxFile.SyntaxFile,
-): Effect.fn.Return<FormattedDocument.FormattedDocument, FormatterError> {
+  operation: SyntaxFormatterError['operation'],
+): Effect.fn.Return<void, SyntaxFormatterError> {
   if (
-    syntax.lexicalDiagnostics.length > 0 ||
-    syntax.parserDiagnostics.length > 0 ||
-    !SyntaxTree.isAvailableSyntax(syntax.root)
-  ) {
-    const diagnostics = Object.freeze([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics])
-    return yield* new FormatterError({
-      operation: 'Formatter.format',
-      sourceId: syntax.source.id,
-      message: `Cannot format damaged Silk source ${syntax.source.id}`,
-      diagnostics,
-      reason: { _tag: 'DamagedSyntax' },
-    })
-  }
+    syntax.lexicalDiagnostics.length === 0 &&
+    syntax.parserDiagnostics.length === 0 &&
+    SyntaxTree.isAvailableSyntax(syntax.root)
+  )
+    return
+  const diagnostics = Object.freeze([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics])
+  return yield* new SyntaxFormatterError({
+    operation,
+    sourceId: syntax.source.id,
+    message: `Cannot format damaged Silk source ${syntax.source.id}`,
+    diagnostics,
+    reason: { _tag: 'DamagedSyntax' },
+  })
+})
+
+/** Validates that one complete syntax artifact can be formatted without source repair. */
+export const validate = Effect.fn('SyntaxFormatter.validate')(function* (
+  syntax: SyntaxFile.SyntaxFile,
+): Effect.fn.Return<void, SyntaxFormatterError> {
+  return yield* validateFor(syntax, 'SyntaxFormatter.validate')
+})
+
+/** Formats one complete lossless syntax artifact with Silk's canonical public policy. */
+export const format = Effect.fn('SyntaxFormatter.format')(function* (
+  syntax: SyntaxFile.SyntaxFile,
+): Effect.fn.Return<FormattedDocument.FormattedDocument, SyntaxFormatterError> {
+  yield* validateFor(syntax, 'SyntaxFormatter.format')
 
   const formatted = FormatDocument.render(printNode(makeContext(syntax), syntax.root))
   return FormattedDocument.make(formatted, changed(syntax.source.bytes, formatted))

@@ -26,8 +26,22 @@ export interface Options {
 
 const diagnosticCodes = (
   outcome: Extract<FormatWorkflow.Outcome, { readonly _tag: 'Damaged' }>,
-): string =>
-  Array.from(new Set(outcome.error.diagnostics.map((diagnostic) => diagnostic.code))).join(', ')
+): string => {
+  const reason = outcome.error.reason
+  const diagnostics =
+    reason._tag === 'OuterSyntax' || reason._tag === 'EmbeddedSyntax' ? reason.diagnostics : []
+  return Array.from(new Set(diagnostics.map((diagnostic) => diagnostic.code))).join(', ')
+}
+
+const damageLocation = (
+  outcome: Extract<FormatWorkflow.Outcome, { readonly _tag: 'Damaged' }>,
+): string => {
+  const reason = outcome.error.reason
+  if (reason._tag === 'OuterSyntax') return ''
+  if (reason._tag === 'DocumentationInfrastructure') return ''
+  const nested = reason.nestedPath.map((range) => `${range.start}..${range.end}`).join(' -> ')
+  return ` at bytes ${reason.fence.start}..${reason.fence.end}${nested === '' ? '' : ` (nested ${nested})`}`
+}
 
 /** Renders one per-file outcome after the workflow has fixed deterministic path order. */
 export const report = Effect.fn('FormatCommand.report')(function* (
@@ -45,7 +59,7 @@ export const report = Effect.fn('FormatCommand.report')(function* (
     case 'Damaged': {
       const codes = diagnosticCodes(outcome)
       yield* Console.error(
-        `${outcome.path}: cannot format damaged syntax${codes.length === 0 ? '' : ` (${codes})`}`,
+        `${outcome.path}: cannot format damaged source${damageLocation(outcome)}${codes.length === 0 ? '' : ` (${codes})`}`,
       )
       return
     }

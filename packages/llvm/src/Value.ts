@@ -151,7 +151,7 @@ export const typeOf = Effect.fn('Value.typeOf')(function* (
 ): Effect.fn.Return<Type.Type, LlvmError> {
   return yield* FunctionBodyState.mutateModule(body, 'Value.typeOf', (draft, module) =>
     Result.gen(function* () {
-      const type = module.typeHandles[yield* FunctionBodyState.valueType(draft, self)]
+      const type = module.types.handles[yield* FunctionBodyState.valueType(draft, self)]
       if (type === undefined) {
         return yield* Result.fail(
           invalidState({

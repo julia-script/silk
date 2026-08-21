@@ -6,12 +6,12 @@ import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StandardStreams from '../src/StandardStreams.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as Target from '../src/Target.js'
 import { unreachable } from './support/raise.js'
 
@@ -32,7 +32,7 @@ const parse = (id: string, source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))
 
 const canonical = Effect.fnUntraced(function* (id: string, source: string) {
-  const formatted = yield* Formatter.format(parse(id, source))
+  const formatted = yield* SyntaxFormatter.format(parse(id, source))
   return decoder.decode(FormattedDocument.toUint8Array(formatted))
 })
 
