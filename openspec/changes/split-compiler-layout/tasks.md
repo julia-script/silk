@@ -1,0 +1,26 @@
+## 1. One packing seam
+
+- [ ] 1.1 Add pack(fields, target) and route the ~8 inline loops through it
+- [ ] 1.2 Route the verifier recomputations through the same seam and verify layout tests pass
+
+## 2. Shared vocabulary
+
+- [ ] 2.1 Introduce one PlacedField base and one Access vocabulary
+- [ ] 2.2 Add unifyPayloadTypes/materializeTaggedCarrier and replace the three lane-width blocks
+
+## 3. Split Layout.ts
+
+- [ ] 3.1 Extract CallingShape.ts
+- [ ] 3.2 Extract LayoutVerify.ts
+- [ ] 3.3 Extract LayoutEncode.ts and verify goldens
+
+## 4. Rename realization module
+
+- [ ] 4.1 Rename CallableFieldRealization to FieldRealization (or split EffectFieldRealization)
+- [ ] 4.2 Replace the stale header and update all imports
+
+## 5. Verification
+
+- [ ] 5.1 Run pnpm typecheck and verify clean
+- [ ] 5.2 Run pnpm exec biome check . and verify clean
+- [ ] 5.3 Run pnpm test
