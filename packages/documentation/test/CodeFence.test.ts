@@ -169,8 +169,8 @@ pub fn documented() -> i32 { return 1 }
       raw,
       `/// > - \`\`\`silk
 /// >   fn main() -> i32 {
-/// >   
-/// >     let text = """line with spaces  
+/// > ${'  '}
+/// >     let text = """line with spaces${'  '}
 /// >   next"""
 /// >     return 1
 /// >   }
