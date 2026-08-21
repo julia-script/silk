@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': major
+'@silk-effect/compiler': minor
 '@silk-effect/documentation': minor
 '@silk-effect/formatter': minor
 '@silk-effect/compiler-cli': minor
