@@ -9488,10 +9488,11 @@ const analyzeStatements = (
     }
 
     const arms = SyntaxTree.directNodes(element, 'Block')
+    const firstArm = arms.at(0)
     const taken =
-      arms.at(0) === undefined
+      firstArm === undefined
         ? []
-        : analyzeStatements(context, arms[0] as SyntaxTree.Node, armScope, armLoopStack)
+        : analyzeStatements(context, firstArm, armScope, armLoopStack)
     const chained = SyntaxTree.directNode(element, 'ConditionalStatement')
     const otherwiseArm = arms.at(1)
     const otherwise =
@@ -9523,10 +9524,11 @@ const analyzeStatements = (
       patternBindings: Object.freeze([...armScope.patternBindings, ...selection.bindings]),
     })
     const arms = SyntaxTree.directNodes(element, 'Block')
+    const firstArm = arms.at(0)
     const taken =
-      arms.at(0) === undefined
+      firstArm === undefined
         ? []
-        : analyzeStatements(context, arms[0] as SyntaxTree.Node, takenScope, armLoopStack)
+        : analyzeStatements(context, firstArm, takenScope, armLoopStack)
     const chained =
       SyntaxTree.directNode(element, 'ConditionalStatement') ??
       SyntaxTree.directNode(element, 'PatternConditionalStatement')
