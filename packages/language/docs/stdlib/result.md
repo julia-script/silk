@@ -139,7 +139,7 @@ The owned alternative consumed only when `self` is a failure.
 pub fn isSuccess<A, F>(self: &silk/result.Result<A, F>) -> bool
 ```
 
-Answers whether the outcome succeeded, without consuming it.
+Returns `true` when the outcome succeeded, without consuming it.
 
 <a id="declaration-73696c6b2f726573756c743a3a69734661696c757265"></a>
 
@@ -149,4 +149,4 @@ Answers whether the outcome succeeded, without consuming it.
 pub fn isFailure<A, F>(self: &silk/result.Result<A, F>) -> bool
 ```
 
-Answers whether the outcome failed, without consuming it.
+Returns `true` when the outcome failed, without consuming it.

@@ -4,6 +4,11 @@ This guide records source conventions for readable and discoverable Silk APIs. I
 change whether a program is valid. The compiler treats a type according to its declaration and use,
 never according to its name.
 
+Public source documentation follows the separate
+[doc comment style guide](documentation-style-guide.md). That guide defines comment coverage,
+structure, examples, links, and ASD-STE100 writing rules. This page defines naming, API shape, and
+source-usage conventions.
+
 ## STYLE-001 — Nominal error types use the `Error` suffix
 
 **Status:** Confirmed

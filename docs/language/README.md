@@ -75,6 +75,8 @@ not belong in a language rule unless a program can observe them.
   diagnostic context, and fatal traps.
 - [Language style guide](style-guide.md) — non-semantic naming and data-first actor-function
   conventions for readable, composable, and extensible Silk APIs.
+- [Doc comment style guide](documentation-style-guide.md) — required public comment coverage,
+  standard sections, complete examples, symbol links, and ASD-STE100 writing rules.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
   mutation, captures, cleanup, allocation lifecycles, and returned views.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function

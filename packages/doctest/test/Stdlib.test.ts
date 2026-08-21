@@ -14,7 +14,7 @@ import { documentation as stdlibDocumentation } from './support/stdlibDocumentat
  * ```` ```silk,ignore ```` fence fails this test until someone writes it down here, which is the
  * only thing standing between a doctest gate and a gate that skips everything it is given.
  */
-const skipped = ['silk/filesystem::releaseIgnored']
+const skipped: ReadonlyArray<string> = []
 
 it.effect(
   'compiles every fenced Silk example in the standard library',

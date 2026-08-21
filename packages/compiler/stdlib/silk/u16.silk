@@ -32,271 +32,273 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The largest u16. The checked arithmetic intrinsics reject every result above this bound.
+/// The largest `u16` value.
 pub const MAX: u16 = 65535
 
-/// The smallest u16. The checked arithmetic intrinsics reject every result below this bound.
+/// The smallest `u16` value.
 pub const MIN: u16 = 0
 
 /// The width of u16 in bits.
 pub const BITS: u32 = 16
 
-/// Calls the concrete u16 toU8 primitive.
+/// Converts `value` to `u8` and traps if `u8` cannot represent it.
 pub fn toU8(value: u16) -> u8 {
   return Intrinsic.u16ToU8(value)
 }
 
-/// Calls the concrete u16 checkedToU8 primitive.
+/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 pub fn checkedToU8(value: u16) -> Option<u8> {
   return Intrinsic.u16CheckedToU8(value)
 }
 
-/// Calls the concrete u16 toU16 primitive.
+/// Returns `value` unchanged as `u16`.
 pub fn toU16(value: u16) -> u16 {
   return Intrinsic.u16ToU16(value)
 }
 
-/// Calls the concrete u16 checkedToU16 primitive.
+/// Returns `Some` with `value` unchanged as `u16`.
 pub fn checkedToU16(value: u16) -> Option<u16> {
   return Intrinsic.u16CheckedToU16(value)
 }
 
-/// Calls the concrete u16 toU32 primitive.
+/// Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn toU32(value: u16) -> u32 {
   return Intrinsic.u16ToU32(value)
 }
 
-/// Calls the concrete u16 checkedToU32 primitive.
+/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn checkedToU32(value: u16) -> Option<u32> {
   return Intrinsic.u16CheckedToU32(value)
 }
 
-/// Calls the concrete u16 toU64 primitive.
+/// Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn toU64(value: u16) -> u64 {
   return Intrinsic.u16ToU64(value)
 }
 
-/// Calls the concrete u16 checkedToU64 primitive.
+/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn checkedToU64(value: u16) -> Option<u64> {
   return Intrinsic.u16CheckedToU64(value)
 }
 
-/// Calls the concrete u16 toUsize primitive.
+/// Converts `value` to `usize` and traps if `usize` cannot represent it.
 pub fn toUsize(value: u16) -> usize {
   return Intrinsic.u16ToUsize(value)
 }
 
-/// Calls the concrete u16 checkedToUsize primitive.
+/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 pub fn checkedToUsize(value: u16) -> Option<usize> {
   return Intrinsic.u16CheckedToUsize(value)
 }
 
-/// Calls the concrete u16 toI8 primitive.
+/// Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn toI8(value: u16) -> i8 {
   return Intrinsic.u16ToI8(value)
 }
 
-/// Calls the concrete u16 checkedToI8 primitive.
+/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn checkedToI8(value: u16) -> Option<i8> {
   return Intrinsic.u16CheckedToI8(value)
 }
 
-/// Calls the concrete u16 toI16 primitive.
+/// Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn toI16(value: u16) -> i16 {
   return Intrinsic.u16ToI16(value)
 }
 
-/// Calls the concrete u16 checkedToI16 primitive.
+/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn checkedToI16(value: u16) -> Option<i16> {
   return Intrinsic.u16CheckedToI16(value)
 }
 
-/// Calls the concrete u16 toI32 primitive.
+/// Converts `value` to `i32` and traps if `i32` cannot represent it.
 pub fn toI32(value: u16) -> i32 {
   return Intrinsic.u16ToI32(value)
 }
 
-/// Calls the concrete u16 checkedToI32 primitive.
+/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 pub fn checkedToI32(value: u16) -> Option<i32> {
   return Intrinsic.u16CheckedToI32(value)
 }
 
-/// Calls the concrete u16 toI64 primitive.
+/// Converts `value` to `i64` and traps if `i64` cannot represent it.
 pub fn toI64(value: u16) -> i64 {
   return Intrinsic.u16ToI64(value)
 }
 
-/// Calls the concrete u16 checkedToI64 primitive.
+/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 pub fn checkedToI64(value: u16) -> Option<i64> {
   return Intrinsic.u16CheckedToI64(value)
 }
 
-/// Calls the concrete u16 toIsize primitive.
+/// Converts `value` to `isize` and traps if `isize` cannot represent it.
 pub fn toIsize(value: u16) -> isize {
   return Intrinsic.u16ToIsize(value)
 }
 
-/// Calls the concrete u16 checkedToIsize primitive.
+/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 pub fn checkedToIsize(value: u16) -> Option<isize> {
   return Intrinsic.u16CheckedToIsize(value)
 }
 
-/// Calls the concrete u16 toF32 primitive.
+/// Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF32(value: u16) -> f32 {
   return Intrinsic.u16ToF32(value)
 }
 
-/// Calls the concrete u16 toF64 primitive.
+/// Converts `value` to the nearest `f64` value, with ties to even.
 pub fn toF64(value: u16) -> f64 {
   return Intrinsic.u16ToF64(value)
 }
 
-/// Calls the concrete u16 add primitive.
+/// Returns `left + right` and traps if the result is outside the `u16` range.
 pub fn add(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Add(left, right)
 }
 
-/// Calls the concrete u16 subtract primitive.
+/// Returns `left - right` and traps if the result is outside the `u16` range.
 pub fn subtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Subtract(left, right)
 }
 
-/// Calls the concrete u16 multiply primitive.
+/// Returns `left * right` and traps if the result is outside the `u16` range.
 pub fn multiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Multiply(left, right)
 }
 
-/// Calls the concrete u16 divide primitive.
+/// Returns `left / right`. Traps if `right` is zero.
 pub fn divide(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Divide(left, right)
 }
 
-/// Calls the concrete u16 remainder primitive.
+/// Returns the remainder of `left / right`. Traps if `right` is zero.
 pub fn remainder(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Remainder(left, right)
 }
 
-/// Calls the concrete u16 bitAnd primitive.
+/// Returns the bitwise AND of `left` and `right`.
 pub fn bitAnd(left: u16, right: u16) -> u16 {
   return Intrinsic.u16BitAnd(left, right)
 }
 
-/// Calls the concrete u16 bitOr primitive.
+/// Returns the bitwise OR of `left` and `right`.
 pub fn bitOr(left: u16, right: u16) -> u16 {
   return Intrinsic.u16BitOr(left, right)
 }
 
-/// Calls the concrete u16 bitXor primitive.
+/// Returns the bitwise exclusive OR of `left` and `right`.
 pub fn bitXor(left: u16, right: u16) -> u16 {
   return Intrinsic.u16BitXor(left, right)
 }
 
-/// Calls the concrete u16 bitNot primitive.
+/// Returns `value` with each bit inverted.
 pub fn bitNot(value: u16) -> u16 {
   return Intrinsic.u16BitNot(value)
 }
 
-/// Calls the concrete u16 shiftLeft primitive.
+/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+/// [`BITS`].
 pub fn shiftLeft(left: u16, right: u16) -> u16 {
   return Intrinsic.u16ShiftLeft(left, right)
 }
 
-/// Calls the concrete u16 shiftRight primitive.
+/// Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is
+/// not less than [`BITS`].
 pub fn shiftRight(left: u16, right: u16) -> u16 {
   return Intrinsic.u16ShiftRight(left, right)
 }
 
-/// Calls the concrete u16 rotateLeft primitive.
+/// Rotates the bits of `left` left by `right` positions.
 pub fn rotateLeft(left: u16, right: u16) -> u16 {
   return Intrinsic.u16RotateLeft(left, right)
 }
 
-/// Calls the concrete u16 rotateRight primitive.
+/// Rotates the bits of `left` right by `right` positions.
 pub fn rotateRight(left: u16, right: u16) -> u16 {
   return Intrinsic.u16RotateRight(left, right)
 }
 
-/// Calls the concrete u16 wrappingAdd primitive.
+/// Returns `left + right`, wrapped to the `u16` range.
 pub fn wrappingAdd(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingAdd(left, right)
 }
 
-/// Calls the concrete u16 wrappingSubtract primitive.
+/// Returns `left - right`, wrapped to the `u16` range.
 pub fn wrappingSubtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingSubtract(left, right)
 }
 
-/// Calls the concrete u16 wrappingMultiply primitive.
+/// Returns `left * right`, wrapped to the `u16` range.
 pub fn wrappingMultiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingMultiply(left, right)
 }
 
-/// Calls the concrete u16 saturatingAdd primitive.
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingAdd(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingAdd(left, right)
 }
 
-/// Calls the concrete u16 saturatingSubtract primitive.
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingSubtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingSubtract(left, right)
 }
 
-/// Calls the concrete u16 saturatingMultiply primitive.
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingMultiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingMultiply(left, right)
 }
 
-/// Calls the concrete u16 checkedAdd primitive.
+/// Returns `Some` with `left + right`, or `None` if the result is outside the `u16` range.
 pub fn checkedAdd(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedAdd(left, right)
 }
 
-/// Calls the concrete u16 checkedSubtract primitive.
+/// Returns `Some` with `left - right`, or `None` if the result is outside the `u16` range.
 pub fn checkedSubtract(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedSubtract(left, right)
 }
 
-/// Calls the concrete u16 checkedMultiply primitive.
+/// Returns `Some` with `left * right`, or `None` if the result is outside the `u16` range.
 pub fn checkedMultiply(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedMultiply(left, right)
 }
 
-/// Calls the concrete u16 checkedDivide primitive.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero.
 pub fn checkedDivide(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedDivide(left, right)
 }
 
-/// Calls the concrete u16 checkedRemainder primitive.
+/// Returns `Some` with the remainder, or `None` if `right` is zero.
 pub fn checkedRemainder(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedRemainder(left, right)
 }
 
-/// Calls the concrete u16 equals primitive.
+/// Returns `true` when `left` and `right` are equal.
 pub fn equals(left: u16, right: u16) -> bool {
   return Intrinsic.u16Equals(left, right)
 }
 
-/// Calls the concrete u16 notEquals primitive.
+/// Returns `true` when `left` and `right` are not equal.
 pub fn notEquals(left: u16, right: u16) -> bool {
   return Intrinsic.u16NotEquals(left, right)
 }
 
-/// Calls the concrete u16 lessThan primitive.
+/// Returns `true` when `left` is less than `right`.
 pub fn lessThan(left: u16, right: u16) -> bool {
   return Intrinsic.u16LessThan(&left, &right)
 }
 
-/// Calls the concrete u16 lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: u16, right: u16) -> bool {
   return Intrinsic.u16LessOrEqual(left, right)
 }
 
-/// Calls the concrete u16 greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`.
 pub fn greaterThan(left: u16, right: u16) -> bool {
   return Intrinsic.u16GreaterThan(left, right)
 }
 
-/// Calls the concrete u16 greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: u16, right: u16) -> bool {
   return Intrinsic.u16GreaterOrEqual(left, right)
 }

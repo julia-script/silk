@@ -102,7 +102,7 @@ the counts never moves the provider's own value out of it.
 pub fn live(self: &silk/metrics.AllocationMetrics) -> usize
 ```
 
-The allocations acquired and not yet released.
+Returns the number of allocations acquired and not yet released.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a7265636f726441637175697265"></a>
 

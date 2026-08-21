@@ -52,7 +52,7 @@ pub fn copy(self: &AllocationMetrics) -> AllocationMetrics {
   }
 }
 
-/// The allocations acquired and not yet released.
+/// Returns the number of allocations acquired and not yet released.
 pub fn live(self: &AllocationMetrics) -> usize {
   return self.acquired - self.released
 }

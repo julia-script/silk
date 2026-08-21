@@ -11,8 +11,8 @@ when an operation must be passed or selected by name.
 
 ## Details
 
-These functions are thin, allocation-free calls to the same concrete Boolean primitives the
-operators use; they add no Effect channels or alternate truth semantics.
+These functions return the same Boolean results as the operators. They allocate no storage and
+add no Effect channels.
 
 Import as `bool` with `import silk.bool`.
 
@@ -26,7 +26,7 @@ Public declarations: 3.
 pub fn equals(left: bool, right: bool) -> bool
 ```
 
-Calls the concrete bool equals primitive.
+Returns `true` when `left` and `right` have the same Boolean value.
 
 <a id="declaration-73696c6b2f626f6f6c3a3a6e6f74457175616c73"></a>
 
@@ -36,7 +36,7 @@ Calls the concrete bool equals primitive.
 pub fn notEquals(left: bool, right: bool) -> bool
 ```
 
-Calls the concrete bool notEquals primitive.
+Returns `true` when `left` and `right` have different Boolean values.
 
 <a id="declaration-73696c6b2f626f6f6c3a3a6e6f74"></a>
 
@@ -46,4 +46,4 @@ Calls the concrete bool notEquals primitive.
 pub fn not(value: bool) -> bool
 ```
 
-Calls the concrete bool not primitive.
+Returns the logical negation of `value`.

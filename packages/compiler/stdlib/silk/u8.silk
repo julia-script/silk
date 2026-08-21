@@ -15,17 +15,23 @@
 //! # Examples
 //! ## Choose an overflow policy instead of relying on a trap
 //! ```silk
-//! import silk.option { None, Some }
+//! import silk.option as Option
+//!
 //! import silk.u8 as u8
 //!
 //! pub fn main() -> i32 {
-//!   let overflowed = match move u8.checkedAdd(255, 1) {
-//!     None {} => true
-//!     Some<u8> { value } => false
+//!   let checked = u8.checkedAdd(255, 1)
+//!   let recovered = move checked
+//!     |> Option.unwrapOr<u8>(42)
+//!   if recovered != 42 {
+//!     return 1
 //!   }
-//!   if !overflowed { return 1 }
-//!   if u8.wrappingAdd(255, 1) != 0 { return 2 }
-//!   if u8.saturatingAdd(255, 1) != 255 { return 3 }
+//!   if u8.wrappingAdd(255, 1) != 0 {
+//!     return 2
+//!   }
+//!   if u8.saturatingAdd(255, 1) != 255 {
+//!     return 3
+//!   }
 //!   return 42
 //! }
 //! ```
@@ -53,271 +59,273 @@ import silk.u32 as u32
 import silk.u64 as u64
 import silk.usize as usize
 
-/// The largest u8. The checked arithmetic intrinsics reject every result above this bound.
+/// The largest `u8` value.
 pub const MAX: u8 = 255
 
-/// The smallest u8. The checked arithmetic intrinsics reject every result below this bound.
+/// The smallest `u8` value.
 pub const MIN: u8 = 0
 
 /// The width of u8 in bits.
 pub const BITS: u32 = 8
 
-/// Calls the concrete u8 toU8 primitive.
+/// Returns `value` unchanged as `u8`.
 pub fn toU8(value: u8) -> u8 {
   return Intrinsic.u8ToU8(value)
 }
 
-/// Calls the concrete u8 checkedToU8 primitive.
+/// Returns `Some` with `value` unchanged as `u8`.
 pub fn checkedToU8(value: u8) -> Option<u8> {
   return Intrinsic.u8CheckedToU8(value)
 }
 
-/// Calls the concrete u8 toU16 primitive.
+/// Converts `value` to `u16` and traps if `u16` cannot represent it.
 pub fn toU16(value: u8) -> u16 {
   return Intrinsic.u8ToU16(value)
 }
 
-/// Calls the concrete u8 checkedToU16 primitive.
+/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 pub fn checkedToU16(value: u8) -> Option<u16> {
   return Intrinsic.u8CheckedToU16(value)
 }
 
-/// Calls the concrete u8 toU32 primitive.
+/// Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn toU32(value: u8) -> u32 {
   return Intrinsic.u8ToU32(value)
 }
 
-/// Calls the concrete u8 checkedToU32 primitive.
+/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn checkedToU32(value: u8) -> Option<u32> {
   return Intrinsic.u8CheckedToU32(value)
 }
 
-/// Calls the concrete u8 toU64 primitive.
+/// Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn toU64(value: u8) -> u64 {
   return Intrinsic.u8ToU64(value)
 }
 
-/// Calls the concrete u8 checkedToU64 primitive.
+/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn checkedToU64(value: u8) -> Option<u64> {
   return Intrinsic.u8CheckedToU64(value)
 }
 
-/// Calls the concrete u8 toUsize primitive.
+/// Converts `value` to `usize` and traps if `usize` cannot represent it.
 pub fn toUsize(value: u8) -> usize {
   return Intrinsic.u8ToUsize(value)
 }
 
-/// Calls the concrete u8 checkedToUsize primitive.
+/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 pub fn checkedToUsize(value: u8) -> Option<usize> {
   return Intrinsic.u8CheckedToUsize(value)
 }
 
-/// Calls the concrete u8 toI8 primitive.
+/// Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn toI8(value: u8) -> i8 {
   return Intrinsic.u8ToI8(value)
 }
 
-/// Calls the concrete u8 checkedToI8 primitive.
+/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn checkedToI8(value: u8) -> Option<i8> {
   return Intrinsic.u8CheckedToI8(value)
 }
 
-/// Calls the concrete u8 toI16 primitive.
+/// Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn toI16(value: u8) -> i16 {
   return Intrinsic.u8ToI16(value)
 }
 
-/// Calls the concrete u8 checkedToI16 primitive.
+/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn checkedToI16(value: u8) -> Option<i16> {
   return Intrinsic.u8CheckedToI16(value)
 }
 
-/// Calls the concrete u8 toI32 primitive.
+/// Converts `value` to `i32` and traps if `i32` cannot represent it.
 pub fn toI32(value: u8) -> i32 {
   return Intrinsic.u8ToI32(value)
 }
 
-/// Calls the concrete u8 checkedToI32 primitive.
+/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 pub fn checkedToI32(value: u8) -> Option<i32> {
   return Intrinsic.u8CheckedToI32(value)
 }
 
-/// Calls the concrete u8 toI64 primitive.
+/// Converts `value` to `i64` and traps if `i64` cannot represent it.
 pub fn toI64(value: u8) -> i64 {
   return Intrinsic.u8ToI64(value)
 }
 
-/// Calls the concrete u8 checkedToI64 primitive.
+/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 pub fn checkedToI64(value: u8) -> Option<i64> {
   return Intrinsic.u8CheckedToI64(value)
 }
 
-/// Calls the concrete u8 toIsize primitive.
+/// Converts `value` to `isize` and traps if `isize` cannot represent it.
 pub fn toIsize(value: u8) -> isize {
   return Intrinsic.u8ToIsize(value)
 }
 
-/// Calls the concrete u8 checkedToIsize primitive.
+/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 pub fn checkedToIsize(value: u8) -> Option<isize> {
   return Intrinsic.u8CheckedToIsize(value)
 }
 
-/// Calls the concrete u8 toF32 primitive.
+/// Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF32(value: u8) -> f32 {
   return Intrinsic.u8ToF32(value)
 }
 
-/// Calls the concrete u8 toF64 primitive.
+/// Converts `value` to the nearest `f64` value, with ties to even.
 pub fn toF64(value: u8) -> f64 {
   return Intrinsic.u8ToF64(value)
 }
 
-/// Calls the concrete u8 add primitive.
+/// Returns `left + right` and traps if the result is outside the `u8` range.
 pub fn add(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Add(left, right)
 }
 
-/// Calls the concrete u8 subtract primitive.
+/// Returns `left - right` and traps if the result is outside the `u8` range.
 pub fn subtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Subtract(left, right)
 }
 
-/// Calls the concrete u8 multiply primitive.
+/// Returns `left * right` and traps if the result is outside the `u8` range.
 pub fn multiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Multiply(left, right)
 }
 
-/// Calls the concrete u8 divide primitive.
+/// Returns `left / right`. Traps if `right` is zero.
 pub fn divide(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Divide(left, right)
 }
 
-/// Calls the concrete u8 remainder primitive.
+/// Returns the remainder of `left / right`. Traps if `right` is zero.
 pub fn remainder(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Remainder(left, right)
 }
 
-/// Calls the concrete u8 bitAnd primitive.
+/// Returns the bitwise AND of `left` and `right`.
 pub fn bitAnd(left: u8, right: u8) -> u8 {
   return Intrinsic.u8BitAnd(left, right)
 }
 
-/// Calls the concrete u8 bitOr primitive.
+/// Returns the bitwise OR of `left` and `right`.
 pub fn bitOr(left: u8, right: u8) -> u8 {
   return Intrinsic.u8BitOr(left, right)
 }
 
-/// Calls the concrete u8 bitXor primitive.
+/// Returns the bitwise exclusive OR of `left` and `right`.
 pub fn bitXor(left: u8, right: u8) -> u8 {
   return Intrinsic.u8BitXor(left, right)
 }
 
-/// Calls the concrete u8 bitNot primitive.
+/// Returns `value` with each bit inverted.
 pub fn bitNot(value: u8) -> u8 {
   return Intrinsic.u8BitNot(value)
 }
 
-/// Calls the concrete u8 shiftLeft primitive.
+/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+/// [`BITS`].
 pub fn shiftLeft(left: u8, right: u8) -> u8 {
   return Intrinsic.u8ShiftLeft(left, right)
 }
 
-/// Calls the concrete u8 shiftRight primitive.
+/// Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is
+/// not less than [`BITS`].
 pub fn shiftRight(left: u8, right: u8) -> u8 {
   return Intrinsic.u8ShiftRight(left, right)
 }
 
-/// Calls the concrete u8 rotateLeft primitive.
+/// Rotates the bits of `left` left by `right` positions.
 pub fn rotateLeft(left: u8, right: u8) -> u8 {
   return Intrinsic.u8RotateLeft(left, right)
 }
 
-/// Calls the concrete u8 rotateRight primitive.
+/// Rotates the bits of `left` right by `right` positions.
 pub fn rotateRight(left: u8, right: u8) -> u8 {
   return Intrinsic.u8RotateRight(left, right)
 }
 
-/// Calls the concrete u8 wrappingAdd primitive.
+/// Returns `left + right`, wrapped to the `u8` range.
 pub fn wrappingAdd(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingAdd(left, right)
 }
 
-/// Calls the concrete u8 wrappingSubtract primitive.
+/// Returns `left - right`, wrapped to the `u8` range.
 pub fn wrappingSubtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingSubtract(left, right)
 }
 
-/// Calls the concrete u8 wrappingMultiply primitive.
+/// Returns `left * right`, wrapped to the `u8` range.
 pub fn wrappingMultiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingMultiply(left, right)
 }
 
-/// Calls the concrete u8 saturatingAdd primitive.
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingAdd(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingAdd(left, right)
 }
 
-/// Calls the concrete u8 saturatingSubtract primitive.
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingSubtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingSubtract(left, right)
 }
 
-/// Calls the concrete u8 saturatingMultiply primitive.
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingMultiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingMultiply(left, right)
 }
 
-/// Calls the concrete u8 checkedAdd primitive.
+/// Returns `Some` with `left + right`, or `None` if the result is outside the `u8` range.
 pub fn checkedAdd(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedAdd(left, right)
 }
 
-/// Calls the concrete u8 checkedSubtract primitive.
+/// Returns `Some` with `left - right`, or `None` if the result is outside the `u8` range.
 pub fn checkedSubtract(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedSubtract(left, right)
 }
 
-/// Calls the concrete u8 checkedMultiply primitive.
+/// Returns `Some` with `left * right`, or `None` if the result is outside the `u8` range.
 pub fn checkedMultiply(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedMultiply(left, right)
 }
 
-/// Calls the concrete u8 checkedDivide primitive.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero.
 pub fn checkedDivide(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedDivide(left, right)
 }
 
-/// Calls the concrete u8 checkedRemainder primitive.
+/// Returns `Some` with the remainder, or `None` if `right` is zero.
 pub fn checkedRemainder(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedRemainder(left, right)
 }
 
-/// Calls the concrete u8 equals primitive.
+/// Returns `true` when `left` and `right` are equal.
 pub fn equals(left: u8, right: u8) -> bool {
   return Intrinsic.u8Equals(left, right)
 }
 
-/// Calls the concrete u8 notEquals primitive.
+/// Returns `true` when `left` and `right` are not equal.
 pub fn notEquals(left: u8, right: u8) -> bool {
   return Intrinsic.u8NotEquals(left, right)
 }
 
-/// Calls the concrete u8 lessThan primitive.
+/// Returns `true` when `left` is less than `right`.
 pub fn lessThan(left: u8, right: u8) -> bool {
   return Intrinsic.u8LessThan(&left, &right)
 }
 
-/// Calls the concrete u8 lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: u8, right: u8) -> bool {
   return Intrinsic.u8LessOrEqual(left, right)
 }
 
-/// Calls the concrete u8 greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`.
 pub fn greaterThan(left: u8, right: u8) -> bool {
   return Intrinsic.u8GreaterThan(left, right)
 }
 
-/// Calls the concrete u8 greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: u8, right: u8) -> bool {
   return Intrinsic.u8GreaterOrEqual(left, right)
 }

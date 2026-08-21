@@ -98,7 +98,7 @@ pub fn unwrapOr<A, F>(
   }
 }
 
-/// Answers whether the outcome succeeded, without consuming it.
+/// Returns `true` when the outcome succeeded, without consuming it.
 pub fn isSuccess<A, F>(self: &Result<A, F>) -> bool {
   return match &self.value {
     Success<A> succeeded => true
@@ -106,7 +106,7 @@ pub fn isSuccess<A, F>(self: &Result<A, F>) -> bool {
   }
 }
 
-/// Answers whether the outcome failed, without consuming it.
+/// Returns `true` when the outcome failed, without consuming it.
 pub fn isFailure<A, F>(self: &Result<A, F>) -> bool {
   return match &self.value {
     Success<A> succeeded => false

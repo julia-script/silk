@@ -37,286 +37,290 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The largest i32. The checked arithmetic intrinsics reject every result above this bound.
+/// The largest `i32` value.
 pub const MAX: i32 = 2147483647
 
-/// The smallest i32. The checked arithmetic intrinsics reject every result below this bound.
+/// The smallest `i32` value.
 pub const MIN: i32 = -2147483648
 
 /// The width of i32 in bits.
 pub const BITS: u32 = 32
 
-/// Calls the concrete i32 negate primitive.
+/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`].
 pub fn negate(value: i32) -> i32 {
   return Intrinsic.i32Negate(value)
 }
 
-/// Calls the concrete i32 wrappingNegate primitive.
+/// Returns the arithmetic negation of `value`, wrapped to the `i32` range.
 pub fn wrappingNegate(value: i32) -> i32 {
   return Intrinsic.i32WrappingNegate(value)
 }
 
-/// Calls the concrete i32 saturatingNegate primitive.
+/// Returns the arithmetic negation of `value`, clamped to the `i32` range.
 pub fn saturatingNegate(value: i32) -> i32 {
   return Intrinsic.i32SaturatingNegate(value)
 }
 
-/// Calls the concrete i32 toU8 primitive.
+/// Converts `value` to `u8` and traps if `u8` cannot represent it.
 pub fn toU8(value: i32) -> u8 {
   return Intrinsic.i32ToU8(value)
 }
 
-/// Calls the concrete i32 checkedToU8 primitive.
+/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 pub fn checkedToU8(value: i32) -> Option<u8> {
   return Intrinsic.i32CheckedToU8(value)
 }
 
-/// Calls the concrete i32 toU16 primitive.
+/// Converts `value` to `u16` and traps if `u16` cannot represent it.
 pub fn toU16(value: i32) -> u16 {
   return Intrinsic.i32ToU16(value)
 }
 
-/// Calls the concrete i32 checkedToU16 primitive.
+/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 pub fn checkedToU16(value: i32) -> Option<u16> {
   return Intrinsic.i32CheckedToU16(value)
 }
 
-/// Calls the concrete i32 toU32 primitive.
+/// Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn toU32(value: i32) -> u32 {
   return Intrinsic.i32ToU32(value)
 }
 
-/// Calls the concrete i32 checkedToU32 primitive.
+/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn checkedToU32(value: i32) -> Option<u32> {
   return Intrinsic.i32CheckedToU32(value)
 }
 
-/// Calls the concrete i32 toU64 primitive.
+/// Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn toU64(value: i32) -> u64 {
   return Intrinsic.i32ToU64(value)
 }
 
-/// Calls the concrete i32 checkedToU64 primitive.
+/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn checkedToU64(value: i32) -> Option<u64> {
   return Intrinsic.i32CheckedToU64(value)
 }
 
-/// Calls the concrete i32 toUsize primitive.
+/// Converts `value` to `usize` and traps if `usize` cannot represent it.
 pub fn toUsize(value: i32) -> usize {
   return Intrinsic.i32ToUsize(value)
 }
 
-/// Calls the concrete i32 checkedToUsize primitive.
+/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 pub fn checkedToUsize(value: i32) -> Option<usize> {
   return Intrinsic.i32CheckedToUsize(value)
 }
 
-/// Calls the concrete i32 toI8 primitive.
+/// Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn toI8(value: i32) -> i8 {
   return Intrinsic.i32ToI8(value)
 }
 
-/// Calls the concrete i32 checkedToI8 primitive.
+/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn checkedToI8(value: i32) -> Option<i8> {
   return Intrinsic.i32CheckedToI8(value)
 }
 
-/// Calls the concrete i32 toI16 primitive.
+/// Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn toI16(value: i32) -> i16 {
   return Intrinsic.i32ToI16(value)
 }
 
-/// Calls the concrete i32 checkedToI16 primitive.
+/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn checkedToI16(value: i32) -> Option<i16> {
   return Intrinsic.i32CheckedToI16(value)
 }
 
-/// Calls the concrete i32 toI32 primitive.
+/// Returns `value` unchanged as `i32`.
 pub fn toI32(value: i32) -> i32 {
   return Intrinsic.i32ToI32(value)
 }
 
-/// Calls the concrete i32 checkedToI32 primitive.
+/// Returns `Some` with `value` unchanged as `i32`.
 pub fn checkedToI32(value: i32) -> Option<i32> {
   return Intrinsic.i32CheckedToI32(value)
 }
 
-/// Calls the concrete i32 toI64 primitive.
+/// Converts `value` to `i64` and traps if `i64` cannot represent it.
 pub fn toI64(value: i32) -> i64 {
   return Intrinsic.i32ToI64(value)
 }
 
-/// Calls the concrete i32 checkedToI64 primitive.
+/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 pub fn checkedToI64(value: i32) -> Option<i64> {
   return Intrinsic.i32CheckedToI64(value)
 }
 
-/// Calls the concrete i32 toIsize primitive.
+/// Converts `value` to `isize` and traps if `isize` cannot represent it.
 pub fn toIsize(value: i32) -> isize {
   return Intrinsic.i32ToIsize(value)
 }
 
-/// Calls the concrete i32 checkedToIsize primitive.
+/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 pub fn checkedToIsize(value: i32) -> Option<isize> {
   return Intrinsic.i32CheckedToIsize(value)
 }
 
-/// Calls the concrete i32 toF32 primitive.
+/// Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF32(value: i32) -> f32 {
   return Intrinsic.i32ToF32(value)
 }
 
-/// Calls the concrete i32 toF64 primitive.
+/// Converts `value` to the nearest `f64` value, with ties to even.
 pub fn toF64(value: i32) -> f64 {
   return Intrinsic.i32ToF64(value)
 }
 
-/// Calls the concrete i32 add primitive.
+/// Returns `left + right` and traps if the result is outside the `i32` range.
 pub fn add(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Add(left, right)
 }
 
-/// Calls the concrete i32 subtract primitive.
+/// Returns `left - right` and traps if the result is outside the `i32` range.
 pub fn subtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Subtract(left, right)
 }
 
-/// Calls the concrete i32 multiply primitive.
+/// Returns `left * right` and traps if the result is outside the `i32` range.
 pub fn multiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Multiply(left, right)
 }
 
-/// Calls the concrete i32 divide primitive.
+/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
+/// [`MIN`] by `-1` occurs.
 pub fn divide(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Divide(left, right)
 }
 
-/// Calls the concrete i32 remainder primitive.
+/// Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
+/// [`MIN`] by `-1` occurs.
 pub fn remainder(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Remainder(left, right)
 }
 
-/// Calls the concrete i32 bitAnd primitive.
+/// Returns the bitwise AND of `left` and `right`.
 pub fn bitAnd(left: i32, right: i32) -> i32 {
   return Intrinsic.i32BitAnd(left, right)
 }
 
-/// Calls the concrete i32 bitOr primitive.
+/// Returns the bitwise OR of `left` and `right`.
 pub fn bitOr(left: i32, right: i32) -> i32 {
   return Intrinsic.i32BitOr(left, right)
 }
 
-/// Calls the concrete i32 bitXor primitive.
+/// Returns the bitwise exclusive OR of `left` and `right`.
 pub fn bitXor(left: i32, right: i32) -> i32 {
   return Intrinsic.i32BitXor(left, right)
 }
 
-/// Calls the concrete i32 bitNot primitive.
+/// Returns `value` with each bit inverted.
 pub fn bitNot(value: i32) -> i32 {
   return Intrinsic.i32BitNot(value)
 }
 
-/// Calls the concrete i32 shiftLeft primitive.
+/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+/// [`BITS`].
 pub fn shiftLeft(left: i32, right: i32) -> i32 {
   return Intrinsic.i32ShiftLeft(left, right)
 }
 
-/// Calls the concrete i32 shiftRight primitive.
+/// Shifts `left` bits right by `right` positions and preserves its sign. Traps if `right` is
+/// negative or not less than [`BITS`].
 pub fn shiftRight(left: i32, right: i32) -> i32 {
   return Intrinsic.i32ShiftRight(left, right)
 }
 
-/// Calls the concrete i32 rotateLeft primitive.
+/// Rotates the bits of `left` left by `right` positions.
 pub fn rotateLeft(left: i32, right: i32) -> i32 {
   return Intrinsic.i32RotateLeft(left, right)
 }
 
-/// Calls the concrete i32 rotateRight primitive.
+/// Rotates the bits of `left` right by `right` positions.
 pub fn rotateRight(left: i32, right: i32) -> i32 {
   return Intrinsic.i32RotateRight(left, right)
 }
 
-/// Calls the concrete i32 wrappingAdd primitive.
+/// Returns `left + right`, wrapped to the `i32` range.
 pub fn wrappingAdd(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingAdd(left, right)
 }
 
-/// Calls the concrete i32 wrappingSubtract primitive.
+/// Returns `left - right`, wrapped to the `i32` range.
 pub fn wrappingSubtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingSubtract(left, right)
 }
 
-/// Calls the concrete i32 wrappingMultiply primitive.
+/// Returns `left * right`, wrapped to the `i32` range.
 pub fn wrappingMultiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingMultiply(left, right)
 }
 
-/// Calls the concrete i32 saturatingAdd primitive.
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingAdd(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingAdd(left, right)
 }
 
-/// Calls the concrete i32 saturatingSubtract primitive.
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingSubtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingSubtract(left, right)
 }
 
-/// Calls the concrete i32 saturatingMultiply primitive.
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingMultiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingMultiply(left, right)
 }
 
-/// Calls the concrete i32 checkedAdd primitive.
+/// Returns `Some` with `left + right`, or `None` if the result is outside the `i32` range.
 pub fn checkedAdd(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedAdd(left, right)
 }
 
-/// Calls the concrete i32 checkedSubtract primitive.
+/// Returns `Some` with `left - right`, or `None` if the result is outside the `i32` range.
 pub fn checkedSubtract(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedSubtract(left, right)
 }
 
-/// Calls the concrete i32 checkedMultiply primitive.
+/// Returns `Some` with `left * right`, or `None` if the result is outside the `i32` range.
 pub fn checkedMultiply(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedMultiply(left, right)
 }
 
-/// Calls the concrete i32 checkedDivide primitive.
+/// Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`] by `-1`.
 pub fn checkedDivide(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedDivide(left, right)
 }
 
-/// Calls the concrete i32 checkedRemainder primitive.
+/// Returns `Some` with the remainder, or `None` for zero or division of [`MIN`] by `-1`.
 pub fn checkedRemainder(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedRemainder(left, right)
 }
 
-/// Calls the concrete i32 equals primitive.
+/// Returns `true` when `left` and `right` are equal.
 pub fn equals(left: i32, right: i32) -> bool {
   return Intrinsic.i32Equals(left, right)
 }
 
-/// Calls the concrete i32 notEquals primitive.
+/// Returns `true` when `left` and `right` are not equal.
 pub fn notEquals(left: i32, right: i32) -> bool {
   return Intrinsic.i32NotEquals(left, right)
 }
 
-/// Calls the concrete i32 lessThan primitive.
+/// Returns `true` when `left` is less than `right`.
 pub fn lessThan(left: i32, right: i32) -> bool {
   return Intrinsic.i32LessThan(&left, &right)
 }
 
-/// Calls the concrete i32 lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: i32, right: i32) -> bool {
   return Intrinsic.i32LessOrEqual(left, right)
 }
 
-/// Calls the concrete i32 greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`.
 pub fn greaterThan(left: i32, right: i32) -> bool {
   return Intrinsic.i32GreaterThan(left, right)
 }
 
-/// Calls the concrete i32 greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: i32, right: i32) -> bool {
   return Intrinsic.i32GreaterOrEqual(left, right)
 }

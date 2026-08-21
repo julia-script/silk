@@ -795,19 +795,8 @@ is the answer the program was computing.
 
 A caller who needs the failure uses `release` instead and does not compose it with `ensuring`.
 
-One shape note for that composition: the finalizer consumes the directory, so the protected
-Effect cannot still be borrowing it. Derive whatever paths the work needs from `path` first,
-then hand the owner to the finalizer:
-
-### Examples
-
-#### Protect work with best-effort temporary-directory cleanup
-
-```silk,ignore
-let scope = run temporaryDirectory(&parent, "silk-build-")
-let artifact = run join(&scope.path, "output.bin")
-let value = run Effect.ensuring(build(&artifact), releaseIgnored(move scope))
-```
+The finalizer consumes the directory. The protected Effect cannot borrow it when the finalizer
+starts. Derive the required paths before you give the owner to the finalizer.
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a72656d6f76654469726563746f72795265637572736976656c79"></a>
 

@@ -175,7 +175,7 @@ count is `HostInputError` rather than a silently shorter sequence.
 pub fn text(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
 ```
 
-The checked textual view of raw host bytes.
+Returns the checked textual view of raw host bytes.
 
 ### Details
 

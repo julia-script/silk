@@ -35,286 +35,290 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The largest i64. The checked arithmetic intrinsics reject every result above this bound.
+/// The largest `i64` value.
 pub const MAX: i64 = 9223372036854775807
 
-/// The smallest i64. The checked arithmetic intrinsics reject every result below this bound.
+/// The smallest `i64` value.
 pub const MIN: i64 = -9223372036854775808
 
 /// The width of i64 in bits.
 pub const BITS: u32 = 64
 
-/// Calls the concrete i64 negate primitive.
+/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`].
 pub fn negate(value: i64) -> i64 {
   return Intrinsic.i64Negate(value)
 }
 
-/// Calls the concrete i64 wrappingNegate primitive.
+/// Returns the arithmetic negation of `value`, wrapped to the `i64` range.
 pub fn wrappingNegate(value: i64) -> i64 {
   return Intrinsic.i64WrappingNegate(value)
 }
 
-/// Calls the concrete i64 saturatingNegate primitive.
+/// Returns the arithmetic negation of `value`, clamped to the `i64` range.
 pub fn saturatingNegate(value: i64) -> i64 {
   return Intrinsic.i64SaturatingNegate(value)
 }
 
-/// Calls the concrete i64 toU8 primitive.
+/// Converts `value` to `u8` and traps if `u8` cannot represent it.
 pub fn toU8(value: i64) -> u8 {
   return Intrinsic.i64ToU8(value)
 }
 
-/// Calls the concrete i64 checkedToU8 primitive.
+/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 pub fn checkedToU8(value: i64) -> Option<u8> {
   return Intrinsic.i64CheckedToU8(value)
 }
 
-/// Calls the concrete i64 toU16 primitive.
+/// Converts `value` to `u16` and traps if `u16` cannot represent it.
 pub fn toU16(value: i64) -> u16 {
   return Intrinsic.i64ToU16(value)
 }
 
-/// Calls the concrete i64 checkedToU16 primitive.
+/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 pub fn checkedToU16(value: i64) -> Option<u16> {
   return Intrinsic.i64CheckedToU16(value)
 }
 
-/// Calls the concrete i64 toU32 primitive.
+/// Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn toU32(value: i64) -> u32 {
   return Intrinsic.i64ToU32(value)
 }
 
-/// Calls the concrete i64 checkedToU32 primitive.
+/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn checkedToU32(value: i64) -> Option<u32> {
   return Intrinsic.i64CheckedToU32(value)
 }
 
-/// Calls the concrete i64 toU64 primitive.
+/// Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn toU64(value: i64) -> u64 {
   return Intrinsic.i64ToU64(value)
 }
 
-/// Calls the concrete i64 checkedToU64 primitive.
+/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn checkedToU64(value: i64) -> Option<u64> {
   return Intrinsic.i64CheckedToU64(value)
 }
 
-/// Calls the concrete i64 toUsize primitive.
+/// Converts `value` to `usize` and traps if `usize` cannot represent it.
 pub fn toUsize(value: i64) -> usize {
   return Intrinsic.i64ToUsize(value)
 }
 
-/// Calls the concrete i64 checkedToUsize primitive.
+/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 pub fn checkedToUsize(value: i64) -> Option<usize> {
   return Intrinsic.i64CheckedToUsize(value)
 }
 
-/// Calls the concrete i64 toI8 primitive.
+/// Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn toI8(value: i64) -> i8 {
   return Intrinsic.i64ToI8(value)
 }
 
-/// Calls the concrete i64 checkedToI8 primitive.
+/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn checkedToI8(value: i64) -> Option<i8> {
   return Intrinsic.i64CheckedToI8(value)
 }
 
-/// Calls the concrete i64 toI16 primitive.
+/// Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn toI16(value: i64) -> i16 {
   return Intrinsic.i64ToI16(value)
 }
 
-/// Calls the concrete i64 checkedToI16 primitive.
+/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn checkedToI16(value: i64) -> Option<i16> {
   return Intrinsic.i64CheckedToI16(value)
 }
 
-/// Calls the concrete i64 toI32 primitive.
+/// Converts `value` to `i32` and traps if `i32` cannot represent it.
 pub fn toI32(value: i64) -> i32 {
   return Intrinsic.i64ToI32(value)
 }
 
-/// Calls the concrete i64 checkedToI32 primitive.
+/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 pub fn checkedToI32(value: i64) -> Option<i32> {
   return Intrinsic.i64CheckedToI32(value)
 }
 
-/// Calls the concrete i64 toI64 primitive.
+/// Returns `value` unchanged as `i64`.
 pub fn toI64(value: i64) -> i64 {
   return Intrinsic.i64ToI64(value)
 }
 
-/// Calls the concrete i64 checkedToI64 primitive.
+/// Returns `Some` with `value` unchanged as `i64`.
 pub fn checkedToI64(value: i64) -> Option<i64> {
   return Intrinsic.i64CheckedToI64(value)
 }
 
-/// Calls the concrete i64 toIsize primitive.
+/// Converts `value` to `isize` and traps if `isize` cannot represent it.
 pub fn toIsize(value: i64) -> isize {
   return Intrinsic.i64ToIsize(value)
 }
 
-/// Calls the concrete i64 checkedToIsize primitive.
+/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 pub fn checkedToIsize(value: i64) -> Option<isize> {
   return Intrinsic.i64CheckedToIsize(value)
 }
 
-/// Calls the concrete i64 toF32 primitive.
+/// Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF32(value: i64) -> f32 {
   return Intrinsic.i64ToF32(value)
 }
 
-/// Calls the concrete i64 toF64 primitive.
+/// Converts `value` to the nearest `f64` value, with ties to even.
 pub fn toF64(value: i64) -> f64 {
   return Intrinsic.i64ToF64(value)
 }
 
-/// Calls the concrete i64 add primitive.
+/// Returns `left + right` and traps if the result is outside the `i64` range.
 pub fn add(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Add(left, right)
 }
 
-/// Calls the concrete i64 subtract primitive.
+/// Returns `left - right` and traps if the result is outside the `i64` range.
 pub fn subtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Subtract(left, right)
 }
 
-/// Calls the concrete i64 multiply primitive.
+/// Returns `left * right` and traps if the result is outside the `i64` range.
 pub fn multiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Multiply(left, right)
 }
 
-/// Calls the concrete i64 divide primitive.
+/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
+/// [`MIN`] by `-1` occurs.
 pub fn divide(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Divide(left, right)
 }
 
-/// Calls the concrete i64 remainder primitive.
+/// Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
+/// [`MIN`] by `-1` occurs.
 pub fn remainder(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Remainder(left, right)
 }
 
-/// Calls the concrete i64 bitAnd primitive.
+/// Returns the bitwise AND of `left` and `right`.
 pub fn bitAnd(left: i64, right: i64) -> i64 {
   return Intrinsic.i64BitAnd(left, right)
 }
 
-/// Calls the concrete i64 bitOr primitive.
+/// Returns the bitwise OR of `left` and `right`.
 pub fn bitOr(left: i64, right: i64) -> i64 {
   return Intrinsic.i64BitOr(left, right)
 }
 
-/// Calls the concrete i64 bitXor primitive.
+/// Returns the bitwise exclusive OR of `left` and `right`.
 pub fn bitXor(left: i64, right: i64) -> i64 {
   return Intrinsic.i64BitXor(left, right)
 }
 
-/// Calls the concrete i64 bitNot primitive.
+/// Returns `value` with each bit inverted.
 pub fn bitNot(value: i64) -> i64 {
   return Intrinsic.i64BitNot(value)
 }
 
-/// Calls the concrete i64 shiftLeft primitive.
+/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+/// [`BITS`].
 pub fn shiftLeft(left: i64, right: i64) -> i64 {
   return Intrinsic.i64ShiftLeft(left, right)
 }
 
-/// Calls the concrete i64 shiftRight primitive.
+/// Shifts `left` bits right by `right` positions and preserves its sign. Traps if `right` is
+/// negative or not less than [`BITS`].
 pub fn shiftRight(left: i64, right: i64) -> i64 {
   return Intrinsic.i64ShiftRight(left, right)
 }
 
-/// Calls the concrete i64 rotateLeft primitive.
+/// Rotates the bits of `left` left by `right` positions.
 pub fn rotateLeft(left: i64, right: i64) -> i64 {
   return Intrinsic.i64RotateLeft(left, right)
 }
 
-/// Calls the concrete i64 rotateRight primitive.
+/// Rotates the bits of `left` right by `right` positions.
 pub fn rotateRight(left: i64, right: i64) -> i64 {
   return Intrinsic.i64RotateRight(left, right)
 }
 
-/// Calls the concrete i64 wrappingAdd primitive.
+/// Returns `left + right`, wrapped to the `i64` range.
 pub fn wrappingAdd(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingAdd(left, right)
 }
 
-/// Calls the concrete i64 wrappingSubtract primitive.
+/// Returns `left - right`, wrapped to the `i64` range.
 pub fn wrappingSubtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingSubtract(left, right)
 }
 
-/// Calls the concrete i64 wrappingMultiply primitive.
+/// Returns `left * right`, wrapped to the `i64` range.
 pub fn wrappingMultiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingMultiply(left, right)
 }
 
-/// Calls the concrete i64 saturatingAdd primitive.
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingAdd(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingAdd(left, right)
 }
 
-/// Calls the concrete i64 saturatingSubtract primitive.
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingSubtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingSubtract(left, right)
 }
 
-/// Calls the concrete i64 saturatingMultiply primitive.
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingMultiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingMultiply(left, right)
 }
 
-/// Calls the concrete i64 checkedAdd primitive.
+/// Returns `Some` with `left + right`, or `None` if the result is outside the `i64` range.
 pub fn checkedAdd(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedAdd(left, right)
 }
 
-/// Calls the concrete i64 checkedSubtract primitive.
+/// Returns `Some` with `left - right`, or `None` if the result is outside the `i64` range.
 pub fn checkedSubtract(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedSubtract(left, right)
 }
 
-/// Calls the concrete i64 checkedMultiply primitive.
+/// Returns `Some` with `left * right`, or `None` if the result is outside the `i64` range.
 pub fn checkedMultiply(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedMultiply(left, right)
 }
 
-/// Calls the concrete i64 checkedDivide primitive.
+/// Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`] by `-1`.
 pub fn checkedDivide(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedDivide(left, right)
 }
 
-/// Calls the concrete i64 checkedRemainder primitive.
+/// Returns `Some` with the remainder, or `None` for zero or division of [`MIN`] by `-1`.
 pub fn checkedRemainder(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedRemainder(left, right)
 }
 
-/// Calls the concrete i64 equals primitive.
+/// Returns `true` when `left` and `right` are equal.
 pub fn equals(left: i64, right: i64) -> bool {
   return Intrinsic.i64Equals(left, right)
 }
 
-/// Calls the concrete i64 notEquals primitive.
+/// Returns `true` when `left` and `right` are not equal.
 pub fn notEquals(left: i64, right: i64) -> bool {
   return Intrinsic.i64NotEquals(left, right)
 }
 
-/// Calls the concrete i64 lessThan primitive.
+/// Returns `true` when `left` is less than `right`.
 pub fn lessThan(left: i64, right: i64) -> bool {
   return Intrinsic.i64LessThan(&left, &right)
 }
 
-/// Calls the concrete i64 lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: i64, right: i64) -> bool {
   return Intrinsic.i64LessOrEqual(left, right)
 }
 
-/// Calls the concrete i64 greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`.
 pub fn greaterThan(left: i64, right: i64) -> bool {
   return Intrinsic.i64GreaterThan(left, right)
 }
 
-/// Calls the concrete i64 greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: i64, right: i64) -> bool {
   return Intrinsic.i64GreaterOrEqual(left, right)
 }

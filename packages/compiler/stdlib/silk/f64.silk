@@ -25,8 +25,12 @@
 //! import silk.f64 as f64
 //!
 //! pub fn main() -> i32 {
-//!   if f64.toBits(f64.round(-0.25)) != f64.toBits(-0.0) { return 1 }
-//!   if !f64.isNaN(f64.sqrt(-1.0)) { return 2 }
+//!   if f64.toBits(f64.round(-0.25)) != f64.toBits(-0.0) {
+//!     return 1
+//!   }
+//!   if !f64.isNaN(f64.sqrt(-1.0)) {
+//!     return 2
+//!   }
 //!   return 42
 //! }
 //! ```
@@ -67,92 +71,93 @@ pub const PI: f64 = 3.141592653589793
 /// Euler's number, the base of the natural logarithm, rounded to the nearest f64.
 pub const E: f64 = 2.718281828459045
 
-/// Calls the concrete f64 negate primitive.
+/// Returns `value` with its sign reversed.
 pub fn negate(value: f64) -> f64 {
   return Intrinsic.f64Negate(value)
 }
 
-/// Calls the concrete f64 add primitive.
+/// Returns `left + right` under IEEE binary64 rules.
 pub fn add(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Add(left, right)
 }
 
-/// Calls the concrete f64 subtract primitive.
+/// Returns `left - right` under IEEE binary64 rules.
 pub fn subtract(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Subtract(left, right)
 }
 
-/// Calls the concrete f64 multiply primitive.
+/// Returns `left * right` under IEEE binary64 rules.
 pub fn multiply(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Multiply(left, right)
 }
 
-/// Calls the concrete f64 divide primitive.
+/// Returns `left / right` under IEEE binary64 rules. Division by zero produces infinity or NaN.
 pub fn divide(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Divide(left, right)
 }
 
-/// Calls the concrete f64 remainder primitive.
+/// Returns `left - trunc(left / right) * right` under IEEE binary64 rules. Invalid
+/// operands produce NaN.
 pub fn remainder(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Remainder(left, right)
 }
 
-/// Calls the concrete f64 equals primitive.
+/// Returns `true` when both values compare equal. Returns `false` if either value is NaN.
 pub fn equals(left: f64, right: f64) -> bool {
   return Intrinsic.f64Equals(left, right)
 }
 
-/// Calls the concrete f64 notEquals primitive.
+/// Returns `true` when values do not compare equal, including when either value is NaN.
 pub fn notEquals(left: f64, right: f64) -> bool {
   return Intrinsic.f64NotEquals(left, right)
 }
 
-/// Calls the concrete f64 lessThan primitive.
+/// Returns `true` when `left` is less than `right`. Returns `false` if either value is NaN.
 pub fn lessThan(left: f64, right: f64) -> bool {
   return Intrinsic.f64LessThan(&left, &right)
 }
 
-/// Calls the concrete f64 lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`. Returns `false` for NaN.
 pub fn lessOrEqual(left: f64, right: f64) -> bool {
   return Intrinsic.f64LessOrEqual(left, right)
 }
 
-/// Calls the concrete f64 greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`. Returns `false` if either value is NaN.
 pub fn greaterThan(left: f64, right: f64) -> bool {
   return Intrinsic.f64GreaterThan(left, right)
 }
 
-/// Calls the concrete f64 greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`. Returns `false` for NaN.
 pub fn greaterOrEqual(left: f64, right: f64) -> bool {
   return Intrinsic.f64GreaterOrEqual(left, right)
 }
 
-/// Calls the concrete f64 isNaN primitive.
+/// Returns `true` when `value` is a NaN.
 pub fn isNaN(value: f64) -> bool {
   return Intrinsic.f64IsNaN(value)
 }
 
-/// Calls the concrete f64 isInfinite primitive.
+/// Returns `true` when `value` is positive or negative infinity.
 pub fn isInfinite(value: f64) -> bool {
   return Intrinsic.f64IsInfinite(value)
 }
 
-/// Calls the concrete f64 isFinite primitive.
+/// Returns `true` when `value` is neither infinity nor NaN.
 pub fn isFinite(value: f64) -> bool {
   return Intrinsic.f64IsFinite(value)
 }
 
-/// Calls the concrete f64 isNormal primitive.
+/// Returns `true` when `value` is finite, nonzero, and not subnormal.
 pub fn isNormal(value: f64) -> bool {
   return Intrinsic.f64IsNormal(value)
 }
 
-/// Calls the concrete f64 isSubnormal primitive.
+/// Returns `true` when `value` is finite and has subnormal magnitude.
 pub fn isSubnormal(value: f64) -> bool {
   return Intrinsic.f64IsSubnormal(value)
 }
 
-/// Calls the concrete f64 isSignNegative primitive.
+/// Returns `true` when the sign bit of `value` is set, including for zero and NaN.
 pub fn isSignNegative(value: f64) -> bool {
   return Intrinsic.f64IsSignNegative(value)
 }
@@ -202,14 +207,15 @@ pub fn sqrt(value: f64) -> f64 {
   return Intrinsic.f64Sqrt(value)
 }
 
-/// The magnitude of `value`, which clears the sign bit. A NaN input gives the canonical NaN.
+/// Returns the magnitude of `value`, which clears the sign bit. A NaN input gives the canonical
+/// NaN.
 pub fn abs(value: f64) -> f64 {
   if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
   return fromBits(u64.bitAnd(toBits(value), 9223372036854775807))
 }
 
-/// The magnitude of `magnitude` carrying the sign bit of `sign`. Requirement 10 outranks sign
-/// transfer here, so a NaN `magnitude` gives the canonical NaN rather than a signed NaN.
+/// Returns the magnitude of `magnitude` with the sign bit of `sign`. A NaN `magnitude` gives the
+/// canonical NaN rather than a signed NaN.
 pub fn copysign(magnitude: f64, sign: f64) -> f64 {
   if Intrinsic.f64IsNaN(magnitude) { return canonicalNaN() }
   let carried = u64.bitAnd(toBits(magnitude), 9223372036854775807)
@@ -236,7 +242,8 @@ pub fn trunc(value: f64) -> f64 {
   return fromBits(u64.bitAnd(bits, kept))
 }
 
-/// The largest integral f64 no greater than `value`. A NaN input gives the canonical NaN.
+/// Returns the largest integral `f64` that is not greater than `value`. A NaN input gives the
+/// canonical NaN.
 pub fn floor(value: f64) -> f64 {
   if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
   let truncated = trunc(value)
@@ -246,7 +253,8 @@ pub fn floor(value: f64) -> f64 {
   return truncated
 }
 
-/// The smallest integral f64 no less than `value`. A NaN input gives the canonical NaN.
+/// Returns the smallest integral `f64` that is not less than `value`. A NaN input gives the
+/// canonical NaN.
 pub fn ceil(value: f64) -> f64 {
   if Intrinsic.f64IsNaN(value) { return canonicalNaN() }
   let truncated = trunc(value)
@@ -270,8 +278,8 @@ pub fn round(value: f64) -> f64 {
   return truncated + copysign(1.0, value)
 }
 
-/// The lesser of two values, ordering negative zero below positive zero. Either operand being NaN
-/// gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `minimum`.
+/// Returns the lesser value and orders negative zero below positive zero. If an operand is NaN,
+/// returns the canonical NaN.
 pub fn min(left: f64, right: f64) -> f64 {
   if Intrinsic.f64IsNaN(left) { return canonicalNaN() }
   if Intrinsic.f64IsNaN(right) { return canonicalNaN() }
@@ -282,8 +290,8 @@ pub fn min(left: f64, right: f64) -> f64 {
   return right
 }
 
-/// The greater of two values, ordering positive zero above negative zero. Either operand being NaN
-/// gives the canonical NaN, which is the NaN-propagating choice IEEE-754-2019 calls `maximum`.
+/// Returns the greater value and orders positive zero above negative zero. If an operand is NaN,
+/// returns the canonical NaN.
 pub fn max(left: f64, right: f64) -> f64 {
   if Intrinsic.f64IsNaN(left) { return canonicalNaN() }
   if Intrinsic.f64IsNaN(right) { return canonicalNaN() }
@@ -311,7 +319,7 @@ pub fn cos(value: f64) -> f64 {
   return Intrinsic.f64Cos(value)
 }
 
-/// Narrows to binary32 with round-to-nearest ties-to-even.
+/// Converts to binary32 with round-to-nearest ties-to-even.
 ///
 /// # Details
 ///
@@ -325,52 +333,62 @@ pub fn toF64(value: f64) -> f64 {
   return Intrinsic.f64ToF64(value)
 }
 
-/// Calls the concrete f64 toU8 primitive.
+/// Converts `value` toward zero to `u8`. Traps for NaN, infinity, or a result
+/// outside the `u8` range.
 pub fn toU8(value: f64) -> u8 {
   return Intrinsic.f64ToU8(value)
 }
 
-/// Calls the concrete f64 toU16 primitive.
+/// Converts `value` toward zero to `u16`. Traps for NaN, infinity, or a result
+/// outside the `u16` range.
 pub fn toU16(value: f64) -> u16 {
   return Intrinsic.f64ToU16(value)
 }
 
-/// Calls the concrete f64 toU32 primitive.
+/// Converts `value` toward zero to `u32`. Traps for NaN, infinity, or a result
+/// outside the `u32` range.
 pub fn toU32(value: f64) -> u32 {
   return Intrinsic.f64ToU32(value)
 }
 
-/// Calls the concrete f64 toU64 primitive.
+/// Converts `value` toward zero to `u64`. Traps for NaN, infinity, or a result
+/// outside the `u64` range.
 pub fn toU64(value: f64) -> u64 {
   return Intrinsic.f64ToU64(value)
 }
 
-/// Calls the concrete f64 toUsize primitive.
+/// Converts `value` toward zero to `usize`. Traps for NaN, infinity, or a result
+/// outside the `usize` range.
 pub fn toUsize(value: f64) -> usize {
   return Intrinsic.f64ToUsize(value)
 }
 
-/// Calls the concrete f64 toI8 primitive.
+/// Converts `value` toward zero to `i8`. Traps for NaN, infinity, or a result
+/// outside the `i8` range.
 pub fn toI8(value: f64) -> i8 {
   return Intrinsic.f64ToI8(value)
 }
 
-/// Calls the concrete f64 toI16 primitive.
+/// Converts `value` toward zero to `i16`. Traps for NaN, infinity, or a result
+/// outside the `i16` range.
 pub fn toI16(value: f64) -> i16 {
   return Intrinsic.f64ToI16(value)
 }
 
-/// Calls the concrete f64 toI32 primitive.
+/// Converts `value` toward zero to `i32`. Traps for NaN, infinity, or a result
+/// outside the `i32` range.
 pub fn toI32(value: f64) -> i32 {
   return Intrinsic.f64ToI32(value)
 }
 
-/// Calls the concrete f64 toI64 primitive.
+/// Converts `value` toward zero to `i64`. Traps for NaN, infinity, or a result
+/// outside the `i64` range.
 pub fn toI64(value: f64) -> i64 {
   return Intrinsic.f64ToI64(value)
 }
 
-/// Calls the concrete f64 toIsize primitive.
+/// Converts `value` toward zero to `isize`. Traps for NaN, infinity, or a result
+/// outside the `isize` range.
 pub fn toIsize(value: f64) -> isize {
   return Intrinsic.f64ToIsize(value)
 }

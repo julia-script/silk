@@ -24,32 +24,32 @@ pub fn toU32(value: char) -> u32 {
   return Intrinsic.charToU32(value)
 }
 
-/// Calls the concrete char equals primitive.
+/// Returns `true` when `left` and `right` are the same Unicode scalar value.
 pub fn equals(left: char, right: char) -> bool {
   return Intrinsic.charEquals(left, right)
 }
 
-/// Calls the concrete char notEquals primitive.
+/// Returns `true` when `left` and `right` are different Unicode scalar values.
 pub fn notEquals(left: char, right: char) -> bool {
   return Intrinsic.charNotEquals(left, right)
 }
 
-/// Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
+/// Returns `true` when the Unicode scalar value of `left` is less than `right`.
 pub fn lessThan(left: char, right: char) -> bool {
   return Intrinsic.charLessThan(&left, &right)
 }
 
-/// Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.
+/// Returns `true` when the Unicode scalar value of `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: char, right: char) -> bool {
   return Intrinsic.charLessOrEqual(left, right)
 }
 
-/// Calls the concrete char greaterThan primitive, which orders by Unicode scalar value.
+/// Returns `true` when the Unicode scalar value of `left` is greater than `right`.
 pub fn greaterThan(left: char, right: char) -> bool {
   return Intrinsic.charGreaterThan(left, right)
 }
 
-/// Calls the concrete char greaterOrEqual primitive, which orders by Unicode scalar value.
+/// Returns `true` when the Unicode scalar value of `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: char, right: char) -> bool {
   return Intrinsic.charGreaterOrEqual(left, right)
 }

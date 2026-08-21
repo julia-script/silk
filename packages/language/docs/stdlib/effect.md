@@ -424,24 +424,25 @@ Supply the selected row first when one provider could satisfy multiple entries.
 
 ### Examples
 
-#### Remove Logger and preserve Clock
+#### Remove one custom service requirement
 
 ```silk
 import silk.effect as Effect
-import silk.logging { Logger, LogError, StdoutLogger }
 
-service Clock {
-  effect fn tick() -> i32 ? &mut Clock
+service Clock {}
+
+struct FixedClock {}
+
+impl Clock for FixedClock {}
+
+effect fn read() -> i32
+? &mut Clock {
+  return 42
 }
 
-effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
-  run Effect.log("Reading clock")
-  return run Clock.tick()
-}
-
-effect fn withLogger() -> i32 ! LogError ? &mut Clock {
-  let mut logger = StdoutLogger.stdout()
-  return run Effect.provideMut<Logger>(read(), &mut logger)
+pub fn main() -> i32 {
+  let mut clock = FixedClock {}
+  return run Effect.provideMut<Clock>(read(), &mut clock)
 }
 ```
 

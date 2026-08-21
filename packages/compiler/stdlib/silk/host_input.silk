@@ -122,7 +122,7 @@ pub effect fn arguments(
   return move collected
 }
 
-/// The checked textual view of raw host bytes.
+/// Returns the checked textual view of raw host bytes.
 ///
 /// # Details
 ///

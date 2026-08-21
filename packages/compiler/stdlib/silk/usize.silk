@@ -36,7 +36,7 @@ import silk.u32 as u32
 import silk.u64 as u64
 import silk.u8 as u8
 
-/// The largest usize selected for the compilation target.
+/// The largest `usize` value for the compilation target.
 ///
 /// # Details
 ///
@@ -44,274 +44,276 @@ import silk.u8 as u8
 /// arithmetic rejects results above it.
 pub const MAX: usize = Target.usizeMax
 
-/// The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.
+/// The smallest `usize` value, which is zero at each pointer width.
 pub const MIN: usize = 0
 
-/// The width of usize in bits, which is the selected target's pointer width.
+/// The width of `usize` in bits, which is the compilation target's pointer width.
 pub const BITS: u32 = Target.pointerBits
 
-/// The usize zero. A bare literal defaults to i32, so a count without a typed context names this.
+/// The `usize` zero value for a count without a typed context.
 pub const ZERO: usize = 0
 
 /// The usize one. A bare literal defaults to i32, so a step without a typed context names this.
 pub const ONE: usize = 1
 
-/// Calls the concrete usize toU8 primitive.
+/// Converts `value` to `u8` and traps if `u8` cannot represent it.
 pub fn toU8(value: usize) -> u8 {
   return Intrinsic.usizeToU8(value)
 }
 
-/// Calls the concrete usize checkedToU8 primitive.
+/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 pub fn checkedToU8(value: usize) -> Option<u8> {
   return Intrinsic.usizeCheckedToU8(value)
 }
 
-/// Calls the concrete usize toU16 primitive.
+/// Converts `value` to `u16` and traps if `u16` cannot represent it.
 pub fn toU16(value: usize) -> u16 {
   return Intrinsic.usizeToU16(value)
 }
 
-/// Calls the concrete usize checkedToU16 primitive.
+/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 pub fn checkedToU16(value: usize) -> Option<u16> {
   return Intrinsic.usizeCheckedToU16(value)
 }
 
-/// Calls the concrete usize toU32 primitive.
+/// Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn toU32(value: usize) -> u32 {
   return Intrinsic.usizeToU32(value)
 }
 
-/// Calls the concrete usize checkedToU32 primitive.
+/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn checkedToU32(value: usize) -> Option<u32> {
   return Intrinsic.usizeCheckedToU32(value)
 }
 
-/// Calls the concrete usize toU64 primitive.
+/// Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn toU64(value: usize) -> u64 {
   return Intrinsic.usizeToU64(value)
 }
 
-/// Calls the concrete usize checkedToU64 primitive.
+/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn checkedToU64(value: usize) -> Option<u64> {
   return Intrinsic.usizeCheckedToU64(value)
 }
 
-/// Calls the concrete usize toUsize primitive.
+/// Returns `value` unchanged as `usize`.
 pub fn toUsize(value: usize) -> usize {
   return Intrinsic.usizeToUsize(value)
 }
 
-/// Calls the concrete usize checkedToUsize primitive.
+/// Returns `Some` with `value` unchanged as `usize`.
 pub fn checkedToUsize(value: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedToUsize(value)
 }
 
-/// Calls the concrete usize toI8 primitive.
+/// Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn toI8(value: usize) -> i8 {
   return Intrinsic.usizeToI8(value)
 }
 
-/// Calls the concrete usize checkedToI8 primitive.
+/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn checkedToI8(value: usize) -> Option<i8> {
   return Intrinsic.usizeCheckedToI8(value)
 }
 
-/// Calls the concrete usize toI16 primitive.
+/// Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn toI16(value: usize) -> i16 {
   return Intrinsic.usizeToI16(value)
 }
 
-/// Calls the concrete usize checkedToI16 primitive.
+/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn checkedToI16(value: usize) -> Option<i16> {
   return Intrinsic.usizeCheckedToI16(value)
 }
 
-/// Calls the concrete usize toI32 primitive.
+/// Converts `value` to `i32` and traps if `i32` cannot represent it.
 pub fn toI32(value: usize) -> i32 {
   return Intrinsic.usizeToI32(value)
 }
 
-/// Calls the concrete usize checkedToI32 primitive.
+/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 pub fn checkedToI32(value: usize) -> Option<i32> {
   return Intrinsic.usizeCheckedToI32(value)
 }
 
-/// Calls the concrete usize toI64 primitive.
+/// Converts `value` to `i64` and traps if `i64` cannot represent it.
 pub fn toI64(value: usize) -> i64 {
   return Intrinsic.usizeToI64(value)
 }
 
-/// Calls the concrete usize checkedToI64 primitive.
+/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 pub fn checkedToI64(value: usize) -> Option<i64> {
   return Intrinsic.usizeCheckedToI64(value)
 }
 
-/// Calls the concrete usize toIsize primitive.
+/// Converts `value` to `isize` and traps if `isize` cannot represent it.
 pub fn toIsize(value: usize) -> isize {
   return Intrinsic.usizeToIsize(value)
 }
 
-/// Calls the concrete usize checkedToIsize primitive.
+/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 pub fn checkedToIsize(value: usize) -> Option<isize> {
   return Intrinsic.usizeCheckedToIsize(value)
 }
 
-/// Calls the concrete usize toF32 primitive.
+/// Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF32(value: usize) -> f32 {
   return Intrinsic.usizeToF32(value)
 }
 
-/// Calls the concrete usize toF64 primitive.
+/// Converts `value` to the nearest `f64` value, with ties to even.
 pub fn toF64(value: usize) -> f64 {
   return Intrinsic.usizeToF64(value)
 }
 
-/// Calls the concrete usize add primitive.
+/// Returns `left + right` and traps if the result is outside the `usize` range.
 pub fn add(left: usize, right: usize) -> usize {
   return Intrinsic.usizeAdd(left, right)
 }
 
-/// Calls the concrete usize subtract primitive.
+/// Returns `left - right` and traps if the result is outside the `usize` range.
 pub fn subtract(left: usize, right: usize) -> usize {
   return Intrinsic.usizeSubtract(left, right)
 }
 
-/// Calls the concrete usize multiply primitive.
+/// Returns `left * right` and traps if the result is outside the `usize` range.
 pub fn multiply(left: usize, right: usize) -> usize {
   return Intrinsic.usizeMultiply(left, right)
 }
 
-/// Calls the concrete usize divide primitive.
+/// Returns `left / right`. Traps if `right` is zero.
 pub fn divide(left: usize, right: usize) -> usize {
   return Intrinsic.usizeDivide(left, right)
 }
 
-/// Calls the concrete usize remainder primitive.
+/// Returns the remainder of `left / right`. Traps if `right` is zero.
 pub fn remainder(left: usize, right: usize) -> usize {
   return Intrinsic.usizeRemainder(left, right)
 }
 
-/// Calls the concrete usize bitAnd primitive.
+/// Returns the bitwise AND of `left` and `right`.
 pub fn bitAnd(left: usize, right: usize) -> usize {
   return Intrinsic.usizeBitAnd(left, right)
 }
 
-/// Calls the concrete usize bitOr primitive.
+/// Returns the bitwise OR of `left` and `right`.
 pub fn bitOr(left: usize, right: usize) -> usize {
   return Intrinsic.usizeBitOr(left, right)
 }
 
-/// Calls the concrete usize bitXor primitive.
+/// Returns the bitwise exclusive OR of `left` and `right`.
 pub fn bitXor(left: usize, right: usize) -> usize {
   return Intrinsic.usizeBitXor(left, right)
 }
 
-/// Calls the concrete usize bitNot primitive.
+/// Returns `value` with each bit inverted.
 pub fn bitNot(value: usize) -> usize {
   return Intrinsic.usizeBitNot(value)
 }
 
-/// Calls the concrete usize shiftLeft primitive.
+/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+/// [`BITS`].
 pub fn shiftLeft(left: usize, right: usize) -> usize {
   return Intrinsic.usizeShiftLeft(left, right)
 }
 
-/// Calls the concrete usize shiftRight primitive.
+/// Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is
+/// not less than [`BITS`].
 pub fn shiftRight(left: usize, right: usize) -> usize {
   return Intrinsic.usizeShiftRight(left, right)
 }
 
-/// Calls the concrete usize rotateLeft primitive.
+/// Rotates the bits of `left` left by `right` positions.
 pub fn rotateLeft(left: usize, right: usize) -> usize {
   return Intrinsic.usizeRotateLeft(left, right)
 }
 
-/// Calls the concrete usize rotateRight primitive.
+/// Rotates the bits of `left` right by `right` positions.
 pub fn rotateRight(left: usize, right: usize) -> usize {
   return Intrinsic.usizeRotateRight(left, right)
 }
 
-/// Calls the concrete usize wrappingAdd primitive.
+/// Returns `left + right`, wrapped to the `usize` range.
 pub fn wrappingAdd(left: usize, right: usize) -> usize {
   return Intrinsic.usizeWrappingAdd(left, right)
 }
 
-/// Calls the concrete usize wrappingSubtract primitive.
+/// Returns `left - right`, wrapped to the `usize` range.
 pub fn wrappingSubtract(left: usize, right: usize) -> usize {
   return Intrinsic.usizeWrappingSubtract(left, right)
 }
 
-/// Calls the concrete usize wrappingMultiply primitive.
+/// Returns `left * right`, wrapped to the `usize` range.
 pub fn wrappingMultiply(left: usize, right: usize) -> usize {
   return Intrinsic.usizeWrappingMultiply(left, right)
 }
 
-/// Calls the concrete usize saturatingAdd primitive.
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingAdd(left: usize, right: usize) -> usize {
   return Intrinsic.usizeSaturatingAdd(left, right)
 }
 
-/// Calls the concrete usize saturatingSubtract primitive.
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingSubtract(left: usize, right: usize) -> usize {
   return Intrinsic.usizeSaturatingSubtract(left, right)
 }
 
-/// Calls the concrete usize saturatingMultiply primitive.
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
 pub fn saturatingMultiply(left: usize, right: usize) -> usize {
   return Intrinsic.usizeSaturatingMultiply(left, right)
 }
 
-/// Calls the concrete usize checkedAdd primitive.
+/// Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.
 pub fn checkedAdd(left: usize, right: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedAdd(left, right)
 }
 
-/// Calls the concrete usize checkedSubtract primitive.
+/// Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.
 pub fn checkedSubtract(left: usize, right: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedSubtract(left, right)
 }
 
-/// Calls the concrete usize checkedMultiply primitive.
+/// Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.
 pub fn checkedMultiply(left: usize, right: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedMultiply(left, right)
 }
 
-/// Calls the concrete usize checkedDivide primitive.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero.
 pub fn checkedDivide(left: usize, right: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedDivide(left, right)
 }
 
-/// Calls the concrete usize checkedRemainder primitive.
+/// Returns `Some` with the remainder, or `None` if `right` is zero.
 pub fn checkedRemainder(left: usize, right: usize) -> Option<usize> {
   return Intrinsic.usizeCheckedRemainder(left, right)
 }
 
-/// Calls the concrete usize equals primitive.
+/// Returns `true` when `left` and `right` are equal.
 pub fn equals(left: usize, right: usize) -> bool {
   return Intrinsic.usizeEquals(left, right)
 }
 
-/// Calls the concrete usize notEquals primitive.
+/// Returns `true` when `left` and `right` are not equal.
 pub fn notEquals(left: usize, right: usize) -> bool {
   return Intrinsic.usizeNotEquals(left, right)
 }
 
-/// Calls the concrete usize lessThan primitive.
+/// Returns `true` when `left` is less than `right`.
 pub fn lessThan(left: usize, right: usize) -> bool {
   return Intrinsic.usizeLessThan(&left, &right)
 }
 
-/// Calls the concrete usize lessOrEqual primitive.
+/// Returns `true` when `left` is less than or equal to `right`.
 pub fn lessOrEqual(left: usize, right: usize) -> bool {
   return Intrinsic.usizeLessOrEqual(left, right)
 }
 
-/// Calls the concrete usize greaterThan primitive.
+/// Returns `true` when `left` is greater than `right`.
 pub fn greaterThan(left: usize, right: usize) -> bool {
   return Intrinsic.usizeGreaterThan(left, right)
 }
 
-/// Calls the concrete usize greaterOrEqual primitive.
+/// Returns `true` when `left` is greater than or equal to `right`.
 pub fn greaterOrEqual(left: usize, right: usize) -> bool {
   return Intrinsic.usizeGreaterOrEqual(left, right)
 }

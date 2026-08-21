@@ -34,7 +34,7 @@ Public declarations: 60.
 pub const MAX: isize
 ```
 
-The largest isize selected for the compilation target.
+The largest `isize` value for the compilation target.
 
 ### Details
 
@@ -49,8 +49,11 @@ arithmetic rejects results above it.
 pub const MIN: isize
 ```
 
-The smallest isize. The checked arithmetic intrinsics reject every result below this bound. It
-is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
+The smallest `isize` value for the compilation target.
+
+### Details
+
+This is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit target.
 
 <a id="declaration-73696c6b2f6973697a653a3a42495453"></a>
 
@@ -60,7 +63,7 @@ is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit one.
 pub const BITS: u32
 ```
 
-The width of isize in bits, which is the selected target's pointer width.
+The width of `isize` in bits, which is the compilation target's pointer width.
 
 <a id="declaration-73696c6b2f6973697a653a3a6e6567617465"></a>
 
@@ -70,7 +73,7 @@ The width of isize in bits, which is the selected target's pointer width.
 pub fn negate(value: isize) -> isize
 ```
 
-Calls the concrete isize negate primitive.
+Returns the arithmetic negation of `value` and traps when `value` is [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e).
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e674e6567617465"></a>
 
@@ -80,7 +83,7 @@ Calls the concrete isize negate primitive.
 pub fn wrappingNegate(value: isize) -> isize
 ```
 
-Calls the concrete isize wrappingNegate primitive.
+Returns the arithmetic negation of `value`, wrapped to the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e674e6567617465"></a>
 
@@ -90,7 +93,7 @@ Calls the concrete isize wrappingNegate primitive.
 pub fn saturatingNegate(value: isize) -> isize
 ```
 
-Calls the concrete isize saturatingNegate primitive.
+Returns the arithmetic negation of `value`, clamped to the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f5538"></a>
 
@@ -100,7 +103,7 @@ Calls the concrete isize saturatingNegate primitive.
 pub fn toU8(value: isize) -> u8
 ```
 
-Calls the concrete isize toU8 primitive.
+Converts `value` to `u8` and traps if `u8` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f5538"></a>
 
@@ -110,7 +113,7 @@ Calls the concrete isize toU8 primitive.
 pub fn checkedToU8(value: isize) -> Option<u8>
 ```
 
-Calls the concrete isize checkedToU8 primitive.
+Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553136"></a>
 
@@ -120,7 +123,7 @@ Calls the concrete isize checkedToU8 primitive.
 pub fn toU16(value: isize) -> u16
 ```
 
-Calls the concrete isize toU16 primitive.
+Converts `value` to `u16` and traps if `u16` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553136"></a>
 
@@ -130,7 +133,7 @@ Calls the concrete isize toU16 primitive.
 pub fn checkedToU16(value: isize) -> Option<u16>
 ```
 
-Calls the concrete isize checkedToU16 primitive.
+Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553332"></a>
 
@@ -140,7 +143,7 @@ Calls the concrete isize checkedToU16 primitive.
 pub fn toU32(value: isize) -> u32
 ```
 
-Calls the concrete isize toU32 primitive.
+Converts `value` to `u32` and traps if `u32` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553332"></a>
 
@@ -150,7 +153,7 @@ Calls the concrete isize toU32 primitive.
 pub fn checkedToU32(value: isize) -> Option<u32>
 ```
 
-Calls the concrete isize checkedToU32 primitive.
+Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553634"></a>
 
@@ -160,7 +163,7 @@ Calls the concrete isize checkedToU32 primitive.
 pub fn toU64(value: isize) -> u64
 ```
 
-Calls the concrete isize toU64 primitive.
+Converts `value` to `u64` and traps if `u64` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553634"></a>
 
@@ -170,7 +173,7 @@ Calls the concrete isize toU64 primitive.
 pub fn checkedToU64(value: isize) -> Option<u64>
 ```
 
-Calls the concrete isize checkedToU64 primitive.
+Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f5573697a65"></a>
 
@@ -180,7 +183,7 @@ Calls the concrete isize checkedToU64 primitive.
 pub fn toUsize(value: isize) -> usize
 ```
 
-Calls the concrete isize toUsize primitive.
+Converts `value` to `usize` and traps if `usize` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f5573697a65"></a>
 
@@ -190,7 +193,7 @@ Calls the concrete isize toUsize primitive.
 pub fn checkedToUsize(value: isize) -> Option<usize>
 ```
 
-Calls the concrete isize checkedToUsize primitive.
+Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f4938"></a>
 
@@ -200,7 +203,7 @@ Calls the concrete isize checkedToUsize primitive.
 pub fn toI8(value: isize) -> i8
 ```
 
-Calls the concrete isize toI8 primitive.
+Converts `value` to `i8` and traps if `i8` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f4938"></a>
 
@@ -210,7 +213,7 @@ Calls the concrete isize toI8 primitive.
 pub fn checkedToI8(value: isize) -> Option<i8>
 ```
 
-Calls the concrete isize checkedToI8 primitive.
+Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493136"></a>
 
@@ -220,7 +223,7 @@ Calls the concrete isize checkedToI8 primitive.
 pub fn toI16(value: isize) -> i16
 ```
 
-Calls the concrete isize toI16 primitive.
+Converts `value` to `i16` and traps if `i16` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493136"></a>
 
@@ -230,7 +233,7 @@ Calls the concrete isize toI16 primitive.
 pub fn checkedToI16(value: isize) -> Option<i16>
 ```
 
-Calls the concrete isize checkedToI16 primitive.
+Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493332"></a>
 
@@ -240,7 +243,7 @@ Calls the concrete isize checkedToI16 primitive.
 pub fn toI32(value: isize) -> i32
 ```
 
-Calls the concrete isize toI32 primitive.
+Converts `value` to `i32` and traps if `i32` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493332"></a>
 
@@ -250,7 +253,7 @@ Calls the concrete isize toI32 primitive.
 pub fn checkedToI32(value: isize) -> Option<i32>
 ```
 
-Calls the concrete isize checkedToI32 primitive.
+Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493634"></a>
 
@@ -260,7 +263,7 @@ Calls the concrete isize checkedToI32 primitive.
 pub fn toI64(value: isize) -> i64
 ```
 
-Calls the concrete isize toI64 primitive.
+Converts `value` to `i64` and traps if `i64` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493634"></a>
 
@@ -270,7 +273,7 @@ Calls the concrete isize toI64 primitive.
 pub fn checkedToI64(value: isize) -> Option<i64>
 ```
 
-Calls the concrete isize checkedToI64 primitive.
+Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f4973697a65"></a>
 
@@ -280,7 +283,7 @@ Calls the concrete isize checkedToI64 primitive.
 pub fn toIsize(value: isize) -> isize
 ```
 
-Calls the concrete isize toIsize primitive.
+Returns `value` unchanged as `isize`.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f4973697a65"></a>
 
@@ -290,7 +293,7 @@ Calls the concrete isize toIsize primitive.
 pub fn checkedToIsize(value: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedToIsize primitive.
+Returns `Some` with `value` unchanged as `isize`.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f463332"></a>
 
@@ -300,7 +303,7 @@ Calls the concrete isize checkedToIsize primitive.
 pub fn toF32(value: isize) -> f32
 ```
 
-Calls the concrete isize toF32 primitive.
+Converts `value` to the nearest `f32` value, with ties to even.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f463634"></a>
 
@@ -310,7 +313,7 @@ Calls the concrete isize toF32 primitive.
 pub fn toF64(value: isize) -> f64
 ```
 
-Calls the concrete isize toF64 primitive.
+Converts `value` to the nearest `f64` value, with ties to even.
 
 <a id="declaration-73696c6b2f6973697a653a3a616464"></a>
 
@@ -320,7 +323,7 @@ Calls the concrete isize toF64 primitive.
 pub fn add(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize add primitive.
+Returns `left + right` and traps if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a7375627472616374"></a>
 
@@ -330,7 +333,7 @@ Calls the concrete isize add primitive.
 pub fn subtract(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize subtract primitive.
+Returns `left - right` and traps if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a6d756c7469706c79"></a>
 
@@ -340,7 +343,7 @@ Calls the concrete isize subtract primitive.
 pub fn multiply(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize multiply primitive.
+Returns `left * right` and traps if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a646976696465"></a>
 
@@ -350,7 +353,8 @@ Calls the concrete isize multiply primitive.
 pub fn divide(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize divide primitive.
+Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
+[`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1` occurs.
 
 <a id="declaration-73696c6b2f6973697a653a3a72656d61696e646572"></a>
 
@@ -360,7 +364,8 @@ Calls the concrete isize divide primitive.
 pub fn remainder(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize remainder primitive.
+Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
+[`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1` occurs.
 
 <a id="declaration-73696c6b2f6973697a653a3a626974416e64"></a>
 
@@ -370,7 +375,7 @@ Calls the concrete isize remainder primitive.
 pub fn bitAnd(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize bitAnd primitive.
+Returns the bitwise AND of `left` and `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a6269744f72"></a>
 
@@ -380,7 +385,7 @@ Calls the concrete isize bitAnd primitive.
 pub fn bitOr(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize bitOr primitive.
+Returns the bitwise OR of `left` and `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a626974586f72"></a>
 
@@ -390,7 +395,7 @@ Calls the concrete isize bitOr primitive.
 pub fn bitXor(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize bitXor primitive.
+Returns the bitwise exclusive OR of `left` and `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a6269744e6f74"></a>
 
@@ -400,7 +405,7 @@ Calls the concrete isize bitXor primitive.
 pub fn bitNot(value: isize) -> isize
 ```
 
-Calls the concrete isize bitNot primitive.
+Returns `value` with each bit inverted.
 
 <a id="declaration-73696c6b2f6973697a653a3a73686966744c656674"></a>
 
@@ -410,7 +415,8 @@ Calls the concrete isize bitNot primitive.
 pub fn shiftLeft(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize shiftLeft primitive.
+Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+[`BITS`](#declaration-73696c6b2f6973697a653a3a42495453).
 
 <a id="declaration-73696c6b2f6973697a653a3a73686966745269676874"></a>
 
@@ -420,7 +426,8 @@ Calls the concrete isize shiftLeft primitive.
 pub fn shiftRight(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize shiftRight primitive.
+Shifts `left` bits right by `right` positions and preserves its sign. Traps if `right` is
+negative or not less than [`BITS`](#declaration-73696c6b2f6973697a653a3a42495453).
 
 <a id="declaration-73696c6b2f6973697a653a3a726f746174654c656674"></a>
 
@@ -430,7 +437,7 @@ Calls the concrete isize shiftRight primitive.
 pub fn rotateLeft(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize rotateLeft primitive.
+Rotates the bits of `left` left by `right` positions.
 
 <a id="declaration-73696c6b2f6973697a653a3a726f746174655269676874"></a>
 
@@ -440,7 +447,7 @@ Calls the concrete isize rotateLeft primitive.
 pub fn rotateRight(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize rotateRight primitive.
+Rotates the bits of `left` right by `right` positions.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e67416464"></a>
 
@@ -450,7 +457,7 @@ Calls the concrete isize rotateRight primitive.
 pub fn wrappingAdd(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize wrappingAdd primitive.
+Returns `left + right`, wrapped to the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e675375627472616374"></a>
 
@@ -460,7 +467,7 @@ Calls the concrete isize wrappingAdd primitive.
 pub fn wrappingSubtract(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize wrappingSubtract primitive.
+Returns `left - right`, wrapped to the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e674d756c7469706c79"></a>
 
@@ -470,7 +477,7 @@ Calls the concrete isize wrappingSubtract primitive.
 pub fn wrappingMultiply(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize wrappingMultiply primitive.
+Returns `left * right`, wrapped to the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e67416464"></a>
 
@@ -480,7 +487,7 @@ Calls the concrete isize wrappingMultiply primitive.
 pub fn saturatingAdd(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize saturatingAdd primitive.
+Returns `left + right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e675375627472616374"></a>
 
@@ -490,7 +497,7 @@ Calls the concrete isize saturatingAdd primitive.
 pub fn saturatingSubtract(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize saturatingSubtract primitive.
+Returns `left - right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e674d756c7469706c79"></a>
 
@@ -500,7 +507,7 @@ Calls the concrete isize saturatingSubtract primitive.
 pub fn saturatingMultiply(left: isize, right: isize) -> isize
 ```
 
-Calls the concrete isize saturatingMultiply primitive.
+Returns `left * right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564416464"></a>
 
@@ -510,7 +517,7 @@ Calls the concrete isize saturatingMultiply primitive.
 pub fn checkedAdd(left: isize, right: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedAdd primitive.
+Returns `Some` with `left + right`, or `None` if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b65645375627472616374"></a>
 
@@ -520,7 +527,7 @@ Calls the concrete isize checkedAdd primitive.
 pub fn checkedSubtract(left: isize, right: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedSubtract primitive.
+Returns `Some` with `left - right`, or `None` if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b65644d756c7469706c79"></a>
 
@@ -530,7 +537,7 @@ Calls the concrete isize checkedSubtract primitive.
 pub fn checkedMultiply(left: isize, right: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedMultiply primitive.
+Returns `Some` with `left * right`, or `None` if the result is outside the `isize` range.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564446976696465"></a>
 
@@ -540,7 +547,7 @@ Calls the concrete isize checkedMultiply primitive.
 pub fn checkedDivide(left: isize, right: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedDivide primitive.
+Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1`.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b656452656d61696e646572"></a>
 
@@ -550,7 +557,7 @@ Calls the concrete isize checkedDivide primitive.
 pub fn checkedRemainder(left: isize, right: isize) -> Option<isize>
 ```
 
-Calls the concrete isize checkedRemainder primitive.
+Returns `Some` with the remainder, or `None` for zero or division of [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1`.
 
 <a id="declaration-73696c6b2f6973697a653a3a657175616c73"></a>
 
@@ -560,7 +567,7 @@ Calls the concrete isize checkedRemainder primitive.
 pub fn equals(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize equals primitive.
+Returns `true` when `left` and `right` are equal.
 
 <a id="declaration-73696c6b2f6973697a653a3a6e6f74457175616c73"></a>
 
@@ -570,7 +577,7 @@ Calls the concrete isize equals primitive.
 pub fn notEquals(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize notEquals primitive.
+Returns `true` when `left` and `right` are not equal.
 
 <a id="declaration-73696c6b2f6973697a653a3a6c6573735468616e"></a>
 
@@ -580,7 +587,7 @@ Calls the concrete isize notEquals primitive.
 pub fn lessThan(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize lessThan primitive.
+Returns `true` when `left` is less than `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a6c6573734f72457175616c"></a>
 
@@ -590,7 +597,7 @@ Calls the concrete isize lessThan primitive.
 pub fn lessOrEqual(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize lessOrEqual primitive.
+Returns `true` when `left` is less than or equal to `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a677265617465725468616e"></a>
 
@@ -600,7 +607,7 @@ Calls the concrete isize lessOrEqual primitive.
 pub fn greaterThan(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize greaterThan primitive.
+Returns `true` when `left` is greater than `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a677265617465724f72457175616c"></a>
 
@@ -610,7 +617,7 @@ Calls the concrete isize greaterThan primitive.
 pub fn greaterOrEqual(left: isize, right: isize) -> bool
 ```
 
-Calls the concrete isize greaterOrEqual primitive.
+Returns `true` when `left` is greater than or equal to `right`.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f54657874"></a>
 

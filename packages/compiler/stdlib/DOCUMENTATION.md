@@ -1,89 +1,48 @@
-# Standard-library documentation guide
+# Standard-library documentation workflow
 
-The comments in `silk/*.silk` are the standard library's canonical API documentation. Write them
-for someone choosing and composing APIs, not for someone counting declarations. Generated module
-pages, editor hovers, policy checks, and doctests all consume the same `//!` and `///` blocks.
+The comments in `silk/*.silk` are the standard library's canonical API documentation. Follow the
+[Silk doc comment style guide](../../../docs/language/documentation-style-guide.md) for comment
+coverage, structure, examples, links, language, and review rules.
 
-## Shape of a document
+This file defines the additional repository workflow for standard-library documentation.
 
-Start every module and public declaration document with one concise summary paragraph. Name the
-public concept and the useful distinction a caller needs first. Do not begin by repeating the
-signature or describing an incidental implementation technique.
+## Generated outputs
 
-Add only sections that teach something useful, in this order:
+The documentation pipeline reads the same `//!` and `///` blocks for generated reference pages,
+editor hovers, policy validation, and doctests. Do not edit generated standard-library pages.
 
-1. `# When to use` — selection guidance when nearby APIs solve related problems.
-2. `# Details` — stable behavior such as ownership, allocation, ordering, bounds, units, failure,
-   lifecycle, portability, or provider selection.
-3. `# Gotchas` — a concrete and likely mistake whose consequence is not obvious.
-4. `# Examples` — selective complete programs, each under a distinct `## Scenario title`.
-5. `# See also` — a short list of navigable relationships.
+After a source comment changes, run:
 
-Omit empty sections, generic advice, speculative guarantees, and duplicated prose. Source headings
-are document-local: use the depths above and let the generated reference rebase them below the
-module or declaration heading.
+```bash
+pnpm --filter @silk-effect/compiler documentation:policy
+pnpm --filter @silk-effect/compiler documentation:examples
+pnpm --filter @silk-effect/compiler documentation:generate
+pnpm --filter @silk-effect/compiler documentation:check
+```
 
-## Put contracts on their owner
+The full repository gate also runs these checks through `pnpm check`.
 
-Attach parameter or type-parameter documentation immediately above that declaration when a caller
-needs to know ownership, units, interpretation, bounds, mutation, defaults, or selection behavior.
-Do not document an obvious operand merely to increase coverage, and do not substitute an
-`@param`-style list in the owning function's prose.
+## Example evidence
 
-Every public field and every service or interface operation needs its own semantic summary. Return
-types, failure rows, requirement rows, and other signature facts are compiler-owned; prose should
-explain how to use those facts rather than transcribe them. Private helpers need comments only when
-a maintainer-facing invariant benefits from one.
+The doctest compiles each ordinary `silk` fence exactly as written. It adds no prelude or hidden
+wrapper. Use `silk,ignore` only when an intentionally invalid example becomes less clear as a
+complete valid program. Each ignored example needs a specific reason in the stdlib doctest audit.
 
-## Link related APIs semantically
+A doctest proves compilation. It does not prove runtime behavior. A claim about results, ownership,
+lifecycle, failure, or ordering must have a behavioral test.
 
-Write a symbol relationship as ``[`Symbol`]`` so the documentation project can resolve it to a
-canonical declaration and the generated reference can link to its page and anchor. Use links when
-they help a reader choose or continue, especially between checked and unsafe forms, borrowed and
-owned forms, portable services and native providers, or representative family operations.
+## Public representation
 
-Prefer the shortest spelling that resolves from the documented module. Do not add decorative links,
-and do not leave unresolved stdlib links as an editing convention: the policy checker reports them.
+Document the public surface that the compiler currently exposes. Do not change visibility during a
+documentation-only pass. Record a likely visibility defect in the local Markdown tracker.
 
-## Write examples as maintained programs
+## Completion standard
 
-An example earns its maintenance cost by teaching composition, inference, failure handling,
-lifecycle, ownership, ordering, or another contract that prose and a signature do not make clear.
-Each executable example is one complete Silk module in an ordinary `silk` fence under a titled
-subsection of `# Examples`. It uses public imports, explicit setup, deterministic inputs, bounded
-work, and one observable idea. The doctest compiles the fence exactly as authored; it adds no
-prelude or hidden wrapper.
+A standard-library documentation change is complete when:
 
-Use `silk,ignore` only for an intentionally non-compilable illustration that would become less
-clear as a complete program. The skipped example remains visible in doctest counts and needs a
-specific justification in the stdlib doctest audit. No other fence attribute is supported.
-
-Doctest proves compilation, not runtime behavior. A claim about runtime results, ownership,
-lifecycle, failure, or ordering must point to an existing behavioral test or gain a narrow test
-that establishes it.
-
-## Evidence checklist
-
-Before publishing or revising a module family:
-
-- Read the declaration and its implementation branches, including unsafe preconditions and
-  allocation or mutation paths.
-- Read behavioral tests for success, boundaries, failure, ownership, ordering, and target-specific
-  behavior.
-- Inspect representative call sites to learn how the API composes and which distinctions matter in
-  real code.
-- Compare related public APIs so summaries explain selection rather than repeat a family template.
-- Consult maintained design prose in this directory, relevant OpenSpec capabilities, and archived
-  changes; keep only behavior that the current implementation and tests still support.
-- Cross-reference every example's behavioral claim with a test, then run the scoped policy,
-  doctest, and generation checks.
-- Classify exposed representation state before describing it. Document the current public surface
-  neutrally, record likely visibility defects in the local Markdown tracker, and do not change
-  visibility as part of a documentation pass.
-
-## Review standard
-
-A documentation pass is complete when the module teaches its shared mental model, required public
-surfaces have locally owned summaries, non-obvious contracts live on the declarations they qualify,
-links resolve, examples are selective and verified, and generated output shows the full intended
-hierarchy in source order. A mechanically complete but unhelpful comment pass is not complete.
+- each changed claim agrees with implementation and tests;
+- each required summary is locally owned by its declaration;
+- each symbol link resolves;
+- each example passes policy and doctest validation;
+- generated pages contain the intended heading structure; and
+- the full repository checks pass.

@@ -35,7 +35,7 @@ Public declarations: 59.
 pub const MAX: usize
 ```
 
-The largest usize selected for the compilation target.
+The largest `usize` value for the compilation target.
 
 ### Details
 
@@ -50,7 +50,7 @@ arithmetic rejects results above it.
 pub const MIN: usize
 ```
 
-The smallest usize. An unsigned bound is zero at every pointer width, so this one is a literal.
+The smallest `usize` value, which is zero at each pointer width.
 
 <a id="declaration-73696c6b2f7573697a653a3a42495453"></a>
 
@@ -60,7 +60,7 @@ The smallest usize. An unsigned bound is zero at every pointer width, so this on
 pub const BITS: u32
 ```
 
-The width of usize in bits, which is the selected target's pointer width.
+The width of `usize` in bits, which is the compilation target's pointer width.
 
 <a id="declaration-73696c6b2f7573697a653a3a5a45524f"></a>
 
@@ -70,7 +70,7 @@ The width of usize in bits, which is the selected target's pointer width.
 pub const ZERO: usize
 ```
 
-The usize zero. A bare literal defaults to i32, so a count without a typed context names this.
+The `usize` zero value for a count without a typed context.
 
 <a id="declaration-73696c6b2f7573697a653a3a4f4e45"></a>
 
@@ -90,7 +90,7 @@ The usize one. A bare literal defaults to i32, so a step without a typed context
 pub fn toU8(value: usize) -> u8
 ```
 
-Calls the concrete usize toU8 primitive.
+Converts `value` to `u8` and traps if `u8` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f5538"></a>
 
@@ -100,7 +100,7 @@ Calls the concrete usize toU8 primitive.
 pub fn checkedToU8(value: usize) -> Option<u8>
 ```
 
-Calls the concrete usize checkedToU8 primitive.
+Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f553136"></a>
 
@@ -110,7 +110,7 @@ Calls the concrete usize checkedToU8 primitive.
 pub fn toU16(value: usize) -> u16
 ```
 
-Calls the concrete usize toU16 primitive.
+Converts `value` to `u16` and traps if `u16` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f553136"></a>
 
@@ -120,7 +120,7 @@ Calls the concrete usize toU16 primitive.
 pub fn checkedToU16(value: usize) -> Option<u16>
 ```
 
-Calls the concrete usize checkedToU16 primitive.
+Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f553332"></a>
 
@@ -130,7 +130,7 @@ Calls the concrete usize checkedToU16 primitive.
 pub fn toU32(value: usize) -> u32
 ```
 
-Calls the concrete usize toU32 primitive.
+Converts `value` to `u32` and traps if `u32` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f553332"></a>
 
@@ -140,7 +140,7 @@ Calls the concrete usize toU32 primitive.
 pub fn checkedToU32(value: usize) -> Option<u32>
 ```
 
-Calls the concrete usize checkedToU32 primitive.
+Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f553634"></a>
 
@@ -150,7 +150,7 @@ Calls the concrete usize checkedToU32 primitive.
 pub fn toU64(value: usize) -> u64
 ```
 
-Calls the concrete usize toU64 primitive.
+Converts `value` to `u64` and traps if `u64` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f553634"></a>
 
@@ -160,7 +160,7 @@ Calls the concrete usize toU64 primitive.
 pub fn checkedToU64(value: usize) -> Option<u64>
 ```
 
-Calls the concrete usize checkedToU64 primitive.
+Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f5573697a65"></a>
 
@@ -170,7 +170,7 @@ Calls the concrete usize checkedToU64 primitive.
 pub fn toUsize(value: usize) -> usize
 ```
 
-Calls the concrete usize toUsize primitive.
+Returns `value` unchanged as `usize`.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f5573697a65"></a>
 
@@ -180,7 +180,7 @@ Calls the concrete usize toUsize primitive.
 pub fn checkedToUsize(value: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedToUsize primitive.
+Returns `Some` with `value` unchanged as `usize`.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f4938"></a>
 
@@ -190,7 +190,7 @@ Calls the concrete usize checkedToUsize primitive.
 pub fn toI8(value: usize) -> i8
 ```
 
-Calls the concrete usize toI8 primitive.
+Converts `value` to `i8` and traps if `i8` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f4938"></a>
 
@@ -200,7 +200,7 @@ Calls the concrete usize toI8 primitive.
 pub fn checkedToI8(value: usize) -> Option<i8>
 ```
 
-Calls the concrete usize checkedToI8 primitive.
+Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f493136"></a>
 
@@ -210,7 +210,7 @@ Calls the concrete usize checkedToI8 primitive.
 pub fn toI16(value: usize) -> i16
 ```
 
-Calls the concrete usize toI16 primitive.
+Converts `value` to `i16` and traps if `i16` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f493136"></a>
 
@@ -220,7 +220,7 @@ Calls the concrete usize toI16 primitive.
 pub fn checkedToI16(value: usize) -> Option<i16>
 ```
 
-Calls the concrete usize checkedToI16 primitive.
+Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f493332"></a>
 
@@ -230,7 +230,7 @@ Calls the concrete usize checkedToI16 primitive.
 pub fn toI32(value: usize) -> i32
 ```
 
-Calls the concrete usize toI32 primitive.
+Converts `value` to `i32` and traps if `i32` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f493332"></a>
 
@@ -240,7 +240,7 @@ Calls the concrete usize toI32 primitive.
 pub fn checkedToI32(value: usize) -> Option<i32>
 ```
 
-Calls the concrete usize checkedToI32 primitive.
+Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f493634"></a>
 
@@ -250,7 +250,7 @@ Calls the concrete usize checkedToI32 primitive.
 pub fn toI64(value: usize) -> i64
 ```
 
-Calls the concrete usize toI64 primitive.
+Converts `value` to `i64` and traps if `i64` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f493634"></a>
 
@@ -260,7 +260,7 @@ Calls the concrete usize toI64 primitive.
 pub fn checkedToI64(value: usize) -> Option<i64>
 ```
 
-Calls the concrete usize checkedToI64 primitive.
+Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f4973697a65"></a>
 
@@ -270,7 +270,7 @@ Calls the concrete usize checkedToI64 primitive.
 pub fn toIsize(value: usize) -> isize
 ```
 
-Calls the concrete usize toIsize primitive.
+Converts `value` to `isize` and traps if `isize` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564546f4973697a65"></a>
 
@@ -280,7 +280,7 @@ Calls the concrete usize toIsize primitive.
 pub fn checkedToIsize(value: usize) -> Option<isize>
 ```
 
-Calls the concrete usize checkedToIsize primitive.
+Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f463332"></a>
 
@@ -290,7 +290,7 @@ Calls the concrete usize checkedToIsize primitive.
 pub fn toF32(value: usize) -> f32
 ```
 
-Calls the concrete usize toF32 primitive.
+Converts `value` to the nearest `f32` value, with ties to even.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f463634"></a>
 
@@ -300,7 +300,7 @@ Calls the concrete usize toF32 primitive.
 pub fn toF64(value: usize) -> f64
 ```
 
-Calls the concrete usize toF64 primitive.
+Converts `value` to the nearest `f64` value, with ties to even.
 
 <a id="declaration-73696c6b2f7573697a653a3a616464"></a>
 
@@ -310,7 +310,7 @@ Calls the concrete usize toF64 primitive.
 pub fn add(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize add primitive.
+Returns `left + right` and traps if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a7375627472616374"></a>
 
@@ -320,7 +320,7 @@ Calls the concrete usize add primitive.
 pub fn subtract(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize subtract primitive.
+Returns `left - right` and traps if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a6d756c7469706c79"></a>
 
@@ -330,7 +330,7 @@ Calls the concrete usize subtract primitive.
 pub fn multiply(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize multiply primitive.
+Returns `left * right` and traps if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a646976696465"></a>
 
@@ -340,7 +340,7 @@ Calls the concrete usize multiply primitive.
 pub fn divide(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize divide primitive.
+Returns `left / right`. Traps if `right` is zero.
 
 <a id="declaration-73696c6b2f7573697a653a3a72656d61696e646572"></a>
 
@@ -350,7 +350,7 @@ Calls the concrete usize divide primitive.
 pub fn remainder(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize remainder primitive.
+Returns the remainder of `left / right`. Traps if `right` is zero.
 
 <a id="declaration-73696c6b2f7573697a653a3a626974416e64"></a>
 
@@ -360,7 +360,7 @@ Calls the concrete usize remainder primitive.
 pub fn bitAnd(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize bitAnd primitive.
+Returns the bitwise AND of `left` and `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a6269744f72"></a>
 
@@ -370,7 +370,7 @@ Calls the concrete usize bitAnd primitive.
 pub fn bitOr(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize bitOr primitive.
+Returns the bitwise OR of `left` and `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a626974586f72"></a>
 
@@ -380,7 +380,7 @@ Calls the concrete usize bitOr primitive.
 pub fn bitXor(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize bitXor primitive.
+Returns the bitwise exclusive OR of `left` and `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a6269744e6f74"></a>
 
@@ -390,7 +390,7 @@ Calls the concrete usize bitXor primitive.
 pub fn bitNot(value: usize) -> usize
 ```
 
-Calls the concrete usize bitNot primitive.
+Returns `value` with each bit inverted.
 
 <a id="declaration-73696c6b2f7573697a653a3a73686966744c656674"></a>
 
@@ -400,7 +400,8 @@ Calls the concrete usize bitNot primitive.
 pub fn shiftLeft(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize shiftLeft primitive.
+Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
+[`BITS`](#declaration-73696c6b2f7573697a653a3a42495453).
 
 <a id="declaration-73696c6b2f7573697a653a3a73686966745269676874"></a>
 
@@ -410,7 +411,8 @@ Calls the concrete usize shiftLeft primitive.
 pub fn shiftRight(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize shiftRight primitive.
+Shifts `left` bits right by `right` positions and inserts zero bits. Traps if `right` is
+not less than [`BITS`](#declaration-73696c6b2f7573697a653a3a42495453).
 
 <a id="declaration-73696c6b2f7573697a653a3a726f746174654c656674"></a>
 
@@ -420,7 +422,7 @@ Calls the concrete usize shiftRight primitive.
 pub fn rotateLeft(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize rotateLeft primitive.
+Rotates the bits of `left` left by `right` positions.
 
 <a id="declaration-73696c6b2f7573697a653a3a726f746174655269676874"></a>
 
@@ -430,7 +432,7 @@ Calls the concrete usize rotateLeft primitive.
 pub fn rotateRight(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize rotateRight primitive.
+Rotates the bits of `left` right by `right` positions.
 
 <a id="declaration-73696c6b2f7573697a653a3a7772617070696e67416464"></a>
 
@@ -440,7 +442,7 @@ Calls the concrete usize rotateRight primitive.
 pub fn wrappingAdd(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize wrappingAdd primitive.
+Returns `left + right`, wrapped to the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a7772617070696e675375627472616374"></a>
 
@@ -450,7 +452,7 @@ Calls the concrete usize wrappingAdd primitive.
 pub fn wrappingSubtract(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize wrappingSubtract primitive.
+Returns `left - right`, wrapped to the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a7772617070696e674d756c7469706c79"></a>
 
@@ -460,7 +462,7 @@ Calls the concrete usize wrappingSubtract primitive.
 pub fn wrappingMultiply(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize wrappingMultiply primitive.
+Returns `left * right`, wrapped to the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a73617475726174696e67416464"></a>
 
@@ -470,7 +472,7 @@ Calls the concrete usize wrappingMultiply primitive.
 pub fn saturatingAdd(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize saturatingAdd primitive.
+Returns `left + right`, clamped to [`MIN`](#declaration-73696c6b2f7573697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f7573697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f7573697a653a3a73617475726174696e675375627472616374"></a>
 
@@ -480,7 +482,7 @@ Calls the concrete usize saturatingAdd primitive.
 pub fn saturatingSubtract(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize saturatingSubtract primitive.
+Returns `left - right`, clamped to [`MIN`](#declaration-73696c6b2f7573697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f7573697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f7573697a653a3a73617475726174696e674d756c7469706c79"></a>
 
@@ -490,7 +492,7 @@ Calls the concrete usize saturatingSubtract primitive.
 pub fn saturatingMultiply(left: usize, right: usize) -> usize
 ```
 
-Calls the concrete usize saturatingMultiply primitive.
+Returns `left * right`, clamped to [`MIN`](#declaration-73696c6b2f7573697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f7573697a653a3a4d4158).
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564416464"></a>
 
@@ -500,7 +502,7 @@ Calls the concrete usize saturatingMultiply primitive.
 pub fn checkedAdd(left: usize, right: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedAdd primitive.
+Returns `Some` with `left + right`, or `None` if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b65645375627472616374"></a>
 
@@ -510,7 +512,7 @@ Calls the concrete usize checkedAdd primitive.
 pub fn checkedSubtract(left: usize, right: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedSubtract primitive.
+Returns `Some` with `left - right`, or `None` if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b65644d756c7469706c79"></a>
 
@@ -520,7 +522,7 @@ Calls the concrete usize checkedSubtract primitive.
 pub fn checkedMultiply(left: usize, right: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedMultiply primitive.
+Returns `Some` with `left * right`, or `None` if the result is outside the `usize` range.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b6564446976696465"></a>
 
@@ -530,7 +532,7 @@ Calls the concrete usize checkedMultiply primitive.
 pub fn checkedDivide(left: usize, right: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedDivide primitive.
+Returns `Some` with `left / right`, or `None` if `right` is zero.
 
 <a id="declaration-73696c6b2f7573697a653a3a636865636b656452656d61696e646572"></a>
 
@@ -540,7 +542,7 @@ Calls the concrete usize checkedDivide primitive.
 pub fn checkedRemainder(left: usize, right: usize) -> Option<usize>
 ```
 
-Calls the concrete usize checkedRemainder primitive.
+Returns `Some` with the remainder, or `None` if `right` is zero.
 
 <a id="declaration-73696c6b2f7573697a653a3a657175616c73"></a>
 
@@ -550,7 +552,7 @@ Calls the concrete usize checkedRemainder primitive.
 pub fn equals(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize equals primitive.
+Returns `true` when `left` and `right` are equal.
 
 <a id="declaration-73696c6b2f7573697a653a3a6e6f74457175616c73"></a>
 
@@ -560,7 +562,7 @@ Calls the concrete usize equals primitive.
 pub fn notEquals(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize notEquals primitive.
+Returns `true` when `left` and `right` are not equal.
 
 <a id="declaration-73696c6b2f7573697a653a3a6c6573735468616e"></a>
 
@@ -570,7 +572,7 @@ Calls the concrete usize notEquals primitive.
 pub fn lessThan(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize lessThan primitive.
+Returns `true` when `left` is less than `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a6c6573734f72457175616c"></a>
 
@@ -580,7 +582,7 @@ Calls the concrete usize lessThan primitive.
 pub fn lessOrEqual(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize lessOrEqual primitive.
+Returns `true` when `left` is less than or equal to `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a677265617465725468616e"></a>
 
@@ -590,7 +592,7 @@ Calls the concrete usize lessOrEqual primitive.
 pub fn greaterThan(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize greaterThan primitive.
+Returns `true` when `left` is greater than `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a677265617465724f72457175616c"></a>
 
@@ -600,7 +602,7 @@ Calls the concrete usize greaterThan primitive.
 pub fn greaterOrEqual(left: usize, right: usize) -> bool
 ```
 
-Calls the concrete usize greaterOrEqual primitive.
+Returns `true` when `left` is greater than or equal to `right`.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f54657874"></a>
 

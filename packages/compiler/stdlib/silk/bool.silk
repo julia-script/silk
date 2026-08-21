@@ -5,22 +5,22 @@
 //! when an operation must be passed or selected by name.
 //!
 //! # Details
-//! These functions are thin, allocation-free calls to the same concrete Boolean primitives the
-//! operators use; they add no Effect channels or alternate truth semantics.
+//! These functions return the same Boolean results as the operators. They allocate no storage and
+//! add no Effect channels.
 
 
 
-/// Calls the concrete bool equals primitive.
+/// Returns `true` when `left` and `right` have the same Boolean value.
 pub fn equals(left: bool, right: bool) -> bool {
   return Intrinsic.boolEquals(left, right)
 }
 
-/// Calls the concrete bool notEquals primitive.
+/// Returns `true` when `left` and `right` have different Boolean values.
 pub fn notEquals(left: bool, right: bool) -> bool {
   return Intrinsic.boolNotEquals(left, right)
 }
 
-/// Calls the concrete bool not primitive.
+/// Returns the logical negation of `value`.
 pub fn not(value: bool) -> bool {
   return Intrinsic.boolNot(value)
 }

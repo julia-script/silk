@@ -10,9 +10,9 @@ normalization rejected reason=EffectEscapes function=silk/effect.catchAll region
 normalization rejected reason=EffectEscapes function=logging/main.program region=r0 local=%0 [264, 868)
 normalization rejected reason=CrossRegionUse function=logging/main.recover region=r0 local=%1 [911, 924)
 normalization rejected reason=EffectEscapes function=silk/effect.result region=r0 local=%1 [3275, 3331)
-normalization rejected reason=EffectEscapes function=silk/effect.provideMut region=r0 local=%2 [17292, 17382)
+normalization rejected reason=EffectEscapes function=silk/effect.provideMut region=r0 local=%2 [17139, 17229)
 normalization rejected reason=EffectEscapes function=silk/effect.log region=r0 local=%1 [2817, 2871)
-normalization rejected reason=EffectEscapes function=silk/effect.provideMut region=r0 local=%2 [17292, 17382)
+normalization rejected reason=EffectEscapes function=silk/effect.provideMut region=r0 local=%2 [17139, 17229)
 normalization rejected reason=EffectEscapes function=silk/effect.logAt region=r0 local=%2 [3050, 3099)
 normalization rejected reason=EffectEscapes function=silk/logging.record region=r0 local=%3 [4905, 6073)
 normalization rejected reason=EffectEscapes function=silk/logging.reject region=r0 local=%1 [2119, 2154)
@@ -123,10 +123,10 @@ calling never lanes=0
 calling silk/result.Failure<silk/logging.LogError> | silk/result.Success<i32> lanes=2 i32[tag],i32[payload[0]]
 static-data text:6669727374 bytes=6669727374 align=1 address=i64 length=usize:i64
 static-data text:7365636f6e640a6c696e65 bytes=7365636f6e640a6c696e65 align=1 address=i64 length=usize:i64
-usize-literal 18446744073709551615 bits=64 available [1682, 1690)
-usize-literal 0 bits=64 available [1815, 1816)
-usize-literal 0 bits=64 available [2061, 2062)
-usize-literal 1 bits=64 available [2184, 2185)
+usize-literal 18446744073709551615 bits=64 available [1681, 1689)
+usize-literal 0 bits=64 available [1783, 1784)
+usize-literal 0 bits=64 available [1999, 2000)
+usize-literal 1 bits=64 available [2122, 2123)
 usize-literal 2 bits=64 available [503, 505)
 usize-literal 0 bits=64 available [559, 561)
 usize-literal 1 bits=64 available [622, 624)
@@ -301,16 +301,16 @@ fn silk/logging.messageByteAt params=3 locals=21 -> u8 entry=r0
     forward r6 [6847, 6893) generated
 fn silk/effect.provideMut<? &mut silk/logging.Logger, (), silk/logging.InMemoryLogger, silk/logging.LogError, ? &mut silk/logging.Logger, effect@silk/effect log string result:effect:Shared<nominal:silk/core.Unit<>!10:RowAlgebra68:8:Concrete55:9:FiniteRow41:5:Array31:nominal:silk/logging.LogError<>7:5:Array?10:RowAlgebra88:8:Concrete75:9:FiniteRow61:5:Array51:nominal:silk/logging.Logger<>@DefaultRole:Exclusive7:5:Array>effect declaration:silk/effect:log site:-1> params=2 locals=3 -> once Effect<() ! silk/logging.LogError> entry=r0
   r0 operation:
-    %2 = make-effect silk/effect.provideMut$effect$-1 captures=%0:shared,%1:take : once Effect<() ! silk/logging.LogError> [17292, 17382)
-    return %2 [17292, 17382)
+    %2 = make-effect silk/effect.provideMut$effect$-1 captures=%0:shared,%1:take : once Effect<() ! silk/logging.LogError> [17139, 17229)
+    return %2 [17139, 17229)
 fn silk/effect.log params=1 locals=2 -> Effect<() ! silk/logging.LogError ? &mut silk/logging.Logger> entry=r0
   r0 operation:
     %1 = make-effect silk/effect.log$effect$-1 captures=%0:copy : Effect<() ! silk/logging.LogError ? &mut silk/logging.Logger> [2817, 2871)
     return %1 [2817, 2871)
 fn silk/effect.provideMut<? &mut silk/logging.Logger, (), silk/logging.InMemoryLogger, silk/logging.LogError, ? &mut silk/logging.Logger, effect@silk/effect logAt nominal:silk/logging.LogLevel<> string result:effect:Take<nominal:silk/core.Unit<>!10:RowAlgebra68:8:Concrete55:9:FiniteRow41:5:Array31:nominal:silk/logging.LogError<>7:5:Array?10:RowAlgebra88:8:Concrete75:9:FiniteRow61:5:Array51:nominal:silk/logging.Logger<>@DefaultRole:Exclusive7:5:Array>effect declaration:silk/effect:logAt site:-1> params=2 locals=3 -> once Effect<() ! silk/logging.LogError> entry=r0
   r0 operation:
-    %2 = make-effect silk/effect.provideMut$effect$-1 captures=%0:take,%1:take : once Effect<() ! silk/logging.LogError> [17292, 17382)
-    return %2 [17292, 17382)
+    %2 = make-effect silk/effect.provideMut$effect$-1 captures=%0:take,%1:take : once Effect<() ! silk/logging.LogError> [17139, 17229)
+    return %2 [17139, 17229)
 fn silk/effect.logAt params=2 locals=3 -> once Effect<() ! silk/logging.LogError ? &mut silk/logging.Logger> entry=r0
   r0 operation:
     %2 = make-effect silk/effect.logAt$effect$-1 captures=%0:take,%1:copy : once Effect<() ! silk/logging.LogError ? &mut silk/logging.Logger> [3050, 3099)
@@ -413,12 +413,12 @@ fn silk/logging.emptyMessages params=0 locals=65 -> Array<i32, 64> entry=r0
     return %64 [3906, 4136)
 fn silk/usize.add params=2 locals=3 -> usize entry=r0
   r0 operation:
-    %2 = add %0, %1 : usize [5278, 5310)
-    return %2 [5278, 5310)
+    %2 = add %0, %1 : usize [5740, 5772)
+    return %2 [5740, 5772)
 fn silk/i32.toU8 params=1 locals=2 -> u8 entry=r0
   r0 operation:
-    %1 = convert %0 i32 -> u8 [2284, 2309)
-    return %1 [2284, 2309)
+    %1 = convert %0 i32 -> u8 [2262, 2287)
+    return %1 [2262, 2287)
 fn silk/logging.info params=0 locals=2 -> silk/logging.LogLevel entry=r0
   r0 operation:
     %0 = literal 2 : i32 [1544, 1546)
@@ -430,8 +430,8 @@ fn silk/string.utf8Bytes params=1 locals=2 -> &[u8] entry=r0
     return %1 [8144, 8177)
 fn silk/u8.toI32 params=1 locals=2 -> i32 entry=r0
   r0 operation:
-    %1 = convert %0 u8 -> i32 [4031, 4056)
-    return %1 [4031, 4056)
+    %1 = convert %0 u8 -> i32 [4298, 4323)
+    return %1 [4298, 4323)
 fn silk/logging.reject params=1 locals=2 -> Effect<never ! silk/logging.LogError> entry=r0
   r0 operation:
     %1 = make-effect silk/logging.reject$effect$-1 captures=%0:copy : Effect<never ! silk/logging.LogError> [2119, 2154)
@@ -650,24 +650,24 @@ fn silk/effect.result$effect$-1<i32, silk/logging.LogError, ? , effect@logging/m
     return %3 [3286, 3329)
 fn silk/effect.provideMut$effect$-1<? &mut silk/logging.Logger, (), silk/logging.InMemoryLogger, silk/logging.LogError, ? &mut silk/logging.Logger, effect@silk/effect log string result:effect:Shared<nominal:silk/core.Unit<>!10:RowAlgebra68:8:Concrete55:9:FiniteRow41:5:Array31:nominal:silk/logging.LogError<>7:5:Array?10:RowAlgebra88:8:Concrete75:9:FiniteRow61:5:Array51:nominal:silk/logging.Logger<>@DefaultRole:Exclusive7:5:Array>effect declaration:silk/effect:log site:-1> params=2 locals=5 -> once Effect<() ! silk/logging.LogError> entry=r0
   r0 operation:
-    forward r1 [17294, 17361) generated
+    forward r1 [17141, 17208) generated
   r1 operation:
-    %3 = run-effect-value %0 runner=silk/effect.log$effect$-1$provided$10 base=silk/effect.log$effect$-1 providers=silk/logging.Logger@DefaultRole:exclusive:exclusive arguments=%1 propagate=1->1 : () [17370, 17380)
-    %4 = effect-outcome tag=0 %3 : once Effect<() ! silk/logging.LogError> [17370, 17380)
-    forward r2 [17370, 17380) generated
+    %3 = run-effect-value %0 runner=silk/effect.log$effect$-1$provided$10 base=silk/effect.log$effect$-1 providers=silk/logging.Logger@DefaultRole:exclusive:exclusive arguments=%1 propagate=1->1 : () [17217, 17227)
+    %4 = effect-outcome tag=0 %3 : once Effect<() ! silk/logging.LogError> [17217, 17227)
+    forward r2 [17217, 17227) generated
   r2 cleanup:
-    drop %1 [17215, 17234) generated
-    return %4 [17370, 17380)
+    drop %1 [17062, 17081) generated
+    return %4 [17217, 17227)
 fn silk/effect.provideMut$effect$-1<? &mut silk/logging.Logger, (), silk/logging.InMemoryLogger, silk/logging.LogError, ? &mut silk/logging.Logger, effect@silk/effect logAt nominal:silk/logging.LogLevel<> string result:effect:Take<nominal:silk/core.Unit<>!10:RowAlgebra68:8:Concrete55:9:FiniteRow41:5:Array31:nominal:silk/logging.LogError<>7:5:Array?10:RowAlgebra88:8:Concrete75:9:FiniteRow61:5:Array51:nominal:silk/logging.Logger<>@DefaultRole:Exclusive7:5:Array>effect declaration:silk/effect:logAt site:-1> params=2 locals=5 -> once Effect<() ! silk/logging.LogError> entry=r0
   r0 operation:
-    forward r1 [17294, 17361) generated
+    forward r1 [17141, 17208) generated
   r1 operation:
-    %3 = run-effect-value %0 runner=silk/effect.logAt$effect$-1$provided$11 base=silk/effect.logAt$effect$-1 providers=silk/logging.Logger@DefaultRole:exclusive:exclusive arguments=%1 propagate=1->1 : () [17370, 17380)
-    %4 = effect-outcome tag=0 %3 : once Effect<() ! silk/logging.LogError> [17370, 17380)
-    forward r2 [17370, 17380) generated
+    %3 = run-effect-value %0 runner=silk/effect.logAt$effect$-1$provided$11 base=silk/effect.logAt$effect$-1 providers=silk/logging.Logger@DefaultRole:exclusive:exclusive arguments=%1 propagate=1->1 : () [17217, 17227)
+    %4 = effect-outcome tag=0 %3 : once Effect<() ! silk/logging.LogError> [17217, 17227)
+    forward r2 [17217, 17227) generated
   r2 cleanup:
-    drop %1 [17215, 17234) generated
-    return %4 [17370, 17380)
+    drop %1 [17062, 17081) generated
+    return %4 [17217, 17227)
 fn silk/logging.record$effect$-1 params=3 locals=84 -> once Effect<() ! silk/logging.LogError> entry=r0
   r0 operation:
     %3 = call silk/string.utf8Bytes(%2) : &[u8] [4922, 4947)

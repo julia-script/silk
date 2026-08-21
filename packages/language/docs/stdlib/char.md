@@ -48,7 +48,7 @@ Returns the exact integer value of an already valid Unicode scalar.
 pub fn equals(left: char, right: char) -> bool
 ```
 
-Calls the concrete char equals primitive.
+Returns `true` when `left` and `right` are the same Unicode scalar value.
 
 <a id="declaration-73696c6b2f636861723a3a6e6f74457175616c73"></a>
 
@@ -58,7 +58,7 @@ Calls the concrete char equals primitive.
 pub fn notEquals(left: char, right: char) -> bool
 ```
 
-Calls the concrete char notEquals primitive.
+Returns `true` when `left` and `right` are different Unicode scalar values.
 
 <a id="declaration-73696c6b2f636861723a3a6c6573735468616e"></a>
 
@@ -68,7 +68,7 @@ Calls the concrete char notEquals primitive.
 pub fn lessThan(left: char, right: char) -> bool
 ```
 
-Calls the concrete char lessThan primitive, which orders by Unicode scalar value.
+Returns `true` when the Unicode scalar value of `left` is less than `right`.
 
 <a id="declaration-73696c6b2f636861723a3a6c6573734f72457175616c"></a>
 
@@ -78,7 +78,7 @@ Calls the concrete char lessThan primitive, which orders by Unicode scalar value
 pub fn lessOrEqual(left: char, right: char) -> bool
 ```
 
-Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar value.
+Returns `true` when the Unicode scalar value of `left` is less than or equal to `right`.
 
 <a id="declaration-73696c6b2f636861723a3a677265617465725468616e"></a>
 
@@ -88,7 +88,7 @@ Calls the concrete char lessOrEqual primitive, which orders by Unicode scalar va
 pub fn greaterThan(left: char, right: char) -> bool
 ```
 
-Calls the concrete char greaterThan primitive, which orders by Unicode scalar value.
+Returns `true` when the Unicode scalar value of `left` is greater than `right`.
 
 <a id="declaration-73696c6b2f636861723a3a677265617465724f72457175616c"></a>
 
@@ -98,4 +98,4 @@ Calls the concrete char greaterThan primitive, which orders by Unicode scalar va
 pub fn greaterOrEqual(left: char, right: char) -> bool
 ```
 
-Calls the concrete char greaterOrEqual primitive, which orders by Unicode scalar value.
+Returns `true` when the Unicode scalar value of `left` is greater than or equal to `right`.
