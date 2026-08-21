@@ -419,18 +419,23 @@ where &P provides S from R {
 ///
 /// ```silk
 /// import silk.effects as Effect
-/// import silk.logging { Logger, LogError, StdoutLogger }
+///
+/// import silk.logging {Logger, LogError, StdoutLogger}
 ///
 /// service Clock {
 ///   effect fn tick() -> i32 ? &mut Clock
 /// }
 ///
-/// effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
+/// effect fn read() -> i32
+/// ! LogError
+/// ? &mut Clock | &mut Logger {
 ///   run Effect.log("Reading clock")
 ///   return run Clock.tick()
 /// }
 ///
-/// effect fn withLogger() -> i32 ! LogError ? &mut Clock {
+/// effect fn withLogger() -> i32
+/// ! LogError
+/// ? &mut Clock {
 ///   let mut logger = StdoutLogger.stdout()
 ///   return run Effect.provideMut<Logger>(read(), &mut logger)
 /// }

@@ -1,0 +1,63 @@
+{
+  "name": "@silk-effect/formatter",
+  "version": "0.0.0",
+  "description": "Canonical whole-source formatting for Silk Effect, including active Silk examples in source documentation.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "directory": "packages/formatter"
+  },
+  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "bugs": {
+    "url": "https://github.com/julia-script/silk-effect/issues"
+  },
+  "keywords": [
+    "silk",
+    "formatter",
+    "documentation"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./Formatter": {
+      "types": "./dist/Formatter.d.ts",
+      "import": "./dist/Formatter.js"
+    },
+    "./FormatterError": {
+      "types": "./dist/FormatterError.d.ts",
+      "import": "./dist/FormatterError.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "stdlib:docs:check": "node scripts/format-stdlib-docs.mjs --check",
+    "stdlib:docs:format": "node scripts/format-stdlib-docs.mjs",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@silk-effect/compiler": "workspace:*",
+    "@silk-effect/documentation": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1"
+  }
+}

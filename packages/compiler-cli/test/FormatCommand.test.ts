@@ -74,6 +74,35 @@ it.effect('continues writing complete files but exits one for damaged syntax', (
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
+it.effect('formats active documentation bodies and exits one for embedded syntax damage', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const root = yield* fileSystem.makeTempDirectoryScoped()
+    const source = `/// \`\`\`silk
+/// pub fn example()->i32{return 1}
+/// \`\`\`
+pub fn main() -> i32 { return 42 }
+`
+    yield* makeProject(root, source)
+    const formatted = yield* execute(['format', '--manifest-path', `${root}/silk.toml`])
+    assert.strictEqual(status(formatted), 0)
+    assert.match(
+      yield* fileSystem.readFileString(`${root}/src/Main.silk`),
+      /\/\/\/ pub fn example\(\) -> i32 \{\n\/\/\/ {3}return 1/,
+    )
+
+    const damaged = `/// \`\`\`silk
+/// @@@
+/// \`\`\`
+pub fn main() -> i32 { return 42 }
+`
+    yield* fileSystem.writeFileString(`${root}/src/Main.silk`, damaged)
+    const refused = yield* execute(['format', '--manifest-path', `${root}/silk.toml`])
+    assert.strictEqual(status(refused), 1)
+    assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), damaged)
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
 it.effect('ignores semantic errors and rejects selections outside the source root', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem

@@ -4,13 +4,13 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as LiteralForm from '../src/LiteralForm.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StaticText from '../src/StaticText.js'
 import type * as SyntaxFile from '../src/SyntaxFile.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 
 const encoder = new TextEncoder()
@@ -151,7 +151,9 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
   Effect.gen(function* () {
     const source =
       'pub fn main()->i32 { let recipe=risky()|>Core.prepare()|>Effect.catchAll(recover) return 0 }'
-    const first = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', source))
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://effect-catch-pipeline.silk', source),
+    )
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -163,7 +165,7 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://effect-catch-pipeline.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://effect-catch-pipeline.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -171,7 +173,7 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
 it.effect('omits semantic fallthrough completion nodes from formatted source', () =>
   Effect.gen(function* () {
     const source = 'fn missing()->i32 { let value=42 } pub fn main()->() {}'
-    const first = yield* Formatter.format(parse('memory://implicit-returns.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://implicit-returns.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -182,7 +184,7 @@ it.effect('omits semantic fallthrough completion nodes from formatted source', (
 pub fn main() -> () {}
 `,
     )
-    const second = yield* Formatter.format(parse('memory://implicit-returns.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://implicit-returns.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -193,7 +195,7 @@ it.effect(
     Effect.gen(function* () {
       const source =
         'fn apply(callback:mut fn(i32)->i32,value:i32)->i32{return (callback)(value)} fn main(attempt:Effect<i32>)->i32{return run attempt|>Effect.retry(2)}'
-      const first = yield* Formatter.format(parse('memory://callable-format.silk', source))
+      const first = yield* SyntaxFormatter.format(parse('memory://callable-format.silk', source))
       const text = formattedText(first)
       assert.strictEqual(
         text,
@@ -207,7 +209,7 @@ fn main(attempt: Effect<i32>) -> i32 {
 }
 `,
       )
-      const second = yield* Formatter.format(parse('memory://callable-format.silk', text))
+      const second = yield* SyntaxFormatter.format(parse('memory://callable-format.silk', text))
       assert.deepEqual(second.bytes, first.bytes)
       assert.strictEqual(second.changed, false)
     }),
@@ -217,7 +219,7 @@ it.effect('formats effect contracts, run, and fail canonically and idempotently'
   Effect.gen(function* () {
     const source = `effect   fn work(problem:Problem)->i32 ! Problem|Other { if true { fail   move problem } return 42 }
 fn main()->i32 { let pending=work(Problem { code:1 }) return run   pending }`
-    const first = yield* Formatter.format(parse('memory://effect-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://effect-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -235,7 +237,7 @@ fn main() -> i32 {
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://effect-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://effect-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -247,7 +249,7 @@ pub effect fn main()->(){run pulse() // first pulse
 // before the second pulse
 run pulse() return ()}`
     const original = parse('memory://expression-statements.silk', source)
-    const first = yield* Formatter.format(original)
+    const first = yield* SyntaxFormatter.format(original)
     const text = formattedText(first)
 
     assert.strictEqual(
@@ -271,7 +273,7 @@ pub effect fn main() -> () {
     assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
     assert.deepEqual(comments(reparsed), comments(original))
 
-    const second = yield* Formatter.format(reparsed)
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),
@@ -279,7 +281,7 @@ pub effect fn main() -> () {
 
 it.effect('formats explicit drop canonically and idempotently', () =>
   Effect.gen(function* () {
-    const first = yield* Formatter.format(
+    const first = yield* SyntaxFormatter.format(
       parse(
         'memory://drop-format.silk',
         'struct Token { value:i32 } fn main()->i32 { let token=Token { value:1 } drop   token return 42 }',
@@ -299,14 +301,14 @@ fn main() -> i32 {
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://drop-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://drop-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
 
 it.effect('formats a chained else if arm on one line and idempotently', () =>
   Effect.gen(function* () {
-    const first = yield* Formatter.format(
+    const first = yield* SyntaxFormatter.format(
       parse(
         'memory://else-if-format.silk',
         'pub fn classify(value:i32)->i32 { if value<0 { return 0 } else   if value<10 { return 1 } else if value<100 { return 2 } else { return 3 } return 4 }',
@@ -338,7 +340,7 @@ it.effect('formats a chained else if arm on one line and idempotently', () =>
     const reparsed = parse('memory://else-if-format.silk', text)
     assert.deepEqual(reparsed.lexicalDiagnostics, [])
     assert.deepEqual(reparsed.parserDiagnostics, [])
-    const second = yield* Formatter.format(reparsed)
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.strictEqual(formattedText(second), text)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
@@ -347,7 +349,7 @@ it.effect('formats a chained else if arm on one line and idempotently', () =>
 
 it.effect('formats the bitwise operators with canonical spacing and idempotently', () =>
   Effect.gen(function* () {
-    const first = yield* Formatter.format(
+    const first = yield* SyntaxFormatter.format(
       parse(
         'memory://bitwise-format.silk',
         'pub fn checksum(value:u32,mask:u32)->u32 { let masked = value&mask let flipped = ~masked return flipped^mask|masked }',
@@ -367,7 +369,7 @@ it.effect('formats the bitwise operators with canonical spacing and idempotently
     const reparsed = parse('memory://bitwise-format.silk', text)
     assert.deepEqual(reparsed.lexicalDiagnostics, [])
     assert.deepEqual(reparsed.parserDiagnostics, [])
-    const second = yield* Formatter.format(reparsed)
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.strictEqual(formattedText(second), text)
     assert.strictEqual(second.changed, false)
   }),
@@ -377,7 +379,7 @@ it.effect('formats unsafe blocks and conformance declarations canonically and id
   Effect.gen(function* () {
     const source =
       'impl Allocator for SystemAllocator{allocate:SystemAllocator.allocate} impl Drop for Guard<Token>{fn drop(self:&mut Guard<Token>)->(){unsafe{drop self.value} return ()}}'
-    const first = yield* Formatter.format(parse('memory://unsafe-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://unsafe-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -395,7 +397,7 @@ impl Drop for Guard<Token> {
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://unsafe-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://unsafe-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -404,7 +406,9 @@ it.effect('formats whole-member binding patterns canonically and idempotently', 
   Effect.gen(function* () {
     const source =
       'fn take(state: Empty | Full) -> i32 { return match move state { Empty   nothing => 0 Full   full => 1 } }'
-    const first = yield* Formatter.format(parse('memory://binding-pattern-format.silk', source))
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://binding-pattern-format.silk', source),
+    )
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -416,7 +420,9 @@ it.effect('formats whole-member binding patterns canonically and idempotently', 
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://binding-pattern-format.silk', text))
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://binding-pattern-format.silk', text),
+    )
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -424,7 +430,7 @@ it.effect('formats whole-member binding patterns canonically and idempotently', 
 it.effect('formats parametric conformances canonically and idempotently', () =>
   Effect.gen(function* () {
     const source = 'impl < T >Drop for Vector<T>{fn drop(self:&mut Vector<T>)->(){return ()}}'
-    const first = yield* Formatter.format(parse('memory://parametric-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://parametric-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -435,7 +441,7 @@ it.effect('formats parametric conformances canonically and idempotently', () =>
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://parametric-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://parametric-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -444,7 +450,7 @@ it.effect('formats bounded conditional conformances canonically and idempotently
   Effect.gen(function* () {
     const source =
       'impl < S : Decoder<S> >Decoder<MappedSchema<S>>for MappedSchema<S>{decode:MappedSchema.mappedDecode}'
-    const first = yield* Formatter.format(parse('memory://conditional-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://conditional-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -453,7 +459,7 @@ it.effect('formats bounded conditional conformances canonically and idempotently
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://conditional-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://conditional-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -462,7 +468,9 @@ it.effect('formats explicit Effect and declaration requirement rows', () =>
   Effect.gen(function* () {
     const source = `fn later()->Effect<i32!Problem?&FileSystem|&mut Allocator at Scratch>{return effect{return 1}}
 effect fn work()->i32!Problem?&FileSystem|&mut Allocator at Scratch{return 1}`
-    const first = yield* Formatter.format(parse('memory://effect-requirement-format.silk', source))
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://effect-requirement-format.silk', source),
+    )
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -479,7 +487,9 @@ effect fn work() -> i32
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://effect-requirement-format.silk', text))
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://effect-requirement-format.silk', text),
+    )
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -487,7 +497,7 @@ effect fn work() -> i32
 it.effect('formats row differences and callable constraints idempotently', () =>
   Effect.gen(function* () {
     const source = `effect fn bind<?S,A,P,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?Without<R,S> where &mut P provides S from R,S in R{return run self}`
-    const first = yield* Formatter.format(parse('memory://row-constraints.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://row-constraints.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
       text,
@@ -499,20 +509,33 @@ where &mut P provides S from R, S in R {
 }
 `,
     )
-    const second = yield* Formatter.format(parse('memory://row-constraints.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://row-constraints.silk', text))
     assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('preserves a requirement union that begins with row difference', () =>
+  Effect.gen(function* () {
+    const source = `effect fn acquire<?S,A,E,F,?R,?Q>(self:once Effect<A!E?R>)->A!F?Without<R,S>|Q where S in R{return run self}`
+    const first = yield* SyntaxFormatter.format(parse('memory://row-union-format.silk', source))
+    const formatted = formattedText(first)
+    assert.include(formatted, '? Without<R, S> | Q')
+    const reparsed = parse('memory://row-union-format.silk', formatted)
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    const second = yield* SyntaxFormatter.format(reparsed)
+    assert.strictEqual(formattedText(second), formatted)
   }),
 )
 
 it.effect('preserves nested row-difference precedence and selected-row call prefixes', () =>
   Effect.gen(function* () {
     const source = `effect fn transform<?S,A,P,E,F,?R,?Q>(self:once Effect<A!E|F?R|Q>,provider:&mut P)->A!Without<E|F,First|Third>?Without<R|Q,S> where &mut P provides S from R|Q{return run Intrinsic.bindRequirementMut<Logger at Audit>(move self,provider)}`
-    const first = yield* Formatter.format(parse('memory://nested-row-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://nested-row-format.silk', source))
     const text = formattedText(first)
     assert.include(text, '! Without<E | F, First | Third>')
     assert.include(text, '? Without<R | Q, S>')
     assert.include(text, 'Intrinsic.bindRequirementMut<Logger at Audit>')
-    const second = yield* Formatter.format(parse('memory://nested-row-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://nested-row-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -520,7 +543,7 @@ it.effect('preserves nested row-difference precedence and selected-row call pref
 it.effect('breaks long constraint lists after where with one constraint per line', () =>
   Effect.gen(function* () {
     const source = `effect fn transform<S,P,A,E,?R>(self:once Effect<A!E?R>,provider:&mut P)->A!E?R where SelectedCapability in ExtremelyLongRequirementRowParameter,&mut ExtremelyLongProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,&ExtremelyLongSharedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,AnotherSelectedCapability in ExtremelyLongRequirementRowParameter{return run self}`
-    const first = yield* Formatter.format(parse('memory://long-where-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://long-where-format.silk', source))
     const text = formattedText(first)
     assert.include(
       text,
@@ -531,7 +554,7 @@ it.effect('breaks long constraint lists after where with one constraint per line
   ExtremelyLongOwnedProviderImplementation provides SelectedCapability from ExtremelyLongRequirementRowParameter,
   AnotherSelectedCapability in ExtremelyLongRequirementRowParameter`,
     )
-    const second = yield* Formatter.format(parse('memory://long-where-format.silk', text))
+    const second = yield* SyntaxFormatter.format(parse('memory://long-where-format.silk', text))
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -539,11 +562,15 @@ it.effect('breaks long constraint lists after where with one constraint per line
 it.effect('formats effect blocks and Copy failure transfer canonically', () =>
   Effect.gen(function* () {
     const source = 'fn later()->i32 { let pending=effect{fail Problem{code:1}} return 0 }'
-    const first = yield* Formatter.format(parse('memory://effect-expression-format.silk', source))
+    const first = yield* SyntaxFormatter.format(
+      parse('memory://effect-expression-format.silk', source),
+    )
     const text = formattedText(first)
     assert.include(text, 'let pending = effect {')
     assert.include(text, 'fail Problem {code: 1}')
-    const second = yield* Formatter.format(parse('memory://effect-expression-format.silk', text))
+    const second = yield* SyntaxFormatter.format(
+      parse('memory://effect-expression-format.silk', text),
+    )
     assert.strictEqual(formattedText(second), text)
   }),
 )
@@ -554,13 +581,13 @@ const golden = (name: string): string =>
 it.effect('normalizes physical whitespace and detects canonical source', () =>
   Effect.gen(function* () {
     const source = 'pub\tfn main ( ) -> Mystery {\r\n\treturn  value   \r\n}\r\n\r\n'
-    const first = yield* Formatter.format(parse('memory://physical.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://physical.silk', source))
     const canonical = 'pub fn main() -> Mystery {\n  return value\n}\n'
 
     assert.strictEqual(formattedText(first), canonical)
     assert.strictEqual(first.changed, true)
 
-    const second = yield* Formatter.format(parse('memory://physical.silk', canonical))
+    const second = yield* SyntaxFormatter.format(parse('memory://physical.silk', canonical))
     assert.strictEqual(formattedText(second), canonical)
     assert.strictEqual(second.changed, false)
   }),
@@ -568,15 +595,17 @@ it.effect('normalizes physical whitespace and detects canonical source', () =>
 
 it.effect('rejects lexical and parser damage without producing formatted bytes', () =>
   Effect.gen(function* () {
-    const lexical = yield* Effect.result(Formatter.format(parse('memory://lexical.silk', '@@@')))
+    const lexical = yield* Effect.result(
+      SyntaxFormatter.format(parse('memory://lexical.silk', '@@@')),
+    )
     const parser = yield* Effect.result(
-      Formatter.format(parse('memory://parser.silk', 'pub fn main() -> i32 { return 42')),
+      SyntaxFormatter.format(parse('memory://parser.silk', 'pub fn main() -> i32 { return 42')),
     )
 
     assert.strictEqual(Result.isFailure(lexical), true)
     assert.strictEqual(Result.isFailure(parser), true)
     if (Result.isFailure(lexical)) {
-      assert.strictEqual(lexical.failure._tag, 'FormatterError')
+      assert.strictEqual(lexical.failure._tag, 'SyntaxFormatterError')
       assert.strictEqual(lexical.failure.reason._tag, 'DamagedSyntax')
       assert.isAbove(lexical.failure.diagnostics.length, 0)
     }
@@ -586,11 +615,11 @@ it.effect('rejects lexical and parser damage without producing formatted bytes',
 it.effect('formats fixed-array source types with canonical bracketed layout', () =>
   Effect.gen(function* () {
     const source = 'struct Arrays { values: [ [ i32 ;4 ] ;3 ] }'
-    const first = yield* Formatter.format(parse('memory://fixed-array-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://fixed-array-format.silk', source))
     const canonical = 'struct Arrays {\n  values: [[i32; 4]; 3]\n}\n'
 
     assert.strictEqual(formattedText(first), canonical)
-    const second = yield* Formatter.format(
+    const second = yield* SyntaxFormatter.format(
       parse('memory://fixed-array-format.silk', formattedText(first)),
     )
     assert.deepEqual(second.bytes, first.bytes)
@@ -601,7 +630,7 @@ it.effect('formats fixed-array source types with canonical bracketed layout', ()
 it.effect('refuses to repair a missing fixed-array semicolon', () =>
   Effect.gen(function* () {
     const attempted = yield* Effect.result(
-      Formatter.format(
+      SyntaxFormatter.format(
         parse('memory://fixed-array-damage.silk', 'struct Broken { value: [i32 4] }'),
       ),
     )
@@ -612,7 +641,7 @@ it.effect('refuses to repair a missing fixed-array semicolon', () =>
 
 it.effect('formats syntactically complete source without semantic analysis', () =>
   Effect.gen(function* () {
-    const document = yield* Formatter.format(
+    const document = yield* SyntaxFormatter.format(
       parse(
         'memory://semantic.silk',
         'pub fn identity(value: Missing) -> Missing { return unknown }',
@@ -631,7 +660,7 @@ it.effect('breaks over-width lists one item per line with a trailing comma', () 
     const source =
       'pub fn combine(firstParameterWithALongName: ExtremelyLongTypeName, ' +
       'secondParameterWithALongName: AnotherExtremelyLongTypeName) -> Result { return firstParameterWithALongName }'
-    const document = yield* Formatter.format(parse('memory://width.silk', source))
+    const document = yield* SyntaxFormatter.format(parse('memory://width.silk', source))
 
     assert.strictEqual(
       formattedText(document),
@@ -666,7 +695,7 @@ pub fn first() -> i32 {
 
 pub fn second() -> i32 { return 2 }
 `
-    const document = yield* Formatter.format(parse('memory://comments.silk', source))
+    const document = yield* SyntaxFormatter.format(parse('memory://comments.silk', source))
 
     assert.strictEqual(
       formattedText(document),
@@ -709,7 +738,7 @@ pub fn main(
 // end of file
 `
     const original = parse('memory://comment-boundaries.silk', source)
-    const document = yield* Formatter.format(original)
+    const document = yield* SyntaxFormatter.format(original)
     const reparsed = parse('memory://comment-boundaries.silk', formattedText(document))
 
     assert.deepEqual(comments(reparsed), comments(original))
@@ -745,7 +774,7 @@ allocate: SystemAllocator.allocate
 }
 `
     const original = parse('memory://module-comments.silk', source)
-    const document = yield* Formatter.format(original)
+    const document = yield* SyntaxFormatter.format(original)
     const formatted = formattedText(document)
     const reparsed = parse('memory://module-comments.silk', formatted)
 
@@ -766,7 +795,9 @@ impl Allocator for SystemAllocator {
 it.effect('removes only terminal horizontal whitespace from comment spellings', () =>
   Effect.gen(function* () {
     const source = '/// documentation  \t\npub fn main() -> i32 { return 1 // value  \t\n}\n'
-    const document = yield* Formatter.format(parse('memory://comment-whitespace.silk', source))
+    const document = yield* SyntaxFormatter.format(
+      parse('memory://comment-whitespace.silk', source),
+    )
 
     assert.strictEqual(
       formattedText(document),
@@ -780,7 +811,7 @@ it.effect('formats match arms, guards, access modes, and nested patterns idempot
     const source = `pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub fn inspect(event: Token) -> i32 { return match   & mut event { Token { span: Span { start: offset , .. }, .. } if true=>offset _=>0 } }`
-    const first = yield* Formatter.format(parse('memory://match-format.silk', source))
+    const first = yield* SyntaxFormatter.format(parse('memory://match-format.silk', source))
     const expected = `pub struct Span {
   start: i32
   end: i32
@@ -799,7 +830,7 @@ pub fn inspect(event: Token) -> i32 {
 `
 
     assert.strictEqual(formattedText(first), expected)
-    const second = yield* Formatter.format(parse('memory://match-format.silk', expected))
+    const second = yield* SyntaxFormatter.format(parse('memory://match-format.silk', expected))
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),
@@ -816,7 +847,7 @@ return 0
     const original = parse('memory://multiline-format.silk', source)
     assert.deepEqual(original.lexicalDiagnostics, [])
     assert.deepEqual(original.parserDiagnostics, [])
-    const first = yield* Formatter.format(original)
+    const first = yield* SyntaxFormatter.format(original)
     const trailingSpaces = '  '
     const expected = `pub fn main() -> i32 {
   let value = """
@@ -835,7 +866,7 @@ y"""[0]
     assert.deepEqual(reparsed.lexicalDiagnostics, [])
     assert.deepEqual(reparsed.parserDiagnostics, [])
     assert.deepEqual(staticValues(reparsed), staticValues(original))
-    const second = yield* Formatter.format(reparsed)
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),
@@ -902,7 +933,7 @@ pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
     assert.deepEqual(original.lexicalDiagnostics, [])
     assert.deepEqual(original.parserDiagnostics, [])
 
-    const first = yield* Formatter.format(original)
+    const first = yield* SyntaxFormatter.format(original)
     const reparsed = parse('memory://grammar.silk', formattedText(first))
     assert.deepEqual(reparsed.lexicalDiagnostics, [])
     assert.deepEqual(reparsed.parserDiagnostics, [])
@@ -915,7 +946,7 @@ pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
     )
     assert.strictEqual(formattedText(first), golden('canonical.silk'))
 
-    const second = yield* Formatter.format(reparsed)
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
     assert.strictEqual(second.changed, false)
   }),

@@ -1,10 +1,10 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 
@@ -54,13 +54,13 @@ it.effect('formats slice syntax and borrow expressions idempotently', () =>
     const syntax = parse(
       'fn use(values : & mut [ i32 ]) -> i32 { return consume ( & mut values ) }',
     )
-    const formatted = yield* Formatter.format(syntax)
+    const formatted = yield* SyntaxFormatter.format(syntax)
     const text = decoder.decode(FormattedDocument.toUint8Array(formatted))
     assert.strictEqual(
       text,
       'fn use(values: &mut [i32]) -> i32 {\n  return consume(&mut values)\n}\n',
     )
-    const again = yield* Formatter.format(parse(text))
+    const again = yield* SyntaxFormatter.format(parse(text))
     assert.strictEqual(decoder.decode(FormattedDocument.toUint8Array(again)), text)
   }),
 )

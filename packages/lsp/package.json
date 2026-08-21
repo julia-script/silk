@@ -71,6 +71,7 @@
     "@silk-effect/compiler": "workspace:*",
     "@silk-effect/compiler-cli": "workspace:*",
     "@silk-effect/documentation": "workspace:*",
+    "@silk-effect/formatter": "workspace:*",
     "@silk-effect/inspector": "workspace:*",
     "effect": "catalog:",
     "vscode-languageserver": "^9.0.1",

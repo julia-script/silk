@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../../dist/Analysis.js'
 import * as FormattedDocument from '../../../dist/FormattedDocument.js'
-import * as Formatter from '../../../dist/Formatter.js'
 import * as Lexer from '../../../dist/Lexer.js'
 import * as Mir from '../../../dist/Mir.js'
 import * as Parser from '../../../dist/Parser.js'
 import * as SourceFile from '../../../dist/SourceFile.js'
+import * as SyntaxFormatter from '../../../dist/SyntaxFormatter.js'
 
 const encoder = new TextEncoder()
 const sizes = [1, 8, 32, 64, 128]
@@ -75,7 +75,7 @@ pub fn main() -> i32 {
 
 const canonical = async (id, source) => {
   const document = await Effect.runPromise(
-    Formatter.format(Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))),
+    SyntaxFormatter.format(Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))),
   )
   return Uint8Array.from(FormattedDocument.toUint8Array(document))
 }

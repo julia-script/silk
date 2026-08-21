@@ -44,7 +44,7 @@ semantic occurrences (both shapes)
   substantially faster because each outer aggregate materializes a progressively larger nested
   value. This is an accepted empirical compiler cost, not semantic expansion, erasure, a runtime
   dictionary, or an indirect call. It is retained as pressure debt for backend aggregate lowering.
-- Formatter indentation makes left-associated canonical source bytes approximately quadratic; the
+- Syntax formatter indentation makes left-associated canonical source bytes approximately quadratic; the
   generator uses named node types so it does not also duplicate nested type expressions.
 - Timing and heap are observations, not gates. A future stable benchmarking environment should add
   target-emission time/heap thresholds after addressing left-associated aggregate lowering.

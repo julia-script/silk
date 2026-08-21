@@ -6,10 +6,10 @@ import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as Type from '../src/Type.js'
 
 const decoder = new TextDecoder()
@@ -57,11 +57,11 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
     Effect.gen(function* () {
       const syntax = yield* parse('syntax')
       assert.deepEqual(syntax.parserDiagnostics, [])
-      const first = yield* Formatter.format(syntax)
+      const first = yield* SyntaxFormatter.format(syntax)
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
       assert.include(text, 'pub interface Decoder<Arguments, A, E, ?R>')
       assert.include(text, 'effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R')
-      const second = yield* Formatter.format(
+      const second = yield* SyntaxFormatter.format(
         Parser.parse(
           Lexer.lex(
             SourceFile.make('complete-interface-contracts/formatted', Uint8Array.from(first.bytes)),

@@ -36,6 +36,10 @@
       "types": "./dist/Document.d.ts",
       "import": "./dist/Document.js"
     },
+    "./CodeFence": {
+      "types": "./dist/CodeFence.d.ts",
+      "import": "./dist/CodeFence.js"
+    },
     "./Json": {
       "types": "./dist/Json.d.ts",
       "import": "./dist/Json.js"
@@ -58,12 +62,12 @@
   },
   "dependencies": {
     "@silk-effect/compiler": "workspace:*",
+    "effect": "catalog:",
     "mdast-util-from-markdown": "^2.0.3"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/mdast": "^4.0.4",
-    "@types/node": "^24.10.1",
-    "effect": "catalog:"
+    "@types/node": "^24.10.1"
   }
 }
