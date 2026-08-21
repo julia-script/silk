@@ -446,12 +446,12 @@ const mangleDescription = (
     case 'Pointer':
       return `p${description.addressSpace.value}`
     case 'Vector': {
-      const child = state.types[description.child]
+      const child = state.types.descriptions[description.child]
       if (child === undefined) throw new Error('missing intrinsic overload vector child')
       return `${description.scalable ? 'nxv' : 'v'}${description.length}${mangleDescription(state, child)}`
     }
     case 'Array': {
-      const child = state.types[description.child]
+      const child = state.types.descriptions[description.child]
       if (child === undefined) throw new Error('missing intrinsic overload array child')
       return `a${description.length}${mangleDescription(state, child)}`
     }
@@ -493,7 +493,7 @@ const intrinsicName = Effect.fnUntraced(function* (
       const suffix: Array<string> = []
       for (const type of overloads) {
         const index = yield* Handle.resolve(builder, owner, type, 'Type', 'Intrinsic.name')
-        const description = state.types[index]
+        const description = state.types.descriptions[index]
         if (description === undefined) {
           return yield* Result.fail(
             invalidState({

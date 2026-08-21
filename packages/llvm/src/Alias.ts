@@ -8,6 +8,7 @@ import * as BuilderState from './internal/BuilderState.js'
 import type * as GlobalDescription from './internal/GlobalDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
+import * as ResolveActor from './internal/resolveActor.js'
 import { invalidInput, invalidState, type LlvmError } from './LlvmError.js'
 import type * as Type from './Type.js'
 
@@ -28,14 +29,6 @@ export interface Alias extends Handle.Handle<'Alias'> {}
 export interface Options extends Global.Options {}
 
 /** @internal */
-const bytes = (value: ByteString.ByteString | Uint8Array | string): ByteString.ByteString =>
-  typeof value === 'string'
-    ? ByteString.fromString(value)
-    : value instanceof Uint8Array
-      ? ByteString.fromUint8Array(value)
-      : value
-
-/** @internal */
 const aliaseeIndex = (
   builder: Builder.Builder,
   state: BuilderState.MutableState,
@@ -45,8 +38,8 @@ const aliaseeIndex = (
 ): Result.Result<number, LlvmError> =>
   Result.gen(function* () {
     const index = yield* Handle.resolve(builder, owner, aliasee, 'Constant', operation)
-    const constant = state.constants[index]
-    const type = constant === undefined ? undefined : state.types[constant.type]
+    const constant = state.constants.descriptions[index]
+    const type = constant === undefined ? undefined : state.types.descriptions[constant.type]
     if (type?._tag !== 'Pointer') {
       return yield* Result.fail(
         invalidInput({
@@ -65,7 +58,7 @@ const handleAt = (
   index: number,
   operation: string,
 ): Result.Result<Alias, LlvmError> => {
-  const handle = state.aliasHandles[index]
+  const handle = state.globals.aliases.handles[index]
   if (handle === undefined) {
     return Result.fail(
       invalidState({ operation, message: 'Alias table handle is missing', state: index }),
@@ -86,15 +79,16 @@ const resolve = (
   LlvmError
 > =>
   Result.gen(function* () {
-    const index = yield* Handle.resolve(builder, owner, self, 'Alias', operation)
-    const description = state.aliases[index]
-    const global = description === undefined ? undefined : state.globals[description.global]
-    if (
-      description === undefined ||
-      global?.kind !== 'Alias' ||
-      global.actorIndex !== index ||
-      global.deleted
-    ) {
+    const { index, description } = yield* ResolveActor.resolve(
+      builder,
+      owner,
+      self,
+      'Alias',
+      state.globals.aliases,
+      operation,
+    )
+    const global = state.globals.entries.descriptions[description.global]
+    if (global?.kind !== 'Alias' || global.actorIndex !== index || global.deleted) {
       return yield* Result.fail(
         invalidState({ operation, message: 'Alias handle is no longer active', state: self }),
       )
@@ -155,18 +149,18 @@ export const make = Effect.fn('Alias.make')(function* (
     Result.gen(function* () {
       const typeIndex = yield* Handle.resolve(builder, owner, valueType, 'Type', 'Alias.make')
       const target = yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.make')
-      const index = state.aliases.length
+      const index = state.globals.aliases.descriptions.length
       const allocated = yield* GlobalState.allocate(
         state,
         owner,
-        bytes(name),
+        ByteString.coerce(name),
         'Alias',
         index,
         options,
         'Alias.make',
       )
       const handle = Handle.make('Alias', owner, index)
-      state.aliases.push(
+      state.globals.aliases.descriptions.push(
         Object.freeze({
           _tag: 'Alias',
           global: allocated.index,
@@ -174,7 +168,7 @@ export const make = Effect.fn('Alias.make')(function* (
           aliasee: target,
         }),
       )
-      state.aliasHandles.push(handle)
+      state.globals.aliases.handles.push(handle)
       return handle
     }),
   )
@@ -198,9 +192,9 @@ export const fromGlobal = Effect.fn('Alias.fromGlobal')(function* (
       if (resolved.description.kind === 'Alias') {
         return yield* handleAt(state, resolved.description.actorIndex, 'Alias.fromGlobal')
       }
-      const index = state.aliases.length
+      const index = state.globals.aliases.descriptions.length
       const handle = Handle.make('Alias', owner, index)
-      state.aliases.push(
+      state.globals.aliases.descriptions.push(
         Object.freeze({
           _tag: 'Alias',
           global: resolved.index,
@@ -208,8 +202,8 @@ export const fromGlobal = Effect.fn('Alias.fromGlobal')(function* (
           aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.fromGlobal'),
         }),
       )
-      state.aliasHandles.push(handle)
-      state.globals[resolved.index] = Object.freeze({
+      state.globals.aliases.handles.push(handle)
+      state.globals.entries.descriptions[resolved.index] = Object.freeze({
         ...resolved.description,
         kind: 'Alias',
         actorIndex: index,
@@ -233,7 +227,7 @@ export const setAliasee = Effect.fn('Alias.setAliasee')(function* (
   yield* BuilderState.mutate(builder, 'Alias.setAliasee', (state, owner) =>
     Result.gen(function* () {
       const { description, index } = yield* resolve(builder, state, owner, self, 'Alias.setAliasee')
-      state.aliases[index] = Object.freeze({
+      state.globals.aliases.descriptions[index] = Object.freeze({
         ...description,
         aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.setAliasee'),
       })
@@ -272,7 +266,7 @@ export const aliasee = Effect.fn('Alias.aliasee')(function* (
   return yield* BuilderState.mutate(builder, 'Alias.aliasee', (state, owner) =>
     Result.gen(function* () {
       const description = (yield* resolve(builder, state, owner, self, 'Alias.aliasee')).description
-      const constant = state.constantHandles[description.aliasee]
+      const constant = state.constants.handles[description.aliasee]
       if (constant === undefined) {
         return yield* Result.fail(
           invalidState({

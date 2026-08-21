@@ -1,3 +1,4 @@
+import * as Result from 'effect/Result'
 import * as AddrSpace from '../AddrSpace.js'
 import * as Alignment from '../Alignment.js'
 import * as ByteString from '../ByteString.js'
@@ -40,11 +41,11 @@ const availableAnonymousName = (state: BuilderState.MutableState): ByteString.By
     const name: ByteString.ByteString = Object.freeze({
       _tag: 'ByteString',
       bytes: Object.freeze(
-        Array.from(String(state.nextAnonymousGlobal), (character) => character.charCodeAt(0)),
+        Array.from(String(state.globals.nextAnonymous), (character) => character.charCodeAt(0)),
       ),
     })
-    state.nextAnonymousGlobal += 1
-    if (!state.globalNames.has(CanonicalKey.bytes(name))) return name
+    state.globals.nextAnonymous += 1
+    if (!state.globals.entries.keys.has(CanonicalKey.bytes(name))) return name
   }
 }
 
@@ -60,7 +61,7 @@ export const allocate = (
 ): Result.Result<{ readonly index: number; readonly handle: Global.Global }, LlvmError> => {
   const resolvedName = name.bytes.length === 0 ? availableAnonymousName(state) : name
   const key = CanonicalKey.bytes(resolvedName)
-  const occupied = state.globalNames.get(key)
+  const occupied = state.globals.entries.keys.get(key)
   if (occupied !== undefined) {
     return Result.fail(
       invalidState({
@@ -70,9 +71,9 @@ export const allocate = (
       }),
     )
   }
-  const index = state.globals.length
+  const index = state.globals.entries.descriptions.length
   const handle = Handle.make('Global', owner, index)
-  state.globals.push(
+  state.globals.entries.descriptions.push(
     Object.freeze({
       _tag: 'Global',
       ...defaults(resolvedName, options),
@@ -82,9 +83,9 @@ export const allocate = (
       deleted: false,
     }),
   )
-  state.globalHandles.push(handle)
-  state.globalMetadata.push(Object.freeze([]))
-  state.globalNames.set(key, index)
+  state.globals.entries.handles.push(handle)
+  state.globals.attachments.push(Object.freeze([]))
+  state.globals.entries.keys.set(key, index)
   return Result.succeed({ index, handle })
 }
 
@@ -103,7 +104,7 @@ export const resolveIndex = (
       )
     }
     visited.add(current)
-    const description = state.globals[current]
+    const description = state.globals.entries.descriptions[current]
     if (description === undefined) {
       return Result.fail(
         invalidState({ operation, message: 'Global table entry is missing', state: current }),
@@ -128,7 +129,7 @@ export const resolve = (
   Result.gen(function* () {
     const original = yield* Handle.resolve(builder, owner, self, 'Global', operation)
     const index = yield* resolveIndex(state, original, operation)
-    const description = state.globals[index]
+    const description = state.globals.entries.descriptions[index]
     if (description === undefined || description.deleted) {
       return yield* Result.fail(
         invalidInput({ operation, message: 'Global has been deleted', input: self }),
@@ -139,11 +140,11 @@ export const resolve = (
 
 /** @internal */
 export const handleAt = (
-  state: Pick<BuilderState.MutableState, 'globalHandles'>,
+  state: Pick<BuilderState.MutableState, 'globals'>,
   index: number,
   operation: string,
 ): Result.Result<Global.Global, LlvmError> => {
-  const handle = state.globalHandles[index]
+  const handle = state.globals.entries.handles[index]
   if (handle === undefined) {
     return Result.fail(
       invalidState({ operation, message: 'Global table handle is missing', state: index }),
@@ -151,5 +152,3 @@ export const handleAt = (
   }
   return Result.succeed(handle)
 }
-
-import * as Result from 'effect/Result'
