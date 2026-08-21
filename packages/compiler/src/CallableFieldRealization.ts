@@ -661,26 +661,6 @@ export const isCallableRealization = (self: Realization): self is CallableRealiz
 export const isEffectRealization = (self: Realization): self is EffectRealization =>
   self._tag === 'EffectFieldRealization'
 
-/** Returns only callable realizations, preserving the Effect storage fence in callable consumers. */
-export const callableRealizationOf = (
-  self: Index,
-  instance: Type.Nominal,
-  id: RepresentationField.Id,
-): CallableRealization | undefined => {
-  const realization = realizationOf(self, instance, id)
-  return realization !== undefined && isCallableRealization(realization) ? realization : undefined
-}
-
-/** Returns only Effect realizations to consumers that are explicitly prepared for that variant. */
-export const effectRealizationOf = (
-  self: Index,
-  instance: Type.Nominal,
-  id: RepresentationField.Id,
-): EffectRealization | undefined => {
-  const realization = realizationOf(self, instance, id)
-  return realization !== undefined && isEffectRealization(realization) ? realization : undefined
-}
-
 /** True when every realized field of one complete instance has a runtime realization. */
 export const supportsInstance = (self: Index, instance: Type.Nominal): boolean => {
   const entries = self.entries.filter((entry) =>

@@ -22,7 +22,7 @@ import * as Mir from './Mir.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
-import type * as ModuleTooling from './ModuleTooling.js'
+import * as ModuleTooling from './ModuleTooling.js'
 import * as NameResolution from './NameResolution.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
@@ -97,8 +97,8 @@ export interface Snapshot extends SingleRootFrontendSnapshot {
 
 /** One available anonymous expression type cached for position fallback. */
 export interface AnonymousExpression {
-  readonly span: FrontendTooling.AnonymousExpression['span']
-  readonly type: FrontendTooling.AnonymousExpression['type']
+  readonly span: ModuleTooling.AnonymousExpression['span']
+  readonly type: ModuleTooling.AnonymousExpression['type']
 }
 
 /** The occurrence-first semantic subject selected for a hover request. */
@@ -528,7 +528,7 @@ const presentationOfIdentity = (
     for (const result of self.results.values())
       for (const fn of result.functions)
         for (const statement of fn.statements)
-          for (const expression of FrontendTooling.statementExpressions(statement))
+          for (const expression of ModuleTooling.statementExpressions(statement))
             if (expression._tag === 'Match')
               for (const arm of expression.arms)
                 for (const binding of arm.bindings)
@@ -732,7 +732,7 @@ export const expressionsOf = (
   Object.freeze(
     self.results
       .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(FrontendTooling.statementExpressions)) ??
+      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ??
       [],
   )
 
@@ -745,18 +745,6 @@ export const matchesOf = (
     expressionsOf(self, module).filter(
       (expression): expression is Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> =>
         expression._tag === 'Match',
-    ),
-  )
-
-/** Returns every retained struct literal fact without reconstructing field mappings. */
-export const structLiteralsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Elaboration.StructLiteralExpressionFact> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.StructLiteralExpressionFact =>
-        expression._tag === 'StructLiteral',
     ),
   )
 
@@ -926,16 +914,6 @@ export const instancesOfCall = (
     }),
   )
 
-/** Returns concrete reached applications while excluding open generic declarations. */
-export const appliedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.entries.filter(
-          (entry) => Type.isNominal(entry.type) && entry.type.arguments.length > 0,
-        ),
-      )
-    : Object.freeze([])
-
 /** Returns concrete instances proven able to reach the suspension intrinsic. */
 export const suspendableInstancesOf = (self: Snapshot): ReadonlyArray<Instances.InstanceKey> =>
   self.instances.suspendable
@@ -995,14 +973,6 @@ export const repeatedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =
       )
     : Object.freeze([])
 
-/** Returns every reachable compiler-owned structural-union layout. */
-export const unionLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.entries.filter((entry) => entry.representation._tag === 'Union'),
-      )
-    : Object.freeze([])
-
 /** Returns every reachable array calling shape and its canonical physical paths. */
 export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
   self.layout._tag === 'Available'
@@ -1010,26 +980,6 @@ export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.Calli
         self.layout.value.callingShapes.filter((shape) => Type.isFixedArray(shape.type)),
       )
     : Object.freeze([])
-
-/** Returns every reachable structural-union sum calling shape. */
-export const unionCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(self.layout.value.callingShapes.filter((shape) => Type.isUnion(shape.type)))
-    : Object.freeze([])
-
-/** Returns every explicit HIR union conversion in source semantic order. */
-export const hirUnionConversionsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>> =>
-  Object.freeze(
-    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
-      fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => (expression._tag === 'UnionConvert' ? [expression] : [])),
-    ),
-  )
 
 /** Returns every typed structured HIR match in deterministic expression preorder. */
 export const hirMatchesOf = (
@@ -1051,20 +1001,6 @@ export const ownershipMatchesOf = (
   module: string,
 ): ReadonlyArray<Ownership.MatchOwnership> =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? [])
-
-/** Returns every verified MIR union conversion in canonical topological order. */
-export const mirUnionConversionsOf = (
-  self: Snapshot,
-): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'ConvertUnion' }>> =>
-  self.mir._tag === 'Unavailable'
-    ? Object.freeze([])
-    : Object.freeze(
-        self.mir.value.functions.flatMap((fn) =>
-          Mir.operations(fn).flatMap((operation) =>
-            operation._tag === 'ConvertUnion' ? [operation] : [],
-          ),
-        ),
-      )
 
 /** Returns every structured MIR match, including nested expression matches, in DAG preorder. */
 export const mirMatchesOf = (
@@ -1160,18 +1096,6 @@ export const fieldByName = (
   declaration: DeclarationIndex.StructFact,
   spelling: string,
 ): DeclarationIndex.FieldLookup => DeclarationIndex.lookupField(declaration.fields, spelling)
-
-/** Looks up one declaration name within one module's elaborated analysis. */
-export const declarationLookup = (
-  result: Elaboration.Result,
-  spelling: string,
-): DeclarationIndex.DeclarationLookup => Elaboration.declarationByName(result, spelling)
-
-/** Looks up one parameter name within one declaration's collected parameters. */
-export const parameterLookup = (
-  declaration: DeclarationIndex.DeclarationFact,
-  spelling: string,
-): DeclarationIndex.ParameterLookup => Elaboration.parameterByName(declaration, spelling)
 
 /** The compilation's complete diagnostic sequence in deterministic driver order. */
 export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
@@ -1283,17 +1207,6 @@ export const arrayTraceEventsOf = (
         | BootstrapEvaluation.ArrayConstructTraceEvent
         | BootstrapEvaluation.PlaceReadTraceEvent =>
         event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
-    ),
-  )
-
-/** Returns logical injection and widening events without exposing physical backend tags. */
-export const unionTraceEventsOf = (
-  outcome: BootstrapEvaluation.Outcome,
-): ReadonlyArray<BootstrapEvaluation.UnionConversionTraceEvent> =>
-  Object.freeze(
-    outcome.trace.filter(
-      (event): event is BootstrapEvaluation.UnionConversionTraceEvent =>
-        event._tag === 'UnionConversion',
     ),
   )
 

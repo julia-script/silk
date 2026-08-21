@@ -6,15 +6,11 @@ import type * as NameResolution from './NameResolution.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 
-export type AnonymousExpression = ModuleTooling.AnonymousExpression
-
-export const statementExpressions = ModuleTooling.statementExpressions
-
 /** Tooling indexes, reusable module artifacts, and observations for one completed frontend. */
 export interface FrontendTooling {
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticOccurrences: SemanticOccurrence.Index
-  readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
+  readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<ModuleTooling.AnonymousExpression>>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 

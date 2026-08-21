@@ -1005,66 +1005,6 @@ export const expressionTree = (expression: Expression): ReadonlyArray<Expression
   return Object.freeze([expression, ...children.flatMap(expressionTree)])
 }
 
-/** Tests whether any expression in the body is an explicit unavailable state. */
-export const hasUnavailable = (self: HirFunction): boolean => {
-  const walk = (expression: Expression): boolean => {
-    switch (expression._tag) {
-      case 'Unavailable':
-        return true
-      case 'Move':
-      case 'Project':
-        return walk(expression.subject)
-      case 'RuntimeStringView':
-        return walk(expression.source)
-      case 'StringEquality':
-      case 'ShortCircuit':
-        return walk(expression.left) || walk(expression.right)
-      case 'Replace':
-        return walk(expression.value)
-      case 'UnionConvert':
-        return walk(expression.source)
-      case 'IndexPlace':
-        return walk(expression.subject) || walk(expression.index)
-      case 'SliceLength':
-        return walk(expression.slice)
-      case 'SliceIndexPlace':
-        return walk(expression.slice) || walk(expression.index)
-      case 'Construct':
-        return expression.fields.some((field) => walk(field.value))
-      case 'ArrayConstruct':
-        return expression.elements.some(walk)
-      case 'Call':
-      case 'EffectConstruct':
-      case 'ServiceEffectConstruct':
-      case 'BuiltinCall':
-      case 'BoundOperationCall':
-        return expression.arguments.some(walk)
-      case 'CallableSection':
-        return expression.captures.some((capture) => walk(capture.value))
-      case 'CallableApply':
-        return walk(expression.callee) || expression.arguments.some(walk)
-      case 'Run':
-        return walk(expression.subject)
-      case 'EffectResult':
-        return walk(expression.protected)
-      case 'EffectBindRequirement':
-        return walk(expression.protected)
-      case 'EffectCatch':
-        return walk(expression.protected) || walk(expression.handler)
-      case 'Match':
-        return (
-          walk(expression.scrutinee) ||
-          expression.arms.some(
-            (arm) => (arm.guard !== undefined && walk(arm.guard)) || walk(arm.result),
-          )
-        )
-      default:
-        return false
-    }
-  }
-  return self.statements.flatMap(statementExpressions).some(walk)
-}
-
 /** The first unavailable expression's cause and span, if the body has one. */
 export const firstUnavailable = (
   self: HirFunction,

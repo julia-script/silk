@@ -648,10 +648,3 @@ export const definitionOf = (
 /** Stable source family identity used by incremental dependency maps and test fixtures. */
 export const key = (self: Definition): string => familyKey(self.family)
 
-/** One privacy-preserving dependency summary that intentionally omits target and capture details. */
-export const publicOrigin = (
-  self: Definition,
-): {
-  readonly family: string
-  readonly bound: string
-} => Object.freeze({ family: key(self), bound: Type.key(self.instance.contract) })

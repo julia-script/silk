@@ -498,15 +498,6 @@ export const intrinsicNominalOrdinal = (self: Nominal): number =>
     (candidate) => candidate.module === self.module && candidate.name === self.name,
   )
 
-/** Compiler-shipped nominal capability witnesses; user declarations extend this in the index. */
-export const intrinsicConformances: ReadonlyMap<string, ReadonlySet<string>> = new Map([])
-
-/** Tests one compiler-shipped nominal capability witness without inspecting provider kinds. */
-export const intrinsicallyConforms = (provider: Type, capability: Nominal): boolean =>
-  isNominal(provider) && (intrinsicConformances.get(key(provider))?.has(key(capability)) ?? false)
-
-/** Tests the one compiler-sealed allocation exhaustion payload. */
-export const isOutOfMemoryError = (self: Type): self is Nominal => equals(self, outOfMemoryError)
 export const isIntrinsicNominal = (self: Type): boolean =>
   isNominal(self) && self.module === 'silk/core' && intrinsicNominals.get(self.name) !== undefined
 

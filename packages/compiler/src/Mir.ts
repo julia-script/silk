@@ -1393,46 +1393,6 @@ export interface ControlEdge {
   readonly kind: 'Forward' | 'Taken' | 'Otherwise' | 'Following' | 'Condition' | 'Body'
 }
 
-/** Target-neutral completion, relay, and resume edges owned by finalized suspension control. */
-export const suspensionControlEdges = (self: MirFunction): ReadonlyArray<SuspensionControlEdge> =>
-  Object.freeze(
-    (self.suspension?.regions ?? []).flatMap((region) =>
-      region._tag === 'SuspendEffectRegion'
-        ? [
-            Object.freeze({
-              _tag: 'SuspensionControlEdge' as const,
-              from: region.point,
-              to: Object.freeze({ _tag: 'RelayExit' as const }),
-              kind: 'RelayTransfer' as const,
-            }),
-          ]
-        : [
-            Object.freeze({
-              _tag: 'SuspensionControlEdge' as const,
-              from: region.point,
-              to: Object.freeze({ _tag: 'RelayExit' as const }),
-              kind: 'RelayTransfer' as const,
-            }),
-            ...(region.relay.state === undefined
-              ? []
-              : [
-                  Object.freeze({
-                    _tag: 'SuspensionControlEdge' as const,
-                    from: region.point,
-                    to: region.relay.state.success.resume,
-                    kind: 'ResumeSuccess' as const,
-                  }),
-                  Object.freeze({
-                    _tag: 'SuspensionControlEdge' as const,
-                    from: region.point,
-                    to: region.relay.state.failure.resume,
-                    kind: 'ResumeFailure' as const,
-                  }),
-                ]),
-          ],
-    ),
-  )
-
 /** Every local retained or referenced by finalized suspension control. */
 export const suspensionLocals = (self: MirFunction): ReadonlyArray<LocalId> =>
   Object.freeze(

@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect'
-import * as Option from 'effect/Option'
 import type * as Analysis from './Analysis.js'
 import * as FrontendTooling from './FrontendTooling.js'
 import * as ModuleClosure from './ModuleClosure.js'
@@ -12,7 +11,6 @@ import * as Pipeline from './Pipeline.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceResolver from './SourceResolver.js'
-import * as SyntaxCorrespondence from './SyntaxCorrespondence.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 
 /** One current module's syntax relationship to the optional previous project revision. */
@@ -33,7 +31,6 @@ export type SyntaxRevision =
       readonly module: string
       readonly previous: SyntaxFile.SyntaxFile
       readonly current: SyntaxFile.SyntaxFile
-      readonly correspondence: SyntaxCorrespondence.SyntaxCorrespondence
     }
 
 /** One frontend-query-compatible root view that cannot be passed to runtime realization. */
@@ -118,9 +115,6 @@ const analyze = Effect.fnUntraced(function* (
         module: module.name,
         previous: previousSyntax,
         current: module.syntax,
-        correspondence: Option.getOrThrow(
-          SyntaxCorrespondence.between(previousSyntax, module.syntax),
-        ),
       }),
     )
   }

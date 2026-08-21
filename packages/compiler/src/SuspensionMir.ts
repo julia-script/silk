@@ -343,10 +343,6 @@ export const finalize = (
   })
 }
 
-/** True when final MIR contains any target-neutral suspension control. */
-export const hasSuspension = (program: Mir.Module): boolean =>
-  program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
-
 /** Stable inspection summary for focused finalization tests. */
 export const summary = (program: Mir.Module): string =>
   program.functions

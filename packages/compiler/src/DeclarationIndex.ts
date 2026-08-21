@@ -7391,8 +7391,6 @@ const proveGoal = (
     if (Type.isNominal(goal.provider)) {
       if (Type.equals(goal.provider, goal.capability))
         return provedGoal(goal, Object.freeze({ _tag: 'IdentitySelection' as const }), [], [])
-      if (Type.intrinsicallyConforms(goal.provider, goal.capability))
-        return provedGoal(goal, Object.freeze({ _tag: 'IntrinsicSelection' as const }), [], [])
     }
     const matching = conformanceCandidates(self, goal)
     const selected = matching.at(0)
@@ -7716,13 +7714,6 @@ export const witness = (
   if (Type.equals(provider, capability)) {
     return Object.freeze({ _tag: 'IdentityConformanceWitness', capability, provider })
   }
-  if (Type.intrinsicallyConforms(provider, capability)) {
-    return Object.freeze({
-      _tag: 'IntrinsicConformanceWitness',
-      capability,
-      provider,
-    })
-  }
   // Proof selection is the single authority for matching both the provider and capability heads.
   // Repeating only provider inference here would lose capability binders and could select a header
   // whose requirements failed.
@@ -7877,14 +7868,11 @@ export const witnessOperation = (
 ): CanonicalId | undefined =>
   self.operations.find((operation) => operation.name === name)?.implementation
 
-const presentParameterNameEntries = (parameters: ReadonlyArray<ParameterFact>) =>
-  presentParameterEntries(parameters)
-
 export const lookupParameter = (
   parameters: ReadonlyArray<ParameterFact>,
   name: string,
 ): ParameterLookup => {
-  const matches = presentParameterNameEntries(parameters)
+  const matches = presentParameterEntries(parameters)
     .filter((entry) => entry.spelling === name)
     .map((entry) => entry.parameter)
   const first = matches.at(0)

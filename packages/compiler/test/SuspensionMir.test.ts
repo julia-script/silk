@@ -96,19 +96,7 @@ it.effect(
         relay.relay.state?.slots.map((slot) => slot.local.ordinal),
         relay.liveLocals.map((local) => local.ordinal),
       )
-      assert.deepEqual(
-        Mir.suspensionControlEdges(
-          left.functions.find((fn) => fn === stateful(left)[0]) ?? stateful(left)[0],
-        )
-          .filter(
-            (edge) =>
-              edge.from.sourceId === relay.point.sourceId &&
-              edge.from.spanStart === relay.point.spanStart &&
-              edge.from.ordinal === relay.point.ordinal,
-          )
-          .map((edge) => edge.kind),
-        ['RelayTransfer', 'ResumeSuccess', 'ResumeFailure'],
-      )
+
     }),
 )
 
