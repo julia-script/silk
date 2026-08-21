@@ -56,6 +56,17 @@ const lineBreaks = (source: SourceFile.SourceFile, token: Token.Token): number =
   return count
 }
 
+const startsLine = (source: SourceFile.SourceFile, token: Token.Token): boolean => {
+  let index = token.span.start
+  while (index > 0) {
+    const byte = source.bytes[index - 1]
+    if (byte === 0x0a || byte === 0x0d) return true
+    if (byte !== 0x20 && byte !== 0x09) return false
+    index -= 1
+  }
+  return true
+}
+
 const make = (
   source: SourceFile.SourceFile,
   kind: Kind,
@@ -88,18 +99,15 @@ const attachedAtEnd = (
   if (trailing?.kind !== 'Whitespace' || lineBreaks(source, trailing) !== 1) return undefined
   index -= 1
   const last = leading[index]
-  if (last?.kind !== commentKind) return undefined
+  if (last?.kind !== commentKind || !startsLine(source, last)) return undefined
   const comments: Array<Token.Token> = [last]
   index -= 1
   while (index >= 1) {
     const whitespace = leading[index]
     const comment = leading[index - 1]
-    if (
-      whitespace?.kind !== 'Whitespace' ||
-      lineBreaks(source, whitespace) !== 1 ||
-      comment?.kind !== commentKind
-    )
-      break
+    if (whitespace?.kind !== 'Whitespace' || lineBreaks(source, whitespace) !== 1) break
+    if (comment?.kind !== commentKind) break
+    if (!startsLine(source, comment)) return undefined
     comments.unshift(comment)
     index -= 2
   }
@@ -127,18 +135,15 @@ const moduleAtStart = (
   leading: ReadonlyArray<Token.Token>,
 ): DocBlock | undefined => {
   const first = leading.at(0)
-  if (first?.kind !== 'ModuleDocComment') return undefined
+  if (first?.kind !== 'ModuleDocComment' || !startsLine(source, first)) return undefined
   const comments: Array<Token.Token> = [first]
   let index = 1
   while (index + 1 < leading.length) {
     const whitespace = leading[index]
     const comment = leading[index + 1]
-    if (
-      whitespace?.kind !== 'Whitespace' ||
-      lineBreaks(source, whitespace) !== 1 ||
-      comment?.kind !== 'ModuleDocComment'
-    )
-      break
+    if (whitespace?.kind !== 'Whitespace' || lineBreaks(source, whitespace) !== 1) break
+    if (comment?.kind !== 'ModuleDocComment') break
+    if (!startsLine(source, comment)) return undefined
     comments.push(comment)
     index += 2
   }

@@ -20,6 +20,7 @@ export interface CodeFence {
   readonly hasAuthoredCloser: boolean
   readonly body: string
   readonly containers: ReadonlyArray<Container>
+  readonly opening: CommonMark.SourceRange
   readonly source: CommonMark.SourceRange
 }
 
@@ -88,7 +89,7 @@ const fenceOf = (
   containers: ReadonlyArray<Container>,
   block: CompilerDocBlock.DocBlock,
   normalized: CommonMark.Normalized,
-): Result.Result<CodeFence, CodeFenceError> => {
+): Result.Result<CodeFence | undefined, CodeFenceError> => {
   const position = node.position
   const startOffset = position?.start.offset
   const startLineNumber = position?.start.line
@@ -119,15 +120,7 @@ const fenceOf = (
   const opening = normalized.markdown.slice(startOffset, openingLine.normalizedEnd)
   const match = /^(`{3,}|~{3,})(.*)$/.exec(opening)
   const rawDelimiter = match?.[1]
-  if (rawDelimiter === undefined)
-    return Result.fail(
-      invalid(
-        'CodeFence.all',
-        block.span.sourceId,
-        'CommonMark code node has no fenced opening line',
-        opening,
-      ),
-    )
+  if (rawDelimiter === undefined) return Result.succeed(undefined)
   const delimiter: CodeFence['delimiter'] = rawDelimiter[0] === '`' ? '`' : '~'
   const ending = normalized.markdown.slice(endingLine.normalizedStart, endingLine.normalizedEnd)
   const closingPattern = delimiter === '`' ? /`{3,}/g : /~{3,}/g
@@ -153,6 +146,11 @@ const fenceOf = (
     hasAuthoredCloser,
     body: node.value,
     containers: Object.freeze(Array.from(containers)),
+    opening: Object.freeze({
+      sourceId: block.span.sourceId,
+      start: normalized.offsets[startOffset] ?? block.span.start,
+      end: openingLine.comment.span.end,
+    }),
     source: CommonMark.sourceRange(block, normalized, position),
   })
   details.set(
@@ -185,7 +183,7 @@ const collect = (
       case 'code': {
         const made = fenceOf(node, fences.length, containers, block, normalized)
         if (Result.isFailure(made)) failure = made.failure
-        else fences.push(made.success)
+        else if (made.success !== undefined) fences.push(made.success)
         return
       }
       case 'blockquote':
@@ -223,6 +221,16 @@ export const all = Effect.fn('CodeFence.all')(function* (
 
 /** Tests whether a fence's case-sensitive CommonMark language word selects Silk formatting. */
 export const isActive = (self: CodeFence): boolean => self.language === 'silk'
+
+/** Tests the fence structure that must survive outer syntax-layout normalization. */
+export const hasSameStructure = (self: CodeFence, other: CodeFence): boolean =>
+  self.language === other.language &&
+  self.metadata === other.metadata &&
+  self.delimiter === other.delimiter &&
+  self.delimiterLength === other.delimiterLength &&
+  self.hasAuthoredCloser === other.hasAuthoredCloser &&
+  self.containers.length === other.containers.length &&
+  self.containers.every((container, index) => container === other.containers[index])
 
 const lineIndent = (source: SourceFile.SourceFile, commentStart: number): Uint8Array => {
   let start = commentStart

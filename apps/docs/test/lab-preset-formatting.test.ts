@@ -1,5 +1,7 @@
-import { Lexer, Parser, SourceFile } from '@silk-effect/compiler'
 import { assert, it } from '@effect/vitest'
+import * as Lexer from '@silk-effect/compiler/Lexer'
+import * as Parser from '@silk-effect/compiler/Parser'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as Formatter from '@silk-effect/formatter/Formatter'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'

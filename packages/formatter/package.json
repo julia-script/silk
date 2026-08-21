@@ -45,8 +45,8 @@
     "build": "pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
-    "stdlib:check": "node scripts/format-stdlib.mjs --check",
-    "stdlib:format": "node scripts/format-stdlib.mjs",
+    "stdlib:docs:check": "node scripts/format-stdlib-docs.mjs --check",
+    "stdlib:docs:format": "node scripts/format-stdlib-docs.mjs",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
@@ -56,6 +56,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.103",
     "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1"
   }

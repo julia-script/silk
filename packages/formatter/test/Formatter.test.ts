@@ -84,6 +84,27 @@ pub fn documented() -> i32 {
     assert.match(value, /const {2}value=1/)
     assert.match(value, /plain {2}text/)
     assert.match(value, /pub fn active\(\) -> i32 \{\n\/\/\/ {3}return 1/)
+
+    const trailing = `pub const prior:i32=1 /// \`\`\`silk
+/// pub fn injected()->i32{return 1}
+/// \`\`\`
+pub fn next()->i32{return 2}
+`
+    const trailingValue = text(
+      yield* Formatter.format(parse('memory://trailing-docs.silk', trailing)),
+    )
+    assert.match(trailingValue, /pub fn injected\(\)->i32\{return 1\}/)
+    assert.strictEqual(trailingValue.match(/pub const prior/g)?.length, 1)
+
+    const indented = `/// Example output:
+///
+///     not a fenced block
+pub fn indented()->i32{return 1}
+`
+    const indentedValue = text(
+      yield* Formatter.format(parse('memory://indented-code.silk', indented)),
+    )
+    assert.match(indentedValue, /\/\/\/ {5}not a fenced block/)
   }),
 )
 
@@ -197,8 +218,17 @@ pub fn documented() -> i32 { return 1 }
       Formatter.format(parse('memory://unclosed.silk', unclosed)),
     )
     assert.isTrue(Result.isFailure(malformed))
-    if (Result.isFailure(malformed))
+    if (Result.isFailure(malformed)) {
       assert.strictEqual(malformed.failure.reason._tag, 'MalformedActiveFence')
+      if (malformed.failure.reason._tag === 'MalformedActiveFence') {
+        const range = malformed.failure.reason.fence
+        const bytes = parse('memory://unclosed.silk', unclosed).source.bytes
+        assert.strictEqual(
+          decoder.decode(Uint8Array.from(bytes.slice(range.start, range.end))),
+          '```silk',
+        )
+      }
+    }
 
     const mixed = `/// \`\`\`silk
 /// pub fn first()->i32{return 1}

@@ -86,6 +86,24 @@ pub fn documented() -> i32 { return 1 }
   }),
 )
 
+it.effect('ignores indented CommonMark code while inventorying actual fences', () =>
+  Effect.gen(function* () {
+    const source = `/// Example output:
+///
+///     not a fenced block
+///
+/// \`\`\`typescript
+/// const value = 1
+/// \`\`\`
+pub fn documented() -> i32 { return 1 }
+`
+    const { syntax, block } = firstBlock('memory://indented.silk', source)
+    const fences = yield* CodeFence.all(syntax.source, block)
+    assert.strictEqual(fences.length, 1)
+    assert.strictEqual(fences[0]?.language, 'typescript')
+  }),
+)
+
 it.effect('rewrites selected raw blocks while preserving markers, fences, Unicode, and CRLF', () =>
   Effect.gen(function* () {
     const source = `/// Prose α.\r

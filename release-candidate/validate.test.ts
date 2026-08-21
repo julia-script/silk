@@ -964,6 +964,7 @@ test('the documentation release candidate exposes its formatter-neutral actors',
     expect(manifest.name).toBe('@silk-effect/documentation')
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@silk-effect/compiler',
+      'effect',
       'mdast-util-from-markdown',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([

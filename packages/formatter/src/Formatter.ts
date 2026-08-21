@@ -140,20 +140,6 @@ const withoutFinalNewline = (document: FormattedDocument.FormattedDocument): str
   return value.endsWith('\n') ? value.slice(0, -1) : value
 }
 
-const sameContainers = (
-  left: ReadonlyArray<CodeFence.Container>,
-  right: ReadonlyArray<CodeFence.Container>,
-): boolean =>
-  left.length === right.length && left.every((container, index) => container === right[index])
-
-const stableFence = (left: CodeFence.CodeFence, right: CodeFence.CodeFence): boolean =>
-  left.language === right.language &&
-  left.metadata === right.metadata &&
-  left.delimiter === right.delimiter &&
-  left.delimiterLength === right.delimiterLength &&
-  left.hasAuthoredCloser === right.hasAuthoredCloser &&
-  sameContainers(left.containers, right.containers)
-
 const join = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
   const size = parts.reduce((total, part) => total + part.length, 0)
   const output = new Uint8Array(size)
@@ -190,7 +176,7 @@ const formatInternal: (
       for (const fence of owner.fences) {
         if (!CodeFence.isActive(fence)) continue
         if (!fence.hasAuthoredCloser)
-          return yield* malformedFence(syntax.source.id, context, fence.source)
+          return yield* malformedFence(syntax.source.id, context, fence.opening)
         const nested = fenceContext(context, fence.source)
         const bodySyntax = parse(
           embeddedSource(syntax.source, blockOrdinal, fence.ordinal, fence.body),
@@ -230,7 +216,7 @@ const formatInternal: (
       if (
         originalFence === undefined ||
         destinationFence === undefined ||
-        !stableFence(originalFence, destinationFence)
+        !CodeFence.hasSameStructure(originalFence, destinationFence)
       )
         return yield* reconstructionFailure(
           syntax.source.id,

@@ -1445,25 +1445,25 @@ const printNode = (
 const changed = (source: ReadonlyArray<number>, formatted: Uint8Array): boolean =>
   source.length !== formatted.length || source.some((byte, index) => byte !== formatted[index])
 
-const validateFor = (
+const validateFor = Effect.fnUntraced(function* (
   syntax: SyntaxFile.SyntaxFile,
   operation: SyntaxFormatterError['operation'],
-): Effect.Effect<void, SyntaxFormatterError> => {
+): Effect.fn.Return<void, SyntaxFormatterError> {
   if (
     syntax.lexicalDiagnostics.length === 0 &&
     syntax.parserDiagnostics.length === 0 &&
     SyntaxTree.isAvailableSyntax(syntax.root)
   )
-    return Effect.void
+    return
   const diagnostics = Object.freeze([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics])
-  return new SyntaxFormatterError({
+  return yield* new SyntaxFormatterError({
     operation,
     sourceId: syntax.source.id,
     message: `Cannot format damaged Silk source ${syntax.source.id}`,
     diagnostics,
     reason: { _tag: 'DamagedSyntax' },
   })
-}
+})
 
 /** Validates that one complete syntax artifact can be formatted without source repair. */
 export const validate = Effect.fn('SyntaxFormatter.validate')(function* (

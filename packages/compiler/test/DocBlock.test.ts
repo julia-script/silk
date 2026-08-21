@@ -136,7 +136,10 @@ impl Read for Box<i32> {
 pub const answer: i32 = 42
 //! Nonleading module-like trivia.
 pub const next: i32 = 43
-pub const trailing: i32 = 44 /// Trailing docs.
+pub const trailing: i32 = 44 /// \`\`\`silk
+/// pub fn injected()->i32{return 1}
+/// \`\`\`
+pub const afterTrailing: i32 = 45
 `
   const syntax = parse(source)
   assert.deepEqual(

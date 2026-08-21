@@ -231,6 +231,9 @@ importers:
       '@silk-effect/compiler':
         specifier: workspace:*
         version: link:../compiler
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
       mdast-util-from-markdown:
         specifier: ^2.0.3
         version: 2.0.3
@@ -244,9 +247,6 @@ importers:
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.3
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
 
   packages/documentation-site:
     dependencies:
@@ -282,6 +282,9 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
     devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.103
+        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
