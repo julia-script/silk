@@ -117,10 +117,13 @@ export const toNumber = (value: Bits): number => {
   return view.getFloat64(0, true)
 }
 
+/** The single canonical quiet NaN bit pattern for the given width. */
+export const canonicalNaN = (width: 32 | 64): bigint =>
+  width === 32 ? 0x7fc00000n : 0x7ff8000000000000n
+
 /** Encodes a host arithmetic result, canonicalizing NaNs as required by Silk evaluation. */
 export const fromNumber = (value: number, width: 32 | 64): Bits => {
-  if (Number.isNaN(value))
-    return Object.freeze({ width, bits: width === 32 ? 0x7fc00000n : 0x7ff8000000000000n })
+  if (Number.isNaN(value)) return Object.freeze({ width, bits: canonicalNaN(width) })
   if (width === 32) {
     view.setFloat32(0, Math.fround(value), true)
     return Object.freeze({ width, bits: BigInt(view.getUint32(0, true)) })
@@ -183,18 +186,18 @@ const integerSquareRoot = (value: bigint): bigint => {
  */
 export const squareRoot = (value: Bits): Bits => {
   const spec = specification(value.width)
-  const canonicalNaN = value.width === 32 ? 0x7fc00000n : 0x7ff8000000000000n
+  const canonicalNaNValue = canonicalNaN(value.width)
   const exponentField =
     (value.bits >> BigInt(spec.precision - 1)) & ((1n << BigInt(spec.exponentBits)) - 1n)
   const fractionField = value.bits & ((1n << BigInt(spec.precision - 1)) - 1n)
   const negative = isSignNegative(value)
   if (exponentField === (1n << BigInt(spec.exponentBits)) - 1n)
     return fractionField !== 0n || negative
-      ? Object.freeze({ width: value.width, bits: canonicalNaN })
+      ? Object.freeze({ width: value.width, bits: canonicalNaNValue })
       : value
   // IEEE-754 keeps the sign of a zero root, so -0 squares back to -0.
   if (exponentField === 0n && fractionField === 0n) return value
-  if (negative) return Object.freeze({ width: value.width, bits: canonicalNaN })
+  if (negative) return Object.freeze({ width: value.width, bits: canonicalNaNValue })
 
   const significand =
     exponentField === 0n ? fractionField : fractionField | (1n << BigInt(spec.precision - 1))
