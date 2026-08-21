@@ -255,6 +255,16 @@ const collectQualifier = (
     return
   }
   const lookup = NameResolution.lookup(scope, index, spelling)
+  if (lookup._tag === 'Resolved') {
+    push(
+      pending,
+      token.span,
+      'Actor',
+      available(identityOfDeclaration(lookup.declaration)),
+      locationOfDeclaration(index, lookup.declaration),
+    )
+    return
+  }
   if (lookup._tag === 'Intrinsic') {
     const actor = Intrinsic.findActor(lookup.actor)
     push(

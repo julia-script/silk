@@ -906,7 +906,61 @@ export const signatureHelp = (
   }
 }
 
-/** Converts one semantic target into an exact snapshot-owned definition link. */
+interface ImportedModuleTarget {
+  readonly module: string
+  readonly span: SourceSpan.SourceSpan
+}
+
+/** Finds the resolved module named by an import path segment under the cursor. */
+const importedModuleAt = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  offset: number,
+): ImportedModuleTarget | undefined => {
+  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  if (syntax === undefined) return undefined
+  for (const declaration of SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')) {
+    const path = SyntaxTree.directNode(declaration, 'ImportPath')
+    if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) continue
+    const segments = ImportPath.segments(path)
+    const selected = segments.find(
+      (segment) => segment.span.start <= offset && offset < segment.span.end,
+    )
+    if (selected === undefined) continue
+    const spellings = segments.map((segment) => sourceText(syntax.source, segment))
+    if (spellings.some((spelling) => spelling === undefined)) return undefined
+    return {
+      module: spellings.join('/'),
+      span: selected.span,
+    }
+  }
+  return undefined
+}
+
+/** Converts one module-path target into a link to the imported source file. */
+const importedModuleDefinition = (
+  self: Document,
+  snapshot: Analysis.FrontendSnapshot,
+  target: ImportedModuleTarget,
+  uriOf: (module: string) => string | undefined,
+): LocationLink | undefined => {
+  const uri = uriOf(target.module)
+  const source = Analysis.sources(snapshot).get(target.module)
+  if (uri === undefined || source === undefined) return undefined
+  const targetIndex = LineIndex.make(SourceFile.toUint8Array(source))
+  const start = { line: 0, character: 0 }
+  return {
+    originSelectionRange: LineIndex.rangeOf(self.index, target.span),
+    targetUri: uri,
+    targetRange: {
+      start,
+      end: LineIndex.positionOf(targetIndex, SourceFile.length(source)),
+    },
+    targetSelectionRange: { start, end: start },
+  }
+}
+
+/** Converts one semantic or imported-module target into an exact snapshot-owned definition link. */
 export const definition = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
@@ -914,6 +968,9 @@ export const definition = (
   uriOf: (module: string) => string | undefined,
 ): LocationLink | undefined => {
   const offset = LineIndex.offsetOf(self.index, position)
+  const importedModule = importedModuleAt(self, snapshot, offset)
+  if (importedModule !== undefined)
+    return importedModuleDefinition(self, snapshot, importedModule, uriOf)
   const occurrence = Analysis.semanticOccurrenceAt(snapshot, self.module, offset)
   if (occurrence?.resolution._tag !== 'Available' || occurrence.declaration === undefined)
     return undefined

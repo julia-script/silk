@@ -49,13 +49,20 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
       assert.strictEqual(actor?.role, 'Actor')
       assert.strictEqual(operation?.role, 'Value')
       assert.isDefined(binding?.declaration)
-      assert.isUndefined(actor?.declaration)
+      assert.strictEqual(actor?.resolution._tag, 'Available')
+      assert.isDefined(actor?.declaration)
       assert.isDefined(operation?.declaration)
       assert.strictEqual(
         binding === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', binding)?.text,
         'let mut allocator: SystemAllocator',
+      )
+      assert.strictEqual(
+        actor === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(snapshot, 'main', actor)?.text,
+        'pub struct SystemAllocator',
       )
       assert.strictEqual(
         operation === undefined

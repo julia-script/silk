@@ -559,6 +559,68 @@ pub fn main() -> i32 { return identity(42) }`
   }),
 )
 
+it.effect('navigates imported module paths', () =>
+  Effect.gen(function* () {
+    const source = `import silk.vector { Vector }
+import silk.effect as Effect`
+    const { document, snapshot } = yield* open(source)
+    const definitionAt = (spelling: string, occurrence = 0) =>
+      Document.definition(document, snapshot, positionOf(source, spelling, occurrence), uriOfModule)
+
+    assert.strictEqual(definitionAt('vector')?.targetUri, uriOfModule('silk/vector'))
+    assert.strictEqual(definitionAt('effect')?.targetUri, uriOfModule('silk/effect'))
+    assert.strictEqual(definitionAt('silk')?.targetUri, uriOfModule('silk/vector'))
+    assert.strictEqual(definitionAt('silk', 1)?.targetUri, uriOfModule('silk/effect'))
+  }),
+)
+
+it.effect('navigates higher-order callable references to their declaration', () =>
+  Effect.gen(function* () {
+    const source = `import silk.vector {Vector}
+import silk.effect as Effect
+
+fn identity(value: Vector<i32>) -> Vector<i32> {
+  return move value
+}
+
+pub fn main() -> () {
+  let value = Vector.make<i32>()
+  drop Effect.of(move value)
+    |> Effect.map(identity)
+}`
+    const { document, snapshot } = yield* open(source)
+    const definitionAt = (occurrence: number) =>
+      Document.definition(
+        document,
+        snapshot,
+        positionOf(source, 'identity', occurrence),
+        uriOfModule,
+      )
+
+    assert.deepEqual(definitionAt(0)?.targetSelectionRange.start, {
+      line: 3,
+      character: 3,
+    })
+    assert.deepEqual(definitionAt(1)?.targetSelectionRange.start, {
+      line: 3,
+      character: 3,
+    })
+
+    const vectorQualifier = positionOf(source, 'Vector', 3)
+    assert.strictEqual(
+      Document.definition(document, snapshot, vectorQualifier, uriOfModule)?.targetUri,
+      uriOfModule('silk/vector'),
+    )
+    const vectorHover = Document.hover(document, snapshot, vectorQualifier)
+    assert.include(
+      typeof vectorHover?.contents === 'object' && 'value' in vectorHover.contents
+        ? vectorHover.contents.value
+        : '',
+      'struct Vector<T>',
+    )
+  }),
+)
+
 it.effect('navigates local declaration names but not library imports', () =>
   Effect.gen(function* () {
     const source = `import silk.core { SystemAllocator }
