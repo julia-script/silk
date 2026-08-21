@@ -1,5 +1,5 @@
-import { alignUp } from './internal/Align.js'
 import * as Instances from './Instances.js'
+import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import * as SilkType from './Type.js'

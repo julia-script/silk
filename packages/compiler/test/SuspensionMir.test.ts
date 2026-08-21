@@ -96,7 +96,6 @@ it.effect(
         relay.relay.state?.slots.map((slot) => slot.local.ordinal),
         relay.liveLocals.map((local) => local.ordinal),
       )
-
     }),
 )
 

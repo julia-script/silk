@@ -1,9 +1,9 @@
-import { alignUp } from './internal/Align.js'
 import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import { alignUp } from './internal/Align.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -495,7 +495,6 @@ const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
     representation,
   })
 }
-
 
 const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined => {
   const stride = alignUp(element.size, element.alignment)

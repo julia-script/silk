@@ -1,4 +1,3 @@
-import { alignUp } from './internal/Align.js'
 import * as Binary from '@silk-effect/wasm/Binary'
 import * as Builder from '@silk-effect/wasm/Builder'
 import * as Data from '@silk-effect/wasm/Data'
@@ -18,6 +17,7 @@ import { symbolFor } from './Backend.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Instances from './Instances.js'
+import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -225,7 +225,6 @@ const laneStoreMnemonic = (
   if (bits === 8) return 'i32.store8'
   return 'i32.store'
 }
-
 
 interface FrameRoot {
   readonly local: number

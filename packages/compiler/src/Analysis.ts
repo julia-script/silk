@@ -11,7 +11,7 @@ import * as Completion from './Completion.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
-import * as Elaboration from './Elaboration.js'
+import type * as Elaboration from './Elaboration.js'
 import * as FrontendTooling from './FrontendTooling.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
@@ -732,8 +732,7 @@ export const expressionsOf = (
   Object.freeze(
     self.results
       .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ??
-      [],
+      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ?? [],
   )
 
 /** Returns every retained semantic match with source patterns and canonical coverage facts. */

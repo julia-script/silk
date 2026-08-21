@@ -10,7 +10,10 @@ import * as SemanticOccurrence from './SemanticOccurrence.js'
 export interface FrontendTooling {
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticOccurrences: SemanticOccurrence.Index
-  readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<ModuleTooling.AnonymousExpression>>
+  readonly anonymousExpressions: ReadonlyMap<
+    string,
+    ReadonlyArray<ModuleTooling.AnonymousExpression>
+  >
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 
