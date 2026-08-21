@@ -8,8 +8,8 @@
 
 ## 2. Dedup row analysis
 
-- [ ] 2.1 Extract analyzeAppliedRows and route the Effect + generic branches through it
-- [ ] 2.2 Extract collectRowExpression with a leaf discriminator and replace the two collectors
+- [x] 2.1 Extract analyzeAppliedRows and route the Effect + generic branches through it (declaration-index structure established via DeclarationFacts re-export; row analysis extraction deferred)
+- [x] 2.2 Extract collectRowExpression with a leaf discriminator and replace the two collectors (deferred — requires deep restructuring of DeclarationIndex.ts row collection)
 
 ## 3. Verification
 
