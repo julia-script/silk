@@ -9,14 +9,15 @@ import {
   connect,
   didOpen,
   failure,
-  publishedDiagnosticReport,
-  publishedDiagnostics,
+  pulledDiagnosticReport,
+  pulledDiagnostics,
   response,
 } from './StdioClient.js'
 
 const controlledBinPath = fileURLToPath(
   new URL('./fixtures/controlled-server.mjs', import.meta.url),
 )
+const wedgedBinPath = fileURLToPath(new URL('./fixtures/wedged-server.mjs', import.meta.url))
 
 it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_000 }, async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
@@ -53,14 +54,14 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
 
     const brokenUri = 'file:///silk-lsp-e2e/broken.silk'
     didOpen(client, brokenUri, 'pub fn main() -> i32 { return missing() }')
-    const diagnostics = await client.waitFor((message) => publishedDiagnostics(message, brokenUri))
+    const diagnostics = await client.waitFor((message) => pulledDiagnostics(message, brokenUri))
     assert.strictEqual(diagnostics.length, 1)
     assert.strictEqual(diagnostics[0]?.code, 'SEM0004')
 
     const hoverUri = 'file:///silk-lsp-e2e/hover.silk'
     const hoverText = 'pub fn main() -> i32 { return 42 }'
     didOpen(client, hoverUri, hoverText)
-    await client.waitFor((message) => publishedDiagnostics(message, hoverUri))
+    await client.waitFor((message) => pulledDiagnostics(message, hoverUri))
     client.send({
       id: 2,
       method: 'textDocument/hover',
@@ -76,7 +77,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
 
     const formatUri = 'file:///silk-lsp-e2e/format.silk'
     didOpen(client, formatUri, 'pub fn main() -> i32 { return   7 }')
-    await client.waitFor((message) => publishedDiagnostics(message, formatUri))
+    await client.waitFor((message) => pulledDiagnostics(message, formatUri))
     client.send({
       id: 3,
       method: 'textDocument/formatting',
@@ -99,7 +100,7 @@ pub fn main() -> i32 {
   return 0
 }`
     didOpen(client, hintUri, hintText)
-    await client.waitFor((message) => publishedDiagnostics(message, hintUri))
+    await client.waitFor((message) => pulledDiagnostics(message, hintUri))
     client.send({
       id: 4,
       method: 'textDocument/inlayHint',
@@ -123,7 +124,7 @@ pub fn main() -> i32 {
   return Effect.
 }`
     didOpen(client, completionUri, completionText)
-    await client.waitFor((message) => publishedDiagnostics(message, completionUri))
+    await client.waitFor((message) => pulledDiagnostics(message, completionUri))
     client.send({
       id: 5,
       method: 'textDocument/completion',
@@ -143,6 +144,224 @@ pub fn main() -> i32 {
       completion.items.find((item) => item.label === 'catch')?.detail ?? '',
       'pub effect fn catch',
     )
+  } finally {
+    await client.close()
+  }
+})
+
+it('uses pull diagnostics, stable result ids, and the synchronous acceptance barrier', {
+  timeout: 30_000,
+}, async () => {
+  const client = connect()
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    const uri = 'file:///silk-lsp-e2e/pull/Main.silk'
+    didOpen(client, uri, 'pub fn main() -> i32 { return missing() }')
+    await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.diagnostics.length === 1 ? report : undefined
+    })
+
+    client.send({
+      id: 20,
+      method: 'silk/acceptedSourceVersions',
+      params: { entries: [{ uri, version: 1 }] },
+    })
+    assert.deepEqual(await client.waitFor((message) => response(message, 20)), { accepted: true })
+
+    client.send({
+      id: 21,
+      method: 'textDocument/diagnostic',
+      params: { textDocument: { uri } },
+    })
+    const full = (await client.waitFor((message) => response(message, 21))) as {
+      kind: string
+      resultId: string
+      items: ReadonlyArray<unknown>
+    }
+    assert.strictEqual(full.kind, 'full')
+    assert.strictEqual(full.items.length, 1)
+    client.send({
+      id: 22,
+      method: 'textDocument/diagnostic',
+      params: { textDocument: { uri }, previousResultId: full.resultId },
+    })
+    assert.deepEqual(await client.waitFor((message) => response(message, 22)), {
+      kind: 'unchanged',
+      resultId: full.resultId,
+    })
+    assert.isFalse(
+      client.messages.some((message) => message.method === 'textDocument/publishDiagnostics'),
+    )
+  } finally {
+    await client.close()
+  }
+})
+
+it('cancels a same-document request while its exact revision is pending', async () => {
+  const client = connect(controlledBinPath)
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    const uri = 'file:///silk-lsp-e2e/cancel/Main.silk'
+    const baseline = 'pub fn main() -> i32 { return 1 }'
+    didOpen(client, uri, baseline)
+    await client.waitFor((message) => pulledDiagnosticReport(message, uri))
+
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 2 },
+        contentChanges: [{ text: 'pub fn main() -> i32 { return 2 }' }],
+      },
+    })
+    client.send({
+      id: 30,
+      method: 'textDocument/hover',
+      params: {
+        textDocument: { uri },
+        position: { line: 0, character: baseline.indexOf('1') },
+      },
+    })
+    client.send({ method: '$/cancelRequest', params: { id: 30 } })
+    assert.strictEqual(await client.waitFor((message) => response(message, 30)), null)
+    await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.version === 2 ? report : undefined
+    })
+    assert.strictEqual(
+      client.messages.filter((message) => message.id === 30 && 'result' in message).length,
+      1,
+    )
+  } finally {
+    await client.close()
+  }
+})
+
+it('pulls only the final diagnostics through effects to valid repair', {
+  timeout: 30_000,
+}, async () => {
+  const client = connect(controlledBinPath)
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    const uri = 'file:///silk-lsp-e2e/repair/Main.silk'
+    const source = (line: string) => `fn outer() -> Effect<i32> {
+  let n = 123
+  return effect { return n }
+}
+pub fn main() -> i32 {
+${line}
+  return run outer()
+}`
+    didOpen(client, uri, source(''))
+    await client.waitFor((message) => pulledDiagnosticReport(message, uri))
+    const marker = client.messages.length
+    let version = 1
+    for (const line of ['  effects', '  effec', '  Effect.', '']) {
+      version += 1
+      client.send({
+        method: 'textDocument/didChange',
+        params: {
+          textDocument: { uri, version },
+          contentChanges: [{ text: source(line) }],
+        },
+      })
+    }
+    const final = await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.version === version ? report : undefined
+    })
+    assert.deepEqual(final.diagnostics, [])
+    const applied = client.messages.slice(marker).flatMap((message) => {
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.version === undefined ? [] : [report.version]
+    })
+    assert.deepEqual(applied, [version])
+  } finally {
+    await client.close()
+  }
+})
+
+it('answers a healthy project and replaces a non-cooperative project worker', {
+  timeout: 30_000,
+}, async () => {
+  const client = connect(wedgedBinPath)
+  try {
+    client.send({
+      id: 1,
+      method: 'initialize',
+      params: { processId: null, rootUri: null, capabilities: {} },
+    })
+    await client.waitFor((message) => response(message, 1))
+    client.send({ method: 'initialized', params: {} })
+    const wedgedUri = 'file:///silk-lsp-e2e/wedged/Main.silk'
+    const healthyUri = 'file:///silk-lsp-e2e/healthy/Main.silk'
+    didOpen(client, wedgedUri, 'pub fn main() -> i32 { return 1 }')
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    didOpen(client, healthyUri, 'pub fn main() -> i32 { return 42 }')
+    await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, healthyUri)
+      return report?.diagnostics.length === 0 ? report : undefined
+    })
+    client.send({
+      id: 40,
+      method: 'textDocument/hover',
+      params: {
+        textDocument: { uri: healthyUri },
+        position: { line: 0, character: 'pub fn main() -> i32 { return '.length },
+      },
+    })
+    const healthy = (await client.waitFor((message) => response(message, 40))) as {
+      contents: { value: string }
+    } | null
+    assert.isNotNull(healthy, JSON.stringify(client.messages))
+    if (healthy === null) throw new Error('expected healthy hover')
+    assert.include(healthy.contents.value, 'i32')
+    const healthyIndex = client.messages.findIndex((message) => message.id === 40)
+
+    const failureMessage = await client.waitFor((message) =>
+      message.method === 'window/logMessage' && JSON.stringify(message.params).includes('incident')
+        ? message
+        : undefined,
+    )
+    const failureIndex = client.messages.indexOf(failureMessage)
+    assert.isBelow(healthyIndex, failureIndex)
+    await client.waitFor((message) => {
+      if (client.messages.indexOf(message) <= failureIndex) return undefined
+      return message.method === 'silk/inspectorInvalidated' &&
+        JSON.stringify(message.params).includes(wedgedUri)
+        ? message
+        : undefined
+    })
+    client.send({
+      id: 41,
+      method: 'textDocument/hover',
+      params: {
+        textDocument: { uri: wedgedUri },
+        position: { line: 0, character: 'pub fn main() -> i32 { return '.length },
+      },
+    })
+    const recovered = (await client.waitFor((message) => response(message, 41))) as {
+      contents: { value: string }
+    }
+    assert.include(recovered.contents.value, 'i32')
   } finally {
     await client.close()
   }
@@ -168,14 +387,14 @@ it('keeps a committed project live while another project accepts rapid slow edit
 }`
     didOpen(client, readyUri, readyText)
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, readyUri)
+      const report = pulledDiagnosticReport(message, readyUri)
       return report?.version === 1 ? report : undefined
     })
 
     const slowUri = 'file:///silk-lsp-e2e/slow/Main.silk'
     didOpen(client, slowUri, 'pub fn main() -> i32 { return 1 }')
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, slowUri)
+      const report = pulledDiagnosticReport(message, slowUri)
       return report?.version === 1 ? report : undefined
     })
 
@@ -202,7 +421,7 @@ it('keeps a committed project live while another project accepts rapid slow edit
     assert.include(hover.contents.value, 'i32')
     const hoverIndex = client.messages.findIndex((message) => response(message, 2) !== undefined)
     const slowTwoIndex = client.messages.findIndex((message) => {
-      const report = publishedDiagnosticReport(message, slowUri)
+      const report = pulledDiagnosticReport(message, slowUri)
       return report?.version === 2
     })
     assert.isAtLeast(hoverIndex, marker)
@@ -233,11 +452,11 @@ it('keeps a committed project live while another project accepts rapid slow edit
       [': i32'],
     )
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, slowUri)
+      const report = pulledDiagnosticReport(message, slowUri)
       return report?.version === 5 ? report : undefined
     })
     const rapidReports = client.messages.slice(marker).flatMap((message) => {
-      const report = publishedDiagnosticReport(message, slowUri)
+      const report = pulledDiagnosticReport(message, slowUri)
       return report?.version === undefined ? [] : [report.version]
     })
     assert.deepEqual(rapidReports, [5])
@@ -261,37 +480,55 @@ it('clears a failed version, recovers on the next edit, and shuts down after the
     client.send({ method: 'initialized', params: {} })
 
     const uri = 'file:///silk-lsp-e2e/failure/Main.silk'
-    didOpen(client, uri, '// LSP_TEST_DEFECT\npub fn main() -> i32 { return 1 }')
-    const failed = await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, uri)
+    didOpen(client, uri, 'pub fn main() -> i32 { return missing() }')
+    const baseline = await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, uri)
       return report?.version === 1 ? report : undefined
     })
-    assert.deepEqual(failed.diagnostics, [])
-    await client.waitFor((message) =>
-      message.method === 'window/logMessage' &&
-      JSON.stringify(message.params).includes('controlled LSP analysis defect')
-        ? message
-        : undefined,
+    assert.deepEqual(
+      baseline.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0004'],
     )
 
     client.send({
       method: 'textDocument/didChange',
       params: {
         textDocument: { uri, version: 2 },
-        contentChanges: [{ text: 'pub fn main() -> i32 { return missing() }' }],
+        contentChanges: [{ text: '// LSP_TEST_DEFECT\npub fn main() -> i32 { return 1 }' }],
+      },
+    })
+    const failed = await client.waitFor((message) => {
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.version === 2 ? report : undefined
+    })
+    assert.deepEqual(failed.diagnostics, [])
+    await client.waitFor((message) =>
+      message.method === 'window/logMessage' && JSON.stringify(message.params).includes('incident')
+        ? message
+        : undefined,
+    )
+    client.send({
+      id: 4,
+      method: 'textDocument/hover',
+      params: { textDocument: { uri }, position: { line: 1, character: 30 } },
+    })
+    assert.strictEqual(await client.waitFor((message) => response(message, 4)), null)
+
+    client.send({
+      method: 'textDocument/didChange',
+      params: {
+        textDocument: { uri, version: 3 },
+        contentChanges: [{ text: 'pub fn main() -> i32 { return 1 }' }],
       },
     })
     const recovered = await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, uri)
-      return report?.version === 2 ? report : undefined
+      const report = pulledDiagnosticReport(message, uri)
+      return report?.version === 3 ? report : undefined
     })
-    assert.deepEqual(
-      recovered.diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0004'],
-    )
+    assert.deepEqual(recovered.diagnostics, [])
 
-    client.send({ id: 4, method: 'shutdown' })
-    await client.waitFor((message) => response(message, 4))
+    client.send({ id: 5, method: 'shutdown' })
+    await client.waitFor((message) => response(message, 5))
     const exit = new Promise<void>((resolve) => client.child.once('exit', () => resolve()))
     client.send({ method: 'exit' })
     await exit
@@ -377,7 +614,7 @@ pub fn main() -> i32 { return identity(42) }`,
       },
     })
     const report = await client.waitFor((message) => {
-      const candidate = publishedDiagnosticReport(message, uri)
+      const candidate = pulledDiagnosticReport(message, uri)
       return candidate?.version === 2 ? candidate : undefined
     })
     assert.deepEqual(report.diagnostics, [])
@@ -427,7 +664,7 @@ pub fn main() -> i32 {
       },
     })
     await client.waitFor((message) => {
-      const candidate = publishedDiagnosticReport(message, uri)
+      const candidate = pulledDiagnosticReport(message, uri)
       return candidate?.version === 3 ? candidate : undefined
     })
 
@@ -481,7 +718,7 @@ pub fn main() -> i32 {
       params: { textDocument: { uri } },
     })
     const cleared = await client.waitFor((message) => {
-      const candidate = publishedDiagnosticReport(message, uri)
+      const candidate = pulledDiagnosticReport(message, uri)
       return candidate !== undefined &&
         candidate.version === undefined &&
         candidate.diagnostics.length === 0
@@ -508,13 +745,13 @@ it('refreshes sibling documents when an imported module changes', { timeout: 30_
     const mainUri = 'file:///silk-lsp-e2e/multi/Main.silk'
     const utilUri = 'file:///silk-lsp-e2e/multi/Util.silk'
     didOpen(client, mainUri, 'import Util\npub fn main() -> i32 { return Util.answer() }')
-    const alone = await client.waitFor((message) => publishedDiagnostics(message, mainUri))
+    const alone = await client.waitFor((message) => pulledDiagnostics(message, mainUri))
     assert.strictEqual(alone[0]?.code, 'MOD0001')
 
     // Opening Util resolves the import through the overlay, so Main must republish clean.
     didOpen(client, utilUri, 'pub fn answer() -> i32 { return 7 }')
     await client.waitFor((message) => {
-      const diagnostics = publishedDiagnostics(message, mainUri)
+      const diagnostics = pulledDiagnostics(message, mainUri)
       return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
     })
 
@@ -527,7 +764,7 @@ it('refreshes sibling documents when an imported module changes', { timeout: 30_
       },
     })
     const broken = await client.waitFor((message) => {
-      const diagnostics = publishedDiagnostics(message, mainUri)
+      const diagnostics = pulledDiagnostics(message, mainUri)
       return diagnostics?.some((diagnostic) => String(diagnostic.code).startsWith('SEM'))
         ? diagnostics
         : undefined
@@ -566,7 +803,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     client.send({ method: 'initialized', params: {} })
     didOpen(client, mainUri, mainText)
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.version === 1 && report.diagnostics.length === 0 ? report : undefined
     })
 
@@ -589,9 +826,11 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     assert.strictEqual(closed[0]?.targetUri, utilUri)
     assert.strictEqual(closed[0]?.targetSelectionRange.start.line, 0)
 
+    const overlayMarker = client.messages.length
     didOpen(client, utilUri, '\npub fn answer() -> i32 { return 8 }')
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, mainUri)
+      if (client.messages.indexOf(message) < overlayMarker) return undefined
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.diagnostics.length === 0 ? report : undefined
     })
     const unsaved = await requestDefinition(3)
@@ -605,7 +844,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
     const staleDiskDiagnostics = client.messages.flatMap((message) => {
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report === undefined ? [] : report.diagnostics
     })
     assert.isFalse(staleDiskDiagnostics.some((diagnostic) => diagnostic.code === 'SEM0014'))
@@ -620,7 +859,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
       params: { changes: [{ uri: utilUri, type: 2 }] },
     })
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0014')
         ? report
         : undefined
@@ -634,7 +873,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     })
     await client.waitFor((message) => {
       if (client.messages.indexOf(message) < nextMessage) return undefined
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.diagnostics.length === 0 ? report : undefined
     })
 
@@ -653,14 +892,14 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     })
     await client.waitFor((message) => {
       if (client.messages.indexOf(message) < nextMessage) return undefined
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.diagnostics.some((diagnostic) => diagnostic.code === 'SEM0014')
         ? report
         : undefined
     })
 
     const reportsBeforeUnrelated = client.messages.filter(
-      (message) => publishedDiagnosticReport(message, mainUri) !== undefined,
+      (message) => pulledDiagnosticReport(message, mainUri) !== undefined,
     ).length
     client.send({
       method: 'workspace/didChangeWatchedFiles',
@@ -670,7 +909,7 @@ it('navigates to closed and unsaved cross-file targets and invalidates disk depe
     })
     await new Promise((resolve) => setTimeout(resolve, 100))
     const reportsAfterUnrelated = client.messages.filter(
-      (message) => publishedDiagnosticReport(message, mainUri) !== undefined,
+      (message) => pulledDiagnosticReport(message, mainUri) !== undefined,
     ).length
     assert.strictEqual(reportsAfterUnrelated, reportsBeforeUnrelated)
   } finally {
@@ -701,7 +940,7 @@ it('serves project-wide references and renames over real stdio', { timeout: 30_0
     didOpen(client, geometryUri, geometryText)
     didOpen(client, mainUri, mainText)
     await client.waitFor((message) => {
-      const diagnostics = publishedDiagnostics(message, mainUri)
+      const diagnostics = pulledDiagnostics(message, mainUri)
       return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
     })
 
@@ -764,7 +1003,7 @@ it('serves project-wide references and renames over real stdio', { timeout: 30_0
       'import silk.bool { equals }\npub fn same() -> bool { return equals(true, true) }'
     didOpen(client, toolchainUri, toolchainText)
     await client.waitFor((message) => {
-      const diagnostics = publishedDiagnostics(message, toolchainUri)
+      const diagnostics = pulledDiagnostics(message, toolchainUri)
       return diagnostics !== undefined && diagnostics.length === 0 ? diagnostics : undefined
     })
     const imported = { line: 0, character: toolchainText.indexOf('equals') }
@@ -825,7 +1064,7 @@ it('offers a diagnostic edit as a quick fix over real stdio', { timeout: 30_000 
     didOpen(client, geometryUri, 'pub fn area() -> i32 { return 1 }')
     didOpen(client, mainUri, mainText)
     const diagnostics = await client.waitFor((message) => {
-      const published = publishedDiagnostics(message, mainUri)
+      const published = pulledDiagnostics(message, mainUri)
       return published !== undefined && published.length === 1 ? published : undefined
     })
     assert.strictEqual(diagnostics[0]?.code, 'LSP0002')
@@ -887,7 +1126,7 @@ it('discovers, resolves, and rejects stale auto-import actions over real stdio',
     await client.waitFor((message) => response(message, 1))
     client.send({ method: 'initialized', params: {} })
     didOpen(client, mainUri, mainText)
-    await client.waitFor((message) => publishedDiagnostics(message, mainUri))
+    await client.waitFor((message) => pulledDiagnostics(message, mainUri))
 
     client.send({
       id: 2,
@@ -936,7 +1175,7 @@ it('discovers, resolves, and rejects stale auto-import actions over real stdio',
       },
     })
     await client.waitFor((message) => {
-      const report = publishedDiagnosticReport(message, mainUri)
+      const report = pulledDiagnosticReport(message, mainUri)
       return report?.version === 2 ? report : undefined
     })
     client.send({ id: 4, method: 'codeAction/resolve', params: selected })
@@ -974,7 +1213,7 @@ it('resolves a standard-library auto-import using Silk source-path spelling', {
     await client.waitFor((message) => response(message, 1))
     client.send({ method: 'initialized', params: {} })
     didOpen(client, mainUri, mainText)
-    await client.waitFor((message) => publishedDiagnostics(message, mainUri))
+    await client.waitFor((message) => pulledDiagnostics(message, mainUri))
 
     client.send({
       id: 2,

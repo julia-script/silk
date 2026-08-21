@@ -1,36 +1,58 @@
 /**
- * The extension is a thin launcher: it forks the `@silk-effect/lsp` stdio server for `.silk`
- * documents and hands everything else to `vscode-languageclient`. All language behavior lives
- * in the server, so this file should never grow feature logic.
+ * The extension is a thin launcher: the editor session owns the `@silk-effect/lsp` process and
+ * hands its detached stdio transport to `vscode-languageclient`. All language behavior lives in
+ * the server, so this file should never grow feature logic.
  */
 
 import * as vscode from 'vscode'
-import { LanguageClient, TransportKind } from 'vscode-languageclient/node'
-import { registerInspector } from './inspector'
+import { type InspectorSession, registerInspector } from './inspector'
 
-const createLifecycle = async (serverModule: string) => {
-  const api = await import('./LanguageClientLifecycle.mjs')
-  const owned = api.make(
-    () =>
-      new LanguageClient(
-        'silk',
-        'Silk Language Server',
-        {
-          run: { module: serverModule, transport: TransportKind.stdio },
-          debug: { module: serverModule, transport: TransportKind.stdio },
-        },
-        {
-          documentSelector: [{ language: 'silk' }],
-        },
+const createSession = async (serverModule: string) => {
+  const [api, clientApi, processApi, Effect] = await Promise.all([
+    import('./EditorSession.mjs'),
+    import('./EditorClient.mjs'),
+    import('./ServerProcess.mjs'),
+    import('effect/Effect'),
+  ])
+  const owned = api.make({
+    currentDocuments: () =>
+      vscode.workspace.textDocuments
+        .filter((document) => document.languageId === 'silk')
+        .map((document) => ({ uri: document.uri.toString(), version: document.version })),
+    construct: (generation, gate) =>
+      processApi.make({ module: serverModule }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new api.EditorSessionError({
+              operation: 'construct',
+              message: `Could not construct language-server generation ${generation}`,
+              cause,
+            }),
+        ),
+        Effect.map((process) => ({
+          client: clientApi.make({ process, gate }),
+          process: {
+            awaitExit: process.awaitExit,
+            terminate: process.terminate.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new api.EditorSessionError({
+                    operation: 'retire',
+                    message: `Could not retire language-server generation ${generation}`,
+                    cause,
+                  }),
+              ),
+            ),
+          },
+        })),
       ),
-  )
+  })
   return { api, owned }
 }
 
-type LoadedLifecycle = Awaited<ReturnType<typeof createLifecycle>>
+type LoadedSession = Awaited<ReturnType<typeof createSession>>
 
-let lifecycle: Promise<LoadedLifecycle> | undefined
-let inspectorClient: LanguageClient | undefined
+let session: Promise<LoadedSession> | undefined
 
 const reportLifecycleFailure = (operation: string, error: unknown): void => {
   void vscode.window.showErrorMessage(`Silk language server ${operation} failed: ${String(error)}`)
@@ -38,24 +60,55 @@ const reportLifecycleFailure = (operation: string, error: unknown): void => {
 
 export function activate(context: vscode.ExtensionContext): void {
   const serverModule = require.resolve('@silk-effect/lsp/bin')
-  lifecycle = createLifecycle(serverModule)
-  const owned = lifecycle
+  session = createSession(serverModule)
+  const owned = session
   context.subscriptions.push(
     vscode.commands.registerCommand('silk.restartLanguageServer', async () => {
       try {
         const loaded = await owned
         await loaded.api.runRestart(loaded.owned)
-        inspectorClient = loaded.api.current(loaded.owned)
       } catch (error) {
         reportLifecycleFailure('restart', error)
       }
     }),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      if (event.document.languageId !== 'silk') return
+      void owned.then((loaded) =>
+        loaded.api.documentChanged(loaded.owned, {
+          uri: event.document.uri.toString(),
+          version: event.document.version,
+        }),
+      )
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      if (document.languageId !== 'silk') return
+      void owned.then((loaded) => loaded.api.documentClosed(loaded.owned, document.uri.toString()))
+    }),
   )
-  registerInspector(context, () => inspectorClient)
+  const inspectorSession: InspectorSession = {
+    request: async <A>(method: string, parameters?: unknown) => {
+      const loaded = await owned
+      return loaded.api.runRequest<A>(loaded.owned, method, parameters)
+    },
+    onInvalidation: (listener) => {
+      let disposed = false
+      let binding: { readonly dispose: () => void } | undefined
+      void owned.then((loaded) => {
+        if (disposed) return
+        binding = loaded.api.onInvalidation(loaded.owned, listener)
+      })
+      return {
+        dispose: () => {
+          disposed = true
+          binding?.dispose()
+        },
+      }
+    },
+  }
+  registerInspector(context, inspectorSession)
   void owned.then(async (loaded) => {
     try {
       await loaded.api.runStart(loaded.owned)
-      inspectorClient = loaded.api.current(loaded.owned)
     } catch (error) {
       reportLifecycleFailure('start', error)
     }
@@ -63,9 +116,8 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): Thenable<void> | undefined {
-  const owned = lifecycle
-  lifecycle = undefined
-  inspectorClient = undefined
+  const owned = session
+  session = undefined
   if (owned === undefined) return undefined
   return owned.then(async (loaded) => {
     try {

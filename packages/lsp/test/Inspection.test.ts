@@ -1,14 +1,7 @@
 import { existsSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Inspection from '../src/Inspection.js'
-import {
-  binPath,
-  connect,
-  didOpen,
-  failure,
-  publishedDiagnostics,
-  response,
-} from './StdioClient.js'
+import { binPath, connect, didOpen, failure, pulledDiagnostics, response } from './StdioClient.js'
 
 interface ViewResult {
   readonly rows: ReadonlyArray<{
@@ -39,7 +32,7 @@ it('projects inspector views over real stdio', { timeout: 30_000 }, async () => 
     const text = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`
     didOpen(client, uri, text)
-    await client.waitFor((message) => publishedDiagnostics(message, uri))
+    await client.waitFor((message) => pulledDiagnostics(message, uri))
 
     // The registry list is served for CJS clients that cannot import the ESM registry.
     client.send({ id: 9, method: Inspection.viewsRequest, params: {} })

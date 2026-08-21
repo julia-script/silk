@@ -17,7 +17,7 @@ import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import type { Fact, RowModel } from '@silk-effect/inspector'
 import { viewById, views } from '@silk-effect/inspector'
 import * as Effect from 'effect/Effect'
-import type * as ProjectSession from './ProjectSession.js'
+import type * as ProjectSnapshot from './ProjectSnapshot.js'
 
 /** The custom request an editor client sends to project one inspector view. */
 export const viewRequest = 'silk/inspectorView'
@@ -94,12 +94,12 @@ const decoder = new TextDecoder()
 /**
  * Realized single-root snapshots, keyed by committed view identity and root module.
  *
- * The weak key is the invalidation strategy: `ProjectSession` replaces the view object on every
+ * The weak key is the invalidation strategy: the project worker replaces the view object on every
  * commit, so a stale cache entry becomes unreachable together with the view it described.
  */
 const realizations = new WeakMap<ProjectAnalysis.View, Map<string, Analysis.Snapshot>>()
 
-const realizedFor = (session: ProjectSession.AnalyzedDocument): Analysis.Snapshot => {
+const realizedFor = (session: ProjectSnapshot.DocumentSnapshot): Analysis.Snapshot => {
   const byRoot = realizations.get(session.snapshot) ?? new Map<string, Analysis.Snapshot>()
   realizations.set(session.snapshot, byRoot)
   const root = session.document.module
@@ -120,7 +120,7 @@ const realizedFor = (session: ProjectSession.AnalyzedDocument): Analysis.Snapsho
 
 /** Projects one inspector view for a committed document analysis. */
 export const project = (
-  session: ProjectSession.AnalyzedDocument,
+  session: ProjectSnapshot.DocumentSnapshot,
   parameters: ViewParameters,
 ): ViewResponse | UnknownView => {
   const definition = viewById(parameters.view)

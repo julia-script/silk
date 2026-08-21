@@ -1,14 +1,17 @@
 import { NodeServices } from '@effect/platform-node'
-import * as Cause from 'effect/Cause'
-import type * as Duration from 'effect/Duration'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import type * as FileSystem from 'effect/FileSystem'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
+import * as Queue from 'effect/Queue'
+import * as Result from 'effect/Result'
 import {
+  type CancellationToken,
   CodeActionKind,
   createConnection,
+  type DiagnosticServerCancellationData,
   DidChangeWatchedFilesNotification,
   LSPErrorCodes,
   ProposedFeatures,
@@ -18,522 +21,574 @@ import {
 } from 'vscode-languageserver/node.js'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import * as Document from './Document.js'
-import * as DocumentUpdates from './DocumentUpdates.js'
+import * as DocumentVersion from './DocumentVersion.js'
+import type * as EditorQuery from './EditorQuery.js'
 import * as Inspection from './Inspection.js'
-import * as ProjectSession from './ProjectSession.js'
+import * as ProjectWorker from './ProjectWorker.js'
+import * as QueryOutcome from './QueryOutcome.js'
+import * as SourceEvent from './SourceEvent.js'
+import type * as SourceLedger from './SourceLedger.js'
 import * as Workspace from './Workspace.js'
+import * as WorkspaceEngine from './WorkspaceEngine.js'
 
 const encoder = new TextEncoder()
 
-/** Injectable scheduler boundaries used by protocol tests and alternate hosts. */
+export const acceptanceRequest = 'silk/acceptedSourceVersions'
+
+export interface AcceptanceRequest {
+  readonly entries: ReadonlyArray<WorkspaceEngine.AcceptanceBarrierEntry>
+}
+
+export interface AcceptanceResponse {
+  readonly accepted: boolean
+}
+
+/** Injectable process boundaries used by real-stdio tests and alternate hosts. */
 export interface Options {
-  readonly debounce?: Duration.Input
-  readonly analyze?: ProjectSession.Options<FileSystem.FileSystem | Path.Path>['analyze']
+  readonly policy?: Partial<WorkspaceEngine.Policy>
+  readonly discover?: (
+    entry: SourceLedger.Entry,
+  ) => Effect.Effect<Document.Document, never, FileSystem.FileSystem | Path.Path>
+  readonly workerFactory?: ProjectWorker.Factory
+}
+
+const emptyCompletion = Object.freeze({ isIncomplete: false, items: [] })
+const emptySemanticTokens = Object.freeze({ data: [] })
+
+const ready = <A, B>(outcome: QueryOutcome.QueryOutcome<A>, fallback: B): A | B =>
+  outcome._tag === 'Ready' ? outcome.value : fallback
+
+const canceledDiagnostic = (code: number, message: string) =>
+  new ResponseError<DiagnosticServerCancellationData>(code, message, { retriggerRequest: true })
+
+const diagnosticFailure = (
+  outcome: Exclude<QueryOutcome.QueryOutcome<never>, QueryOutcome.Ready<never>>,
+) => {
+  switch (outcome._tag) {
+    case 'Superseded':
+      return canceledDiagnostic(LSPErrorCodes.ServerCancelled, 'Diagnostic revision was superseded')
+    case 'Canceled':
+      return canceledDiagnostic(LSPErrorCodes.RequestCancelled, 'Diagnostic request was canceled')
+    case 'DeadlineExceeded':
+      return canceledDiagnostic(
+        LSPErrorCodes.ServerCancelled,
+        'Diagnostic analysis is still pending',
+      )
+    case 'AnalysisFailed':
+    case 'Unavailable':
+    case 'Closed':
+      return undefined
+  }
 }
 
 /**
- * The external protocol boundary. `vscode-languageserver` is callback-driven, so this module
- * is the application edge: each handler builds one Effect and runs it against the Node
- * platform services, keeping every module inward of this file effectful and platform-free.
+ * The callback-driven JSON-RPC boundary. Compiler and semantic execution remain behind the
+ * workspace engine and its project workers; this module only translates protocol values.
  */
 export const start = (options: Options = {}): void => {
   const connection = createConnection(ProposedFeatures.all, process.stdin, process.stdout)
   const documents = new TextDocuments(TextDocument)
-  const projects = new Map<string, ProjectSession.ProjectSession>()
-  const projectByUri = new Map<string, string>()
-  const inFlight = new Set<Promise<unknown>>()
-  const documentUpdates = DocumentUpdates.make()
-  let shuttingDown = false
-  let supportsDynamicWatchers = false
-  let watcherRegistration: { readonly dispose: () => void } | undefined
-
-  // Platform services are built once for the server's lifetime, not per request.
   const runtime = ManagedRuntime.make(NodeServices.layer)
-  const run = <A>(
-    effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>,
-  ): Promise<A> => {
-    const promise = runtime.runPromise(effect)
-    inFlight.add(promise)
-    promise.finally(() => inFlight.delete(promise)).catch(() => undefined)
-    return promise
-  }
+  let supportsDynamicWatchers = false
+  let supportsDiagnosticRefresh = false
+  let watcherRegistration: { readonly dispose: () => void } | undefined
+  let shuttingDown = false
 
-  connection.onInitialize((parameters) => {
-    supportsDynamicWatchers =
-      parameters.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true
-    return {
-      capabilities: {
-        positionEncoding: 'utf-16',
-        textDocumentSync: TextDocumentSyncKind.Incremental,
-        hoverProvider: true,
-        definitionProvider: true,
-        referencesProvider: true,
-        renameProvider: { prepareProvider: true },
-        completionProvider: { triggerCharacters: ['.'] },
-        signatureHelpProvider: { triggerCharacters: ['(', ','] },
-        inlayHintProvider: true,
-        documentSymbolProvider: true,
-        documentFormattingProvider: true,
-        codeActionProvider: {
-          codeActionKinds: [CodeActionKind.QuickFix],
-          resolveProvider: true,
-        },
-        semanticTokensProvider: { legend: Document.semanticTokensLegend, full: true },
-        foldingRangeProvider: true,
-        callHierarchyProvider: true,
-      },
-    }
+  const discover =
+    options.discover ??
+    ((entry: SourceLedger.Entry) =>
+      Workspace.open({
+        uri: entry.uri,
+        version: entry.version.value,
+        bytes: entry.bytes,
+      }))
+
+  const bootstrap = WorkspaceEngine.make({
+    discover,
+    workerFactory: options.workerFactory ?? ProjectWorker.nodeFactory,
+    ...(options.policy === undefined ? {} : { policy: options.policy }),
   })
 
-  connection.onInitialized(() => {
-    if (!supportsDynamicWatchers) return
-    connection.client
-      .register(DidChangeWatchedFilesNotification.type, {
-        watchers: [{ globPattern: '**/*.silk' }, { globPattern: '**/silk.toml' }],
-      })
-      .then((registration) => {
-        watcherRegistration = registration
-      })
-      .catch((error) => {
-        connection.console.error(`silk-lsp failed to register file watchers: ${String(error)}`)
-      })
-  })
+  void runtime
+    .runPromise(bootstrap)
+    .then((engine) => {
+      const run = <A>(
+        effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>,
+      ): Promise<A> => runtime.runPromise(effect)
 
-  const publishProject = Effect.fnUntraced(function* (workspace: string, sourceRoot: string) {
-    const project = yield* ProjectSession.make({
-      workspace,
-      sourceRoot,
-      ...(options.debounce === undefined ? {} : { debounce: options.debounce }),
-      analyze: options.analyze ?? Workspace.analyzeProject,
-      publish: Effect.fnUntraced(function* (session) {
-        yield* Effect.promise(() =>
-          connection.sendDiagnostics({
-            uri: session.document.uri,
-            version: session.document.version,
-            diagnostics: [
-              ...Document.diagnostics(session.document, session.snapshot, (module) =>
-                session.moduleUris.get(module),
-              ),
-            ],
-          }),
-        )
-        // Rides the same publish an analysis commit already makes, so an open inspector view
-        // learns it is stale exactly when diagnostics do.
-        yield* Effect.promise(() =>
-          connection.sendNotification(Inspection.invalidatedNotification, {
-            workspace: session.document.workspace,
-            uri: session.document.uri,
-            version: session.document.version,
-          } satisfies Inspection.InvalidatedParameters),
-        )
-      }),
-      failed: Effect.fnUntraced(function* (failure) {
-        yield* Effect.sync(() => {
-          connection.console.error(
-            `silk-lsp project analysis failed for ${failure.document.uri}@${failure.document.version}: ${Cause.pretty(failure.cause)}`,
-          )
+      const request = <K extends EditorQuery.Tag>(
+        query: EditorQuery.EditorQuery<K>,
+        token: CancellationToken,
+      ): Promise<QueryOutcome.QueryOutcome<EditorQuery.Result<K>>> => {
+        const canceled = Deferred.makeUnsafe<void>()
+        if (token.isCancellationRequested) Deferred.doneUnsafe(canceled, Effect.succeed(undefined))
+        const subscription = token.onCancellationRequested(() => {
+          Deferred.doneUnsafe(canceled, Effect.succeed(undefined))
         })
-        yield* Effect.promise(() =>
-          connection.sendDiagnostics({
-            uri: failure.document.uri,
-            version: failure.document.version,
-            diagnostics: [],
-          }),
-        )
-      }),
-    })
-    projects.set(workspace, project)
-    return project
-  })
-
-  const projectFor = Effect.fnUntraced(function* (workspace: string, sourceRoot: string) {
-    const existing = projects.get(workspace)
-    return existing ?? (yield* publishProject(workspace, sourceRoot))
-  })
-
-  const synchronize = Effect.fnUntraced(function* (text: TextDocument) {
-    if (shuttingDown) return
-    const document = yield* Workspace.open({
-      uri: text.uri,
-      version: text.version,
-      bytes: encoder.encode(text.getText()),
-    })
-    const previousWorkspace = projectByUri.get(text.uri)
-    if (previousWorkspace !== undefined && previousWorkspace !== document.workspace) {
-      const previous = projects.get(previousWorkspace)
-      if (previous !== undefined) {
-        yield* previous.close(text.uri)
-        if (previous.documents().length === 0) {
-          yield* previous.shutdown()
-          projects.delete(previousWorkspace)
-        }
+        return run(
+          Effect.race(
+            engine.request(query),
+            Deferred.await(canceled).pipe(Effect.as(QueryOutcome.canceled)),
+          ),
+        ).finally(() => subscription.dispose())
       }
-    }
-    const currentProject = projects.get(document.workspace)
-    if (currentProject !== undefined && currentProject.sourceRoot !== document.sourceRoot) {
-      yield* currentProject.shutdown()
-      projects.delete(document.workspace)
-    }
-    projectByUri.set(text.uri, document.workspace)
-    const project = yield* projectFor(document.workspace, document.sourceRoot)
-    yield* project.open(document)
-  })
 
-  documents.onDidChangeContent(({ document }) => {
-    const update = run(
-      DocumentUpdates.enqueue(
-        documentUpdates,
-        document.uri,
-        document.version,
-        synchronize(document),
-      ),
-    )
-    update.catch((error) => {
-      connection.console.error(`silk-lsp failed to analyze ${document.uri}: ${String(error)}`)
-    })
-  })
+      const accept = (event: SourceEvent.SourceEvent): void => {
+        const accepted = engine.accept(event)
+        if (Result.isFailure(accepted))
+          connection.console.warn(
+            `silk-lsp rejected source synchronization for ${accepted.failure.uri}: ${accepted.failure.message}`,
+          )
+      }
 
-  documents.onDidClose(({ document }) => {
-    const update = run(
-      DocumentUpdates.enqueue(
-        documentUpdates,
-        document.uri,
-        document.version,
-        Effect.gen(function* () {
-          const workspace = projectByUri.get(document.uri)
-          projectByUri.delete(document.uri)
-          if (workspace !== undefined) {
-            const project = projects.get(workspace)
-            if (project !== undefined) {
-              yield* project.close(document.uri)
-              if (project.documents().length === 0) {
-                yield* project.shutdown()
-                projects.delete(workspace)
-              }
-            }
-          }
+      connection.onInitialize((parameters) => {
+        supportsDynamicWatchers =
+          parameters.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true
+        supportsDiagnosticRefresh =
+          parameters.capabilities.workspace?.diagnostics?.refreshSupport === true
+        return {
+          capabilities: {
+            positionEncoding: 'utf-16',
+            textDocumentSync: TextDocumentSyncKind.Incremental,
+            hoverProvider: true,
+            definitionProvider: true,
+            referencesProvider: true,
+            renameProvider: { prepareProvider: true },
+            completionProvider: { triggerCharacters: ['.'] },
+            signatureHelpProvider: { triggerCharacters: ['(', ','] },
+            inlayHintProvider: true,
+            documentSymbolProvider: true,
+            documentFormattingProvider: true,
+            codeActionProvider: {
+              codeActionKinds: [CodeActionKind.QuickFix],
+              resolveProvider: true,
+            },
+            semanticTokensProvider: { legend: Document.semanticTokensLegend, full: true },
+            foldingRangeProvider: true,
+            callHierarchyProvider: true,
+            diagnosticProvider: {
+              identifier: 'silk',
+              interFileDependencies: true,
+              workspaceDiagnostics: false,
+            },
+          },
+        }
+      })
+
+      connection.onInitialized(() => {
+        if (!supportsDynamicWatchers) return
+        connection.client
+          .register(DidChangeWatchedFilesNotification.type, {
+            watchers: [{ globPattern: '**/*.silk' }, { globPattern: '**/silk.toml' }],
+          })
+          .then((registration) => {
+            watcherRegistration = registration
+          })
+          .catch((error: unknown) => {
+            connection.console.error(`silk-lsp failed to register file watchers: ${String(error)}`)
+          })
+      })
+
+      documents.onDidOpen(({ document }) => {
+        accept(
+          SourceEvent.open(
+            document.uri,
+            DocumentVersion.make(document.version),
+            encoder.encode(document.getText()),
+          ),
+        )
+      })
+
+      documents.onDidChangeContent(({ document }) => {
+        if (engine.accepted([{ uri: document.uri, version: document.version }])) return
+        accept(
+          SourceEvent.change(
+            document.uri,
+            DocumentVersion.make(document.version),
+            encoder.encode(document.getText()),
+          ),
+        )
+      })
+
+      documents.onDidClose(({ document }) => {
+        accept(SourceEvent.close(document.uri))
+      })
+
+      connection.onRequest(
+        acceptanceRequest,
+        (parameters: AcceptanceRequest): AcceptanceResponse => ({
+          accepted:
+            Array.isArray(parameters.entries) &&
+            parameters.entries.every(
+              (entry) =>
+                typeof entry.uri === 'string' &&
+                Number.isSafeInteger(entry.version) &&
+                entry.version >= 0,
+            ) &&
+            engine.accepted(parameters.entries),
         }),
-      ),
-    )
-    update.catch((error) => {
-      connection.console.error(`silk-lsp failed to close ${document.uri}: ${String(error)}`)
-    })
-    void connection.sendDiagnostics({ uri: document.uri, diagnostics: [] })
-  })
-
-  const awaitProjectUpdates = Effect.fnUntraced(function* (project: ProjectSession.ProjectSession) {
-    const path = yield* Path.Path
-    for (const text of documents.all()) {
-      const documentPath = yield* Effect.try({
-        try: () => new URL(text.uri),
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.flatMap((url) => path.fromFileUrl(url)),
-        Effect.option,
       )
-      if (Option.isNone(documentPath)) continue
-      const relative = path.relative(project.sourceRoot, documentPath.value)
-      if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
-      yield* DocumentUpdates.awaitCurrent(documentUpdates, text.uri)
-    }
-  })
 
-  const acquire = async (uri: string) => {
-    const text = documents.get(uri)
-    if (text === undefined) return Option.none<ProjectSession.AnalyzedDocument>()
-    const version = text.version
-    await run(DocumentUpdates.awaitCurrent(documentUpdates, uri))
-    const workspace = projectByUri.get(uri)
-    const project = workspace === undefined ? undefined : projects.get(workspace)
-    if (project === undefined) return Option.none<ProjectSession.AnalyzedDocument>()
-    await run(awaitProjectUpdates(project))
-    return await run(project.acquire(uri, version))
-  }
+      connection.languages.diagnostics.on(async (parameters, token) => {
+        const outcome = await request(
+          {
+            _tag: 'Diagnostics',
+            uri: parameters.textDocument.uri,
+            parameters:
+              parameters.previousResultId === undefined
+                ? {}
+                : { previousResultId: parameters.previousResultId },
+          },
+          token,
+        )
+        if (outcome._tag === 'Ready')
+          return parameters.previousResultId === outcome.value.resultId
+            ? { kind: 'unchanged' as const, resultId: outcome.value.resultId }
+            : {
+                kind: 'full' as const,
+                resultId: outcome.value.resultId,
+                items: [...outcome.value.items],
+              }
+        const failure = diagnosticFailure(outcome)
+        if (failure !== undefined) return failure
+        const version = documents.get(parameters.textDocument.uri)?.version ?? 0
+        const resultId = `unavailable:${version}`
+        return parameters.previousResultId === resultId
+          ? { kind: 'unchanged' as const, resultId }
+          : { kind: 'full' as const, resultId, items: [] }
+      })
 
-  connection.onHover(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return null
-    return (
-      Document.hover(session.value.document, session.value.snapshot, parameters.position) ?? null
-    )
-  })
+      connection.onHover(
+        async (parameters, token) =>
+          ready(
+            await request(
+              { _tag: 'Hover', uri: parameters.textDocument.uri, parameters: parameters.position },
+              token,
+            ),
+            undefined,
+          ) ?? null,
+      )
 
-  connection.onDefinition(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return null
-    const definition = Document.definition(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-      (module) => session.value.moduleUris.get(module),
-    )
-    return definition === undefined ? null : [definition]
-  })
+      connection.onDefinition(async (parameters, token) => {
+        const value = ready(
+          await request(
+            {
+              _tag: 'Definition',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.position,
+            },
+            token,
+          ),
+          undefined,
+        )
+        return value === undefined ? null : [value]
+      })
 
-  connection.onReferences(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return null
-    const locations = Document.references(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-      parameters.context.includeDeclaration,
-      (module) => session.value.moduleUris.get(module),
-    )
-    return locations === undefined ? null : [...locations]
-  })
+      connection.onReferences(async (parameters, token) => {
+        const locations = ready(
+          await request(
+            {
+              _tag: 'References',
+              uri: parameters.textDocument.uri,
+              parameters: {
+                position: parameters.position,
+                includeDeclaration: parameters.context.includeDeclaration,
+              },
+            },
+            token,
+          ),
+          undefined,
+        )
+        return locations === undefined ? null : [...locations]
+      })
 
-  const unrenameable = (): ResponseError<void> =>
-    new ResponseError<void>(
-      LSPErrorCodes.RequestFailed,
-      'The selected token has no renameable declaration',
-    )
+      const unrenameable = (): ResponseError<void> =>
+        new ResponseError<void>(
+          LSPErrorCodes.RequestFailed,
+          'The selected token has no renameable declaration',
+        )
 
-  connection.onPrepareRename(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return unrenameable()
-    const prepared = Document.prepareRename(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-    )
-    return prepared === undefined
-      ? unrenameable()
-      : { range: prepared.range, placeholder: prepared.placeholder }
-  })
+      connection.onPrepareRename(async (parameters, token) => {
+        const prepared = ready(
+          await request(
+            {
+              _tag: 'PrepareRename',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.position,
+            },
+            token,
+          ),
+          undefined,
+        )
+        return prepared === undefined
+          ? unrenameable()
+          : { range: prepared.range, placeholder: prepared.placeholder }
+      })
 
-  connection.onRenameRequest(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return unrenameable()
-    const renamed = Document.rename(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-      parameters.newName,
-      (module) => session.value.moduleUris.get(module),
-    )
-    if (renamed === undefined) return unrenameable()
-    return renamed._tag === 'RenameEdit'
-      ? renamed.edit
-      : new ResponseError<void>(LSPErrorCodes.RequestFailed, `${renamed.code}: ${renamed.message}`)
-  })
+      connection.onRenameRequest(async (parameters, token) => {
+        const renamed = ready(
+          await request(
+            {
+              _tag: 'Rename',
+              uri: parameters.textDocument.uri,
+              parameters: { position: parameters.position, newName: parameters.newName },
+            },
+            token,
+          ),
+          undefined,
+        )
+        if (renamed === undefined) return unrenameable()
+        return renamed._tag === 'RenameEdit'
+          ? renamed.edit
+          : new ResponseError<void>(
+              LSPErrorCodes.RequestFailed,
+              `${renamed.code}: ${renamed.message}`,
+            )
+      })
 
-  connection.languages.inlayHint.on(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return []
-    return [
-      ...Document.inlayHints(session.value.document, session.value.snapshot, parameters.range),
-    ]
-  })
+      connection.languages.inlayHint.on(async (parameters, token) => [
+        ...ready(
+          await request(
+            {
+              _tag: 'InlayHints',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.range,
+            },
+            token,
+          ),
+          [],
+        ),
+      ])
 
-  connection.onCompletion(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return { isIncomplete: false, items: [] }
-    return Document.completion(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-      session.value.inventory,
-    )
-  })
+      connection.onCompletion(async (parameters, token) =>
+        ready(
+          await request(
+            {
+              _tag: 'Completion',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.position,
+            },
+            token,
+          ),
+          emptyCompletion,
+        ),
+      )
 
-  connection.onSignatureHelp(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return null
-    return (
-      Document.signatureHelp(session.value.document, session.value.snapshot, parameters.position) ??
-      null
-    )
-  })
+      connection.onSignatureHelp(
+        async (parameters, token) =>
+          ready(
+            await request(
+              {
+                _tag: 'SignatureHelp',
+                uri: parameters.textDocument.uri,
+                parameters: parameters.position,
+              },
+              token,
+            ),
+            undefined,
+          ) ?? null,
+      )
 
-  connection.onDocumentSymbol(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return []
-    return [...Document.symbols(session.value.document, session.value.snapshot)]
-  })
+      connection.onDocumentSymbol(async (parameters, token) => [
+        ...ready(
+          await request(
+            { _tag: 'Symbols', uri: parameters.textDocument.uri, parameters: undefined },
+            token,
+          ),
+          [],
+        ),
+      ])
 
-  connection.onCodeAction(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return []
-    return [
-      ...Document.codeActions(
-        session.value.document,
-        session.value.snapshot,
-        parameters.range,
-        (module) => session.value.moduleUris.get(module),
-        session.value.inventory,
-      ),
-    ]
-  })
+      connection.onCodeAction(async (parameters, token) => [
+        ...ready(
+          await request(
+            {
+              _tag: 'CodeActions',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.range,
+            },
+            token,
+          ),
+          [],
+        ),
+      ])
 
-  connection.onCodeActionResolve(async (action) => {
-    const data = Document.parseAutoImportData(action.data)
-    if (data === undefined)
-      return Document.disableCodeAction(action, 'The source action descriptor is invalid')
-    await run(DocumentUpdates.awaitCurrent(documentUpdates, data.uri))
-    const workspace = projectByUri.get(data.uri)
-    const project = workspace === undefined ? undefined : projects.get(workspace)
-    if (project === undefined)
-      return Document.disableCodeAction(action, 'The source revision is no longer available')
-    await run(awaitProjectUpdates(project))
-    const session = await run(project.acquire(data.uri, data.version))
-    if (Option.isNone(session))
-      return Document.disableCodeAction(action, 'The source revision is no longer available')
-    return Document.resolveCodeAction(
-      session.value.document,
-      session.value.snapshot,
-      session.value.inventory,
-      action,
-      (module) => session.value.moduleUris.get(module),
-    )
-  })
+      connection.onCodeActionResolve(async (action, token) => {
+        const data = Document.parseAutoImportData(action.data)
+        if (data === undefined)
+          return Document.disableCodeAction(action, 'The source action descriptor is invalid')
+        return ready(
+          await request({ _tag: 'ResolveCodeAction', uri: data.uri, parameters: action }, token),
+          Document.disableCodeAction(action, 'The source revision is no longer available'),
+        )
+      })
 
-  connection.languages.semanticTokens.on(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return { data: [] }
-    return Document.semanticTokens(session.value.document, session.value.snapshot)
-  })
+      connection.languages.semanticTokens.on(async (parameters, token) =>
+        ready(
+          await request(
+            {
+              _tag: 'SemanticTokens',
+              uri: parameters.textDocument.uri,
+              parameters: undefined,
+            },
+            token,
+          ),
+          emptySemanticTokens,
+        ),
+      )
 
-  connection.onFoldingRanges(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return []
-    return [...Document.foldingRanges(session.value.document, session.value.snapshot)]
-  })
+      connection.onFoldingRanges(async (parameters, token) => [
+        ...ready(
+          await request(
+            {
+              _tag: 'FoldingRanges',
+              uri: parameters.textDocument.uri,
+              parameters: undefined,
+            },
+            token,
+          ),
+          [],
+        ),
+      ])
 
-  connection.languages.callHierarchy.onPrepare(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return null
-    const items = Document.prepareCallHierarchy(
-      session.value.document,
-      session.value.snapshot,
-      parameters.position,
-      (module) => session.value.moduleUris.get(module),
-    )
-    return items.length === 0 ? null : [...items]
-  })
+      connection.languages.callHierarchy.onPrepare(async (parameters, token) => {
+        const items = ready(
+          await request(
+            {
+              _tag: 'PrepareCallHierarchy',
+              uri: parameters.textDocument.uri,
+              parameters: parameters.position,
+            },
+            token,
+          ),
+          [],
+        )
+        return items.length === 0 ? null : [...items]
+      })
 
-  connection.languages.callHierarchy.onIncomingCalls(async (parameters) => {
-    const session = await acquire(parameters.item.uri)
-    if (Option.isNone(session)) return null
-    return [
-      ...Document.incomingCalls(
-        session.value.document,
-        session.value.snapshot,
-        parameters.item,
-        (module) => session.value.moduleUris.get(module),
-      ),
-    ]
-  })
+      connection.languages.callHierarchy.onIncomingCalls(async (parameters, token) => {
+        const items = ready(
+          await request(
+            { _tag: 'IncomingCalls', uri: parameters.item.uri, parameters: parameters.item },
+            token,
+          ),
+          undefined,
+        )
+        return items === undefined ? null : [...items]
+      })
 
-  connection.languages.callHierarchy.onOutgoingCalls(async (parameters) => {
-    const session = await acquire(parameters.item.uri)
-    if (Option.isNone(session)) return null
-    return [
-      ...Document.outgoingCalls(
-        session.value.document,
-        session.value.snapshot,
-        parameters.item,
-        (module) => session.value.moduleUris.get(module),
-      ),
-    ]
-  })
+      connection.languages.callHierarchy.onOutgoingCalls(async (parameters, token) => {
+        const items = ready(
+          await request(
+            { _tag: 'OutgoingCalls', uri: parameters.item.uri, parameters: parameters.item },
+            token,
+          ),
+          undefined,
+        )
+        return items === undefined ? null : [...items]
+      })
 
-  connection.onDocumentFormatting(async (parameters) => {
-    const session = await acquire(parameters.textDocument.uri)
-    if (Option.isNone(session)) return []
-    return run(
-      Effect.map(Document.format(session.value.document, session.value.snapshot), (edits) => [
-        ...edits,
-      ]),
-    )
-  })
+      connection.onDocumentFormatting(async (parameters, token) => [
+        ...ready(
+          await request(
+            { _tag: 'Formatting', uri: parameters.textDocument.uri, parameters: undefined },
+            token,
+          ),
+          [],
+        ),
+      ])
 
-  connection.onDidChangeWatchedFiles(({ changes }) => {
-    const update = run(
-      Effect.gen(function* () {
-        const path = yield* Path.Path
-        for (const change of changes) {
-          const parsed = yield* Effect.try({
-            try: () => new URL(change.uri),
-            catch: (cause) => cause,
-          }).pipe(Effect.option)
-          if (Option.isNone(parsed) || parsed.value.protocol !== 'file:') continue
-          const changedPath = yield* path.fromFileUrl(parsed.value).pipe(Effect.option)
-          if (Option.isNone(changedPath)) continue
-          const isManifest = path.basename(changedPath.value) === 'silk.toml'
-          if (isManifest) {
-            const directory = path.dirname(changedPath.value)
-            for (const project of projects.values()) {
-              const relative = path.relative(directory, project.sourceRoot)
-              if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
-              yield* project.invalidate({ rediscover: true })
-            }
-            for (const text of documents.all()) {
-              const documentPath = yield* Effect.try({
-                try: () => new URL(text.uri),
+      connection.onDidChangeWatchedFiles(({ changes }) => {
+        void run(
+          Effect.gen(function* () {
+            const path = yield* Path.Path
+            const paths: Array<string> = []
+            let rediscover = false
+            for (const change of changes) {
+              const parsed = yield* Effect.try({
+                try: () => new URL(change.uri),
                 catch: (cause) => cause,
-              }).pipe(
-                Effect.flatMap((url) => path.fromFileUrl(url)),
-                Effect.option,
-              )
-              if (Option.isNone(documentPath)) continue
-              const relative = path.relative(directory, documentPath.value)
-              if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
-              yield* synchronize(text)
+              }).pipe(Effect.option)
+              if (Option.isNone(parsed) || parsed.value.protocol !== 'file:') continue
+              const changedPath = yield* path.fromFileUrl(parsed.value).pipe(Effect.option)
+              if (Option.isNone(changedPath)) continue
+              if (path.basename(changedPath.value) === 'silk.toml') rediscover = true
+              if (rediscover || changedPath.value.endsWith('.silk')) paths.push(changedPath.value)
             }
-            continue
-          }
-          if (!changedPath.value.endsWith('.silk')) continue
-          for (const project of projects.values()) {
-            const relative = path.relative(project.sourceRoot, changedPath.value)
-            if (relative === '..' || relative.startsWith(`..${path.sep}`)) continue
-            yield* project.invalidate({ dirtyPaths: [changedPath.value] })
+            if (paths.length > 0) engine.accept(SourceEvent.invalidate(paths, rediscover))
+          }),
+        ).catch((error: unknown) => {
+          connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
+        })
+      })
+
+      connection.onRequest(Inspection.viewsRequest, () => ({ views: Inspection.descriptors }))
+
+      connection.onRequest(
+        Inspection.viewRequest,
+        async (parameters: Inspection.ViewParameters, token: CancellationToken) => {
+          const projected = ready(
+            await request({ _tag: 'Inspection', uri: parameters.uri, parameters }, token),
+            undefined,
+          )
+          if (projected === undefined)
+            return new ResponseError<void>(
+              LSPErrorCodes.RequestFailed,
+              `No discovered Silk project contains ${parameters.uri}`,
+            )
+          return projected._tag === 'UnknownView'
+            ? new ResponseError<void>(LSPErrorCodes.RequestFailed, projected.message)
+            : projected
+        },
+      )
+
+      const observer = Effect.gen(function* () {
+        while (!shuttingDown) {
+          const event = yield* Queue.take(engine.events)
+          switch (event._tag) {
+            case 'Committed':
+              if (supportsDiagnosticRefresh && event.refreshDiagnostics)
+                yield* Effect.sync(() => connection.languages.diagnostics.refresh())
+              for (const document of event.documents)
+                yield* Effect.tryPromise({
+                  try: () =>
+                    connection.sendNotification(Inspection.invalidatedNotification, {
+                      workspace: event.workspace,
+                      uri: document.uri,
+                      version: document.version,
+                    } satisfies Inspection.InvalidatedParameters),
+                  catch: (cause) => cause,
+                }).pipe(Effect.ignore)
+              break
+            case 'Failed':
+              yield* Effect.sync(() =>
+                connection.console.error(
+                  `silk-lsp project analysis failed for ${event.workspace} ` +
+                    `(generation ${event.generation.value}, incident ${event.incident.value})`,
+                ),
+              )
+              break
+            case 'WorkerRetired':
+              break
           }
         }
-      }),
-    )
-    update.catch((error) => {
-      connection.console.error(`silk-lsp failed to process watched files: ${String(error)}`)
+      })
+      void run(observer).catch(() => undefined)
+
+      connection.onShutdown(async () => {
+        if (shuttingDown) return
+        shuttingDown = true
+        watcherRegistration?.dispose()
+        watcherRegistration = undefined
+        await run(engine.shutdown)
+        await runtime.dispose()
+      })
+
+      documents.listen(connection)
+      connection.listen()
     })
-  })
-
-  connection.onRequest(Inspection.viewsRequest, () => ({ views: Inspection.descriptors }))
-
-  connection.onRequest(Inspection.viewRequest, async (parameters: Inspection.ViewParameters) => {
-    const session = await acquire(parameters.uri)
-    if (Option.isNone(session)) {
-      return new ResponseError<void>(
-        LSPErrorCodes.RequestFailed,
-        `No discovered Silk project contains ${parameters.uri}`,
-      )
-    }
-    try {
-      const projected = Inspection.project(session.value, parameters)
-      return projected._tag === 'UnknownView'
-        ? new ResponseError<void>(LSPErrorCodes.RequestFailed, projected.message)
-        : projected
-    } catch (error) {
-      return new ResponseError<void>(
-        LSPErrorCodes.RequestFailed,
-        `Inspector projection failed: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  })
-
-  connection.onShutdown(async () => {
-    shuttingDown = true
-    watcherRegistration?.dispose()
-    watcherRegistration = undefined
-    await runtime.runPromise(DocumentUpdates.drain(documentUpdates))
-    await Promise.all(
-      [...projects.values()].map((project) => runtime.runPromise(project.shutdown())),
-    )
-    await Promise.all([...inFlight])
-    projects.clear()
-    projectByUri.clear()
-    await runtime.dispose()
-  })
-
-  documents.listen(connection)
-  connection.listen()
+    .catch((cause: unknown) => {
+      process.stderr.write(`silk-lsp failed to initialize: ${String(cause)}\n`)
+      process.exitCode = 1
+    })
 }

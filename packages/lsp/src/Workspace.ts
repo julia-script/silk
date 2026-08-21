@@ -12,12 +12,17 @@ import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 import * as Document from './Document.js'
-import type * as ProjectSession from './ProjectSession.js'
+import type * as ProjectSnapshot from './ProjectSnapshot.js'
 import * as WorkspaceCatalog from './WorkspaceCatalog.js'
 
 export interface Identity {
   readonly workspace: string
   readonly sourceRoot: string
+}
+
+export interface Invalidation {
+  readonly dirtyPaths: ReadonlyArray<string>
+  readonly rediscover: boolean
 }
 
 const virtualModule = (uri: string): string => {
@@ -146,13 +151,13 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
 /** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
 export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   documents: ReadonlyArray<Document.Document>,
-  previous: ReadonlyMap<string, ProjectSession.AnalyzedDocument> = new Map(),
-  invalidation: ProjectSession.AcceptedInvalidation = Object.freeze({
+  previous: ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot> = new Map(),
+  invalidation: Invalidation = Object.freeze({
     dirtyPaths: Object.freeze([]),
     rediscover: false,
   }),
 ): Effect.fn.Return<
-  ReadonlyMap<string, ProjectSession.AnalyzedDocument>,
+  ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
   never,
   FileSystem.FileSystem | Path.Path
 > {

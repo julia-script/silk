@@ -19,6 +19,38 @@
         "${workspaceFolder}/packages/vscode/dist/**/*.js",
         "${workspaceFolder}/packages/lsp/dist/**/*.js"
       ]
+    },
+    {
+      "name": "Silk: LSP Acceptance Host (manual)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode",
+        "${workspaceFolder}/packages/vscode/test/fixtures/lsp-acceptance"
+      ],
+      "preLaunchTask": "Silk: Build extension host deps",
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.js",
+        "${workspaceFolder}/packages/lsp/dist/**/*.js"
+      ]
+    },
+    {
+      "name": "Silk: LSP Extension Host Test",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--disable-extensions",
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode",
+        "--extensionTestsPath=${workspaceFolder}/packages/vscode/test/extension-host/index.cjs",
+        "${workspaceFolder}/packages/vscode/test/fixtures/lsp-acceptance"
+      ],
+      "preLaunchTask": "Silk: Build extension host deps",
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.js",
+        "${workspaceFolder}/packages/lsp/dist/**/*.js"
+      ]
     }
   ]
 }

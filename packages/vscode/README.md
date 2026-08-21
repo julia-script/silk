@@ -8,12 +8,11 @@ Two parts:
 - **Grammar and language configuration** are generated from `@silk-effect/language` (the single
   source of truth) by `pnpm --filter @silk-effect/language sync:vscode`; a test in that package
   fails when the generated files drift.
-- **Language server**: `src/extension.ts` forks the `@silk-effect/lsp` stdio server for `silk`
-  documents via `vscode-languageclient`. Diagnostics, hover types, go to definition, document
-  symbols, formatting (including `editor.formatOnSave`), and dynamic project file watchers all
-  come from the server; the extension itself stays a thin launcher. The bundled language client
-  supports standard dynamic watched-file registration, so no duplicate extension-owned watcher is
-  installed.
+- **Language server**: `src/extension.ts` owns the `@silk-effect/lsp` child process and gives its
+  detached stdio transport to `vscode-languageclient`. Diagnostics, hover types, go to definition,
+  document symbols, formatting (including `editor.formatOnSave`), and dynamic project file watchers
+  all come from the server. The stable editor session gates diagnostics by client generation and
+  editor version, and only becomes ready after built-in document synchronization is acknowledged.
 
 ## Silk Inspector
 
@@ -70,6 +69,34 @@ and `silk-language` first.
 Optional watch tasks (**Silk: Watch language server**, **Silk: Watch extension**) rebuild on save
 while the host is open.
 
+### LSP acceptance launch
+
+Run **Silk: LSP Acceptance Host (manual)** from Run and Debug. It builds both packages and opens the
+fixture workspace at `packages/vscode/test/fixtures/lsp-acceptance` in an Extension Development
+Host. In `src/Main.silk`:
+
+1. On the blank line in `main`, type `effects`, pause for diagnostics and hover, shorten it to
+   `effec`, change it to `Effect.`, then delete the line so the file is valid again.
+2. Open Quick Fix while an intermediate spelling is present. After every edit, the Problems entry
+   and hover must either describe that exact spelling or disappear; an older `effec` diagnostic
+   must never reappear, and `Loading...` / quick-fix checks must settle without reloading the window.
+3. In `src/Util.silk`, rename `answer` to `answer2`. The unchanged call in `Main.silk` must become
+   diagnostic-bearing after the watched dependency refresh. Restore `answer`; the diagnostic must
+   clear.
+4. Run **Silk: Restart Language Server** while hover or Quick Fix is active. Restart must finish,
+   the open documents must resynchronize once, and current diagnostics and hover must recover
+   without **Developer: Reload Window**.
+
+The stdio and scheduler suites automate the same source revisions, cancellation, dependency
+refresh, process wedging, and recovery. This launch is the opt-in production-adapter check through
+the real editor extension host.
+
+For the scripted form, run **Silk: LSP Extension Host Test**. The guest host drives the same edits
+through VS Code's real `vscode-languageclient` adapter, checks synchronous diagnostic retirement,
+pull-diagnostic generation gating, dependency refresh, hover/quick-fix completion, acknowledged
+restart, and diagnostic removal on close, then exits with a failing launch when an assertion does
+not hold.
+
 ## Reload vs restart
 
 | Change | Action |
@@ -77,7 +104,8 @@ while the host is open.
 | Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest) |
 | Rebuilt `@silk-effect/lsp` only, same extension path | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
 
-**Silk: Restart Language Server** also recovers automatically when the old server is unresponsive:
-if its normal stop reaches the client timeout, the extension retires that client and still starts a
-fresh one. Use **Developer: Reload Window** only for extension-host changes in the first row, or if
-the extension itself cannot execute commands; an LSP stop-timeout no longer requires a reload.
+**Silk: Restart Language Server** also recovers when the old server is unresponsive. The stable
+editor session gives protocol cleanup one bounded retirement window, forcibly terminates a process
+that does not exit, acknowledges its death, and only then starts the replacement. Use **Developer:
+Reload Window** only for extension-host changes in the first row, or if the extension itself cannot
+execute commands; an LSP stop-timeout no longer requires a reload.

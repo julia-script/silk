@@ -8,7 +8,11 @@
  * `@silk-effect/inspector` package that defines it.
  */
 import * as vscode from 'vscode'
-import type { LanguageClient } from 'vscode-languageclient/node'
+
+export interface InspectorSession {
+  readonly request: <A>(method: string, parameters?: unknown) => Promise<A>
+  readonly onInvalidation: (listener: () => void) => vscode.Disposable
+}
 
 interface Span {
   readonly module: string
@@ -49,8 +53,6 @@ interface ViewDescriptor {
 
 const viewRequest = 'silk/inspectorView'
 const viewsRequest = 'silk/inspectorViews'
-const invalidatedNotification = 'silk/inspectorInvalidated'
-
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
@@ -65,7 +67,7 @@ const positionOfByte = (document: vscode.TextDocument, byteOffset: number): vsco
 
 export const registerInspector = (
   context: vscode.ExtensionContext,
-  clientOf: () => LanguageClient | undefined,
+  session: InspectorSession,
 ): void => {
   let panel: vscode.WebviewPanel | undefined
   let views: ReadonlyArray<ViewDescriptor> = []
@@ -80,10 +82,9 @@ export const registerInspector = (
   }
 
   const refresh = async (): Promise<void> => {
-    const client = clientOf()
-    if (panel === undefined || client === undefined || state.uri === undefined) return
+    if (panel === undefined || state.uri === undefined) return
     try {
-      const result = await client.sendRequest<ViewResponse>(viewRequest, {
+      const result = await session.request<ViewResponse>(viewRequest, {
         uri: state.uri,
         view: state.viewId,
         filter: state.filter,
@@ -192,11 +193,10 @@ export const registerInspector = (
         }
       })
 
-      const client = clientOf()
-      if (client !== undefined && views.length === 0) {
+      if (views.length === 0) {
         try {
           views = (
-            await client.sendRequest<{ views: ReadonlyArray<ViewDescriptor> }>(viewsRequest)
+            await session.request<{ views: ReadonlyArray<ViewDescriptor> }>(viewsRequest)
           ).views.filter((view) => view.id !== 'source')
         } catch {
           // The picker stays empty until the server answers; the next refresh retries nothing —
@@ -213,16 +213,12 @@ export const registerInspector = (
 
   // Any commit may change the view (an edited import changes the closure of every dependent), so
   // the panel refreshes on every invalidation rather than tracking project membership itself.
-  const subscribeInvalidations = (client: LanguageClient): void => {
-    context.subscriptions.push(
-      client.onNotification(invalidatedNotification, () => {
-        state.evaluate = false
-        void refresh()
-      }),
-    )
-  }
-  const client = clientOf()
-  if (client !== undefined) subscribeInvalidations(client)
+  context.subscriptions.push(
+    session.onInvalidation(() => {
+      state.evaluate = false
+      void refresh()
+    }),
+  )
 }
 
 /**
