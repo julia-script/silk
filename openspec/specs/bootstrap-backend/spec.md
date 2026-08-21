@@ -5,7 +5,9 @@ The nominal `Backend` service: one operation consuming a target-aware monomorphi
 a codegen request, and the bootstrap `LlvmBackend` lowering MIR through the Silk LLVM builder to
 deterministic bitcode — the seam the driver and any future backend share, with textual LLVM IR as
 an inspection artifact only.
+
 ## Requirements
+
 ### Requirement: The Backend service is a nominal contract
 
 The `Backend` service SHALL expose a stable backend identifier, its canonical compatible targets, and one emission operation consuming the whole target-aware monomorphized MIR program plus a codegen request, producing one typed program artifact. It MUST NOT accept a second target-layout input or choose an alternate representation for a Silk type. One compilation request SHALL produce one MIR program, one backend module, and one artifact; source modules are semantic namespaces, not codegen units. Artifact finalization SHALL follow the artifact kind and selected target rather than assuming every backend result requires native object emission and linking.
@@ -911,3 +913,12 @@ pattern ABI or independently choosing tags.
 
 - **WHEN** one program uses recursive let destructuring and both matching and mismatching if-let selections
 - **THEN** native, WebAssembly, and evaluation agree on results, binding visibility, and active-payload cleanup
+
+### Requirement: Expected request-validation failures yield BackendError
+
+A backend SHALL model every expected caller-caused failure (invalid MIR, invalid module, invalid target, invalid request parameters) in its typed `BackendError` channel. It SHALL NOT throw inside an Effect generator for an expected failure.
+
+#### Scenario: An invalid private stack page bound is a typed failure
+
+- **WHEN** a wasm emit request specifies an invalid `privateExecutionStackPages` bound
+- **THEN** the backend yields a `BackendError`, never a thrown `RangeError` defect, and error-channel mapping observes it
