@@ -36,6 +36,10 @@
       "types": "./dist/Document.d.ts",
       "import": "./dist/Document.js"
     },
+    "./CodeFence": {
+      "types": "./dist/CodeFence.d.ts",
+      "import": "./dist/CodeFence.js"
+    },
     "./Json": {
       "types": "./dist/Json.d.ts",
       "import": "./dist/Json.js"

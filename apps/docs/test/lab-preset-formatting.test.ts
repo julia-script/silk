@@ -1,5 +1,6 @@
-import { Formatter, Lexer, Parser, SourceFile } from '@silk-effect/compiler'
+import { Lexer, Parser, SourceFile } from '@silk-effect/compiler'
 import { assert, it } from '@effect/vitest'
+import * as Formatter from '@silk-effect/formatter/Formatter'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import { presets } from '../app/labs/presets'

@@ -111,6 +111,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@silk-effect/formatter':
+        specifier: workspace:*
+        version: link:../../packages/formatter
       '@silk-effect/llvm':
         specifier: workspace:*
         version: link:../../packages/llvm
@@ -184,6 +187,9 @@ importers:
       '@silk-effect/documentation':
         specifier: workspace:*
         version: link:../documentation
+      '@silk-effect/formatter':
+        specifier: workspace:*
+        version: link:../formatter
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -264,6 +270,25 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
+  packages/formatter:
+    dependencies:
+      '@silk-effect/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@silk-effect/documentation':
+        specifier: workspace:*
+        version: link:../documentation
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
+
   packages/inspector:
     dependencies:
       '@silk-effect/compiler':
@@ -332,6 +357,9 @@ importers:
       '@silk-effect/documentation':
         specifier: workspace:*
         version: link:../documentation
+      '@silk-effect/formatter':
+        specifier: workspace:*
+        version: link:../formatter
       '@silk-effect/inspector':
         specifier: workspace:*
         version: link:../inspector

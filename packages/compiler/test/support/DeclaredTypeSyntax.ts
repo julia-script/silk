@@ -1,13 +1,13 @@
 import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
 import * as FormattedDocument from '../../src/FormattedDocument.js'
-import * as Formatter from '../../src/Formatter.js'
 import * as Lexer from '../../src/Lexer.js'
 import * as ModuleClosure from '../../src/ModuleClosure.js'
 import * as NameResolution from '../../src/NameResolution.js'
 import * as Parser from '../../src/Parser.js'
 import * as SourceFile from '../../src/SourceFile.js'
 import * as SourceResolver from '../../src/SourceResolver.js'
+import * as SyntaxFormatter from '../../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../../src/SyntaxTree.js'
 import { raise } from './raise.js'
 
@@ -64,6 +64,6 @@ export const codes = (self: DeclarationIndex.Index): ReadonlyArray<string> =>
 
 /** Formats one declared-type fixture to canonical UTF-8 text. */
 export const format = Effect.fnUntraced(function* (id: string, source: string) {
-  const document = yield* Formatter.format(parse(id, source))
+  const document = yield* SyntaxFormatter.format(parse(id, source))
   return decoder.decode(FormattedDocument.toUint8Array(document))
 })

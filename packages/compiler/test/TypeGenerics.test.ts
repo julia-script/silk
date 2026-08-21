@@ -6,7 +6,6 @@ import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Instances from '../src/Instances.js'
 import * as Layout from '../src/Layout.js'
 import * as Lexer from '../src/Lexer.js'
@@ -18,6 +17,7 @@ import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as SourceSpan from '../src/SourceSpan.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import * as Json from './support/Json.js'
@@ -497,13 +497,13 @@ it.effect('formats generic declarations, applications, and calls idempotently', 
         ),
       ),
     )
-    const formatted = yield* Formatter.format(syntax)
+    const formatted = yield* SyntaxFormatter.format(syntax)
     const text = new TextDecoder().decode(FormattedDocument.toUint8Array(formatted))
     assert.strictEqual(
       text,
       'struct Box<T> {\n  value: T\n}\n\nfn keep<T>(value: Box<T>) -> Box<T> {\n  return identity<T>(value)\n}\n',
     )
-    const again = yield* Formatter.format(
+    const again = yield* SyntaxFormatter.format(
       Parser.parse(Lexer.lex(SourceFile.make('generics/format', new TextEncoder().encode(text)))),
     )
     assert.strictEqual(new TextDecoder().decode(FormattedDocument.toUint8Array(again)), text)
@@ -522,7 +522,7 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
         ),
       ),
     )
-    const formatted = yield* Formatter.format(syntax)
+    const formatted = yield* SyntaxFormatter.format(syntax)
     const text = new TextDecoder().decode(FormattedDocument.toUint8Array(formatted))
     assert.strictEqual(
       text,
@@ -531,7 +531,7 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
 }
 `,
     )
-    const again = yield* Formatter.format(
+    const again = yield* SyntaxFormatter.format(
       Parser.parse(
         Lexer.lex(SourceFile.make('generics/channel-format', new TextEncoder().encode(text))),
       ),

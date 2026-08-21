@@ -17,6 +17,7 @@ const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
 const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
 const documentationPackageRoot = resolve(workspaceRoot, 'packages/documentation')
+const formatterPackageRoot = resolve(workspaceRoot, 'packages/formatter')
 const inspectorPackageRoot = resolve(workspaceRoot, 'packages/inspector')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
@@ -286,7 +287,6 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './FiniteRow',
       './FloatingPoint',
       './FormattedDocument',
-      './Formatter',
       './Hir',
       './HostInput',
       './ImportPlan',
@@ -330,6 +330,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Stdlib',
       './SyntaxCorrespondence',
       './SyntaxFile',
+      './SyntaxFormatter',
       './SyntaxTree',
       './Target',
       './Termination',
@@ -720,7 +721,6 @@ console.log(
       'FiniteRow',
       'FloatingPoint',
       'FormattedDocument',
-      'Formatter',
       'Hir',
       'HostInput',
       'ImportPlan',
@@ -765,6 +765,7 @@ console.log(
       'Stdlib',
       'SyntaxCorrespondence',
       'SyntaxFile',
+      'SyntaxFormatter',
       'SyntaxTree',
       'Target',
       'TargetConstant',
@@ -801,7 +802,7 @@ console.log(
     expect(api.deep['./Diagnostic']).toContain('wrongCallArity')
     expect(api.deep['./Diagnostic']).toContain('merge')
     expect(api.deep['./SourceFile']).toContain('make')
-    expect(api.deep['./Formatter']).toContain('format')
+    expect(api.deep['./SyntaxFormatter']).toContain('format')
     expect(api.deep['./SyntaxTree']).toContain('tokens')
     expect(api.deep['./Operator']).toContain('infix')
     expect(api.deep['./Type']).toContain('nominal')
@@ -967,6 +968,7 @@ test('the documentation release candidate exposes its formatter-neutral actors',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
+      './CodeFence',
       './Document',
       './Highlight',
       './Json',
@@ -1007,7 +1009,105 @@ test('the documentation release candidate exposes its formatter-neutral actors',
         { cwd: consumerRoot, encoding: 'utf8' },
       ),
     )
-    expect(api).toEqual(['Document', 'Highlight', 'Json', 'Project'])
+    expect(api).toEqual(['CodeFence', 'Document', 'Highlight', 'Json', 'Project'])
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+}, 30_000)
+
+test('the formatter release candidate installs offline with root and deep API parity', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-effect-formatter-release-candidate-'))
+
+  try {
+    const archiveRoot = resolve(temporary, 'archives')
+    const unpackRoot = resolve(temporary, 'unpacked')
+    mkdirSync(archiveRoot)
+    mkdirSync(unpackRoot)
+    for (const root of [
+      formatterPackageRoot,
+      documentationPackageRoot,
+      compilerPackageRoot,
+      packageRoot,
+      wasmPackageRoot,
+    ])
+      execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
+        cwd: root,
+        stdio: 'pipe',
+      })
+
+    const archives = readdirSync(archiveRoot)
+    const archive = archives.find((file) => file.startsWith('silk-effect-formatter-'))
+    const documentationArchive = archives.find((file) =>
+      file.startsWith('silk-effect-documentation-'),
+    )
+    const compilerArchive = archives.find(
+      (file) => file.startsWith('silk-effect-compiler-') && !file.includes('-cli-'),
+    )
+    const llvmArchive = archives.find((file) => file.startsWith('silk-effect-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silk-effect-wasm-'))
+    expect(archive).toBeDefined()
+    execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
+
+    const packedRoot = resolve(unpackRoot, 'package')
+    const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('@silk-effect/formatter')
+    expect(manifest.private).not.toBe(true)
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      '@silk-effect/compiler',
+      '@silk-effect/documentation',
+      'effect',
+    ])
+    expect(Object.keys(manifest.exports).sort()).toEqual(['.', './Formatter', './FormatterError'])
+    expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'test'))).toBe(false)
+
+    const consumerRoot = resolve(temporary, 'consumer')
+    mkdirSync(consumerRoot)
+    writeFileSync(
+      resolve(consumerRoot, 'package.json'),
+      JSON.stringify({
+        private: true,
+        type: 'module',
+        dependencies: {
+          '@silk-effect/formatter': `file:${resolve(archiveRoot, archive ?? '')}`,
+        },
+      }),
+    )
+    writeFileSync(
+      resolve(consumerRoot, 'pnpm-workspace.yaml'),
+      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+    )
+    installConsumer(consumerRoot)
+
+    const inspected = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `import * as api from '@silk-effect/formatter';
+import * as Formatter from '@silk-effect/formatter/Formatter';
+import * as FormatterError from '@silk-effect/formatter/FormatterError';
+console.log(JSON.stringify({
+  root: Object.keys(api).sort(),
+  formatterRoot: Object.keys(api.Formatter).sort(),
+  formatterDeep: Object.keys(Formatter).sort(),
+  errorRoot: Object.keys(api.FormatterError).sort(),
+  errorDeep: Object.keys(FormatterError).sort(),
+}));`,
+        ],
+        { cwd: consumerRoot, encoding: 'utf8' },
+      ),
+    )
+    expect(inspected.root).toEqual(['Formatter', 'FormatterError'])
+    expect(inspected.formatterRoot).toEqual(inspected.formatterDeep)
+    expect(inspected.errorRoot).toEqual(inspected.errorDeep)
+    expect(inspected.formatterDeep).toContain('format')
+    expect(inspected.errorDeep).toContain('FormatterError')
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
@@ -1026,6 +1126,7 @@ test('the compiler CLI release candidate installs with its project-first command
       compilerCliPackageRoot,
       compilerPackageRoot,
       documentationPackageRoot,
+      formatterPackageRoot,
       packageRoot,
       wasmPackageRoot,
     ]) {
@@ -1047,11 +1148,13 @@ test('the compiler CLI release candidate installs with its project-first command
     const documentationArchive = archives.find((file) =>
       file.startsWith('silk-effect-documentation-'),
     )
+    const formatterArchive = archives.find((file) => file.startsWith('silk-effect-formatter-'))
     expect(archive).toBeDefined()
     expect(compilerArchive).toBeDefined()
     expect(llvmArchive).toBeDefined()
     expect(wasmArchive).toBeDefined()
     expect(documentationArchive).toBeDefined()
+    expect(formatterArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
@@ -1062,6 +1165,7 @@ test('the compiler CLI release candidate installs with its project-first command
       '@effect/platform-node',
       '@silk-effect/compiler',
       '@silk-effect/documentation',
+      '@silk-effect/formatter',
       'effect',
       'smol-toml',
     ])
@@ -1112,7 +1216,7 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 
@@ -1337,6 +1441,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
       compilerCliPackageRoot,
       compilerPackageRoot,
       documentationPackageRoot,
+      formatterPackageRoot,
       inspectorPackageRoot,
       packageRoot,
       wasmPackageRoot,
@@ -1358,9 +1463,11 @@ test('the lsp release candidate installs and answers an initialize request', asy
     const documentationArchive = archives.find((file) =>
       file.startsWith('silk-effect-documentation-'),
     )
+    const formatterArchive = archives.find((file) => file.startsWith('silk-effect-formatter-'))
     const inspectorArchive = archives.find((file) => file.startsWith('silk-effect-inspector-'))
     expect(archive).toBeDefined()
     expect(documentationArchive).toBeDefined()
+    expect(formatterArchive).toBeDefined()
     expect(inspectorArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
@@ -1368,6 +1475,18 @@ test('the lsp release candidate installs and answers an initialize request', asy
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
     expect(manifest.name).toBe('@silk-effect/lsp')
     expect(manifest.private).not.toBe(true)
+    expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      '@effect/platform-node',
+      '@silk-effect/compiler',
+      '@silk-effect/compiler-cli',
+      '@silk-effect/documentation',
+      '@silk-effect/formatter',
+      '@silk-effect/inspector',
+      'effect',
+      'vscode-languageserver',
+      'vscode-languageserver-textdocument',
+      'vscode-languageserver-types',
+    ])
     expect(manifest.bin).toEqual({ 'silk-lsp': './dist/bin.js' })
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
@@ -1399,7 +1518,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
     )
     installConsumer(consumerRoot)
 

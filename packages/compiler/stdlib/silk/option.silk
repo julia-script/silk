@@ -66,7 +66,7 @@ pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Opt
 /// ## Choose between a present value and a fallback
 ///
 /// ```silk
-/// import silk.option { none, some, unwrapOr }
+/// import silk.option {none, some, unwrapOr}
 ///
 /// pub fn main() -> i32 {
 ///   let present = some<i32>(7)

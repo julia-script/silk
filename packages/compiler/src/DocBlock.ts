@@ -15,6 +15,25 @@ export interface DocBlock {
   readonly span: SourceSpan.SourceSpan
 }
 
+const documentableKinds: ReadonlySet<SyntaxTree.NodeKind> = new Set([
+  'StructDeclaration',
+  'ServiceDeclaration',
+  'InterfaceDeclaration',
+  'RoleDeclaration',
+  'ConstantDeclaration',
+  'ImplDeclaration',
+  'FunctionDeclaration',
+  'StructField',
+  'TypeParameter',
+  'ParameterDeclaration',
+  'ServiceOperation',
+  'ImplOperation',
+])
+
+/** Tests whether one concrete-syntax kind participates in Silk's documentation model. */
+export const isDocumentableKind = (kind: SyntaxTree.NodeKind): boolean =>
+  documentableKinds.has(kind)
+
 const isTrivia = (token: Token.Token): boolean =>
   token.kind === 'Whitespace' ||
   token.kind === 'LineComment' ||
@@ -131,7 +150,7 @@ export const ofNode = (
   syntax: SyntaxFile.SyntaxFile,
   node: SyntaxTree.Node,
 ): DocBlock | undefined =>
-  node.span.sourceId === syntax.source.id
+  isDocumentableKind(node.kind) && node.span.sourceId === syntax.source.id
     ? attachedAtEnd(syntax.source, directLeadingTrivia(node), 'Declaration')
     : undefined
 
@@ -143,4 +162,32 @@ export const ofModule = (syntax: SyntaxFile.SyntaxFile): DocBlock | undefined =>
     leading.push(token)
   }
   return moduleAtStart(syntax.source, leading)
+}
+
+/** Returns every source-owned documentation block in physical source order. */
+export const all = (syntax: SyntaxFile.SyntaxFile): ReadonlyArray<DocBlock> => {
+  const blocks: Array<DocBlock> = []
+  const module = ofModule(syntax)
+  if (module !== undefined) blocks.push(module)
+
+  const visit = (node: SyntaxTree.Node): void => {
+    if (isDocumentableKind(node.kind)) {
+      const block = ofNode(syntax, node)
+      if (block !== undefined) blocks.push(block)
+    }
+    for (const child of node.children) if (SyntaxTree.isNode(child)) visit(child)
+  }
+  visit(syntax.root)
+
+  const seen = new Set<string>()
+  return Object.freeze(
+    blocks
+      .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)
+      .filter((block) => {
+        const key = `${block.span.sourceId}:${block.span.start}:${block.span.end}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }),
+  )
 }

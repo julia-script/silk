@@ -1,7 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
@@ -9,6 +8,7 @@ import * as Parser from '../src/Parser.js'
 import * as Presentation from '../src/Presentation.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 
@@ -59,7 +59,7 @@ pub struct Exclusive<A,F:mut Effect<A>>{operation:F}`
     )
     assert.deepEqual(syntax.parserDiagnostics, [])
 
-    const formatted = yield* Formatter.format(syntax)
+    const formatted = yield* SyntaxFormatter.format(syntax)
     assert.strictEqual(
       decoder.decode(FormattedDocument.toUint8Array(formatted)),
       `pub struct Mapper<A, B, F: fn(A) -> B> {

@@ -212,7 +212,7 @@ authority only to its directly wrapped complete call and not to nested argument 
 
 **Evidence:** [unsafe block parser](../../packages/compiler/src/Parser.ts),
 [unsafe semantic admission](../../packages/compiler/src/Elaboration.ts),
-[unsafe formatting](../../packages/compiler/src/Formatter.ts).
+[unsafe syntax formatting](../../packages/compiler/src/SyntaxFormatter.ts).
 
 ### UNSAFE-004 — An unsafe effect function is acknowledged when its Effect is constructed
 

@@ -3,12 +3,12 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -49,7 +49,7 @@ it.effect('parses and formats typed constant declarations losslessly', () =>
       syntax.tokens.find((token) => token.kind === 'ConstKeyword')?.kind,
       'ConstKeyword',
     )
-    const formatted = yield* Formatter.format(syntax)
+    const formatted = yield* SyntaxFormatter.format(syntax)
     assert.strictEqual(
       decoder.decode(FormattedDocument.toUint8Array(formatted)),
       'pub const answer: i32 = 40\n\nconst enabled: bool = true\n',

@@ -1,8 +1,9 @@
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
-import * as Formatter from '@silk-effect/compiler/Formatter'
 import * as Lexer from '@silk-effect/compiler/Lexer'
 import * as Parser from '@silk-effect/compiler/Parser'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as Formatter from '@silk-effect/formatter/Formatter'
+import * as FormatterError from '@silk-effect/formatter/FormatterError'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -19,7 +20,11 @@ export interface Options extends Project.LoadOptions {
 export type Outcome =
   | { readonly _tag: 'Unchanged'; readonly path: string }
   | { readonly _tag: 'Changed'; readonly path: string; readonly written: boolean }
-  | { readonly _tag: 'Damaged'; readonly path: string; readonly error: Formatter.FormatterError }
+  | {
+      readonly _tag: 'Damaged'
+      readonly path: string
+      readonly error: FormatterError.FormatterError
+    }
   | {
       readonly _tag: 'Failed'
       readonly path: string
@@ -215,7 +220,14 @@ const process = Effect.fnUntraced(function* (
   const syntax = Parser.parse(Lexer.lex(source))
   const attempted = yield* Effect.result(Formatter.format(syntax))
   if (Result.isFailure(attempted)) {
-    return Object.freeze({ _tag: 'Damaged' as const, path: file, error: attempted.failure })
+    return FormatterError.isSourceDamage(attempted.failure)
+      ? Object.freeze({ _tag: 'Damaged' as const, path: file, error: attempted.failure })
+      : Object.freeze({
+          _tag: 'Failed' as const,
+          path: file,
+          message: attempted.failure.message,
+          cause: attempted.failure,
+        })
   }
   if (!attempted.success.changed) return Object.freeze({ _tag: 'Unchanged' as const, path: file })
   if (check) return Object.freeze({ _tag: 'Changed' as const, path: file, written: false })

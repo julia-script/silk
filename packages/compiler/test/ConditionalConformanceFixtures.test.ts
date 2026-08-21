@@ -7,11 +7,11 @@ import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
-import * as Formatter from '../src/Formatter.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SyntaxCorrespondence from '../src/SyntaxCorrespondence.js'
+import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 
@@ -46,7 +46,7 @@ layer(NodeServices.layer)('conditional conformance fixtures', (it) => {
     Effect.gen(function* () {
       const original = yield* parse('syntax-original')
       assert.deepEqual(original.parserDiagnostics, [])
-      const first = yield* Formatter.format(original)
+      const first = yield* SyntaxFormatter.format(original)
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
       assert.strictEqual(
         text,
@@ -67,7 +67,7 @@ impl<S: Decoder> Decoder for Wrapper<S> {
 }
 `,
       )
-      const second = yield* Formatter.format(
+      const second = yield* SyntaxFormatter.format(
         Parser.parse(
           Lexer.lex(
             SourceFile.make('conditional-conformance/formatted', Uint8Array.from(first.bytes)),

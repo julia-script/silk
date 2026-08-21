@@ -8,6 +8,20 @@ import { denying } from './fileSystemFailures.js'
 
 const canonical = 'pub fn main() -> i32 {\n  return 42\n}\n'
 const compact = 'pub fn main() -> i32 { return 42 }'
+const embeddedDrift = `/// \`\`\`silk
+/// pub fn example()->i32{return 7}
+/// \`\`\`
+pub fn main() -> i32 { return 42 }
+`
+const embeddedCanonical = `/// \`\`\`silk
+/// pub fn example() -> i32 {
+///   return 7
+/// }
+/// \`\`\`
+pub fn main() -> i32 {
+  return 42
+}
+`
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -168,6 +182,67 @@ it.effect('check mode performs no writes and semantic-only errors do not affect 
       ['Unchanged'],
     )
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.effect('checks and writes active source-documentation examples', () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const root = yield* fileSystem.makeTempDirectoryScoped()
+    yield* makeProject(root, embeddedDrift)
+
+    const checked = yield* FormatWorkflow.run({ workingDirectory: root, check: true })
+    assert.deepEqual(
+      checked.outcomes.map((outcome) => outcome._tag),
+      ['Changed'],
+    )
+    assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), embeddedDrift)
+
+    const written = yield* FormatWorkflow.run({ workingDirectory: root })
+    assert.deepEqual(
+      written.outcomes.map((outcome) => outcome._tag),
+      ['Changed'],
+    )
+    assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), embeddedCanonical)
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.effect(
+  'retains original fence location, refuses partial writes, and continues across files',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root, compact)
+      const damaged = `/// \`\`\`silk
+/// pub fn first()->i32{return 1}
+/// \`\`\`
+///
+/// \`\`\`silk
+/// @@@
+/// \`\`\`
+pub fn broken()->i32{return 1}
+`
+      yield* writeFile(`${root}/src/Broken.silk`, damaged)
+
+      const summary = yield* FormatWorkflow.run({ workingDirectory: root })
+      assert.deepEqual(
+        summary.outcomes.map((outcome) => outcome._tag),
+        ['Damaged', 'Changed'],
+      )
+      assert.strictEqual(FormatWorkflow.exitStatus(summary), 1)
+      assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Broken.silk`), damaged)
+      assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), canonical)
+
+      const broken = summary.outcomes.at(0)
+      assert.strictEqual(broken?._tag, 'Damaged')
+      if (broken?._tag !== 'Damaged' || broken.error.reason._tag !== 'EmbeddedSyntax') return
+      const bytes = new TextEncoder().encode(damaged)
+      const range = broken.error.reason.fence
+      assert.strictEqual(
+        new TextDecoder().decode(bytes.slice(range.start, range.end)),
+        `\`\`\`silk\n/// @@@\n/// \`\`\``,
+      )
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
 it.effect('reports storage failures, continues in order, and gives exit class two precedence', () =>

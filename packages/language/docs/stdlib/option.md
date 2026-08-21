@@ -110,7 +110,7 @@ two owned values leaves this call and the other drops.
 #### Choose between a present value and a fallback
 
 ```silk
-import silk.option { none, some, unwrapOr }
+import silk.option {none, some, unwrapOr}
 
 pub fn main() -> i32 {
   let present = some<i32>(7)

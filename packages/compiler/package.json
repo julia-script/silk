@@ -290,9 +290,9 @@
       "types": "./dist/FormattedDocument.d.ts",
       "import": "./dist/FormattedDocument.js"
     },
-    "./Formatter": {
-      "types": "./dist/Formatter.d.ts",
-      "import": "./dist/Formatter.js"
+    "./SyntaxFormatter": {
+      "types": "./dist/SyntaxFormatter.d.ts",
+      "import": "./dist/SyntaxFormatter.js"
     },
     "./FloatingPoint": {
       "types": "./dist/FloatingPoint.d.ts",

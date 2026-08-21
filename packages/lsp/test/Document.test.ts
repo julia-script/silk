@@ -15,6 +15,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { SemanticTokenTypes, SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
+import * as EmbeddedFormatting from './fixtures/embeddedFormatting.js'
 
 const encoder = new TextEncoder()
 
@@ -524,6 +525,29 @@ it.effect('formats a non-canonical document with one whole-document edit', () =>
 it.effect('formats a damaged document with no edits', () =>
   Effect.gen(function* () {
     const { document, snapshot } = yield* open('pub fn main( -> {')
+    assert.deepEqual(yield* Document.format(document, snapshot), [])
+  }),
+)
+
+it.effect('formats active documentation examples with the shared canonical bytes', () =>
+  Effect.gen(function* () {
+    const { document, snapshot } = yield* open(EmbeddedFormatting.source)
+    const edits = yield* Document.format(document, snapshot)
+    assert.deepEqual(
+      edits.map((edit) => edit.newText),
+      [EmbeddedFormatting.canonical],
+    )
+  }),
+)
+
+it.effect('returns no edit for embedded syntax damage', () =>
+  Effect.gen(function* () {
+    const source = `/// \`\`\`silk
+/// @@@
+/// \`\`\`
+pub fn main() -> i32 { return 42 }
+`
+    const { document, snapshot } = yield* open(source)
     assert.deepEqual(yield* Document.format(document, snapshot), [])
   }),
 )
