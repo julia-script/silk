@@ -946,8 +946,21 @@ export const parameterArgument = (self: Parameter): GenericArgument => {
   }
 }
 
-const accessRank = (access: CallableMode | Effect['access']): number =>
+/** Ranks access modes: Shared(0) < Exclusive(1) < Take(2). */
+export const accessRank = (access: CallableMode | Effect['access']): number =>
   access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
+
+/** True when the supplied access is at least as strong as the required one. */
+export const compareAccess = (
+  supplied: CallableMode | Effect['access'],
+  required: CallableMode | Effect['access'],
+): boolean => accessRank(supplied) <= accessRank(required)
+
+/** True when one requirement is satisfied by a supplied requirement with compatible access. */
+export const requirementSatisfies = (
+  supplied: { readonly access: 'Shared' | 'Exclusive' | 'Take' },
+  required: { readonly access: 'Shared' | 'Exclusive' },
+): boolean => compareAccess(supplied.access, required.access)
 
 /**
  * Intersects two uses of one representation contract. The result keeps the most restrictive
@@ -1580,7 +1593,7 @@ const genericArgumentsHaveSameRepresentationShape = (
         return (
           compared !== undefined &&
           requirement.role === compared.role &&
-          requirement.access === compared.access &&
+          requirementSatisfies(requirement, compared) &&
           haveSameRepresentationShape(requirement.capability, compared.capability)
         )
       }) &&
@@ -1643,11 +1656,9 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
     )
   if (isCallable(left) || isCallable(right)) {
     if (!isCallable(left) || !isCallable(right)) return false
-    const leftRank = left.mode === 'Shared' ? 0 : left.mode === 'Exclusive' ? 1 : 2
-    const rightRank = right.mode === 'Shared' ? 0 : right.mode === 'Exclusive' ? 1 : 2
     return (
       (!left.unsafe || right.unsafe) &&
-      leftRank <= rightRank &&
+      compareAccess(left.mode, right.mode) &&
       left.parameters.length === right.parameters.length &&
       left.parameters.every((parameter_, ordinal) => {
         const compared = right.parameters.at(ordinal)
@@ -1658,10 +1669,8 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
   }
   if (isEffect(left) || isEffect(right)) {
     if (!isEffect(left) || !isEffect(right)) return false
-    const leftRank = left.access === 'Shared' ? 0 : left.access === 'Exclusive' ? 1 : 2
-    const rightRank = right.access === 'Shared' ? 0 : right.access === 'Exclusive' ? 1 : 2
     return (
-      leftRank <= rightRank &&
+      compareAccess(left.access, right.access) &&
       haveSameRepresentationShape(left.success, right.success) &&
       haveSameRepresentationShape(failureType(left), failureType(right)) &&
       requirementMembers(left).length === requirementMembers(right).length &&
@@ -1670,7 +1679,7 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
         return (
           compared !== undefined &&
           requirement.role === compared.role &&
-          requirement.access === compared.access &&
+          requirementSatisfies(requirement, compared) &&
           haveSameRepresentationShape(requirement.capability, compared.capability)
         )
       }) &&
@@ -2298,6 +2307,33 @@ const isClosedGenericArgument = (self: GenericArgument): boolean => {
 /** Tests whether one erased argument is fully closed and contains no unavailable recovery value. */
 export const isRuntimeConcreteGenericArgument = (self: GenericArgument): boolean =>
   isClosedGenericArgument(self) && runtimeAvailableGenericArgument(self)
+
+/** True when any nested Type satisfies the predicate (including self). */
+export const someSubterm = (self: Type, predicate: (type: Type) => boolean): boolean => {
+  if (predicate(self)) return true
+  if (isReference(self)) return someSubterm(self.target, predicate)
+  if (isSlice(self)) return someSubterm(self.element, predicate)
+  if (isNominal(self))
+    return self.arguments
+      .filter(isTypeArgument)
+      .some((argument) => someSubterm(argument, predicate))
+  if (isFixedArray(self)) return someSubterm(self.element, predicate)
+  if (isCallable(self))
+    return (
+      self.parameters.some((parameter_) => someSubterm(parameter_, predicate)) ||
+      someSubterm(self.result, predicate)
+    )
+  if (isEffect(self))
+    return (
+      someSubterm(self.success, predicate) ||
+      RowAlgebra.concreteMembers(failureRowPolicy(), self.failureRow).some((member) =>
+        someSubterm(member, predicate),
+      )
+    )
+  if (isRepresented(self)) return someSubterm(self.contract, predicate)
+  if (isUnion(self)) return self.members.some((member) => someSubterm(member, predicate))
+  return false
+}
 
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {

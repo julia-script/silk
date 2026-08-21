@@ -3,6 +3,7 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
+import { equal as setEqual } from './internal/SetOf.js'
 import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -2677,8 +2678,7 @@ const checkFunction = (
     if (existing === undefined) states.set(loop.ordinal, [new Set(live)])
     else existing.push(new Set(live))
   }
-  const sameLive = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
-    left.size === right.size && [...left].every((site) => right.has(site))
+  const sameLive = setEqual
   const intersection = (states: ReadonlyArray<ReadonlySet<string>>): Set<string> => {
     const [first, ...rest] = states
     return new Set([...(first ?? [])].filter((site) => rest.every((state) => state.has(site))))
