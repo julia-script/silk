@@ -2309,6 +2309,25 @@ const isClosedGenericArgument = (self: GenericArgument): boolean => {
 export const isRuntimeConcreteGenericArgument = (self: GenericArgument): boolean =>
   isClosedGenericArgument(self) && runtimeAvailableGenericArgument(self)
 
+/** True when any nested Type satisfies the predicate (including self). */
+export const someSubterm = (self: Type, predicate: (type: Type) => boolean): boolean => {
+  if (predicate(self)) return true
+  if (isReference(self)) return someSubterm(self.target, predicate)
+  if (isSlice(self)) return someSubterm(self.element, predicate)
+  if (isNominal(self)) return self.arguments.filter(isTypeArgument).some((argument) => someSubterm(argument, predicate))
+  if (isFixedArray(self)) return someSubterm(self.element, predicate)
+  if (isCallable(self))
+    return self.parameters.some((parameter_) => someSubterm(parameter_, predicate)) || someSubterm(self.result, predicate)
+  if (isEffect(self))
+    return (
+      someSubterm(self.success, predicate) ||
+      RowAlgebra.concreteMembers(failureRowPolicy(), self.failureRow).some((member) => someSubterm(member, predicate))
+    )
+  if (isRepresented(self)) return someSubterm(self.contract, predicate)
+  if (isUnion(self)) return self.members.some((member) => someSubterm(member, predicate))
+  return false
+}
+
 /** Tests whether a type contains a lexical borrow at any depth. */
 export const containsBorrow = (self: Type): boolean => {
   if (isString(self)) return true
