@@ -1,4 +1,5 @@
 import * as ByteClass from './internal/ByteClass.js'
+import { scalarCount } from './internal/Escape.js'
 import type * as Token from './Token.js'
 
 /** The semantic category selected by a static-literal modifier and delimiter. */
@@ -144,38 +145,7 @@ export const scanBoundary = (
   return Object.freeze({ end: bytes.length, terminated: false })
 }
 
-const isContinuation = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x80 && byte <= 0xbf
-
-/**
- * Counts the Unicode scalars one escaped body denotes, without decoding any of them.
- *
- * The count is a scalar count and never a byte count: `é` is two UTF-8 bytes and one scalar, and
- * one escape sequence denotes one scalar however it is spelled. Only the extent of an escape
- * matters here, never its meaning, so the decoder in `StaticText` stays the single authority on
- * what an escape produces and this rule stays valid for any escape it later accepts.
- */
-export const scalarCount = (bytes: ByteSequence, contentStart: number, end: number): number => {
-  let index = contentStart
-  let scalars = 0
-  while (index < end) {
-    scalars += 1
-    if (bytes[index] !== 0x5c) {
-      index += 1
-      while (index < end && isContinuation(bytes[index])) index += 1
-      continue
-    }
-    const escaped = bytes[index + 1]
-    if (escaped === 0x75 && bytes[index + 2] === 0x7b) {
-      index += 3
-      while (index < end && bytes[index] !== 0x7d) index += 1
-      index += 1
-      continue
-    }
-    index += escaped === 0x78 ? 4 : 2
-  }
-  return scalars
-}
+export { scalarCount } from './internal/Escape.js'
 
 /** Returns the token kind selected by a valid form. */
 export const tokenKind = (self: LiteralForm): Token.TokenKind => self.tokenKind
