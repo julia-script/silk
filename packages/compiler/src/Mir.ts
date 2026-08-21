@@ -1,4 +1,3 @@
-import * as Option from 'effect/Option'
 import * as CallableFieldRealization from './CallableFieldRealization.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
@@ -6547,11 +6546,11 @@ const sampleSpan = (
   source: SourceFile.SourceFile,
   start: number,
   end: number,
-): SourceSpan.SourceSpan =>
-  Option.getOrThrowWith(
-    SourceSpan.make(source, start, end),
-    () => new RangeError('MIR sample produced an invalid span'),
-  )
+): SourceSpan.SourceSpan => {
+  const span = SourceSpan.make(source, start, end)
+  if (span._tag === 'None') throw new RangeError('MIR sample produced an invalid span')
+  return span.value
+}
 const local = (ordinal: number): LocalId => Object.freeze({ _tag: 'Local', ordinal })
 const region = (ordinal: number): RegionId => Object.freeze({ _tag: 'Region', ordinal })
 const i32: Type = Object.freeze({ _tag: 'i32' })
