@@ -22,6 +22,47 @@ element count, every selected range is in bounds, and every read or view covers 
 elements. Releasing a raw buffer releases its allocation but does not discover and drop values
 still stored in it; a container must clear initialized `Slot` values before release.
 
+## Examples
+
+### Initialize and read a raw byte buffer
+
+```silk
+import silk.core as Core
+
+import silk.core {Allocator}
+
+import silk.effect as Effect
+
+import silk.layout as Layout
+
+import silk.raw_buffer as RawBuffer
+
+import silk.u8 as u8
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let allocation = run acquiring
+  unsafe {
+    let mut buffer = RawBuffer.from<u8>(move allocation, 3)
+    let filled = RawBuffer.fill(&mut buffer, 0, 3, u8.toU8(14))
+    let values = RawBuffer.view<u8>(&buffer, 0, 3)
+    return u8.toI32(values[0] + values[1] + values[2])
+  }
+  return 0
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
 Import as `RawBuffer` with `import silk.raw_buffer`.
 
 Public declarations: 8.
@@ -34,7 +75,11 @@ Public declarations: 8.
 pub fn from<T>(allocation: Allocation, count: usize) -> silk/core.RawBuffer<T>
 ```
 
-Adopts an allocation as typed raw storage. The caller proves the count fits the allocation.
+Adopts an allocation as typed raw storage with the specified element capacity.
+
+### Gotchas
+
+The caller must prove that the allocation has the size and alignment for `count` values of `T`.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a736c6f74"></a>
 
@@ -44,7 +89,12 @@ Adopts an allocation as typed raw storage. The caller proves the count fits the 
 pub fn slot<T>(buffer: &mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<T>
 ```
 
-Selects one unchecked storage slot. The caller proves the index is in bounds.
+Selects one raw storage slot without checking bounds or initialization.
+
+### Gotchas
+
+`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74). The caller must separately track whether the slot is
+initialized.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a636f756e74"></a>
 
@@ -64,7 +114,11 @@ Returns the element capacity recorded by a raw buffer.
 pub fn read<T>(buffer: &silk/core.RawBuffer<T>, index: usize) -> T
 ```
 
-Reads an unchecked initialized element. The caller proves initialization and bounds.
+Copies one initialized element without changing its slot state.
+
+### Gotchas
+
+`index` must be less than [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74), and the selected slot must contain an initialized `T`.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a636f7079"></a>
 
@@ -81,6 +135,11 @@ Moves a caller-proven initialized range into selected storage in one bulk transf
 Source and destination may overlap; the result is as if the elements travelled through an
 intermediate buffer.
 
+### Gotchas
+
+The caller must prove that both selected ranges are in bounds. The source range must be
+initialized.
+
 <a id="declaration-73696c6b2f7261775f6275666665723a3a66696c6c"></a>
 
 ## `fill`
@@ -89,7 +148,11 @@ intermediate buffer.
 pub fn fill(buffer: &mut silk/core.RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()
 ```
 
-Sets a caller-proven byte range of raw storage to one repeated byte value.
+Initializes a selected byte range with one repeated byte value.
+
+### Gotchas
+
+`offset + length` must not exceed [`count`](#declaration-73696c6b2f7261775f6275666665723a3a636f756e74).
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a76696577"></a>
 
@@ -99,7 +162,11 @@ Sets a caller-proven byte range of raw storage to one repeated byte value.
 pub fn view<T>(buffer: &silk/core.RawBuffer<T>, offset: usize, length: usize) -> &[T]
 ```
 
-Forms a shared view over caller-proven initialized elements in the selected range.
+Borrows a shared view of an initialized element range.
+
+### Gotchas
+
+The selected range must be in bounds, and each selected slot must be initialized.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a766965774d7574"></a>
 
@@ -109,4 +176,8 @@ Forms a shared view over caller-proven initialized elements in the selected rang
 pub fn viewMut<T>(buffer: &mut silk/core.RawBuffer<T>, offset: usize, length: usize) -> &mut [T]
 ```
 
-Forms an exclusive view over caller-proven initialized elements in the selected range.
+Borrows an exclusive view of an initialized element range.
+
+### Gotchas
+
+The selected range must be in bounds, and each selected slot must be initialized.

@@ -22,6 +22,48 @@ Selecting an out-of-bounds slot, writing twice, or reading an uninitialized slot
 raw-storage contract. Debug execution may diagnose these mistakes; portable code must not rely
 on a runtime check.
 
+## Examples
+
+### Copy and then take one initialized value
+
+```silk
+import silk.core as Core
+
+import silk.core {Allocator}
+
+import silk.effect as Effect
+
+import silk.layout as Layout
+
+import silk.raw_buffer as RawBuffer
+
+import silk.slot as Slot
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let acquiring = Allocator.allocate(Layout.of<i32>())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let allocation = run acquiring
+  unsafe {
+    let mut buffer = RawBuffer.from<i32>(move allocation, 1)
+    let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
+    let copied = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+    let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+    return copied + taken
+  }
+  return 0
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
 Import as `Slot` with `import silk.slot`.
 
 Public declarations: 4.
@@ -34,7 +76,12 @@ Public declarations: 4.
 pub fn write<T>(slot: silk/core.Slot<T>, value: T) -> ()
 ```
 
-Initializes one selected raw slot exactly once.
+Moves one value into a selected uninitialized raw slot.
+
+### Gotchas
+
+The slot must be in bounds and uninitialized. A second write without a state transition is
+invalid.
 
 <a id="declaration-73696c6b2f736c6f743a3a74616b65"></a>
 
@@ -44,7 +91,11 @@ Initializes one selected raw slot exactly once.
 pub fn take<T>(slot: silk/core.Slot<T>) -> T
 ```
 
-Moves an initialized value out of one selected raw slot.
+Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
+
+### Gotchas
+
+The slot must be in bounds and initialized.
 
 <a id="declaration-73696c6b2f736c6f743a3a636f7079"></a>
 
@@ -54,7 +105,11 @@ Moves an initialized value out of one selected raw slot.
 pub fn copy<T>(slot: silk/core.Slot<T>) -> T
 ```
 
-Copies an initialized Copy value out of one selected raw slot.
+Copies a `Copy` value from a selected initialized raw slot without changing its state.
+
+### Gotchas
+
+The slot must be in bounds and initialized.
 
 <a id="declaration-73696c6b2f736c6f743a3a64726f7056616c7565"></a>
 
@@ -64,4 +119,8 @@ Copies an initialized Copy value out of one selected raw slot.
 pub fn dropValue<T>(slot: silk/core.Slot<T>) -> ()
 ```
 
-Drops an initialized value in one selected raw slot.
+Drops a value in a selected initialized raw slot and leaves the slot uninitialized.
+
+### Gotchas
+
+The slot must be in bounds and initialized.

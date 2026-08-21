@@ -15,6 +15,36 @@ when the caller is ready to consume the option.
 `Option<T>` is the structural union of [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a536f6d65) and [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65). Its combinators preserve affine
 ownership: a present value moves forward, while an unused fallback or abandoned branch drops.
 
+## Examples
+
+### Transform and continue only when a value is present
+
+```silk
+import silk.option as Option
+
+fn double(value: i32) -> i32 {
+  return value * 2
+}
+
+fn positive(value: i32) -> Option.Option<i32> {
+  if value > 0 {
+    return Option.some<i32>(value)
+  }
+  return Option.none<i32>()
+}
+
+pub fn main() -> i32 {
+  let initial = Option.some<i32>(21)
+  let doubled = Option.map<i32, i32>(move initial, double)
+  let answer = Option.flatMap<i32, i32>(move doubled, positive)
+  let absent = Option.none<i32>()
+  let missing = Option.map<i32, i32>(move absent, double)
+  let presentValue = Option.unwrapOr<i32>(move answer, 0)
+  let absentValue = Option.unwrapOr<i32>(move missing, 0)
+  return presentValue + absentValue
+}
+```
+
 Import as `Option` with `import silk.option`.
 
 Public declarations: 8.
@@ -27,7 +57,7 @@ Public declarations: 8.
 pub struct Some<T>
 ```
 
-The present member of [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e), carrying one owned value.
+The present member of [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e), carrying the available owned value.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65"></a>
 
@@ -37,7 +67,7 @@ The present member of [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f707469
 pub struct None
 ```
 
-The absent member of [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e).
+The absent member of [`Option`](#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e); it carries no explanation for the absence.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e"></a>
 
@@ -49,6 +79,11 @@ pub struct Option<T>
 
 An owned value that is either [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a536f6d65) or [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65).
 
+### Details
+
+Match on an `Option` when both arms need custom behavior. Prefer [`map`](#declaration-73696c6b2f6f7074696f6e3a3a6d6170), [`flatMap`](#declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170), or
+[`unwrapOr`](#declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72) for the common transform, continue, and default cases.
+
 <a id="declaration-73696c6b2f6f7074696f6e3a3a6e6f6e65"></a>
 
 ## `none`
@@ -57,7 +92,7 @@ An owned value that is either [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a53
 pub fn none<T>() -> Option<T>
 ```
 
-Constructs an absent optional value.
+Constructs an absent optional value of the requested element type.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a736f6d65"></a>
 
@@ -67,7 +102,7 @@ Constructs an absent optional value.
 pub fn some<T>(value: T) -> Option<T>
 ```
 
-Constructs a present optional value.
+Constructs a present option by moving `value` into it.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a6d6170"></a>
 
@@ -77,7 +112,12 @@ Constructs a present optional value.
 pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U>
 ```
 
-Applies a transform to a present value and keeps an absent value absent.
+Applies `transform` once to a present value and keeps an absent value absent.
+
+### Details
+
+The callback is not called for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65). This operation consumes `self`; use a shared borrow and
+`match` instead when the original option must remain available.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a666c61744d6170"></a>
 
@@ -89,6 +129,11 @@ pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Opt
 
 Continues a present value with a transform that itself answers with an Option, so the
 outcome stays one Option deep instead of nesting.
+
+### Details
+
+The callback runs once for [`Some`](#declaration-73696c6b2f6f7074696f6e3a3a536f6d65) and not at all for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65). Use this when the next step may
+reject the value without needing to explain why; use a `Result` when rejection needs an error.
 
 <a id="declaration-73696c6b2f6f7074696f6e3a3a756e777261704f72"></a>
 

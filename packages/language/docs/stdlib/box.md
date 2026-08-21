@@ -21,6 +21,39 @@ still releases the allocation exactly once.
 Ordinary recursive destruction uses the call stack. For a very deep chain, consume links with
 [`into`](#declaration-73696c6b2f626f783a3a696e746f) in an iterative loop when stack depth matters.
 
+## Examples
+
+### Store and recover one owned value
+
+```silk
+import silk.box as Box
+
+import silk.core as Core
+
+import silk.effect as Effect
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let creating = Box.make<i32>(42)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let boxed = run creating
+  let borrowed = Box.get<i32>(&boxed)
+  if borrowed[0] != 42 {
+    return 1
+  }
+  return Box.into<i32>(move boxed)
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
 Import as `Box` with `import silk.box`.
 
 Public declarations: 7.
@@ -33,7 +66,7 @@ Public declarations: 7.
 pub struct Vacant
 ```
 
-Internal occupancy state exposed by the current representation; it is not a construction API.
+A marker for a box whose element has been transferred to its caller.
 
 <a id="declaration-73696c6b2f626f783a3a4f63637570696564"></a>
 
@@ -43,7 +76,7 @@ Internal occupancy state exposed by the current representation; it is not a cons
 pub struct Occupied
 ```
 
-Internal occupancy state exposed by the current representation; it is not a construction API.
+A marker for a box that owns one initialized element.
 
 <a id="declaration-73696c6b2f626f783a3a426f78"></a>
 
@@ -63,7 +96,12 @@ Owns one heap-allocated `T` and releases both the value and its allocation on dr
 pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
-Moves one value onto the heap, allocating storage for exactly one element.
+Moves one value into a new box with storage for exactly one element.
+
+### Details
+
+The returned box owns the value and the allocation. Allocation failure produces
+`OutOfMemoryError` and does not produce a partial box.
 
 <a id="declaration-73696c6b2f626f783a3a676574"></a>
 
@@ -73,7 +111,11 @@ Moves one value onto the heap, allocating storage for exactly one element.
 pub fn get<T>(self: &silk/box.Box<T>) -> &[T]
 ```
 
-Borrows the held value as one shared element view.
+Borrows the held value as a shared slice of length one.
+
+### Details
+
+The slice borrows the box and remains valid only for the lexical borrow.
 
 <a id="declaration-73696c6b2f626f783a3a6765744d7574"></a>
 
@@ -83,7 +125,11 @@ Borrows the held value as one shared element view.
 pub fn getMut<T>(self: &mut silk/box.Box<T>) -> &mut [T]
 ```
 
-Borrows the held value as one exclusive element view.
+Borrows the held value as an exclusive slice of length one.
+
+### Details
+
+The slice permits mutation of the element and remains valid only for the lexical borrow.
 
 <a id="declaration-73696c6b2f626f783a3a696e746f"></a>
 
@@ -93,7 +139,7 @@ Borrows the held value as one exclusive element view.
 pub fn into<T>(self: silk/box.Box<T>) -> T
 ```
 
-Consumes the box and yields the value it held, releasing the storage.
+Consumes the box, returns its owned value, and releases its allocation.
 
 <a id="declaration-73696c6b2f626f783a3a696d706c656d656e746174696f6e3a30"></a>
 

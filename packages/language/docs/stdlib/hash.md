@@ -22,6 +22,28 @@ Whenever `HashKey.equals` reports two values equal, `HashKey.hash` must return t
 for both under every seed. The collection cannot detect a witness that violates this rule; such
 a key may become unreachable.
 
+## Examples
+
+### Hash the fields of one key deterministically
+
+```silk
+import silk.hash as Hash
+
+import silk.u64 as u64
+
+pub fn main() -> i32 {
+  let seed = Hash.seed(17)
+  let first = Hash.mix(&seed, 4)
+    |> Hash.combine(9)
+  let second = Hash.mix(&seed, 4)
+    |> Hash.combine(9)
+  if first != second {
+    return 0
+  }
+  return u64.toI32(Hash.word(42).value)
+}
+```
+
 Import as `HashKey` with `import silk.hash`.
 
 Public declarations: 7.
@@ -34,13 +56,12 @@ Public declarations: 7.
 pub struct HashSeed
 ```
 
-The value every hash in one collection is computed under.
+A collection-wide value that changes deterministic hash and bucket results.
 
 ### Details
 
-One seed fixes one iteration order. A collection consults nothing else — no allocation address,
-no clock, no ambient entropy — so two runs of one program over one seed observe one order, and
-they observe it identically on the evaluator, on the native backend, and on WebAssembly.
+The same seed, keys, and operation sequence produce the same bucket order on all Silk engines.
+A seed does not use allocation addresses, clocks, or ambient entropy.
 
 <a id="declaration-73696c6b2f686173683a3a48617368536565643a3a6669656c643a30"></a>
 
@@ -68,7 +89,7 @@ impl Copy for HashSeed
 pub fn seed(value: u64) -> HashSeed
 ```
 
-Constructs a seed from one value.
+Creates a deterministic hash seed from one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a486173684b6579"></a>
 
@@ -78,19 +99,16 @@ Constructs a seed from one value.
 pub interface HashKey
 ```
 
-Static hashing contract for a key of a hashed collection.
+A compile-time equivalence and seeded-hash contract for hashed collection keys.
 
 ### Details
 
-A witness supplies two operations over one key type: the equivalence `==` spells, and a hash of
-one key under one seed. The seed is an operand of the hash rather than state a key carries,
-because one seed serves the whole collection.
+The `==` operator selects `equals`. A hashed collection calls `hash` with its own seed.
 
 ### Gotchas
 
-A witness must compute equal hashes for two keys its own `equals` reports equivalent, under every
-seed. Nothing checks this — a witness that breaks it makes a present key unreachable, and a
-collection can neither detect the breakage nor recover from it.
+For each seed, two equivalent keys must have equal hashes. A collection cannot check this rule.
+If a witness breaks the rule, a present key can become unreachable.
 
 <a id="declaration-73696c6b2f686173683a3a486173684b65793a3a6f7065726174696f6e3a657175616c73"></a>
 
@@ -102,6 +120,10 @@ operator == fn equals(left: &Self, right: &Self) -> bool
 
 Reports whether two keys name the same collection entry.
 
+#### Gotchas
+
+If this returns `true`, `HashKey.hash` must return equal hashes for both keys under each seed.
+
 <a id="declaration-73696c6b2f686173683a3a486173684b65793a3a6f7065726174696f6e3a68617368"></a>
 
 ### Operation `hash`
@@ -112,6 +134,10 @@ fn hash(value: &Self, seed: &silk/hash.HashSeed) -> u64
 
 Computes the key's deterministic 64-bit hash under the collection seed.
 
+#### Gotchas
+
+Equivalent keys must return equal results for the same seed.
+
 <a id="declaration-73696c6b2f686173683a3a6d6978"></a>
 
 ## `mix`
@@ -120,13 +146,16 @@ Computes the key's deterministic 64-bit hash under the collection seed.
 pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
 ```
 
-Mixes one value under one seed into a hash spread across the whole 64-bit range.
+Mixes the first integer field of a key with one seed into a 64-bit hash.
+
+### When to use
+
+Use this function to start a hash for an integer key or the first integer field of a key.
 
 ### Details
 
-Every step is a wrapping multiply, a shift, or an exclusive or, so the result is exactly the same
-on every engine. A witness for a key built from integers can answer `hash` by folding its fields
-through this function rather than inventing a mixer.
+The same seed and value return the same result on all Silk engines. Use [`combine`](#declaration-73696c6b2f686173683a3a636f6d62696e65) for each
+additional field that participates in equality.
 
 <a id="declaration-73696c6b2f686173683a3a636f6d62696e65"></a>
 
@@ -138,6 +167,10 @@ pub fn combine(hashed: u64, value: u64) -> u64
 
 Continues a hash with one further value, so a key of several fields folds into one hash.
 
+### When to use
+
+Use this function after [`mix`](#declaration-73696c6b2f686173683a3a6d6978) for each additional integer field that participates in equality.
+
 <a id="declaration-73696c6b2f686173683a3a576f7264"></a>
 
 ## `Word`
@@ -146,14 +179,7 @@ Continues a hash with one further value, so a key of several fields folds into o
 pub struct Word
 ```
 
-A key holding one unsigned integer.
-
-### Details
-
-The scalar types cannot carry a `HashKey` witness themselves: a conformance whose provider is a
-scalar admits a sealed compiler operation and nothing else, and no compiler operation computes a
-hash — nor may one be added. A key built from an integer is therefore a declared type, and this
-is the canonical one.
+A ready-made [`HashKey`](#declaration-73696c6b2f686173683a3a486173684b6579) that holds one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a576f72643a3a6669656c643a30"></a>
 
@@ -181,7 +207,7 @@ impl Copy for Word
 pub fn word(value: u64) -> Word
 ```
 
-Constructs an integer key.
+Creates a [`Word`](#declaration-73696c6b2f686173683a3a576f7264) key from one `u64` value.
 
 <a id="declaration-73696c6b2f686173683a3a696d706c656d656e746174696f6e3a32"></a>
 

@@ -27,6 +27,47 @@ the arrival; [`remove`](#declaration-73696c6b2f686173685f7365743a3a72656d6f7665)
 and therefore requires a `Copy` element; [`contains`](#declaration-73696c6b2f686173685f7365743a3a636f6e7461696e73) and [`indexOf`](#declaration-73696c6b2f686173685f7365743a3a696e6465784f66) can inspect membership for
 move-only elements without taking them out.
 
+## Examples
+
+### Insert one unique element and remove it
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.hash as Hash
+
+import silk.hash_set as HashSet
+
+import silk.option as Option
+
+import silk.u64 as u64
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut set = HashSet.make<Hash.Word>(Hash.seed(17))
+  let inserting = HashSet.insert<Hash.Word>(&mut set, Hash.word(42))
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let existed = run inserting
+  if existed || !HashSet.contains<Hash.Word>(&set, Hash.word(42)) {
+    return 0
+  }
+  let removed = HashSet.remove<Hash.Word>(&mut set, Hash.word(42))
+    |> Option.unwrapOr<Hash.Word>(Hash.word(0))
+  return u64.toI32(removed.value)
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
 Import as `HashSet` with `import silk.hash_set`.
 
 Public declarations: 13.
@@ -79,6 +120,11 @@ pub struct HashSet<T>
 
 Owns one representative of each equivalence class under one hash witness and seed.
 
+### Details
+
+An equivalent insertion keeps the representative already stored. The seed and operation
+sequence determine bucket presentation order, which is not insertion order.
+
 <a id="declaration-73696c6b2f686173685f7365743a3a6d616b65"></a>
 
 ## `make`
@@ -87,7 +133,11 @@ Owns one representative of each equivalence class under one hash witness and see
 pub fn make<T>(seed: HashSeed) -> silk/hash_set.HashSet<T>
 ```
 
-Constructs an empty set whose every hash is computed under one seed.
+Creates an empty set whose every hash is computed under one seed.
+
+### Details
+
+An empty set allocates no storage. The seed fixes bucket order for the same operation sequence.
 
 <a id="declaration-73696c6b2f686173685f7365743a3a6c656e677468"></a>
 
@@ -155,6 +205,10 @@ pub fn contains<T>(self: &silk/hash_set.HashSet<T>, value: T) -> bool
 
 Reports whether the set holds an element equivalent to one probe element.
 
+### Details
+
+This function consumes the probe element. It does not change the set or move a stored element.
+
 <a id="declaration-73696c6b2f686173685f7365743a3a696e6465784f66"></a>
 
 ## `indexOf`
@@ -168,6 +222,7 @@ Returns the bucket holding an element equivalent to one probe element, or an abs
 ### Details
 
 This is the membership question a set of move-only elements answers without moving anything.
+This function consumes the probe element.
 
 <a id="declaration-73696c6b2f686173685f7365743a3a72656d6f7665"></a>
 
@@ -196,3 +251,7 @@ Returns the element held in one bucket. Traps on a bucket that holds no element.
 ### Details
 
 Reads a copy out of the set, so it answers for a set whose element type is `Copy`.
+
+### Gotchas
+
+If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f7365743a3a6f636375706965644174) returns `false`, the program traps.

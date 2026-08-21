@@ -48,13 +48,13 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The largest finite f64.
+/// The largest finite `f64` value.
 pub const MAX: f64 = 1.7976931348623157e308
 
-/// The smallest finite f64, which is the negation of MAX.
+/// The most negative finite `f64` value, which is the negation of [`MAX`].
 pub const MIN: f64 = -1.7976931348623157e308
 
-/// The distance from 1.0 to the next larger f64.
+/// The distance from `1.0` to the next larger `f64` value.
 pub const EPSILON: f64 = 2.220446049250313e-16
 
 /// Positive infinity with the binary64 bit pattern `0x7FF0000000000000`.
@@ -65,10 +65,10 @@ pub const EPSILON: f64 = 2.220446049250313e-16
 /// decimal-to-binary64 rounding produces the infinity encoding.
 pub const INFINITY: f64 = 1e999
 
-/// The ratio of a circle's circumference to its diameter, rounded to the nearest f64.
+/// The ratio of a circle's circumference to its diameter, rounded to the nearest `f64` value.
 pub const PI: f64 = 3.141592653589793
 
-/// Euler's number, the base of the natural logarithm, rounded to the nearest f64.
+/// Euler's number, rounded to the nearest `f64` value.
 pub const E: f64 = 2.718281828459045
 
 /// Returns `value` with its sign reversed.
@@ -76,28 +76,32 @@ pub fn negate(value: f64) -> f64 {
   return Intrinsic.f64Negate(value)
 }
 
-/// Returns `left + right` under IEEE binary64 rules.
+/// Returns `left + right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn add(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Add(left, right)
 }
 
-/// Returns `left - right` under IEEE binary64 rules.
+/// Returns `left - right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn subtract(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Subtract(left, right)
 }
 
-/// Returns `left * right` under IEEE binary64 rules.
+/// Returns `left * right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn multiply(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Multiply(left, right)
 }
 
-/// Returns `left / right` under IEEE binary64 rules. Division by zero produces infinity or NaN.
+/// Returns `left / right`, rounded to nearest with ties to even. Division by zero produces
+/// infinity or NaN; it does not trap.
 pub fn divide(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Divide(left, right)
 }
 
-/// Returns `left - trunc(left / right) * right` under IEEE binary64 rules. Invalid
-/// operands produce NaN.
+/// Returns `left - trunc(left / right) * right`. A zero `right`, infinite `left`, or NaN operand
+/// produces NaN; it does not trap.
 pub fn remainder(left: f64, right: f64) -> f64 {
   return Intrinsic.f64Remainder(left, right)
 }
@@ -164,6 +168,10 @@ pub fn isSignNegative(value: f64) -> bool {
 
 /// Reports whether `left` precedes or equals `right` in the IEEE total order.
 ///
+/// # When to use
+///
+/// Use this function for deterministic ordering that includes NaNs and distinguishes signed zero.
+///
 /// # Details
 ///
 /// Unlike ordinary comparison, this order distinguishes negative and positive zero and provides a
@@ -173,17 +181,25 @@ pub fn totalOrder(left: f64, right: f64) -> bool {
 }
 
 /// Reinterprets a value as its exact 64-bit IEEE representation.
+///
+/// # When to use
+///
+/// Use this function to inspect or preserve representation bits. It does not convert the number.
 pub fn toBits(value: f64) -> u64 {
   return Intrinsic.f64ToBits(value)
 }
 
-/// Reinterprets an arbitrary 64-bit pattern as an f64 without numeric conversion.
+/// Reinterprets an arbitrary 64-bit pattern as `f64` without numeric conversion.
+///
+/// # When to use
+///
+/// Use this function to construct a value from representation bits, including NaN and signed zero.
 pub fn fromBits(value: u64) -> f64 {
   return Intrinsic.f64FromBits(value)
 }
 
-/// The one NaN encoding every f64 operation in this module reports, so a NaN result carries no
-/// payload that could differ between the evaluator, the Wasm backend, and the native backend.
+// One stable NaN result for source-defined operations whose public contract requires canonical
+// bits across all execution engines.
 fn canonicalNaN() -> f64 {
   return fromBits(9221120237041090560)
 }

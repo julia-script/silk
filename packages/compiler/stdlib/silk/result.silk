@@ -8,19 +8,51 @@
 //! # Details
 //! `Result<A, F>` owns either [`Success`] or [`Failure`]. Its combinators move the selected payload
 //! forward and preserve the other arm without inventing a runtime failure-row descriptor.
+//!
+//! Unlike an `Effect<A ! F>`, a `Result<A, F>` is already completed ordinary data: it does not run,
+//! require a provider, or propagate through `fail`. Use `Effect.result` to turn one Effect execution
+//! into a `Result` when a caller needs to inspect or store the outcome.
+//!
+//! # Examples
+//! ## Transform a success and choose a fallback for failure
+//! ```silk
+//! import silk.result as Result
+//!
+//! fn half(value: i32) -> Result.Result<i32, i32> {
+//!   if value == 0 {
+//!     return Result.failResult<i32, i32>(2)
+//!   }
+//!   return Result.succeed<i32, i32>(value / 2)
+//! }
+//!
+//! fn addTwo(value: i32) -> i32 {
+//!   return value + 2
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let initial = Result.succeed<i32, i32>(80)
+//!   let halved = Result.flatMap<i32, i32, i32>(move initial, half)
+//!   let answer = Result.map<i32, i32, i32>(move halved, addTwo)
+//!   let failed = Result.failResult<i32, i32>(7)
+//!   if Result.isFailure<i32, i32>(&failed) {} else {
+//!     return 0
+//!   }
+//!   return Result.unwrapOr<i32, i32>(move answer, 0)
+//! }
+//! ```
 
 // Canonical completed typed outcome data. Failure rows project to ordinary value sums through
 // E directly; Result itself remains ordinary source-defined data with no runtime row descriptor.
 
 import silk.bool as bool
 
-/// The successful member of a completed outcome.
+/// The successful member of a completed [`Result`].
 pub struct Success<A> {
   /// The produced success value.
   value: A
 }
 
-/// The failed member of a completed outcome.
+/// The failed member of a completed [`Result`].
 pub struct Failure<F> {
   /// The produced failure value.
   error: F
@@ -33,22 +65,29 @@ pub struct Failure<F> {
 /// `Result` is the reified form of an Effect that has already run. Reifying an Effect turns its
 /// failure row into ordinary value data, which is what lets the failure combinators in
 /// `silk.effect` be written as ordinary Silk source instead of compiler built-ins.
+/// A `Result` is consumed when matched or passed to a transforming combinator; borrow it for
+/// [`isSuccess`] and [`isFailure`] when the payload must remain available.
 pub struct Result<A, F> {
   /// The completed outcome, narrowed with `match`.
   value: Success<A> | Failure<F>
 }
 
-/// Constructs a completed successful outcome.
+/// Constructs a completed success by moving `value` into the success arm.
 pub fn succeed<A, F>(value: A) -> Result<A, F> {
   return Result<A, F> { value: Success<A> { value: move value } }
 }
 
-/// Constructs a completed failed outcome.
+/// Constructs a completed failure by moving `error` into the failure arm.
 pub fn failResult<A, F>(error: F) -> Result<A, F> {
   return Result<A, F> { value: Failure<F> { error: move error } }
 }
 
-/// Applies a transform to a success value and carries a failure through unchanged.
+/// Applies `transform` once to a success value and carries a failure through unchanged.
+///
+/// # Details
+///
+/// The callback is never called for [`Failure`]. This consumes the result and may change only its
+/// success type; use [`mapError`] to change the failure type instead.
 pub fn map<A, B, F>(self: Result<A, F>, transform: once fn(A) -> B) -> Result<B, F> {
   return match move self {
     Result<A, F> { value: outcome } => match move outcome {
@@ -58,7 +97,12 @@ pub fn map<A, B, F>(self: Result<A, F>, transform: once fn(A) -> B) -> Result<B,
   }
 }
 
-/// Applies a transform to a failure value and carries a success through unchanged.
+/// Applies `transform` once to a failure value and carries a success through unchanged.
+///
+/// # Details
+///
+/// The callback is never called for [`Success`]. This consumes the result and may change only its
+/// failure type.
 pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> Result<A, G> {
   return match move self {
     Result<A, F> { value: outcome } => match move outcome {
@@ -70,6 +114,11 @@ pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> Resu
 
 /// Continues a success with a transform that answers with a Result of its own, so the outcome
 /// stays one Result deep instead of nesting.
+///
+/// # Details
+///
+/// A failure bypasses the callback unchanged. The callback must use the same failure type `F`, so
+/// use [`mapError`] before or after this operation when the steps use different error types.
 pub fn flatMap<A, B, F>(self: Result<A, F>, transform: once fn(A) -> Result<B, F>) -> Result<B, F> {
   return match move self {
     Result<A, F> { value: outcome } => match move outcome {
@@ -85,6 +134,7 @@ pub fn flatMap<A, B, F>(self: Result<A, F>, transform: once fn(A) -> Result<B, F
 ///
 /// Only the failure arm consumes the fallback. The success arm releases it, and the failure arm
 /// releases the error, so exactly one owned value leaves this call and the other drops.
+/// Use `match` instead when the failure payload affects recovery or must be retained.
 pub fn unwrapOr<A, F>(
   self: Result<A, F>,
   /// The owned alternative consumed only when `self` is a failure.
@@ -98,7 +148,7 @@ pub fn unwrapOr<A, F>(
   }
 }
 
-/// Returns `true` when the outcome succeeded, without consuming it.
+/// Returns `true` when the borrowed outcome is [`Success`], without consuming either payload.
 pub fn isSuccess<A, F>(self: &Result<A, F>) -> bool {
   return match &self.value {
     Success<A> succeeded => true
@@ -106,7 +156,7 @@ pub fn isSuccess<A, F>(self: &Result<A, F>) -> bool {
   }
 }
 
-/// Returns `true` when the outcome failed, without consuming it.
+/// Returns `true` when the borrowed outcome is [`Failure`], without consuming either payload.
 pub fn isFailure<A, F>(self: &Result<A, F>) -> bool {
   return match &self.value {
     Success<A> succeeded => false

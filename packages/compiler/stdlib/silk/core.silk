@@ -8,32 +8,90 @@
 //! # Details
 //! Both capabilities are ordinary source-declared services. Their requirements remain in an
 //! Effect until a caller supplies a provider, so tests and applications can replace process-backed
-//! implementations lexically. Allocation failure is typed as [`OutOfMemoryError`], and stream failure as
-//! [`StreamWriteError`].
+//! implementations lexically. Allocation failure is typed as [`OutOfMemoryError`]. Stream failure
+//! is typed as [`StreamWriteError`].
+//!
+//! # Examples
+//! ## Provide the process allocator
+//! ```silk
+//! import silk.bytes as Bytes
+//!
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.usize as usize
+//!
+//! effect fn copyMessage() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let source = b"Silk"
+//!   let copying = Bytes.copy(&source)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let bytes = run copying
+//!   return Bytes.length(&bytes)
+//!     |> usize.toI32
+//! }
+//!
+//! effect fn recoverAllocation(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(copyMessage(), recoverAllocation)
+//! }
+//! ```
+//!
+//! ## Write one complete standard-output message
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! effect fn writeMessage() -> ()
+//! ! Core.StreamWriteError {
+//!   let mut streams = Core.native()
+//!   return run Core.send(Core.stdout(), b"Silk\n")
+//!     |> Effect.provideMut<Core.StandardStreams>(&mut streams)
+//! }
+//!
+//! effect fn ignoreWriteFailure(error: Core.StreamWriteError) -> () {
+//!   return ()
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
+//!   return 42
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.layout { Layout as LayoutValue }
 import silk.layout { Layout }
 import silk.u8 as u8
 
-/// Reports that an allocator could not satisfy a storage request.
+/// A failure that reports that an allocator cannot satisfy a storage request.
 pub struct OutOfMemoryError {}
 
-/// Fails immediately with [`OutOfMemoryError`], for translating checked sizing failures.
+/// Fails immediately with `OutOfMemoryError`.
+///
+/// # When to use
+///
+/// Use this function to translate a checked size failure into the standard allocation failure.
 pub effect fn outOfMemory() -> never ! OutOfMemoryError {
   fail OutOfMemoryError {}
 }
 
-/// Mutable service for acquiring owned storage described by a layout.
+/// A mutable service that acquires owned storage described by a layout.
 pub service Allocator {
-  /// Acquires one allocation or fails without returning partial storage.
+  /// Acquires one allocation for `layout`, or fails without returning partial storage.
   effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 }
 
-/// Constructs the process-backed allocation provider.
+/// A process-backed provider for [`Allocator`].
 pub struct SystemAllocator {}
 
-/// Constructs a process-backed allocator provider with no allocation of its own.
+/// Creates a process-backed allocator provider without allocating storage.
 pub fn make() -> SystemAllocator {
   return SystemAllocator {}
 }
@@ -46,32 +104,36 @@ impl Allocator for SystemAllocator {
   allocate: SystemAllocator.allocate
 }
 
-/// Failure to commit one complete stream message.
+/// A failure to commit one complete standard-stream message.
 pub struct StreamWriteError {}
 
-/// Portable complete-message output contract.
+/// A mutable service that writes complete messages to standard output or standard error.
 pub service StandardStreams {
-  /// Commits one complete immutable byte sequence to the selected destination.
+  /// Writes a complete immutable byte sequence to the selected standard-stream destination.
+  ///
+  /// # Gotchas
+  ///
+  /// A failure means that the service did not commit the complete message.
   effect fn writeAll(
     destination: bool,
     bytes: &[u8]
   ) -> () ! StreamWriteError ? &mut StandardStreams
 }
 
-/// Process-backed standard-stream provider.
+/// A process-backed provider for [`StandardStreams`].
 pub struct NativeStandardStreams {}
 
-/// Selects the process standard-output destination.
+/// Returns the destination value that selects process standard output.
 pub fn stdout() -> bool {
   return false
 }
 
-/// Selects the process standard-error destination.
+/// Returns the destination value that selects process standard error.
 pub fn stderr() -> bool {
   return true
 }
 
-/// Constructs the process-backed standard-stream provider.
+/// Creates a process-backed standard-stream provider.
 pub fn native() -> NativeStandardStreams {
   return NativeStandardStreams {}
 }
@@ -88,7 +150,12 @@ impl StandardStreams for NativeStandardStreams {
   writeAll: NativeStandardStreams.nativeWriteAll
 }
 
-/// Builds one complete-write service effect.
+/// Writes one complete immutable byte sequence to a selected standard stream.
+///
+/// # Details
+///
+/// The returned Effect requires a mutable [`StandardStreams`] provider. Use [`stdout`] or
+/// [`stderr`] for `destination`.
 pub effect fn send(
   destination: bool,
   bytes: &[u8]

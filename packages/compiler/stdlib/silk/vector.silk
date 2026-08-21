@@ -8,8 +8,8 @@
 //! [`make`] is allocation-free. The first growth reserves four elements and later growth doubles
 //! capacity; [`reserve`] can move that cost ahead of mutation. Growth completes in replacement
 //! storage before committing, so [`append`] and [`reserve`] leave the vector unchanged on
-//! [`OutOfMemoryError`]. Removing, clearing, and truncating drop exactly the elements they discard while
-//! retaining capacity.
+//! [`OutOfMemoryError`]. Removing, clearing, and truncating drop exactly the elements they discard
+//! while retaining capacity.
 //!
 //! [`sort`] is stable, deterministic, and supports move-only elements, but allocates scratch space.
 //! [`binarySearch`] requires an already sorted vector and returns the lowest index among equal
@@ -19,6 +19,81 @@
 //! [`get`], [`set`], and [`remove`] trap on an out-of-range index. An [`insert`] position must be at
 //! or before the current length. Use [`asSlice`] to borrow move-only elements because [`get`]
 //! produces a copied value.
+//!
+//! # Examples
+//! ## Grow and edit an owned sequence
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.vector as Vector
+//!
+//! effect fn build() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let mut values = Vector.make<i32>()
+//!   let first = run Vector.append<i32>(&mut values, 10)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let second = run Vector.append<i32>(&mut values, 30)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let middle = run Vector.insert<i32>(&mut values, 1, 20)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let changed = Vector.set<i32>(&mut values, 2, 22)
+//!   let removed = Vector.remove<i32>(&mut values, 0)
+//!   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(build(), recover)
+//! }
+//! ```
+//!
+//! ## Sort values and find the first equal value
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.option as Option
+//!
+//! import silk.usize as usize
+//!
+//! import silk.vector as Vector
+//!
+//! effect fn search() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let mut values = Vector.make<i32>()
+//!   let first = run Vector.append<i32>(&mut values, 3)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let second = run Vector.append<i32>(&mut values, 36)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let third = run Vector.append<i32>(&mut values, 3)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let sorting = Vector.sort<i32>(&mut values)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let sorted = run sorting
+//!   let found = Vector.binarySearch<i32>(&values, 3)
+//!     |> Option.unwrapOr<usize>(99)
+//!   if found != usize.ZERO {
+//!     return 0
+//!   }
+//!   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1) + Vector.get<i32>(&values, 2)
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(search(), recover)
+//! }
+//! ```
 
 // A growable owned sequence over the allocation substrate. Ordinary Silk: no compiler phase
 // knows this type, and every capability it uses is available to user code.
@@ -39,17 +114,22 @@ import silk.slot as Slot
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Allocation-free storage state used by an empty [`Vector`].
+/// The allocation-free storage state of an empty [`Vector`].
 pub struct Empty<T> {
   anchor: [T; 0]
 }
 
-/// Allocated storage state used by a non-empty or reserved [`Vector`].
+/// The allocated storage state of a non-empty or reserved [`Vector`].
 pub struct Full<T> {
   buffer: RawBuffer<T>
 }
 
 /// Owns an initialized prefix of a growable contiguous allocation.
+///
+/// # Details
+///
+/// The vector releases each initialized element and its storage on drop. Length counts initialized
+/// elements. Capacity counts elements that fit without growth.
 pub struct Vector<T> {
   storage: Empty<T> | Full<T>
   length: usize
@@ -62,7 +142,7 @@ fn absurd<T>() -> T {
   return absurd<T>()
 }
 
-/// Constructs an empty vector with zero capacity and no allocation.
+/// Creates an empty vector with zero capacity and no allocation.
 pub fn make<T>() -> Vector<T> {
   return Vector<T> { storage: Empty<T> { anchor: [] }, length: usize.ZERO, capacity: usize.ZERO }
 }
@@ -72,7 +152,7 @@ pub fn length<T>(self: &Vector<T>) -> usize {
   return self.length
 }
 
-/// Returns how many elements fit before the next growth allocation.
+/// Returns the total number of elements that fit without another growth allocation.
 pub fn capacity<T>(self: &Vector<T>) -> usize {
   return self.capacity
 }
@@ -86,6 +166,10 @@ fn emptyMutSlice<T>(anchor: &mut [T]) -> &mut [T] {
 }
 
 /// Borrows the initialized elements as one shared lexical slice.
+///
+/// # Gotchas
+///
+/// Do not retain this slice across an operation that can grow the vector.
 pub fn asSlice<T>(self: &Vector<T>) -> &[T] {
   return match &self.storage {
     Empty<T> { anchor } => emptySlice<T>(&anchor)
@@ -93,7 +177,11 @@ pub fn asSlice<T>(self: &Vector<T>) -> &[T] {
   }
 }
 
-/// Borrows the initialized elements as one exclusive lexical slice.
+/// Borrows all initialized elements as one exclusive lexical slice.
+///
+/// # Gotchas
+///
+/// Do not retain this slice across an operation that can grow the vector.
 pub fn asMutSlice<T>(self: &mut Vector<T>) -> &mut [T] {
   return match &mut self.storage {
     Empty<T> { anchor } => emptyMutSlice<T>(&mut anchor)
@@ -135,6 +223,11 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
 // Growth is atomic: the replacement buffer exists and holds every element before the vector's
 // storage commits, so a failed allocation leaves the original untouched.
 /// Appends one owned value, growing geometrically when capacity is exhausted.
+///
+/// # Details
+///
+/// The vector takes ownership of `value`. If growth fails, the vector keeps its prior contents,
+/// length, and capacity.
 pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator {
   if self.length == self.capacity {
     let mut next = self.capacity + self.capacity
@@ -171,6 +264,10 @@ pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemoryError
 // and moving out of a borrowed slice is only a copy when the element type is Copy. Growth
 // repeats the shape `append` uses, so a failed allocation leaves the original vector untouched.
 /// Appends every byte of one borrowed sequence in source order with one bulk copy.
+///
+/// # Details
+///
+/// If growth fails, the vector keeps its prior contents, length, and capacity.
 pub effect fn appendBytes(
   self: &mut Vector<u8>,
   values: &[u8]
@@ -230,6 +327,15 @@ fn copyBuffer(buffer: RawBuffer<u8>, offset: usize, values: &[u8], count: usize)
 }
 
 /// Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
+///
+/// # Details
+///
+/// Existing elements from `index` onward move one position to the right. If growth fails, the
+/// vector keeps its prior contents, length, and capacity.
+///
+/// # Gotchas
+///
+/// `index` must be less than or equal to [`length`].
 pub effect fn insert<T>(
   self: &mut Vector<T>,
   index: usize,
@@ -345,6 +451,10 @@ impl<T: Copy> Copy for Read<T> {}
 
 // Checked read for Copy element types: out-of-range access traps identically on every engine.
 /// Copies the element at one index and traps when the index is out of range.
+///
+/// # When to use
+///
+/// Use this function for a `Copy` element. Use [`asSlice`] to borrow a move-only element.
 pub fn get<T: Copy>(self: &Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
@@ -389,6 +499,10 @@ fn takeSlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
 }
 
 /// Removes the last element and returns it. Returns an absent value for an empty vector.
+///
+/// # Details
+///
+/// A present result transfers ownership of the removed element. Capacity does not change.
 pub fn pop<T>(self: &mut Vector<T>) -> Option<T> {
   if self.length == usize.ZERO {
     return Option.none<T>()
@@ -411,6 +525,10 @@ fn finish<T>(self: &mut Vector<T>, storage: Full<T>, value: T) -> Option<T> {
 }
 
 /// Removes the element at one index, shifting the later elements down. Traps out of range.
+///
+/// # Details
+///
+/// Ownership of the removed element passes to the caller. Capacity does not change.
 pub fn remove<T>(self: &mut Vector<T>, index: usize) -> T {
   if self.length <= index {
     let boom = 1 / 0
@@ -467,6 +585,10 @@ pub fn clear<T>(self: &mut Vector<T>) -> () {
 }
 
 /// Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
+///
+/// # Details
+///
+/// If `length` is not less than the current length, this function does nothing.
 pub fn truncate<T>(self: &mut Vector<T>, length: usize) -> () {
   if self.length <= length {
     return ()
@@ -536,7 +658,12 @@ fn replaceSlot<T>(buffer: RawBuffer<T>, index: usize, value: T) -> RawBuffer<T> 
 // Growth is atomic exactly as in append: the replacement buffer holds every element before the
 // vector's storage commits, so a failed allocation leaves the original untouched.
 
-/// Grows the capacity to hold at least one additional count of elements.
+/// Grows capacity to hold at least `additional` more elements without another allocation.
+///
+/// # Details
+///
+/// This function does not change the length. If allocation fails, contents, length, and capacity
+/// remain unchanged.
 pub effect fn reserve<T>(
   self: &mut Vector<T>,
   additional: usize
@@ -595,6 +722,11 @@ struct Applied<T> {
 }
 
 /// Orders the elements in place. Equal elements keep their input order.
+///
+/// # Details
+///
+/// The sort is stable and deterministic. It supports move-only elements and allocates scratch
+/// storage. If allocation fails, the vector remains unchanged.
 pub effect fn sort<T: Order>(self: &mut Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator {
   let count = self.length
   if count <= usize.ONE {
@@ -731,6 +863,11 @@ fn releaseScratch<T>(buffer: RawBuffer<T>, leftover: RawBuffer<T>) -> RawBuffer<
 ///
 /// Returns the lowest matching index when a vector holds several equal elements, so a repeated
 /// search over one vector always answers with the same index.
+/// This function consumes `target` and does not change the vector.
+///
+/// # Gotchas
+///
+/// The vector must already be ordered by the same `Order` witness.
 pub fn binarySearch<T: Order>(self: &Vector<T>, target: T) -> Option<usize> {
   let two = usize.ONE + usize.ONE
   let values = asSlice<T>(self)

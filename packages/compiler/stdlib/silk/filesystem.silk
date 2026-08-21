@@ -19,6 +19,35 @@
 //! # Gotchas
 //! A path created from arbitrary bytes may not have a valid text view. Keep using [`rawBytes`] unless
 //! the bytes were validated as UTF-8; [`view`] and [`name`] rely on that caller knowledge.
+//!
+//! # Examples
+//! ## Construct and inspect a portable path
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.filesystem as FileSystem
+//!
+//! effect fn example() -> i32
+//! ! FileSystem.FileError | Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let path = run FileSystem.make("/workspace")
+//!     |> Effect.provideMut(&mut allocator)
+//!   if FileSystem.name(&path) == "workspace" {
+//!     return 42
+//!   }
+//!   return 0
+//! }
+//!
+//! effect fn recover(error: FileSystem.FileError | Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(example(), recover)
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.bytes {
@@ -49,28 +78,34 @@ import silk.vector {
   pop as vectorPop
 }
 
-/// A normalized path rooted in the selected FileSystem provider.
+/// An owned, normalized absolute path in a [`FileSystem`] provider's portable namespace.
+///
+/// # Details
+///
+/// Portable `/` means the selected provider's root, not necessarily the host operating system's
+/// root. Construct paths through [`make`], [`fromBytes`], [`root`], [`join`], or [`resolve`]; the
+/// representation is private so every `Path` satisfies the normalization rules.
 pub struct Path {
   bytes: Bytes
   nameBytes: Bytes
 }
 
-/// Metadata for one portable regular file.
+/// Minimal portable metadata for one regular file.
 pub struct FileInfo {
   /// Complete file length in bytes.
   pub byteLength: usize
 }
 
-/// Metadata identifying one portable directory.
+/// Portable metadata identifying a directory; no platform-specific fields are exposed.
 pub struct DirectoryInfo {}
 
-/// The portable kind of one directory entry.
+/// The closed portable kind of one directory entry.
 pub struct DirectoryEntryKind {
   /// Stable portable kind code selected by [`file`] or [`directory`].
   pub code: i32
 }
 
-/// One immediate directory child with an independently owned complete Path.
+/// One immediate directory child with an independently owned complete [`Path`].
 pub struct DirectoryEntry {
   /// Independently owned complete path to the child.
   pub path: Path
@@ -78,19 +113,25 @@ pub struct DirectoryEntry {
   pub kind: DirectoryEntryKind
 }
 
-/// The operation that produced one FileError.
+/// The stable portable operation category stored in a [`FileError`].
 pub struct FileOperation {
   /// Stable code identifying the attempted portable operation.
   pub code: i32
 }
 
-/// A closed portable filesystem recovery reason.
+/// A stable portable recovery category stored in a [`FileError`].
 pub struct FileReason {
   /// Stable code identifying the portable recovery reason.
   pub code: i32
 }
 
-/// An allocation-free portable filesystem failure.
+/// An allocation-free portable failure naming the attempted operation and recovery reason.
+///
+/// # Details
+///
+/// Match or compare [`operationCode`] and [`reasonCode`] for portable recovery. [`providerCode`]
+/// may retain an OS or provider-specific numeric detail for diagnostics, but portable decisions
+/// must not depend on it.
 pub struct FileError {
   /// The operation that failed.
   pub operation: FileOperation
@@ -100,27 +141,27 @@ pub struct FileError {
   hasProviderCode: bool
 }
 
-/// Selects the regular-file directory-entry kind.
+/// Constructs the regular-file [`DirectoryEntryKind`].
 pub fn file() -> DirectoryEntryKind { return DirectoryEntryKind { code: 0 } }
 
-/// Selects the directory directory-entry kind.
+/// Constructs the directory [`DirectoryEntryKind`].
 pub fn directory() -> DirectoryEntryKind { return DirectoryEntryKind { code: 1 } }
 
-/// Returns the stable directory-entry kind code.
+/// Returns the stable code for a consumed [`DirectoryEntryKind`]: `0` for file, `1` for directory.
 pub fn entryKindCode(kind: DirectoryEntryKind) -> i32 { return kind.code }
 
 /// Reads the stable directory-entry kind code through a borrow.
 fn borrowedKindCode(kind: &DirectoryEntryKind) -> i32 { return kind.code }
 
-/// Constructs portable regular-file metadata.
+/// Constructs regular-file metadata with the complete length in bytes.
 pub fn fileInfo(byteLength: usize) -> FileInfo {
   return FileInfo { byteLength: byteLength }
 }
 
-/// Constructs portable directory metadata.
+/// Constructs the fieldless portable directory metadata value.
 pub fn directoryInfo() -> DirectoryInfo { return DirectoryInfo {} }
 
-/// Constructs one owned portable directory entry.
+/// Constructs a directory entry by taking ownership of its complete child `path` and `kind`.
 pub fn directoryEntry(path: Path, kind: DirectoryEntryKind) -> DirectoryEntry {
   return DirectoryEntry { path: move path, kind: move kind }
 }
@@ -152,43 +193,43 @@ pub fn pathOperation() -> FileOperation { return FileOperation { code: 7 } }
 /// Selects the create-temporary-directory operation.
 pub fn createTemporaryDirectoryOperation() -> FileOperation { return FileOperation { code: 8 } }
 
-/// Returns the stable operation code.
+/// Returns the stable numeric code of a consumed [`FileOperation`].
 pub fn operationCode(operation: FileOperation) -> i32 { return operation.code }
 
-/// Selects NotFound.
+/// Constructs the `NotFound` recovery reason.
 pub fn notFound() -> FileReason { return FileReason { code: 0 } }
 
-/// Selects AlreadyExists.
+/// Constructs the `AlreadyExists` recovery reason.
 pub fn alreadyExists() -> FileReason { return FileReason { code: 1 } }
 
-/// Selects PermissionDenied.
+/// Constructs the `PermissionDenied` recovery reason.
 pub fn permissionDenied() -> FileReason { return FileReason { code: 2 } }
 
-/// Selects InvalidPath.
+/// Constructs the `InvalidPath` recovery reason.
 pub fn invalidPath() -> FileReason { return FileReason { code: 3 } }
 
-/// Selects WrongType.
+/// Constructs the `WrongType` recovery reason.
 pub fn wrongType() -> FileReason { return FileReason { code: 4 } }
 
-/// Selects NotEmpty.
+/// Constructs the `NotEmpty` recovery reason.
 pub fn notEmpty() -> FileReason { return FileReason { code: 5 } }
 
-/// Selects NoSpace.
+/// Constructs the `NoSpace` recovery reason.
 pub fn noSpace() -> FileReason { return FileReason { code: 6 } }
 
-/// Selects TooLarge.
+/// Constructs the `TooLarge` recovery reason.
 pub fn tooLarge() -> FileReason { return FileReason { code: 7 } }
 
-/// Selects Unsupported.
+/// Constructs the `Unsupported` recovery reason.
 pub fn unsupported() -> FileReason { return FileReason { code: 8 } }
 
-/// Selects Other.
+/// Constructs the catch-all `Other` recovery reason.
 pub fn other() -> FileReason { return FileReason { code: 9 } }
 
-/// Returns the stable portable reason code.
+/// Returns the stable numeric code of a consumed [`FileReason`].
 pub fn reasonCode(reason: FileReason) -> i32 { return reason.code }
 
-/// Constructs an allocation-free FileError for a provider without a numeric detail.
+/// Constructs a portable [`FileError`] without a provider-specific numeric detail.
 pub fn error(operation: FileOperation, reason: FileReason) -> FileError {
   return FileError {
     operation: move operation,
@@ -198,7 +239,12 @@ pub fn error(operation: FileOperation, reason: FileReason) -> FileError {
   }
 }
 
-/// Constructs an allocation-free FileError retaining one provider-defined numeric detail.
+/// Constructs a portable [`FileError`] while retaining one provider-specific diagnostic code.
+///
+/// # Details
+///
+/// The numeric `code` is opaque outside that provider. The portable `operation` and `reason` remain
+/// the fields callers should use for recovery.
 pub fn errorWithCode(operation: FileOperation, reason: FileReason, code: i32) -> FileError {
   return FileError {
     operation: move operation,
@@ -208,7 +254,7 @@ pub fn errorWithCode(operation: FileOperation, reason: FileReason, code: i32) ->
   }
 }
 
-/// Returns the provider-defined numeric detail when one was retained.
+/// Borrows an error and returns its provider-specific numeric detail, if one was retained.
 pub fn providerCode(error: &FileError) -> Option<i32> {
   if error.hasProviderCode { return some<i32>(error.providerCodeValue) }
   return none<i32>()
@@ -334,7 +380,13 @@ effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemoryError ? &mut Allocator {
   return Path { bytes: move bytes, nameBytes: move nameBytes }
 }
 
-/// Constructs an owned normalized provider-absolute Path from semantic text.
+/// Copies UTF-8 text into an owned, normalized provider-absolute [`Path`].
+///
+/// # Details
+///
+/// The text must begin with `/`. Root is valid; every other path must have nonempty components and
+/// no trailing slash, NUL, `.` component, or `..` component. Invalid input fails with
+/// `FileError(pathOperation(), invalidPath())`; copying can fail with [`OutOfMemoryError`].
 pub effect fn make(value: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   let values = stringUtf8Bytes(value)
   if validAbsolute(values) == false { return run rejectPath() }
@@ -357,7 +409,7 @@ pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? 
   return run finishPath(move copied)
 }
 
-/// Constructs the selected provider's root Path.
+/// Allocates the portable root path `/` in the selected allocator.
 pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator {
   let mut copied = bytesMake()
   let appended = run bytesAppend(&mut copied, stringUtf8Bytes("/"))
@@ -376,16 +428,25 @@ pub fn rawBytes(self: &Path) -> &[u8] {
   return pathBytes(self)
 }
 
-/// Borrows the complete normalized path as text when its bytes are known to be valid UTF-8.
+/// Borrows the complete path as text when its bytes are known to be valid UTF-8.
+///
+/// # Details
+///
+/// Paths from [`make`], [`join`], [`joinUtf8`], and [`resolve`] satisfy that precondition. A path
+/// created with [`fromBytes`] may not; use [`rawBytes`] unless the source bytes were validated.
 pub fn view(self: &Path) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(pathBytes(self)) }
   return ""
 }
 
-/// Reports whether this Path denotes the selected provider's root.
+/// Returns `true` exactly when this path is the portable root `/`.
 pub fn isRoot(self: &Path) -> bool { return bytesAsSlice(&self.bytes).length == usize.ONE }
 
-/// Borrows the final component as text when its bytes are valid UTF-8; root returns empty text.
+/// Borrows the final component as text; root returns empty text.
+///
+/// # Details
+///
+/// This has the same UTF-8 precondition as [`view`]. It does not allocate or include a separator.
 pub fn name(self: &Path) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(bytesAsSlice(&self.nameBytes)) }
   return ""
@@ -406,7 +467,12 @@ effect fn joinBytes(
   return run finishPath(move combined)
 }
 
-/// Joins one already-normalized relative text fragment to an absolute Path.
+/// Appends one normalized relative text fragment to an absolute base path.
+///
+/// # Details
+///
+/// `fragment` must be nonempty and relative, with no NUL, empty, `.`, or `..` component and no
+/// trailing slash. Use [`resolve`] when dot components should be interpreted instead of rejected.
 pub effect fn join(
   base: &Path,
   fragment: string
@@ -414,7 +480,12 @@ pub effect fn join(
   return run joinBytes(base, stringUtf8Bytes(fragment))
 }
 
-/// Validates and joins one provider-supplied UTF-8 byte fragment.
+/// Validates UTF-8 bytes as one normalized relative fragment and appends them to `base`.
+///
+/// # Details
+///
+/// This is useful for a child name returned as bytes by another portable API. Invalid UTF-8 and the
+/// same malformed components rejected by [`join`] fail with the `InvalidPath` reason.
 pub effect fn joinUtf8(
   base: &Path,
   fragment: &[u8]
@@ -461,7 +532,13 @@ fn survivingRelative(values: &[u8], after: usize) -> bool {
   return true
 }
 
-/// Resolves relative text lexically against one explicit absolute base.
+/// Resolves relative text lexically against an explicit absolute base.
+///
+/// # Details
+///
+/// Empty text and `.` keep the base; `..` removes components; ordinary components append. An
+/// absolute relative value, an empty interior component, NUL, or any attempt to escape above root
+/// fails with the `InvalidPath` reason. Resolution is lexical and never accesses the filesystem.
 pub effect fn resolve(
   base: &Path,
   relativeText: string
@@ -562,7 +639,11 @@ pub effect fn resolve(
   return run finishPath(move combined)
 }
 
-/// Allocates an independently owned parent Path, or None for root.
+/// Allocates an independently owned parent path, or [`None`] when `self` is root.
+///
+/// # Details
+///
+/// The result does not borrow `self`. A direct child of root has root as its parent.
 pub effect fn parent(
   self: &Path
 ) -> Option<Path> ! OutOfMemoryError ? &mut Allocator {
@@ -576,25 +657,79 @@ pub effect fn parent(
   return some<Path>(move owned)
 }
 
-/// Portable mutable whole-file service. Providers own implementation and platform policy.
+/// Portable mutable service for normalized paths and whole-file operations.
+///
+/// # Details
+///
+/// Application code supplies one provider lexically with `Effect.provideMut`; tests can implement
+/// this service in memory, while native applications can use `silk.os_filesystem`. The service owns
+/// platform policy, but every implementation must preserve the portable error categories,
+/// create-or-truncate writes, and deterministic listing order described here.
+///
+/// # Examples
+/// ## Write a file after creating its parents
+/// ```silk
+/// import silk.core as Core
+///
+/// import silk.filesystem as FileSystem
+///
+/// import silk.usize as usize
+///
+/// pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
+/// ! FileSystem.FileError | Core.OutOfMemoryError
+/// ? &mut FileSystem.FileSystem | &mut Core.Allocator {
+///   let written = run FileSystem.writeFileWithParents(path, contents)
+///   return contents.length
+/// }
+/// ```
 pub service FileSystem {
   /// Reads one complete regular file into independently owned bytes.
+  ///
+  /// # Details
+  ///
+  /// Reading a directory fails with `WrongType`. Allocation of the returned [`Bytes`] may fail
+  /// independently of the provider read.
   effect fn readFile(
     path: &Path
   ) -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
   /// Writes one complete byte view with create-or-truncate semantics.
+  ///
+  /// # Details
+  ///
+  /// A missing file is created; an existing regular file is replaced by exactly `bytes`. The call
+  /// does not create missing parent directories—use [`writeFileWithParents`] for that workflow.
   effect fn writeFile(path: &Path, bytes: &[u8]) -> () ! FileError ? &mut FileSystem
-  /// Returns minimal regular-file or directory metadata.
+  /// Returns [`FileInfo`] or [`DirectoryInfo`] for the path without opening file contents.
+  ///
+  /// # Details
+  ///
+  /// Missing paths fail with `NotFound`; providers use `WrongType` only when an operation requires a
+  /// particular kind, not for this discriminating query.
   effect fn stat(path: &Path) -> FileInfo | DirectoryInfo ! FileError ? &mut FileSystem
-  /// Returns immediate owned child entries in deterministic path-byte order.
+  /// Returns immediate owned children in deterministic complete-path byte order.
+  ///
+  /// # Details
+  ///
+  /// The result is not recursive. Each `DirectoryEntry.path` is independently owned and may be
+  /// retained after the listing vector is released.
   effect fn listDirectory(
     path: &Path
   ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
-  /// Creates exactly one missing directory.
+  /// Creates exactly one missing directory whose parent already exists.
+  ///
+  /// # Details
+  ///
+  /// Existing paths fail with `AlreadyExists`; use [`createDirectoriesRecursively`] to ensure every
+  /// missing component.
   effect fn createDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
-  /// Removes exactly one regular file.
+  /// Removes exactly one regular file and fails with `WrongType` for a directory.
   effect fn removeFile(path: &Path) -> () ! FileError ? &mut FileSystem
   /// Removes exactly one empty directory.
+  ///
+  /// # Details
+  ///
+  /// A nonempty directory fails with `NotEmpty`; use [`removeDirectoryRecursively`] only when all
+  /// descendants are intentionally in scope for removal.
   effect fn removeDirectory(path: &Path) -> () ! FileError ? &mut FileSystem
   /// Creates one directory under an existing parent under a name no other caller holds.
   ///
@@ -603,6 +738,8 @@ pub service FileSystem {
   /// The provider chooses the name's unique part and returns the complete Path, because only the
   /// provider can create and claim a name in one step. A caller that supplied the name would have
   /// to check-then-create, and the gap between those two is exactly the race this avoids.
+  /// `prefix` is a byte prefix for the provider-chosen child name, not a complete path. The returned
+  /// directory already exists and is an immediate child of `parent`.
   effect fn createTemporaryDirectory(
     parent: &Path,
     prefix: &[u8]
@@ -629,11 +766,13 @@ pub struct TemporaryDirectory {
   pub path: Path
 }
 
-/// Creates one temporary directory under `parent` whose name begins with `prefix`.
+/// Creates an explicitly owned temporary directory under `parent` with a name beginning in `prefix`.
 ///
 /// # Details
 ///
-/// The result is owned. Nothing removes it until a caller runs `release` or `releaseIgnored`.
+/// The result is owned. Nothing removes it until a caller runs [`release`] or [`releaseIgnored`].
+/// The prefix is encoded as UTF-8 and the provider chooses and claims the remaining unique name in
+/// one operation.
 pub effect fn temporaryDirectory(
   parent: &Path,
   prefix: string
@@ -646,9 +785,10 @@ pub effect fn temporaryDirectory(
 ///
 /// # Details
 ///
-/// Both rows are stated rather than hidden. Removal reaches the host, so it can fail; walking the
+/// Both rows are stated rather than hidden. Removal reaches the provider, so it can fail; walking the
 /// tree to find what to remove allocates, so it can exhaust memory. A caller that must observe a
-/// failed cleanup uses this operation and handles the failure.
+/// failed cleanup uses this operation and handles the failure. The owner is consumed even when
+/// removal fails, so copy any diagnostic path information needed before calling.
 pub effect fn release(
   self: TemporaryDirectory
 ) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
@@ -694,7 +834,7 @@ effect fn recordedCopy(
   }
 }
 
-/// Removes one directory and everything inside it.
+/// Removes a directory, every descendant file, and every descendant directory.
 ///
 /// # Details
 ///
@@ -704,6 +844,9 @@ effect fn recordedCopy(
 /// child-before-parent for free: a directory is always recorded before the children found inside
 /// it, so reversing the record reverses the containment. Neither pass recurses, so depth costs
 /// vector capacity rather than stack.
+///
+/// This operation is destructive and not transactional. If a provider or allocation failure occurs,
+/// removals already completed remain completed and the remaining tree is left in place.
 pub effect fn removeDirectoryRecursively(
   path: &Path
 ) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
@@ -771,7 +914,13 @@ fn classifyDirectory(
   }
 }
 
-/// Creates every missing directory component with ordinary stat/create composition.
+/// Ensures that `path` and every missing ancestor exist as directories.
+///
+/// # Details
+///
+/// Existing directories are kept. An existing regular file at any component fails with
+/// `WrongType`; failures other than `NotFound` propagate. This is ordinary stat-then-create
+/// composition, so concurrent namespace changes may still race according to provider policy.
 pub effect fn createDirectoriesRecursively(
   path: &Path
 ) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
@@ -804,7 +953,13 @@ pub effect fn createDirectoriesRecursively(
   return ()
 }
 
-/// Creates missing parent directories, then delegates one complete write operation.
+/// Ensures every parent directory exists, then writes the complete byte view to `path`.
+///
+/// # Details
+///
+/// The final write uses `FileSystem.writeFile` create-or-truncate semantics. Passing root delegates
+/// directly to the provider and normally fails with `WrongType`. Directory creation and writing are
+/// not transactional, so a later failure may leave newly created parents behind.
 pub effect fn writeFileWithParents(
   path: &Path,
   bytes: &[u8]
@@ -850,7 +1005,12 @@ effect fn existsFailure(failure: FileError) -> bool ! FileError {
   return run raise(move failure)
 }
 
-/// Returns false only for NotFound and propagates every other provider failure.
+/// Returns whether a file or directory exists at `path`.
+///
+/// # Details
+///
+/// Only the portable `NotFound` reason becomes `false`. Permission, I/O, and every other provider
+/// failure propagate so callers cannot mistake an inaccessible path for an absent one.
 pub effect fn exists(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let completed = run Intrinsic.effectResult(FileSystem.stat(path))
   return match move completed {

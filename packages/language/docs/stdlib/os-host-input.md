@@ -17,10 +17,28 @@ independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573)
 boundary reports. An absent argument or variable remains [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65); an unavailable working
 directory and contradictory host lengths become [`HostInputError`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72).
 
+Constructing the provider reads no host state. Portable code performs lookups after the
+application supplies `&mut OsHostInput` for the `&mut HostInput` requirement. Each owned result
+also requires an allocator.
+
 ## Gotchas
 
 Reachable OS host-input operations are native-only. Direct WebAssembly compilation rejects them
 instead of inventing process-global imports; evaluator execution requires an injected adapter.
+
+## Examples
+
+### Construct the native provider without reading process state
+
+```silk
+import silk.os_host_input as OsHostInput
+
+pub fn main() -> i32 {
+  let provider = OsHostInput.make()
+  drop provider
+  return 42
+}
+```
 
 Import as `OsHostInput` with `import silk.os_host_input`.
 
@@ -34,8 +52,12 @@ Public declarations: 2.
 pub struct OsHostInput
 ```
 
-Native provider reading the process command line, environment, and working directory. It owns no
-state; all three belong to the process rather than to the value.
+A stateless native [`HostInput`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider for process arguments, environment, and directory.
+
+### Details
+
+The process owns the source values. Each successful byte lookup returns a new owned copy through
+the portable service.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a6d616b65"></a>
 
@@ -45,7 +67,17 @@ state; all three belong to the process rather than to the value.
 pub fn make() -> OsHostInput
 ```
 
-Constructs the process-backed input provider.
+Creates a stateless provider for native process input.
+
+### When to use
+
+Use this function at a native application edge. Provide the result as `&mut HostInput` to
+portable lookup operations in `silk.host_input`.
+
+### Details
+
+Construction performs no lookup and cannot fail. Argument and environment absence remain
+ordinary `None` values when a later lookup runs.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 

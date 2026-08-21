@@ -185,7 +185,12 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
           snapshot,
           Analysis.documentationAt(snapshot, 'main', source.indexOf('map')),
         ),
-        '/// Transforms the success channel of an Effect.',
+        `/// Applies a pure callback to success while preserving typed failure and requirements.
+///
+/// # Details
+///
+/// \`onSuccess\` runs once only after \`self\` succeeds. A typed failure propagates without invoking the
+/// callback. Use [\`flatMap\`] when the callback itself needs an Effect.`,
       )
       assert.strictEqual(
         occurrence === undefined
@@ -210,8 +215,22 @@ pub fn main() -> i32 {
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
-        ['asSlice', '/// Borrows the initialized elements as one shared lexical slice.'],
-        ['asMutSlice', '/// Borrows the initialized elements as one exclusive lexical slice.'],
+        [
+          'asSlice',
+          `/// Borrows the initialized elements as one shared lexical slice.
+///
+/// # Gotchas
+///
+/// Do not retain this slice across an operation that can grow the vector.`,
+        ],
+        [
+          'asMutSlice',
+          `/// Borrows all initialized elements as one exclusive lexical slice.
+///
+/// # Gotchas
+///
+/// Do not retain this slice across an operation that can grow the vector.`,
+        ],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, name, 1)
         assert.strictEqual(occurrence?.resolution._tag, 'Available')
@@ -260,15 +279,26 @@ pub fn main() -> i32 {
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
-        ['make', '/// Constructs empty Bytes without allocating.'],
-        ['copy', '/// Copies one borrowed byte sequence into independently owned storage.'],
+        ['make', '/// Creates an empty `Bytes` value without allocating storage.'],
+        ['copy', '/// Copies a complete borrowed byte sequence into independently owned storage.'],
         [
           'append',
-          '/// Appends one complete borrowed byte sequence in source order with one bulk copy.',
+          `/// Appends a complete borrowed byte sequence in source order.
+///
+/// # Details
+///
+/// If growth fails, the original bytes and their length remain unchanged.`,
         ],
         ['length', '/// Returns the initialized byte count.'],
-        ['asSlice', '/// Borrows the initialized octets as one shared lexical slice.'],
-        ['asMutSlice', '/// Borrows the initialized octets as one exclusive lexical slice.'],
+        ['asSlice', '/// Borrows all initialized octets as one shared lexical slice.'],
+        [
+          'asMutSlice',
+          `/// Borrows all initialized octets as one exclusive lexical slice.
+///
+/// # Gotchas
+///
+/// Do not retain this slice across [\`append\`], because an append can replace the allocation.`,
+        ],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, name, 0)
         assert.strictEqual(occurrence?.resolution._tag, 'Available')
@@ -353,14 +383,19 @@ pub fn main() -> i32 {
           snapshot,
           Analysis.documentationAt(snapshot, 'main', source.indexOf('logAt')),
         ),
-        '/// Dispatches one complete message at the selected level through the provided Logger.',
+        `/// Sends one complete message at \`level\` through the required mutable [\`Logger\`].
+///
+/// # Details
+///
+/// The message is one logging event rather than a fragment. The provider controls formatting and
+/// destination; its [\`LogError\`] propagates unchanged.`,
       )
       assert.strictEqual(
         documentationText(
           snapshot,
           Analysis.documentationAt(snapshot, 'main', source.indexOf('warning')),
         ),
-        '/// Selects Warning severity.',
+        '/// Returns the Warning severity for a recoverable abnormal condition.',
       )
 
       for (const [prefix, expected] of [
@@ -423,7 +458,13 @@ pub fn main() -> i32 { return 42 }`
           snapshot,
           Analysis.documentationAt(snapshot, 'main', source.indexOf('resolve(base')),
         ),
-        '/// Resolves relative text lexically against one explicit absolute base.',
+        `/// Resolves relative text lexically against an explicit absolute base.
+///
+/// # Details
+///
+/// Empty text and \`.\` keep the base; \`..\` removes components; ordinary components append. An
+/// absolute relative value, an empty interior component, NUL, or any attempt to escape above root
+/// fails with the \`InvalidPath\` reason. Resolution is lexical and never accesses the filesystem.`,
       )
 
       for (const [prefix, expected] of [

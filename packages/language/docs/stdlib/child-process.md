@@ -12,14 +12,74 @@ syntax.
 
 ## Details
 
-Requests preserve argument and environment-entry order as exact platform bytes. The environment
-begins empty, the working directory is inherited unless [`requestWithin`](#declaration-73696c6b2f6368696c645f70726f636573733a3a7265717565737457697468696e) selects one, and child
-standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
-stdout and stderr captures in [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65). A nonzero exit is ordinary outcome data.
+Requests preserve NUL-free argument and environment-entry bytes in insertion order. The
+environment begins empty, and the working directory is inherited unless [`requestWithin`](#declaration-73696c6b2f6368696c645f70726f636573733a3a7265717565737457697468696e)
+selects one. Child standard input is closed. `ChildProcess.execute` blocks until termination and
+owns complete stdout and stderr captures in [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65). A nonzero exit is outcome data.
 
 [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) is reserved for failing to spawn, wait, or capture; it carries a stable
 portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) when
 captured output cannot be owned.
+
+## Gotchas
+
+An argument, environment name, or environment value must not contain NUL. The request uses NUL
+as its entry separator, and a native provider cannot preserve an embedded NUL as data.
+
+## Examples
+
+### Handle a nonzero child exit as outcome data
+
+```silk
+import silk.bytes as Bytes
+
+import silk.child_process as Process
+
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.filesystem as Path
+
+import silk.option as Option
+
+struct Completed {}
+
+effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
+! Process.ProcessError | Core.OutOfMemoryError
+? &mut Core.Allocator {
+  return Process.exited(7, Bytes.make(), Bytes.make())
+}
+
+impl Process.ChildProcess for Completed {
+  execute: Completed.execute
+}
+
+effect fn program() -> i32
+! Path.FileError | Core.OutOfMemoryError | Process.ProcessError {
+  let mut allocator = Core.make()
+  let mut provider = Completed {}
+  let path = run Path.make("/tool")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let request = run Process.request(&path)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let outcome = run Process.submit(&request)
+    |> Effect.provideMut<Process.ChildProcess>(&mut provider)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  return match move Process.exitCode(&outcome) {
+    Option.Some<i32> {value} => 35 + value
+    Option.None {} => 1
+  }
+}
+
+effect fn recover(error: Path.FileError | Core.OutOfMemoryError | Process.ProcessError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}
+```
 
 Import as `ChildProcess` with `import silk.child_process`.
 
@@ -33,7 +93,7 @@ Public declarations: 41.
 pub struct ProcessOperation
 ```
 
-The stage of one execution that failed.
+A provider-reported execution stage for one [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72).
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7065726174696f6e3a3a6669656c643a30"></a>
 
@@ -43,7 +103,7 @@ The stage of one execution that failed.
 pub code: i32
 ```
 
-Stable code identifying the failed execution stage.
+The stable numeric code for the provider-reported execution stage.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f63657373526561736f6e"></a>
 
@@ -53,7 +113,7 @@ Stable code identifying the failed execution stage.
 pub struct ProcessReason
 ```
 
-A closed portable child-process recovery reason.
+A portable recovery category for one [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72).
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f63657373526561736f6e3a3a6669656c643a30"></a>
 
@@ -63,7 +123,7 @@ A closed portable child-process recovery reason.
 pub code: i32
 ```
 
-Stable code identifying the portable recovery reason.
+The stable numeric code for the portable recovery category.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72"></a>
 
@@ -73,11 +133,14 @@ Stable code identifying the portable recovery reason.
 pub struct ProcessError
 ```
 
-An allocation-free typed failure to start, to wait for, or to capture one child.
+A typed failure to start, wait for, or capture one child process.
 
 ### Details
 
-A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
+`operation` identifies the provider-reported stage. `reason` gives a portable recovery category.
+Use [`providerCode`](#declaration-73696c6b2f6368696c645f70726f636573733a3a70726f7669646572436f6465) when diagnostics also need a provider-defined numeric code.
+
+A child that exits with a nonzero code produces [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) data instead of this error.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a30"></a>
 
@@ -87,7 +150,7 @@ A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` d
 pub operation: ProcessOperation
 ```
 
-The execution stage that failed.
+The execution stage reported by the provider.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f723a3a6669656c643a31"></a>
 
@@ -97,7 +160,7 @@ The execution stage that failed.
 pub reason: ProcessReason
 ```
 
-The portable reason callers can recover by.
+The portable category that callers can use for recovery.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a737061776e4f7065726174696f6e"></a>
 
@@ -107,7 +170,7 @@ The portable reason callers can recover by.
 pub fn spawnOperation() -> ProcessOperation
 ```
 
-Selects the start stage, which covers building the child and reaching its first instruction.
+Returns the stage for preparing and starting the child process.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776169744f7065726174696f6e"></a>
 
@@ -117,7 +180,7 @@ Selects the start stage, which covers building the child and reaching its first 
 pub fn waitOperation() -> ProcessOperation
 ```
 
-Selects the wait stage, which covers observing how the child terminated.
+Returns the stage for waiting until the child process terminates.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a636170747572654f7065726174696f6e"></a>
 
@@ -127,7 +190,7 @@ Selects the wait stage, which covers observing how the child terminated.
 pub fn captureOperation() -> ProcessOperation
 ```
 
-Selects the capture stage, which covers owning the child's completed output.
+Returns the stage for copying the completed output and error streams.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f7065726174696f6e436f6465"></a>
 
@@ -137,7 +200,7 @@ Selects the capture stage, which covers owning the child's completed output.
 pub fn operationCode(operation: ProcessOperation) -> i32
 ```
 
-Returns the stable stage code.
+Returns the stable numeric code for an execution stage.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f74466f756e64"></a>
 
@@ -147,7 +210,7 @@ Returns the stable stage code.
 pub fn notFound() -> ProcessReason
 ```
 
-Selects NotFound: no executable exists at the requested path.
+Returns the reason used when no executable exists at the requested path.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7065726d697373696f6e44656e696564"></a>
 
@@ -157,7 +220,7 @@ Selects NotFound: no executable exists at the requested path.
 pub fn permissionDenied() -> ProcessReason
 ```
 
-Selects PermissionDenied.
+Returns the reason used when the provider denies access to the requested executable.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a696e76616c696452657175657374"></a>
 
@@ -167,7 +230,7 @@ Selects PermissionDenied.
 pub fn invalidRequest() -> ProcessReason
 ```
 
-Selects InvalidRequest: the request cannot be presented to the platform at all.
+Returns the reason used when the provider cannot present the request to its process boundary.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6e6f5370616365"></a>
 
@@ -177,7 +240,7 @@ Selects InvalidRequest: the request cannot be presented to the platform at all.
 pub fn noSpace() -> ProcessReason
 ```
 
-Selects NoSpace, which includes exhausting the storage that holds captured output.
+Returns the reason used when process setup or captured output exhausts provider storage.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a756e737570706f72746564"></a>
 
@@ -187,7 +250,7 @@ Selects NoSpace, which includes exhausting the storage that holds captured outpu
 pub fn unsupported() -> ProcessReason
 ```
 
-Selects Unsupported.
+Returns the reason used when the provider does not support the requested process operation.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f74686572"></a>
 
@@ -197,7 +260,7 @@ Selects Unsupported.
 pub fn other() -> ProcessReason
 ```
 
-Selects Other.
+Returns the reason used when no other portable recovery category applies.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a726561736f6e436f6465"></a>
 
@@ -207,7 +270,7 @@ Selects Other.
 pub fn reasonCode(reason: ProcessReason) -> i32
 ```
 
-Returns the stable portable reason code.
+Returns the stable numeric code for a portable recovery category.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c757265"></a>
 
@@ -217,7 +280,7 @@ Returns the stable portable reason code.
 pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError
 ```
 
-Constructs one typed process failure without a provider detail.
+Creates a process failure without a provider-defined numeric code.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6661696c75726557697468436f6465"></a>
 
@@ -227,7 +290,7 @@ Constructs one typed process failure without a provider detail.
 pub fn failureWithCode(operation: ProcessOperation, reason: ProcessReason, code: i32) -> ProcessError
 ```
 
-Constructs one typed process failure that retains a provider-defined numeric detail.
+Creates a process failure with a provider-defined numeric code for diagnostics.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f7669646572436f6465"></a>
 
@@ -237,7 +300,7 @@ Constructs one typed process failure that retains a provider-defined numeric det
 pub fn providerCode(error: &silk/child_process.ProcessError) -> Option<i32>
 ```
 
-Returns the provider-defined numeric detail when one was retained.
+Returns the provider-defined numeric code, or `None` when the failure has no such code.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a50726f6365737352657175657374"></a>
 
@@ -247,7 +310,7 @@ Returns the provider-defined numeric detail when one was retained.
 pub struct ProcessRequest
 ```
 
-One complete execution request.
+One owned child-process request with ordered arguments and an explicit environment.
 
 ### Details
 
@@ -255,6 +318,11 @@ Arguments and environment entries are exact platform bytes rather than checked t
 received from the platform can be handed to a child unchanged. Entries are retained in the order
 they were added, and the environment starts empty: a child sees no variable that this request
 did not name.
+
+### Gotchas
+
+Argument, environment-name, and environment-value bytes must not contain NUL. NUL separates
+entries in the provider request format.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a72657175657374"></a>
 
@@ -264,7 +332,7 @@ did not name.
 pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
-Builds a request that runs `program` with no arguments, an empty environment, and the caller's
+Creates a request for `program` with no arguments, an empty environment, and the caller's
 own working directory.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7265717565737457697468696e"></a>
@@ -275,7 +343,7 @@ own working directory.
 pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
-Builds a request that additionally runs the child in `directory` rather than the caller's own
+Creates a request that runs `program` in `directory` instead of the caller's
 working directory.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74"></a>
@@ -286,7 +354,16 @@ working directory.
 pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
-Appends one argument as exact bytes, after every argument already added.
+Appends one NUL-free byte argument after all arguments already in the request.
+
+### Details
+
+The request copies `value` and preserves argument order.
+
+### Gotchas
+
+`value` must not contain NUL. NUL is the entry separator used by process providers.
+If allocation fails, do not reuse `self`; it can contain an incomplete argument entry.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65"></a>
 
@@ -296,7 +373,18 @@ Appends one argument as exact bytes, after every argument already added.
 pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
-Appends one environment entry as the exact bytes `name`, `=`, then `value`.
+Appends one NUL-free environment entry as `name`, `=`, and `value` bytes.
+
+### Details
+
+The request starts with an empty environment and preserves insertion order. This function does
+not read or merge the caller's environment.
+
+### Gotchas
+
+`name` and `value` must not contain NUL. The request builder does not validate environment-name
+grammar beyond this provider-format requirement.
+If allocation fails, do not reuse `self`; it can contain an incomplete environment entry.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a70726f6772616d"></a>
 
@@ -306,7 +394,7 @@ Appends one environment entry as the exact bytes `name`, `=`, then `value`.
 pub fn program(self: &silk/child_process.ProcessRequest) -> &[u8]
 ```
 
-Borrows the executable path as exact platform bytes.
+Borrows the executable path bytes for the lifetime of the request borrow.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e7473"></a>
 
@@ -316,7 +404,7 @@ Borrows the executable path as exact platform bytes.
 pub fn arguments(self: &silk/child_process.ProcessRequest) -> &[u8]
 ```
 
-Borrows the ordered arguments as one block of NUL-terminated entries.
+Borrows all ordered arguments as one block of NUL-terminated entries.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a617267756d656e74436f756e74"></a>
 
@@ -326,7 +414,7 @@ Borrows the ordered arguments as one block of NUL-terminated entries.
 pub fn argumentCount(self: &silk/child_process.ProcessRequest) -> usize
 ```
 
-Returns the number of arguments added so far.
+Returns the number of calls to [`addArgument`](#declaration-73696c6b2f6368696c645f70726f636573733a3a616464417267756d656e74) that completed successfully.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74"></a>
 
@@ -336,7 +424,7 @@ Returns the number of arguments added so far.
 pub fn environment(self: &silk/child_process.ProcessRequest) -> &[u8]
 ```
 
-Borrows the exact environment as one block of NUL-terminated entries.
+Borrows the explicit environment as one block of NUL-terminated `name=value` entries.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a656e7669726f6e6d656e74436f756e74"></a>
 
@@ -346,7 +434,7 @@ Borrows the exact environment as one block of NUL-terminated entries.
 pub fn environmentCount(self: &silk/child_process.ProcessRequest) -> usize
 ```
 
-Returns the number of environment entries added so far.
+Returns the number of calls to [`setVariable`](#declaration-73696c6b2f6368696c645f70726f636573733a3a7365745661726961626c65) that completed successfully.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a776f726b696e674469726563746f7279"></a>
 
@@ -356,8 +444,7 @@ Returns the number of environment entries added so far.
 pub fn workingDirectory(self: &silk/child_process.ProcessRequest) -> &[u8]
 ```
 
-Borrows the requested working directory as exact platform bytes, empty when the child inherits
-the caller's own directory.
+Borrows the selected working-directory bytes, or an empty view when the child inherits one.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a686173576f726b696e674469726563746f7279"></a>
 
@@ -367,7 +454,7 @@ the caller's own directory.
 pub fn hasWorkingDirectory(self: &silk/child_process.ProcessRequest) -> bool
 ```
 
-Reports whether the request selects a working directory of its own.
+Reports whether the request selects a working directory instead of inheriting one.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a457869746564"></a>
 
@@ -377,7 +464,7 @@ Reports whether the request selects a working directory of its own.
 pub struct Exited
 ```
 
-A child that ran to completion and returned an exit code.
+A completed child process that returned an exit code and two owned captures.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a4578697465643a3a6669656c643a30"></a>
 
@@ -417,7 +504,7 @@ The complete captured standard error, owned by this outcome.
 pub struct Signaled
 ```
 
-A child that terminated because a signal reached it rather than by returning a code.
+A completed child process that a signal terminated, with two owned captures.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a5369676e616c65643a3a6669656c643a30"></a>
 
@@ -457,7 +544,7 @@ The complete captured standard error, owned by this outcome.
 pub struct ProcessOutcome
 ```
 
-One completed execution outcome, narrowed with `match`.
+One completed child execution, represented as an exit or signal termination.
 
 ### Details
 
@@ -482,13 +569,15 @@ The completed outcome.
 pub service ChildProcess
 ```
 
-Portable blocking child-process contract.
+A portable blocking child-process service with complete output capture.
 
 ### Details
 
-One `execute` runs the request to completion with the child's standard input closed, and owns
-the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
-failure to start, to wait, or to capture is `ProcessError`.
+`execute` closes child standard input and blocks until termination. The returned outcome owns
+complete standard-output and standard-error captures. A nonzero exit code is outcome data.
+
+A start, wait, or capture failure produces [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72). Owning either capture can also
+produce [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). The operation needs exclusive provider and allocator requirements.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f636573733a3a6f7065726174696f6e3a65786563757465"></a>
 
@@ -498,7 +587,12 @@ failure to start, to wait, or to capture is `ProcessError`.
 effect fn execute(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
-Runs one structured request to completion and captures both output streams.
+Runs one request to termination and returns owned captures of both output streams.
+
+#### Details
+
+This operation blocks and closes the child's standard input. A nonzero exit code returns on
+the success channel. Start, wait, and capture failures produce `ProcessError`.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a657869746564"></a>
 
@@ -508,7 +602,7 @@ Runs one structured request to completion and captures both output streams.
 pub fn exited(code: i32, output: Bytes, errors: Bytes) -> ProcessOutcome
 ```
 
-Constructs the outcome of a child that returned `code`.
+Creates an exited outcome that owns `output` and `errors`.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7369676e616c6564"></a>
 
@@ -518,7 +612,7 @@ Constructs the outcome of a child that returned `code`.
 pub fn signaled(signal: i32, output: Bytes, errors: Bytes) -> ProcessOutcome
 ```
 
-Constructs the outcome of a child that a signal terminated.
+Creates a signaled outcome that owns `output` and `errors`.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a69735369676e616c6564"></a>
 
@@ -528,7 +622,7 @@ Constructs the outcome of a child that a signal terminated.
 pub fn isSignaled(outcome: &silk/child_process.ProcessOutcome) -> bool
 ```
 
-Reports whether a signal terminated the child.
+Reports whether a signal terminated the child instead of an exit code.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a65786974436f6465"></a>
 
@@ -538,7 +632,7 @@ Reports whether a signal terminated the child.
 pub fn exitCode(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
 ```
 
-Returns the exit code, or None when a signal terminated the child.
+Returns the exit code, or `None` when a signal terminated the child.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7465726d696e6174696e675369676e616c"></a>
 
@@ -548,7 +642,7 @@ Returns the exit code, or None when a signal terminated the child.
 pub fn terminatingSignal(outcome: &silk/child_process.ProcessOutcome) -> Option<i32>
 ```
 
-Returns the terminating signal number, or None when the child returned an exit code.
+Returns the terminating signal number, or `None` when the child returned an exit code.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6f75747075744279746573"></a>
 
@@ -558,7 +652,7 @@ Returns the terminating signal number, or None when the child returned an exit c
 pub fn outputBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
 ```
 
-Borrows the complete captured standard output.
+Borrows the complete captured standard output without consuming the outcome.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a6572726f724279746573"></a>
 
@@ -568,7 +662,7 @@ Borrows the complete captured standard output.
 pub fn errorBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
 ```
 
-Borrows the complete captured standard error.
+Borrows the complete captured standard error without consuming the outcome.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a7375626d6974"></a>
 
@@ -578,4 +672,9 @@ Borrows the complete captured standard error.
 pub effect fn submit(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
-Builds one service execute effect.
+Runs the active [`ChildProcess`](#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373) provider for one request.
+
+### Details
+
+This wrapper preserves the service contract: it blocks, closes child input, and returns complete
+owned captures. It requires exclusive child-process and allocator providers.

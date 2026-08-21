@@ -1,9 +1,9 @@
 //! Owned key-value storage with deterministic seeded hashing and open-addressed lookup.
 //!
 //! # When to use
-//! Use [`HashMap`] for key-based lookup when a key has a [`HashKey`] witness. Use `silk.vector.Vector`
-//! when presentation order should follow insertion, or when indexing rather than equivalence is the
-//! primary operation.
+//! Use [`HashMap`] for key-based lookup when a key has a [`HashKey`] witness. Use
+//! `silk.vector.Vector` when presentation order should follow insertion, or when indexing rather
+//! than equivalence is the primary operation.
 //!
 //! # Details
 //! The map starts allocation-free, first allocates eight buckets, and grows before used buckets
@@ -20,6 +20,46 @@
 //! Lookup and removal consume the probe key. [`get`], [`keyAt`], and [`valueAt`] copy a complete
 //! stored entry and therefore require both stored key and value to be `Copy`; use [`remove`] to
 //! transfer a move-only value out. Equivalent keys must also obey the [`HashKey`] hash contract.
+//!
+//! # Examples
+//! ## Insert, read, and remove one value
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.hash as Hash
+//!
+//! import silk.hash_map as HashMap
+//!
+//! import silk.option as Option
+//!
+//! effect fn build() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let mut map = HashMap.make<Hash.Word, i32>(Hash.seed(17))
+//!   let inserting = HashMap.insert<Hash.Word, i32>(&mut map, Hash.word(7), 42)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let previous = run inserting
+//!   drop previous
+//!   let found = HashMap.get<Hash.Word, i32>(&map, Hash.word(7))
+//!     |> Option.unwrapOr<i32>(0)
+//!   let removed = HashMap.remove<Hash.Word, i32>(&mut map, Hash.word(7))
+//!   drop removed
+//!   if HashMap.contains<Hash.Word, i32>(&map, Hash.word(7)) {
+//!     return 0
+//!   }
+//!   return found
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(build(), recover)
+//! }
+//! ```
 
 // A hashed map over the allocation substrate. Ordinary Silk: no compiler phase knows this type, no
 // engine contains a hash operation, and every hash a program computes is a call to a function some
@@ -88,6 +128,11 @@ pub struct Table<K, V> {
 }
 
 /// Owns unique keys and their values under one equivalence, hash witness, and seed.
+///
+/// # Details
+///
+/// An equivalent insertion replaces the stored value instead of adding another entry. The seed
+/// and operation sequence determine bucket presentation order, which is not insertion order.
 pub struct HashMap<K, V> {
   storage: Unallocated<K, V> | Table<K, V>
   seed: HashSeed
@@ -480,6 +525,10 @@ pub effect fn insert<K: HashKey, V>(
 }
 
 /// Reports whether the map holds an entry under a key equivalent to one probe key.
+///
+/// # Details
+///
+/// This function consumes the probe key. It does not change the map or move a stored entry.
 pub fn contains<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> bool {
   if self.capacity == usize.ZERO {
     return false
@@ -512,6 +561,7 @@ pub fn contains<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> bool {
 ///
 /// This is the lookup a map with move-only values answers: the bucket names the entry without
 /// moving anything out of the map. A move-only value can then be transferred with [`remove`].
+/// This function consumes the probe key.
 pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
   if self.capacity == usize.ZERO {
     return Option.none<usize>()
@@ -544,6 +594,7 @@ pub fn indexOf<K: HashKey, V>(self: &HashMap<K, V>, key: K) -> Option<usize> {
 ///
 /// Reads a complete entry copy, so it answers only when both stored key and value types are `Copy`.
 /// Use [`indexOf`] for a non-moving presence check and [`remove`] to transfer a move-only value.
+/// This function consumes the probe key and does not change the map.
 pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V> {
   if self.capacity == usize.ZERO {
     return Option.none<V>()
@@ -620,6 +671,10 @@ pub fn remove<K: HashKey, V>(self: &mut HashMap<K, V>, key: K) -> Option<V> {
 /// # Details
 ///
 /// Reads a complete entry copy, so both stored key and value types must be `Copy`.
+///
+/// # Gotchas
+///
+/// If `index` is out of range or [`occupiedAt`] returns `false`, the program traps.
 pub fn keyAt<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> K {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0
@@ -632,6 +687,10 @@ pub fn keyAt<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> K {
 /// # Details
 ///
 /// Reads a complete entry copy, so both stored key and value types must be `Copy`.
+///
+/// # Gotchas
+///
+/// If `index` is out of range or [`occupiedAt`] returns `false`, the program traps.
 pub fn valueAt<K: Copy, V: Copy>(self: &HashMap<K, V>, index: usize) -> V {
   if !occupiedAt<K, V>(self, index) {
     let boom = 1 / 0

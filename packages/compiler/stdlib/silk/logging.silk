@@ -1,9 +1,9 @@
 //! Typed semantic logging with replaceable stdout and bounded in-memory providers.
 //!
 //! # When to use
-//! Require [`Logger`] when code emits whole semantic messages but should not choose their storage or
-//! destination. Provide [`StdoutLogger`] at a process edge, or [`InMemoryLogger`] for deterministic
-//! observation and failure testing.
+//! Require [`Logger`] when code emits whole semantic messages but should not choose storage or
+//! destination. Provide [`StdoutLogger`] at a process edge. Use [`InMemoryLogger`] for
+//! deterministic observation and failure tests.
 //!
 //! # Details
 //! Each invocation carries one [`LogLevel`] and one valid UTF-8 message. The service does not add
@@ -12,8 +12,41 @@
 //! bytes, and exposes attempted calls separately from successful commits.
 //!
 //! # Gotchas
-//! Logger failures are typed [`LogError`] values and do not imply that a message committed. Bounded
-//! accessors require a committed event and valid byte index; invalid indices trap.
+//! Logger failures are typed [`LogError`] values and do not guarantee that a message committed.
+//! In-memory accessors require an event index less than [`length`] and a valid message-byte index.
+//!
+//! # Examples
+//! ## Record and inspect one warning
+//!
+//! ```silk
+//! import silk.effect as Effect
+//!
+//! import silk.logging as Logging
+//!
+//! import silk.usize as usize
+//!
+//! effect fn program() -> i32
+//! ! Logging.LogError {
+//!   let mut logger = Logging.memory()
+//!   let logged = run Effect.logAt(Logging.warning(), "cache miss")
+//!     |> Effect.provideMut(&mut logger)
+//!   if Logging.length(&logger) != usize.ONE {
+//!     return 1
+//!   }
+//!   if Logging.levelCode(Logging.levelAt(&logger, usize.ZERO)) != 3 {
+//!     return 2
+//!   }
+//!   return 42
+//! }
+//!
+//! effect fn recover(error: Logging.LogError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(program(), recover)
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.core {
@@ -27,54 +60,89 @@ import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u8 as u8
 import silk.usize as usize
 
-/// A closed bootstrap logging severity.
+/// One logging severity from Trace through Error.
 pub struct LogLevel {
   code: i32
 }
 
-/// Selects Trace severity.
+/// Returns the Trace severity for detailed diagnostic events.
 pub fn trace() -> LogLevel { return LogLevel { code: 0 } }
 
-/// Selects Debug severity.
+/// Returns the Debug severity for development diagnostic events.
 pub fn debug() -> LogLevel { return LogLevel { code: 1 } }
 
-/// Selects Info severity.
+/// Returns the Info severity for ordinary operational events.
 pub fn info() -> LogLevel { return LogLevel { code: 2 } }
 
-/// Selects Warning severity.
+/// Returns the Warning severity for a recoverable abnormal condition.
 pub fn warning() -> LogLevel { return LogLevel { code: 3 } }
 
-/// Selects Error severity.
+/// Returns the Error severity for an operation that did not complete as intended.
 pub fn error() -> LogLevel { return LogLevel { code: 4 } }
 
-/// Returns the stable bootstrap ordinal for one logging severity.
+/// Returns the stable ordinal from `0` for Trace through `4` for Error.
 pub fn levelCode(level: LogLevel) -> i32 { return level.code }
 
-/// A typed failure reported by a Logger provider.
+/// A typed failure reported by one [`Logger`] provider.
+///
+/// # Details
+///
+/// The numeric code belongs to the provider. Portable code can recover from `LogError` without
+/// assigning one meaning to that code across different providers.
 pub struct LogError {
   code: i32
 }
 
-/// Returns the provider-defined bootstrap failure code.
+/// Returns the provider-defined failure code for diagnostics.
+///
+/// # Gotchas
+///
+/// Interpret this code only with knowledge of the selected provider. Different providers can use
+/// the same code for different failures.
 pub fn errorCode(error: LogError) -> i32 { return error.code }
 
 effect fn reject(code: i32) -> never ! LogError {
   fail LogError { code: code }
 }
 
-/// Receives one complete semantic message per invocation.
+/// A replaceable service that receives one complete semantic log event per call.
+///
+/// # When to use
+///
+/// Use this service when library code must emit events without selecting stdout, memory, or another
+/// destination.
+///
+/// # Details
+///
+/// Each call carries one severity and one valid UTF-8 message. The service does not require a
+/// newline, timestamp, prefix, allocation, or output destination. The provider owns those choices.
 pub service Logger {
-  /// Submits one complete message at one severity to the active provider.
+  /// Submits one complete UTF-8 message at one severity to the active provider.
+  ///
+  /// # Details
+  ///
+  /// The call preserves the message bytes exactly. It does not add a newline, severity label,
+  /// timestamp, or other formatting. A provider failure produces [`LogError`].
   effect fn log(
     level: LogLevel,
     message: string
   ) -> () ! LogError ? &mut Logger
 }
 
-/// A process-output Logger provider with no mandatory formatting or allocation.
+/// A [`Logger`] provider that writes each complete message to process standard output.
+///
+/// # Details
+///
+/// The provider ignores the severity for physical formatting and writes only the UTF-8 message
+/// bytes. It adds no newline and performs no message allocation.
 pub struct StdoutLogger {}
 
-/// Constructs a Logger that forwards complete messages to process stdout.
+/// Creates a logger that forwards each complete message to process standard output.
+///
+/// # Gotchas
+///
+/// The caller must include a newline in `message` when line separation is required. A standard-
+/// output write failure becomes a provider-defined [`LogError`].
 pub fn stdout() -> StdoutLogger { return StdoutLogger {} }
 
 effect fn writeStdoutCounted(
@@ -105,7 +173,18 @@ impl Logger for StdoutLogger {
   log: StdoutLogger.writeStdout
 }
 
-/// A deterministic retaining Logger provider implemented entirely in Silk.
+/// A deterministic [`Logger`] provider that retains up to eight events and 64 total message bytes.
+///
+/// # When to use
+///
+/// Use this provider in tests that must inspect event order, severity, message bytes, or failure
+/// behavior without process output.
+///
+/// # Details
+///
+/// The provider copies each committed message into fixed internal storage. It records attempted
+/// calls separately from committed events. Capacity failure and configured failure do not commit an
+/// event.
 pub struct InMemoryLogger {
   levels: [i32; 8]
   offsets: [usize; 8]
@@ -135,7 +214,12 @@ fn emptyMessages() -> [i32; 64] {
   ]
 }
 
-/// Constructs a bounded in-memory Logger for up to eight events and 64 message bytes.
+/// Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
+///
+/// # Gotchas
+///
+/// A call fails when eight events are already committed. A call also fails when its bytes exceed
+/// the remaining 64-byte total. Neither failure commits the event.
 pub fn memory() -> InMemoryLogger {
   return InMemoryLogger {
     levels: emptyLevels(),
@@ -150,7 +234,12 @@ pub fn memory() -> InMemoryLogger {
   }
 }
 
-/// Constructs an in-memory Logger that rejects one zero-based invocation ordinal.
+/// Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
+///
+/// # Details
+///
+/// The configured attempt increases [`attempts`] but does not increase [`length`] or consume
+/// message capacity. Other attempts retain the eight-event and 64-byte limits of [`memory`].
 pub fn memoryFailAt(failAt: usize) -> InMemoryLogger {
   let mut logger = memory()
   logger.failEnabled = true
@@ -199,24 +288,45 @@ impl Logger for InMemoryLogger {
   log: InMemoryLogger.record
 }
 
-/// Returns the number of committed Logger invocations.
+/// Returns the number of events that the in-memory logger committed.
+///
+/// # Details
+///
+/// Failed attempts do not increase this count. Use [`attempts`] when rejected calls must also be
+/// observed.
 pub fn length(self: &InMemoryLogger) -> usize {
   return self.count
 }
 
-/// Returns the severity of one committed invocation.
+/// Returns the severity of one committed event.
+///
+/// # Gotchas
+///
+/// `index` must be less than [`length`]. An unused index below eight returns the initial Trace
+/// value instead of trapping. An index of eight or more traps.
 pub fn levelAt(self: &InMemoryLogger, index: usize) -> LogLevel {
   let levels = self.levels
   return LogLevel { code: levels[index] }
 }
 
-/// Returns the byte length of one committed message.
+/// Returns the UTF-8 byte length of one committed message.
+///
+/// # Gotchas
+///
+/// `index` must be less than [`length`]. An unused index below eight returns zero instead of
+/// trapping. An index of eight or more traps.
 pub fn messageLengthAt(self: &InMemoryLogger, index: usize) -> usize {
   let lengths = self.lengths
   return lengths[index]
 }
 
-/// Returns one byte from a committed message.
+/// Returns one UTF-8 byte from a committed message.
+///
+/// # Gotchas
+///
+/// `eventIndex` must be less than [`length`]. `byteIndex` must be less than
+/// [`messageLengthAt`] for that event. An unused event or invalid byte index traps. An event index
+/// of eight or more also traps.
 pub fn messageByteAt(
   self: &InMemoryLogger,
   eventIndex: usize,
@@ -231,5 +341,5 @@ pub fn messageByteAt(
   return i32.toU8(messages[offset + byteIndex])
 }
 
-/// Returns the number of attempted Logger invocations.
+/// Returns the number of calls attempted, including calls that produced [`LogError`].
 pub fn attempts(self: &InMemoryLogger) -> usize { return self.attempts }

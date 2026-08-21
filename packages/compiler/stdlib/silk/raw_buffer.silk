@@ -14,17 +14,65 @@
 //! element count, every selected range is in bounds, and every read or view covers initialized
 //! elements. Releasing a raw buffer releases its allocation but does not discover and drop values
 //! still stored in it; a container must clear initialized `Slot` values before release.
+//!
+//! # Examples
+//! ## Initialize and read a raw byte buffer
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.core {Allocator}
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.layout as Layout
+//!
+//! import silk.raw_buffer as RawBuffer
+//!
+//! import silk.u8 as u8
+//!
+//! effect fn build() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let allocation = run acquiring
+//!   unsafe {
+//!     let mut buffer = RawBuffer.from<u8>(move allocation, 3)
+//!     let filled = RawBuffer.fill(&mut buffer, 0, 3, u8.toU8(14))
+//!     let values = RawBuffer.view<u8>(&buffer, 0, 3)
+//!     return u8.toI32(values[0] + values[1] + values[2])
+//!   }
+//!   return 0
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(build(), recover)
+//! }
+//! ```
 
 import silk.slot as Slot
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Adopts an allocation as typed raw storage. The caller proves the count fits the allocation.
+/// Adopts an allocation as typed raw storage with the specified element capacity.
+///
+/// # Gotchas
+///
+/// The caller must prove that the allocation has the size and alignment for `count` values of `T`.
 pub fn from<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
   unsafe { return Intrinsic.rawBufferFrom<T>(move allocation, count) }
 }
 
-/// Selects one unchecked storage slot. The caller proves the index is in bounds.
+/// Selects one raw storage slot without checking bounds or initialization.
+///
+/// # Gotchas
+///
+/// `index` must be less than [`count`]. The caller must separately track whether the slot is
+/// initialized.
 pub fn slot<T>(buffer: &mut RawBuffer<T>, index: usize) -> Slot<T> {
   unsafe { return Intrinsic.rawBufferSlot<T>(buffer, index) }
 }
@@ -34,7 +82,11 @@ pub fn count<T>(buffer: &RawBuffer<T>) -> usize {
   return Intrinsic.rawBufferCount<T>(buffer)
 }
 
-/// Reads an unchecked initialized element. The caller proves initialization and bounds.
+/// Copies one initialized element without changing its slot state.
+///
+/// # Gotchas
+///
+/// `index` must be less than [`count`], and the selected slot must contain an initialized `T`.
 pub fn read<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
   unsafe { return Intrinsic.rawBufferRead<T>(buffer, index) }
 }
@@ -45,21 +97,38 @@ pub fn read<T: Copy>(buffer: &RawBuffer<T>, index: usize) -> T {
 ///
 /// Source and destination may overlap; the result is as if the elements travelled through an
 /// intermediate buffer.
+///
+/// # Gotchas
+///
+/// The caller must prove that both selected ranges are in bounds. The source range must be
+/// initialized.
 pub fn copy<T>(destination: &mut RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> () {
   unsafe { return Intrinsic.rawBufferCopy<T>(destination, destinationOffset, source, length) }
 }
 
-/// Sets a caller-proven byte range of raw storage to one repeated byte value.
+/// Initializes a selected byte range with one repeated byte value.
+///
+/// # Gotchas
+///
+/// `offset + length` must not exceed [`count`].
 pub fn fill(buffer: &mut RawBuffer<u8>, offset: usize, length: usize, value: u8) -> () {
   unsafe { return Intrinsic.rawBufferFill(buffer, offset, length, value) }
 }
 
-/// Forms a shared view over caller-proven initialized elements in the selected range.
+/// Borrows a shared view of an initialized element range.
+///
+/// # Gotchas
+///
+/// The selected range must be in bounds, and each selected slot must be initialized.
 pub fn view<T>(buffer: &RawBuffer<T>, offset: usize, length: usize) -> &[T] {
   unsafe { return Intrinsic.rawBufferView<T>(buffer, offset, length) }
 }
 
-/// Forms an exclusive view over caller-proven initialized elements in the selected range.
+/// Borrows an exclusive view of an initialized element range.
+///
+/// # Gotchas
+///
+/// The selected range must be in bounds, and each selected slot must be initialized.
 pub fn viewMut<T>(buffer: &mut RawBuffer<T>, offset: usize, length: usize) -> &mut [T] {
   unsafe { return Intrinsic.rawBufferViewMut<T>(buffer, offset, length) }
 }

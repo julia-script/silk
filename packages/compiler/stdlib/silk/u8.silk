@@ -65,105 +65,117 @@ pub const MAX: u8 = 255
 /// The smallest `u8` value.
 pub const MIN: u8 = 0
 
-/// The width of u8 in bits.
+/// The fixed width of `u8`, in bits.
 pub const BITS: u32 = 8
 
-/// Returns `value` unchanged as `u8`.
+/// Returns `value` unchanged as `u8`. Use this function when generic conversion code
+/// can select `u8` as both source and destination.
 pub fn toU8(value: u8) -> u8 {
   return Intrinsic.u8ToU8(value)
 }
 
-/// Returns `Some` with `value` unchanged as `u8`.
+/// Returns `Some` with `value` unchanged as `u8`. Use this function when generic
+/// checked-conversion code can select the same source and destination type.
 pub fn checkedToU8(value: u8) -> Option<u8> {
   return Intrinsic.u8CheckedToU8(value)
 }
 
-/// Converts `value` to `u16` and traps if `u16` cannot represent it.
+/// Converts `value` exactly to `u16`. Every `u8` value is representable.
 pub fn toU16(value: u8) -> u16 {
   return Intrinsic.u8ToU16(value)
 }
 
-/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
+/// Converts `value` exactly to `u16` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToU16(value: u8) -> Option<u16> {
   return Intrinsic.u8CheckedToU16(value)
 }
 
-/// Converts `value` to `u32` and traps if `u32` cannot represent it.
+/// Converts `value` exactly to `u32`. Every `u8` value is representable.
 pub fn toU32(value: u8) -> u32 {
   return Intrinsic.u8ToU32(value)
 }
 
-/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
+/// Converts `value` exactly to `u32` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToU32(value: u8) -> Option<u32> {
   return Intrinsic.u8CheckedToU32(value)
 }
 
-/// Converts `value` to `u64` and traps if `u64` cannot represent it.
+/// Converts `value` exactly to `u64`. Every `u8` value is representable.
 pub fn toU64(value: u8) -> u64 {
   return Intrinsic.u8ToU64(value)
 }
 
-/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
+/// Converts `value` exactly to `u64` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToU64(value: u8) -> Option<u64> {
   return Intrinsic.u8CheckedToU64(value)
 }
 
-/// Converts `value` to `usize` and traps if `usize` cannot represent it.
+/// Converts `value` exactly to `usize`. Every `u8` value is representable.
 pub fn toUsize(value: u8) -> usize {
   return Intrinsic.u8ToUsize(value)
 }
 
-/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
+/// Converts `value` exactly to `usize` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToUsize(value: u8) -> Option<usize> {
   return Intrinsic.u8CheckedToUsize(value)
 }
 
-/// Converts `value` to `i8` and traps if `i8` cannot represent it.
+/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI8(value: u8) -> i8 {
   return Intrinsic.u8ToI8(value)
 }
 
-/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
+/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: u8) -> Option<i8> {
   return Intrinsic.u8CheckedToI8(value)
 }
 
-/// Converts `value` to `i16` and traps if `i16` cannot represent it.
+/// Converts `value` exactly to `i16`. Every `u8` value is representable.
 pub fn toI16(value: u8) -> i16 {
   return Intrinsic.u8ToI16(value)
 }
 
-/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
+/// Converts `value` exactly to `i16` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToI16(value: u8) -> Option<i16> {
   return Intrinsic.u8CheckedToI16(value)
 }
 
-/// Converts `value` to `i32` and traps if `i32` cannot represent it.
+/// Converts `value` exactly to `i32`. Every `u8` value is representable.
 pub fn toI32(value: u8) -> i32 {
   return Intrinsic.u8ToI32(value)
 }
 
-/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
+/// Converts `value` exactly to `i32` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToI32(value: u8) -> Option<i32> {
   return Intrinsic.u8CheckedToI32(value)
 }
 
-/// Converts `value` to `i64` and traps if `i64` cannot represent it.
+/// Converts `value` exactly to `i64`. Every `u8` value is representable.
 pub fn toI64(value: u8) -> i64 {
   return Intrinsic.u8ToI64(value)
 }
 
-/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
+/// Converts `value` exactly to `i64` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToI64(value: u8) -> Option<i64> {
   return Intrinsic.u8CheckedToI64(value)
 }
 
-/// Converts `value` to `isize` and traps if `isize` cannot represent it.
+/// Converts `value` exactly to `isize`. Every `u8` value is representable.
 pub fn toIsize(value: u8) -> isize {
   return Intrinsic.u8ToIsize(value)
 }
 
-/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
+/// Converts `value` exactly to `isize` and returns `Some`. Every `u8` value is
+/// representable.
 pub fn checkedToIsize(value: u8) -> Option<isize> {
   return Intrinsic.u8CheckedToIsize(value)
 }
@@ -178,27 +190,32 @@ pub fn toF64(value: u8) -> f64 {
   return Intrinsic.u8ToF64(value)
 }
 
-/// Returns `left + right` and traps if the result is outside the `u8` range.
+/// Returns `left + right` and traps if the result is outside the `u8` range. Use this function
+/// when overflow is a program error.
 pub fn add(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Add(left, right)
 }
 
-/// Returns `left - right` and traps if the result is outside the `u8` range.
+/// Returns `left - right` and traps if the result is outside the `u8` range. Use this function
+/// when overflow is a program error.
 pub fn subtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Subtract(left, right)
 }
 
-/// Returns `left * right` and traps if the result is outside the `u8` range.
+/// Returns `left * right` and traps if the result is outside the `u8` range. Use this function
+/// when overflow is a program error.
 pub fn multiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Multiply(left, right)
 }
 
-/// Returns `left / right`. Traps if `right` is zero.
+/// Returns `left / right`. Traps if `right` is zero. Use this function when a zero
+/// divisor is a program error.
 pub fn divide(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Divide(left, right)
 }
 
-/// Returns the remainder of `left / right`. Traps if `right` is zero.
+/// Returns the remainder of `left / right`. Traps if `right` is zero. Use this function
+/// when a zero divisor is a program error.
 pub fn remainder(left: u8, right: u8) -> u8 {
   return Intrinsic.u8Remainder(left, right)
 }
@@ -223,8 +240,7 @@ pub fn bitNot(value: u8) -> u8 {
   return Intrinsic.u8BitNot(value)
 }
 
-/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
-/// [`BITS`].
+/// Shifts `left` bits left by `right` positions. Traps if `right` is not less than [`BITS`].
 pub fn shiftLeft(left: u8, right: u8) -> u8 {
   return Intrinsic.u8ShiftLeft(left, right)
 }
@@ -245,57 +261,68 @@ pub fn rotateRight(left: u8, right: u8) -> u8 {
   return Intrinsic.u8RotateRight(left, right)
 }
 
-/// Returns `left + right`, wrapped to the `u8` range.
+/// Returns `left + right`, wrapped to the `u8` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingAdd(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingAdd(left, right)
 }
 
-/// Returns `left - right`, wrapped to the `u8` range.
+/// Returns `left - right`, wrapped to the `u8` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingSubtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingSubtract(left, right)
 }
 
-/// Returns `left * right`, wrapped to the `u8` range.
+/// Returns `left * right`, wrapped to the `u8` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingMultiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8WrappingMultiply(left, right)
 }
 
-/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingAdd(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingAdd(left, right)
 }
 
-/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingSubtract(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingSubtract(left, right)
 }
 
-/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingMultiply(left: u8, right: u8) -> u8 {
   return Intrinsic.u8SaturatingMultiply(left, right)
 }
 
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `u8` range.
+/// Use this function when overflow is input data.
 pub fn checkedAdd(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedAdd(left, right)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `u8` range.
+/// Use this function when overflow is input data.
 pub fn checkedSubtract(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedSubtract(left, right)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `u8` range.
+/// Use this function when overflow is input data.
 pub fn checkedMultiply(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedMultiply(left, right)
 }
 
-/// Returns `Some` with `left / right`, or `None` if `right` is zero.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this
+/// function when a zero divisor is input data.
 pub fn checkedDivide(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedDivide(left, right)
 }
 
-/// Returns `Some` with the remainder, or `None` if `right` is zero.
+/// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function
+/// when a zero divisor is input data.
 pub fn checkedRemainder(left: u8, right: u8) -> Option<u8> {
   return Intrinsic.u8CheckedRemainder(left, right)
 }
@@ -330,12 +357,18 @@ pub fn greaterOrEqual(left: u8, right: u8) -> bool {
   return Intrinsic.u8GreaterOrEqual(left, right)
 }
 
-/// Renders the value as decimal text in freshly owned storage.
+/// Renders the value as base-10 text in new owned storage. Allocation uses the required
+/// `Allocator` and can fail with `OutOfMemoryError`.
 pub effect fn toText(value: u8) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.unsignedText(toU64(value))
 }
 
-/// Reads complete decimal text as a `u8`, or reports why the text is not one.
+/// Reads the complete text as an unsigned decimal `u8`.
+///
+/// # Details
+///
+/// A failure contains `silk.format.NotANumber` for empty text, a sign, a non-digit, or trailing
+/// bytes. It contains `silk.format.OutOfRange` if the number is outside the `u8` range.
 pub fn parse(text: string) -> Result<u8, ParseError> {
   return Format.u8Value(text)
 }

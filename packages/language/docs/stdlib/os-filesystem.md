@@ -7,24 +7,58 @@ Native [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d
 ## When to use
 
 Construct [`OsFileSystem`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a4f7346696c6553797374656d) at a native application edge and provide it to portable filesystem
-code. Supply an ordinary in-memory [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d) in tests or on targets without native OS access.
+code. Supply an in-memory [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d) in tests or on targets without native OS access.
 
 ## Details
 
 Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
 rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
 reads and writes own or commit complete contents, directory listings retry oversized entries and
-sort complete child paths deterministically, and low-level failures become portable [`FileError`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72)
+sort complete child paths deterministically. Low-level failures become portable [`FileError`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72)
 values with retained native codes.
 
-[`make`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65) copies its root. The root must be an absolute, non-empty, NUL-free native path; violating
-that constructor precondition traps. Open handles are closed on success and failure, while an
-operation's original typed failure remains the reported outcome if closing also fails.
+[`make`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65) copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
+that violates this precondition traps. Open handles close on success and failure. If an
+operation and close both fail, the operation's original typed failure remains the reported
+result.
+
+Constructing the provider performs no filesystem operation beyond owning the root bytes.
+Portable code uses `FileSystem` operations after the application supplies `&mut OsFileSystem`
+for the `&mut FileSystem` requirement.
 
 ## Gotchas
 
 Reachable OS filesystem operations are native-only. Direct WebAssembly compilation rejects them
 rather than inventing filesystem imports; evaluator execution requires an injected adapter.
+
+## Examples
+
+### Construct a provider without accessing the filesystem
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.os_filesystem as OsFileSystem
+
+effect fn program() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let provider = run OsFileSystem.make("/tmp")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  drop provider
+  return 42
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}
+```
 
 Import as `OsFileSystem` with `import silk.os_filesystem`.
 
@@ -38,7 +72,12 @@ Public declarations: 2.
 pub struct OsFileSystem
 ```
 
-Native provider state. The root bytes are independently owned and never exposed as a Path.
+A native [`FileSystem`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c6553797374656d) provider confined beneath one independently owned platform root.
+
+### Details
+
+Portable absolute paths resolve inside this root. The provider never exposes the root as a
+[`Path`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a50617468), and operations reject lexical or symbolic-link escape from the root.
 
 <a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a6d616b65"></a>
 
@@ -48,7 +87,22 @@ Native provider state. The root bytes are independently owned and never exposed 
 pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
 ```
 
-Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
+Copies one absolute native root and creates a confined filesystem provider.
+
+### When to use
+
+Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
+that uses the portable filesystem service.
+
+### Details
+
+Construction owns the root bytes but does not open the directory. Portable `/` then denotes
+this provider root instead of the host filesystem root.
+
+### Gotchas
+
+`root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
+Allocation failure leaves no provider value.
 
 <a id="declaration-73696c6b2f6f735f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
 

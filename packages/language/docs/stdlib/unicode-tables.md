@@ -16,6 +16,27 @@ The tables come from Unicode 17.0.0, are packed as big-endian byte strings, and 
 with ordinary Silk functions. Regeneration may change their representation and record layout;
 the compiler gives neither this module nor its declaration names special treatment.
 
+## Gotchas
+
+A zero lookup result is a sentinel, not Unicode scalar U+0000. Hangul decomposition and
+composition are algorithmic and are not present in these tables.
+
+## Examples
+
+### Read the canonical decomposition of é
+
+```silk
+import silk.unicode_tables as UnicodeTables
+
+pub fn main() -> i32 {
+  let decomposition = UnicodeTables.canonicalDecomposition(233)
+  if decomposition.first != 101 || decomposition.second != 769 {
+    return 0
+  }
+  return 42
+}
+```
+
 Import as `UnicodeTables` with `import silk.unicode_tables`.
 
 Public declarations: 7.
@@ -28,8 +49,7 @@ Public declarations: 7.
 pub struct Decomposition
 ```
 
-One canonical decomposition. A singleton leaves `second` at zero, which is not a decomposable
-scalar, so zero is an unambiguous absence.
+One canonical decomposition with zero sentinels for an absent mapping or second scalar.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a30"></a>
 
@@ -39,7 +59,7 @@ scalar, so zero is an unambiguous absence.
 pub first: u32
 ```
 
-First scalar in the canonical mapping, or zero when no mapping exists.
+The first mapped scalar, or zero when the input has no table mapping.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e3a3a6669656c643a31"></a>
 
@@ -49,7 +69,7 @@ First scalar in the canonical mapping, or zero when no mapping exists.
 pub second: u32
 ```
 
-Optional second scalar in the canonical mapping; zero means the mapping is a singleton.
+The second mapped scalar, or zero when the mapping contains one scalar.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f7264"></a>
 
@@ -59,7 +79,7 @@ Optional second scalar in the canonical mapping; zero means the mapping is a sin
 pub struct PairRecord
 ```
 
-One canonical decomposition together with the scalar it decomposes, for searching either way.
+One two-scalar canonical decomposition and its composed scalar.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a30"></a>
 
@@ -69,7 +89,7 @@ One canonical decomposition together with the scalar it decomposes, for searchin
 pub composed: u32
 ```
 
-Scalar whose canonical mapping is the pair in this record.
+The scalar whose canonical mapping is this pair.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a506169725265636f72643a3a6669656c643a31"></a>
 
@@ -99,7 +119,7 @@ Second scalar of the canonical mapping.
 pub fn dataVersion() -> string
 ```
 
-The Unicode version every table in this module was generated from.
+Returns the Unicode data version that defines all lookup results in this module.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a6d6178696d756d4465636f6d706f736974696f6e4c656e677468"></a>
 
@@ -109,8 +129,7 @@ The Unicode version every table in this module was generated from.
 pub fn maximumDecompositionLength() -> usize
 ```
 
-The longest full canonical decomposition of any single scalar, which bounds the decomposer's
-pending buffer.
+Returns the longest full canonical decomposition of one scalar in these tables.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a636f6d62696e696e67436c617373"></a>
 
@@ -120,7 +139,7 @@ pending buffer.
 pub fn combiningClass(scalar: u32) -> u32
 ```
 
-Returns a scalar's canonical combining class, or zero for a starter.
+Returns a scalar's canonical combining class, or zero for a starter or unknown value.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a63616e6f6e6963616c4465636f6d706f736974696f6e"></a>
 
@@ -142,4 +161,11 @@ pub fn canonicalComposition(first: u32, second: u32) -> u32
 ```
 
 Composes a starter and a following scalar, or returns zero when the pair does not compose.
-Excluded pairs are absent from the index, so a hit is always a primary composite.
+
+### Details
+
+Excluded composition pairs are absent. A nonzero result is always a primary composite.
+
+### Gotchas
+
+Hangul composition is algorithmic and is not included in this lookup.

@@ -13,8 +13,38 @@ be passed by name or when the Unicode scalar ordering should be explicit at a ca
 ## Details
 
 Ordering compares scalar values, not locale collation, normalization, grapheme clusters, or UTF-8
-byte sequences. These allocation-free functions call the same primitives as the corresponding
-operators and introduce no Effect channels.
+byte sequences. These functions allocate no storage and add no Effect channels.
+
+## Gotchas
+
+Integer construction rejects `0xD800` through `0xDFFF` and values above `0x10FFFF`. It returns
+`None`; it does not truncate or trap.
+
+## Examples
+
+### Validate a Unicode scalar integer
+
+```silk
+import silk.char as Char
+
+import silk.option as Option
+
+pub fn main() -> i32 {
+  let scalar = Char.fromU32(0x2603)
+  let value = move scalar
+    |> Option.unwrapOr<char>('?')
+  if Char.toU32(value) != 0x2603 {
+    return 1
+  }
+  let surrogate = Char.fromU32(0xD800)
+  let replacement = move surrogate
+    |> Option.unwrapOr<char>('?')
+  if replacement != '?' {
+    return 2
+  }
+  return 42
+}
+```
 
 Import as `char` with `import silk.char`.
 
@@ -28,7 +58,8 @@ Public declarations: 8.
 pub fn fromU32(value: u32) -> Option<char>
 ```
 
-Converts an integer to a Unicode scalar, returning None for surrogates or out-of-range values.
+Converts an integer to a Unicode scalar. Returns `None` for `0xD800` through `0xDFFF` and values
+above `0x10FFFF`.
 
 <a id="declaration-73696c6b2f636861723a3a746f553332"></a>
 

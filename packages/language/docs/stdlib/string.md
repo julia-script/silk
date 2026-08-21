@@ -20,6 +20,75 @@ allocate. Scalar cursors expose Unicode scalar values and byte offsets, not grap
 A [`ScalarCursor`](#declaration-73696c6b2f737472696e673a3a5363616c6172437572736f72) is meaningful only for the same unchanged string from which its traversal
 began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a7363616c6172437572736f72) and advance only with [`nextCursor`](#declaration-73696c6b2f737472696e673a3a6e657874437572736f72).
 
+## Examples
+
+### Validate borrowed UTF-8 bytes
+
+```silk
+import silk.result as Result
+
+import silk.string as String
+
+import silk.usize as usize
+
+pub fn main() -> i32 {
+  let valid = String.fromUtf8(b"Silk")
+    |> Result.unwrapOr<string, String.InvalidUtf8>("")
+  let invalid = String.fromUtf8(b"a\x80")
+  if !Result.isFailure<string, String.InvalidUtf8>(&invalid) {
+    return 0
+  }
+  let length = String.byteLength(valid)
+    |> usize.toI32
+  return length + 38
+}
+```
+
+### Build owned text and read its first scalar
+
+```silk
+import silk.char as char
+
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.option as Option
+
+import silk.string as String
+
+import silk.u32 as u32
+
+fn scalarCode(step: String.ScalarStep) -> i32 {
+  return String.scalarValue(&step)
+    |> char.toU32
+    |> u32.toI32
+}
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let copying = String.copy("é")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut text = run copying
+  let appending = String.append(&mut text, "!")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let appended = run appending
+  let stepped = String.nextScalar(String.view(&text), String.scalarCursor())
+  let mapped = Option.map<String.ScalarStep, i32>(move stepped, scalarCode)
+  let scalar = Option.unwrapOr<i32>(move mapped, 0)
+  return scalar - 191
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
 Import as `String` with `import silk.string`.
 
 Public declarations: 22.
@@ -32,7 +101,7 @@ Public declarations: 22.
 pub struct String
 ```
 
-An owned sequence of valid UTF-8 bytes.
+An owned sequence of valid UTF-8 bytes that releases its storage on drop.
 
 <a id="declaration-73696c6b2f737472696e673a3a496e76616c696455746638"></a>
 
@@ -62,7 +131,7 @@ The zero-based offset of the first byte that cannot continue a valid UTF-8 seque
 pub struct ScalarCursor
 ```
 
-An opaque position between Unicode scalars in a string.
+An opaque UTF-8 position used for scalar-by-scalar traversal.
 
 <a id="declaration-73696c6b2f737472696e673a3a5363616c617253746570"></a>
 
@@ -72,7 +141,7 @@ An opaque position between Unicode scalars in a string.
 pub struct ScalarStep
 ```
 
-One decoded Unicode scalar and the cursor following it.
+One decoded Unicode scalar, its byte offset, and the cursor after it.
 
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638556e636865636b6564"></a>
 
@@ -82,12 +151,17 @@ One decoded Unicode scalar and the cursor following it.
 pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
 ```
 
-Borrows bytes as text without validating their UTF-8 encoding.
+Borrows caller-validated UTF-8 bytes as text without runtime validation.
+
+### When to use
+
+Use this function only when an earlier operation proves that the complete byte view is UTF-8.
+Use [`fromUtf8`](#declaration-73696c6b2f737472696e673a3a66726f6d55746638) when the bytes have not been validated.
 
 ### Gotchas
 
 The caller must guarantee that the complete byte view is valid UTF-8 for the lifetime of the
-returned string view. Prefer `fromUtf8` when the bytes have not already been validated.
+returned string view. Invalid bytes violate the safety contract.
 
 <a id="declaration-73696c6b2f737472696e673a3a66726f6d55746638"></a>
 
@@ -101,8 +175,8 @@ Validates a complete byte view and borrows it as text without allocating.
 
 ### Details
 
-The offset is unpacked before the borrow rather than after it because an unchecked construction
-has to happen in the function that owns the borrowed parameter the view comes from.
+Success returns a `string` view with the same lexical lifetime as `values`. Failure returns the
+first invalid byte offset in [`InvalidUtf8`](#declaration-73696c6b2f737472696e673a3a496e76616c696455746638).
 
 <a id="declaration-73696c6b2f737472696e673a3a6d616b65"></a>
 
@@ -122,7 +196,7 @@ Constructs an empty owned String without allocating.
 pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
-Copies valid text into independently owned storage.
+Copies valid borrowed text into independently owned storage.
 
 <a id="declaration-73696c6b2f737472696e673a3a636f707955746638"></a>
 
@@ -134,12 +208,15 @@ pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, 
 
 Validates complete UTF-8 bytes and copies them into independently owned storage.
 
+### When to use
+
+Use this function when the bytes must outlive their current buffer. Use [`fromUtf8`](#declaration-73696c6b2f737472696e673a3a66726f6d55746638) for a
+borrowed result without allocation.
+
 ### Details
 
-The companion to `fromUtf8` for bytes a program built rather than borrowed. `fromUtf8` hands
-back a view that lives exactly as long as the buffer under it, which is the wrong shape for an
-encoder that wants to return its result and let its working buffer go; this validates the same
-way and owns the outcome.
+Invalid input returns [`InvalidUtf8`](#declaration-73696c6b2f737472696e673a3a496e76616c696455746638) as ordinary result data. Allocation failure remains in the
+Effect failure channel. No owned string is returned in either failure case.
 
 <a id="declaration-73696c6b2f737472696e673a3a617070656e64"></a>
 
@@ -151,6 +228,14 @@ pub effect fn append(self: &mut silk/string.String, value: string) -> () ! OutOf
 
 Appends complete valid text atomically with respect to allocation failure.
 
+### When to use
+
+Use this function for borrowed text. Use [`appendOwned`](#declaration-73696c6b2f737472696e673a3a617070656e644f776e6564) when the suffix is an owned [`String`](#declaration-73696c6b2f737472696e673a3a537472696e67).
+
+### Details
+
+If growth fails, `self` keeps its prior contents and byte length.
+
 <a id="declaration-73696c6b2f737472696e673a3a617070656e644f776e6564"></a>
 
 ## `appendOwned`
@@ -161,10 +246,13 @@ pub effect fn appendOwned(self: &mut silk/string.String, value: String) -> () ! 
 
 Appends another owned String atomically with respect to allocation failure.
 
+### When to use
+
+Use this function to consume an owned suffix. Use [`append`](#declaration-73696c6b2f737472696e673a3a617070656e64) when the suffix is borrowed text.
+
 ### Details
 
-The companion to `append` for text a program computed rather than wrote. The appended String is
-consumed, so a rendered value composes into a message without the caller keeping it alive.
+This function consumes `value`. If growth fails, `self` keeps its prior contents and byte length.
 
 <a id="declaration-73696c6b2f737472696e673a3a76696577"></a>
 
@@ -174,7 +262,7 @@ consumed, so a rendered value composes into a message without the caller keeping
 pub fn view(self: &silk/string.String) -> string
 ```
 
-Borrows the complete owned contents as valid text without allocating.
+Borrows the complete owned contents as valid text without allocating or copying.
 
 <a id="declaration-73696c6b2f737472696e673a3a757466384279746573"></a>
 
@@ -224,7 +312,7 @@ Returns an owned String's initialized UTF-8 byte length.
 pub fn scalarCursor() -> ScalarCursor
 ```
 
-Selects the position before the first Unicode scalar.
+Creates a cursor at UTF-8 byte offset zero, before the first Unicode scalar.
 
 <a id="declaration-73696c6b2f737472696e673a3a637572736f72427974654f6666736574"></a>
 
@@ -244,7 +332,7 @@ Returns a cursor's explicit UTF-8 byte offset.
 pub fn scalarValue(step: &silk/string.ScalarStep) -> char
 ```
 
-Returns the decoded Unicode scalar value for one step.
+Returns the decoded Unicode scalar value without consuming the step.
 
 <a id="declaration-73696c6b2f737472696e673a3a7363616c6172427974654f6666736574"></a>
 
@@ -264,7 +352,7 @@ Returns the UTF-8 byte offset at which one step begins.
 pub fn nextCursor(step: ScalarStep) -> ScalarCursor
 ```
 
-Returns the cursor immediately following one decoded scalar.
+Consumes one scalar step and returns the cursor immediately after that scalar.
 
 <a id="declaration-73696c6b2f737472696e673a3a6e6578745363616c6172"></a>
 
@@ -274,4 +362,13 @@ Returns the cursor immediately following one decoded scalar.
 pub fn nextScalar(value: string, cursor: ScalarCursor) -> Option<silk/string.ScalarStep>
 ```
 
-Decodes the scalar at a cursor, or returns None at the end of the string.
+Decodes the scalar at a cursor, or returns `None` at the end of the string.
+
+### Details
+
+A present step contains the scalar, its starting byte offset, and the next cursor. This function
+does not allocate.
+
+### Gotchas
+
+The cursor must come from [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a7363616c6172437572736f72) or [`nextCursor`](#declaration-73696c6b2f737472696e673a3a6e657874437572736f72) for the same unchanged string.

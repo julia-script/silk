@@ -14,8 +14,65 @@ structured logging belongs in `silk.logging`.
 
 Both capabilities are ordinary source-declared services. Their requirements remain in an
 Effect until a caller supplies a provider, so tests and applications can replace process-backed
-implementations lexically. Allocation failure is typed as [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), and stream failure as
-[`StreamWriteError`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72).
+implementations lexically. Allocation failure is typed as [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). Stream failure
+is typed as [`StreamWriteError`](#declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72).
+
+## Examples
+
+### Provide the process allocator
+
+```silk
+import silk.bytes as Bytes
+
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.usize as usize
+
+effect fn copyMessage() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let source = b"Silk"
+  let copying = Bytes.copy(&source)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let bytes = run copying
+  return Bytes.length(&bytes)
+    |> usize.toI32
+}
+
+effect fn recoverAllocation(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(copyMessage(), recoverAllocation)
+}
+```
+
+### Write one complete standard-output message
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+effect fn writeMessage() -> ()
+! Core.StreamWriteError {
+  let mut streams = Core.native()
+  return run Core.send(Core.stdout(), b"Silk\n")
+    |> Effect.provideMut<Core.StandardStreams>(&mut streams)
+}
+
+effect fn ignoreWriteFailure(error: Core.StreamWriteError) -> () {
+  return ()
+}
+
+pub fn main() -> i32 {
+  let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
+  return 42
+}
+```
 
 Import as `Allocator` with `import silk.core`.
 
@@ -29,7 +86,7 @@ Public declarations: 12.
 pub struct OutOfMemoryError
 ```
 
-Reports that an allocator could not satisfy a storage request.
+A failure that reports that an allocator cannot satisfy a storage request.
 
 <a id="declaration-73696c6b2f636f72653a3a6f75744f664d656d6f7279"></a>
 
@@ -39,7 +96,11 @@ Reports that an allocator could not satisfy a storage request.
 pub effect fn outOfMemory() -> never ! OutOfMemoryError
 ```
 
-Fails immediately with [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72), for translating checked sizing failures.
+Fails immediately with `OutOfMemoryError`.
+
+### When to use
+
+Use this function to translate a checked size failure into the standard allocation failure.
 
 <a id="declaration-73696c6b2f636f72653a3a416c6c6f6361746f72"></a>
 
@@ -49,7 +110,7 @@ Fails immediately with [`OutOfMemoryError`](#declaration-73696c6b2f636f72653a3a4
 pub service Allocator
 ```
 
-Mutable service for acquiring owned storage described by a layout.
+A mutable service that acquires owned storage described by a layout.
 
 <a id="declaration-73696c6b2f636f72653a3a416c6c6f6361746f723a3a6f7065726174696f6e3a616c6c6f63617465"></a>
 
@@ -59,7 +120,7 @@ Mutable service for acquiring owned storage described by a layout.
 effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 ```
 
-Acquires one allocation or fails without returning partial storage.
+Acquires one allocation for `layout`, or fails without returning partial storage.
 
 <a id="declaration-73696c6b2f636f72653a3a53797374656d416c6c6f6361746f72"></a>
 
@@ -69,7 +130,7 @@ Acquires one allocation or fails without returning partial storage.
 pub struct SystemAllocator
 ```
 
-Constructs the process-backed allocation provider.
+A process-backed provider for [`Allocator`](#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72).
 
 <a id="declaration-73696c6b2f636f72653a3a6d616b65"></a>
 
@@ -79,7 +140,7 @@ Constructs the process-backed allocation provider.
 pub fn make() -> SystemAllocator
 ```
 
-Constructs a process-backed allocator provider with no allocation of its own.
+Creates a process-backed allocator provider without allocating storage.
 
 <a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -105,7 +166,7 @@ allocate = SystemAllocator.allocate
 pub struct StreamWriteError
 ```
 
-Failure to commit one complete stream message.
+A failure to commit one complete standard-stream message.
 
 <a id="declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d73"></a>
 
@@ -115,7 +176,7 @@ Failure to commit one complete stream message.
 pub service StandardStreams
 ```
 
-Portable complete-message output contract.
+A mutable service that writes complete messages to standard output or standard error.
 
 <a id="declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d733a3a6f7065726174696f6e3a7772697465416c6c"></a>
 
@@ -125,7 +186,11 @@ Portable complete-message output contract.
 effect fn writeAll(destination: bool, bytes: &[u8]) -> () ! StreamWriteError ? &mut StandardStreams
 ```
 
-Commits one complete immutable byte sequence to the selected destination.
+Writes a complete immutable byte sequence to the selected standard-stream destination.
+
+#### Gotchas
+
+A failure means that the service did not commit the complete message.
 
 <a id="declaration-73696c6b2f636f72653a3a4e61746976655374616e6461726453747265616d73"></a>
 
@@ -135,7 +200,7 @@ Commits one complete immutable byte sequence to the selected destination.
 pub struct NativeStandardStreams
 ```
 
-Process-backed standard-stream provider.
+A process-backed provider for [`StandardStreams`](#declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d73).
 
 <a id="declaration-73696c6b2f636f72653a3a7374646f7574"></a>
 
@@ -145,7 +210,7 @@ Process-backed standard-stream provider.
 pub fn stdout() -> bool
 ```
 
-Selects the process standard-output destination.
+Returns the destination value that selects process standard output.
 
 <a id="declaration-73696c6b2f636f72653a3a737464657272"></a>
 
@@ -155,7 +220,7 @@ Selects the process standard-output destination.
 pub fn stderr() -> bool
 ```
 
-Selects the process standard-error destination.
+Returns the destination value that selects process standard error.
 
 <a id="declaration-73696c6b2f636f72653a3a6e6174697665"></a>
 
@@ -165,7 +230,7 @@ Selects the process standard-error destination.
 pub fn native() -> NativeStandardStreams
 ```
 
-Constructs the process-backed standard-stream provider.
+Creates a process-backed standard-stream provider.
 
 <a id="declaration-73696c6b2f636f72653a3a696d706c656d656e746174696f6e3a31"></a>
 
@@ -191,4 +256,9 @@ writeAll = NativeStandardStreams.nativeWriteAll
 pub effect fn send(destination: bool, bytes: &[u8]) -> () ! StreamWriteError ? &mut StandardStreams
 ```
 
-Builds one complete-write service effect.
+Writes one complete immutable byte sequence to a selected standard stream.
+
+### Details
+
+The returned Effect requires a mutable [`StandardStreams`](#declaration-73696c6b2f636f72653a3a5374616e6461726453747265616d73) provider. Use [`stdout`](#declaration-73696c6b2f636f72653a3a7374646f7574) or
+[`stderr`](#declaration-73696c6b2f636f72653a3a737464657272) for `destination`.

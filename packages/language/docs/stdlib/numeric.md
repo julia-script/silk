@@ -16,6 +16,23 @@ Witnesses are selected during specialization and create no Effect requirement, p
 runtime dispatch. The interface intentionally exposes only the operation spelled by `+`; it does
 not attempt to erase the distinct ranges and conversion rules of each integer type.
 
+## Gotchas
+
+The selected primitive operation keeps its ordinary overflow policy. Integer addition traps when
+the mathematical result is outside the selected type's range.
+
+## Examples
+
+### Add values through one generic contract
+
+```silk
+import silk.numeric as Numeric
+
+pub fn main() -> i32 {
+  return Numeric.add<i32>(40, 2)
+}
+```
+
 Import as `Integer` with `import silk.numeric`.
 
 Public declarations: 2.
@@ -30,6 +47,10 @@ pub interface Integer
 
 Static addition contract for primitive integer values.
 
+### When to use
+
+Use this interface when a generic algorithm needs only ordinary integer addition.
+
 ### Details
 
 Interfaces select compiler-known operations during specialization. They do not create
@@ -43,7 +64,7 @@ effect requirements, provider slots, or runtime dispatch.
 operator + fn add(left: Self, right: Self) -> Self
 ```
 
-Adds two values using the concrete primitive integer operation.
+Adds two values and traps if the selected integer type cannot represent the result.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -213,4 +234,8 @@ add = Intrinsic.isizeAdd
 pub fn add<T>(left: T, right: T) -> T
 ```
 
-Adds two values using the concrete integer operation selected during specialization.
+Adds two values and traps if the selected integer type cannot represent the result.
+
+### When to use
+
+Use this function to call ordinary integer addition from generic code.

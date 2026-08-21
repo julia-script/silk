@@ -8,36 +8,76 @@
 //! # Details
 //! `Option<T>` is the structural union of [`Some`] and [`None`]. Its combinators preserve affine
 //! ownership: a present value moves forward, while an unused fallback or abandoned branch drops.
+//!
+//! # Examples
+//! ## Transform and continue only when a value is present
+//! ```silk
+//! import silk.option as Option
+//!
+//! fn double(value: i32) -> i32 {
+//!   return value * 2
+//! }
+//!
+//! fn positive(value: i32) -> Option.Option<i32> {
+//!   if value > 0 {
+//!     return Option.some<i32>(value)
+//!   }
+//!   return Option.none<i32>()
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let initial = Option.some<i32>(21)
+//!   let doubled = Option.map<i32, i32>(move initial, double)
+//!   let answer = Option.flatMap<i32, i32>(move doubled, positive)
+//!   let absent = Option.none<i32>()
+//!   let missing = Option.map<i32, i32>(move absent, double)
+//!   let presentValue = Option.unwrapOr<i32>(move answer, 0)
+//!   let absentValue = Option.unwrapOr<i32>(move missing, 0)
+//!   return presentValue + absentValue
+//! }
+//! ```
 
 // Canonical recoverable outcome members. The compiler's Option<T> is represented transparently by the
 // structural union Some<T> | None; the named declaration is its source-navigation anchor.
 
 
 
-/// The present member of [`Option`], carrying one owned value.
+/// The present member of [`Option`], carrying the available owned value.
 pub struct Some<T> {
+  /// The value moved through present-only combinator branches.
   value: T
 }
 
-/// The absent member of [`Option`].
+/// The absent member of [`Option`]; it carries no explanation for the absence.
 pub struct None {}
 
 /// An owned value that is either [`Some`] or [`None`].
+///
+/// # Details
+///
+/// Match on an `Option` when both arms need custom behavior. Prefer [`map`], [`flatMap`], or
+/// [`unwrapOr`] for the common transform, continue, and default cases.
 pub struct Option<T> {
+  /// The structural outcome narrowed by `match`.
   value: Some<T> | None
 }
 
-/// Constructs an absent optional value.
+/// Constructs an absent optional value of the requested element type.
 pub fn none<T>() -> Option<T> {
   return None {}
 }
 
-/// Constructs a present optional value.
+/// Constructs a present option by moving `value` into it.
 pub fn some<T>(value: T) -> Option<T> {
   return Some<T> { value: move value }
 }
 
-/// Applies a transform to a present value and keeps an absent value absent.
+/// Applies `transform` once to a present value and keeps an absent value absent.
+///
+/// # Details
+///
+/// The callback is not called for [`None`]. This operation consumes `self`; use a shared borrow and
+/// `match` instead when the original option must remain available.
 pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
   return match move self {
     Some<T> { value } => some<U>(transform(move value))
@@ -47,6 +87,11 @@ pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> Option<U> {
 
 /// Continues a present value with a transform that itself answers with an Option, so the
 /// outcome stays one Option deep instead of nesting.
+///
+/// # Details
+///
+/// The callback runs once for [`Some`] and not at all for [`None`]. Use this when the next step may
+/// reject the value without needing to explain why; use a `Result` when rejection needs an error.
 pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> Option<U>) -> Option<U> {
   return match move self {
     Some<T> { value } => transform(move value)

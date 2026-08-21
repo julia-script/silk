@@ -6,12 +6,30 @@
 //!
 //! # Details
 //! The provider owns no persistent state and commits each host read directly into the caller's
-//! buffer. A zero-length host transfer becomes the outcome selected by [`endOfInput`]; only a host
-//! read error becomes [`StreamReadError`]. Partial transfer counts are preserved exactly.
+//! buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
+//! [`endOfInput`]. Only a host read error becomes [`StreamReadError`]. Partial transfer counts are
+//! preserved exactly.
+//!
+//! Constructing the provider performs no read. Portable code reads after the application supplies
+//! `&mut OsStandardInput` for the `&mut StandardInput` requirement.
 //!
 //! # Gotchas
 //! Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
-//! them rather than inventing a descriptor import; evaluator execution requires an injected adapter.
+//! them instead of inventing a descriptor import. Evaluator execution requires an injected adapter.
+//! The caller must use a non-empty buffer. A zero-capacity host read also transfers zero bytes.
+//!
+//! # Examples
+//! ## Construct the native provider without reading standard input
+//!
+//! ```silk
+//! import silk.os_standard_input as OsStandardInput
+//!
+//! pub fn main() -> i32 {
+//!   let provider = OsStandardInput.make()
+//!   drop provider
+//!   return 42
+//! }
+//! ```
 
 import silk.i32 as i32
 import silk.option { None, Option, Some, none }
@@ -27,11 +45,25 @@ import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Native provider reading the process standard-input descriptor. It owns no state; the descriptor
-/// belongs to the process rather than to the value.
+/// A stateless native [`StandardInput`] provider for the process input descriptor.
+///
+/// # Details
+///
+/// The process owns the descriptor. Each read changes only the committed prefix of the caller's
+/// buffer and preserves the host transfer count.
 pub struct OsStandardInput {}
 
-/// Constructs the process-backed byte-input provider.
+/// Creates a stateless provider for native standard-input bytes.
+///
+/// # When to use
+///
+/// Use this function at a native application edge. Provide the result as `&mut StandardInput` to
+/// portable code that calls `silk.standard_input.receive`.
+///
+/// # Details
+///
+/// Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+/// host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`].
 pub fn make() -> OsStandardInput {
   return OsStandardInput {}
 }
@@ -50,6 +82,9 @@ effect fn raise() -> never ! StreamReadError {
 ///
 /// The low-level boundary reports a zero-length transfer for the end of input, which becomes
 /// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
+///
+/// The caller must use a non-empty `buffer`. With no capacity, the host also reports a zero-length
+/// transfer and cannot prove permanent end-of-input.
 effect fn read(self: &mut OsStandardInput, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
   let mut lowReason = 0
   let mut nativeCode = u32.toU32(0)

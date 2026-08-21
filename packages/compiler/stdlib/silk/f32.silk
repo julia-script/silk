@@ -18,6 +18,23 @@
 //! # Gotchas
 //! Converting to an integer discards the fractional part and traps for NaN, infinity, or a value
 //! outside the destination range. Converting a large integer to f32 can round it.
+//!
+//! # Examples
+//! ## Inspect a binary32 boundary by its bits
+//! ```silk
+//! import silk.f32 as f32
+//!
+//! pub fn main() -> i32 {
+//!   let rounded = f32.round(-0.25)
+//!   if f32.toBits(rounded) != f32.toBits(-0.0) {
+//!     return 1
+//!   }
+//!   if !f32.isNaN(f32.sqrt(-1.0)) {
+//!     return 2
+//!   }
+//!   return 42
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.f64 as f64
@@ -32,13 +49,13 @@ import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The largest finite f32.
+/// The largest finite `f32` value.
 pub const MAX: f32 = 3.4028235e38
 
-/// The smallest finite f32, which is the negation of MAX.
+/// The most negative finite `f32` value, which is the negation of [`MAX`].
 pub const MIN: f32 = -3.4028235e38
 
-/// The distance from 1.0 to the next larger f32.
+/// The distance from `1.0` to the next larger `f32` value.
 pub const EPSILON: f32 = 1.1920929e-7
 
 /// Positive infinity with the binary32 bit pattern `0x7F800000`.
@@ -49,10 +66,10 @@ pub const EPSILON: f32 = 1.1920929e-7
 /// decimal-to-binary32 rounding produces the infinity encoding.
 pub const INFINITY: f32 = 1e999
 
-/// The ratio of a circle's circumference to its diameter, rounded to the nearest f32.
+/// The ratio of a circle's circumference to its diameter, rounded to the nearest `f32` value.
 pub const PI: f32 = 3.1415927
 
-/// Euler's number, the base of the natural logarithm, rounded to the nearest f32.
+/// Euler's number, rounded to the nearest `f32` value.
 pub const E: f32 = 2.7182817
 
 /// Returns `value` with its sign reversed.
@@ -60,28 +77,32 @@ pub fn negate(value: f32) -> f32 {
   return Intrinsic.f32Negate(value)
 }
 
-/// Returns `left + right` under IEEE binary32 rules.
+/// Returns `left + right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn add(left: f32, right: f32) -> f32 {
   return Intrinsic.f32Add(left, right)
 }
 
-/// Returns `left - right` under IEEE binary32 rules.
+/// Returns `left - right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn subtract(left: f32, right: f32) -> f32 {
   return Intrinsic.f32Subtract(left, right)
 }
 
-/// Returns `left * right` under IEEE binary32 rules.
+/// Returns `left * right`, rounded to nearest with ties to even. Overflow produces infinity; it
+/// does not trap.
 pub fn multiply(left: f32, right: f32) -> f32 {
   return Intrinsic.f32Multiply(left, right)
 }
 
-/// Returns `left / right` under IEEE binary32 rules. Division by zero produces infinity or NaN.
+/// Returns `left / right`, rounded to nearest with ties to even. Division by zero produces
+/// infinity or NaN; it does not trap.
 pub fn divide(left: f32, right: f32) -> f32 {
   return Intrinsic.f32Divide(left, right)
 }
 
-/// Returns `left - trunc(left / right) * right` under IEEE binary32 rules. Invalid
-/// operands produce NaN.
+/// Returns `left - trunc(left / right) * right`. A zero `right`, infinite `left`, or NaN operand
+/// produces NaN; it does not trap.
 pub fn remainder(left: f32, right: f32) -> f32 {
   return Intrinsic.f32Remainder(left, right)
 }
@@ -148,6 +169,10 @@ pub fn isSignNegative(value: f32) -> bool {
 
 /// Reports whether `left` precedes or equals `right` in the IEEE total order.
 ///
+/// # When to use
+///
+/// Use this function for deterministic ordering that includes NaNs and distinguishes signed zero.
+///
 /// # Details
 ///
 /// Unlike ordinary comparison, this order distinguishes negative and positive zero and provides a
@@ -157,17 +182,25 @@ pub fn totalOrder(left: f32, right: f32) -> bool {
 }
 
 /// Reinterprets a value as its exact 32-bit IEEE representation.
+///
+/// # When to use
+///
+/// Use this function to inspect or preserve representation bits. It does not convert the number.
 pub fn toBits(value: f32) -> u32 {
   return Intrinsic.f32ToBits(value)
 }
 
-/// Reinterprets an arbitrary 32-bit pattern as an f32 without numeric conversion.
+/// Reinterprets an arbitrary 32-bit pattern as `f32` without numeric conversion.
+///
+/// # When to use
+///
+/// Use this function to construct a value from representation bits, including NaN and signed zero.
 pub fn fromBits(value: u32) -> f32 {
   return Intrinsic.f32FromBits(value)
 }
 
-/// The one NaN encoding every f32 operation in this module reports, so a NaN result carries no
-/// payload that could differ between the evaluator, the Wasm backend, and the native backend.
+// One stable NaN result for source-defined operations whose public contract requires canonical
+// bits across all execution engines.
 fn canonicalNaN() -> f32 {
   return fromBits(2143289344)
 }

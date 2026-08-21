@@ -21,6 +21,23 @@ Decimal [`parse`](#declaration-73696c6b2f6973697a653a3a7061727365) and [`toText`
 ## Gotchas
 
 Code that succeeds at a 64-bit boundary may fail or trap when compiled for a 32-bit target.
+[`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) also has no positive counterpart. Use [`checkedDivide`](#declaration-73696c6b2f6973697a653a3a636865636b6564446976696465) when division by `-1` can receive
+that value.
+
+## Examples
+
+### Clamp an offset at the target boundary
+
+```silk
+import silk.isize as isize
+
+pub fn main() -> i32 {
+  if isize.saturatingAdd(isize.MAX, 1) != isize.MAX {
+    return 1
+  }
+  return 42
+}
+```
 
 Import as `isize` with `import silk.isize`.
 
@@ -73,7 +90,8 @@ The width of `isize` in bits, which is the compilation target's pointer width.
 pub fn negate(value: isize) -> isize
 ```
 
-Returns the arithmetic negation of `value` and traps when `value` is [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e).
+Returns the arithmetic negation of `value` and traps when `value` is [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e). Use
+this function when that boundary is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e674e6567617465"></a>
 
@@ -83,7 +101,8 @@ Returns the arithmetic negation of `value` and traps when `value` is [`MIN`](#de
 pub fn wrappingNegate(value: isize) -> isize
 ```
 
-Returns the arithmetic negation of `value`, wrapped to the `isize` range.
+Returns the arithmetic negation of `value`, wrapped to the `isize` range. [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e)
+stays [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e). Use this function for deliberate modulo arithmetic.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e674e6567617465"></a>
 
@@ -93,7 +112,8 @@ Returns the arithmetic negation of `value`, wrapped to the `isize` range.
 pub fn saturatingNegate(value: isize) -> isize
 ```
 
-Returns the arithmetic negation of `value`, clamped to the `isize` range.
+Returns the arithmetic negation of `value`, clamped to the `isize` range. [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e)
+becomes [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158). Use this function when the positive boundary is required.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f5538"></a>
 
@@ -103,7 +123,8 @@ Returns the arithmetic negation of `value`, clamped to the `isize` range.
 pub fn toU8(value: isize) -> u8
 ```
 
-Converts `value` to `u8` and traps if `u8` cannot represent it.
+Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f5538"></a>
 
@@ -113,7 +134,8 @@ Converts `value` to `u8` and traps if `u8` cannot represent it.
 pub fn checkedToU8(value: isize) -> Option<u8>
 ```
 
-Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
+Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553136"></a>
 
@@ -123,7 +145,8 @@ Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
 pub fn toU16(value: isize) -> u16
 ```
 
-Converts `value` to `u16` and traps if `u16` cannot represent it.
+Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553136"></a>
 
@@ -133,7 +156,8 @@ Converts `value` to `u16` and traps if `u16` cannot represent it.
 pub fn checkedToU16(value: isize) -> Option<u16>
 ```
 
-Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
+Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553332"></a>
 
@@ -143,7 +167,8 @@ Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
 pub fn toU32(value: isize) -> u32
 ```
 
-Converts `value` to `u32` and traps if `u32` cannot represent it.
+Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553332"></a>
 
@@ -153,7 +178,8 @@ Converts `value` to `u32` and traps if `u32` cannot represent it.
 pub fn checkedToU32(value: isize) -> Option<u32>
 ```
 
-Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
+Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f553634"></a>
 
@@ -163,7 +189,8 @@ Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
 pub fn toU64(value: isize) -> u64
 ```
 
-Converts `value` to `u64` and traps if `u64` cannot represent it.
+Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f553634"></a>
 
@@ -173,7 +200,8 @@ Converts `value` to `u64` and traps if `u64` cannot represent it.
 pub fn checkedToU64(value: isize) -> Option<u64>
 ```
 
-Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
+Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f5573697a65"></a>
 
@@ -183,7 +211,8 @@ Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
 pub fn toUsize(value: isize) -> usize
 ```
 
-Converts `value` to `usize` and traps if `usize` cannot represent it.
+Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f5573697a65"></a>
 
@@ -193,7 +222,8 @@ Converts `value` to `usize` and traps if `usize` cannot represent it.
 pub fn checkedToUsize(value: isize) -> Option<usize>
 ```
 
-Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
+Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f4938"></a>
 
@@ -203,7 +233,8 @@ Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
 pub fn toI8(value: isize) -> i8
 ```
 
-Converts `value` to `i8` and traps if `i8` cannot represent it.
+Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f4938"></a>
 
@@ -213,7 +244,8 @@ Converts `value` to `i8` and traps if `i8` cannot represent it.
 pub fn checkedToI8(value: isize) -> Option<i8>
 ```
 
-Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
+Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493136"></a>
 
@@ -223,7 +255,8 @@ Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
 pub fn toI16(value: isize) -> i16
 ```
 
-Converts `value` to `i16` and traps if `i16` cannot represent it.
+Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493136"></a>
 
@@ -233,7 +266,8 @@ Converts `value` to `i16` and traps if `i16` cannot represent it.
 pub fn checkedToI16(value: isize) -> Option<i16>
 ```
 
-Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
+Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493332"></a>
 
@@ -243,7 +277,8 @@ Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
 pub fn toI32(value: isize) -> i32
 ```
 
-Converts `value` to `i32` and traps if `i32` cannot represent it.
+Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use
+this function when an out-of-range value is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493332"></a>
 
@@ -253,7 +288,8 @@ Converts `value` to `i32` and traps if `i32` cannot represent it.
 pub fn checkedToI32(value: isize) -> Option<i32>
 ```
 
-Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
+Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`
+range. Use this function when an out-of-range value is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f493634"></a>
 
@@ -263,7 +299,7 @@ Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
 pub fn toI64(value: isize) -> i64
 ```
 
-Converts `value` to `i64` and traps if `i64` cannot represent it.
+Converts `value` exactly to `i64`. Every `isize` value is representable.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f493634"></a>
 
@@ -273,7 +309,8 @@ Converts `value` to `i64` and traps if `i64` cannot represent it.
 pub fn checkedToI64(value: isize) -> Option<i64>
 ```
 
-Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
+Converts `value` exactly to `i64` and returns `Some`. Every `isize` value is
+representable.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f4973697a65"></a>
 
@@ -283,7 +320,8 @@ Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
 pub fn toIsize(value: isize) -> isize
 ```
 
-Returns `value` unchanged as `isize`.
+Returns `value` unchanged as `isize`. Use this function when generic conversion code
+can select `isize` as both source and destination.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564546f4973697a65"></a>
 
@@ -293,7 +331,8 @@ Returns `value` unchanged as `isize`.
 pub fn checkedToIsize(value: isize) -> Option<isize>
 ```
 
-Returns `Some` with `value` unchanged as `isize`.
+Returns `Some` with `value` unchanged as `isize`. Use this function when generic
+checked-conversion code can select the same source and destination type.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f463332"></a>
 
@@ -323,7 +362,8 @@ Converts `value` to the nearest `f64` value, with ties to even.
 pub fn add(left: isize, right: isize) -> isize
 ```
 
-Returns `left + right` and traps if the result is outside the `isize` range.
+Returns `left + right` and traps if the result is outside the `isize` range. Use this function
+when overflow is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a7375627472616374"></a>
 
@@ -333,7 +373,8 @@ Returns `left + right` and traps if the result is outside the `isize` range.
 pub fn subtract(left: isize, right: isize) -> isize
 ```
 
-Returns `left - right` and traps if the result is outside the `isize` range.
+Returns `left - right` and traps if the result is outside the `isize` range. Use this function
+when overflow is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a6d756c7469706c79"></a>
 
@@ -343,7 +384,8 @@ Returns `left - right` and traps if the result is outside the `isize` range.
 pub fn multiply(left: isize, right: isize) -> isize
 ```
 
-Returns `left * right` and traps if the result is outside the `isize` range.
+Returns `left * right` and traps if the result is outside the `isize` range. Use this function
+when overflow is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a646976696465"></a>
 
@@ -353,8 +395,8 @@ Returns `left * right` and traps if the result is outside the `isize` range.
 pub fn divide(left: isize, right: isize) -> isize
 ```
 
-Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
-[`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1` occurs.
+Returns `left / right`, rounded toward zero. Traps if `right` is zero or [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) is
+divided by `-1`. Use this function when an invalid quotient is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a72656d61696e646572"></a>
 
@@ -364,8 +406,8 @@ Returns `left / right`, rounded toward zero. Traps if `right` is zero or divisio
 pub fn remainder(left: isize, right: isize) -> isize
 ```
 
-Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
-[`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1` occurs.
+Returns the remainder with the sign of `left`. Traps if `right` is zero or [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) is
+divided by `-1`. Use this function when invalid division is a program error.
 
 <a id="declaration-73696c6b2f6973697a653a3a626974416e64"></a>
 
@@ -457,7 +499,8 @@ Rotates the bits of `left` right by `right` positions.
 pub fn wrappingAdd(left: isize, right: isize) -> isize
 ```
 
-Returns `left + right`, wrapped to the `isize` range.
+Returns `left + right`, wrapped to the `isize` range. Use this function for
+deliberate modulo arithmetic.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e675375627472616374"></a>
 
@@ -467,7 +510,8 @@ Returns `left + right`, wrapped to the `isize` range.
 pub fn wrappingSubtract(left: isize, right: isize) -> isize
 ```
 
-Returns `left - right`, wrapped to the `isize` range.
+Returns `left - right`, wrapped to the `isize` range. Use this function for
+deliberate modulo arithmetic.
 
 <a id="declaration-73696c6b2f6973697a653a3a7772617070696e674d756c7469706c79"></a>
 
@@ -477,7 +521,8 @@ Returns `left - right`, wrapped to the `isize` range.
 pub fn wrappingMultiply(left: isize, right: isize) -> isize
 ```
 
-Returns `left * right`, wrapped to the `isize` range.
+Returns `left * right`, wrapped to the `isize` range. Use this function for
+deliberate modulo arithmetic.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e67416464"></a>
 
@@ -487,7 +532,8 @@ Returns `left * right`, wrapped to the `isize` range.
 pub fn saturatingAdd(left: isize, right: isize) -> isize
 ```
 
-Returns `left + right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
+Returns `left + right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158). Use this function when a
+boundary value is the required overflow result.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e675375627472616374"></a>
 
@@ -497,7 +543,8 @@ Returns `left + right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a
 pub fn saturatingSubtract(left: isize, right: isize) -> isize
 ```
 
-Returns `left - right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
+Returns `left - right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158). Use this function when a
+boundary value is the required overflow result.
 
 <a id="declaration-73696c6b2f6973697a653a3a73617475726174696e674d756c7469706c79"></a>
 
@@ -507,7 +554,8 @@ Returns `left - right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a
 pub fn saturatingMultiply(left: isize, right: isize) -> isize
 ```
 
-Returns `left * right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158).
+Returns `left * right`, clamped to [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) or [`MAX`](#declaration-73696c6b2f6973697a653a3a4d4158). Use this function when a
+boundary value is the required overflow result.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564416464"></a>
 
@@ -518,6 +566,7 @@ pub fn checkedAdd(left: isize, right: isize) -> Option<isize>
 ```
 
 Returns `Some` with `left + right`, or `None` if the result is outside the `isize` range.
+Use this function when overflow is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b65645375627472616374"></a>
 
@@ -528,6 +577,7 @@ pub fn checkedSubtract(left: isize, right: isize) -> Option<isize>
 ```
 
 Returns `Some` with `left - right`, or `None` if the result is outside the `isize` range.
+Use this function when overflow is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b65644d756c7469706c79"></a>
 
@@ -538,6 +588,7 @@ pub fn checkedMultiply(left: isize, right: isize) -> Option<isize>
 ```
 
 Returns `Some` with `left * right`, or `None` if the result is outside the `isize` range.
+Use this function when overflow is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b6564446976696465"></a>
 
@@ -547,7 +598,8 @@ Returns `Some` with `left * right`, or `None` if the result is outside the `isiz
 pub fn checkedDivide(left: isize, right: isize) -> Option<isize>
 ```
 
-Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1`.
+Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) is
+divided by `-1`. Use this function when an invalid quotient is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a636865636b656452656d61696e646572"></a>
 
@@ -557,7 +609,8 @@ Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`](#d
 pub fn checkedRemainder(left: isize, right: isize) -> Option<isize>
 ```
 
-Returns `Some` with the remainder, or `None` for zero or division of [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) by `-1`.
+Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`](#declaration-73696c6b2f6973697a653a3a4d494e) is
+divided by `-1`. Use this function when invalid division is input data.
 
 <a id="declaration-73696c6b2f6973697a653a3a657175616c73"></a>
 
@@ -627,7 +680,8 @@ Returns `true` when `left` is greater than or equal to `right`.
 pub effect fn toText(value: isize) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
-Renders the value as decimal text in freshly owned storage.
+Renders the value as base-10 text in new owned storage. Allocation uses the required
+`Allocator` and can fail with `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f6973697a653a3a7061727365"></a>
 
@@ -637,4 +691,9 @@ Renders the value as decimal text in freshly owned storage.
 pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
-Reads complete decimal text as an `isize`, or reports why the text is not one.
+Reads the complete text as a signed decimal `isize`.
+
+### Details
+
+A failure contains `silk.format.NotANumber` for empty text, a leading `+`, a non-digit, or
+trailing bytes. It contains `silk.format.OutOfRange` outside the target's `isize` range.

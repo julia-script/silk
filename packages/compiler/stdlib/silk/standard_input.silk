@@ -6,12 +6,72 @@
 //!
 //! # Details
 //! Each read writes only a prefix of the caller's mutable buffer and reports the exact committed
-//! count, which may be smaller than the buffer length. [`EndOfInput`] is ordinary outcome data and
-//! promises that no later read will produce bytes; [`StreamReadError`] is reserved for a provider
-//! that could not complete a read.
+//! count, which may be smaller than the buffer length. For valid non-empty reads, [`EndOfInput`] is
+//! ordinary outcome data and promises that no later read will produce bytes. [`StreamReadError`] is
+//! reserved for a provider that could not complete a read.
 //!
 //! This service is separate from `StandardStreams`: output commits a complete message or fails,
 //! while input is inherently partial and eventually ends.
+//!
+//! # Gotchas
+//! The caller must supply a non-empty read buffer. A zero-length native read cannot distinguish
+//! available input from end-of-input.
+//!
+//! # Examples
+//! ## Read one byte and then observe the end of input
+//!
+//! ```silk
+//! import silk.effect as Effect
+//!
+//! import silk.standard_input as Input
+//!
+//! import silk.u8 as u8
+//!
+//! import silk.usize as usize
+//!
+//! struct OneByte {
+//!   complete: bool
+//! }
+//!
+//! effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> Input.ReadOutcome
+//! ! Input.StreamReadError {
+//!   if self.complete {
+//!     return Input.endOfInput()
+//!   }
+//!   buffer[usize.ZERO] = u8.toU8(42)
+//!   self.complete = true
+//!   return Input.filled(usize.ONE)
+//! }
+//!
+//! impl Input.StandardInput for OneByte {
+//!   read: OneByte.read
+//! }
+//!
+//! effect fn program() -> i32
+//! ! Input.StreamReadError {
+//!   let mut provider = OneByte {complete: false}
+//!   let mut buffer = [u8.toU8(0)]
+//!   let first = run Input.receive(&mut buffer)
+//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)
+//!   if Input.count(&first) != usize.ONE {
+//!     return 1
+//!   }
+//!   let second = run Input.receive(&mut buffer)
+//!     |> Effect.provideMut<Input.StandardInput>(&mut provider)
+//!   if Input.isEndOfInput(&second) == false {
+//!     return 2
+//!   }
+//!   return u8.toI32(buffer[usize.ZERO])
+//! }
+//!
+//! effect fn recover(error: Input.StreamReadError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(program(), recover)
+//! }
+//! ```
 
 // The portable byte-input boundary. `StandardStreams` writes and never reads; this service reads
 // and never writes. The two are separate because a write is all-or-failure while a read is
@@ -21,59 +81,84 @@ import silk.bool as bool
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Failure to complete one standard-input read.
+/// A typed failure from a standard-input provider that could not complete one read.
 pub struct StreamReadError {}
 
-/// Constructs the typed failure of one host read that could not complete.
+/// Creates a standard-input failure for a provider that cannot complete one read.
 pub fn readFailure() -> StreamReadError {
   return StreamReadError {}
 }
 
-/// A read that committed `count` bytes into the caller's buffer.
+/// A read that committed a known prefix of the caller's buffer.
 pub struct Filled {
-  /// The exact number of leading buffer bytes the provider wrote. It may be less than the
-  /// buffer length and is never greater.
+  /// The exact number of leading bytes written, which can be less than the buffer length.
   pub count: usize
 }
 
-/// A read that observed the end of input. No further bytes will arrive.
+/// A valid non-empty read that observed permanent end-of-input without changing the buffer.
 pub struct EndOfInput {}
 
-/// One completed read outcome, narrowed with `match`.
+/// One completed read, represented as committed bytes or permanent end-of-input.
 ///
 /// # Details
 ///
-/// End of input is data rather than a typed failure: reaching it is the ordinary way input ends,
-/// so a caller that drains input never handles a failure to do so.
+/// End-of-input is outcome data instead of failure. [`Filled`] identifies the exact initialized
+/// prefix; bytes after that prefix retain their previous values.
 pub struct ReadOutcome {
-  /// The completed outcome.
+  /// The committed-byte count or permanent end-of-input result.
   pub value: Filled | EndOfInput
 }
 
-/// Portable blocking byte-input contract.
+/// A portable blocking service for partial reads of raw standard-input bytes.
+///
+/// # When to use
+///
+/// Use this service for replaceable byte input. Decode text in a separate operation after each read
+/// when text validation is required.
 ///
 /// # Details
 ///
-/// One `read` fills a prefix of the caller's buffer and reports the exact committed count. A host
-/// error is `StreamReadError`; the end of input is not.
+/// `read` changes only the reported leading prefix of the buffer. The committed count can be less
+/// than the buffer length. A host error produces [`StreamReadError`]; end-of-input does not.
+///
+/// After [`EndOfInput`] from a valid non-empty read, later reads do not produce bytes.
 pub service StandardInput {
-  /// Reads up to the buffer length, returning a partial count or end-of-input data.
+  /// Reads at most the buffer length and reports the exact committed prefix or end-of-input.
+  ///
+  /// # Details
+  ///
+  /// Bytes after a [`Filled`] count keep their previous values. For a valid non-empty buffer,
+  /// [`EndOfInput`] means no later call produces bytes. Provider failure produces `StreamReadError`.
+  ///
+  /// # Gotchas
+  ///
+  /// `buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from
+  /// end-of-input.
   effect fn read(
     buffer: &mut [u8]
   ) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 }
 
-/// Constructs the outcome of a read that committed `count` bytes.
+/// Creates an outcome for a read that committed exactly `count` leading bytes.
+///
+/// # Gotchas
+///
+/// A provider must not use a count greater than the buffer length passed to its read operation.
 pub fn filled(count: usize) -> ReadOutcome {
   return ReadOutcome { value: Filled { count: count } }
 }
 
-/// Constructs the outcome of a read that observed the end of input.
+/// Creates an outcome that reports permanent end-of-input after a valid non-empty read.
 pub fn endOfInput() -> ReadOutcome {
   return ReadOutcome { value: EndOfInput {} }
 }
 
-/// Returns the committed byte count, treating the end of input as zero.
+/// Returns the committed byte count, or zero for end-of-input.
+///
+/// # Gotchas
+///
+/// A zero count does not by itself identify end-of-input. Use [`isEndOfInput`] when that
+/// distinction controls another read.
 pub fn count(outcome: &ReadOutcome) -> usize {
   return match &outcome.value {
     Filled { count } => count
@@ -81,7 +166,7 @@ pub fn count(outcome: &ReadOutcome) -> usize {
   }
 }
 
-/// Reports whether the outcome observed the end of input.
+/// Reports whether the outcome guarantees that no later read produces bytes.
 pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
   return match &outcome.value {
     Filled { count } => false
@@ -89,7 +174,17 @@ pub fn isEndOfInput(outcome: &ReadOutcome) -> bool {
   }
 }
 
-/// Builds one service read effect.
+/// Reads through the active [`StandardInput`] provider into a mutable buffer.
+///
+/// # Details
+///
+/// This wrapper preserves partial-read behavior and the exclusive provider requirement. Inspect
+/// [`count`] before reading buffer bytes. Use [`isEndOfInput`] to decide when draining is complete.
+///
+/// # Gotchas
+///
+/// `buffer` must be non-empty. A native provider can otherwise report end-of-input while bytes are
+/// still available.
 pub effect fn receive(
   buffer: &mut [u8]
 ) -> ReadOutcome ! StreamReadError ? &mut StandardInput {

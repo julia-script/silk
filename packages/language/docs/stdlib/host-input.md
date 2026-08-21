@@ -20,6 +20,75 @@ Returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) va
 The service is read-only and never mutates environment variables or the process working
 directory. No ambient global is consulted after a provider is supplied.
 
+## Examples
+
+### Read the argument count through an application provider
+
+```silk
+import silk.bytes as Bytes
+
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.host_input as Host
+
+import silk.option as Option
+
+import silk.usize as usize
+
+struct FixedInput {}
+
+effect fn argumentCount(self: &mut FixedInput) -> usize
+! Host.HostInputError {
+  return usize.ONE
+}
+
+effect fn argument(self: &mut FixedInput, index: usize) -> Option.Option<Bytes.Bytes>
+! Host.HostInputError | Core.OutOfMemoryError
+? &mut Core.Allocator {
+  fail Host.inputFailure()
+}
+
+effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option.Option<Bytes.Bytes>
+! Host.HostInputError | Core.OutOfMemoryError
+? &mut Core.Allocator {
+  fail Host.inputFailure()
+}
+
+effect fn workingDirectory(self: &mut FixedInput) -> Bytes.Bytes
+! Host.HostInputError | Core.OutOfMemoryError
+? &mut Core.Allocator {
+  fail Host.inputFailure()
+}
+
+impl Host.HostInput for FixedInput {
+  argumentCount: FixedInput.argumentCount
+  argument: FixedInput.argument
+  variable: FixedInput.variable
+  workingDirectory: FixedInput.workingDirectory
+}
+
+effect fn program() -> i32
+! Host.HostInputError {
+  let mut provider = FixedInput {}
+  let total = run Host.argumentCount()
+    |> Effect.provideMut<Host.HostInput>(&mut provider)
+  if total != usize.ONE {
+    return 1
+  }
+  return 42
+}
+
+effect fn recover(error: Host.HostInputError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}
+```
+
 Import as `HostInput` with `import silk.host_input`.
 
 Public declarations: 10.
@@ -32,7 +101,7 @@ Public declarations: 10.
 pub struct HostInputError
 ```
 
-Failure to complete one host-input lookup.
+A typed failure from a host-input provider that could not answer a lookup.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a696e7075744661696c757265"></a>
 
@@ -42,7 +111,7 @@ Failure to complete one host-input lookup.
 pub fn inputFailure() -> HostInputError
 ```
 
-Constructs the typed failure of one host lookup that could not complete.
+Creates a host-input failure for a provider that cannot complete a lookup.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574"></a>
 
@@ -52,7 +121,7 @@ Constructs the typed failure of one host lookup that could not complete.
 pub service HostInput
 ```
 
-Portable read-only process-input contract.
+A portable read-only service for process arguments, environment values, and working directory.
 
 ### Details
 
@@ -60,6 +129,9 @@ The service reads and never writes: it has no operation that sets an environment
 changes the working directory. An absent argument index and an unset variable name are `None`
 rather than typed failures, because absence is an ordinary answer; only a host that cannot
 answer at all is `HostInputError`.
+
+Returned byte values are independently owned. Operations that return bytes therefore require an
+exclusive [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) and can also fail with [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72).
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a617267756d656e74436f756e74"></a>
 
@@ -69,8 +141,11 @@ answer at all is `HostInputError`.
 effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
 ```
 
-The number of command-line arguments the process received, including the program name at
-index zero.
+Returns the argument count, including the program name at index zero.
+
+#### Details
+
+A provider that cannot inspect the process arguments fails with `HostInputError`.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a617267756d656e74"></a>
 
@@ -80,7 +155,12 @@ index zero.
 effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-The raw bytes of one argument, or `None` at or past the argument count.
+Copies one argument as raw bytes, or returns `None` when `index` is out of range.
+
+#### Details
+
+The returned bytes preserve host order and do not require valid UTF-8. Provider lookup failure
+produces `HostInputError`; ownership allocation produces `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a7661726961626c65"></a>
 
@@ -90,7 +170,12 @@ The raw bytes of one argument, or `None` at or past the argument count.
 effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-The raw bytes of one environment variable's value, or `None` when the name is unset.
+Copies one environment value as raw bytes, or returns `None` when `name` is unset.
+
+#### Details
+
+This operation does not change the environment. Provider lookup failure produces
+`HostInputError`; ownership allocation produces `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a776f726b696e674469726563746f7279"></a>
 
@@ -100,7 +185,12 @@ The raw bytes of one environment variable's value, or `None` when the name is un
 effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-The raw bytes of the process working directory.
+Copies the process working directory as raw bytes.
+
+#### Details
+
+This operation does not change the directory. An unavailable host value produces
+`HostInputError`; ownership allocation produces `OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a617267756d656e74436f756e74"></a>
 
@@ -110,7 +200,12 @@ The raw bytes of the process working directory.
 pub effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
 ```
 
-Builds the argument-count effect.
+Returns the process argument count through the active [`HostInput`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider.
+
+### Details
+
+The count includes the program name at index zero. Provider failure produces
+[`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72).
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a617267756d656e74"></a>
 
@@ -120,7 +215,12 @@ Builds the argument-count effect.
 pub effect fn argument(index: usize) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-Builds one argument lookup effect.
+Copies one process argument through the active [`HostInput`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider.
+
+### Details
+
+Returns `None` when `index` is at or past [`argumentCount`](#declaration-73696c6b2f686f73745f696e7075743a3a617267756d656e74436f756e74). The returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) value is
+independently owned and can contain bytes that are not valid UTF-8.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a7661726961626c65"></a>
 
@@ -130,7 +230,12 @@ Builds one argument lookup effect.
 pub effect fn variable(name: &[u8]) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-Builds one environment lookup effect for a raw byte name.
+Copies one environment value selected by a raw byte name.
+
+### Details
+
+Returns `None` when the name is unset. This operation reads the provider and does not modify the
+process environment. The returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) value is independently owned.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a7661726961626c654e616d6564"></a>
 
@@ -140,7 +245,12 @@ Builds one environment lookup effect for a raw byte name.
 pub effect fn variableNamed(name: string) -> Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-Looks one environment variable up by its textual name.
+Copies one environment value selected by a valid UTF-8 name.
+
+### Details
+
+This function borrows the UTF-8 encoding of `name` and delegates to [`variable`](#declaration-73696c6b2f686f73745f696e7075743a3a7661726961626c65). It returns
+`None` when the name is unset and independently owns a present value.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a776f726b696e674469726563746f7279"></a>
 
@@ -150,7 +260,12 @@ Looks one environment variable up by its textual name.
 pub effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-Builds the working-directory effect.
+Copies the process working directory through the active [`HostInput`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider.
+
+### Details
+
+The returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) value is independently owned and is not required to be valid UTF-8. This
+operation reads the directory and does not change it.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a617267756d656e7473"></a>
 
@@ -160,12 +275,20 @@ Builds the working-directory effect.
 pub effect fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
-Collects every command-line argument, in the order the process received them.
+Copies all process arguments into an owned vector in host order.
+
+### When to use
+
+Use this function when the caller needs the complete argument list. Use [`argument`](#declaration-73696c6b2f686f73745f696e7075743a3a617267756d656e74) for one
+index without retaining all argument values.
 
 ### Details
 
 A host that reports a count it cannot then supply is a broken host, so a missing index below the
 count is `HostInputError` rather than a silently shorter sequence.
+
+Each argument and the result vector own their storage. The operation preserves the program name
+at index zero.
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a74657874"></a>
 
@@ -175,9 +298,14 @@ count is `HostInputError` rather than a silently shorter sequence.
 pub fn text(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
 ```
 
-Returns the checked textual view of raw host bytes.
+Validates host bytes as UTF-8 and returns a borrowed textual view or [`InvalidUtf8`](./string.md#declaration-73696c6b2f737472696e673a3a496e76616c696455746638).
+
+### When to use
+
+Use this function only when the caller needs text. Keep byte-oriented code on the original
+slice so every host value can pass through unchanged.
 
 ### Details
 
-Host input is not required to be UTF-8, so the view is fallible. A failure leaves the bytes
-untouched and readable, which is how a program passes a value it cannot decode through unchanged.
+Host input is not required to be UTF-8. Validation does not allocate or change `values`. A
+failure identifies invalid text while the original bytes remain available to the caller.

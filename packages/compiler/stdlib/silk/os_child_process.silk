@@ -10,10 +10,27 @@
 //! and stderr captures into independently owned [`Bytes`] values. Exit status and signal
 //! termination remain ordinary [`ProcessOutcome`] data.
 //!
+//! Constructing the provider performs no process operation. Portable code invokes
+//! `ChildProcess.execute` after an application provides `&mut OsChildProcess` for the
+//! `&mut ChildProcess` requirement and supplies an allocator for owned captures.
+//!
 //! # Gotchas
 //! Reachable OS process operations are native-only. Direct WebAssembly compilation rejects them
 //! instead of inventing a process host import; evaluator execution requires an injected host
 //! adapter.
+//!
+//! # Examples
+//! ## Construct the native provider without starting a process
+//!
+//! ```silk
+//! import silk.os_child_process as OsChildProcess
+//!
+//! pub fn main() -> i32 {
+//!   let provider = OsChildProcess.make()
+//!   drop provider
+//!   return 42
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.bytes {
@@ -55,11 +72,25 @@ import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Native provider that runs one child through the platform process boundary. It owns no state; a
-/// completed execution's captured streams belong to the outcome it returns.
+/// A stateless native [`ChildProcess`] provider with blocking execution and complete capture.
+///
+/// # Details
+///
+/// The provider borrows the request and transfers each completed capture into independent [`Bytes`]
+/// storage. The returned [`ProcessOutcome`] owns that storage.
 pub struct OsChildProcess {}
 
-/// Constructs the process-backed child-process provider.
+/// Creates a stateless provider for the native process boundary.
+///
+/// # When to use
+///
+/// Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
+/// portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
+///
+/// # Details
+///
+/// Construction starts no process and allocates no storage. Each execution translates native
+/// failures into [`ProcessError`] and requires an allocator for owned output captures.
 pub fn make() -> OsChildProcess {
   return OsChildProcess {}
 }

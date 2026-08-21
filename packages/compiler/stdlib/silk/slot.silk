@@ -14,25 +14,80 @@
 //! Selecting an out-of-bounds slot, writing twice, or reading an uninitialized slot violates the
 //! raw-storage contract. Debug execution may diagnose these mistakes; portable code must not rely
 //! on a runtime check.
+//!
+//! # Examples
+//! ## Copy and then take one initialized value
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.core {Allocator}
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.layout as Layout
+//!
+//! import silk.raw_buffer as RawBuffer
+//!
+//! import silk.slot as Slot
+//!
+//! effect fn build() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let acquiring = Allocator.allocate(Layout.of<i32>())
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let allocation = run acquiring
+//!   unsafe {
+//!     let mut buffer = RawBuffer.from<i32>(move allocation, 1)
+//!     let written = Slot.write(RawBuffer.slot(&mut buffer, 0), 21)
+//!     let copied = Slot.copy(RawBuffer.slot(&mut buffer, 0))
+//!     let taken = Slot.take(RawBuffer.slot(&mut buffer, 0))
+//!     return copied + taken
+//!   }
+//!   return 0
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(build(), recover)
+//! }
+//! ```
 
-
-
-/// Initializes one selected raw slot exactly once.
+/// Moves one value into a selected uninitialized raw slot.
+///
+/// # Gotchas
+///
+/// The slot must be in bounds and uninitialized. A second write without a state transition is
+/// invalid.
 pub fn write<T>(slot: Slot<T>, value: T) -> () {
   unsafe { return Intrinsic.slotWrite<T>(move slot, move value) }
 }
 
-/// Moves an initialized value out of one selected raw slot.
+/// Moves a value out of a selected initialized raw slot and leaves the slot uninitialized.
+///
+/// # Gotchas
+///
+/// The slot must be in bounds and initialized.
 pub fn take<T>(slot: Slot<T>) -> T {
   unsafe { return Intrinsic.slotTake<T>(move slot) }
 }
 
-/// Copies an initialized Copy value out of one selected raw slot.
+/// Copies a `Copy` value from a selected initialized raw slot without changing its state.
+///
+/// # Gotchas
+///
+/// The slot must be in bounds and initialized.
 pub fn copy<T: Copy>(slot: Slot<T>) -> T {
   unsafe { return Intrinsic.slotCopy<T>(move slot) }
 }
 
-/// Drops an initialized value in one selected raw slot.
+/// Drops a value in a selected initialized raw slot and leaves the slot uninitialized.
+///
+/// # Gotchas
+///
+/// The slot must be in bounds and initialized.
 pub fn dropValue<T>(slot: Slot<T>) -> () {
   unsafe { return Intrinsic.slotDrop<T>(move slot) }
 }

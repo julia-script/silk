@@ -12,13 +12,32 @@ code. Use a scripted provider in tests to control partial reads, end-of-input, a
 ## Details
 
 The provider owns no persistent state and commits each host read directly into the caller's
-buffer. A zero-length host transfer becomes the outcome selected by [`endOfInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a656e644f66496e707574); only a host
-read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are preserved exactly.
+buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
+[`endOfInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a656e644f66496e707574). Only a host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are
+preserved exactly.
+
+Constructing the provider performs no read. Portable code reads after the application supplies
+`&mut OsStandardInput` for the `&mut StandardInput` requirement.
 
 ## Gotchas
 
 Reachable OS standard-input operations are native-only. Direct WebAssembly compilation rejects
-them rather than inventing a descriptor import; evaluator execution requires an injected adapter.
+them instead of inventing a descriptor import. Evaluator execution requires an injected adapter.
+The caller must use a non-empty buffer. A zero-capacity host read also transfers zero bytes.
+
+## Examples
+
+### Construct the native provider without reading standard input
+
+```silk
+import silk.os_standard_input as OsStandardInput
+
+pub fn main() -> i32 {
+  let provider = OsStandardInput.make()
+  drop provider
+  return 42
+}
+```
 
 Import as `OsStandardInput` with `import silk.os_standard_input`.
 
@@ -32,8 +51,12 @@ Public declarations: 2.
 pub struct OsStandardInput
 ```
 
-Native provider reading the process standard-input descriptor. It owns no state; the descriptor
-belongs to the process rather than to the value.
+A stateless native [`StandardInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e707574) provider for the process input descriptor.
+
+### Details
+
+The process owns the descriptor. Each read changes only the committed prefix of the caller's
+buffer and preserves the host transfer count.
 
 <a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a6d616b65"></a>
 
@@ -43,7 +66,17 @@ belongs to the process rather than to the value.
 pub fn make() -> OsStandardInput
 ```
 
-Constructs the process-backed byte-input provider.
+Creates a stateless provider for native standard-input bytes.
+
+### When to use
+
+Use this function at a native application edge. Provide the result as `&mut StandardInput` to
+portable code that calls `silk.standard_input.receive`.
+
+### Details
+
+Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72).
 
 <a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 

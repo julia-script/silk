@@ -6,14 +6,72 @@
 //! syntax.
 //!
 //! # Details
-//! Requests preserve argument and environment-entry order as exact platform bytes. The environment
-//! begins empty, the working directory is inherited unless [`requestWithin`] selects one, and child
-//! standard input is closed. `ChildProcess.execute` blocks until termination and owns complete
-//! stdout and stderr captures in [`ProcessOutcome`]. A nonzero exit is ordinary outcome data.
+//! Requests preserve NUL-free argument and environment-entry bytes in insertion order. The
+//! environment begins empty, and the working directory is inherited unless [`requestWithin`]
+//! selects one. Child standard input is closed. `ChildProcess.execute` blocks until termination and
+//! owns complete stdout and stderr captures in [`ProcessOutcome`]. A nonzero exit is outcome data.
 //!
 //! [`ProcessError`] is reserved for failing to spawn, wait, or capture; it carries a stable
 //! portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`] when
 //! captured output cannot be owned.
+//!
+//! # Gotchas
+//! An argument, environment name, or environment value must not contain NUL. The request uses NUL
+//! as its entry separator, and a native provider cannot preserve an embedded NUL as data.
+//!
+//! # Examples
+//! ## Handle a nonzero child exit as outcome data
+//!
+//! ```silk
+//! import silk.bytes as Bytes
+//!
+//! import silk.child_process as Process
+//!
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.filesystem as Path
+//!
+//! import silk.option as Option
+//!
+//! struct Completed {}
+//!
+//! effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
+//! ! Process.ProcessError | Core.OutOfMemoryError
+//! ? &mut Core.Allocator {
+//!   return Process.exited(7, Bytes.make(), Bytes.make())
+//! }
+//!
+//! impl Process.ChildProcess for Completed {
+//!   execute: Completed.execute
+//! }
+//!
+//! effect fn program() -> i32
+//! ! Path.FileError | Core.OutOfMemoryError | Process.ProcessError {
+//!   let mut allocator = Core.make()
+//!   let mut provider = Completed {}
+//!   let path = run Path.make("/tool")
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let request = run Process.request(&path)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   let outcome = run Process.submit(&request)
+//!     |> Effect.provideMut<Process.ChildProcess>(&mut provider)
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   return match move Process.exitCode(&outcome) {
+//!     Option.Some<i32> {value} => 35 + value
+//!     Option.None {} => 1
+//!   }
+//! }
+//!
+//! effect fn recover(error: Path.FileError | Core.OutOfMemoryError | Process.ProcessError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(program(), recover)
+//! }
+//! ```
 
 // The portable child-process boundary: one blocking execution from structured input to structured
 // output. It is not a shell. The request carries an executable path and ordered argument bytes, and
@@ -37,66 +95,69 @@ import silk.option { None, Option, Some, none, some }
 import silk.u8 as u8
 import silk.usize as usize
 
-/// The stage of one execution that failed.
+/// A provider-reported execution stage for one [`ProcessError`].
 pub struct ProcessOperation {
-  /// Stable code identifying the failed execution stage.
+  /// The stable numeric code for the provider-reported execution stage.
   pub code: i32
 }
 
-/// A closed portable child-process recovery reason.
+/// A portable recovery category for one [`ProcessError`].
 pub struct ProcessReason {
-  /// Stable code identifying the portable recovery reason.
+  /// The stable numeric code for the portable recovery category.
   pub code: i32
 }
 
-/// An allocation-free typed failure to start, to wait for, or to capture one child.
+/// A typed failure to start, wait for, or capture one child process.
 ///
 /// # Details
 ///
-/// A child that ran and exited nonzero is not a failure: that is `ProcessOutcome` data.
+/// `operation` identifies the provider-reported stage. `reason` gives a portable recovery category.
+/// Use [`providerCode`] when diagnostics also need a provider-defined numeric code.
+///
+/// A child that exits with a nonzero code produces [`ProcessOutcome`] data instead of this error.
 pub struct ProcessError {
-  /// The execution stage that failed.
+  /// The execution stage reported by the provider.
   pub operation: ProcessOperation
-  /// The portable reason callers can recover by.
+  /// The portable category that callers can use for recovery.
   pub reason: ProcessReason
   providerCodeValue: i32
   hasProviderCode: bool
 }
 
-/// Selects the start stage, which covers building the child and reaching its first instruction.
+/// Returns the stage for preparing and starting the child process.
 pub fn spawnOperation() -> ProcessOperation { return ProcessOperation { code: 0 } }
 
-/// Selects the wait stage, which covers observing how the child terminated.
+/// Returns the stage for waiting until the child process terminates.
 pub fn waitOperation() -> ProcessOperation { return ProcessOperation { code: 1 } }
 
-/// Selects the capture stage, which covers owning the child's completed output.
+/// Returns the stage for copying the completed output and error streams.
 pub fn captureOperation() -> ProcessOperation { return ProcessOperation { code: 2 } }
 
-/// Returns the stable stage code.
+/// Returns the stable numeric code for an execution stage.
 pub fn operationCode(operation: ProcessOperation) -> i32 { return operation.code }
 
-/// Selects NotFound: no executable exists at the requested path.
+/// Returns the reason used when no executable exists at the requested path.
 pub fn notFound() -> ProcessReason { return ProcessReason { code: 0 } }
 
-/// Selects PermissionDenied.
+/// Returns the reason used when the provider denies access to the requested executable.
 pub fn permissionDenied() -> ProcessReason { return ProcessReason { code: 1 } }
 
-/// Selects InvalidRequest: the request cannot be presented to the platform at all.
+/// Returns the reason used when the provider cannot present the request to its process boundary.
 pub fn invalidRequest() -> ProcessReason { return ProcessReason { code: 2 } }
 
-/// Selects NoSpace, which includes exhausting the storage that holds captured output.
+/// Returns the reason used when process setup or captured output exhausts provider storage.
 pub fn noSpace() -> ProcessReason { return ProcessReason { code: 3 } }
 
-/// Selects Unsupported.
+/// Returns the reason used when the provider does not support the requested process operation.
 pub fn unsupported() -> ProcessReason { return ProcessReason { code: 4 } }
 
-/// Selects Other.
+/// Returns the reason used when no other portable recovery category applies.
 pub fn other() -> ProcessReason { return ProcessReason { code: 5 } }
 
-/// Returns the stable portable reason code.
+/// Returns the stable numeric code for a portable recovery category.
 pub fn reasonCode(reason: ProcessReason) -> i32 { return reason.code }
 
-/// Constructs one typed process failure without a provider detail.
+/// Creates a process failure without a provider-defined numeric code.
 pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessError {
   return ProcessError {
     operation: move operation,
@@ -106,7 +167,7 @@ pub fn failure(operation: ProcessOperation, reason: ProcessReason) -> ProcessErr
   }
 }
 
-/// Constructs one typed process failure that retains a provider-defined numeric detail.
+/// Creates a process failure with a provider-defined numeric code for diagnostics.
 pub fn failureWithCode(
   operation: ProcessOperation,
   reason: ProcessReason,
@@ -120,13 +181,13 @@ pub fn failureWithCode(
   }
 }
 
-/// Returns the provider-defined numeric detail when one was retained.
+/// Returns the provider-defined numeric code, or `None` when the failure has no such code.
 pub fn providerCode(error: &ProcessError) -> Option<i32> {
   if error.hasProviderCode { return some<i32>(error.providerCodeValue) }
   return none<i32>()
 }
 
-/// One complete execution request.
+/// One owned child-process request with ordered arguments and an explicit environment.
 ///
 /// # Details
 ///
@@ -134,6 +195,11 @@ pub fn providerCode(error: &ProcessError) -> Option<i32> {
 /// received from the platform can be handed to a child unchanged. Entries are retained in the order
 /// they were added, and the environment starts empty: a child sees no variable that this request
 /// did not name.
+///
+/// # Gotchas
+///
+/// Argument, environment-name, and environment-value bytes must not contain NUL. NUL separates
+/// entries in the provider request format.
 pub struct ProcessRequest {
   programValue: Bytes
   argumentValues: Bytes
@@ -149,7 +215,7 @@ effect fn terminate(target: &mut Bytes) -> () ! OutOfMemoryError ? &mut Allocato
   return ()
 }
 
-/// Builds a request that runs `program` with no arguments, an empty environment, and the caller's
+/// Creates a request for `program` with no arguments, an empty environment, and the caller's
 /// own working directory.
 pub effect fn request(program: &Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator {
   let owned = run bytesCopy(pathRawBytes(program))
@@ -163,7 +229,7 @@ pub effect fn request(program: &Path) -> ProcessRequest ! OutOfMemoryError ? &mu
   }
 }
 
-/// Builds a request that additionally runs the child in `directory` rather than the caller's own
+/// Creates a request that runs `program` in `directory` instead of the caller's
 /// working directory.
 pub effect fn requestWithin(
   program: &Path,
@@ -174,7 +240,16 @@ pub effect fn requestWithin(
   return move built
 }
 
-/// Appends one argument as exact bytes, after every argument already added.
+/// Appends one NUL-free byte argument after all arguments already in the request.
+///
+/// # Details
+///
+/// The request copies `value` and preserves argument order.
+///
+/// # Gotchas
+///
+/// `value` must not contain NUL. NUL is the entry separator used by process providers.
+/// If allocation fails, do not reuse `self`; it can contain an incomplete argument entry.
 pub effect fn addArgument(
   self: &mut ProcessRequest,
   value: &[u8]
@@ -185,7 +260,18 @@ pub effect fn addArgument(
   return ()
 }
 
-/// Appends one environment entry as the exact bytes `name`, `=`, then `value`.
+/// Appends one NUL-free environment entry as `name`, `=`, and `value` bytes.
+///
+/// # Details
+///
+/// The request starts with an empty environment and preserves insertion order. This function does
+/// not read or merge the caller's environment.
+///
+/// # Gotchas
+///
+/// `name` and `value` must not contain NUL. The request builder does not validate environment-name
+/// grammar beyond this provider-format requirement.
+/// If allocation fails, do not reuse `self`; it can contain an incomplete environment entry.
 pub effect fn setVariable(
   self: &mut ProcessRequest,
   name: &[u8],
@@ -200,43 +286,42 @@ pub effect fn setVariable(
   return ()
 }
 
-/// Borrows the executable path as exact platform bytes.
+/// Borrows the executable path bytes for the lifetime of the request borrow.
 pub fn program(self: &ProcessRequest) -> &[u8] {
   return bytesSlice(&self.programValue)
 }
 
-/// Borrows the ordered arguments as one block of NUL-terminated entries.
+/// Borrows all ordered arguments as one block of NUL-terminated entries.
 pub fn arguments(self: &ProcessRequest) -> &[u8] {
   return bytesSlice(&self.argumentValues)
 }
 
-/// Returns the number of arguments added so far.
+/// Returns the number of calls to [`addArgument`] that completed successfully.
 pub fn argumentCount(self: &ProcessRequest) -> usize {
   return self.argumentTotal
 }
 
-/// Borrows the exact environment as one block of NUL-terminated entries.
+/// Borrows the explicit environment as one block of NUL-terminated `name=value` entries.
 pub fn environment(self: &ProcessRequest) -> &[u8] {
   return bytesSlice(&self.environmentValues)
 }
 
-/// Returns the number of environment entries added so far.
+/// Returns the number of calls to [`setVariable`] that completed successfully.
 pub fn environmentCount(self: &ProcessRequest) -> usize {
   return self.environmentTotal
 }
 
-/// Borrows the requested working directory as exact platform bytes, empty when the child inherits
-/// the caller's own directory.
+/// Borrows the selected working-directory bytes, or an empty view when the child inherits one.
 pub fn workingDirectory(self: &ProcessRequest) -> &[u8] {
   return bytesSlice(&self.directoryValue)
 }
 
-/// Reports whether the request selects a working directory of its own.
+/// Reports whether the request selects a working directory instead of inheriting one.
 pub fn hasWorkingDirectory(self: &ProcessRequest) -> bool {
   return bytesLength(&self.directoryValue) != usize.ZERO
 }
 
-/// A child that ran to completion and returned an exit code.
+/// A completed child process that returned an exit code and two owned captures.
 pub struct Exited {
   /// The code the child returned. Any value, including a nonzero one, is ordinary data.
   pub code: i32
@@ -246,7 +331,7 @@ pub struct Exited {
   pub errors: Bytes
 }
 
-/// A child that terminated because a signal reached it rather than by returning a code.
+/// A completed child process that a signal terminated, with two owned captures.
 pub struct Signaled {
   /// The platform signal number that terminated the child.
   pub signal: i32
@@ -256,7 +341,7 @@ pub struct Signaled {
   pub errors: Bytes
 }
 
-/// One completed execution outcome, narrowed with `match`.
+/// One completed child execution, represented as an exit or signal termination.
 ///
 /// # Details
 ///
@@ -267,35 +352,42 @@ pub struct ProcessOutcome {
   pub value: Exited | Signaled
 }
 
-/// Portable blocking child-process contract.
+/// A portable blocking child-process service with complete output capture.
 ///
 /// # Details
 ///
-/// One `execute` runs the request to completion with the child's standard input closed, and owns
-/// the complete captured output and errors when it returns. A nonzero exit code is outcome data; a
-/// failure to start, to wait, or to capture is `ProcessError`.
+/// `execute` closes child standard input and blocks until termination. The returned outcome owns
+/// complete standard-output and standard-error captures. A nonzero exit code is outcome data.
+///
+/// A start, wait, or capture failure produces [`ProcessError`]. Owning either capture can also
+/// produce [`OutOfMemoryError`]. The operation needs exclusive provider and allocator requirements.
 pub service ChildProcess {
-  /// Runs one structured request to completion and captures both output streams.
+  /// Runs one request to termination and returns owned captures of both output streams.
+  ///
+  /// # Details
+  ///
+  /// This operation blocks and closes the child's standard input. A nonzero exit code returns on
+  /// the success channel. Start, wait, and capture failures produce `ProcessError`.
   effect fn execute(
     request: &ProcessRequest
   ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 }
 
-/// Constructs the outcome of a child that returned `code`.
+/// Creates an exited outcome that owns `output` and `errors`.
 pub fn exited(code: i32, output: Bytes, errors: Bytes) -> ProcessOutcome {
   return ProcessOutcome {
     value: Exited { code: code, output: move output, errors: move errors }
   }
 }
 
-/// Constructs the outcome of a child that a signal terminated.
+/// Creates a signaled outcome that owns `output` and `errors`.
 pub fn signaled(signal: i32, output: Bytes, errors: Bytes) -> ProcessOutcome {
   return ProcessOutcome {
     value: Signaled { signal: signal, output: move output, errors: move errors }
   }
 }
 
-/// Reports whether a signal terminated the child.
+/// Reports whether a signal terminated the child instead of an exit code.
 pub fn isSignaled(outcome: &ProcessOutcome) -> bool {
   return match &outcome.value {
     Exited { code, output, errors } => false
@@ -303,7 +395,7 @@ pub fn isSignaled(outcome: &ProcessOutcome) -> bool {
   }
 }
 
-/// Returns the exit code, or None when a signal terminated the child.
+/// Returns the exit code, or `None` when a signal terminated the child.
 pub fn exitCode(outcome: &ProcessOutcome) -> Option<i32> {
   return match &outcome.value {
     Exited { code, output, errors } => some<i32>(code)
@@ -311,7 +403,7 @@ pub fn exitCode(outcome: &ProcessOutcome) -> Option<i32> {
   }
 }
 
-/// Returns the terminating signal number, or None when the child returned an exit code.
+/// Returns the terminating signal number, or `None` when the child returned an exit code.
 pub fn terminatingSignal(outcome: &ProcessOutcome) -> Option<i32> {
   return match &outcome.value {
     Exited { code, output, errors } => none<i32>()
@@ -319,7 +411,7 @@ pub fn terminatingSignal(outcome: &ProcessOutcome) -> Option<i32> {
   }
 }
 
-/// Borrows the complete captured standard output.
+/// Borrows the complete captured standard output without consuming the outcome.
 pub fn outputBytes(outcome: &ProcessOutcome) -> &[u8] {
   return match &outcome.value {
     Exited { code, output, errors } => bytesSlice(&output)
@@ -327,7 +419,7 @@ pub fn outputBytes(outcome: &ProcessOutcome) -> &[u8] {
   }
 }
 
-/// Borrows the complete captured standard error.
+/// Borrows the complete captured standard error without consuming the outcome.
 pub fn errorBytes(outcome: &ProcessOutcome) -> &[u8] {
   return match &outcome.value {
     Exited { code, output, errors } => bytesSlice(&errors)
@@ -335,7 +427,12 @@ pub fn errorBytes(outcome: &ProcessOutcome) -> &[u8] {
   }
 }
 
-/// Builds one service execute effect.
+/// Runs the active [`ChildProcess`] provider for one request.
+///
+/// # Details
+///
+/// This wrapper preserves the service contract: it blocks, closes child input, and returns complete
+/// owned captures. It requires exclusive child-process and allocator providers.
 pub effect fn submit(
   request: &ProcessRequest
 ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator {

@@ -16,11 +16,29 @@ portable [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f7
 and stderr captures into independently owned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values. Exit status and signal
 termination remain ordinary [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) data.
 
+Constructing the provider performs no process operation. Portable code invokes
+`ChildProcess.execute` after an application provides `&mut OsChildProcess` for the
+`&mut ChildProcess` requirement and supplies an allocator for owned captures.
+
 ## Gotchas
 
 Reachable OS process operations are native-only. Direct WebAssembly compilation rejects them
 instead of inventing a process host import; evaluator execution requires an injected host
 adapter.
+
+## Examples
+
+### Construct the native provider without starting a process
+
+```silk
+import silk.os_child_process as OsChildProcess
+
+pub fn main() -> i32 {
+  let provider = OsChildProcess.make()
+  drop provider
+  return 42
+}
+```
 
 Import as `OsChildProcess` with `import silk.os_child_process`.
 
@@ -34,8 +52,12 @@ Public declarations: 2.
 pub struct OsChildProcess
 ```
 
-Native provider that runs one child through the platform process boundary. It owns no state; a
-completed execution's captured streams belong to the outcome it returns.
+A stateless native [`ChildProcess`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373) provider with blocking execution and complete capture.
+
+### Details
+
+The provider borrows the request and transfers each completed capture into independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573)
+storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) owns that storage.
 
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a6d616b65"></a>
 
@@ -45,7 +67,17 @@ completed execution's captured streams belong to the outcome it returns.
 pub fn make() -> OsChildProcess
 ```
 
-Constructs the process-backed child-process provider.
+Creates a stateless provider for the native process boundary.
+
+### When to use
+
+Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
+portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
+
+### Details
+
+Construction starts no process and allocates no storage. Each execution translates native
+failures into [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) and requires an allocator for owned output captures.
 
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
 

@@ -15,6 +15,24 @@ Alignments are non-zero powers of two. [`repeat`](#declaration-73696c6b2f6c61796
 [`LayoutOverflow`](#declaration-73696c6b2f6c61796f75743a3a4c61796f75744f766572666c6f77) instead of wrapping the aggregate byte size. A [`Layout`](#declaration-73696c6b2f6c61796f75743a3a4c61796f7574) describes storage;
 it does not allocate or initialize it.
 
+## Examples
+
+### Size storage for repeated values
+
+```silk
+import silk.layout as Layout
+
+import silk.usize as usize
+
+pub fn main() -> i32 {
+  let element = Layout.of<i32>()
+  return match move Layout.repeat(move element, 3) {
+    Layout.Layout {bytes, alignment} => usize.toI32(bytes) + 30
+    Layout.LayoutOverflow {} => 0
+  }
+}
+```
+
 Import as `Layout` with `import silk.layout`.
 
 Public declarations: 6.
@@ -87,7 +105,7 @@ Reports that [`repeat`](#declaration-73696c6b2f6c61796f75743a3a726570656174) cou
 pub fn of<T>() -> Layout
 ```
 
-Returns the compiler-selected layout of T.
+Returns the byte size and alignment required to store one value of `T`.
 
 <a id="declaration-73696c6b2f6c61796f75743a3a6d616b65"></a>
 
@@ -97,7 +115,11 @@ Returns the compiler-selected layout of T.
 pub fn make(size: usize, alignment: usize) -> silk/layout.InvalidAlignment | silk/layout.Layout
 ```
 
-Constructs a layout from an explicit size and alignment.
+Creates a layout from an explicit byte size and alignment.
+
+### Gotchas
+
+If `alignment` is zero or is not a power of two, returns `InvalidAlignment` with that value.
 
 <a id="declaration-73696c6b2f6c61796f75743a3a726570656174"></a>
 
@@ -107,4 +129,12 @@ Constructs a layout from an explicit size and alignment.
 pub fn repeat(layout: Layout, count: usize) -> silk/layout.Layout | silk/layout.LayoutOverflow
 ```
 
-Repeats a layout with checked aggregate-size semantics.
+Returns a layout for `count` contiguous instances without wrapping the total byte size.
+
+### Details
+
+The result keeps the input alignment and multiplies its byte size by `count`.
+
+### Gotchas
+
+If the total byte size does not fit in `usize`, returns `LayoutOverflow`.

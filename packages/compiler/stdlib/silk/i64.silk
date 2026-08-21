@@ -13,7 +13,25 @@
 //! [`toText`] allocates owned text. Conversion to `f32` or `f64` can round large exact integers.
 //!
 //! # Gotchas
-//! [`MIN`] has no positive i64 counterpart. Its ordinary negation and division by `-1` trap.
+//! [`MIN`] has no positive i64 counterpart. Use [`wrappingNegate`] or [`saturatingNegate`] for its
+//! negation boundary. Use [`checkedDivide`] when division by `-1` can receive [`MIN`].
+//!
+//! # Examples
+//! ## Parse a complete signed decimal value
+//! ```silk
+//! import silk.format as Format
+//!
+//! import silk.i64 as i64
+//!
+//! import silk.result as Result
+//!
+//! pub fn main() -> i32 {
+//!   let parsed = i64.parse("-42")
+//!   let value = move parsed
+//!     |> Result.unwrapOr<i64, Format.ParseError>(0)
+//!   return i64.toI32(value + 84)
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.core { Allocator }
@@ -41,120 +59,143 @@ pub const MAX: i64 = 9223372036854775807
 /// The smallest `i64` value.
 pub const MIN: i64 = -9223372036854775808
 
-/// The width of i64 in bits.
+/// The fixed width of `i64`, in bits.
 pub const BITS: u32 = 64
 
-/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`].
+/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`]. Use
+/// this function when that boundary is a program error.
 pub fn negate(value: i64) -> i64 {
   return Intrinsic.i64Negate(value)
 }
 
-/// Returns the arithmetic negation of `value`, wrapped to the `i64` range.
+/// Returns the arithmetic negation of `value`, wrapped to the `i64` range. [`MIN`]
+/// stays [`MIN`]. Use this function for deliberate modulo arithmetic.
 pub fn wrappingNegate(value: i64) -> i64 {
   return Intrinsic.i64WrappingNegate(value)
 }
 
-/// Returns the arithmetic negation of `value`, clamped to the `i64` range.
+/// Returns the arithmetic negation of `value`, clamped to the `i64` range. [`MIN`]
+/// becomes [`MAX`]. Use this function when the positive boundary is required.
 pub fn saturatingNegate(value: i64) -> i64 {
   return Intrinsic.i64SaturatingNegate(value)
 }
 
-/// Converts `value` to `u8` and traps if `u8` cannot represent it.
+/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU8(value: i64) -> u8 {
   return Intrinsic.i64ToU8(value)
 }
 
-/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
+/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: i64) -> Option<u8> {
   return Intrinsic.i64CheckedToU8(value)
 }
 
-/// Converts `value` to `u16` and traps if `u16` cannot represent it.
+/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU16(value: i64) -> u16 {
   return Intrinsic.i64ToU16(value)
 }
 
-/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
+/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU16(value: i64) -> Option<u16> {
   return Intrinsic.i64CheckedToU16(value)
 }
 
-/// Converts `value` to `u32` and traps if `u32` cannot represent it.
+/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU32(value: i64) -> u32 {
   return Intrinsic.i64ToU32(value)
 }
 
-/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
+/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU32(value: i64) -> Option<u32> {
   return Intrinsic.i64CheckedToU32(value)
 }
 
-/// Converts `value` to `u64` and traps if `u64` cannot represent it.
+/// Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU64(value: i64) -> u64 {
   return Intrinsic.i64ToU64(value)
 }
 
-/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
+/// Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU64(value: i64) -> Option<u64> {
   return Intrinsic.i64CheckedToU64(value)
 }
 
-/// Converts `value` to `usize` and traps if `usize` cannot represent it.
+/// Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toUsize(value: i64) -> usize {
   return Intrinsic.i64ToUsize(value)
 }
 
-/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
+/// Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToUsize(value: i64) -> Option<usize> {
   return Intrinsic.i64CheckedToUsize(value)
 }
 
-/// Converts `value` to `i8` and traps if `i8` cannot represent it.
+/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI8(value: i64) -> i8 {
   return Intrinsic.i64ToI8(value)
 }
 
-/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
+/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: i64) -> Option<i8> {
   return Intrinsic.i64CheckedToI8(value)
 }
 
-/// Converts `value` to `i16` and traps if `i16` cannot represent it.
+/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI16(value: i64) -> i16 {
   return Intrinsic.i64ToI16(value)
 }
 
-/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
+/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: i64) -> Option<i16> {
   return Intrinsic.i64CheckedToI16(value)
 }
 
-/// Converts `value` to `i32` and traps if `i32` cannot represent it.
+/// Converts `value` to `i32`. Traps if `value` is outside the `i32` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI32(value: i64) -> i32 {
   return Intrinsic.i64ToI32(value)
 }
 
-/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
+/// Converts `value` to `i32`, or returns `None` if `value` is outside the `i32`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI32(value: i64) -> Option<i32> {
   return Intrinsic.i64CheckedToI32(value)
 }
 
-/// Returns `value` unchanged as `i64`.
+/// Returns `value` unchanged as `i64`. Use this function when generic conversion code
+/// can select `i64` as both source and destination.
 pub fn toI64(value: i64) -> i64 {
   return Intrinsic.i64ToI64(value)
 }
 
-/// Returns `Some` with `value` unchanged as `i64`.
+/// Returns `Some` with `value` unchanged as `i64`. Use this function when generic
+/// checked-conversion code can select the same source and destination type.
 pub fn checkedToI64(value: i64) -> Option<i64> {
   return Intrinsic.i64CheckedToI64(value)
 }
 
-/// Converts `value` to `isize` and traps if `isize` cannot represent it.
+/// Converts `value` to `isize`. Traps if `value` is outside the `isize` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toIsize(value: i64) -> isize {
   return Intrinsic.i64ToIsize(value)
 }
 
-/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
+/// Converts `value` to `isize`, or returns `None` if `value` is outside the `isize`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToIsize(value: i64) -> Option<isize> {
   return Intrinsic.i64CheckedToIsize(value)
 }
@@ -169,29 +210,32 @@ pub fn toF64(value: i64) -> f64 {
   return Intrinsic.i64ToF64(value)
 }
 
-/// Returns `left + right` and traps if the result is outside the `i64` range.
+/// Returns `left + right` and traps if the result is outside the `i64` range. Use this function
+/// when overflow is a program error.
 pub fn add(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Add(left, right)
 }
 
-/// Returns `left - right` and traps if the result is outside the `i64` range.
+/// Returns `left - right` and traps if the result is outside the `i64` range. Use this function
+/// when overflow is a program error.
 pub fn subtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Subtract(left, right)
 }
 
-/// Returns `left * right` and traps if the result is outside the `i64` range.
+/// Returns `left * right` and traps if the result is outside the `i64` range. Use this function
+/// when overflow is a program error.
 pub fn multiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Multiply(left, right)
 }
 
-/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
-/// [`MIN`] by `-1` occurs.
+/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when an invalid quotient is a program error.
 pub fn divide(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Divide(left, right)
 }
 
-/// Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
-/// [`MIN`] by `-1` occurs.
+/// Returns the remainder with the sign of `left`. Traps if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when invalid division is a program error.
 pub fn remainder(left: i64, right: i64) -> i64 {
   return Intrinsic.i64Remainder(left, right)
 }
@@ -238,57 +282,68 @@ pub fn rotateRight(left: i64, right: i64) -> i64 {
   return Intrinsic.i64RotateRight(left, right)
 }
 
-/// Returns `left + right`, wrapped to the `i64` range.
+/// Returns `left + right`, wrapped to the `i64` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingAdd(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingAdd(left, right)
 }
 
-/// Returns `left - right`, wrapped to the `i64` range.
+/// Returns `left - right`, wrapped to the `i64` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingSubtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingSubtract(left, right)
 }
 
-/// Returns `left * right`, wrapped to the `i64` range.
+/// Returns `left * right`, wrapped to the `i64` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingMultiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64WrappingMultiply(left, right)
 }
 
-/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingAdd(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingAdd(left, right)
 }
 
-/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingSubtract(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingSubtract(left, right)
 }
 
-/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingMultiply(left: i64, right: i64) -> i64 {
   return Intrinsic.i64SaturatingMultiply(left, right)
 }
 
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `i64` range.
+/// Use this function when overflow is input data.
 pub fn checkedAdd(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedAdd(left, right)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `i64` range.
+/// Use this function when overflow is input data.
 pub fn checkedSubtract(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedSubtract(left, right)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `i64` range.
+/// Use this function when overflow is input data.
 pub fn checkedMultiply(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedMultiply(left, right)
 }
 
-/// Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`] by `-1`.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when an invalid quotient is input data.
 pub fn checkedDivide(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedDivide(left, right)
 }
 
-/// Returns `Some` with the remainder, or `None` for zero or division of [`MIN`] by `-1`.
+/// Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when invalid division is input data.
 pub fn checkedRemainder(left: i64, right: i64) -> Option<i64> {
   return Intrinsic.i64CheckedRemainder(left, right)
 }
@@ -323,12 +378,18 @@ pub fn greaterOrEqual(left: i64, right: i64) -> bool {
   return Intrinsic.i64GreaterOrEqual(left, right)
 }
 
-/// Renders the value as decimal text in freshly owned storage.
+/// Renders the value as base-10 text in new owned storage. Allocation uses the required
+/// `Allocator` and can fail with `OutOfMemoryError`.
 pub effect fn toText(value: i64) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.signedText(toI64(value))
 }
 
-/// Reads complete decimal text as an `i64`, or reports why the text is not one.
+/// Reads the complete text as a signed decimal `i64`.
+///
+/// # Details
+///
+/// A failure contains `silk.format.NotANumber` for empty text, a leading `+`, a non-digit, or
+/// trailing bytes. It contains `silk.format.OutOfRange` if the number is outside the `i64` range.
 pub fn parse(text: string) -> Result<i64, ParseError> {
   return Format.i64Value(text)
 }

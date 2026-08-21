@@ -14,8 +14,8 @@ fixed array when the length is part of the type, and `silk.bytes.Bytes` for bulk
 [`make`](#declaration-73696c6b2f766563746f723a3a6d616b65) is allocation-free. The first growth reserves four elements and later growth doubles
 capacity; [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) can move that cost ahead of mutation. Growth completes in replacement
 storage before committing, so [`append`](#declaration-73696c6b2f766563746f723a3a617070656e64) and [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) leave the vector unchanged on
-[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). Removing, clearing, and truncating drop exactly the elements they discard while
-retaining capacity.
+[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). Removing, clearing, and truncating drop exactly the elements they discard
+while retaining capacity.
 
 [`sort`](#declaration-73696c6b2f766563746f723a3a736f7274) is stable, deterministic, and supports move-only elements, but allocates scratch space.
 [`binarySearch`](#declaration-73696c6b2f766563746f723a3a62696e617279536561726368) requires an already sorted vector and returns the lowest index among equal
@@ -26,6 +26,84 @@ matches.
 [`get`](#declaration-73696c6b2f766563746f723a3a676574), [`set`](#declaration-73696c6b2f766563746f723a3a736574), and [`remove`](#declaration-73696c6b2f766563746f723a3a72656d6f7665) trap on an out-of-range index. An [`insert`](#declaration-73696c6b2f766563746f723a3a696e73657274) position must be at
 or before the current length. Use [`asSlice`](#declaration-73696c6b2f766563746f723a3a6173536c696365) to borrow move-only elements because [`get`](#declaration-73696c6b2f766563746f723a3a676574)
 produces a copied value.
+
+## Examples
+
+### Grow and edit an owned sequence
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.vector as Vector
+
+effect fn build() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut values = Vector.make<i32>()
+  let first = run Vector.append<i32>(&mut values, 10)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let second = run Vector.append<i32>(&mut values, 30)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let middle = run Vector.insert<i32>(&mut values, 1, 20)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let changed = Vector.set<i32>(&mut values, 2, 22)
+  let removed = Vector.remove<i32>(&mut values, 0)
+  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(build(), recover)
+}
+```
+
+### Sort values and find the first equal value
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.option as Option
+
+import silk.usize as usize
+
+import silk.vector as Vector
+
+effect fn search() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut values = Vector.make<i32>()
+  let first = run Vector.append<i32>(&mut values, 3)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let second = run Vector.append<i32>(&mut values, 36)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let third = run Vector.append<i32>(&mut values, 3)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let sorting = Vector.sort<i32>(&mut values)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let sorted = run sorting
+  let found = Vector.binarySearch<i32>(&values, 3)
+    |> Option.unwrapOr<usize>(99)
+  if found != usize.ZERO {
+    return 0
+  }
+  return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1) + Vector.get<i32>(&values, 2)
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(search(), recover)
+}
+```
 
 Import as `Vector` with `import silk.vector`.
 
@@ -39,7 +117,7 @@ Public declarations: 20.
 pub struct Empty<T>
 ```
 
-Allocation-free storage state used by an empty [`Vector`](#declaration-73696c6b2f766563746f723a3a566563746f72).
+The allocation-free storage state of an empty [`Vector`](#declaration-73696c6b2f766563746f723a3a566563746f72).
 
 <a id="declaration-73696c6b2f766563746f723a3a46756c6c"></a>
 
@@ -49,7 +127,7 @@ Allocation-free storage state used by an empty [`Vector`](#declaration-73696c6b2
 pub struct Full<T>
 ```
 
-Allocated storage state used by a non-empty or reserved [`Vector`](#declaration-73696c6b2f766563746f723a3a566563746f72).
+The allocated storage state of a non-empty or reserved [`Vector`](#declaration-73696c6b2f766563746f723a3a566563746f72).
 
 <a id="declaration-73696c6b2f766563746f723a3a566563746f72"></a>
 
@@ -61,6 +139,11 @@ pub struct Vector<T>
 
 Owns an initialized prefix of a growable contiguous allocation.
 
+### Details
+
+The vector releases each initialized element and its storage on drop. Length counts initialized
+elements. Capacity counts elements that fit without growth.
+
 <a id="declaration-73696c6b2f766563746f723a3a6d616b65"></a>
 
 ## `make`
@@ -69,7 +152,7 @@ Owns an initialized prefix of a growable contiguous allocation.
 pub fn make<T>() -> silk/vector.Vector<T>
 ```
 
-Constructs an empty vector with zero capacity and no allocation.
+Creates an empty vector with zero capacity and no allocation.
 
 <a id="declaration-73696c6b2f766563746f723a3a6c656e677468"></a>
 
@@ -89,7 +172,7 @@ Returns the number of initialized elements.
 pub fn capacity<T>(self: &silk/vector.Vector<T>) -> usize
 ```
 
-Returns how many elements fit before the next growth allocation.
+Returns the total number of elements that fit without another growth allocation.
 
 <a id="declaration-73696c6b2f766563746f723a3a6173536c696365"></a>
 
@@ -101,6 +184,10 @@ pub fn asSlice<T>(self: &silk/vector.Vector<T>) -> &[T]
 
 Borrows the initialized elements as one shared lexical slice.
 
+### Gotchas
+
+Do not retain this slice across an operation that can grow the vector.
+
 <a id="declaration-73696c6b2f766563746f723a3a61734d7574536c696365"></a>
 
 ## `asMutSlice`
@@ -109,7 +196,11 @@ Borrows the initialized elements as one shared lexical slice.
 pub fn asMutSlice<T>(self: &mut silk/vector.Vector<T>) -> &mut [T]
 ```
 
-Borrows the initialized elements as one exclusive lexical slice.
+Borrows all initialized elements as one exclusive lexical slice.
+
+### Gotchas
+
+Do not retain this slice across an operation that can grow the vector.
 
 <a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -129,6 +220,11 @@ pub effect fn append<T>(self: &mut silk/vector.Vector<T>, value: T) -> () ! OutO
 
 Appends one owned value, growing geometrically when capacity is exhausted.
 
+### Details
+
+The vector takes ownership of `value`. If growth fails, the vector keeps its prior contents,
+length, and capacity.
+
 <a id="declaration-73696c6b2f766563746f723a3a617070656e644279746573"></a>
 
 ## `appendBytes`
@@ -139,6 +235,10 @@ pub effect fn appendBytes(self: &mut silk/vector.Vector<u8>, values: &[u8]) -> (
 
 Appends every byte of one borrowed sequence in source order with one bulk copy.
 
+### Details
+
+If growth fails, the vector keeps its prior contents, length, and capacity.
+
 <a id="declaration-73696c6b2f766563746f723a3a696e73657274"></a>
 
 ## `insert`
@@ -148,6 +248,15 @@ pub effect fn insert<T>(self: &mut silk/vector.Vector<T>, index: usize, value: T
 ```
 
 Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
+
+### Details
+
+Existing elements from `index` onward move one position to the right. If growth fails, the
+vector keeps its prior contents, length, and capacity.
+
+### Gotchas
+
+`index` must be less than or equal to [`length`](#declaration-73696c6b2f766563746f723a3a6c656e677468).
 
 <a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a31"></a>
 
@@ -167,6 +276,10 @@ pub fn get<T>(self: &silk/vector.Vector<T>, index: usize) -> T
 
 Copies the element at one index and traps when the index is out of range.
 
+### When to use
+
+Use this function for a `Copy` element. Use [`asSlice`](#declaration-73696c6b2f766563746f723a3a6173536c696365) to borrow a move-only element.
+
 <a id="declaration-73696c6b2f766563746f723a3a706f70"></a>
 
 ## `pop`
@@ -177,6 +290,10 @@ pub fn pop<T>(self: &mut silk/vector.Vector<T>) -> Option<T>
 
 Removes the last element and returns it. Returns an absent value for an empty vector.
 
+### Details
+
+A present result transfers ownership of the removed element. Capacity does not change.
+
 <a id="declaration-73696c6b2f766563746f723a3a72656d6f7665"></a>
 
 ## `remove`
@@ -186,6 +303,10 @@ pub fn remove<T>(self: &mut silk/vector.Vector<T>, index: usize) -> T
 ```
 
 Removes the element at one index, shifting the later elements down. Traps out of range.
+
+### Details
+
+Ownership of the removed element passes to the caller. Capacity does not change.
 
 <a id="declaration-73696c6b2f766563746f723a3a636c656172"></a>
 
@@ -207,6 +328,10 @@ pub fn truncate<T>(self: &mut silk/vector.Vector<T>, length: usize) -> ()
 
 Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
 
+### Details
+
+If `length` is not less than the current length, this function does nothing.
+
 <a id="declaration-73696c6b2f766563746f723a3a736574"></a>
 
 ## `set`
@@ -225,7 +350,12 @@ Overwrites the element at one index, dropping the old element first. Traps out o
 pub effect fn reserve<T>(self: &mut silk/vector.Vector<T>, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
-Grows the capacity to hold at least one additional count of elements.
+Grows capacity to hold at least `additional` more elements without another allocation.
+
+### Details
+
+This function does not change the length. If allocation fails, contents, length, and capacity
+remain unchanged.
 
 <a id="declaration-73696c6b2f766563746f723a3a736f7274"></a>
 
@@ -236,6 +366,11 @@ pub effect fn sort<T>(self: &mut silk/vector.Vector<T>) -> () ! OutOfMemoryError
 ```
 
 Orders the elements in place. Equal elements keep their input order.
+
+### Details
+
+The sort is stable and deterministic. It supports move-only elements and allocates scratch
+storage. If allocation fails, the vector remains unchanged.
 
 <a id="declaration-73696c6b2f766563746f723a3a62696e617279536561726368"></a>
 
@@ -251,3 +386,8 @@ Returns the index of a matching element in a sorted vector, or an absent value w
 
 Returns the lowest matching index when a vector holds several equal elements, so a repeated
 search over one vector always answers with the same index.
+This function consumes `target` and does not change the vector.
+
+### Gotchas
+
+The vector must already be ordered by the same `Order` witness.

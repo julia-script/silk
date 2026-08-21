@@ -2,22 +2,55 @@
 //!
 //! # When to use
 //! Construct [`OsFileSystem`] at a native application edge and provide it to portable filesystem
-//! code. Supply an ordinary in-memory [`FileSystem`] in tests or on targets without native OS access.
+//! code. Supply an in-memory [`FileSystem`] in tests or on targets without native OS access.
 //!
 //! # Details
 //! Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
 //! rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-file
 //! reads and writes own or commit complete contents, directory listings retry oversized entries and
-//! sort complete child paths deterministically, and low-level failures become portable [`FileError`]
+//! sort complete child paths deterministically. Low-level failures become portable [`FileError`]
 //! values with retained native codes.
 //!
-//! [`make`] copies its root. The root must be an absolute, non-empty, NUL-free native path; violating
-//! that constructor precondition traps. Open handles are closed on success and failure, while an
-//! operation's original typed failure remains the reported outcome if closing also fails.
+//! [`make`] copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
+//! that violates this precondition traps. Open handles close on success and failure. If an
+//! operation and close both fail, the operation's original typed failure remains the reported
+//! result.
+//!
+//! Constructing the provider performs no filesystem operation beyond owning the root bytes.
+//! Portable code uses `FileSystem` operations after the application supplies `&mut OsFileSystem`
+//! for the `&mut FileSystem` requirement.
 //!
 //! # Gotchas
 //! Reachable OS filesystem operations are native-only. Direct WebAssembly compilation rejects them
 //! rather than inventing filesystem imports; evaluator execution requires an injected adapter.
+//!
+//! # Examples
+//! ## Construct a provider without accessing the filesystem
+//!
+//! ```silk
+//! import silk.core as Core
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.os_filesystem as OsFileSystem
+//!
+//! effect fn program() -> i32
+//! ! Core.OutOfMemoryError {
+//!   let mut allocator = Core.make()
+//!   let provider = run OsFileSystem.make("/tmp")
+//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!   drop provider
+//!   return 42
+//! }
+//!
+//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(program(), recover)
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.bytes {
@@ -81,12 +114,32 @@ import silk.vector {
   make as vectorMake
 }
 
-/// Native provider state. The root bytes are independently owned and never exposed as a Path.
+/// A native [`FileSystem`] provider confined beneath one independently owned platform root.
+///
+/// # Details
+///
+/// Portable absolute paths resolve inside this root. The provider never exposes the root as a
+/// [`Path`], and operations reject lexical or symbolic-link escape from the root.
 pub struct OsFileSystem {
   root: Bytes
 }
 
-/// Copies one absolute native root. A relative or NUL-containing root violates the constructor precondition.
+/// Copies one absolute native root and creates a confined filesystem provider.
+///
+/// # When to use
+///
+/// Use this function at a native application edge. Provide the result as `&mut FileSystem` to code
+/// that uses the portable filesystem service.
+///
+/// # Details
+///
+/// Construction owns the root bytes but does not open the directory. Portable `/` then denotes
+/// this provider root instead of the host filesystem root.
+///
+/// # Gotchas
+///
+/// `root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
+/// Allocation failure leaves no provider value.
 pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   let rootBytes = stringUtf8Bytes(root)
   if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }

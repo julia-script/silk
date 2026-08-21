@@ -11,6 +11,23 @@
 //!
 //! Decimal [`parse`] consumes the entire input and distinguishes malformed text from range
 //! overflow. [`toText`] allocates a new owned string.
+//!
+//! # Examples
+//! ## Recover from a narrowing conversion
+//! ```silk
+//! import silk.option as Option
+//!
+//! import silk.u16 as u16
+//!
+//! import silk.u8 as u8
+//!
+//! pub fn main() -> i32 {
+//!   let narrowed = u16.checkedToU8(300)
+//!   let value = move narrowed
+//!     |> Option.unwrapOr<u8>(42)
+//!   return u8.toI32(value)
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.core { Allocator }
@@ -38,105 +55,119 @@ pub const MAX: u16 = 65535
 /// The smallest `u16` value.
 pub const MIN: u16 = 0
 
-/// The width of u16 in bits.
+/// The fixed width of `u16`, in bits.
 pub const BITS: u32 = 16
 
-/// Converts `value` to `u8` and traps if `u8` cannot represent it.
+/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU8(value: u16) -> u8 {
   return Intrinsic.u16ToU8(value)
 }
 
-/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
+/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: u16) -> Option<u8> {
   return Intrinsic.u16CheckedToU8(value)
 }
 
-/// Returns `value` unchanged as `u16`.
+/// Returns `value` unchanged as `u16`. Use this function when generic conversion code
+/// can select `u16` as both source and destination.
 pub fn toU16(value: u16) -> u16 {
   return Intrinsic.u16ToU16(value)
 }
 
-/// Returns `Some` with `value` unchanged as `u16`.
+/// Returns `Some` with `value` unchanged as `u16`. Use this function when generic
+/// checked-conversion code can select the same source and destination type.
 pub fn checkedToU16(value: u16) -> Option<u16> {
   return Intrinsic.u16CheckedToU16(value)
 }
 
-/// Converts `value` to `u32` and traps if `u32` cannot represent it.
+/// Converts `value` exactly to `u32`. Every `u16` value is representable.
 pub fn toU32(value: u16) -> u32 {
   return Intrinsic.u16ToU32(value)
 }
 
-/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
+/// Converts `value` exactly to `u32` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToU32(value: u16) -> Option<u32> {
   return Intrinsic.u16CheckedToU32(value)
 }
 
-/// Converts `value` to `u64` and traps if `u64` cannot represent it.
+/// Converts `value` exactly to `u64`. Every `u16` value is representable.
 pub fn toU64(value: u16) -> u64 {
   return Intrinsic.u16ToU64(value)
 }
 
-/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
+/// Converts `value` exactly to `u64` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToU64(value: u16) -> Option<u64> {
   return Intrinsic.u16CheckedToU64(value)
 }
 
-/// Converts `value` to `usize` and traps if `usize` cannot represent it.
+/// Converts `value` exactly to `usize`. Every `u16` value is representable.
 pub fn toUsize(value: u16) -> usize {
   return Intrinsic.u16ToUsize(value)
 }
 
-/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
+/// Converts `value` exactly to `usize` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToUsize(value: u16) -> Option<usize> {
   return Intrinsic.u16CheckedToUsize(value)
 }
 
-/// Converts `value` to `i8` and traps if `i8` cannot represent it.
+/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI8(value: u16) -> i8 {
   return Intrinsic.u16ToI8(value)
 }
 
-/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
+/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: u16) -> Option<i8> {
   return Intrinsic.u16CheckedToI8(value)
 }
 
-/// Converts `value` to `i16` and traps if `i16` cannot represent it.
+/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI16(value: u16) -> i16 {
   return Intrinsic.u16ToI16(value)
 }
 
-/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
+/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: u16) -> Option<i16> {
   return Intrinsic.u16CheckedToI16(value)
 }
 
-/// Converts `value` to `i32` and traps if `i32` cannot represent it.
+/// Converts `value` exactly to `i32`. Every `u16` value is representable.
 pub fn toI32(value: u16) -> i32 {
   return Intrinsic.u16ToI32(value)
 }
 
-/// Converts `value` to `i32`, or returns `None` if `i32` cannot represent it.
+/// Converts `value` exactly to `i32` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToI32(value: u16) -> Option<i32> {
   return Intrinsic.u16CheckedToI32(value)
 }
 
-/// Converts `value` to `i64` and traps if `i64` cannot represent it.
+/// Converts `value` exactly to `i64`. Every `u16` value is representable.
 pub fn toI64(value: u16) -> i64 {
   return Intrinsic.u16ToI64(value)
 }
 
-/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
+/// Converts `value` exactly to `i64` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToI64(value: u16) -> Option<i64> {
   return Intrinsic.u16CheckedToI64(value)
 }
 
-/// Converts `value` to `isize` and traps if `isize` cannot represent it.
+/// Converts `value` exactly to `isize`. Every `u16` value is representable.
 pub fn toIsize(value: u16) -> isize {
   return Intrinsic.u16ToIsize(value)
 }
 
-/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
+/// Converts `value` exactly to `isize` and returns `Some`. Every `u16` value is
+/// representable.
 pub fn checkedToIsize(value: u16) -> Option<isize> {
   return Intrinsic.u16CheckedToIsize(value)
 }
@@ -151,27 +182,32 @@ pub fn toF64(value: u16) -> f64 {
   return Intrinsic.u16ToF64(value)
 }
 
-/// Returns `left + right` and traps if the result is outside the `u16` range.
+/// Returns `left + right` and traps if the result is outside the `u16` range. Use this function
+/// when overflow is a program error.
 pub fn add(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Add(left, right)
 }
 
-/// Returns `left - right` and traps if the result is outside the `u16` range.
+/// Returns `left - right` and traps if the result is outside the `u16` range. Use this function
+/// when overflow is a program error.
 pub fn subtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Subtract(left, right)
 }
 
-/// Returns `left * right` and traps if the result is outside the `u16` range.
+/// Returns `left * right` and traps if the result is outside the `u16` range. Use this function
+/// when overflow is a program error.
 pub fn multiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Multiply(left, right)
 }
 
-/// Returns `left / right`. Traps if `right` is zero.
+/// Returns `left / right`. Traps if `right` is zero. Use this function when a zero
+/// divisor is a program error.
 pub fn divide(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Divide(left, right)
 }
 
-/// Returns the remainder of `left / right`. Traps if `right` is zero.
+/// Returns the remainder of `left / right`. Traps if `right` is zero. Use this function
+/// when a zero divisor is a program error.
 pub fn remainder(left: u16, right: u16) -> u16 {
   return Intrinsic.u16Remainder(left, right)
 }
@@ -196,8 +232,7 @@ pub fn bitNot(value: u16) -> u16 {
   return Intrinsic.u16BitNot(value)
 }
 
-/// Shifts `left` bits left by `right` positions. Traps if `right` is negative or not less than
-/// [`BITS`].
+/// Shifts `left` bits left by `right` positions. Traps if `right` is not less than [`BITS`].
 pub fn shiftLeft(left: u16, right: u16) -> u16 {
   return Intrinsic.u16ShiftLeft(left, right)
 }
@@ -218,57 +253,68 @@ pub fn rotateRight(left: u16, right: u16) -> u16 {
   return Intrinsic.u16RotateRight(left, right)
 }
 
-/// Returns `left + right`, wrapped to the `u16` range.
+/// Returns `left + right`, wrapped to the `u16` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingAdd(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingAdd(left, right)
 }
 
-/// Returns `left - right`, wrapped to the `u16` range.
+/// Returns `left - right`, wrapped to the `u16` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingSubtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingSubtract(left, right)
 }
 
-/// Returns `left * right`, wrapped to the `u16` range.
+/// Returns `left * right`, wrapped to the `u16` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingMultiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16WrappingMultiply(left, right)
 }
 
-/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingAdd(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingAdd(left, right)
 }
 
-/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingSubtract(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingSubtract(left, right)
 }
 
-/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingMultiply(left: u16, right: u16) -> u16 {
   return Intrinsic.u16SaturatingMultiply(left, right)
 }
 
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `u16` range.
+/// Use this function when overflow is input data.
 pub fn checkedAdd(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedAdd(left, right)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `u16` range.
+/// Use this function when overflow is input data.
 pub fn checkedSubtract(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedSubtract(left, right)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `u16` range.
+/// Use this function when overflow is input data.
 pub fn checkedMultiply(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedMultiply(left, right)
 }
 
-/// Returns `Some` with `left / right`, or `None` if `right` is zero.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero. Use this
+/// function when a zero divisor is input data.
 pub fn checkedDivide(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedDivide(left, right)
 }
 
-/// Returns `Some` with the remainder, or `None` if `right` is zero.
+/// Returns `Some` with the remainder, or `None` if `right` is zero. Use this function
+/// when a zero divisor is input data.
 pub fn checkedRemainder(left: u16, right: u16) -> Option<u16> {
   return Intrinsic.u16CheckedRemainder(left, right)
 }
@@ -303,12 +349,18 @@ pub fn greaterOrEqual(left: u16, right: u16) -> bool {
   return Intrinsic.u16GreaterOrEqual(left, right)
 }
 
-/// Renders the value as decimal text in freshly owned storage.
+/// Renders the value as base-10 text in new owned storage. Allocation uses the required
+/// `Allocator` and can fail with `OutOfMemoryError`.
 pub effect fn toText(value: u16) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.unsignedText(toU64(value))
 }
 
-/// Reads complete decimal text as a `u16`, or reports why the text is not one.
+/// Reads the complete text as an unsigned decimal `u16`.
+///
+/// # Details
+///
+/// A failure contains `silk.format.NotANumber` for empty text, a sign, a non-digit, or trailing
+/// bytes. It contains `silk.format.OutOfRange` if the number is outside the `u16` range.
 pub fn parse(text: string) -> Result<u16, ParseError> {
   return Format.u16Value(text)
 }

@@ -14,8 +14,29 @@
 //! [`toText`] allocates an owned decimal string.
 //!
 //! # Gotchas
-//! [`MIN`] has no positive i32 counterpart. Negating it, or dividing it by `-1`, traps unless the
-//! corresponding checked, wrapping, or saturating policy is selected.
+//! [`MIN`] has no positive i32 counterpart. Use [`wrappingNegate`] or [`saturatingNegate`] for its
+//! negation boundary. Use [`checkedDivide`] when division by `-1` can receive [`MIN`].
+//!
+//! # Examples
+//! ## Select an overflow result explicitly
+//! ```silk
+//! import silk.i32 as i32
+//!
+//! import silk.option as Option
+//!
+//! pub fn main() -> i32 {
+//!   let checked = i32.checkedAdd(i32.MAX, 1)
+//!   let recovered = move checked
+//!     |> Option.unwrapOr<i32>(42)
+//!   if i32.wrappingAdd(i32.MAX, 1) != i32.MIN {
+//!     return 1
+//!   }
+//!   if i32.saturatingAdd(i32.MAX, 1) != i32.MAX {
+//!     return 2
+//!   }
+//!   return recovered
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.core { Allocator }
@@ -43,120 +64,141 @@ pub const MAX: i32 = 2147483647
 /// The smallest `i32` value.
 pub const MIN: i32 = -2147483648
 
-/// The width of i32 in bits.
+/// The fixed width of `i32`, in bits.
 pub const BITS: u32 = 32
 
-/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`].
+/// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`]. Use
+/// this function when that boundary is a program error.
 pub fn negate(value: i32) -> i32 {
   return Intrinsic.i32Negate(value)
 }
 
-/// Returns the arithmetic negation of `value`, wrapped to the `i32` range.
+/// Returns the arithmetic negation of `value`, wrapped to the `i32` range. [`MIN`]
+/// stays [`MIN`]. Use this function for deliberate modulo arithmetic.
 pub fn wrappingNegate(value: i32) -> i32 {
   return Intrinsic.i32WrappingNegate(value)
 }
 
-/// Returns the arithmetic negation of `value`, clamped to the `i32` range.
+/// Returns the arithmetic negation of `value`, clamped to the `i32` range. [`MIN`]
+/// becomes [`MAX`]. Use this function when the positive boundary is required.
 pub fn saturatingNegate(value: i32) -> i32 {
   return Intrinsic.i32SaturatingNegate(value)
 }
 
-/// Converts `value` to `u8` and traps if `u8` cannot represent it.
+/// Converts `value` to `u8`. Traps if `value` is outside the `u8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU8(value: i32) -> u8 {
   return Intrinsic.i32ToU8(value)
 }
 
-/// Converts `value` to `u8`, or returns `None` if `u8` cannot represent it.
+/// Converts `value` to `u8`, or returns `None` if `value` is outside the `u8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU8(value: i32) -> Option<u8> {
   return Intrinsic.i32CheckedToU8(value)
 }
 
-/// Converts `value` to `u16` and traps if `u16` cannot represent it.
+/// Converts `value` to `u16`. Traps if `value` is outside the `u16` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU16(value: i32) -> u16 {
   return Intrinsic.i32ToU16(value)
 }
 
-/// Converts `value` to `u16`, or returns `None` if `u16` cannot represent it.
+/// Converts `value` to `u16`, or returns `None` if `value` is outside the `u16`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU16(value: i32) -> Option<u16> {
   return Intrinsic.i32CheckedToU16(value)
 }
 
-/// Converts `value` to `u32` and traps if `u32` cannot represent it.
+/// Converts `value` to `u32`. Traps if `value` is outside the `u32` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU32(value: i32) -> u32 {
   return Intrinsic.i32ToU32(value)
 }
 
-/// Converts `value` to `u32`, or returns `None` if `u32` cannot represent it.
+/// Converts `value` to `u32`, or returns `None` if `value` is outside the `u32`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU32(value: i32) -> Option<u32> {
   return Intrinsic.i32CheckedToU32(value)
 }
 
-/// Converts `value` to `u64` and traps if `u64` cannot represent it.
+/// Converts `value` to `u64`. Traps if `value` is outside the `u64` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toU64(value: i32) -> u64 {
   return Intrinsic.i32ToU64(value)
 }
 
-/// Converts `value` to `u64`, or returns `None` if `u64` cannot represent it.
+/// Converts `value` to `u64`, or returns `None` if `value` is outside the `u64`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToU64(value: i32) -> Option<u64> {
   return Intrinsic.i32CheckedToU64(value)
 }
 
-/// Converts `value` to `usize` and traps if `usize` cannot represent it.
+/// Converts `value` to `usize`. Traps if `value` is outside the `usize` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toUsize(value: i32) -> usize {
   return Intrinsic.i32ToUsize(value)
 }
 
-/// Converts `value` to `usize`, or returns `None` if `usize` cannot represent it.
+/// Converts `value` to `usize`, or returns `None` if `value` is outside the `usize`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToUsize(value: i32) -> Option<usize> {
   return Intrinsic.i32CheckedToUsize(value)
 }
 
-/// Converts `value` to `i8` and traps if `i8` cannot represent it.
+/// Converts `value` to `i8`. Traps if `value` is outside the `i8` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI8(value: i32) -> i8 {
   return Intrinsic.i32ToI8(value)
 }
 
-/// Converts `value` to `i8`, or returns `None` if `i8` cannot represent it.
+/// Converts `value` to `i8`, or returns `None` if `value` is outside the `i8`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI8(value: i32) -> Option<i8> {
   return Intrinsic.i32CheckedToI8(value)
 }
 
-/// Converts `value` to `i16` and traps if `i16` cannot represent it.
+/// Converts `value` to `i16`. Traps if `value` is outside the `i16` range. Use
+/// this function when an out-of-range value is a program error.
 pub fn toI16(value: i32) -> i16 {
   return Intrinsic.i32ToI16(value)
 }
 
-/// Converts `value` to `i16`, or returns `None` if `i16` cannot represent it.
+/// Converts `value` to `i16`, or returns `None` if `value` is outside the `i16`
+/// range. Use this function when an out-of-range value is input data.
 pub fn checkedToI16(value: i32) -> Option<i16> {
   return Intrinsic.i32CheckedToI16(value)
 }
 
-/// Returns `value` unchanged as `i32`.
+/// Returns `value` unchanged as `i32`. Use this function when generic conversion code
+/// can select `i32` as both source and destination.
 pub fn toI32(value: i32) -> i32 {
   return Intrinsic.i32ToI32(value)
 }
 
-/// Returns `Some` with `value` unchanged as `i32`.
+/// Returns `Some` with `value` unchanged as `i32`. Use this function when generic
+/// checked-conversion code can select the same source and destination type.
 pub fn checkedToI32(value: i32) -> Option<i32> {
   return Intrinsic.i32CheckedToI32(value)
 }
 
-/// Converts `value` to `i64` and traps if `i64` cannot represent it.
+/// Converts `value` exactly to `i64`. Every `i32` value is representable.
 pub fn toI64(value: i32) -> i64 {
   return Intrinsic.i32ToI64(value)
 }
 
-/// Converts `value` to `i64`, or returns `None` if `i64` cannot represent it.
+/// Converts `value` exactly to `i64` and returns `Some`. Every `i32` value is
+/// representable.
 pub fn checkedToI64(value: i32) -> Option<i64> {
   return Intrinsic.i32CheckedToI64(value)
 }
 
-/// Converts `value` to `isize` and traps if `isize` cannot represent it.
+/// Converts `value` exactly to `isize`. Every `i32` value is representable.
 pub fn toIsize(value: i32) -> isize {
   return Intrinsic.i32ToIsize(value)
 }
 
-/// Converts `value` to `isize`, or returns `None` if `isize` cannot represent it.
+/// Converts `value` exactly to `isize` and returns `Some`. Every `i32` value is
+/// representable.
 pub fn checkedToIsize(value: i32) -> Option<isize> {
   return Intrinsic.i32CheckedToIsize(value)
 }
@@ -171,29 +213,32 @@ pub fn toF64(value: i32) -> f64 {
   return Intrinsic.i32ToF64(value)
 }
 
-/// Returns `left + right` and traps if the result is outside the `i32` range.
+/// Returns `left + right` and traps if the result is outside the `i32` range. Use this function
+/// when overflow is a program error.
 pub fn add(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Add(left, right)
 }
 
-/// Returns `left - right` and traps if the result is outside the `i32` range.
+/// Returns `left - right` and traps if the result is outside the `i32` range. Use this function
+/// when overflow is a program error.
 pub fn subtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Subtract(left, right)
 }
 
-/// Returns `left * right` and traps if the result is outside the `i32` range.
+/// Returns `left * right` and traps if the result is outside the `i32` range. Use this function
+/// when overflow is a program error.
 pub fn multiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Multiply(left, right)
 }
 
-/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or division of
-/// [`MIN`] by `-1` occurs.
+/// Returns `left / right`, rounded toward zero. Traps if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when an invalid quotient is a program error.
 pub fn divide(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Divide(left, right)
 }
 
-/// Returns the remainder with the sign of `left`. Traps if `right` is zero or division of
-/// [`MIN`] by `-1` occurs.
+/// Returns the remainder with the sign of `left`. Traps if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when invalid division is a program error.
 pub fn remainder(left: i32, right: i32) -> i32 {
   return Intrinsic.i32Remainder(left, right)
 }
@@ -240,57 +285,68 @@ pub fn rotateRight(left: i32, right: i32) -> i32 {
   return Intrinsic.i32RotateRight(left, right)
 }
 
-/// Returns `left + right`, wrapped to the `i32` range.
+/// Returns `left + right`, wrapped to the `i32` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingAdd(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingAdd(left, right)
 }
 
-/// Returns `left - right`, wrapped to the `i32` range.
+/// Returns `left - right`, wrapped to the `i32` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingSubtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingSubtract(left, right)
 }
 
-/// Returns `left * right`, wrapped to the `i32` range.
+/// Returns `left * right`, wrapped to the `i32` range. Use this function for
+/// deliberate modulo arithmetic.
 pub fn wrappingMultiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32WrappingMultiply(left, right)
 }
 
-/// Returns `left + right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left + right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingAdd(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingAdd(left, right)
 }
 
-/// Returns `left - right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left - right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingSubtract(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingSubtract(left, right)
 }
 
-/// Returns `left * right`, clamped to [`MIN`] or [`MAX`].
+/// Returns `left * right`, clamped to [`MIN`] or [`MAX`]. Use this function when a
+/// boundary value is the required overflow result.
 pub fn saturatingMultiply(left: i32, right: i32) -> i32 {
   return Intrinsic.i32SaturatingMultiply(left, right)
 }
 
 /// Returns `Some` with `left + right`, or `None` if the result is outside the `i32` range.
+/// Use this function when overflow is input data.
 pub fn checkedAdd(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedAdd(left, right)
 }
 
 /// Returns `Some` with `left - right`, or `None` if the result is outside the `i32` range.
+/// Use this function when overflow is input data.
 pub fn checkedSubtract(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedSubtract(left, right)
 }
 
 /// Returns `Some` with `left * right`, or `None` if the result is outside the `i32` range.
+/// Use this function when overflow is input data.
 pub fn checkedMultiply(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedMultiply(left, right)
 }
 
-/// Returns `Some` with `left / right`, or `None` for zero or division of [`MIN`] by `-1`.
+/// Returns `Some` with `left / right`, or `None` if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when an invalid quotient is input data.
 pub fn checkedDivide(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedDivide(left, right)
 }
 
-/// Returns `Some` with the remainder, or `None` for zero or division of [`MIN`] by `-1`.
+/// Returns `Some` with the remainder, or `None` if `right` is zero or [`MIN`] is
+/// divided by `-1`. Use this function when invalid division is input data.
 pub fn checkedRemainder(left: i32, right: i32) -> Option<i32> {
   return Intrinsic.i32CheckedRemainder(left, right)
 }
@@ -325,12 +381,18 @@ pub fn greaterOrEqual(left: i32, right: i32) -> bool {
   return Intrinsic.i32GreaterOrEqual(left, right)
 }
 
-/// Renders the value as decimal text in freshly owned storage.
+/// Renders the value as base-10 text in new owned storage. Allocation uses the required
+/// `Allocator` and can fail with `OutOfMemoryError`.
 pub effect fn toText(value: i32) -> String ! OutOfMemoryError ? &mut Allocator {
   return run Format.signedText(toI64(value))
 }
 
-/// Reads complete decimal text as an `i32`, or reports why the text is not one.
+/// Reads the complete text as a signed decimal `i32`.
+///
+/// # Details
+///
+/// A failure contains `silk.format.NotANumber` for empty text, a leading `+`, a non-digit, or
+/// trailing bytes. It contains `silk.format.OutOfRange` if the number is outside the `i32` range.
 pub fn parse(text: string) -> Result<i32, ParseError> {
   return Format.i32Value(text)
 }

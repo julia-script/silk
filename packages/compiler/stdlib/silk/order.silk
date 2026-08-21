@@ -7,8 +7,33 @@
 //! # Details
 //! An interface witness is selected during specialization; it creates no service requirement or
 //! runtime dispatch. [`Equal`] means neither operand orders before the other, so equality cannot
-//! disagree with the witness's own strict ordering. Witness implementations must provide a
-//! consistent strict order for algorithms to behave predictably.
+//! disagree with the witness's own strict ordering.
+//!
+//! # Gotchas
+//! A witness must define a strict total order. The module cannot verify this law. If two different
+//! values are incomparable, [`compare`] and [`equal`] report them as equal.
+//!
+//! # Examples
+//! ## Classify each comparison result
+//! ```silk
+//! import silk.order as Order
+//!
+//! pub fn main() -> i32 {
+//!   let low = Order.compare<i32>(2, 7)
+//!   let same = Order.compare<i32>(7, 7)
+//!   let high = Order.compare<i32>(9, 7)
+//!   if !Order.isLess(&low) {
+//!     return 1
+//!   }
+//!   if !Order.isEqual(&same) {
+//!     return 2
+//!   }
+//!   if !Order.isGreater(&high) {
+//!     return 3
+//!   }
+//!   return 42
+//! }
+//! ```
 
 // The comparison contract the ordered sequence operations resolve against. Ordinary Silk: the
 // interface selects a compiler-known comparison during specialization exactly as `Integer` does, and
@@ -41,20 +66,30 @@ pub struct Equal {}
 /// The left value orders after the right value.
 pub struct Greater {}
 
-/// The result of comparing two values in one order.
+/// A three-way comparison result that contains exactly one of [`Less`], [`Equal`], or [`Greater`].
 pub struct Ordering {
-  /// The comparison result, narrowed with `match`.
+  /// The comparison result, which a `match` expression narrows to one outcome type.
   pub value: Less | Equal | Greater
 }
 
 /// Static strict-ordering contract for primitive comparable values.
 ///
+/// # When to use
+///
+/// Use this interface when a generic algorithm needs strict ordering through `<`.
+///
 /// # Details
 ///
 /// A witness supplies the strict `lessThan` the operator `<` spells. Equality is derived from it
-/// rather than declared, so a witness can never disagree with itself about which values are equal.
+/// rather than declared, so a witness cannot disagree with itself about which values are equal.
+///
+/// # Gotchas
+///
+/// An implementation must define a strict total order. If two different values are incomparable,
+/// [`compare`] and [`equal`] treat them as equal.
 pub interface Order {
-  /// Reports whether `left` orders strictly before `right`.
+  /// Reports whether `left` orders strictly before `right`. An implementation must define a strict
+  /// total order so different values are not incomparable.
   operator < fn lessThan(left: &Self, right: &Self) -> bool
 }
 
@@ -71,10 +106,19 @@ impl Order for isize { lessThan: Intrinsic.isizeLessThan }
 
 /// Compares two values three ways using the concrete comparison selected during specialization.
 ///
+/// # When to use
+///
+/// Use this function when the caller needs to distinguish less, equal, and greater outcomes.
+///
 /// # Details
 ///
-/// Reads both operands twice without moving either, so the result is the same whichever order a
-/// caller evaluates the operands in.
+/// Calls the selected strict comparison with `left, right`. If that result is false, it calls the
+/// comparison with `right, left`. The function then consumes both owned arguments.
+///
+/// # Gotchas
+///
+/// If neither comparison is true, this function returns [`Equal`]. The witness must not leave two
+/// different values incomparable.
 pub fn compare<T: Order>(left: T, right: T) -> Ordering {
   if (&left) < (&right) {
     return Ordering { value: Less {} }
@@ -85,12 +129,18 @@ pub fn compare<T: Order>(left: T, right: T) -> Ordering {
   return Ordering { value: Equal {} }
 }
 
-/// Reports whether one value orders strictly before another.
+/// Reports whether `left` orders strictly before `right` under the selected [`Order`] witness. The
+/// function calls the witness once and then consumes both owned arguments.
 pub fn less<T: Order>(left: T, right: T) -> bool {
   return (&left) < (&right)
 }
 
-/// Reports whether neither value orders before the other.
+/// Reports whether neither value orders before the other under the selected [`Order`] witness. The
+/// function calls the witness once or twice and then consumes both owned arguments.
+///
+/// # Gotchas
+///
+/// If the witness leaves different values incomparable, this function reports them as equal.
 pub fn equal<T: Order>(left: T, right: T) -> bool {
   if (&left) < (&right) {
     return false

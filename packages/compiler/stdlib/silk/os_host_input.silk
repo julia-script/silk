@@ -11,9 +11,26 @@
 //! boundary reports. An absent argument or variable remains [`None`]; an unavailable working
 //! directory and contradictory host lengths become [`HostInputError`].
 //!
+//! Constructing the provider reads no host state. Portable code performs lookups after the
+//! application supplies `&mut OsHostInput` for the `&mut HostInput` requirement. Each owned result
+//! also requires an allocator.
+//!
 //! # Gotchas
 //! Reachable OS host-input operations are native-only. Direct WebAssembly compilation rejects them
 //! instead of inventing process-global imports; evaluator execution requires an injected adapter.
+//!
+//! # Examples
+//! ## Construct the native provider without reading process state
+//!
+//! ```silk
+//! import silk.os_host_input as OsHostInput
+//!
+//! pub fn main() -> i32 {
+//!   let provider = OsHostInput.make()
+//!   drop provider
+//!   return 42
+//! }
+//! ```
 
 import silk.bool as bool
 import silk.bytes {
@@ -35,11 +52,25 @@ import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
 
-/// Native provider reading the process command line, environment, and working directory. It owns no
-/// state; all three belong to the process rather than to the value.
+/// A stateless native [`HostInput`] provider for process arguments, environment, and directory.
+///
+/// # Details
+///
+/// The process owns the source values. Each successful byte lookup returns a new owned copy through
+/// the portable service.
 pub struct OsHostInput {}
 
-/// Constructs the process-backed input provider.
+/// Creates a stateless provider for native process input.
+///
+/// # When to use
+///
+/// Use this function at a native application edge. Provide the result as `&mut HostInput` to
+/// portable lookup operations in `silk.host_input`.
+///
+/// # Details
+///
+/// Construction performs no lookup and cannot fail. Argument and environment absence remain
+/// ordinary `None` values when a later lookup runs.
 pub fn make() -> OsHostInput {
   return OsHostInput {}
 }
@@ -99,8 +130,8 @@ effect fn ownedPrefix(view: &[u8], length: usize) -> Bytes ! OutOfMemoryError ? 
 /// Copies one host value into independently owned bytes, growing the buffer once when needed.
 ///
 /// The low-level boundary reports the value's complete byte length even when the buffer it received
-/// was too small, so a second pass with an exactly sized buffer always completes. An absent value is
-/// `None` with the not-found reason; any other reason is a host error.
+/// was too small, so a second pass with an exactly sized buffer always completes. An absent value
+/// is `None` with the not-found reason; any other reason is a host error.
 effect fn fetch(
   selector: i32,
   index: usize,

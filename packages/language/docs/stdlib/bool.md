@@ -14,6 +14,22 @@ when an operation must be passed or selected by name.
 These functions return the same Boolean results as the operators. They allocate no storage and
 add no Effect channels.
 
+## Examples
+
+### Compose named Boolean operations
+
+```silk
+import silk.bool as Bool
+
+pub fn main() -> i32 {
+  let accepted = Bool.equals(true, Bool.not(false))
+  if Bool.notEquals(accepted, true) {
+    return 1
+  }
+  return 42
+}
+```
+
 Import as `bool` with `import silk.bool`.
 
 Public declarations: 3.

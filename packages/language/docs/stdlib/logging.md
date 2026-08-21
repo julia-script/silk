@@ -6,9 +6,9 @@ Typed semantic logging with replaceable stdout and bounded in-memory providers.
 
 ## When to use
 
-Require [`Logger`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572) when code emits whole semantic messages but should not choose their storage or
-destination. Provide [`StdoutLogger`](#declaration-73696c6b2f6c6f6767696e673a3a5374646f75744c6f67676572) at a process edge, or [`InMemoryLogger`](#declaration-73696c6b2f6c6f6767696e673a3a496e4d656d6f72794c6f67676572) for deterministic
-observation and failure testing.
+Require [`Logger`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572) when code emits whole semantic messages but should not choose storage or
+destination. Provide [`StdoutLogger`](#declaration-73696c6b2f6c6f6767696e673a3a5374646f75744c6f67676572) at a process edge. Use [`InMemoryLogger`](#declaration-73696c6b2f6c6f6767696e673a3a496e4d656d6f72794c6f67676572) for
+deterministic observation and failure tests.
 
 ## Details
 
@@ -19,8 +19,42 @@ bytes, and exposes attempted calls separately from successful commits.
 
 ## Gotchas
 
-Logger failures are typed [`LogError`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72) values and do not imply that a message committed. Bounded
-accessors require a committed event and valid byte index; invalid indices trap.
+Logger failures are typed [`LogError`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72) values and do not guarantee that a message committed.
+In-memory accessors require an event index less than [`length`](#declaration-73696c6b2f6c6f6767696e673a3a6c656e677468) and a valid message-byte index.
+
+## Examples
+
+### Record and inspect one warning
+
+```silk
+import silk.effect as Effect
+
+import silk.logging as Logging
+
+import silk.usize as usize
+
+effect fn program() -> i32
+! Logging.LogError {
+  let mut logger = Logging.memory()
+  let logged = run Effect.logAt(Logging.warning(), "cache miss")
+    |> Effect.provideMut(&mut logger)
+  if Logging.length(&logger) != usize.ONE {
+    return 1
+  }
+  if Logging.levelCode(Logging.levelAt(&logger, usize.ZERO)) != 3 {
+    return 2
+  }
+  return 42
+}
+
+effect fn recover(error: Logging.LogError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}
+```
 
 Import as `Logger` with `import silk.logging`.
 
@@ -34,7 +68,7 @@ Public declarations: 20.
 pub struct LogLevel
 ```
 
-A closed bootstrap logging severity.
+One logging severity from Trace through Error.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a7472616365"></a>
 
@@ -44,7 +78,7 @@ A closed bootstrap logging severity.
 pub fn trace() -> LogLevel
 ```
 
-Selects Trace severity.
+Returns the Trace severity for detailed diagnostic events.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6465627567"></a>
 
@@ -54,7 +88,7 @@ Selects Trace severity.
 pub fn debug() -> LogLevel
 ```
 
-Selects Debug severity.
+Returns the Debug severity for development diagnostic events.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a696e666f"></a>
 
@@ -64,7 +98,7 @@ Selects Debug severity.
 pub fn info() -> LogLevel
 ```
 
-Selects Info severity.
+Returns the Info severity for ordinary operational events.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a7761726e696e67"></a>
 
@@ -74,7 +108,7 @@ Selects Info severity.
 pub fn warning() -> LogLevel
 ```
 
-Selects Warning severity.
+Returns the Warning severity for a recoverable abnormal condition.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6572726f72"></a>
 
@@ -84,7 +118,7 @@ Selects Warning severity.
 pub fn error() -> LogLevel
 ```
 
-Selects Error severity.
+Returns the Error severity for an operation that did not complete as intended.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6c6576656c436f6465"></a>
 
@@ -94,7 +128,7 @@ Selects Error severity.
 pub fn levelCode(level: LogLevel) -> i32
 ```
 
-Returns the stable bootstrap ordinal for one logging severity.
+Returns the stable ordinal from `0` for Trace through `4` for Error.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72"></a>
 
@@ -104,7 +138,12 @@ Returns the stable bootstrap ordinal for one logging severity.
 pub struct LogError
 ```
 
-A typed failure reported by a Logger provider.
+A typed failure reported by one [`Logger`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572) provider.
+
+### Details
+
+The numeric code belongs to the provider. Portable code can recover from `LogError` without
+assigning one meaning to that code across different providers.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6572726f72436f6465"></a>
 
@@ -114,7 +153,12 @@ A typed failure reported by a Logger provider.
 pub fn errorCode(error: LogError) -> i32
 ```
 
-Returns the provider-defined bootstrap failure code.
+Returns the provider-defined failure code for diagnostics.
+
+### Gotchas
+
+Interpret this code only with knowledge of the selected provider. Different providers can use
+the same code for different failures.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572"></a>
 
@@ -124,7 +168,17 @@ Returns the provider-defined bootstrap failure code.
 pub service Logger
 ```
 
-Receives one complete semantic message per invocation.
+A replaceable service that receives one complete semantic log event per call.
+
+### When to use
+
+Use this service when library code must emit events without selecting stdout, memory, or another
+destination.
+
+### Details
+
+Each call carries one severity and one valid UTF-8 message. The service does not require a
+newline, timestamp, prefix, allocation, or output destination. The provider owns those choices.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a4c6f676765723a3a6f7065726174696f6e3a6c6f67"></a>
 
@@ -134,7 +188,12 @@ Receives one complete semantic message per invocation.
 effect fn log(level: LogLevel, message: string) -> () ! LogError ? &mut Logger
 ```
 
-Submits one complete message at one severity to the active provider.
+Submits one complete UTF-8 message at one severity to the active provider.
+
+#### Details
+
+The call preserves the message bytes exactly. It does not add a newline, severity label,
+timestamp, or other formatting. A provider failure produces [`LogError`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72).
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a5374646f75744c6f67676572"></a>
 
@@ -144,7 +203,12 @@ Submits one complete message at one severity to the active provider.
 pub struct StdoutLogger
 ```
 
-A process-output Logger provider with no mandatory formatting or allocation.
+A [`Logger`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572) provider that writes each complete message to process standard output.
+
+### Details
+
+The provider ignores the severity for physical formatting and writes only the UTF-8 message
+bytes. It adds no newline and performs no message allocation.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a7374646f7574"></a>
 
@@ -154,7 +218,12 @@ A process-output Logger provider with no mandatory formatting or allocation.
 pub fn stdout() -> StdoutLogger
 ```
 
-Constructs a Logger that forwards complete messages to process stdout.
+Creates a logger that forwards each complete message to process standard output.
+
+### Gotchas
+
+The caller must include a newline in `message` when line separation is required. A standard-
+output write failure becomes a provider-defined [`LogError`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72).
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -180,7 +249,18 @@ log = StdoutLogger.writeStdout
 pub struct InMemoryLogger
 ```
 
-A deterministic retaining Logger provider implemented entirely in Silk.
+A deterministic [`Logger`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572) provider that retains up to eight events and 64 total message bytes.
+
+### When to use
+
+Use this provider in tests that must inspect event order, severity, message bytes, or failure
+behavior without process output.
+
+### Details
+
+The provider copies each committed message into fixed internal storage. It records attempted
+calls separately from committed events. Capacity failure and configured failure do not commit an
+event.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6d656d6f7279"></a>
 
@@ -190,7 +270,12 @@ A deterministic retaining Logger provider implemented entirely in Silk.
 pub fn memory() -> InMemoryLogger
 ```
 
-Constructs a bounded in-memory Logger for up to eight events and 64 message bytes.
+Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
+
+### Gotchas
+
+A call fails when eight events are already committed. A call also fails when its bytes exceed
+the remaining 64-byte total. Neither failure commits the event.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6d656d6f72794661696c4174"></a>
 
@@ -200,7 +285,12 @@ Constructs a bounded in-memory Logger for up to eight events and 64 message byte
 pub fn memoryFailAt(failAt: usize) -> InMemoryLogger
 ```
 
-Constructs an in-memory Logger that rejects one zero-based invocation ordinal.
+Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
+
+### Details
+
+The configured attempt increases [`attempts`](#declaration-73696c6b2f6c6f6767696e673a3a617474656d707473) but does not increase [`length`](#declaration-73696c6b2f6c6f6767696e673a3a6c656e677468) or consume
+message capacity. Other attempts retain the eight-event and 64-byte limits of [`memory`](#declaration-73696c6b2f6c6f6767696e673a3a6d656d6f7279).
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a696d706c656d656e746174696f6e3a31"></a>
 
@@ -226,7 +316,12 @@ log = InMemoryLogger.record
 pub fn length(self: &silk/logging.InMemoryLogger) -> usize
 ```
 
-Returns the number of committed Logger invocations.
+Returns the number of events that the in-memory logger committed.
+
+### Details
+
+Failed attempts do not increase this count. Use [`attempts`](#declaration-73696c6b2f6c6f6767696e673a3a617474656d707473) when rejected calls must also be
+observed.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6c6576656c4174"></a>
 
@@ -236,7 +331,12 @@ Returns the number of committed Logger invocations.
 pub fn levelAt(self: &silk/logging.InMemoryLogger, index: usize) -> LogLevel
 ```
 
-Returns the severity of one committed invocation.
+Returns the severity of one committed event.
+
+### Gotchas
+
+`index` must be less than [`length`](#declaration-73696c6b2f6c6f6767696e673a3a6c656e677468). An unused index below eight returns the initial Trace
+value instead of trapping. An index of eight or more traps.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6d6573736167654c656e6774684174"></a>
 
@@ -246,7 +346,12 @@ Returns the severity of one committed invocation.
 pub fn messageLengthAt(self: &silk/logging.InMemoryLogger, index: usize) -> usize
 ```
 
-Returns the byte length of one committed message.
+Returns the UTF-8 byte length of one committed message.
+
+### Gotchas
+
+`index` must be less than [`length`](#declaration-73696c6b2f6c6f6767696e673a3a6c656e677468). An unused index below eight returns zero instead of
+trapping. An index of eight or more traps.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a6d657373616765427974654174"></a>
 
@@ -256,7 +361,13 @@ Returns the byte length of one committed message.
 pub fn messageByteAt(self: &silk/logging.InMemoryLogger, eventIndex: usize, byteIndex: usize) -> u8
 ```
 
-Returns one byte from a committed message.
+Returns one UTF-8 byte from a committed message.
+
+### Gotchas
+
+`eventIndex` must be less than [`length`](#declaration-73696c6b2f6c6f6767696e673a3a6c656e677468). `byteIndex` must be less than
+[`messageLengthAt`](#declaration-73696c6b2f6c6f6767696e673a3a6d6573736167654c656e6774684174) for that event. An unused event or invalid byte index traps. An event index
+of eight or more also traps.
 
 <a id="declaration-73696c6b2f6c6f6767696e673a3a617474656d707473"></a>
 
@@ -266,4 +377,4 @@ Returns one byte from a committed message.
 pub fn attempts(self: &silk/logging.InMemoryLogger) -> usize
 ```
 
-Returns the number of attempted Logger invocations.
+Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72).

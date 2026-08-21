@@ -17,6 +17,48 @@ the entire input: whitespace, a leading `+`, or trailing characters produce [`No
 while syntactically valid values outside the destination range produce [`OutOfRange`](#declaration-73696c6b2f666f726d61743a3a4f75744f6652616e6765). Signed
 parsing accepts `-0`; unsigned parsing rejects any sign.
 
+## Examples
+
+### Parse and render one signed integer
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.format as Format
+
+import silk.i64 as i64
+
+import silk.result as Result
+
+import silk.string as String
+
+effect fn convert() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let parsed = Format.signedValue("-42")
+    |> Result.unwrapOr<i64, Format.ParseError>(0)
+  let rendering = Format.signedText(parsed)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let rendered = run rendering
+  let text = String.view(&rendered)
+  if text == "-42" {} else {
+    return 0
+  }
+  return 0 - parsed
+    |> i64.toI32
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(convert(), recover)
+}
+```
+
 Import as `Format` with `import silk.format`.
 
 Public declarations: 17.
@@ -29,7 +71,7 @@ Public declarations: 17.
 pub struct NotANumber
 ```
 
-The byte offset of the first byte that is not part of a decimal number.
+The byte offset where complete decimal parsing cannot continue.
 
 <a id="declaration-73696c6b2f666f726d61743a3a4e6f74414e756d6265723a3a6669656c643a30"></a>
 
@@ -39,7 +81,7 @@ The byte offset of the first byte that is not part of a decimal number.
 pub offset: usize
 ```
 
-The offset at which reading stopped. Empty text reports offset zero.
+The offset where reading stopped. It can equal the byte length when a digit was required.
 
 <a id="declaration-73696c6b2f666f726d61743a3a4f75744f6652616e6765"></a>
 
@@ -83,8 +125,7 @@ Renders an unsigned value as decimal text in freshly owned storage.
 
 ### Details
 
-Every unsigned integer module reaches this by widening, so the text of a `u8` and the text of the
-same number as a `u64` are the same bytes.
+The result contains ASCII decimal digits without a sign or leading zeroes. Zero produces `"0"`.
 
 <a id="declaration-73696c6b2f666f726d61743a3a7369676e656454657874"></a>
 
@@ -98,8 +139,8 @@ Renders a signed value as decimal text in freshly owned storage, with a leading 
 
 ### Details
 
-The digits are taken from the value's negative form, so `i64.MIN` needs no special case: negating
-it would overflow, while negating one digit of it never does.
+The result contains ASCII decimal digits without leading zeroes. Zero produces `"0"`.
+The complete `i64` range, including `i64.MIN`, is supported.
 
 <a id="declaration-73696c6b2f666f726d61743a3a756e7369676e656456616c7565"></a>
 
@@ -180,7 +221,8 @@ Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
 pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseError>
 ```
 
-Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot hold.
+Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot
+hold.
 
 <a id="declaration-73696c6b2f666f726d61743a3a693856616c7565"></a>
 
@@ -230,4 +272,5 @@ Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`
 pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
-Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot hold.
+Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot
+hold.

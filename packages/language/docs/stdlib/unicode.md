@@ -22,6 +22,46 @@ results.
 This module implements canonical NFC and NFD, not compatibility normalization (NFKC or NFKD),
 locale-sensitive comparison, grapheme segmentation, or case folding.
 
+## Examples
+
+### Make canonically equivalent text compare equal
+
+```silk
+import silk.core as Core
+
+import silk.effect as Effect
+
+import silk.string as String
+
+import silk.unicode as Unicode
+
+effect fn normalize() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let composing = Unicode.normalizeNfc("e\u{301}")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let composed = run composing
+  let decomposing = Unicode.normalizeNfd("é")
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let decomposed = run decomposing
+  if String.view(&composed) != "é" {
+    return 0
+  }
+  if String.view(&decomposed) != "e\u{301}" {
+    return 0
+  }
+  return 42
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(normalize(), recover)
+}
+```
+
 Import as `Unicode` with `import silk.unicode`.
 
 Public declarations: 5.
@@ -49,7 +89,7 @@ tables contain, and changes neither a compiler type nor a target ABI.
 pub fn longestDecomposition() -> usize
 ```
 
-Returns the longest full canonical decomposition of a single scalar in the generated tables.
+Returns the longest full canonical decomposition of one scalar in the active Unicode data.
 
 <a id="declaration-73696c6b2f756e69636f64653a3a63616e6f6e6963616c436f6d62696e696e67436c617373"></a>
 
@@ -59,7 +99,7 @@ Returns the longest full canonical decomposition of a single scalar in the gener
 pub fn canonicalCombiningClass(scalar: u32) -> u32
 ```
 
-Returns a Unicode scalar's canonical combining class, or zero for a starter or table miss.
+Returns a Unicode scalar's canonical combining class, or zero for a starter or unknown value.
 
 <a id="declaration-73696c6b2f756e69636f64653a3a63616e6f6e6963616c436f6d62696e696e67436c6173733a3a706172616d657465723a30"></a>
 
@@ -81,6 +121,16 @@ pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Al
 
 Returns the Normalization Form D of text: fully decomposed, in canonical order.
 
+### When to use
+
+Use this function when consumers require decomposed scalars in canonical combining-class order.
+Use [`normalizeNfc`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6663) for ordinary normalized storage and comparison.
+
+### Details
+
+The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
+Canonically equivalent inputs produce equal NFD text under the same Unicode data version.
+
 <a id="declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6663"></a>
 
 ## `normalizeNfc`
@@ -91,7 +141,12 @@ pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Al
 
 Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.
 
+### When to use
+
+Use this function for ordinary normalized storage and canonical-equivalence comparison. Use
+[`normalizeNfd`](#declaration-73696c6b2f756e69636f64653a3a6e6f726d616c697a654e6664) when a consumer requires decomposed scalars.
+
 ### Details
 
-This is the operation that lets a precomposed `é` and a decomposed `é` compare equal, and it
-only does so where source asks for it.
+The function does not change `value`. It returns freshly owned UTF-8 text and can allocate.
+Canonically equivalent inputs produce equal NFC text under the same Unicode data version.

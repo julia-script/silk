@@ -21,6 +21,38 @@ The compiler does not collect these metrics. A provider calls [`recordAcquire`](
 Recording is intentionally minimal and assumes every release corresponds to an earlier acquire.
 The module does not identify allocations or repair an unbalanced provider.
 
+## Examples
+
+### Publish a snapshot of one allocation ledger
+
+```silk
+import silk.metrics as Metrics
+
+import silk.usize as usize
+
+pub fn main() -> i32 {
+  let mut metrics = Metrics.make()
+  Metrics.recordAcquire(&mut metrics)
+  Metrics.recordAcquire(&mut metrics)
+  Metrics.recordRelease(&mut metrics)
+
+  let snapshot = Metrics.copy(&metrics)
+  if snapshot.acquired != usize.add(0, 2) {
+    return 1
+  }
+  if snapshot.released != usize.ONE {
+    return 2
+  }
+  if Metrics.live(&snapshot) != usize.ONE {
+    return 3
+  }
+  if snapshot.peakLive != usize.add(0, 2) {
+    return 4
+  }
+  return 42
+}
+```
+
 Import as `AllocationMetrics` with `import silk.metrics`.
 
 Public declarations: 6.
@@ -33,7 +65,12 @@ Public declarations: 6.
 pub struct AllocationMetrics
 ```
 
-The acquire, release, and peak-live counts one allocation provider has observed.
+Copyable counters for one provider's successful allocation acquisitions and releases.
+
+### Details
+
+`acquired` and `released` are cumulative. `peakLive` is the greatest value of
+`acquired - released` observed by [`recordAcquire`](#declaration-73696c6b2f6d6574726963733a3a7265636f726441637175697265). Use [`live`](#declaration-73696c6b2f6d6574726963733a3a6c697665) for the current difference.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d6574726963733a3a6669656c643a30"></a>
 
@@ -43,7 +80,7 @@ The acquire, release, and peak-live counts one allocation provider has observed.
 pub acquired: usize
 ```
 
-Total successful acquisitions observed by the provider.
+The cumulative number of successful acquisitions recorded by the provider.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d6574726963733a3a6669656c643a31"></a>
 
@@ -53,7 +90,7 @@ Total successful acquisitions observed by the provider.
 pub released: usize
 ```
 
-Total releases observed by the provider.
+The cumulative number of releases recorded by the provider.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d6574726963733a3a6669656c643a32"></a>
 
@@ -63,7 +100,7 @@ Total releases observed by the provider.
 pub peakLive: usize
 ```
 
-Greatest number of simultaneously live allocations observed so far.
+The greatest live-allocation count observed after an acquisition.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -81,7 +118,7 @@ impl Copy for AllocationMetrics
 pub fn make() -> AllocationMetrics
 ```
 
-Constructs the zeroed counts a provider starts from.
+Creates a ledger with zero acquisitions, zero releases, and a zero peak.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a636f7079"></a>
 
@@ -91,8 +128,11 @@ Constructs the zeroed counts a provider starts from.
 pub fn copy(self: &silk/metrics.AllocationMetrics) -> AllocationMetrics
 ```
 
-Reads one independent snapshot through a shared borrow. Every field is Copy, so publishing
-the counts never moves the provider's own value out of it.
+Copies the current counters without moving or changing the provider's ledger.
+
+### When to use
+
+Use this function when a provider must publish metrics while it keeps the mutable ledger.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a6c697665"></a>
 
@@ -102,7 +142,12 @@ the counts never moves the provider's own value out of it.
 pub fn live(self: &silk/metrics.AllocationMetrics) -> usize
 ```
 
-Returns the number of allocations acquired and not yet released.
+Returns `acquired - released`, which is the number of recorded live allocations.
+
+### Gotchas
+
+If `released` is greater than `acquired`, the unsigned subtraction traps. Record each release
+only after its matching successful acquisition.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a7265636f726441637175697265"></a>
 
@@ -112,7 +157,17 @@ Returns the number of allocations acquired and not yet released.
 pub fn recordAcquire(self: &mut silk/metrics.AllocationMetrics) -> ()
 ```
 
-Records one acquired allocation, raising the peak when the new live count exceeds it.
+Adds one successful acquisition and updates the peak live count.
+
+### Details
+
+Call this function only after the provider acquires the allocation. A failed acquisition must
+not change the counters.
+
+### Gotchas
+
+The operation traps if `acquired` overflows `usize`. An unbalanced prior release can also make
+the live-count subtraction trap.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a7265636f726452656c65617365"></a>
 
@@ -122,4 +177,13 @@ Records one acquired allocation, raising the peak when the new live count exceed
 pub fn recordRelease(self: &mut silk/metrics.AllocationMetrics) -> ()
 ```
 
-Records one released allocation. The peak keeps the highest live count ever observed.
+Adds one release without changing the historical peak live count.
+
+### Details
+
+Call this function after the provider releases one allocation that it previously recorded.
+
+### Gotchas
+
+This function does not check that a matching acquisition exists. If releases become greater
+than acquisitions, [`live`](#declaration-73696c6b2f6d6574726963733a3a6c697665) traps.
