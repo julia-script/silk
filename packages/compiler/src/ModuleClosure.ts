@@ -128,14 +128,6 @@ const canonicalRoots = (
   )
 }
 
-const spelling = (source: SourceFile.SourceFile, token: Token.Token): string => {
-  const bytes = Option.getOrThrowWith(
-    SourceFile.slice(source, token.span),
-    () => new RangeError(`Import token span does not belong to source ${source.id}`),
-  )
-  return Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
-}
-
 const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
   SyntaxTree.unavailableElement(parent.children, parent)
 
