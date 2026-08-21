@@ -1,3 +1,4 @@
+import type * as SourceFile from './SourceFile.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 
@@ -47,3 +48,28 @@ export const segments = (self: SyntaxTree.Node): ReadonlyArray<Token.Token> =>
       (element): element is Token.Token => element._tag === 'Token' && isSegmentKind(element.kind),
     ),
   )
+
+const decoder = new TextDecoder()
+
+const tokenText = (source: SourceFile.SourceFile, token: Token.Token): string =>
+  decoder.decode(Uint8Array.from(source.bytes.slice(token.span.start, token.span.end)))
+
+/** Renders the import path in source-spelling form (segments joined by "/"). */
+export const spelling = (
+  source: SourceFile.SourceFile,
+  path: SyntaxTree.Node,
+): string | undefined => {
+  const pathSegments = segments(path)
+  if (pathSegments.length === 0) return undefined
+  return pathSegments.map((segment) => tokenText(source, segment)).join('/')
+}
+
+/** Renders the import path in canonical form (segments joined by "."). */
+export const canonicalTarget = (
+  source: SourceFile.SourceFile,
+  path: SyntaxTree.Node,
+): string | undefined => {
+  const pathSegments = segments(path)
+  if (pathSegments.length === 0) return undefined
+  return pathSegments.map((segment) => tokenText(source, segment)).join('.')
+}

@@ -169,12 +169,16 @@ const parseModule = (
   const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
-    const tokens = path === undefined ? [] : ImportPath.segments(path)
-    if (path === undefined || tokens.length === 0 || !SyntaxTree.isAvailableSyntax(path)) {
+    if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) {
       return [Object.freeze({ syntax: element, path: path ?? element })]
     }
-    const sourceSpelling = tokens.map((token) => spelling(syntax.source, token)).join('.')
-    const canonicalTarget = tokens.map((token) => spelling(syntax.source, token)).join('/')
+    const joined = ImportPath.spelling(syntax.source, path)
+    if (joined === undefined) {
+      return [Object.freeze({ syntax: element, path })]
+    }
+    const sourceSpelling = joined.split("/").join(".")
+    const canonicalTarget = joined
+    const tokens = ImportPath.segments(path)
     const token = tokens.at(0)
     if (token === undefined) throw new RangeError('Available import path lost its first segment')
     return [Object.freeze({ syntax: element, path, sourceSpelling, canonicalTarget, token })]
