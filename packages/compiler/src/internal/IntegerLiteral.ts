@@ -1,3 +1,4 @@
+import * as ByteClass from './ByteClass.js'
 import * as DigitSeparator from './DigitSeparator.js'
 
 /** The numeric base an integer literal's digits are read in. */
@@ -17,9 +18,6 @@ export interface Base {
 
 const codeAt = (digits: Digits, index: number): number =>
   typeof digits === 'string' ? digits.charCodeAt(index) : (digits[index] ?? Number.NaN)
-
-const digitValue = (byte: number): number =>
-  byte <= 0x39 ? byte - 0x30 : byte <= 0x46 ? byte - 0x41 + 10 : byte - 0x61 + 10
 
 const make = (radix: Radix, width: 0 | 2): Base => Object.freeze({ radix, width })
 
@@ -90,7 +88,7 @@ export const magnitude = (digits: Digits): bigint => {
   for (let index = base.width; index < digits.length; index += 1) {
     const code = codeAt(digits, index)
     if (DigitSeparator.isSeparator(code)) continue
-    value = value * radix + BigInt(digitValue(code))
+    value = value * radix + BigInt(ByteClass.hexValue(code))
   }
   return value
 }

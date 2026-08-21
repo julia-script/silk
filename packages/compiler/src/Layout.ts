@@ -1,3 +1,4 @@
+import { alignUp } from './internal/Align.js'
 import * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -495,8 +496,6 @@ const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
   })
 }
 
-const alignUp = (offset: number, alignment: number): number =>
-  Math.ceil(offset / alignment) * alignment
 
 const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined => {
   const stride = alignUp(element.size, element.alignment)

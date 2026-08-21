@@ -1,3 +1,4 @@
+import * as ByteClass from './internal/ByteClass.js'
 import type * as Token from './Token.js'
 
 /** The semantic category selected by a static-literal modifier and delimiter. */
@@ -71,18 +72,6 @@ const matches = (bytes: ByteSequence, index: number, form: LiteralForm): boolean
 export const recognize = (bytes: ByteSequence, index = 0): LiteralForm | undefined =>
   forms.find((form) => matches(bytes, index, form))
 
-const isAsciiLetter = (byte: number | undefined): boolean =>
-  byte !== undefined && ((byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a))
-
-const isDecimalDigit = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x30 && byte <= 0x39
-
-const isIdentifierStart = (byte: number | undefined): boolean =>
-  byte === 0x5f || isAsciiLetter(byte)
-
-const isIdentifierContinue = (byte: number | undefined): boolean =>
-  isIdentifierStart(byte) || isDecimalDigit(byte)
-
 /** One identifier-like spelling reserved as an unrecognized adjacent literal modifier. */
 export interface UnknownIntroduction {
   readonly modifier: string
@@ -100,9 +89,9 @@ export const recognizeUnknown = (
   bytes: ByteSequence,
   index = 0,
 ): UnknownIntroduction | undefined => {
-  if (!isIdentifierStart(bytes[index])) return undefined
+  if (!ByteClass.isIdentifierStart(bytes[index])) return undefined
   let cursor = index + 1
-  while (cursor < bytes.length && isIdentifierContinue(bytes[cursor])) cursor += 1
+  while (cursor < bytes.length && ByteClass.isIdentifierContinue(bytes[cursor])) cursor += 1
   if (bytes[cursor] !== quote) return undefined
   const modifier = String.fromCharCode(...bytes.slice(index, cursor))
   if (forms.some((form) => form.modifier === modifier)) return undefined

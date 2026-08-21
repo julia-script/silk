@@ -1,3 +1,4 @@
+import { alignUp } from './internal/Align.js'
 import * as Binary from '@silk-effect/wasm/Binary'
 import * as Builder from '@silk-effect/wasm/Builder'
 import * as Data from '@silk-effect/wasm/Data'
@@ -225,8 +226,6 @@ const laneStoreMnemonic = (
   return 'i32.store'
 }
 
-const alignUp = (value: number, alignment: number): number =>
-  Math.ceil(value / alignment) * alignment
 
 interface FrameRoot {
   readonly local: number
