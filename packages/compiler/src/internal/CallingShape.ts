@@ -6,4 +6,4 @@
  * re-exports the public CallingShape types.
  */
 
-export type { CallingShape, CallingScalar, CallingLane, CallingShapeSelector } from '../Layout.js'
+export type { CallingShape, CallingShapeNode } from '../Layout.js'
