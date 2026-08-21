@@ -7,12 +7,12 @@
  */
 
 export type {
-  SuspensionClassification,
-  SuspensionPointId,
   SuspensionBorrowIdentity,
-  SuspensionProviderArgument,
-  SuspensionRunner,
+  SuspensionClassification,
   SuspensionCompletion,
-  SuspensionRegion,
   SuspensionControlEdge,
+  SuspensionPointId,
+  SuspensionProviderArgument,
+  SuspensionRegion,
+  SuspensionRunner,
 } from '../Mir.js'

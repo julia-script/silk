@@ -6,6 +6,4 @@
  * re-exports the public fact model types.
  */
 
-export type {
-  DeclarationFact,
-} from '../DeclarationIndex.js'
+export type { DeclarationFact } from '../DeclarationIndex.js'

@@ -6,10 +6,16 @@
  * re-exports the public shared contract types.
  */
 
-export { BackendError, formatModuleViolations, terminationOf, suspensionPointKey, symbolFor } from '../Backend.js'
 export type {
-  Backend,
   Artifact,
+  Backend,
   CodegenRequest,
   ControlProvenance,
+} from '../Backend.js'
+export {
+  BackendError,
+  formatModuleViolations,
+  suspensionPointKey,
+  symbolFor,
+  terminationOf,
 } from '../Backend.js'
