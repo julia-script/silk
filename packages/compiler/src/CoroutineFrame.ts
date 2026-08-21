@@ -1,10 +1,8 @@
 import * as Instances from './Instances.js'
+import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import * as SilkType from './Type.js'
-
-const alignUp = (offset: number, alignment: number): number =>
-  Math.ceil(offset / alignment) * alignment
 
 const pointKey = (point: Mir.SuspensionPointId): string =>
   [

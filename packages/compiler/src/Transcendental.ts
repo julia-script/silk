@@ -16,7 +16,7 @@ export interface Plan {
 
 const f32: Plan = Object.freeze({
   width: 32,
-  canonicalNaN: 0x7fc00000n,
+  canonicalNaN: FloatingPoint.canonicalNaN(32),
   one: 0x3f800000n,
   half: 0x3f000000n,
   four: 0x40800000n,
@@ -53,7 +53,7 @@ const f32: Plan = Object.freeze({
 
 const f64: Plan = Object.freeze({
   width: 64,
-  canonicalNaN: 0x7ff8000000000000n,
+  canonicalNaN: FloatingPoint.canonicalNaN(64),
   one: 0x3ff0000000000000n,
   half: 0x3fe0000000000000n,
   four: 0x4010000000000000n,

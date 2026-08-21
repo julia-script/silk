@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as ByteClass from './internal/ByteClass.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
@@ -16,18 +17,6 @@ export interface LexicalResult {
 
 const isWhitespace = (byte: number | undefined): boolean =>
   byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
-
-const isAsciiLetter = (byte: number | undefined): boolean =>
-  byte !== undefined && ((byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a))
-
-const isDecimalDigit = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x30 && byte <= 0x39
-
-const isIdentifierStart = (byte: number | undefined): boolean =>
-  byte === 0x5f || isAsciiLetter(byte)
-
-const isIdentifierContinue = (byte: number | undefined): boolean =>
-  isIdentifierStart(byte) || isDecimalDigit(byte)
 
 const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2f && bytes[index + 1] === 0x2f
@@ -85,8 +74,8 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
   const byte = bytes[index]
   return (
     isWhitespace(byte) ||
-    isIdentifierStart(byte) ||
-    isDecimalDigit(byte) ||
+    ByteClass.isIdentifierStart(byte) ||
+    ByteClass.isDecimalDigit(byte) ||
     isLiteralStart(bytes, index) ||
     isLineCommentStart(bytes, index) ||
     compoundPunctuationKind(bytes, index) !== undefined ||
@@ -376,14 +365,14 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
-    if (isIdentifierStart(byte)) {
+    if (ByteClass.isIdentifierStart(byte)) {
       index += 1
-      while (index < bytes.length && isIdentifierContinue(bytes[index])) index += 1
+      while (index < bytes.length && ByteClass.isIdentifierContinue(bytes[index])) index += 1
       pushToken(keywordKind(bytes, start, index), start, index)
       continue
     }
 
-    if (isDecimalDigit(byte)) {
+    if (ByteClass.isDecimalDigit(byte)) {
       const base = IntegerLiteral.recognize(bytes, index)
       if (base.radix !== 10) {
         index += base.width

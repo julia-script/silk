@@ -303,7 +303,7 @@ export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey): st
         .map(injectivePart)
         .join('_')}`
 
-const suspensionPointKey = (point: Mir.SuspensionPointId): string =>
+export const suspensionPointKey = (point: Mir.SuspensionPointId): string =>
   `${Instances.keyText(point.owner)}\u0000${point.sourceId}\u0000${point.spanStart}\u0000${point.spanEnd}\u0000${point.ordinal}`
 
 interface LineTable {
