@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -34,21 +35,30 @@ const installedVersion = (name: string): string =>
     readFileSync(resolve(compilerCliPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
   ).version
 
-const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
-  const result = spawnSync(
-    'pnpm',
-    [
-      'install',
-      '--ignore-scripts',
-      '--offline',
-      ...(ignoreWorkspace ? ['--ignore-workspace'] : []),
-    ],
-    {
-      cwd,
-      encoding: 'utf8',
-      timeout: 60_000,
-    },
-  )
+const installedDependencyVersion = (parent: string, name: string): string =>
+  JSON.parse(
+    readFileSync(
+      resolve(
+        realpathSync(resolve(compilerCliPackageRoot, `node_modules/${parent}`)),
+        `../${name}/package.json`,
+      ),
+      'utf8',
+    ),
+  ).version
+
+const consumerWorkspace = (configuration = ''): string =>
+  `overrides:\n  'uuid': ${installedDependencyVersion('effect', 'uuid')}\n${configuration}`
+
+test('consumer workspaces pin Effect transitive ranges to installed versions', () => {
+  expect(consumerWorkspace()).toContain(`  'uuid': ${installedDependencyVersion('effect', 'uuid')}`)
+})
+
+const installConsumer = (cwd: string): void => {
+  const result = spawnSync('pnpm', ['install', '--ignore-scripts', '--offline'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 60_000,
+  })
   if (result.status === 0) return
   throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
 }
@@ -145,7 +155,8 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    installConsumer(consumerRoot, true)
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -422,7 +433,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1025,7 +1038,9 @@ test('the documentation release candidate exposes its formatter-neutral actors',
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
     const api = JSON.parse(
@@ -1109,7 +1124,9 @@ test('the formatter release candidate installs offline with root and deep API pa
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1246,7 +1263,9 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      consumerWorkspace(
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1390,7 +1409,8 @@ test('the wasm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    installConsumer(consumerRoot, true)
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -1548,7 +1568,9 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      consumerWorkspace(
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1645,10 +1667,8 @@ test('the WebContainer release candidate exposes every SSR-safe actor subpath', 
         },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
     const inspected = JSON.parse(
       execFileSync(
         process.execPath,
