@@ -19,12 +19,11 @@ SLP (direction and coherence)
 ## Proposals
 
 - [SLP-0001: Independently resumable Effect executions](0001-independently-resumable-effect-executions/proposal.md)
-  — Candidate; fixed scheduler-neutral execution and parking direction for implementing fibers in
-  ordinary source without selecting the canonical Fiber API, awaiting adversarial review.
+  — Accepted direction; scheduler-neutral independently resumable execution and race-free parking
+  for ordinary-source owners without selecting the canonical Fiber API.
 - [SLP-0002: Allocation-backed local shared ownership](0002-allocation-backed-local-shared-ownership/proposal.md)
-  — Candidate; fixed explicit single-threaded shared-lifetime direction with scoped interior access
-  and last-handle cleanup, without atomics or compiler-known stateful actors, awaiting adversarial
-  review.
+  — Accepted direction; explicit single-threaded shared lifetime with scoped interior access and
+  last-handle cleanup, without atomics or compiler-known stateful actors.
 - [SLP-0003: Implicit ownership for park-capable Effect entries](0003-implicit-ownership-for-park-capable-effect-entries/proposal.md)
   — Draft; split from SLP-0001 to decide synchronous root execution ownership, storage, target
   validation, and final-outcome adaptation while preserving ordinary `run` as the desired API.

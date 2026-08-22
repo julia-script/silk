@@ -1,21 +1,21 @@
 # SLP-0001: Independently resumable Effect executions
 
 SLP: 0001
-Status: Candidate
-Revision: 30
+Status: Accepted direction
+Revision: 31
 Author: Julia Ortiz
 Created: 2026-08-21
 Updated: 2026-08-22
 Discussion: —
-Review record: [r001](reviews/r001.md), [r002](reviews/r002.md), [r004](reviews/r004.md), [r005](reviews/r005.md), [r006](reviews/r006.md), [r007](reviews/r007.md), [r008](reviews/r008.md), [r009](reviews/r009.md), [r010](reviews/r010.md), [r011](reviews/r011.md), [r012](reviews/r012.md), [r013](reviews/r013.md)
-Review state: Cap — 13 legacy unbounded rounds ended at r013; next `slp-3-resolve`
+Review record: [r001](reviews/r001.md), [r002](reviews/r002.md), [r003](reviews/r003.md), [r004](reviews/r004.md), [r005](reviews/r005.md), [r006](reviews/r006.md), [r007](reviews/r007.md), [r008](reviews/r008.md), [r009](reviews/r009.md), [r010](reviews/r010.md), [r011](reviews/r011.md), [r012](reviews/r012.md), [r013](reviews/r013.md)
+Review state: Cap — bounded review ended at r013 with revision 30 preserved; author resolution completed at revision 31
 Depends on: [values and types](../../docs/language/values-and-types.md), [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md), [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md), [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md), [Effect suspension](../../docs/language/effect-suspension.md), SLP-0002
 Split from: —
 Split into: SLP-0002, SLP-0003
 Supersedes: —
 Superseded by: —
 Revisit when: —
-Resolution: —
+Resolution: Author accepted the revision 30 Scheduler-grade capability point after resolving SLP-0002 as Accepted direction. The selected model retains owner-controlled first activation, task-specific push readiness, one recoverable caller-funded package, and the fixed affine lifecycle and cleanup contracts; non-directional compiler, diagnostic, and cross-engine realization questions are delegated to OpenSpec.
 OpenSpec handoff: —
 
 ## Summary
@@ -1849,12 +1849,13 @@ question: how ordinary Silk code can give several dormant values local access to
 lived mutable allocation. It is needed by the source sufficiency witness but is useful without
 parking, and it has its own allocation, access-conflict, and last-handle cleanup rules. This SLP
 therefore assumes that capability instead of smuggling shared state into Execution or making the
-compiler recognize Deferred and Scheduler. Every unresolved direct dependency gates this proposal:
+compiler recognize Deferred and Scheduler. Every direct dependency gates this proposal:
 [values and types](../../docs/language/values-and-types.md)'s canonical value foundation, [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md)'s generic and exact-representation model, [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md)'s
 unsafe and sealed-intrinsic authority, [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md)'s language/library/runtime layering, [Effect suspension](../../docs/language/effect-suspension.md)'s
 nested suspension and execution-stack contract, and SLP-0002's shared ownership must each be
-accepted or replaced consistently before this Candidate can advance to Accepted or an implementation
-handoff. The narrow sealed erasures selected here are an explicit extension point, not evidence that
+accepted or replaced consistently before an implementation handoff. The linked language foundations
+are Confirmed and SLP-0002 reached Accepted direction at revision 6, so this resolution satisfies
+the dependency gate. The narrow sealed erasures selected here are an explicit extension point, not evidence that
 [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md) already permits general existential callables.
 
 Implicit program-entry ownership is split into SLP-0003 because it answers a second independent
@@ -2080,6 +2081,11 @@ post-construction stack growth, or the absence of compiler-known scheduling acto
 - The diagnostic presentation and cached reachability fact for a failed `Intrinsic.NonParking`
   bound. Its semantics are fixed here as absence of transitive external-wake parking after
   specialization; only the internal summary representation remains open.
+- How OpenSpec scenarios encode observational all-or-nothing task publication, every row of the
+  wake-ordering table, and every completion, suspension, dormant-destroy, cancelled-Wake,
+  notification, and DestroyPending cleanup path across evaluator, native, and Wasm.
+- How exact executable identity plus sealed property conjuncts survive substitution, caching, and
+  serialization without becoming nominal conformance or a general intersection type.
 - Which target-specific post-construction growth increments and pooling strategy should realize the
   fatal continuation-stack contract after caller-funded packaging.
 - How a safe source wrapper pools the exact combined Layout without changing visible procurement
@@ -2113,14 +2119,19 @@ Wake must still never drive an execution inline.
 
 ## OpenSpec realization map
 
-No OpenSpec handoff exists while this proposal remains a Candidate. If the direction is later
-accepted, likely capability slices are:
+No OpenSpec handoff has been requested. The accepted direction has these likely capability slices:
 
 1. target-neutral suspension-mode summaries and the owner-neutral execution lifecycle;
 2. caller-funded combined Execution packaging, later fatal stack growth, drive, resume, and exact destroy;
 3. fixed-layout affine Wake, transient cell ownership, and race-free external-wake parking;
 4. evaluator, native, and Wasm parity for explicit executions; and
 5. static pay-for-use and alternate-owner separation evidence.
+
+Every slice must trace the fixed publication ordering, wake transition table, cleanup matrix,
+`Detached` and `NonParking` derivation, exact-executable-plus-sealed-property admission, Notifying and
+DestroyPending behavior, execution-local roots, and evaluator/native/Wasm parity into executable
+requirements and scenarios. Those realization choices may refine representation and diagnostics but
+may not reverse the accepted capability point.
 
 Canonical concurrency and Coroutine APIs require dependent SLP decisions before their own OpenSpec
 handoffs.
@@ -2159,3 +2170,4 @@ handoffs.
 | 28 | 2026-08-22 | Resolved fresh review r011. Removed `drive`'s unused result generic and made the sealed operation unit-returning; repaired the ordinary-source witness to current actor-local declaration, expression-match, literal, and exact-bound syntax; used nominal `TaskOutput` for homogeneous scheduling; inlined the future Coroutine body; corrected Timer Wake identity and local publication/O(1) wording; normalized lifecycle and cohesion terminology; specified wake-cell generation reuse and completion-loan rejection; and retained `O` plus `R(&O)` because current reusable callables cannot own affine detached state without becoming consuming. |
 | 29 | 2026-08-22 | Resolved fresh review r012. Added the sealed `Intrinsic.NonParking` fact for runtime-invoked callbacks; selected the narrow exact-executable-plus-sealed-property conjunction rule required by generic wrappers; kept readiness Notifying and non-drivable until endpoint callback return; normalized the direct activation case and prose to `TaskOutput`; added the explicit Timer-driver trace; separated execution and cell/package coordination states; and retained the compiler-evidenced `O` plus `R(&O)` endpoint split. |
 | 30 | 2026-08-22 | Resolved bounded four-lens review r013. Repaired the two zero-field `None {}` patterns to current Silk syntax; removed duplicated summary prose; described initial publication observationally rather than implying hardware atomicity; and clarified that a live Wake completes notification while only a still-live execution becomes Eligible. The scope, compiler, and dedicated simplification lenses found no material design blocker. |
+| 31 | 2026-08-22 | Completed author resolution. Retained revision 30's Scheduler-grade capability point, accepted the non-blocking review batch, recorded SLP-0002 revision 6 as satisfying the shared-ownership dependency, delegated compiler representation, diagnostics, ordering, cleanup, and cross-engine conformance mechanics to OpenSpec, reconstructed the cross-round finding ledger, and recorded Accepted direction. |

@@ -1,22 +1,22 @@
 # SLP-0002: Allocation-backed local shared ownership
 
 SLP: 0002
-Status: Candidate
-Revision: 5
+Status: Accepted direction
+Revision: 6
 Author: Julia Ortiz
 Created: 2026-08-21
-Updated: 2026-08-21
+Updated: 2026-08-22
 Discussion: —
 Review record: [r001](reviews/r001.md)
-Review state: —
+Review state: Clean — r001 found no proposal blocker; author resolution completed at revision 6
 Depends on: [values and types](../../docs/language/values-and-types.md), [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md), [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md), [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md)
 Split from: SLP-0001
 Split into: —
 Supersedes: —
 Superseded by: —
 Revisit when: —
-Resolution: —
-OpenSpec handoff: —
+Resolution: Author accepted the explicit allocation-backed local shared-ownership direction after r001 found no blocker. The selected model retains caller-visible allocation, local non-transferability, one exclusive callback-scoped access state, and exact last-handle cleanup; non-directional realization questions are delegated to OpenSpec.
+OpenSpec handoff: [establish-local-shared-ownership](../../openspec/changes/establish-local-shared-ownership/proposal.md), [add-local-shared-control-block-allocation](../../openspec/changes/add-local-shared-control-block-allocation/proposal.md), [add-local-shared-lifecycle-operations](../../openspec/changes/add-local-shared-lifecycle-operations/proposal.md), [add-local-shared-standard-library](../../openspec/changes/add-local-shared-standard-library/proposal.md), [add-local-shared-engine-parity](../../openspec/changes/add-local-shared-engine-parity/proposal.md), [prove-local-shared-slp1-sufficiency](../../openspec/changes/prove-local-shared-slp1-sufficiency/proposal.md)
 
 ## Summary
 
@@ -354,8 +354,9 @@ Shared.with(&cell, fn(_) {
 ```
 
 No nested case obtains a second reference. Cloning a handle or dropping a non-last alias during an
-access callback does not itself access `T` and remains legal; the borrowed receiver ensures that the
-active callback cannot drop the last handle.
+access callback changes only the independent strong-count state; it does not inspect or change the
+active access state and remains legal. The borrowed receiver ensures that the active callback cannot
+drop the last handle.
 
 ### Move affine values through ordinary state operations
 
@@ -416,6 +417,16 @@ If a later Effect fails while both handles are live, ordinary frame cleanup drop
 only the count transition to zero cleans `Token`. A fatal trap does not promise unwinding or cleanup,
 consistent with Silk's general rule.
 
+The same rule applies when the handles occupy different Effect frames:
+
+| Typed-failure cleanup step | Live handles before cleanup | Required transition |
+| --- | --- | --- |
+| a deeper failing frame drops its moved clone | two | strong count `2 -> 1`; `Token` remains live |
+| the caller frame propagates the typed failure and drops its original | one | strong count `1 -> 0`; clean `Token`, then release the allocation |
+
+No frame independently owns `Token` cleanup. Whichever ordinary cleanup path performs the final
+strong-count transition acquires the one last-handle obligation.
+
 `Shared.clone` is allocation-free and has no typed failure. If incrementing the target's local
 strong-count representation would overflow, it traps before changing the count and before producing
 a new handle. Wrapping the count, saturating it, or leaking a phantom obligation is invalid.
@@ -469,16 +480,19 @@ control-block byte layout may differ by target; observable ownership transitions
 2. `sharedFromAllocation` consumes that allocation and `T`, initializes one local control block, and
    returns one strong handle. Failure before the call leaves cleanup with ordinary source; a valid
    call cannot return partial state.
-3. `clone` increments the local strong count and returns one new non-Copy handle. It does not clone
-   `T` or allocate. If increment would overflow, it traps before changing the count or returning a
+3. `clone` increments the local strong count and returns one new non-Copy handle. Strong-count state
+   is independent of access state: cloning or dropping a non-last handle during active access does
+   not create another access to `T` or change which callback owns access. `clone` does not clone `T`
+   or allocate. If increment would overflow, it traps before changing the count or returning a
    handle.
 4. `with` and `withMut` both establish exclusive control-block access for exactly one ordinary
    callback invocation. `with` narrows the callback argument to a shared borrow.
 5. The callback's lexical borrow ends before the operation restores the access state and returns its
    result. It cannot suspend or escape the borrow.
 6. A conflicting reentrant access invokes the sealed operation's `onConflict` callback while the
-   existing access remains active. The selected public wrappers trap; another ordinary wrapper may
-   translate the same outcome into data. No conflict creates overlapping references.
+   existing access remains active. Observing the conflict does not alter or release that active
+   access state. The selected public wrappers trap; another ordinary wrapper may translate the same
+   outcome into data. No conflict creates overlapping references.
 7. Dropping a non-last handle decrements the local strong count and performs no `T` cleanup.
 8. Dropping the last handle obtains exclusive control-block ownership, cleans `T` exactly once, and
    releases the allocation exactly once. Fatal traps retain Silk's general no-unwind rule.
@@ -692,11 +706,15 @@ These questions may refine representation and diagnostics but may not change exp
 infallible clone with fatal overflow, exclusive callback access, non-transferability, or last-handle
 cleanup:
 
-- How control-block size, alignment, header fields, and target layout remain target-neutral while
-  ordinary source requests allocation.
+- How control-block size, alignment, header fields, strong-count overflow, and target layout remain
+  target-neutral while ordinary source requests the exact allocation.
+- How the control block retains allocation-release authority and proves the order “clean `T`, then
+  release storage” on every last-handle path.
+- How evaluator, native, and Wasm prove count checks before mutation, count/access-state
+  independence, non-mutating conflict observation, and identical last-drop behavior.
+- How callback-borrow escape diagnostics cover direct return, generic result, Effect capture, and
+  callable capture while identifying the `Shared` access boundary precisely.
 - Which compiler semantic fact records non-transferability before a parallel type model consumes it.
-- How callback-borrow escape and conflict diagnostics reuse ordinary ownership categories while
-  identifying the `Shared` access boundary precisely.
 
 ## Future directions
 
@@ -714,15 +732,14 @@ allocation identity, rather than value access, belongs in the public actor.
 
 ## OpenSpec realization map
 
-No OpenSpec handoff exists while this proposal remains a Candidate. If the direction is later
-accepted, likely capability slices are:
+The Accepted direction is handed off as these dependency-ordered capability slices:
 
-1. local shared ownership and execution-affinity semantic facts;
-2. caller-funded control-block allocation and from-allocation initialization;
-3. clone, scoped access, conflict, and last-handle cleanup;
-4. ordinary-source `Shared<T>` construction and safe wrappers;
-5. evaluator, native, and Wasm parity; and
-6. SLP-0001 ready-inbox and Deferred sufficiency evidence.
+1. [establish-local-shared-ownership](../../openspec/changes/establish-local-shared-ownership/proposal.md) — local shared ownership and execution-affinity semantic facts;
+2. [add-local-shared-control-block-allocation](../../openspec/changes/add-local-shared-control-block-allocation/proposal.md) — caller-funded control-block allocation and from-allocation initialization;
+3. [add-local-shared-lifecycle-operations](../../openspec/changes/add-local-shared-lifecycle-operations/proposal.md) — clone, scoped access, conflict, and last-handle cleanup;
+4. [add-local-shared-standard-library](../../openspec/changes/add-local-shared-standard-library/proposal.md) — ordinary-source `Shared<T>` construction and safe wrappers;
+5. [add-local-shared-engine-parity](../../openspec/changes/add-local-shared-engine-parity/proposal.md) — evaluator, native, and Wasm parity; and
+6. [prove-local-shared-slp1-sufficiency](../../openspec/changes/prove-local-shared-slp1-sufficiency/proposal.md) — SLP-0001 ready-inbox and Deferred sufficiency evidence.
 
 ## Revision and decision record
 
@@ -733,3 +750,4 @@ accepted, likely capability slices are:
 | 3 | 2026-08-21 | Selected one opaque `SharedCore<T>` and four operations: `sharedLayout`, `sharedFromAllocation`, `sharedClone`, and callback-shaped `sharedWithMut`. Derived public `Shared.with` by narrowing the exclusive borrow, selected public `Shared.withMut`, rejected a separate initial read-access primitive, and kept conflict policy in ordinary source through `onConflict`; the initial wrappers trap on every reentrant conflict. |
 | 4 | 2026-08-21 | Completed the ownership pressure cases: all initial reentrant access combinations conflict, callback borrows cannot escape, affine values move only through ordinary state operations, allocation failure creates no partial handle, acyclic last-handle cleanup is exact, strong cycles leak, local handles may be retained by Effects and executions but not transferred across threads, and strong-count overflow traps before mutation without adding a clone failure channel. |
 | 5 | 2026-08-21 | Author explicitly promoted the completed direction to Candidate. This revision changes lifecycle metadata only and freezes the dossier for fixed-revision adversarial review. |
+| 6 | 2026-08-22 | Resolved clean review r001. Made strong-count/access-state independence and non-mutating conflict observation explicit, added a multi-frame typed-failure cleanup trace, delegated target layout, release authority, engine parity, borrow-escape diagnostics, and non-transferability representation to OpenSpec, and recorded the author's Accepted direction outcome. |
