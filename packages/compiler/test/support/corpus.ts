@@ -1074,6 +1074,27 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 7 },
   },
+  // folded from OwnedAllocationAcceptance.test.ts: caller-funded shared-core initialization.
+  {
+    name: 'local-shared-control-block-allocation',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',

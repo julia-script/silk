@@ -5149,6 +5149,23 @@
       "identity": "LayoutOf"
     },
     {
+      "operation": "Intrinsic.sharedLayout",
+      "signature": "fn Intrinsic.sharedLayout<T>() -> Layout",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/shared.layout",
+      "identity": "SharedLayout"
+    },
+    {
+      "operation": "Intrinsic.sharedFromAllocation",
+      "signature": "unsafe fn Intrinsic.sharedFromAllocation<T>(allocation: Allocation, value: T) -> SharedCore<T>",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/shared.fromAllocation",
+      "identity": "SharedFromAllocation",
+      "invariant": "caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once"
+    },
+    {
       "operation": "Intrinsic.systemAllocationAcquire",
       "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemoryError>",
       "unsafe": false,

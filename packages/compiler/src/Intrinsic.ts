@@ -138,7 +138,7 @@ const admission = (family: string): AdmissionCategory => {
   if (family === 'Effect') return 'Effect'
   if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
   if (family === 'Layout' || family === 'string') return 'Representation'
-  if (family === 'RawBuffer' || family === 'Slot') return 'Ownership'
+  if (family === 'RawBuffer' || family === 'Slot' || family === 'Shared') return 'Ownership'
   return 'Language'
 }
 
@@ -190,12 +190,15 @@ const builtin = (options: {
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
-    ...(options.unsafe && (options.actor === 'RawBuffer' || options.actor === 'Slot')
+    ...(options.unsafe &&
+    (options.actor === 'RawBuffer' || options.actor === 'Slot' || options.actor === 'Shared')
       ? {
           invariant:
             options.actor === 'RawBuffer'
               ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
-              : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
+              : options.actor === 'Slot'
+                ? 'caller proves the selected slot is in bounds and has the initializedness state required by the operation'
+                : 'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once',
         }
       : {}),
     ...(options.actor === 'Host' && options.name === 'write'
@@ -289,6 +292,8 @@ const actor = (
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
+const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 0, 'T')
+const sharedTypeParameters = Object.freeze([sharedElement])
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
@@ -933,6 +938,34 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([]),
       result: 'Layout',
       semanticResult: Type.layout,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Shared',
+      name: 'layout',
+      operation: 'SharedLayout',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: 'Layout',
+      semanticResult: Type.layout,
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'fromAllocation',
+      operation: 'SharedFromAllocation',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('allocation', 'Allocation'),
+        valueParameter('value', 'T'),
+      ]),
+      semanticParameters: Object.freeze([Type.allocation, sharedElement]),
+      result: 'SharedCore<T>',
+      semanticResult: Type.sharedCore(sharedElement),
+      unsafe: true,
     }),
   ]),
   ...Object.freeze([

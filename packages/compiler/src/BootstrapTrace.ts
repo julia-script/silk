@@ -201,6 +201,7 @@ export interface AllocationTraceEvent {
   readonly _tag:
     | 'AllocationAcquire'
     | 'RawBufferForm'
+    | 'SharedInitialize'
     | 'SlotProject'
     | 'SlotWrite'
     | 'SlotTake'
@@ -215,6 +216,8 @@ export interface AllocationTraceEvent {
   readonly index?: bigint
   readonly count?: bigint
   readonly element?: Type.Type
+  readonly strong?: bigint
+  readonly access?: 'Available'
   readonly span: SourceSpan.SourceSpan
 }
 

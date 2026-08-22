@@ -200,6 +200,14 @@ export interface RawBufferValue {
   readonly stride: number
 }
 
+/** One affine handle to evaluator-owned local-shared control-block state. */
+export interface SharedCoreValue {
+  readonly _tag: 'SharedCoreValue'
+  readonly type: Type.Nominal
+  readonly ticket: number
+  readonly element: Type.Type
+}
+
 export interface SlotValue {
   readonly _tag: 'SlotValue'
   readonly type: Type.Nominal
@@ -228,6 +236,7 @@ export type Value =
   | EffectOutcomeValue
   | AllocationValue
   | RawBufferValue
+  | SharedCoreValue
   | SlotValue
 
 /** Entered the resolved entry instance. */

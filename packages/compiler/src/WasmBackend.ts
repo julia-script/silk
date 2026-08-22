@@ -2307,6 +2307,68 @@ const emitRawBufferFromOperation = (
   ]
 }
 
+const emitSharedFromAllocationOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SharedFromAllocation' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, storeAt } = state
+  const allocation = slots(operation.allocation)
+  const base = allocation.at(0)
+  const bytes = allocation.at(1)
+  const alignment = allocation.at(2)
+  const destination = slots(operation.destination).at(0)
+  const allocationShape = LayoutPlan.callingShape(plan, SilkType.allocation)
+  const valueShape = LayoutPlan.callingShape(plan, operation.element)
+  if (
+    base === undefined ||
+    bytes === undefined ||
+    alignment === undefined ||
+    destination === undefined ||
+    allocationShape === undefined ||
+    valueShape === undefined ||
+    allocationShape.lanes.length !== allocation.length
+  )
+    throw new RangeError('Wasm local-shared initialization lost its planned lanes')
+  const instructions: Array<Instr.Instr> = [
+    Instr.localGet(bytes),
+    Instr.i32Const(operation.block.size),
+    Instr.op('i32.ne'),
+    Instr.localGet(alignment),
+    Instr.i32Const(operation.block.alignment),
+    Instr.op('i32.ne'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(base),
+    Instr.localSet(destination),
+    Instr.localGet(base),
+    Instr.i32Const(1),
+    Instr.memoryAccess('i32.store', state.requireMemory().memory, {
+      offset: operation.block.strongOffset,
+    }),
+    Instr.localGet(base),
+    Instr.i32Const(0),
+    Instr.memoryAccess('i32.store', state.requireMemory().memory, {
+      offset: operation.block.accessOffset,
+    }),
+  ]
+  for (const [ordinal, lane] of allocationShape.lanes.entries()) {
+    const value = allocation.at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, SilkType.allocation, lane.path)
+    if (value === undefined || offset === undefined)
+      throw new RangeError('Wasm local-shared initialization lost reclaim provenance')
+    instructions.push(...storeAt(base, value, operation.block.allocationOffset + offset, lane))
+  }
+  const payload = slots(operation.value)
+  for (const [ordinal, lane] of valueShape.lanes.entries()) {
+    const value = payload.at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, operation.element, lane.path)
+    if (value === undefined || offset === undefined)
+      throw new RangeError('Wasm local-shared initialization lost its payload')
+    instructions.push(...storeAt(base, value, operation.block.valueOffset + offset, lane))
+  }
+  return instructions
+}
+
 const emitRawBufferCountOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferCount' }>,
   state: WasmOperationContext,
@@ -5075,6 +5137,8 @@ const emitOperationWithContext = (
       return emitOsCallOperation(operation, context)
     case 'RawBufferFrom':
       return emitRawBufferFromOperation(operation, context)
+    case 'SharedFromAllocation':
+      return emitSharedFromAllocationOperation(operation, context)
     case 'RawBufferCount':
       return emitRawBufferCountOperation(operation, context)
     case 'RawBufferSlot':
@@ -5940,6 +6004,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       (operation) =>
         operation._tag === 'Allocate' ||
         operation._tag === 'RawBufferFrom' ||
+        operation._tag === 'SharedFromAllocation' ||
         operation._tag === 'RawBufferCount' ||
         operation._tag === 'RawBufferSlot' ||
         operation._tag === 'RawBufferRead' ||

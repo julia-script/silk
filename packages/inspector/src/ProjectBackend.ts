@@ -800,6 +800,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
+    case 'SharedFromAllocation':
+      return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
     case 'RawBufferCount':
@@ -1057,9 +1059,11 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                                   ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
                                   : value._tag === 'SlotValue'
                                     ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-                                    : value._tag === 'ReferenceValue'
-                                      ? `borrow f${value.frame}.c${value.cell}`
-                                      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                                    : value._tag === 'SharedCoreValue'
+                                      ? `${typeText(value.type)} ticket=${value.ticket} · ${typeText(value.element)}`
+                                      : value._tag === 'ReferenceValue'
+                                        ? `borrow f${value.frame}.c${value.cell}`
+                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -1141,6 +1145,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `reject callable #${event.ticket} · ${event.mode.toLowerCase()}`
     case 'AllocationAcquire':
       return `acquire allocation #${event.ticket}`
+    case 'SharedInitialize':
+      return `initialize shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'} · ${event.access?.toLowerCase() ?? '?'}`
     case 'RawBufferForm':
       return `form raw buffer #${event.ticket} × ${event.count?.toString() ?? '?'}`
     case 'SlotProject':
@@ -1232,6 +1238,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'CallableCleanup':
     case 'CallableRejected':
     case 'AllocationAcquire':
+    case 'SharedInitialize':
     case 'RawBufferForm':
     case 'SlotProject':
     case 'SlotWrite':

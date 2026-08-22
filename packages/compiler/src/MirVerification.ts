@@ -6,6 +6,7 @@ import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as Match from './Match.js'
 import type {
   CleanupRegion,
@@ -654,6 +655,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
       return [operation.destination, operation.allocation, operation.count]
+    case 'SharedFromAllocation':
+      return [operation.destination, operation.allocation, operation.value]
     case 'RawBufferCount':
       return [operation.destination, operation.buffer]
     case 'RawBufferSlot':
@@ -1353,6 +1356,8 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
+    case 'SharedFromAllocation':
+      return [semanticType(operation.type), operation.element]
     case 'RawBufferCount':
       return [semanticType(operation.type)]
     case 'RawBufferSlot':
@@ -1532,6 +1537,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return operation.arguments
     case 'RawBufferFrom':
       return [operation.allocation, operation.count]
+    case 'SharedFromAllocation':
+      return [operation.allocation, operation.value]
     case 'RawBufferCount':
       return [operation.buffer]
     case 'RawBufferSlot':
@@ -3039,6 +3046,44 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
           }
+        }
+        if (operation._tag === 'SharedFromAllocation') {
+          const allocation = fn.localTypes.at(operation.allocation.ordinal)
+          const value = fn.localTypes.at(operation.value.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const elementLayout = Layout.entry(self.layout, operation.element)
+          const expected =
+            elementLayout === undefined
+              ? undefined
+              : LocalSharedControlBlock.plan(self.layout.target, operation.element, elementLayout)
+          if (
+            allocation?._tag !== 'Nominal' ||
+            !SilkType.equals(allocation.type, SilkType.allocation) ||
+            value === undefined ||
+            !SilkType.equals(semanticType(value), operation.element) ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.isSharedCore(destination.type) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !SilkType.equals(destination.type.arguments[0], operation.element) ||
+            expected?._tag !== 'LocalSharedControlBlockPlan' ||
+            expected.provenance !== operation.block.provenance ||
+            expected.size !== operation.block.size ||
+            expected.alignment !== operation.block.alignment ||
+            expected.strongOffset !== operation.block.strongOffset ||
+            expected.accessOffset !== operation.block.accessOffset ||
+            expected.allocationOffset !== operation.block.allocationOffset ||
+            expected.valueOffset !== operation.block.valueOffset
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidLocalSharedOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'Local-shared initialization lost allocation, element, target-layout, or control-block provenance',
+              }),
+            )
         }
         if (operation._tag === 'RawBufferCount') {
           const buffer = fn.localTypes.at(operation.buffer.ordinal)

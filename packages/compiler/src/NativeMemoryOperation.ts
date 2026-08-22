@@ -25,6 +25,7 @@ type Operation = Extract<
       | 'HostWrite'
       | 'OsCall'
       | 'RawBufferFrom'
+      | 'SharedFromAllocation'
       | 'RawBufferCount'
       | 'RawBufferSlot'
       | 'RawBufferRead'
@@ -358,6 +359,96 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([...allocation, count]))
+      break
+    }
+    case 'SharedFromAllocation': {
+      const allocation = NativeStorage.readLocal(nativeStorage, operation.allocation)
+      const baseAddress = allocation.at(0)
+      const bytes = allocation.at(1)
+      const alignment = allocation.at(2)
+      if (
+        baseAddress === undefined ||
+        bytes === undefined ||
+        alignment === undefined ||
+        usizeType === undefined
+      )
+        throw new RangeError('LLVM local-shared initialization lost its allocation lanes')
+      const bytesMismatch = yield* FunctionBody.integerCompare(
+        body,
+        'ne',
+        bytes,
+        yield* Constant.integerUnsigned(builder, usizeType, BigInt(operation.block.size)),
+        `shared${operation.destination.ordinal}_bytes_mismatch`,
+      )
+      const alignmentMismatch = yield* FunctionBody.integerCompare(
+        body,
+        'ne',
+        alignment,
+        yield* Constant.integerUnsigned(builder, usizeType, BigInt(operation.block.alignment)),
+        `shared${operation.destination.ordinal}_alignment_mismatch`,
+      )
+      const invalid = yield* FunctionBody.binary(
+        body,
+        'or',
+        bytesMismatch,
+        alignmentMismatch,
+        `shared${operation.destination.ordinal}_invalid`,
+      )
+      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'shared_trap')
+      const accepted = yield* LlvmBlock.make(
+        body,
+        `shared${operation.destination.ordinal}_accepted`,
+      )
+      yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+      yield* LlvmBlock.setInsertionPoint(body, accepted)
+      const base = yield* FunctionBody.cast(
+        body,
+        'inttoptr',
+        baseAddress,
+        pointer,
+        `shared${operation.destination.ordinal}_base`,
+      )
+      const storeWord = Effect.fnUntraced(function* (offset: number, value: Value.Input) {
+        yield* FunctionBody.store(
+          body,
+          value,
+          yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            base,
+            offset,
+            `shared${operation.destination.ordinal}_${offset}_ptr`,
+          ),
+        )
+      })
+      yield* storeWord(
+        operation.block.strongOffset,
+        yield* Constant.integerUnsigned(builder, usizeType, 1n),
+      )
+      yield* storeWord(
+        operation.block.accessOffset,
+        yield* Constant.integerUnsigned(builder, usizeType, 0n),
+      )
+      const allocationLanes = Layout.callingShape(program.layout, SilkType.allocation)?.lanes
+      const valueLanes = Layout.callingShape(program.layout, operation.element)?.lanes
+      const payload = NativeStorage.readLocal(nativeStorage, operation.value)
+      if (allocationLanes === undefined || valueLanes === undefined)
+        throw new RangeError('LLVM local-shared initialization lost its calling shapes')
+      for (const [ordinal, lane] of allocationLanes.entries()) {
+        const value = allocation.at(ordinal)
+        const offset = LayoutVerify.laneOffset(program.layout, SilkType.allocation, lane.path)
+        if (value === undefined || offset === undefined)
+          throw new RangeError('LLVM local-shared initialization lost reclaim provenance')
+        yield* storeWord(operation.block.allocationOffset + offset, value)
+      }
+      for (const [ordinal, lane] of valueLanes.entries()) {
+        const value = payload.at(ordinal)
+        const offset = LayoutVerify.laneOffset(program.layout, operation.element, lane.path)
+        if (value === undefined || offset === undefined)
+          throw new RangeError('LLVM local-shared initialization lost its payload')
+        yield* storeWord(operation.block.valueOffset + offset, value)
+      }
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([baseAddress]))
       break
     }
     case 'RawBufferCount': {

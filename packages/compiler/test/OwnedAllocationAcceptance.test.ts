@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Projections from './support/projections.js'
 
 const bytes = new Uint8Array(
@@ -57,6 +60,173 @@ it.effect('keeps one owned allocation in parity across the evaluator and Wasm', 
   }),
 )
 
+it.effect('computes a local-shared layout without allocator access or cleanup authority', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.layout { Layout }
+pub fn main() -> i32 {
+  let layout = Intrinsic.sharedLayout<i32>()
+  if layout.bytes == 72 { return 42 }
+  return 0
+}`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-layout/native',
+      source,
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.deepEqual(Projections.allocationTraceEventsOf(evaluated), [])
+  }),
+)
+
+it.effect('initializes one caller-funded local-shared core in evaluator and Wasm parity', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const native = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/native',
+      source,
+      'aarch64-apple-darwin',
+    )
+    const wasm = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/wasm',
+      source,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
+    const mir = Analysis.loweredMir(native)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.strictEqual(
+      mir.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'SharedFromAllocation').length,
+      1,
+    )
+    const malformed: Mir.Module = Object.freeze({
+      ...mir,
+      functions: Object.freeze(
+        mir.functions.map((fn) =>
+          Object.freeze({
+            ...fn,
+            regions: Object.freeze(
+              fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : Object.freeze({
+                      ...region,
+                      operations: Object.freeze(
+                        region.operations.map((operation) =>
+                          operation._tag !== 'SharedFromAllocation'
+                            ? operation
+                            : Object.freeze({
+                                ...operation,
+                                block: Object.freeze({
+                                  ...operation.block,
+                                  size: operation.block.size + 1,
+                                }),
+                              }),
+                        ),
+                      ),
+                    }),
+              ),
+            ),
+          }),
+        ),
+      ),
+    })
+    assert.include(
+      MirVerification.verify(malformed).map((violation) => violation.rule),
+      'InvalidLocalSharedOperation',
+    )
+    const evaluated = Analysis.evaluate(native)
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked'
+        ? evaluated.reason._tag === 'InvalidMir'
+          ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+          : evaluated.reason._tag
+        : evaluated._tag,
+    )
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.deepEqual(
+      Projections.allocationTraceEventsOf(evaluated).map((event) => ({
+        tag: event._tag,
+        strong: event.strong,
+        access: event.access,
+      })),
+      [
+        { tag: 'AllocationAcquire', strong: undefined, access: undefined },
+        { tag: 'SharedInitialize', strong: 1n, access: 'Available' },
+      ],
+    )
+    const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('leaves the payload cleanup obligation with source when allocation is exhausted', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+import silk.layout { Layout }
+struct Token { storage: Allocation }
+struct Exhausted {}
+effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
+}
+impl Allocator for Exhausted { allocate: Exhausted.reject }
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let payloadLayout = Layout.of<i32>()
+  let storage = run Intrinsic.systemAllocationAcquire(move payloadLayout)
+  let token = Token { storage: move storage }
+  let mut allocator = Exhausted {}
+  let recipe = Allocator.allocate(Intrinsic.sharedLayout<Token>())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<Token>(move allocation, move token)
+    drop core
+  }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/exhausted',
+      source,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.deepEqual(
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      ['AllocationAcquire', 'AllocationRelease'],
+    )
+  }),
+)
+
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
@@ -90,6 +260,76 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 it.effect('rejects every prohibited allocation shape before lowering', () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'local-shared-layout-provenance-mismatch',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i64>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-outside-unsafe',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+  drop core
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0082',
+      ],
+      [
+        'local-shared-reuses-consumed-allocation',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop allocation
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'OWN0001',
+      ],
+      [
+        'local-shared-reuses-consumed-payload',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+effect fn store() -> i32 ! OutOfMemoryError {
+  let blockLayout = Intrinsic.sharedLayout<Allocation>()
+  let block = run Intrinsic.systemAllocationAcquire(move blockLayout)
+  let payloadLayout = Intrinsic.sharedLayout<i32>()
+  let payload = run Intrinsic.systemAllocationAcquire(move payloadLayout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<Allocation>(move block, move payload)
+    drop payload
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'OWN0001',
+      ],
       [
         'raw-storage-outside-unsafe',
         `import silk.core { Allocator }
@@ -153,7 +393,7 @@ pub fn main() -> i32 { return 0 }`,
       assert.include(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         code,
-        name,
+        `${name}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
       )
     }
   }),

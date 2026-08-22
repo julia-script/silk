@@ -14,6 +14,7 @@ import * as NativeValueOperation from './NativeValueOperation.js'
 export const needsAllocation = (operation: Mir.Operation): boolean =>
   operation._tag === 'Allocate' ||
   operation._tag === 'RawBufferFrom' ||
+  operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'RawBufferCount' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
@@ -61,6 +62,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'HostWrite':
     case 'OsCall':
     case 'RawBufferFrom':
+    case 'SharedFromAllocation':
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':

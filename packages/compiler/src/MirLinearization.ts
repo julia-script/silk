@@ -105,6 +105,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'HostWrite':
     case 'OsCall':
     case 'RawBufferFrom':
+    case 'SharedFromAllocation':
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':
@@ -131,6 +132,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'HostWrite' ||
   operation._tag === 'OsCall' ||
   operation._tag === 'RawBufferFrom' ||
+  operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
   operation._tag === 'RawBufferView' ||

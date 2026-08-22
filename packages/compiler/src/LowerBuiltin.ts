@@ -7,6 +7,7 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import { borrowKey, isOsOperation, usize } from './Lower.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
@@ -61,14 +62,21 @@ export const lowerBuiltinExpression = (
   }
   const witnessCall = lowerInterfaceWitnessCall(fn, expression, argumentLocals)
   if (witnessCall !== undefined) return finishBuiltin(witnessCall)
-  if (expression.operation === 'LayoutOf') {
+  if (expression.operation === 'LayoutOf' || expression.operation === 'SharedLayout') {
     const raw = expression.typeArguments.at(0)
     const element = raw === undefined ? undefined : fn.semantic(raw)
     const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+    const sharedBlock =
+      expression.operation === 'SharedLayout' &&
+      element !== undefined &&
+      elementLayout !== undefined
+        ? LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
+        : undefined
     const layoutEntry = Layout.entry(fn.layout, Type.layout)
     const type = fn.type(Type.layout)
     if (
       elementLayout === undefined ||
+      (sharedBlock !== undefined && sharedBlock._tag !== 'LocalSharedControlBlockPlan') ||
       layoutEntry?.representation._tag !== 'Aggregate' ||
       type?._tag !== 'Nominal'
     )
@@ -84,7 +92,11 @@ export const lowerBuiltinExpression = (
           _tag: 'Literal' as const,
           destination: value,
           type: usize,
-          value: BigInt(field.name === 'bytes' ? elementLayout.size : elementLayout.alignment),
+          value: BigInt(
+            field.name === 'bytes'
+              ? (sharedBlock?.size ?? elementLayout.size)
+              : (sharedBlock?.alignment ?? elementLayout.alignment),
+          ),
           provenance: generated(expression.span),
         }),
       )
@@ -135,6 +147,42 @@ export const lowerBuiltinExpression = (
         element,
         stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
         elementAlignment: elementLayout.alignment,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'SharedFromAllocation') {
+    const [allocation, value] = argumentLocals
+    const type = fn.type(expression.type)
+    const raw = Type.isSharedCore(expression.type)
+      ? Type.typeArgumentAt(expression.type, 0)
+      : undefined
+    const element = raw === undefined ? undefined : fn.semantic(raw)
+    const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+    const block =
+      element === undefined || elementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
+    if (
+      allocation === undefined ||
+      value === undefined ||
+      type?._tag !== 'Nominal' ||
+      !Type.isSharedCore(type.type) ||
+      element === undefined ||
+      block?._tag !== 'LocalSharedControlBlockPlan'
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'SharedFromAllocation' as const,
+        destination,
+        allocation,
+        value,
+        element,
+        block,
         type,
         provenance: authored(expression.span),
       }),

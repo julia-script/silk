@@ -107,7 +107,12 @@ effect fn storage() -> i32 ! OutOfMemoryError {
   let coreRecipe = Allocator.allocate(move coreLayout) |> Intrinsic.bindRequirementMut(&mut allocator)
   let coreAllocation = run coreRecipe
   drop coreAllocation
+  let sharedLayout = Intrinsic.sharedLayout<i32>()
+  let sharedRecipe = Allocator.allocate(move sharedLayout) |> Intrinsic.bindRequirementMut(&mut allocator)
+  let sharedAllocation = run sharedRecipe
   unsafe {
+    let shared = Intrinsic.sharedFromAllocation<i32>(move sharedAllocation, 42)
+    drop shared
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let count = RawBuffer.count(&buffer)
     let firstSlot = RawBuffer.slot(&mut buffer, 0)
@@ -470,4 +475,24 @@ it.effect(
         assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
       assert.strictEqual(occurrence?.declaration?.module, 'silk/i32')
     }),
+)
+
+it.effect('keeps same-spelled local-shared operations entirely ordinary outside Intrinsic', () =>
+  Effect.gen(function* () {
+    const source = `fn sharedLayout() -> i32 { return 20 }
+fn sharedFromAllocation(value: i32) -> i32 { return value + 22 }
+pub fn main() -> i32 { return sharedFromAllocation(sharedLayout()) }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'intrinsic/local-shared-same-spelling',
+      encoder.encode(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(
+      operationKeys(snapshot).filter((operation) => operation.includes('shared')),
+      [],
+    )
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
 )

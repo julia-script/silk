@@ -18,6 +18,7 @@ import type {
 } from './internal/CallingShape.js'
 import * as Packing from './internal/Packing.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -809,9 +810,22 @@ export const catalog = (
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     if (Type.isSharedCore(type)) {
-      const result = unavailable(type, Object.freeze([]), {
-        _tag: 'InvalidDeclaration',
-        detail: 'sealed local shared ownership has no target representation in this layer',
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: false,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+        representation: Object.freeze({
+          _tag: 'Reference',
+          target: type,
+          address: Object.freeze({
+            bits: target.pointerSize === 4 ? 32 : 64,
+            offset: 0,
+            size: target.pointerSize,
+            alignment: target.pointerAlignment,
+          }),
+        }),
       })
       completed.set(key, result)
       return result
@@ -2288,6 +2302,131 @@ const usizeLiteralVerdicts = (
   })
 }
 
+const nestedStatements = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Statement> =>
+  Object.freeze(
+    statements.flatMap((statement): ReadonlyArray<Hir.Statement> => {
+      switch (statement._tag) {
+        case 'Unsafe':
+          return [statement, ...nestedStatements(statement.statements)]
+        case 'If':
+        case 'IfLet':
+          return [
+            statement,
+            ...nestedStatements(statement.taken),
+            ...nestedStatements(statement.otherwise),
+          ]
+        case 'While':
+          return [statement, ...nestedStatements(statement.body)]
+        default:
+          return [statement]
+      }
+    }),
+  )
+
+interface SharedLayoutProvenance {
+  readonly element: Type.Type
+  readonly span: SourceSpan.SourceSpan
+}
+
+const localSharedProvenanceDiagnostics = (
+  discovery: Instances.Discovery,
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const diagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const instance of discovery.instances) {
+    const roots = nestedStatements(instance.function.statements)
+    const statements = Object.freeze([
+      ...roots,
+      ...roots
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .flatMap((expression) =>
+          expression._tag === 'EffectBlock' ? nestedStatements(expression.statements) : [],
+        ),
+    ])
+    const bindings = new Map(
+      statements.flatMap((statement) =>
+        statement._tag === 'Bind'
+          ? [[statement.binding.ordinal, statement.initializer] as const]
+          : [],
+      ),
+    )
+    const layoutOf = (
+      expression: Hir.Expression,
+      active = new Set<number>(),
+    ): SharedLayoutProvenance | undefined => {
+      if (expression._tag === 'Move') return layoutOf(expression.subject, active)
+      if (expression._tag === 'BindingReference') {
+        if (active.has(expression.binding.ordinal)) return undefined
+        const initializer = bindings.get(expression.binding.ordinal)
+        return initializer === undefined
+          ? undefined
+          : layoutOf(initializer, new Set(active).add(expression.binding.ordinal))
+      }
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout')
+        return undefined
+      const raw = expression.typeArguments.at(0)
+      return raw === undefined || !Type.isTypeArgument(raw)
+        ? undefined
+        : Object.freeze({
+            element: Type.substitute(raw, instance.substitution),
+            span: expression.span,
+          })
+    }
+    const allocationOf = (
+      expression: Hir.Expression,
+      active = new Set<number>(),
+    ): SharedLayoutProvenance | undefined => {
+      if (expression._tag === 'Move' || expression._tag === 'Run')
+        return allocationOf(expression.subject, active)
+      if (expression._tag === 'BindingReference') {
+        if (active.has(expression.binding.ordinal)) return undefined
+        const initializer = bindings.get(expression.binding.ordinal)
+        return initializer === undefined
+          ? undefined
+          : allocationOf(initializer, new Set(active).add(expression.binding.ordinal))
+      }
+      if (expression._tag === 'EffectBindRequirement')
+        return allocationOf(expression.protected, active)
+      if (
+        expression._tag !== 'BuiltinCall' &&
+        expression._tag !== 'EffectConstruct' &&
+        expression._tag !== 'ServiceEffectConstruct'
+      )
+        return undefined
+      const result = expression.type
+      if (!Type.isEffect(result) || !Type.equals(result.success, Type.allocation)) return undefined
+      for (const argument of expression.arguments) {
+        const provenance = layoutOf(argument, active)
+        if (provenance !== undefined) return provenance
+      }
+      return undefined
+    }
+    for (const expression of statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedFromAllocation')
+        continue
+      const raw = expression.typeArguments.at(0)
+      const allocation = expression.arguments.at(0)
+      const expected =
+        raw !== undefined && Type.isTypeArgument(raw)
+          ? Type.substitute(raw, instance.substitution)
+          : undefined
+      const actual = allocation === undefined ? undefined : allocationOf(allocation)
+      if (expected !== undefined && actual !== undefined && !Type.equals(expected, actual.element))
+        diagnostics.push(
+          Diagnostic.localSharedLayoutMismatch(
+            Type.encode(expected),
+            Type.encode(actual.element),
+            actual.span,
+            expression.span,
+          ),
+        )
+    }
+  }
+  return Diagnostic.merge(diagnostics)
+}
+
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
@@ -2355,6 +2494,34 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
   const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
+  const localSharedProvenance = localSharedProvenanceDiagnostics(discovery)
+  const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
+      const raw = expression.typeArguments.at(0)
+      const element =
+        raw !== undefined && Type.isTypeArgument(raw)
+          ? Type.substitute(raw, instance.substitution)
+          : undefined
+      const elementLayout = element === undefined ? undefined : resolve(element)
+      if (
+        element !== undefined &&
+        elementLayout !== undefined &&
+        LocalSharedControlBlock.plan(self.target, element, elementLayout)._tag ===
+          'LocalSharedControlBlockUnavailable'
+      )
+        localSharedDiagnostics.push(
+          Diagnostic.intrinsicTargetUnavailable(
+            'Intrinsic.sharedLayout',
+            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            expression.span,
+          ),
+        )
+    }
+  }
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
     if (
@@ -2411,7 +2578,11 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     ),
     staticData,
     literalVerdicts: literals.verdicts,
-    diagnostics: literals.diagnostics,
+    diagnostics: Diagnostic.merge([
+      ...literals.diagnostics,
+      ...localSharedDiagnostics,
+      ...localSharedProvenance,
+    ]),
   })
 }
 
@@ -2588,6 +2759,21 @@ const shapeNode = (
         type: Object.freeze({
           _tag: 'Address',
           element: type.target,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      laneCount: 1,
+    })
+  }
+  if (Type.isSharedCore(type)) {
+    return Object.freeze({
+      _tag: 'AddressShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type,
           bits: target.pointerSize === 4 ? 32 : 64,
         }),
         lane: 0,

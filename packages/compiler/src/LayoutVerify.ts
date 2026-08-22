@@ -545,6 +545,25 @@ const verifyEntry = (
     }
     return Object.freeze(violations)
   }
+  if (Type.isSharedCore(candidate.type) && candidate.representation._tag === 'Reference') {
+    const address = candidate.representation.address
+    return candidate.copy === false &&
+      candidate.size === target.pointerSize &&
+      candidate.alignment === target.pointerAlignment &&
+      Type.equals(candidate.representation.target, candidate.type) &&
+      address.bits === (target.pointerSize === 4 ? 32 : 64) &&
+      address.offset === 0 &&
+      address.size === target.pointerSize &&
+      address.alignment === target.pointerAlignment
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidAggregate',
+            candidate.type,
+            `${Type.encode(candidate.type)} has a non-canonical opaque local-shared handle`,
+          ),
+        ])
+  }
   if (candidate.representation._tag !== 'Aggregate') {
     return Object.freeze([
       invalid(
