@@ -5,7 +5,7 @@
 
 ## 2. Instances split
 
-- [x] 2.1 Extract `InstanceDiagnostics.ts` (the five violation checks)
+- [x] 2.1 Extract `InstanceDiagnostics.ts` with ownership of all five violation checks and their supporting diagnostic logic; retain no forwarding implementation in `Instances`
 - [x] 2.2 Extract `ExecutableOrigin.ts` (origin, callables, effects, suspension, reachability)
 - [x] 2.3 Verify instance/discovery and conformance tests pass
 

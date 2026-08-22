@@ -1,9 +1,12 @@
 import type * as Builder from '@silk-effect/llvm/Builder'
+import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import type * as LlvmError from '@silk-effect/llvm/LlvmError'
 import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import * as Effect from 'effect/Effect'
+import { type LineTable, positionOf } from './Backend.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as SilkType from './Type.js'
 
 /** Debug metadata state shared by all declarations in one native module. */
@@ -14,6 +17,32 @@ export interface LoweringContext {
   readonly file: LlvmMetadata.Optional
   readonly types: Map<string, LlvmMetadata.Optional>
 }
+
+/** Source-location state for instructions in one native function body. */
+export interface LocationContext {
+  readonly builder: Builder.Builder
+  readonly body: FunctionBody.FunctionBody
+  readonly enabled: boolean
+  readonly scope: LlvmMetadata.Optional
+  readonly table: LineTable
+}
+
+/** Attaches one source location when debug metadata is enabled. */
+export const locate = Effect.fnUntraced(function* (
+  context: LocationContext,
+  span: SourceSpan.SourceSpan,
+  instruction: FunctionBody.Instruction | undefined,
+) {
+  if (!context.enabled || context.scope === undefined || instruction === undefined) return
+  const position = positionOf(context.table, span.start)
+  const location = yield* LlvmMetadata.location(
+    context.builder,
+    position.line,
+    position.column,
+    context.scope,
+  )
+  yield* FunctionBody.setDebugLocation(context.body, instruction, location)
+})
 
 /** Emits and memoizes the source-level debug type for one MIR value. */
 export const typeOf = Effect.fn('NativeDebug.typeOf')(function* (

@@ -1,6 +1,7 @@
 import * as CleanupPlan from './CleanupPlan.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as FieldRealization from './FieldRealization.js'
@@ -231,14 +232,14 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   type: DeclarationFacts.SemanticType | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): OwnershipCategory =>
   type === undefined ||
   (Type.isEffect(type) && type.access === 'Shared') ||
   (Type.isCallable(type) && type.mode === 'Shared') ||
-  DeclarationIndex.copyType(index, type, assumptions)
+  ConformanceProof.copyType(index, type, assumptions)
     ? copyable
     : Object.freeze({ _tag: 'MoveOnly', type })
 
@@ -265,7 +266,7 @@ interface MutableBinding {
 }
 
 interface CheckState {
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
@@ -1106,7 +1107,7 @@ const borrowedPlaceAccess = (
 
 const analyzeLoans = (
   fn: Elaboration.FunctionFact,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   copyAssumptions: ReadonlySet<string>,
 ): LoanAnalysis => {
   const loans: Array<LoanFact> = []
@@ -2090,7 +2091,7 @@ interface ExitDescriptor {
 
 const borrowedReplacements = (
   fn: Elaboration.FunctionFact,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<BorrowedReplacementFact> => {
   const replacements: Array<BorrowedReplacementFact> = []
   const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
@@ -2131,7 +2132,7 @@ const borrowedReplacements = (
 
 const checkFunction = (
   fn: Hir.HirFunction,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
 ): CheckedFunction => {
   const declaration = fn.declaration
@@ -2817,7 +2818,7 @@ const checkFunction = (
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (
   result: Elaboration.Result,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): ModuleOwnership => {
   const checked = result.hir.functions.map((fn, ordinal) =>
     checkFunction(fn, index, result.functions.at(ordinal)),

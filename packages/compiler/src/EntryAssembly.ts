@@ -1,5 +1,6 @@
 import { generated, indexExits } from './CleanupEmission.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import { lowerEffectCatch, lowerRunEffectComposite, lowerRunEffectValue } from './EffectLowering.js'
 import type {} from './Forwarding.js'
@@ -101,7 +102,7 @@ export const lowerInstance = (
   instance: Instances.Instance,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -249,7 +250,7 @@ export const lowerEffectRunner = (
   spec: GeneratedBlockEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -382,7 +383,7 @@ export const lowerCatchEffectRunner = (
   spec: GeneratedCatchEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -508,7 +509,7 @@ export const lowerWitnessEffectRunner = (
   spec: GeneratedWitnessEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,

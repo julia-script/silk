@@ -8,9 +8,9 @@ See proposal.md. The @silk-effect/llvm boundary is already thin and Effect-nativ
 
 - **Linearization**: move expandMatches/linearize/llvmControl (484–920) to a target-neutral module beside Mir (it is candidate-neutral control-flow lowering).
 
-- **LoweringContext record**: capture { builder, types, program, layout, lanesFor, packedLanes, declared, mutableStorage } explicitly; each Native* actor is a pure function (ctx, ...) => ... with no closure capture. The per-function body, coerceLane, callValues, emitCallableBinary/emitIntegerConversion, Binary/CheckedScalar, aggregate/cleanup, the operation dispatch switch, terminator switch, and coroutine thunks each become one actor.
+- **Lowering contexts**: pass explicit immutable data and cohesive named actor contexts. `NativeStorage` owns local reads, mutable storage, address roots, materialization, and reload; `NativeDebug` owns location emission; `NativeHostFailure` owns the host-failure ABI; type, arithmetic, aggregate, call, suspension, and lane-pointer actors receive their own contexts. `NativeOperation` retains only dispatch data plus those named contexts: it has no behavior callbacks and is not assembled from closed-over mutable functions. The per-function body, operation dispatch, terminator control, and coroutine thunks remain in their owning actors rather than one monolithic emitter.
 
-- **NativeArith seam**: one comparisonPredicates table and one checked-arithmetic/overflow/range/div-by-zero lowering, consumed by both emitCallableBinary and the Binary case (and by the conversion/CheckedScalar paths) with different read/write wrappers.
+- **NativeArith seam**: one comparisonPredicates table and one checked-arithmetic/overflow/range/div-by-zero lowering, consumed by both emitCallableBinary and the Binary case (and by the conversion/CheckedScalar paths) through explicit contexts rather than read/write callbacks.
 
 - **Lane-pointer helper**: one lanePointer(lanes, base, offset, name) reconciling the six pointerAt/bytePointer/framePointer variants.
 

@@ -1,5 +1,5 @@
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as SetOf from './internal/SetOf.js'
@@ -285,7 +285,7 @@ const releasesOf = (operation: Mir.Operation): ReadonlyArray<Release> =>
 
 const accessOf = (
   program: Mir.Module,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   fn: Mir.MirFunction,
   definitions: ReadonlyMap<number, Mir.Operation>,
   local: Mir.LocalId,
@@ -302,7 +302,7 @@ const accessOf = (
 
 const planFor = (
   program: Mir.Module,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   fn: Mir.MirFunction,
   region: Mir.Region,
   operation: Mir.Operation,
@@ -393,7 +393,7 @@ const comparePlan = (left: Plan, right: Plan): number =>
 export const plan = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): Module => {
   const plans: Array<Plan> = []
   const violations: Array<Violation> = []

@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
@@ -228,7 +229,7 @@ const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray
   )
 
 const namespaceCandidates = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   module: string,
 ): ReadonlyArray<Candidate> =>
   (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
@@ -309,7 +310,7 @@ const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined =
 }
 
 const fieldCandidates = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   type: Type.Nominal | undefined,
   module: string,
 ): ReadonlyArray<Candidate> => {
@@ -338,7 +339,7 @@ const fieldCandidates = (
 
 const typeCandidates = (
   module: string,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   fn: Elaboration.FunctionFact | undefined,
 ): ReadonlyArray<Candidate> => {
@@ -436,7 +437,7 @@ const typeCandidates = (
 
 const expressionCandidates = (
   module: string,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
@@ -616,7 +617,7 @@ export const complete = (options: {
   readonly source: SourceFile.SourceFile
   readonly module: string
   readonly offset: number
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly result: Elaboration.Result
 }): Result => {

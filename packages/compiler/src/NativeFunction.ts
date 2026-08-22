@@ -6,7 +6,6 @@ import * as DISPFlags from '@silk-effect/llvm/DISPFlags'
 import * as FunctionActor from '@silk-effect/llvm/Function'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Intrinsic from '@silk-effect/llvm/Intrinsic'
-import type * as LlvmError from '@silk-effect/llvm/LlvmError'
 import * as LlvmMetadata from '@silk-effect/llvm/Metadata'
 import type * as LlvmType from '@silk-effect/llvm/Type'
 import * as Value from '@silk-effect/llvm/Value'
@@ -19,117 +18,23 @@ import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import { destinationOf, type LinearBlock, opensRuntimeContinuation } from './MirLinearization.js'
 import type * as NativeAggregate from './NativeAggregate.js'
-import * as NativeArith from './NativeArith.js'
+import type * as NativeArith from './NativeArith.js'
 import type * as NativeCall from './NativeCall.js'
 import * as NativeControl from './NativeControl.js'
 import * as NativeDebug from './NativeDebug.js'
-import * as NativeLanePointer from './NativeLanePointer.js'
+import type * as NativeHostFailure from './NativeHostFailure.js'
+import type * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeOperation from './NativeOperation.js'
-import * as NativeSuspension from './NativeSuspension.js'
+import type * as NativeOperationContext from './NativeOperationContext.js'
+import * as NativeStorage from './NativeStorage.js'
+import type * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
-import type * as SourceSpan from './SourceSpan.js'
-import * as SilkType from './Type.js'
 
 export interface MutableRoots {
   readonly mutable: ReadonlySet<number>
   readonly address: ReadonlySet<number>
 }
-
-/** Per-function LLVM storage state used by mutation and address-taking lowering. */
-export interface StorageContext {
-  readonly builder: Builder.Builder
-  readonly body: FunctionBody.FunctionBody
-  readonly byteType: LlvmType.Type
-  readonly offsetType: LlvmType.Type
-  readonly fn: Mir.MirFunction
-  readonly layout: Layout.Plan
-  readonly mutableRoots: ReadonlySet<number>
-  readonly mutableStorage: ReadonlyMap<number, ReadonlyArray<Value.Input>>
-  readonly addressStorage: ReadonlyMap<number, Value.Input>
-  readonly locals: Map<number, ReadonlyArray<Value.Input>>
-  readonly valueLanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
-}
-
-/** Reads one lowered local's complete physical lane vector. */
-export const readLocal = (
-  locals: ReadonlyMap<number, ReadonlyArray<Value.Input>>,
-  local: Mir.LocalId,
-): ReadonlyArray<Value.Input> => {
-  const found = locals.get(local.ordinal)
-  if (found === undefined) throw new RangeError(`Backend read undefined local %${local.ordinal}`)
-  return found
-}
-
-/** Reads the only lane of a scalar lowered local. */
-export const readScalar = (
-  locals: ReadonlyMap<number, ReadonlyArray<Value.Input>>,
-  local: Mir.LocalId,
-): Value.Input => {
-  const found = readLocal(locals, local)
-  const scalar = found.at(0)
-  if (scalar === undefined || found.length !== 1)
-    throw new RangeError(`Backend expected scalar local %${local.ordinal}`)
-  return scalar
-}
-
-/** Reloads memory-backed roots at a control-flow join into the current SSA cache. */
-export const reloadRoots = Effect.fnUntraced(function* (
-  context: StorageContext,
-  tag: string,
-): Effect.fn.Return<void, LlvmError.LlvmError> {
-  for (const root of [...context.mutableRoots].sort((left, right) => left - right)) {
-    const storage = context.mutableStorage.get(root)
-    if (storage === undefined) continue
-    const loaded: Array<Value.Input> = []
-    const logicalType = context.fn.localTypes.at(root)
-    if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
-    for (const [lane, pointer] of storage.entries()) {
-      const callingLane = context.valueLanesFor(logicalType).at(lane)
-      if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
-      loaded.push(
-        yield* FunctionBody.load(
-          context.body,
-          context.laneType(callingLane),
-          pointer,
-          `mut${root}_${lane}_load_${tag}`,
-        ),
-      )
-    }
-    context.locals.set(root, Object.freeze(loaded))
-  }
-})
-
-/** Stores every physical lane of an address-taken root into its stable byte storage. */
-export const storeAddressValues = Effect.fnUntraced(function* (
-  context: StorageContext,
-  root: number,
-  values: ReadonlyArray<Value.Input>,
-  name: string,
-): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const base = context.addressStorage.get(root)
-  const logicalType = context.fn.localTypes.at(root)
-  if (base === undefined || logicalType === undefined)
-    throw new RangeError(`Backend lost address storage for %${root}`)
-  for (const [ordinal, lane] of context.valueLanesFor(logicalType).entries()) {
-    const offset = LayoutVerify.laneOffset(context.layout, Mir.semanticType(logicalType), lane.path)
-    const stored = values.at(ordinal)
-    if (offset === undefined || stored === undefined)
-      throw new RangeError(`Backend lost address lane ${ordinal} for %${root}`)
-    yield* FunctionBody.store(
-      context.body,
-      stored,
-      yield* FunctionBody.getElementPtr(
-        context.body,
-        context.byteType,
-        base,
-        [yield* Constant.integerUnsigned(context.builder, context.offsetType, BigInt(offset))],
-        `${name}_${ordinal}_ptr`,
-      ),
-    )
-  }
-})
 
 /** Finds locals that need stable stack storage across mutation, calls, and suspension control. */
 export const discoverRoots = (
@@ -457,6 +362,14 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           entry,
           mutableStorage,
         })
+        const nativeTypes: NativeType.LoweringContext = Object.freeze({
+          program,
+          i32,
+          f32,
+          f64,
+          pointer,
+          integerTypes,
+        })
         const addressStorage = new Map<number, Value.Input>()
         for (const root of [...addressRoots].sort((left, right) => left - right)) {
           const logicalType = entry.fn.localTypes.at(root)
@@ -492,7 +405,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           }
         }
 
-        const storageContext: StorageContext = Object.freeze({
+        const storageContext: NativeStorage.Context = Object.freeze({
           builder: loweringContext.builder,
           body: loweringContext.body,
           byteType: i8,
@@ -501,21 +414,18 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           layout: loweringContext.layout,
           mutableRoots,
           mutableStorage: loweringContext.mutableStorage,
+          addressRoots,
           addressStorage,
           locals,
-          valueLanesFor: loweringContext.valueLanesFor,
-          laneType: loweringContext.laneType,
+          types: nativeTypes,
+          lanePointers,
+          sequences: { materialize: 0, reload: 0 },
         })
-        const reloadMutableRoots = (tag: string) => reloadRoots(storageContext, tag)
-        const storeAddressRootValues = (
-          root: number,
-          values: ReadonlyArray<Value.Input>,
-          name: string,
-        ) => storeAddressValues(storageContext, root, values, name)
         for (const root of [...addressRoots].sort((left, right) => left - right)) {
           const logicalType = entry.fn.localTypes.at(root)
           if (logicalType === undefined) throw new RangeError(`Backend lost address root %${root}`)
-          yield* storeAddressRootValues(
+          yield* NativeStorage.storeAddressValues(
+            storageContext,
             root,
             Object.freeze(
               yield* Effect.forEach(valueLanesFor(logicalType), (lane) =>
@@ -579,7 +489,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             }
           }
           if (addressRoots.has(ordinal)) {
-            yield* storeAddressRootValues(ordinal, Object.freeze(values), `addr${ordinal}_param`)
+            yield* NativeStorage.storeAddressValues(
+              storageContext,
+              ordinal,
+              Object.freeze(values),
+              `addr${ordinal}_param`,
+            )
           }
         }
         const transferPointer = entry.suspendable
@@ -742,48 +657,26 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           }
           yield* FunctionBody.sealSwitch(body, dispatch)
         }
-        const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
-          const found = locals.get(local.ordinal)
-          if (found === undefined) {
-            throw new RangeError(`Backend read undefined local %${local.ordinal}`)
-          }
-          return found
-        }
-        const locate = Effect.fnUntraced(function* (
-          span: SourceSpan.SourceSpan,
-          instruction: FunctionBody.Instruction | undefined,
-        ) {
-          if (!debug || scope === undefined || instruction === undefined) return
-          const position = positionOf(table, span.start)
-          const location = yield* LlvmMetadata.location(
-            builder,
-            position.line,
-            position.column,
-            scope,
-          )
-          yield* FunctionBody.setDebugLocation(body, instruction, location)
+        const debugLocation: NativeDebug.LocationContext = Object.freeze({
+          builder,
+          body,
+          enabled: debug,
+          scope,
+          table,
         })
-
         const laneContext: NativeArith.LaneContext = Object.freeze({
           body: loweringContext.body,
           pointerBits: loweringContext.layout.target.pointerSize === 4 ? 32 : 64,
           i32: loweringContext.types.i32,
           integerTypes: loweringContext.types.integers,
-          laneType: loweringContext.laneType,
+          types: nativeTypes,
         })
-        const coerceLane = (
-          input: Value.Input,
-          source: Layout.CallingLane,
-          target: Layout.CallingLane,
-          name: string,
-        ) => NativeArith.coerceLane(laneContext, input, source, target, name)
-
         const failureContext: NativeAggregate.FailureContext = Object.freeze({
           builder,
           body,
           program,
           i32,
-          laneType,
+          types: nativeTypes,
           arith: laneContext,
         })
 
@@ -795,15 +688,18 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           entry,
           ...(invocationFrameStorage === undefined ? {} : { invocationFrameStorage }),
           ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
-          lanesFor,
-          laneType,
+          types: nativeTypes,
         })
-        const returnStep = (status: bigint, values: ReadonlyArray<Value.Input>, tag: string) =>
-          NativeSuspension.returnStep(suspensionReturnContext, status, values, tag)
+        const hostFailureContext: NativeHostFailure.Context = Object.freeze({
+          builder,
+          body,
+          entry,
+          types: nativeTypes,
+          suspension: suspensionReturnContext,
+        })
         const synchronousCallContext: NativeCall.SynchronousContext = Object.freeze({
           body,
-          addressRoots,
-          reloadAddressRoot: (root: number) => reloadAddressRoot(root),
+          storage: storageContext,
         })
         const arithContext: NativeArith.OperationContext = Object.freeze({
           builder,
@@ -813,9 +709,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           integerTypes,
           signedOverflowSignatures,
           unsignedOverflowSignatures,
-          valueLanesFor,
-          laneType,
-          locate,
+          lane: laneContext,
+          types: nativeTypes,
+          debug: debugLocation,
           state: operationState,
         })
         const suspensionContext: NativeSuspension.OperationContext = Object.freeze({
@@ -827,8 +723,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           pointer,
           entry,
           lanePointers,
-          lanesFor,
-          laneType,
+          types: nativeTypes,
           transferHeaderSize,
           transferResultOffset,
           ...(transferPointer === undefined ? {} : { transferPointer }),
@@ -837,147 +732,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           resumeThunks,
           suspensionRegions,
           resumeBlocks,
-          locals,
-          mutableStorage,
+          storage: storageContext,
           returns: suspensionReturnContext,
         })
-        const storeMutable = Effect.fnUntraced(function* (
-          root: Mir.LocalId,
-          values: ReadonlyArray<Value.Input>,
-        ) {
-          const storage = mutableStorage.get(root.ordinal)
-          if (storage === undefined) return
-          for (const [lane, pointer] of storage.entries()) {
-            const stored = values.at(lane)
-            if (stored === undefined) throw new RangeError('Mutable root lost a physical lane')
-            yield* FunctionBody.store(body, stored, pointer)
-          }
-        })
-
-        const constantBytePointer = Effect.fnUntraced(function* (
-          base: Value.Input,
-          offset: number,
-          name: string,
-        ) {
-          return yield* NativeLanePointer.lanePointer(lanePointers, body, base, offset, name)
-        })
-        const aggregateFieldOffset = (type: SilkType.Type, name: string): number => {
-          const planned = Layout.entry(program.layout, type)
-          if (planned?.representation._tag !== 'Aggregate') {
-            throw new RangeError(`LLVM raw storage lost aggregate ${SilkType.encode(type)}`)
-          }
-          const field = planned.representation.fields.find((candidate) => candidate.name === name)
-          if (field === undefined) throw new RangeError(`LLVM raw storage lost field ${name}`)
-          return field.offset
-        }
-        const emitHostFailure = Effect.fnUntraced(function* (
-          operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' | 'HostWrite' }>,
-        ) {
-          const lanes = lanesFor(operation.propagationType)
-          const values: Array<Value.Input> = []
-          for (const [ordinal, lane] of lanes.entries()) {
-            values.push(
-              yield* Constant.integerUnsigned(
-                builder,
-                laneType(lane),
-                ordinal === 0 ? BigInt(operation.failureTag) : 0n,
-              ),
-            )
-          }
-          if (entry.suspendable) {
-            yield* returnStep(
-              0n,
-              Object.freeze(values),
-              `host_failure${operation.destination.ordinal}`,
-            )
-            return
-          }
-          if (values.length === 0) {
-            yield* FunctionBody.returnVoid(body)
-            return
-          }
-          const single = values.at(0)
-          if (values.length === 1 && single !== undefined) {
-            yield* FunctionBody.returnValue(body, single)
-            return
-          }
-          yield* FunctionBody.returnValue(
-            body,
-            yield* FunctionBody.buildAggregate(
-              body,
-              entry.resultType,
-              Object.freeze(values),
-              `host_failure${operation.destination.ordinal}`,
-            ),
-          )
-        })
-        let materializeSequence = 0
-        const materializeAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
-          const materializeId = materializeSequence++
-          const base = addressStorage.get(root.ordinal)
-          const logicalType = entry.fn.localTypes.at(root.ordinal)
-          if (base === undefined || logicalType === undefined) {
-            throw new RangeError(`Backend lost address storage for %${root.ordinal}`)
-          }
-          yield* storeAddressRootValues(
-            root.ordinal,
-            readLocal(root),
-            `addr${root.ordinal}_${materializeId}`,
-          )
-        })
-        const ensureAddressRoot = Effect.fnUntraced(function* (root: Mir.LocalId) {
-          if (!addressStorage.has(root.ordinal)) {
-            const logicalType = entry.fn.localTypes.at(root.ordinal)
-            const layout =
-              logicalType === undefined
-                ? undefined
-                : Layout.entry(program.layout, Mir.semanticType(logicalType))
-            if (logicalType === undefined || layout === undefined)
-              throw new RangeError(`Backend cannot materialize callable capture %${root.ordinal}`)
-            addressStorage.set(
-              root.ordinal,
-              yield* FunctionBody.alloca(body, i8, `callable_addr${root.ordinal}`, {
-                count: yield* Constant.integerUnsigned(builder, i32, BigInt(layout.size)),
-                alignment: yield* Alignment.fromByteUnits(layout.alignment),
-              }),
-            )
-          }
-          yield* materializeAddressRoot(root)
-        })
-        let reloadSequence = 0
-        const reloadAddressRoot = Effect.fnUntraced(function* (root: number) {
-          const reloadId = reloadSequence++
-          const base = addressStorage.get(root)
-          const logicalType = entry.fn.localTypes.at(root)
-          if (base === undefined || logicalType === undefined) {
-            throw new RangeError(`Backend lost address storage for %${root}`)
-          }
-          const values: Array<Value.Input> = []
-          for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
-            const offset = LayoutVerify.laneOffset(
-              program.layout,
-              Mir.semanticType(logicalType),
-              lane.path,
-            )
-            if (offset === undefined) throw new RangeError(`Backend lost address lane ${ordinal}`)
-            values.push(
-              yield* FunctionBody.load(
-                body,
-                laneType(lane),
-                yield* constantBytePointer(
-                  base,
-                  offset,
-                  `reload${root}_${ordinal}_${reloadId}_ptr`,
-                ),
-                `reload${root}_${ordinal}_${reloadId}`,
-              ),
-            )
-          }
-          const frozen = Object.freeze(values)
-          locals.set(root, frozen)
-          yield* storeMutable(Object.freeze({ _tag: 'Local', ordinal: root }), frozen)
-        })
-
         const callContext: NativeCall.Context = Object.freeze({
           builder,
           body,
@@ -990,10 +747,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(invocationFrameStorage === undefined ? {} : { invocationFrameStorage }),
           resumeThunks,
           lanePointers,
-          lanesFor,
-          addressRoots,
-          reloadAddressRoot,
-          locals,
+          types: nativeTypes,
+          storage: storageContext,
           synchronous: synchronousCallContext,
           returns: suspensionReturnContext,
         })
@@ -1008,20 +763,19 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(usizeType === undefined ? {} : { usizeType }),
           ...(free === undefined ? {} : { free }),
           declared,
-          laneType,
-          constantBytePointer,
+          types: nativeTypes,
+          lanePointers,
           call: callContext,
-          coerceLane,
-          reloadMutableRoots,
+          arith: laneContext,
+          storage: storageContext,
         })
 
-        const operationContext: NativeOperation.LoweringContext = Object.freeze({
+        const actorContext: NativeOperationContext.Context = Object.freeze({
           builder,
           body,
           program,
           entry,
           declared,
-          locals,
           staticPointers,
           i32,
           f32,
@@ -1037,23 +791,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(standardWrite === undefined ? {} : { standardWrite }),
           osRuntimes,
           lanePointers,
-          addressRoots,
-          addressStorage,
-          mutableStorage,
           suspensionRegions,
-          lanesFor,
-          valueLanesFor,
-          laneType,
-          coerceLane,
-          locate,
-          constantBytePointer,
-          aggregateFieldOffset,
-          emitHostFailure,
-          materializeAddressRoot,
-          ensureAddressRoot,
-          reloadAddressRoot,
-          reloadMutableRoots,
-          storeMutable,
+          types: nativeTypes,
+          storage: storageContext,
+          debug: debugLocation,
+          hostFailure: hostFailureContext,
           cleanup: cleanupContext,
           failure: failureContext,
           arith: arithContext,
@@ -1061,21 +803,35 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           suspension: suspensionContext,
           state: operationState,
         })
+        const operationContext: NativeOperation.LoweringContext = Object.freeze({
+          value: actorContext,
+          memory: actorContext,
+          place: actorContext,
+          scalar: actorContext,
+          effect: actorContext,
+          call: actorContext,
+        })
         for (const [blockOrdinal, block] of entry.linear.entries()) {
           const blockHandle = blocks.get(block.id.ordinal)
           if (blockHandle === undefined) continue
           yield* LlvmBlock.setInsertionPoint(body, blockHandle)
-          if (blockOrdinal > 0) yield* reloadMutableRoots(`b${block.id.ordinal}`)
+          if (blockOrdinal > 0)
+            yield* NativeStorage.reloadRoots(storageContext, `b${block.id.ordinal}`)
           for (const operation of block.operations) {
             yield* NativeOperation.emit(operationContext, operation)
             const destination = destinationOf(operation)
             if (destination !== undefined && mutableRoots.has(destination.ordinal)) {
-              yield* storeMutable(destination, readLocal(destination))
+              yield* NativeStorage.storeMutable(
+                storageContext,
+                destination,
+                NativeStorage.readLocal(storageContext, destination),
+              )
             }
             if (destination !== undefined && addressRoots.has(destination.ordinal)) {
-              yield* storeAddressRootValues(
+              yield* NativeStorage.storeAddressValues(
+                storageContext,
                 destination.ordinal,
-                readLocal(destination),
+                NativeStorage.readLocal(storageContext, destination),
                 `addr${destination.ordinal}_defined`,
               )
             }
@@ -1091,7 +847,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               cleanup: cleanupContext,
               failure: failureContext,
               suspension: suspensionReturnContext,
-              locate,
+              debug: debugLocation,
             }),
             block.terminator,
             blockOrdinal,

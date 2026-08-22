@@ -8,10 +8,10 @@ import type * as LlvmType from '@silk-effect/llvm/Type'
 import type * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
 import { suspensionPointKey } from './Backend.js'
-import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
+import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
 
@@ -23,8 +23,7 @@ export interface DeclaredTarget {
 
 export interface SynchronousContext {
   readonly body: FunctionBody.FunctionBody
-  readonly addressRoots: ReadonlySet<number>
-  readonly reloadAddressRoot: (root: number) => Effect.Effect<void, LlvmError.LlvmError>
+  readonly storage: NativeStorage.Context
 }
 
 /** Calls one synchronous native target and unpacks its ABI result lanes. */
@@ -37,8 +36,8 @@ export const callSynchronous = Effect.fnUntraced(function* (
   if (target.suspendable)
     throw new RangeError('LLVM synchronous helper selected a suspendable target')
   const result = yield* FunctionBody.callDirect(context.body, target.handle, arguments_, name)
-  for (const root of [...context.addressRoots].sort((left, right) => left - right))
-    yield* context.reloadAddressRoot(root)
+  for (const root of [...context.storage.addressRoots].sort((left, right) => left - right))
+    yield* NativeStorage.reloadAddressRoot(context.storage, root)
   if (target.resultLaneCount === 0) return Object.freeze([])
   if (result === undefined) throw new RangeError('Backend call produced no value')
   if (target.resultLaneCount === 1) return Object.freeze([result])
@@ -77,10 +76,8 @@ export interface Context {
     }
   >
   readonly lanePointers: NativeLanePointer.Context
-  readonly lanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly addressRoots: ReadonlySet<number>
-  readonly reloadAddressRoot: (root: number) => Effect.Effect<void, LlvmError.LlvmError>
-  readonly locals: ReadonlyMap<number, ReadonlyArray<Value.Input>>
+  readonly types: NativeType.LoweringContext
+  readonly storage: NativeStorage.Context
   readonly synchronous: SynchronousContext
   readonly returns: NativeSuspension.ReturnContext
 }
@@ -93,7 +90,6 @@ export const callValues = Effect.fnUntraced(function* (
   suspension?: Mir.RunSuspendableEffectRegion,
 ) {
   const {
-    addressRoots,
     body,
     builder,
     entry,
@@ -101,18 +97,15 @@ export const callValues = Effect.fnUntraced(function* (
     i32,
     invocationFrameStorage,
     lanePointers,
-    lanesFor,
-    locals,
+    storage,
+    types,
     pointer,
     program,
-    reloadAddressRoot,
     resumeThunks,
     transferPointer,
   } = context
   const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
-    const values = locals.get(local.ordinal)
-    if (values === undefined) throw new RangeError(`Backend read undefined local %${local.ordinal}`)
-    return values
+    return NativeStorage.readLocal(storage, local)
   }
   if (!target.suspendable)
     return yield* callSynchronous(context.synchronous, target, arguments_, name)
@@ -202,7 +195,11 @@ export const callValues = Effect.fnUntraced(function* (
       const values = readLocal(field.local)
       const type = entry.fn.localTypes.at(field.local.ordinal)
       if (type === undefined) throw new RangeError('LLVM frame payload lost its type')
-      const packed = NativeType.packLanes(program.layout.target, lanesFor(type), field.offset)
+      const packed = NativeType.packLanes(
+        program.layout.target,
+        NativeType.lanesFor(types, type),
+        field.offset,
+      )
       for (const [ordinal, lane] of packed.entries.entries()) {
         const value = values.at(ordinal)
         if (value === undefined) throw new RangeError('LLVM frame payload lost a lane')
@@ -228,8 +225,8 @@ export const callValues = Effect.fnUntraced(function* (
   }
   yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
-  for (const root of [...addressRoots].sort((left, right) => left - right)) {
-    yield* reloadAddressRoot(root)
+  for (const root of [...storage.addressRoots].sort((left, right) => left - right)) {
+    yield* NativeStorage.reloadAddressRoot(storage, root)
   }
   const values: Array<Value.Input> = []
   for (let lane = 0; lane < target.resultLaneCount; lane += 1) {

@@ -1,5 +1,5 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -231,7 +231,7 @@ const loansOf = (captures: ReadonlyArray<CaptureSlot>): ReadonlyArray<LoanDepend
   )
 
 const livenessOf = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   captures: ReadonlyArray<CaptureSlot>,
 ): Liveness => {
   const ownedLanes = captures.filter((capture) => capture.owned).length
@@ -241,7 +241,7 @@ const livenessOf = (
     moveOnly: captures.some(
       (capture) =>
         capture.access === 'Exclusive' ||
-        (capture.access === 'Take' && !DeclarationIndex.copyType(index, capture.type)),
+        (capture.access === 'Take' && !ConformanceProof.copyType(index, capture.type)),
     ),
     ownedLanes,
     borrowedLanes,
@@ -249,7 +249,7 @@ const livenessOf = (
 }
 
 const cleanupOf = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   captures: ReadonlyArray<CaptureSlot>,
   invocation: ReceiverAccess,
 ): Cleanup =>
@@ -257,7 +257,7 @@ const cleanupOf = (
     _tag: 'CallableFieldCleanup' as const,
     lanes: Object.freeze(
       captures.flatMap((capture) =>
-        capture.owned && !DeclarationIndex.copyType(index, capture.type) ? [capture.ordinal] : [],
+        capture.owned && !ConformanceProof.copyType(index, capture.type) ? [capture.ordinal] : [],
       ),
     ),
     consumedByInvocation: invocation === 'Take',
@@ -425,7 +425,7 @@ type ResolvedField = Extract<
 >
 
 const realizeCallableField = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   resolution: ResolvedField,
   identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
@@ -586,7 +586,7 @@ const realizeEffectField = (
  * This function never inspects initializer syntax and never invents a second field identity.
  */
 export const realizeField = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   resolution: RepresentationField.Resolution,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,
@@ -605,7 +605,7 @@ export const realizeField = (
 
 /** Realizes every executable field of one resolved field index in deterministic key order. */
 export const realize = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   fields: RepresentationField.Index,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,

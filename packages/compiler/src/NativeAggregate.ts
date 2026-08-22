@@ -15,15 +15,28 @@ import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
+import * as NativeStorage from './NativeStorage.js'
+import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
+
+/** Resolves one field's byte offset from an aggregate layout. */
+export const fieldOffset = (layout: Layout.Plan, type: SilkType.Type, name: string): number => {
+  const planned = Layout.entry(layout, type)
+  if (planned?.representation._tag !== 'Aggregate')
+    throw new RangeError(`LLVM raw storage lost aggregate ${SilkType.encode(type)}`)
+  const field = planned.representation.fields.find((candidate) => candidate.name === name)
+  if (field === undefined) throw new RangeError(`LLVM raw storage lost field ${name}`)
+  return field.offset
+}
 
 export interface FailureContext {
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
   readonly program: Mir.Module
   readonly i32: LlvmType.Type
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly types: NativeType.LoweringContext
   readonly arith: NativeArith.LaneContext
 }
 
@@ -44,7 +57,7 @@ export const failurePayload = Effect.fnUntraced(function* (
   for (const [targetOrdinal, targetLane] of targetShape.lanes.slice(1).entries()) {
     let selected: Value.Input = yield* Constant.nullValue(
       context.builder,
-      context.laneType(targetLane),
+      NativeType.laneType(context.types, targetLane),
     )
     for (const [mappingOrdinal, mapping] of [...mappings].reverse().entries()) {
       const repacking = Layout.failurePayloadRepacking(
@@ -60,7 +73,7 @@ export const failurePayload = Effect.fnUntraced(function* (
       const sourceValue = lane === undefined ? undefined : source.at(lane.sourceOrdinal)
       let candidate: Value.Input = yield* Constant.nullValue(
         context.builder,
-        context.laneType(targetLane),
+        NativeType.laneType(context.types, targetLane),
       )
       if (lane !== undefined && sourceValue !== undefined) {
         const member = yield* NativeArith.coerceLane(
@@ -139,20 +152,11 @@ export interface Context {
   readonly usizeType?: LlvmType.Type
   readonly free?: FunctionActor.Function
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
-  readonly constantBytePointer: (
-    base: Value.Input,
-    offset: number,
-    name: string,
-  ) => Effect.Effect<Value.Value, LlvmError.LlvmError>
+  readonly types: NativeType.LoweringContext
+  readonly lanePointers: NativeLanePointer.Context
   readonly call: NativeCall.Context
-  readonly coerceLane: (
-    input: Value.Input,
-    source: Layout.CallingLane,
-    target: Layout.CallingLane,
-    name: string,
-  ) => Effect.Effect<Value.Input, LlvmError.LlvmError>
-  readonly reloadMutableRoots: (tag: string) => Effect.Effect<void, LlvmError.LlvmError>
+  readonly arith: NativeArith.LaneContext
+  readonly storage: NativeStorage.Context
 }
 
 /**
@@ -177,11 +181,11 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     usizeType,
     free,
     declared,
-    laneType,
-    constantBytePointer,
+    lanePointers,
     call,
-    coerceLane,
-    reloadMutableRoots,
+    arith,
+    storage,
+    types,
   } = context
   const semanticLanesOf = (type: SilkType.Type): ReadonlyArray<Layout.CallingLane> => {
     const shape = Layout.callingShape(program.layout, type)
@@ -292,7 +296,13 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         yield* FunctionBody.store(
           body,
           stored,
-          yield* constantBytePointer(base, offset, `${tag}_store${ordinal}`),
+          yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            base,
+            offset,
+            `${tag}_store${ordinal}`,
+          ),
         )
       }
       yield* NativeCall.callValues(call, target, [base], `${tag}_hook`)
@@ -303,8 +313,14 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         reloaded.push(
           yield* FunctionBody.load(
             body,
-            laneType(lane),
-            yield* constantBytePointer(base, offset, `${tag}_reload${ordinal}_ptr`),
+            NativeType.laneType(types, lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
+              base,
+              offset,
+              `${tag}_reload${ordinal}_ptr`,
+            ),
             `${tag}_reload${ordinal}`,
           ),
         )
@@ -394,7 +410,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
             if (value === undefined || sourceLane === undefined || targetLane === undefined)
               continue
             selected.push(
-              yield* coerceLane(
+              yield* NativeArith.coerceLane(
+                arith,
                 value,
                 sourceLane,
                 targetLane,
@@ -418,7 +435,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           // reloads its receiver after calling out, and those loads live in the arm.
           // Reloading re-roots the cache in this block, which is both valid SSA and
           // the value the arm may have just mutated.
-          yield* reloadMutableRoots(`${tag}_u${caseEntry.ordinal}_next`)
+          yield* NativeStorage.reloadRoots(storage, `${tag}_u${caseEntry.ordinal}_next`)
           continue
         }
         if (paths.length === 0) continue

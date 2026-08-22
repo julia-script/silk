@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 
 /**
  * Every diagnostic family judged against reachable concrete instances, collected once so that
@@ -318,7 +318,7 @@ const normalizeMir = (
 const finalizeMir = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   options: Options,
 ): Mir.Module => {
   const normalized = normalizeMir(program, provisional, options)
@@ -388,7 +388,7 @@ export type Preparation =
     }
 
 const hasInvalidGenericBody = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
 ): boolean =>
   index.modules.some((module) =>

@@ -9,7 +9,6 @@ import type {
   DeclaredTypeFact,
   FailureRowFact,
   FieldFact,
-  Index,
   InterfaceFact,
   InterfaceOperationApplicationFact,
   MemberFact,
@@ -27,8 +26,13 @@ import type {
   TypeResolution,
   TypeResolver,
 } from './DeclarationFacts.js'
-import { copyApplication, interfaceApplication, lookupDeclaration } from './DeclarationFacts.js'
-import { requirementRoleIdentity } from './DeclarationIndex.js'
+import {
+  copyApplication,
+  interfaceApplication,
+  lookupDeclaration,
+  requirementRoleIdentity,
+} from './DeclarationFacts.js'
+import type { Index } from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'

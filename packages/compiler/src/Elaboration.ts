@@ -1,9 +1,10 @@
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import type * as CallableContract from './CallableContract.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import type * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
@@ -1738,7 +1739,7 @@ export interface Input {
   readonly syntax: SyntaxFile.SyntaxFile
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
 }
 
 export const elaborateModule = (input: Input): Result => {
@@ -1790,7 +1791,7 @@ export const elaborateModule = (input: Input): Result => {
               if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
               return Object.freeze({
                 ...capture,
-                access: DeclarationIndex.copyType(
+                access: ConformanceProof.copyType(
                   index,
                   declared.type,
                   copyAssumptionsOf(fact.declaration),

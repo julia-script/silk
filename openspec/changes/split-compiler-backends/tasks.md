@@ -7,11 +7,11 @@
 
 ## 2. Split Backend emitProgram
 
-- [x] 2.1 Introduce the LoweringContext record
+- [x] 2.1 Introduce explicit actor contexts; keep `NativeOperation.LoweringContext` dispatch-only and free of behavior callbacks
 - [x] 2.2 Extract NativeType.ts, NativeDeclare.ts, NativeDebug.ts
 - [x] 2.3 Extract NativeFunction.ts, NativeCall.ts
 - [x] 2.4 Extract NativeArith.ts (dedup comparisonPredicates + checked ops)
-- [x] 2.5 Extract NativeAggregate.ts, NativeOperation.ts, NativeControl.ts, NativeSuspension.ts
+- [x] 2.5 Extract NativeAggregate.ts, NativeOperation.ts, NativeControl.ts, NativeSuspension.ts, NativeStorage.ts, and NativeHostFailure.ts with actual behavior ownership
 - [x] 2.6 Move the transcendental kernel beside Transcendental.plan
 - [x] 2.7 Collapse the six lane-pointer helpers into one lanePointer
 - [x] 2.8 Verify native backend goldens pass
@@ -33,5 +33,5 @@
 
 ## 5. Convergence findings
 
-- [x] 5.1 Introduce the explicit native `LoweringContext` and move the actual type, declaration, debug, function, call, arithmetic, aggregate, operation, control, and suspension lowering implementations into their `Native*` actors
+- [x] 5.1 Move actual type, declaration, debug, storage, host-failure, function, call, arithmetic, aggregate, operation, control, and suspension lowering into their `Native*` actors; remove callback-bag context assembly and duplicate closures
 - [x] 5.2 Make `LlvmBackend.emitProgram` a thin coordinator and verify native IR/bitcode goldens and differential execution remain unchanged

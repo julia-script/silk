@@ -14,6 +14,7 @@ import * as Mir from './Mir.js'
 import * as NativeCall from './NativeCall.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
+import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
 
 export interface ReturnContext {
@@ -24,8 +25,7 @@ export interface ReturnContext {
   readonly entry: NativeLoweringContext.DeclaredFunction
   readonly invocationFrameStorage?: Value.Input
   readonly coroutineFramePop?: FunctionActor.Function
-  readonly lanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly types: NativeType.LoweringContext
 }
 
 /** Emits one suspension-step ABI return and releases a completed invocation frame. */
@@ -55,11 +55,13 @@ export const returnStep = Effect.fnUntraced(function* (
     )
   }
   const padded = [...values]
-  const resultLanes = context.lanesFor(context.entry.fn.result)
+  const resultLanes = NativeType.lanesFor(context.types, context.entry.fn.result)
   while (padded.length < resultLanes.length) {
     const lane = resultLanes.at(padded.length)
     if (lane === undefined) break
-    padded.push(yield* Constant.nullValue(context.builder, context.laneType(lane)))
+    padded.push(
+      yield* Constant.nullValue(context.builder, NativeType.laneType(context.types, lane)),
+    )
   }
   yield* FunctionBody.returnValue(
     context.body,
@@ -79,13 +81,13 @@ export const returnStep = Effect.fnUntraced(function* (
 export const logicalLanes = (
   fn: Mir.MirFunction,
   locals: ReadonlyArray<Mir.LocalId>,
-  lanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>,
+  types: NativeType.LoweringContext,
 ): ReadonlyArray<Layout.CallingLane> =>
   Object.freeze(
     locals.flatMap((local) => {
       const type = fn.localTypes.at(local.ordinal)
       if (type === undefined) throw new RangeError(`LLVM suspension lost local %${local.ordinal}`)
-      return lanesFor(type)
+      return NativeType.lanesFor(types, type)
     }),
   )
 
@@ -116,8 +118,7 @@ export interface ThunkContext {
       readonly layout: Mir.CoroutineFrameTargetStateLayout
     }
   >
-  readonly lanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly types: NativeType.LoweringContext
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
   readonly transferStorageSize: number
@@ -140,8 +141,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
     declared,
     originThunks,
     resumeThunks,
-    lanesFor,
-    laneType,
+    types,
     transferHeaderSize,
     transferResultOffset,
     transferStorageSize,
@@ -171,7 +171,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         const argumentLanes = logicalLanes(
           origin.owner.fn,
           NativeCall.operationInputs(origin.region.operation),
-          lanesFor,
+          types,
         )
         const packed = NativeType.packLanes(program.layout.target, argumentLanes)
         const arguments_: Array<Value.Input> = []
@@ -179,7 +179,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           arguments_.push(
             yield* FunctionBody.load(
               body,
-              laneType(lane.lane),
+              NativeType.laneType(types, lane.lane),
               yield* NativeLanePointer.lanePointer(
                 lanePointers,
                 body,
@@ -212,7 +212,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             : yield* FunctionBody.extractValue(body, result, [0], 'child_status')
           : yield* Constant.integerUnsigned(builder, i32, 0n)
         if (status === undefined) throw new RangeError('LLVM child thunk lost status')
-        const resultLanes = lanesFor(target.fn.result)
+        const resultLanes = NativeType.lanesFor(types, target.fn.result)
         const resultPacked = NativeType.packLanes(
           program.layout.target,
           resultLanes,
@@ -267,13 +267,13 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         if (ordinal < 0) throw new RangeError('LLVM resume thunk lost dispatch identity')
         const parameters = resume.owner.fn.localTypes
           .slice(0, resume.owner.fn.parameterCount)
-          .flatMap((type) => lanesFor(type))
+          .flatMap((type) => NativeType.lanesFor(types, type))
         const result = yield* FunctionBody.callDirect(
           body,
           resume.owner.handle,
           [
             ...(yield* Effect.forEach(parameters, (lane) =>
-              Constant.nullValue(builder, laneType(lane)),
+              Constant.nullValue(builder, NativeType.laneType(types, lane)),
             )),
             transfer,
             frame,
@@ -285,7 +285,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         const status = yield* FunctionBody.extractValue(body, result, [0], 'resume_status')
         const resultPacked = NativeType.packLanes(
           program.layout.target,
-          lanesFor(resume.owner.fn.result),
+          NativeType.lanesFor(types, resume.owner.fn.result),
           transferResultOffset,
         )
         for (const [laneOrdinal, lane] of resultPacked.entries.entries()) {
@@ -527,14 +527,14 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         const finalValues: Array<Value.Input> = []
         const finalPacked = NativeType.packLanes(
           program.layout.target,
-          lanesFor(machine.fn.result),
+          NativeType.lanesFor(types, machine.fn.result),
           transferResultOffset,
         )
         for (const [ordinal, lane] of finalPacked.entries.entries())
           finalValues.push(
             yield* FunctionBody.load(
               body,
-              laneType(lane.lane),
+              NativeType.laneType(types, lane.lane),
               yield* NativeLanePointer.lanePointer(
                 lanePointers,
                 body,
@@ -560,8 +560,7 @@ export interface OperationContext {
   readonly pointer: LlvmType.Type
   readonly entry: NativeLoweringContext.DeclaredFunction
   readonly lanePointers: NativeLanePointer.Context
-  readonly lanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly types: NativeType.LoweringContext
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
   readonly transferPointer?: Value.Input
@@ -576,8 +575,7 @@ export interface OperationContext {
   >
   readonly suspensionRegions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
   readonly resumeBlocks: ReadonlyMap<string, LlvmBlock.Block>
-  readonly locals: Map<number, ReadonlyArray<Value.Input>>
-  readonly mutableStorage: ReadonlyMap<number, ReadonlyArray<Value.Input>>
+  readonly storage: NativeStorage.Context
   readonly returns: ReturnContext
 }
 
@@ -586,13 +584,7 @@ const storeMutable = Effect.fnUntraced(function* (
   root: Mir.LocalId,
   values: ReadonlyArray<Value.Input>,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const storage = context.mutableStorage.get(root.ordinal)
-  if (storage === undefined) return
-  for (const [lane, pointer] of storage.entries()) {
-    const stored = values.at(lane)
-    if (stored === undefined) throw new RangeError('Mutable root lost a physical lane')
-    yield* FunctionBody.store(context.body, stored, pointer)
-  }
+  yield* NativeStorage.storeMutable(context.storage, root, values)
 })
 
 const originateTransfer = Effect.fnUntraced(function* (
@@ -606,7 +598,7 @@ const originateTransfer = Effect.fnUntraced(function* (
     body,
     entry,
     lanePointers,
-    lanesFor,
+    types,
     originThunks,
     program,
     transferHeaderSize,
@@ -640,7 +632,7 @@ const originateTransfer = Effect.fnUntraced(function* (
   )
   const packed = NativeType.packLanes(
     program.layout.target,
-    logicalLanes(entry.fn, NativeCall.operationInputs(region.operation), lanesFor),
+    logicalLanes(entry.fn, NativeCall.operationInputs(region.operation), types),
   )
   if (packed.entries.length !== arguments_.length)
     throw new RangeError('LLVM suspension origin argument shape disagrees with its thunk')
@@ -671,7 +663,7 @@ export const emitOrigin = Effect.fnUntraced(function* (
   arguments_: ReadonlyArray<Value.Input>,
   name: string,
 ) {
-  const { body, builder, laneType, lanesFor, locals, suspensionRegions } = context
+  const { body, builder, storage: nativeStorage, suspensionRegions, types } = context
   const suspension = suspensionRegions.get(operation)
   if (suspension?._tag !== 'SuspendEffectRegion') return false
   yield* originateTransfer(context, suspension, arguments_, name)
@@ -680,17 +672,17 @@ export const emitOrigin = Effect.fnUntraced(function* (
     yield* LlvmBlock.make(body, `${name}_unreachable_continuation`),
   )
   const outcomeValues = Object.freeze(
-    yield* Effect.forEach(lanesFor(operation.outcomeType), (lane) =>
-      Constant.nullValue(builder, laneType(lane)),
+    yield* Effect.forEach(NativeType.lanesFor(types, operation.outcomeType), (lane) =>
+      Constant.nullValue(builder, NativeType.laneType(types, lane)),
     ),
   )
   const destinationValues = Object.freeze(
-    yield* Effect.forEach(lanesFor(operation.type), (lane) =>
-      Constant.nullValue(builder, laneType(lane)),
+    yield* Effect.forEach(NativeType.lanesFor(types, operation.type), (lane) =>
+      Constant.nullValue(builder, NativeType.laneType(types, lane)),
     ),
   )
-  locals.set(operation.outcome.ordinal, outcomeValues)
-  locals.set(operation.destination.ordinal, destinationValues)
+  nativeStorage.locals.set(operation.outcome.ordinal, outcomeValues)
+  nativeStorage.locals.set(operation.destination.ordinal, destinationValues)
   return true
 })
 
@@ -710,17 +702,15 @@ export const joinOutcome = Effect.fnUntraced(function* (
     i8,
     i32,
     lanePointers,
-    laneType,
-    lanesFor,
-    locals,
-    mutableStorage,
     program,
     resumeBlocks,
     resumeFrame,
     resumeThunks,
     suspensionRegions,
+    storage: nativeStorage,
     transferPointer,
     transferResultOffset,
+    types,
   } = context
   const suspension = suspensionRegions.get(operation)
   const descriptor =
@@ -738,10 +728,14 @@ export const joinOutcome = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, resumeBlock)
   for (const field of generated.layout.payload) {
     const type = entry.fn.localTypes.at(field.local.ordinal)
-    const storage = mutableStorage.get(field.local.ordinal)
+    const storage = nativeStorage.mutableStorage.get(field.local.ordinal)
     if (type === undefined || storage === undefined)
       throw new RangeError('LLVM coroutine payload has no mutable restore storage')
-    const packed = NativeType.packLanes(program.layout.target, lanesFor(type), field.offset)
+    const packed = NativeType.packLanes(
+      program.layout.target,
+      NativeType.lanesFor(types, type),
+      field.offset,
+    )
     for (const [ordinal, lane] of packed.entries.entries()) {
       const target = storage.at(ordinal)
       if (target === undefined) throw new RangeError('LLVM restore lost payload lane')
@@ -749,7 +743,7 @@ export const joinOutcome = Effect.fnUntraced(function* (
         body,
         yield* FunctionBody.load(
           body,
-          laneType(lane.lane),
+          NativeType.laneType(types, lane.lane),
           yield* NativeLanePointer.lanePointer(
             lanePointers,
             body,
@@ -763,12 +757,12 @@ export const joinOutcome = Effect.fnUntraced(function* (
       )
     }
   }
-  const outcomeStorage = mutableStorage.get(operation.outcome.ordinal)
+  const outcomeStorage = nativeStorage.mutableStorage.get(operation.outcome.ordinal)
   if (outcomeStorage === undefined)
     throw new RangeError('LLVM coroutine outcome has no restore storage')
   const outcomePacked = NativeType.packLanes(
     program.layout.target,
-    lanesFor(operation.outcomeType),
+    NativeType.lanesFor(types, operation.outcomeType),
     transferResultOffset,
   )
   for (const [ordinal, lane] of outcomePacked.entries.entries()) {
@@ -778,7 +772,7 @@ export const joinOutcome = Effect.fnUntraced(function* (
       body,
       yield* FunctionBody.load(
         body,
-        laneType(lane.lane),
+        NativeType.laneType(types, lane.lane),
         yield* FunctionBody.getElementPtr(
           body,
           i8,
@@ -795,29 +789,36 @@ export const joinOutcome = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, following)
   for (const field of generated.layout.payload) {
     const type = entry.fn.localTypes.at(field.local.ordinal)
-    const storage = mutableStorage.get(field.local.ordinal)
+    const storage = nativeStorage.mutableStorage.get(field.local.ordinal)
     if (type === undefined || storage === undefined)
       throw new RangeError('LLVM joined continuation lost payload storage')
     const values: Array<Value.Input> = []
-    for (const [ordinal, lane] of lanesFor(type).entries()) {
+    for (const [ordinal, lane] of NativeType.lanesFor(types, type).entries()) {
       const source = storage.at(ordinal)
       if (source === undefined) throw new RangeError('LLVM joined payload lost lane')
       values.push(
         yield* FunctionBody.load(
           body,
-          laneType(lane),
+          NativeType.laneType(types, lane),
           source,
           `${name}_joined_payload${field.slot}_${ordinal}`,
         ),
       )
     }
-    locals.set(field.local.ordinal, Object.freeze(values))
+    nativeStorage.locals.set(field.local.ordinal, Object.freeze(values))
   }
   const joined: Array<Value.Input> = []
-  for (const [ordinal, lane] of lanesFor(operation.outcomeType).entries()) {
+  for (const [ordinal, lane] of NativeType.lanesFor(types, operation.outcomeType).entries()) {
     const source = outcomeStorage.at(ordinal)
     if (source === undefined) throw new RangeError('LLVM joined outcome lost storage')
-    joined.push(yield* FunctionBody.load(body, laneType(lane), source, `${name}_joined${ordinal}`))
+    joined.push(
+      yield* FunctionBody.load(
+        body,
+        NativeType.laneType(types, lane),
+        source,
+        `${name}_joined${ordinal}`,
+      ),
+    )
   }
   return Object.freeze(joined)
 })

@@ -1,4 +1,5 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -109,7 +110,7 @@ interface SymbolicUse {
 }
 
 const plansOfInternal = (
-  declarations: DeclarationFacts.Index,
+  declarations: DeclarationIndex.Index,
   nominal: DeclarationFacts.CanonicalId | Type.Nominal,
   seen: ReadonlySet<string>,
 ): ReadonlyArray<Plan> => {
@@ -184,11 +185,11 @@ const plansOfInternal = (
 
 /** Collects source-ordered represented-field plans, including forwarded nested representations. */
 export const plansOf = (
-  declarations: DeclarationFacts.Index,
+  declarations: DeclarationIndex.Index,
   nominal: DeclarationFacts.CanonicalId | Type.Nominal,
 ): ReadonlyArray<Plan> => plansOfInternal(declarations, nominal, new Set())
 
-const provenanceOf = (declarations: DeclarationFacts.Index, plan: Plan): Provenance | undefined => {
+const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provenance | undefined => {
   const declaration = declarations.modules
     .flatMap((module) => module.structs)
     .find(
@@ -262,7 +263,7 @@ const resolvePlan = (
 
 /** Resolves represented fields for complete nominal instances, deduplicated by structural key. */
 export const resolveFields = (
-  declarations: DeclarationFacts.Index,
+  declarations: DeclarationIndex.Index,
   instances: ReadonlyArray<Type.Nominal>,
 ): Index => {
   const resolutions = new Map<string, Resolution>()

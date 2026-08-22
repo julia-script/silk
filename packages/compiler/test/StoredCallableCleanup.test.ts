@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as FieldRealization from '../src/FieldRealization.js'
-import * as Instances from '../src/Instances.js'
+import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
@@ -39,7 +39,7 @@ const bindingCleanup = (
 }
 
 const soleRealization = (snapshot: Analysis.Snapshot): FieldRealization.CallableRealization =>
-  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+  InstanceDiagnostics.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
       FieldRealization.isCallableRealization(entry.support.realization)
@@ -52,7 +52,7 @@ const realizationOf = (
   snapshot: Analysis.Snapshot,
   owner: string,
 ): FieldRealization.CallableRealization =>
-  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+  InstanceDiagnostics.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
       FieldRealization.isCallableRealization(entry.support.realization) &&

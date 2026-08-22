@@ -6,10 +6,12 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
@@ -74,6 +76,24 @@ const expectedPhases = [
   'shim',
   'link',
 ]
+
+it.effect('measures Effect phases with the fiber clock', () =>
+  Effect.gen(function* () {
+    const reports: Array<PhaseReport.PhaseReport> = []
+    const value = yield* PhaseReport.measureEffectInto(
+      reports,
+      'controlled-clock',
+      1,
+      Effect.gen(function* () {
+        yield* TestClock.adjust(1250)
+        return 42
+      }),
+      () => 1,
+    )
+    assert.strictEqual(value, 42)
+    assert.strictEqual(reports.at(0)?.elapsedMs, 1250)
+  }),
+)
 
 it.effect('compiles a three-module call chain to native execution matching the interpreter', () =>
   Effect.gen(function* () {

@@ -9,6 +9,8 @@ import * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
 import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
+import * as NativeDebug from './NativeDebug.js'
+import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 
@@ -17,7 +19,7 @@ export interface LaneContext {
   readonly pointerBits: 32 | 64
   readonly i32: LlvmType.Type
   readonly integerTypes: ReadonlyMap<number, LlvmType.Type>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly types: NativeType.LoweringContext
 }
 
 /** Reinterprets and resizes one physical ABI lane without changing its semantic bits. */
@@ -67,9 +69,21 @@ export const coerceLane = Effect.fnUntraced(function* (
       `${name}_width`,
     )
   if (targetIsAddress)
-    return yield* FunctionBody.cast(context.body, 'inttoptr', bits, context.laneType(target), name)
+    return yield* FunctionBody.cast(
+      context.body,
+      'inttoptr',
+      bits,
+      NativeType.laneType(context.types, target),
+      name,
+    )
   return targetFloating
-    ? yield* FunctionBody.cast(context.body, 'bitcast', bits, context.laneType(target), name)
+    ? yield* FunctionBody.cast(
+        context.body,
+        'bitcast',
+        bits,
+        NativeType.laneType(context.types, target),
+        name,
+      )
     : bits
 })
 
@@ -122,12 +136,9 @@ export interface OperationContext {
     number,
     { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
   >
-  readonly valueLanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
-  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
-  readonly locate: (
-    span: SourceSpan.SourceSpan,
-    instruction: FunctionBody.Instruction | undefined,
-  ) => Effect.Effect<void, LlvmError.LlvmError>
+  readonly lane: LaneContext
+  readonly types: NativeType.LoweringContext
+  readonly debug: NativeDebug.LocationContext
   readonly state: { trapBlock: LlvmBlock.Block | undefined }
 }
 
@@ -144,21 +155,20 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     body,
     builder,
     i32,
-    laneType,
-    locate,
+    debug,
     program,
     signedOverflowSignatures,
     state: operationState,
     unsignedOverflowSignatures,
-    valueLanesFor,
+    types,
   } = context
-  const leftLane = valueLanesFor(operandMirType).at(0)
+  const leftLane = NativeType.valueLanesFor(types, operandMirType).at(0)
   if (leftLane === undefined)
     throw new RangeError('LLVM callable binary operation lost its operand type')
   const semanticOperand = Mir.semanticType(operandMirType)
   const scalar = typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
   const unsigned = scalar?.signedness === 'Unsigned'
-  const operandType = laneType(leftLane)
+  const operandType = NativeType.laneType(types, leftLane)
   if (scalar?.category === 'Floating') {
     const predicate: FunctionBody.FloatingPredicate | undefined =
       operator === 'Equals'
@@ -205,7 +215,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       right,
       `callable_float${nameOrdinal}`,
     )
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   const predicate = comparisonPredicate(operator, unsigned)
@@ -218,7 +228,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       `callable_cmp${nameOrdinal}_flag`,
     )
     const widened = yield* FunctionBody.cast(body, 'zext', flag, i32, `callable_cmp${nameOrdinal}`)
-    yield* locate(span, yield* Value.instruction(body, flag))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, flag))
     return widened
   }
   if (
@@ -246,7 +256,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       right,
       `callable_integer${nameOrdinal}`,
     )
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
@@ -274,7 +284,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       right,
       `callable_shift${nameOrdinal}`,
     )
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   if (operator === 'RotateLeft' || operator === 'RotateRight') {
@@ -291,7 +301,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       { signature },
     )
     if (result === undefined) throw new RangeError('LLVM callable rotate produced no value')
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   if (operator === 'SaturatingAdd' || operator === 'SaturatingSubtract') {
@@ -317,7 +327,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     )
     if (result === undefined)
       throw new RangeError('LLVM callable saturating arithmetic produced no value')
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   if (operator === 'SaturatingMultiply') {
@@ -397,7 +407,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       wrapped,
       `callable_saturating${nameOrdinal}`,
     )
-    yield* locate(span, yield* Value.instruction(body, result))
+    yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
     return result
   }
   if (operationState.trapBlock === undefined)
@@ -509,7 +519,7 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       `callable_arith${nameOrdinal}`,
     )
   }
-  yield* locate(span, yield* Value.instruction(body, result))
+  yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
   return result
 })
 

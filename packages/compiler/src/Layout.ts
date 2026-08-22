@@ -1,9 +1,11 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
+import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import type {
@@ -559,7 +561,7 @@ const unavailable = (
 /** Computes every canonical nominal layout before runtime reachability or backend work. */
 export const catalog = (
   target: Target.Target,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   discovery?: Instances.Discovery,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Catalog => {
@@ -579,7 +581,9 @@ export const catalog = (
   const completed = new Map<string, CatalogEntry>()
   const visiting = new Set<string>()
   const callableRealizations =
-    discovery === undefined ? undefined : Instances.callableFieldRealizations(discovery, index)
+    discovery === undefined
+      ? undefined
+      : InstanceDiagnostics.callableFieldRealizations(discovery, index)
 
   interface InlineEnvironmentLayout {
     readonly fields: ReadonlyArray<StoredEffectEnvironmentField>

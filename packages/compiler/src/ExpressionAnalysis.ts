@@ -4,7 +4,7 @@ import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
@@ -2949,7 +2949,7 @@ export const effectBindingProvider = (
   evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
   provider: ExpressionFact,
   span: SourceSpan.SourceSpan,
-  index?: DeclarationFacts.Index,
+  index?: DeclarationIndex.Index,
 ): EffectRequirementBindingFact | undefined => {
   if (
     operation.rule._tag !== 'ContractRule' ||
@@ -2991,7 +2991,7 @@ export const effectBindingProvider = (
       provider._tag === 'Move' &&
       provider.subject.type._tag === 'Available' &&
       index !== undefined &&
-      DeclarationIndex.copyType(index, provider.subject.type.type)
+      ConformanceProof.copyType(index, provider.subject.type.type)
         ? 'Copy'
         : captureAccess(provider, index),
     span,
@@ -3538,7 +3538,7 @@ export const boundOperatorSelections = (
   )
 
 export const concreteOperatorSelections = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   module: string,
   operator: Operator.Eligible,
 ): ReadonlyArray<OperatorContractSelection> => {
@@ -3956,7 +3956,7 @@ export const analyzePipelineExpression = (
 
 export const effectExpressionAccess = (
   expression: ExpressionFact,
-  index: DeclarationFacts.Index | undefined,
+  index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   if (expression._tag === 'Move') {
@@ -3970,7 +3970,7 @@ export const effectExpressionAccess = (
     if (
       expression.subject.type._tag === 'Available' &&
       index !== undefined &&
-      DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
+      ConformanceProof.copyType(index, expression.subject.type.type, assumptions)
     )
       return 'Shared'
     return 'Take'
@@ -3989,7 +3989,7 @@ export const effectExpressionAccess = (
 
 export const effectCaptureAccess = (
   arguments_: ReadonlyArray<ArgumentFact>,
-  index: DeclarationFacts.Index | undefined,
+  index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   const accesses = arguments_.map((argument) =>
@@ -4001,7 +4001,7 @@ export const effectCaptureAccess = (
 export const intrinsicEffectCaptureAccess = (
   operation: Intrinsic.Operation,
   arguments_: ReadonlyArray<ArgumentFact>,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   if (
@@ -4135,7 +4135,7 @@ export const analyzeEffectResult = (
 export const effectCaptureFacts = (
   statements: ReadonlyArray<StatementFact>,
   firstLocalBinding: number,
-  index?: DeclarationFacts.Index,
+  index?: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
@@ -4171,7 +4171,7 @@ export const effectCaptureFacts = (
         !Type.containsViewBorrow(fact.type.type) &&
         (index === undefined
           ? typeof fact.type.type === 'string'
-          : DeclarationIndex.copyType(index, fact.type.type, assumptions)),
+          : ConformanceProof.copyType(index, fact.type.type, assumptions)),
     )
   }
   const expression = (
@@ -5494,7 +5494,7 @@ export interface BodyContext {
 
 export interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   /** Exact direct-call spans acknowledged by the expression form `unsafe call(...)`. */
   readonly unsafeCallSpans?: ReadonlyArray<SourceSpan.SourceSpan>

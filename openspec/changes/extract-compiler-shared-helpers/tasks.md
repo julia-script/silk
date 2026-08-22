@@ -13,7 +13,7 @@
 ## 3. Rendering, measurement, ABI
 
 - [x] 3.1 Route `Presentation` through `Type.encodeRequirement`; delete the five inline copies
-- [x] 3.2 Unify phase measurement on `PhaseReport.measure`; delete `Pipeline`/`Driver` wrappers and inline reports
+- [x] 3.2 Unify phase measurement on `PhaseReport.measure`/`measureEffectInto`, use Effect `Clock` for Effect phases, and delete `Pipeline`/`Driver` wrappers and inline reports
 - [x] 3.3 Export `suspensionPointKey` from `Backend` and delete the `WasmBackend` copy
 
 ## 4. Verification

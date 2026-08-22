@@ -1,9 +1,11 @@
 import * as CallableContract from './CallableContract.js'
 import type * as ConformanceHead from './ConformanceHead.js'
 import type * as Constraint from './Constraint.js'
+import type { Index } from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as Operator from './Operator.js'
+import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as StaticText from './StaticText.js'
 import type * as SyntaxTree from './SyntaxTree.js'
@@ -39,6 +41,16 @@ export interface DeclarationFact {
 
 /** The semantic types recognized in declaration and executable analysis. */
 export type SemanticType = Type.Type
+
+/** Resolves one retained requirement-role fact to its semantic identity when available. */
+export const requirementRoleIdentity = (
+  role: RequirementRoleFact,
+): Type.Requirement['role'] | undefined =>
+  role._tag === 'DefaultRole'
+    ? RequirementRow.defaultRole
+    : role._tag === 'ResolvedRole'
+      ? role.role
+      : undefined
 
 /** A deterministic declaration identity local to one analyzed source snapshot. */
 export interface DeclarationId {
@@ -1276,14 +1288,6 @@ export interface ModuleHeaders {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-/** The immutable declaration index of one loaded closure. */
-export interface Index {
-  readonly _tag: 'DeclarationIndex'
-  readonly stage: 'Collected' | 'Complete'
-  readonly modules: ReadonlyArray<ModuleHeaders>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-}
-
 export interface TypeResolution {
   readonly fact: DeclaredTypeFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -1420,4 +1424,92 @@ export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefine
   return result._tag === 'Resolved' && result.declaration.canonical._tag === 'Canonical'
     ? result.declaration
     : undefined
+}
+
+/** Tests whether a value of this type can retain lexical storage through its fields. */
+export const containsLexicalBorrow = (
+  self: Index,
+  type: Type.Type,
+  seen: ReadonlySet<string> = new Set(),
+): boolean => {
+  if (Type.isString(type) || Type.isSlice(type) || Type.isReference(type)) return true
+  if (Type.isFixedArray(type)) return containsLexicalBorrow(self, type.element, seen)
+  if (Type.isUnion(type))
+    return type.members.some((member) => containsLexicalBorrow(self, member, seen))
+  if (Type.isEffect(type))
+    return (
+      containsLexicalBorrow(self, type.success, seen) ||
+      Type.failureMembers(type).some((failure) => containsLexicalBorrow(self, failure, seen))
+    )
+  if (!Type.isNominal(type)) return false
+  const key = Type.key(type)
+  if (seen.has(key)) return false
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration')
+    return type.arguments
+      .filter(Type.isTypeArgument)
+      .some((argument) => containsLexicalBorrow(self, argument, seen))
+  const substitution =
+    TypeInference.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const next = new Set(seen).add(key)
+  return declaration.fields.some(
+    (field) =>
+      field.declaredType._tag === 'Resolved' &&
+      containsLexicalBorrow(self, Type.substitute(field.declaredType.type, substitution), next),
+  )
+}
+
+/** One stored bare-callable occurrence that denies an aggregate type a target layout. */
+export interface StoredCallable {
+  readonly path: ReadonlyArray<string>
+  readonly callable: Type.Callable
+}
+
+/** Finds the first aggregate position that retains a bare callable value. */
+export const storedCallable = (
+  self: Index,
+  type: Type.Type,
+  seen: ReadonlySet<string> = new Set(),
+): StoredCallable | undefined => {
+  if (Type.isCallable(type)) return Object.freeze({ path: Object.freeze([]), callable: type })
+  if (Type.isFixedArray(type) || Type.isSlice(type)) return storedCallable(self, type.element, seen)
+  if (Type.isUnion(type)) {
+    for (const member of type.members) {
+      const found = storedCallable(self, member, seen)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
+  const key = Type.key(type)
+  if (seen.has(key)) return undefined
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag !== 'StructDeclaration') return undefined
+  const substitution =
+    TypeInference.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    ) ?? new Map()
+  const next = new Set(seen).add(key)
+  for (const field of declaration.fields) {
+    if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
+    const found = storedCallable(self, Type.substitute(field.declaredType.type, substitution), next)
+    if (found !== undefined)
+      return Object.freeze({
+        path: Object.freeze([field.name.spelling, ...found.path]),
+        callable: found.callable,
+      })
+  }
+  return undefined
 }

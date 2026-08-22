@@ -1,6 +1,7 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
@@ -132,7 +133,7 @@ export const lowerProgram = (
   discovery: Instances.Discovery,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.Module => {
   const staticDataById = new Map<

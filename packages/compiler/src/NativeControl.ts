@@ -11,9 +11,9 @@ import * as CleanupPlan from './CleanupPlan.js'
 import * as Mir from './Mir.js'
 import type { LinearTerminator } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
+import * as NativeDebug from './NativeDebug.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
-import type * as SourceSpan from './SourceSpan.js'
 
 export interface Context {
   readonly builder: Builder.Builder
@@ -25,10 +25,7 @@ export interface Context {
   readonly cleanup: NativeAggregate.Context
   readonly failure: NativeAggregate.FailureContext
   readonly suspension: NativeSuspension.ReturnContext
-  readonly locate: (
-    span: SourceSpan.SourceSpan,
-    instruction: FunctionBody.Instruction | undefined,
-  ) => Effect.Effect<void, LlvmError.LlvmError>
+  readonly debug: NativeDebug.LocationContext
 }
 
 const read = (context: Context, local: Mir.LocalId): ReadonlyArray<Value.Input> => {
@@ -221,7 +218,7 @@ export const emit = Effect.fnUntraced(function* (
                   `return_value_b${block.id.ordinal}`,
                 ),
               )
-      yield* context.locate(terminator.provenance.span, instruction)
+      yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break
     }
     case 'Jump': {
@@ -239,7 +236,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'Trap': {
       yield* Intrinsic.call(body, 'trap', [], [])
       const instruction = yield* FunctionBody.unreachable(body)
-      yield* context.locate(terminator.provenance.span, instruction)
+      yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break
     }
   }

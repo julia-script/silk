@@ -9,7 +9,7 @@
 
 ## 2. Dedup loan choreography
 
-- [x] 2.1 Add `lowerProvidedEffect` and replace the four provider-loan copies
+- [x] 2.1 Add the authored and forwarded provider brackets and replace all four provider-loan copies, including source-conformance Take handling
 - [x] 2.2 Route the five inline end-loan loops through `endLoans`/`endRunLoans`
 - [x] 2.3 Verify borrow-identity/loan-end determinism tests pass
 

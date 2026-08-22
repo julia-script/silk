@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -136,7 +137,7 @@ const isCanonicalMember = (
   declaration: DeclarationFacts.MemberFact,
 ): declaration is CanonicalMember => declaration.canonical._tag === 'Canonical'
 const canonicalDeclaration = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   module: string,
   spelling: string,
 ): CanonicalMember | undefined => {
@@ -160,7 +161,7 @@ const bindingTarget = (binding: Exclude<Binding, { readonly _tag: 'Unavailable' 
 
 export const resolve = (
   closure: ModuleClosure.Facts,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): Resolution => {
   const scopes: Array<ModuleScope> = []
   for (const module of closure.modules) {
@@ -340,7 +341,7 @@ export const scopeOf = (self: Resolution, module: string): ModuleScope | undefin
   self.modules.find((scope) => scope.module === module)
 export const lookup = (
   scope: ModuleScope,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   spelling: string,
 ): Lookup => {
   const conflict = scope.conflicts.find((value) => value.spelling === spelling)
@@ -370,7 +371,7 @@ export const lookup = (
 }
 export const lookupQualified = (
   scope: ModuleScope,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   namespace: string,
   member: string,
   token: Token.Token,
@@ -494,7 +495,7 @@ const typeUseSpan = (path: DeclarationFacts.TypePathFact): Token.Token['span'] =
 /** Resolves one retained declaration type path through an immutable module scope. */
 export const resolveType = (
   resolution: Resolution,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   module: string,
   path: DeclarationFacts.TypePathFact,
 ): DeclarationFacts.TypeResolution => {
@@ -547,7 +548,7 @@ export const resolveType = (
 /** Resolves one retained item path through the same import scope and visibility gate as values. */
 export const resolveItem = (
   resolution: Resolution,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   module: string,
   path: DeclarationFacts.TypePathFact,
 ): DeclarationFacts.ItemResolution => {
@@ -594,7 +595,7 @@ export const resolveItem = (
 /** Runs identity collection, scope construction, and declared-type completion in phase order. */
 export const analyze = (
   closure: ModuleClosure.Facts,
-): { readonly index: DeclarationFacts.Index; readonly resolution: Resolution } => {
+): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
   const collected = DeclarationCollection.collect(closure)
   const preliminary = resolve(closure, collected)
   const resolvers = ResolutionSeams.make(

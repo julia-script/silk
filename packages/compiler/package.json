@@ -170,13 +170,13 @@
       "types": "./dist/Constraint.d.ts",
       "import": "./dist/Constraint.js"
     },
-    "./DeclarationIndex": {
-      "types": "./dist/DeclarationIndex.d.ts",
-      "import": "./dist/DeclarationIndex.js"
-    },
     "./DeclarationFacts": {
       "types": "./dist/DeclarationFacts.d.ts",
       "import": "./dist/DeclarationFacts.js"
+    },
+    "./DeclarationIndex": {
+      "types": "./dist/DeclarationIndex.d.ts",
+      "import": "./dist/DeclarationIndex.js"
     },
     "./Driver": {
       "types": "./dist/Driver.d.ts",

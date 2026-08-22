@@ -1,5 +1,5 @@
 import * as Effect from 'effect/Effect'
-import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
+import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
 import * as FormattedDocument from '../../src/FormattedDocument.js'
 import * as Lexer from '../../src/Lexer.js'
 import * as ModuleClosure from '../../src/ModuleClosure.js'
@@ -51,7 +51,7 @@ export const indexWithImports = Effect.fnUntraced(function* (
 })
 
 /** Finds one named ordinary or Effect declaration in a completed index. */
-export const declaration = (self: DeclarationFacts.Index, module: string, name: string) =>
+export const declaration = (self: DeclarationIndex.Index, module: string, name: string) =>
   self.modules
     .find((candidate) => candidate.module === module)
     ?.declarations.find(
@@ -59,7 +59,7 @@ export const declaration = (self: DeclarationFacts.Index, module: string, name: 
     )
 
 /** Returns stable diagnostic codes in emission order. */
-export const codes = (self: DeclarationFacts.Index): ReadonlyArray<string> =>
+export const codes = (self: DeclarationIndex.Index): ReadonlyArray<string> =>
   self.diagnostics.map((diagnostic) => diagnostic.code)
 
 /** Formats one declared-type fixture to canonical UTF-8 text. */

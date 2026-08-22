@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
@@ -24,7 +25,7 @@ export interface Options {
 }
 
 interface FrontendFacts {
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
@@ -47,7 +48,7 @@ export interface ProjectFrontend extends FrontendFacts {
 }
 
 interface HeaderFacts {
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }

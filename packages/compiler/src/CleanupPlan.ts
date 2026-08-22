@@ -1,6 +1,6 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -115,7 +115,7 @@ export const reclaims = (self: CleanupPlan): boolean =>
 
 export const hasEffect = (self: CleanupPlan): boolean => hasHook(self) || reclaims(self)
 export const cleanupFields = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   type: Type.Nominal,
   seen = new Set<string>(),
 ): ReadonlyArray<DeclarationFacts.FieldId> => {
@@ -140,14 +140,14 @@ export const cleanupFields = (
 }
 
 export const cleanupPlan = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   type: DeclarationFacts.SemanticType,
   seen = new Set<string>(),
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (DeclarationIndex.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
+  if (ConformanceProof.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
   if (Type.isSlice(type) || Type.isReference(type))
     return Object.freeze({ _tag: 'NoCleanup', type })
@@ -259,7 +259,7 @@ export const cleanupPlan = (
 }
 
 export const cleanupTypeAtPath = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   root: DeclarationFacts.SemanticType | undefined,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): DeclarationFacts.SemanticType | undefined => {
@@ -449,7 +449,7 @@ export const specializeCleanup = (
  * a direct one clean in the same order.
  */
 export const realizedCallableCleanup = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   realization: FieldRealization.CallableRealization,
 ): CleanupPlan => {
   const type = realization.contract

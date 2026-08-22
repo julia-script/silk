@@ -1,4 +1,5 @@
 import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
+import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
  *
@@ -155,7 +156,7 @@ const conformanceLabel = (conformance: DeclarationFacts.ConformanceFact): string
   return `impl${parameters} ${declaredTypeText(conformance.capability)} for ${declaredTypeText(conformance.provider)}`
 }
 
-export const indexRows = (index: DeclarationFacts.Index): ReadonlyArray<RowModel> => {
+export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of index.modules) {

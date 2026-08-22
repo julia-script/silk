@@ -4,7 +4,7 @@ import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
@@ -1297,7 +1297,7 @@ export const analyzeCallContract = (
 export const interfaceConstraintDiagnostics = (
   reference: CallReferenceFact,
   contract: CallContractResult,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   caller: DeclarationFact,
   span: SourceSpan.SourceSpan,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
@@ -1327,7 +1327,7 @@ export const interfaceConstraintDiagnostics = (
         const callerCopyAssumptions = copyAssumptionsOf(caller)
         const assumedByCaller =
           Type.equals(capability, Type.copyCapability) &&
-          DeclarationIndex.copyType(index, provider, callerCopyAssumptions)
+          ConformanceProof.copyType(index, provider, callerCopyAssumptions)
         if (!bound.application.providerMatches)
           return [
             Diagnostic.invalidConformance(
@@ -1935,13 +1935,13 @@ export const analyzeSectionContract = (
 
 export const captureAccess = (
   expression: ExpressionFact,
-  index: DeclarationFacts.Index | undefined,
+  index: DeclarationIndex.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] => {
   if (expression._tag === 'Move')
     return expression.subject.type._tag === 'Available' &&
       index !== undefined &&
-      DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
+      ConformanceProof.copyType(index, expression.subject.type.type, assumptions)
       ? 'Copy'
       : 'Take'
   if (expression._tag === 'Borrow')
@@ -1956,12 +1956,12 @@ export const captureAccess = (
 
 export const ownedProviderCaptureAccess = (
   expression: ExpressionFact,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] =>
   expression._tag === 'Move' &&
   expression.subject.type._tag === 'Available' &&
-  DeclarationIndex.copyType(index, expression.subject.type.type, assumptions)
+  ConformanceProof.copyType(index, expression.subject.type.type, assumptions)
     ? 'Copy'
     : captureAccess(expression, index, assumptions)
 

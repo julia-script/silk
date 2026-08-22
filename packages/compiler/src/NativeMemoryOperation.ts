@@ -10,8 +10,11 @@ import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
-import * as NativeFunction from './NativeFunction.js'
-import type { LoweringContext } from './NativeOperation.js'
+import * as NativeHostFailure from './NativeHostFailure.js'
+import * as NativeLanePointer from './NativeLanePointer.js'
+import type { Context } from './NativeOperationContext.js'
+import * as NativeStorage from './NativeStorage.js'
+import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
 type Operation = Extract<
@@ -37,27 +40,23 @@ type Operation = Extract<
   }
 >
 
-export const emit = Effect.fnUntraced(function* (context: LoweringContext, operation: Operation) {
+export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
-    addressRoots,
-    aggregateFieldOffset,
     body,
     builder,
-    constantBytePointer,
     cleanup,
-    emitHostFailure,
     entry,
     free,
+    hostFailure,
     i32,
-    laneType,
-    lanesFor,
-    locals,
+    lanePointers,
     malloc,
     osRuntimes,
     pointer,
     program,
-    reloadAddressRoot,
     standardWrite,
+    storage: nativeStorage,
+    types,
     unsignedOverflowSignatures,
     usizeType,
   } = context
@@ -66,7 +65,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'Allocate': {
-      const [bytes, alignment] = NativeFunction.readLocal(locals, operation.layout)
+      const [bytes, alignment] = NativeStorage.readLocal(nativeStorage, operation.layout)
       if (
         bytes === undefined ||
         alignment === undefined ||
@@ -171,7 +170,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       yield* LlvmBlock.setInsertionPoint(body, failed)
       if (free === undefined) throw new RangeError('LLVM allocation lost release shim')
       yield* FunctionBody.callDirect(body, free, [raw])
-      yield* emitHostFailure(operation)
+      yield* NativeHostFailure.emit(hostFailure, operation)
       yield* LlvmBlock.setInsertionPoint(body, acquired)
       const advanced = yield* FunctionBody.binary(
         body,
@@ -194,15 +193,15 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         mask,
         `allocation${operation.destination.ordinal}_base`,
       )
-      locals.set(
+      nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([base, bytes, alignment, one, rawAddress, one]),
       )
       break
     }
     case 'HostWrite': {
-      const stream = NativeFunction.readLocal(locals, operation.stream).at(0)
-      const [address, length] = NativeFunction.readLocal(locals, operation.bytes)
+      const stream = NativeStorage.readLocal(nativeStorage, operation.stream).at(0)
+      const [address, length] = NativeStorage.readLocal(nativeStorage, operation.bytes)
       if (
         stream === undefined ||
         address === undefined ||
@@ -237,9 +236,9 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, failedStatus, failed, written)
       yield* LlvmBlock.setInsertionPoint(body, failed)
-      yield* emitHostFailure(operation)
+      yield* NativeHostFailure.emit(hostFailure, operation)
       yield* LlvmBlock.setInsertionPoint(body, written)
-      locals.set(operation.destination.ordinal, Object.freeze([]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
     case 'OsCall': {
@@ -248,15 +247,15 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         throw new RangeError(`LLVM OS runtime ${operation.operation.name} is unavailable`)
       }
       const arguments_ = operation.arguments.flatMap((argument) => [
-        ...NativeFunction.readLocal(locals, argument),
+        ...NativeStorage.readLocal(nativeStorage, argument),
       ])
-      const resultLanes = lanesFor(operation.type)
+      const resultLanes = NativeType.lanesFor(types, operation.type)
       const openOutputs =
         runtime.abi === 'OpenOut'
           ? yield* Effect.forEach(resultLanes.slice(1), (lane, ordinal) =>
               FunctionBody.alloca(
                 body,
-                laneType(lane),
+                NativeType.laneType(types, lane),
                 `os${operation.destination.ordinal}_out${ordinal}`,
               ),
             )
@@ -267,11 +266,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         [...arguments_, ...openOutputs],
         `os${operation.destination.ordinal}`,
       )
-      for (const root of [...addressRoots].sort((left, right) => left - right)) {
-        yield* reloadAddressRoot(root)
+      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
+        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
       if (runtime.resultLaneCount === 0) {
-        locals.set(operation.destination.ordinal, Object.freeze([]))
+        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
         break
       }
       if (result === undefined) throw new RangeError('LLVM OS runtime returned no value')
@@ -283,17 +282,17 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           values.push(
             yield* FunctionBody.load(
               body,
-              laneType(lane),
+              NativeType.laneType(types, lane),
               output,
               `os${operation.destination.ordinal}_out${ordinal}_value`,
             ),
           )
         }
-        locals.set(operation.destination.ordinal, Object.freeze(values))
+        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
         break
       }
       if (runtime.resultLaneCount === 1) {
-        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
         break
       }
       const values: Array<Value.Input> = []
@@ -307,12 +306,12 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           ),
         )
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'RawBufferFrom': {
-      const allocation = NativeFunction.readLocal(locals, operation.allocation)
-      const count = NativeFunction.readLocal(locals, operation.count).at(0)
+      const allocation = NativeStorage.readLocal(nativeStorage, operation.allocation)
+      const count = NativeStorage.readLocal(nativeStorage, operation.count).at(0)
       const bytes = allocation.at(1)
       const alignment = allocation.at(2)
       if (
@@ -358,11 +357,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      locals.set(operation.destination.ordinal, Object.freeze([...allocation, count]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([...allocation, count]))
       break
     }
     case 'RawBufferCount': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
       const referenceType = entry.fn.localTypes.at(operation.buffer.ordinal)
       if (
         address === undefined ||
@@ -375,19 +374,21 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const value = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(referenceType.type.target, 'count'),
+          NativeAggregate.fieldOffset(program.layout, referenceType.type.target, 'count'),
           `raw_buffer_count${operation.destination.ordinal}_ptr`,
         ),
         `raw_buffer_count${operation.destination.ordinal}`,
       )
-      locals.set(operation.destination.ordinal, Object.freeze([value]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([value]))
       break
     }
     case 'RawBufferSlot': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
-      const index = NativeFunction.readLocal(locals, operation.index).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
+      const index = NativeStorage.readLocal(nativeStorage, operation.index).at(0)
       const element = Layout.entry(program.layout, operation.element)
       if (
         address === undefined ||
@@ -401,9 +402,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const count = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(bufferType, 'count'),
+          NativeAggregate.fieldOffset(program.layout, bufferType, 'count'),
           `raw_slot${operation.destination.ordinal}_count_ptr`,
         ),
         `raw_slot${operation.destination.ordinal}_count`,
@@ -422,13 +425,20 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, outOfBounds, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+      const allocationOffset = NativeAggregate.fieldOffset(
+        program.layout,
+        bufferType,
+        '$allocation',
+      )
       const baseAddress = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+          allocationOffset +
+            NativeAggregate.fieldOffset(program.layout, SilkType.allocation, '$base'),
           `raw_slot${operation.destination.ordinal}_base_ptr`,
         ),
         `raw_slot${operation.destination.ordinal}_base`,
@@ -448,12 +458,12 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         offset,
         `raw_slot${operation.destination.ordinal}_address`,
       )
-      locals.set(operation.destination.ordinal, Object.freeze([selected]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([selected]))
       break
     }
     case 'RawBufferRead': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
-      const index = NativeFunction.readLocal(locals, operation.index).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
+      const index = NativeStorage.readLocal(nativeStorage, operation.index).at(0)
       const element = Layout.entry(program.layout, operation.element)
       if (
         address === undefined ||
@@ -467,9 +477,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const count = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(bufferType, 'count'),
+          NativeAggregate.fieldOffset(program.layout, bufferType, 'count'),
           `raw_read${operation.destination.ordinal}_count_ptr`,
         ),
         `raw_read${operation.destination.ordinal}_count`,
@@ -488,13 +500,20 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, outOfBounds, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+      const allocationOffset = NativeAggregate.fieldOffset(
+        program.layout,
+        bufferType,
+        '$allocation',
+      )
       const baseAddress = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+          allocationOffset +
+            NativeAggregate.fieldOffset(program.layout, SilkType.allocation, '$base'),
           `raw_read${operation.destination.ordinal}_base_ptr`,
         ),
         `raw_read${operation.destination.ordinal}_base`,
@@ -532,8 +551,10 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         values.push(
           yield* FunctionBody.load(
             body,
-            laneType(lane),
-            yield* constantBytePointer(
+            NativeType.laneType(types, lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
               base,
               laneOffset,
               `raw_read${operation.destination.ordinal}_${ordinal}_ptr`,
@@ -542,13 +563,13 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           ),
         )
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'RawBufferView': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
-      const offset = NativeFunction.readLocal(locals, operation.offset).at(0)
-      const length = NativeFunction.readLocal(locals, operation.length).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
+      const offset = NativeStorage.readLocal(nativeStorage, operation.offset).at(0)
+      const length = NativeStorage.readLocal(nativeStorage, operation.length).at(0)
       if (
         address === undefined ||
         offset === undefined ||
@@ -561,9 +582,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const count = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(bufferType, 'count'),
+          NativeAggregate.fieldOffset(program.layout, bufferType, 'count'),
           `raw_view${operation.destination.ordinal}_count_ptr`,
         ),
         `raw_view${operation.destination.ordinal}_count`,
@@ -603,13 +626,20 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+      const allocationOffset = NativeAggregate.fieldOffset(
+        program.layout,
+        bufferType,
+        '$allocation',
+      )
       const baseAddress = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+          allocationOffset +
+            NativeAggregate.fieldOffset(program.layout, SilkType.allocation, '$base'),
           `raw_view${operation.destination.ordinal}_base_ptr`,
         ),
         `raw_view${operation.destination.ordinal}_base`,
@@ -635,16 +665,16 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         pointer,
         `raw_view${operation.destination.ordinal}_ptr`,
       )
-      locals.set(operation.destination.ordinal, Object.freeze([base, length]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([base, length]))
       break
     }
     case 'RawBufferCopy': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
-      const offset = NativeFunction.readLocal(locals, operation.offset).at(0)
-      const sourceLanes = NativeFunction.readLocal(locals, operation.source)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
+      const offset = NativeStorage.readLocal(nativeStorage, operation.offset).at(0)
+      const sourceLanes = NativeStorage.readLocal(nativeStorage, operation.source)
       const sourceAddress = sourceLanes.at(0)
       const sourceLength = sourceLanes.at(1)
-      const length = NativeFunction.readLocal(locals, operation.length).at(0)
+      const length = NativeStorage.readLocal(nativeStorage, operation.length).at(0)
       const element = Layout.entry(program.layout, operation.element)
       if (
         address === undefined ||
@@ -661,9 +691,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const count = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(bufferType, 'count'),
+          NativeAggregate.fieldOffset(program.layout, bufferType, 'count'),
           `raw_copy${operation.destination.ordinal}_count_ptr`,
         ),
         `raw_copy${operation.destination.ordinal}_count`,
@@ -717,13 +749,20 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+      const allocationOffset = NativeAggregate.fieldOffset(
+        program.layout,
+        bufferType,
+        '$allocation',
+      )
       const baseAddress = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+          allocationOffset +
+            NativeAggregate.fieldOffset(program.layout, SilkType.allocation, '$base'),
           `raw_copy${operation.destination.ordinal}_base_ptr`,
         ),
         `raw_copy${operation.destination.ordinal}_base`,
@@ -762,14 +801,14 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         destinationAlignment: yield* Alignment.fromByteUnits(element.alignment),
         sourceAlignment: yield* Alignment.fromByteUnits(element.alignment),
       })
-      locals.set(operation.destination.ordinal, Object.freeze([]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
     case 'RawBufferFill': {
-      const address = NativeFunction.readLocal(locals, operation.buffer).at(0)
-      const offset = NativeFunction.readLocal(locals, operation.offset).at(0)
-      const length = NativeFunction.readLocal(locals, operation.length).at(0)
-      const value = NativeFunction.readLocal(locals, operation.value).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.buffer).at(0)
+      const offset = NativeStorage.readLocal(nativeStorage, operation.offset).at(0)
+      const length = NativeStorage.readLocal(nativeStorage, operation.length).at(0)
+      const value = NativeStorage.readLocal(nativeStorage, operation.value).at(0)
       if (
         address === undefined ||
         offset === undefined ||
@@ -783,9 +822,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const count = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          aggregateFieldOffset(bufferType, 'count'),
+          NativeAggregate.fieldOffset(program.layout, bufferType, 'count'),
           `raw_fill${operation.destination.ordinal}_count_ptr`,
         ),
         `raw_fill${operation.destination.ordinal}_count`,
@@ -825,13 +866,20 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       )
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      const allocationOffset = aggregateFieldOffset(bufferType, '$allocation')
+      const allocationOffset = NativeAggregate.fieldOffset(
+        program.layout,
+        bufferType,
+        '$allocation',
+      )
       const baseAddress = yield* FunctionBody.load(
         body,
         usizeType,
-        yield* constantBytePointer(
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
           address,
-          allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base'),
+          allocationOffset +
+            NativeAggregate.fieldOffset(program.layout, SilkType.allocation, '$base'),
           `raw_fill${operation.destination.ordinal}_base_ptr`,
         ),
         `raw_fill${operation.destination.ordinal}_base`,
@@ -851,11 +899,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         `raw_fill${operation.destination.ordinal}_ptr`,
       )
       yield* Intrinsic.memset(body, target, value, length)
-      locals.set(operation.destination.ordinal, Object.freeze([]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
     case 'SlotWrite': {
-      const address = NativeFunction.readLocal(locals, operation.slot).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.slot).at(0)
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM Slot.write lost its address')
       }
@@ -866,7 +914,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         pointer,
         `slot_write${operation.destination.ordinal}_base`,
       )
-      const values = NativeFunction.readLocal(locals, operation.value)
+      const values = NativeStorage.readLocal(nativeStorage, operation.value)
       const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
       if (lanes === undefined) throw new RangeError('LLVM Slot.write lost its shape')
       for (const [ordinal, lane] of lanes.entries()) {
@@ -878,19 +926,21 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         yield* FunctionBody.store(
           body,
           value,
-          yield* constantBytePointer(
+          yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
             base,
             offset,
             `slot_write${operation.destination.ordinal}_${ordinal}_ptr`,
           ),
         )
       }
-      locals.set(operation.destination.ordinal, Object.freeze([]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
     case 'ValidateLayout': {
-      const bytes = NativeFunction.readLocal(locals, operation.bytes).at(0)
-      const alignment = NativeFunction.readLocal(locals, operation.alignment).at(0)
+      const bytes = NativeStorage.readLocal(nativeStorage, operation.bytes).at(0)
+      const alignment = NativeStorage.readLocal(nativeStorage, operation.alignment).at(0)
       if (bytes === undefined || alignment === undefined || usizeType === undefined) {
         throw new RangeError('LLVM layout validation lost its operands')
       }
@@ -938,21 +988,21 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       // Layout packs {bytes, alignment}; InvalidAlignment packs {alignment} at slot 0.
       const first = yield* FunctionBody.select(body, valid, bytes, alignment, `${name}_slot0`)
       const second = yield* FunctionBody.select(body, valid, alignment, zero, `${name}_slot1`)
-      const lanes = lanesFor(operation.type)
+      const lanes = NativeType.lanesFor(types, operation.type)
       const values: Array<Value.Input> = [tag, first, second]
       while (values.length < lanes.length) {
         const lane = lanes.at(values.length)
         if (lane === undefined) break
-        values.push(yield* Constant.nullValue(builder, laneType(lane)))
+        values.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'RepeatLayout': {
-      const layoutValues = NativeFunction.readLocal(locals, operation.layout)
+      const layoutValues = NativeStorage.readLocal(nativeStorage, operation.layout)
       const bytes = layoutValues.at(0)
       const alignment = layoutValues.at(1)
-      const count = NativeFunction.readLocal(locals, operation.count).at(0)
+      const count = NativeStorage.readLocal(nativeStorage, operation.count).at(0)
       if (
         bytes === undefined ||
         alignment === undefined ||
@@ -1080,19 +1130,19 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         `${name}_tag`,
       )
       const totalOut = yield* FunctionBody.select(body, overflow, zero, total, `${name}_bytes`)
-      const lanes = lanesFor(operation.type)
+      const lanes = NativeType.lanesFor(types, operation.type)
       const values: Array<Value.Input> = [tag, totalOut, alignment]
       while (values.length < lanes.length) {
         const lane = lanes.at(values.length)
         if (lane === undefined) break
-        values.push(yield* Constant.nullValue(builder, laneType(lane)))
+        values.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'SlotTake':
     case 'SlotCopy': {
-      const address = NativeFunction.readLocal(locals, operation.slot).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.slot).at(0)
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM Slot.take lost its address')
       }
@@ -1112,8 +1162,10 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         values.push(
           yield* FunctionBody.load(
             body,
-            laneType(lane),
-            yield* constantBytePointer(
+            NativeType.laneType(types, lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
               base,
               offset,
               `slot_take${operation.destination.ordinal}_${ordinal}_ptr`,
@@ -1122,11 +1174,11 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           ),
         )
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'SlotDrop': {
-      const address = NativeFunction.readLocal(locals, operation.slot).at(0)
+      const address = NativeStorage.readLocal(nativeStorage, operation.slot).at(0)
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM Slot.drop lost its address')
       }
@@ -1146,8 +1198,10 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         values.push(
           yield* FunctionBody.load(
             body,
-            laneType(lane),
-            yield* constantBytePointer(
+            NativeType.laneType(types, lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
               base,
               offset,
               `slot_drop${operation.destination.ordinal}_${ordinal}_ptr`,
@@ -1162,7 +1216,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         Object.freeze(values),
         `slot_drop${operation.destination.ordinal}`,
       )
-      locals.set(operation.destination.ordinal, Object.freeze([]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
   }

@@ -161,7 +161,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             NativeSuspension.logicalLanes(
               fn,
               NativeCall.operationInputs(region.operation),
-              lanesFor,
+              typeContext,
             ),
           ]
         : [],
@@ -463,8 +463,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       declared,
       originThunks,
       resumeThunks,
-      lanesFor,
-      laneType,
+      types: typeContext,
       transferHeaderSize,
       transferResultOffset,
       transferStorageSize,

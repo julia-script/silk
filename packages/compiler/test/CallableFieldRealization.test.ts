@@ -5,7 +5,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as FieldRealization from '../src/FieldRealization.js'
-import * as Instances from '../src/Instances.js'
+import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as RepresentationField from '../src/RepresentationField.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
@@ -29,7 +29,7 @@ const realized = Effect.fnUntraced(function* (name: string, source: string) {
 
 /** Builds the realization index the same way every downstream phase reaches it. */
 const realizationsOf = (snapshot: Analysis.Snapshot): FieldRealization.Index =>
-  Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
+  InstanceDiagnostics.callableFieldRealizations(snapshot.instances, snapshot.index)
 
 const soleRealization = (index: FieldRealization.Index): FieldRealization.CallableRealization => {
   const supported = index.entries.flatMap((entry) =>
@@ -381,7 +381,7 @@ pub fn main() -> i32 {
       )
       const fields = RepresentationField.resolveFields(
         snapshot.index,
-        Instances.representedNominals(snapshot.instances, snapshot.index),
+        InstanceDiagnostics.representedNominals(snapshot.instances, snapshot.index),
       )
       const resolution = fields.resolutions.find(
         (candidate) => candidate._tag === 'ResolvedRepresentationField',
@@ -428,7 +428,7 @@ it.effect('keeps the realization keyed by the shared representation field identi
   Effect.gen(function* () {
     const snapshot = yield* realized('callable-field/lookup', namedCallable)
     const index = realizationsOf(snapshot)
-    const nominals = Instances.representedNominals(snapshot.instances, snapshot.index)
+    const nominals = InstanceDiagnostics.representedNominals(snapshot.instances, snapshot.index)
     const instance = nominals.at(0) ?? unreachable('expected one represented nominal instance')
     const plan =
       RepresentationField.plansOf(snapshot.index, instance).at(0) ??
@@ -476,7 +476,7 @@ it.effect('derives invocation admissibility from the aggregate receiver access',
 it.effect('reports an unresolved representation field as explicitly unsupported', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized('callable-field/unsupported', namedCallable)
-    const nominals = Instances.representedNominals(snapshot.instances, snapshot.index)
+    const nominals = InstanceDiagnostics.representedNominals(snapshot.instances, snapshot.index)
     const instance = nominals.at(0) ?? unreachable('expected one represented nominal instance')
     const plan =
       RepresentationField.plansOf(snapshot.index, instance).at(0) ??

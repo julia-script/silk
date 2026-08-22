@@ -5,6 +5,7 @@ import * as CallableContract from './CallableContract.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as ContractConstraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
 import * as RequirementRow from './RequirementRow.js'
@@ -1942,7 +1943,7 @@ export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
   })
 
 /** Construct canonically ordered surfaces for a completed declaration index. */
-export const fromIndex = (index: DeclarationFacts.Index): ReadonlyMap<string, ModuleSurface> =>
+export const fromIndex = (index: DeclarationIndex.Index): ReadonlyMap<string, ModuleSurface> =>
   new Map(
     [...index.modules]
       .sort((left, right) => compareText(left.module, right.module))

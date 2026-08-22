@@ -1,3 +1,4 @@
+import * as Option from 'effect/Option'
 import type {
   ArrayLengthFact,
   BoundFact,
@@ -6,6 +7,7 @@ import type {
   ConformanceFact,
   ConformanceRequirementFact,
   ConstantFact,
+  ConstantLiteralFact,
   ConstraintFact,
   DeclarationFact,
   DeclarationId,
@@ -15,12 +17,12 @@ import type {
   FieldFact,
   FieldId,
   FieldState,
-  Index,
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
   OpaqueResultFact,
   ParameterFact,
+  RequirementRoleFact,
   RequirementRowFact,
   ReturnTypeFact,
   RowExpressionFact,
@@ -33,29 +35,198 @@ import type {
   TypePathFact,
   TypeResolution,
 } from './DeclarationFacts.js'
-import { interfaceOperationContracts, presentParameterEntries } from './DeclarationFacts.js'
 import {
-  childNode,
-  collectedRequirementRole,
-  constantLiteral,
-  declaredTypeNode,
-  isDeclaredTypeNode,
-  presentName,
+  interfaceOperationContracts,
+  presentParameterEntries,
   requirementRoleIdentity,
-  spelling,
-} from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
+import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import type * as SourceFile from './SourceFile.js'
+import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
+import * as TargetConstant from './TargetConstant.js'
 import * as Token from './Token.js'
 import * as Type from './Type.js'
+
+export const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
+  Option.getOrThrowWith(
+    SourceFile.spelling(source, token.span),
+    () => new RangeError(`Header token span does not belong to source ${source.id}`),
+  )
+
+const retainedTypePath = (
+  source: SourceFile.SourceFile,
+  syntax: SyntaxTree.Node,
+): TypePathFact | undefined => {
+  const segments = SyntaxTree.tokens(syntax)
+    .filter((token) => token.kind === 'Identifier')
+    .map((token) => Object.freeze({ spelling: spelling(source, token), token }))
+  return segments.length === 0
+    ? undefined
+    : Object.freeze({
+        _tag: 'TypePath',
+        spelling: segments.map((segment) => segment.spelling).join('.'),
+        segments: Object.freeze(segments),
+        syntax,
+      })
+}
+
+export const collectedRequirementRole = (
+  source: SourceFile.SourceFile,
+  requirement: SyntaxTree.Node,
+): RequirementRoleFact => {
+  const at = SyntaxTree.directToken(requirement, 'Identifier')
+  const roleSyntax =
+    at === undefined ? undefined : SyntaxTree.directNodes(requirement, 'TypePath').at(-1)
+  const path = roleSyntax?.kind === 'TypePath' ? retainedTypePath(source, roleSyntax) : undefined
+  return path === undefined
+    ? Object.freeze({ _tag: 'DefaultRole' })
+    : Object.freeze({ _tag: 'UnresolvedRole', path })
+}
+
+export const childNode = (parent: SyntaxTree.Node, kind: SyntaxTree.NodeKind): SyntaxTree.Node => {
+  const child = SyntaxTree.directNode(parent, kind)
+  if (child === undefined)
+    throw new RangeError(`Header collection expected ${kind} below ${parent.kind}`)
+  return child
+}
+
+export const isDeclaredTypeNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
+  SyntaxTree.isNode(element) &&
+  (element.kind === 'TypePath' ||
+    element.kind === 'AppliedType' ||
+    element.kind === 'FixedArrayType' ||
+    element.kind === 'SliceType' ||
+    element.kind === 'ReferenceType' ||
+    element.kind === 'CallableType' ||
+    element.kind === 'UnitType' ||
+    element.kind === 'ParenthesizedType' ||
+    element.kind === 'ExactRepresentationType' ||
+    element.kind === 'OpaqueResultType' ||
+    element.kind === 'UnionType')
+
+export const declaredTypeNode = (parent: SyntaxTree.Node): SyntaxTree.Node => {
+  const child = parent.children.find((element): element is SyntaxTree.Node =>
+    isDeclaredTypeNode(element),
+  )
+  if (child === undefined) throw new RangeError(`Header collection expected a declared type`)
+  return child
+}
+
+export const presentName = (source: SourceFile.SourceFile, node: SyntaxTree.Node): DeclaredName => {
+  const token = SyntaxTree.directToken(node, 'Identifier')
+  return token === undefined
+    ? Object.freeze({
+        _tag: 'Unavailable',
+        syntax: SyntaxTree.unavailableChild(node, 'Identifier'),
+      })
+    : Object.freeze({ _tag: 'Present', spelling: spelling(source, token), token })
+}
+
+export const constantLiteral = (
+  source: SourceFile.SourceFile,
+  initializer: SyntaxTree.Node,
+): ConstantLiteralFact => {
+  if (initializer.kind === 'BooleanLiteralExpression') {
+    const token =
+      SyntaxTree.directToken(initializer, 'TrueKeyword') ??
+      SyntaxTree.directToken(initializer, 'FalseKeyword')
+    return token === undefined
+      ? Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+      : Object.freeze({ _tag: 'BooleanLiteral', value: token.kind === 'TrueKeyword', token })
+  }
+  if (initializer.kind === 'CharacterLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'CharLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    if (bytes === undefined || form === undefined)
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const decoded = StaticText.decodeScalar(Array.from(bytes), form)
+    return decoded._tag === 'Scalar'
+      ? Object.freeze({ _tag: 'CharacterLiteral', value: decoded.value, token })
+      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
+  }
+  if (initializer.kind === 'IntegerLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'DecimalInteger')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const digits = spelling(source, token)
+    const negative = SyntaxTree.directToken(initializer, 'Minus') !== undefined
+    const magnitude = IntegerLiteral.magnitude(digits)
+    return Object.freeze({
+      _tag: 'IntegerLiteral',
+      value: negative ? -magnitude : magnitude,
+      spelling: `${negative ? '-' : ''}${digits}`,
+      token,
+    })
+  }
+  if (initializer.kind === 'FloatingLiteralExpression') {
+    const token = SyntaxTree.directToken(initializer, 'DecimalFloat')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const literal = DigitSeparator.strip(spelling(source, token))
+    return Object.freeze({
+      _tag: 'FloatingLiteral',
+      spelling: `${SyntaxTree.directToken(initializer, 'Minus') === undefined ? '' : '-'}${literal}`,
+      token,
+    })
+  }
+  if (initializer.kind === 'StaticTextLiteralExpression') {
+    const token =
+      SyntaxTree.directToken(initializer, 'TextLiteral') ??
+      SyntaxTree.directToken(initializer, 'ByteStringLiteral')
+    if (token === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    const bytes = Option.getOrUndefined(SourceFile.slice(source, token.span))
+    const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
+    if (bytes === undefined || form === undefined)
+      return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+    // The header decodes once so every reference — in this module or an importing one — shares
+    // the exact bytes the equivalent `let` binding would produce.
+    const decoded = StaticText.decode(Array.from(bytes), form)
+    return decoded._tag === 'Decoded'
+      ? Object.freeze({ _tag: 'StringLiteral', data: decoded.data, token })
+      : Object.freeze({ _tag: 'Malformed', detail: decoded.detail, syntax: initializer })
+  }
+  const target = targetConstant(source, initializer)
+  if (target !== undefined) return target
+  return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+}
+
+/**
+ * Recognizes `Target.<fact>`, the one initializer form that is not a source literal. The projection
+ * is matched on syntax alone — `Target` names no declaration and resolves to nothing — so a form
+ * that is already rejected today is the only form whose meaning changes.
+ */
+const targetConstant = (
+  source: SourceFile.SourceFile,
+  initializer: SyntaxTree.Node,
+): ConstantLiteralFact | undefined => {
+  if (initializer.kind !== 'FieldProjectionExpression') return undefined
+  const base = SyntaxTree.directNode(initializer, 'IdentifierExpression')
+  const baseToken = base === undefined ? undefined : SyntaxTree.directToken(base, 'Identifier')
+  if (baseToken === undefined || spelling(source, baseToken) !== TargetConstant.root)
+    return undefined
+  const member = SyntaxTree.directToken(initializer, 'Identifier')
+  if (member === undefined) return Object.freeze({ _tag: 'Unavailable', syntax: initializer })
+  const memberSpelling = spelling(source, member)
+  const selector = TargetConstant.find(memberSpelling)
+  return selector === undefined
+    ? Object.freeze({
+        _tag: 'Malformed',
+        detail: `${TargetConstant.root}.${memberSpelling} names no target fact; the target facts are ${TargetConstant.all.map((candidate) => `${TargetConstant.root}.${candidate}`).join(', ')}`,
+        syntax: initializer,
+      })
+    : Object.freeze({ _tag: 'TargetConstant', selector, token: member })
+}
 
 interface AppliedRequirement {
   readonly capability: TypeResolution
@@ -2350,14 +2521,13 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
 }
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
-export const collect = (closure: ModuleClosure.Facts): Index => {
+export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
   const modules = Object.freeze(closure.modules.map((module) => collectModule(module.syntax)))
-  return Object.freeze({
-    _tag: 'DeclarationIndex',
-    stage: 'Collected',
+  return DeclarationIndex.make(
+    'Collected',
     modules,
-    diagnostics: Diagnostic.merge(...modules.map((module) => module.diagnostics)),
-  })
+    Diagnostic.merge(...modules.map((module) => module.diagnostics)),
+  )
 }
 
 /**

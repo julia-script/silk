@@ -10,7 +10,7 @@ See proposal.md. Each helper is extracted by taking the most general existing im
 - **`internal/ByteClass.ts`**: move the classifiers from `Lexer`/`LiteralForm` and `hexValue`/`digitValue` from `StaticText`/`IntegerLiteral`.
 - **`internal/Escape.ts`**: single `escapeExtent` (what `scalarCount` computes) derived from the same escape list `StaticText.decode` consumes.
 - **`FloatingPoint.canonicalNaN(width)`**: returns `0x7fc00000n`/`0x7ff8000000000000n`; `fromNumber`, `squareRoot`, and the transcendental `Plan` records reference it.
-- **`PhaseReport.measure`**: one `measure` accepting optional `{ counter, heapBytes }`; `Pipeline.measured`/`measuredModuleWork` and `Driver.phase`/`phaseWithHeap` and the three inline reports all call it. Heap source injected once, not read from `node:process` inline.
+- **`PhaseReport.measure` / `measureEffectInto`**: synchronous measurement keeps synchronous host timing, while Effect measurement reads Effect's `Clock` so TestClock and application clock layers control observations. Pipeline/Frontend and Driver routes call these owners rather than constructing reports or reading an ambient timer inline. Heap source is injected once, not read from `node:process` inline.
 - **`suspensionPointKey`**: export from `Backend.ts` and delete the copy at `WasmBackend.ts:1596`.
 
 ## Risks / Trade-offs

@@ -1,20 +1,17 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
-import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
-import * as Diagnostic from './Diagnostic.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
-import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
-import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
-import * as SourceSpan from './SourceSpan.js'
+import type * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
@@ -65,24 +62,6 @@ export interface ConcreteSpecialization {
   readonly constraints: ReadonlyArray<Constraint.Constraint>
   readonly evidence: ReadonlyArray<ConcreteEvidence>
 }
-
-/** Completes every source executable identity with the full discovered owner specialization. */
-const specializeInstanceType = (
-  type: Type.Type,
-  owner: InstanceKey,
-  substitutions: ReadonlyArray<Type.Substitution>,
-): Type.Type =>
-  Type.specializeExecutableOwner(
-    substitutions.reduce(
-      (specialized, substitution) => Type.substitute(specialized, substitution),
-      type,
-    ),
-    Object.freeze({
-      declaration: owner.declaration,
-      typeArguments: owner.typeArguments,
-    }),
-    Constraint.specializeCallableSchemaExecutableOwner,
-  )
 
 /** One concrete hidden callable-section construction reachable from an instance. */
 export interface CallableInstance {
@@ -239,7 +218,7 @@ const selectedRequirement = (
 const requirementBindingWitness = (
   binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
   substitution: Type.Substitution,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): DeclarationFacts.ConformanceWitness | undefined => {
   const capability = selectedRequirement(binding, substitution)?.capability
   const provider = Type.substitute(binding.provider.providerType, substitution)
@@ -272,340 +251,6 @@ const forwardedRequirementBinding = (
     return undefined
   return binding.initializer
 }
-
-/**
- * Rejects reachable constructions that would store a bare callable value inside an aggregate.
- *
- * A direct callable value keeps its hidden concrete identity beside its structural type, so
- * higher-order calls monomorphize; a `Construct` or `ArrayConstruct` result carries only the
- * declared type, and nominal layout planning then meets a bare `fn(...) -> ...` field it refuses
- * to size (#184). Lowering has no diagnostic channel and the program would otherwise pass a clean
- * frontend and die in MIR validation, so the check runs here, where each instance's substitution
- * is concrete and diagnostics are already reported.
- *
- * Scoped to reachable instances on purpose: a callable-bearing struct that is only declared, or
- * only constructed in unreachable code, compiles and runs today and stays accepted.
- *
- * Provenance follows where the callable was written. A construction whose declared type already
- * stores a callable — `Parser<A> { decode: fn(i32) -> A }` — names the fault itself, so its own
- * span is primary. One that stores a callable only after substitution — `Holder<T> { value: T }`
- * specialized at a callable — was decided at the call that chose the type arguments, so the
- * earliest specializing call site (by source ID, then position) is primary and the generic body's
- * construction is retained as related provenance. That keeps a stdlib-internal construction such
- * as `Option.some(i32.add(1))` pointing at the user's call rather than into `silk/option`.
- */
-export interface StoredRepresentation {
-  readonly path: ReadonlyArray<string>
-  readonly contract: Type.RepresentationBound
-  readonly open: boolean
-}
-
-/** Finds represented storage exclusively through the specialization field-resolution seam. */
-export const storedRepresentation = (
-  index: DeclarationFacts.Index,
-  type: Type.Type,
-  kind: 'Callable' | 'Effect',
-  seen: ReadonlySet<string> = new Set(),
-): StoredRepresentation | undefined => {
-  if (Type.isRepresented(type)) {
-    if (
-      (kind === 'Callable' && !Type.isCallable(type.contract)) ||
-      (kind === 'Effect' && !Type.isEffect(type.contract))
-    )
-      return undefined
-    return Object.freeze({
-      path: Object.freeze([]),
-      contract: type.contract,
-      open: Type.isRepresentationParameterArgument(type.representation.argument),
-    })
-  }
-  if (Type.isFixedArray(type) || Type.isSlice(type))
-    return storedRepresentation(index, type.element, kind, seen)
-  if (Type.isUnion(type)) {
-    for (const member of type.members) {
-      const found = storedRepresentation(index, member, kind, seen)
-      if (found !== undefined) return found
-    }
-    return undefined
-  }
-  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
-  const typeKey = Type.key(type)
-  if (seen.has(typeKey)) return undefined
-  const declaration = DeclarationFacts.byCanonical(index, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
-  if (declaration?._tag !== 'StructDeclaration') return undefined
-  const substitution =
-    TypeInference.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      type.arguments,
-    ) ?? new Map()
-  const fieldIndex = RepresentationField.resolveFields(index, [type])
-  const plans = RepresentationField.plansOf(index, type)
-  const next = new Set(seen).add(typeKey)
-  for (const [ordinal, field] of declaration.fields.entries()) {
-    if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
-    const fieldPlans = plans.filter((candidate) => candidate.id.ordinal === ordinal)
-    for (const plan of fieldPlans) {
-      const resolution = RepresentationField.lookup(fieldIndex, type, plan.id)
-      if (resolution !== undefined) {
-        const contract =
-          resolution._tag === 'ResolvedRepresentationField'
-            ? resolution.argument.contract
-            : resolution.reason.requiredBound
-        if (
-          (kind === 'Callable' && Type.isCallable(contract)) ||
-          (kind === 'Effect' && Type.isEffect(contract))
-        )
-          return Object.freeze({
-            path: Object.freeze([field.name.spelling]),
-            contract,
-            open: resolution._tag === 'UnavailableRepresentationField',
-          })
-      }
-    }
-    const nested = storedRepresentation(
-      index,
-      Type.substitute(field.declaredType.type, substitution),
-      kind,
-      next,
-    )
-    if (nested !== undefined)
-      return Object.freeze({
-        path: Object.freeze([field.name.spelling, ...nested.path]),
-        contract: nested.contract,
-        open: nested.open,
-      })
-  }
-  return undefined
-}
-
-/** Orders call sites by source ID, then position, for a deterministic primary origin. */
-const compareCallSites = (left: CallInstance, right: CallInstance): number =>
-  left.span.sourceId === right.span.sourceId
-    ? left.span.start - right.span.start || left.span.end - right.span.end
-    : left.span.sourceId < right.span.sourceId
-      ? -1
-      : 1
-
-interface StoredExecutable {
-  readonly path: ReadonlyArray<string>
-  readonly contract: Type.RepresentationBound
-  readonly represented: boolean
-  readonly open: boolean
-}
-
-const storedExecutable = (
-  index: DeclarationFacts.Index,
-  type: Type.Type,
-  kind: 'Callable' | 'Effect',
-): StoredExecutable | undefined => {
-  if (kind === 'Callable') {
-    const bare = DeclarationIndex.storedCallable(index, type)
-    if (bare !== undefined)
-      return Object.freeze({
-        path: bare.path,
-        contract: bare.callable,
-        represented: false,
-        open: false,
-      })
-  }
-  const represented = storedRepresentation(index, type, kind)
-  return represented === undefined
-    ? undefined
-    : Object.freeze({
-        ...represented,
-        represented: true,
-      })
-}
-
-/** Stable semantic identity of one executable-storage violation before presentation encoding. */
-interface StoredExecutableViolationKey {
-  readonly aggregate: Type.Type
-  readonly path: ReadonlyArray<string>
-  readonly contract: Type.RepresentationBound
-  readonly represented: boolean
-  readonly span: SourceSpan.SourceSpan
-  readonly constructionSpan: SourceSpan.SourceSpan
-}
-
-const sameStoredExecutableViolationKey = (
-  left: StoredExecutableViolationKey,
-  right: StoredExecutableViolationKey,
-): boolean =>
-  Type.equals(left.aggregate, right.aggregate) &&
-  left.path.length === right.path.length &&
-  left.path.every((part, index) => part === right.path[index]) &&
-  Type.equals(left.contract, right.contract) &&
-  left.represented === right.represented &&
-  SourceSpan.equals(left.span, right.span) &&
-  SourceSpan.equals(left.constructionSpan, right.constructionSpan)
-
-/** Collects every reachable aggregate construction that retains executable storage. */
-export const storedExecutableViolations = (
-  self: Discovery,
-  index: DeclarationFacts.Index,
-  kind: 'Callable' | 'Effect',
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const fieldRealizations = callableFieldRealizations(self, index)
-  const specializingCalls = new Map<string, CallInstance>()
-  for (const call of self.calls) {
-    const target = keyText(call.target)
-    const current = specializingCalls.get(target)
-    if (current === undefined || compareCallSites(call, current) < 0)
-      specializingCalls.set(target, call)
-  }
-  const reported: Array<StoredExecutableViolationKey> = []
-  return Object.freeze(
-    self.instances.flatMap((instance) =>
-      instance.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => {
-          if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') return []
-          const aggregate = specializeInstanceType(expression.type, instance.key, [
-            instance.substitution,
-          ])
-          const found = storedExecutable(index, aggregate, kind)
-          if (found === undefined) return []
-          if (
-            found.represented &&
-            Type.isNominal(aggregate) &&
-            FieldRealization.supportsInstance(fieldRealizations, aggregate)
-          )
-            return []
-          const declared = storedExecutable(index, expression.type, kind)
-          const specializing =
-            declared === undefined || declared.open
-              ? specializingCalls.get(keyText(instance.key))
-              : undefined
-          const span = specializing?.span ?? expression.span
-          const constructionSpan = expression.span
-          const key: StoredExecutableViolationKey = {
-            aggregate,
-            path: found.path,
-            contract: found.contract,
-            represented: found.represented,
-            span,
-            constructionSpan,
-          }
-          if (reported.some((candidate) => sameStoredExecutableViolationKey(candidate, key)))
-            return []
-          reported.push(key)
-          const path = found.path.length === 0 ? undefined : found.path.join('.')
-          const related = specializing === undefined ? undefined : expression.span
-          if (kind === 'Callable' && Type.isCallable(found.contract))
-            return [
-              Diagnostic.storedCallableConstruction(
-                Type.encode(aggregate),
-                path,
-                Type.encode(found.contract),
-                span,
-                related,
-                found.represented,
-              ),
-            ]
-          if (kind === 'Effect' && Type.isEffect(found.contract))
-            return [
-              Diagnostic.storedRepresentedEffectConstruction(
-                Type.encode(aggregate),
-                path,
-                Type.encode(found.contract),
-                span,
-                related,
-              ),
-            ]
-          return []
-        }),
-    ),
-  )
-}
-
-const collectNominals = (
-  index: DeclarationFacts.Index,
-  type: Type.Type,
-  into: Map<string, Type.Nominal>,
-  seen: Set<string>,
-): void => {
-  if (Type.isFixedArray(type) || Type.isSlice(type)) {
-    collectNominals(index, type.element, into, seen)
-    return
-  }
-  if (Type.isUnion(type)) {
-    for (const member of type.members) collectNominals(index, member, into, seen)
-    return
-  }
-  if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return
-  const typeKey = Type.key(type)
-  if (seen.has(typeKey)) return
-  seen.add(typeKey)
-  if (!into.has(typeKey) && RepresentationField.plansOf(index, type).length > 0)
-    into.set(typeKey, type)
-  const declaration = DeclarationFacts.byCanonical(index, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
-  if (declaration?._tag !== 'StructDeclaration') return
-  const substitution =
-    TypeInference.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      type.arguments,
-    ) ?? new Map()
-  for (const field of declaration.fields) {
-    if (field.declaredType._tag !== 'Resolved') continue
-    collectNominals(index, Type.substitute(field.declaredType.type, substitution), into, seen)
-  }
-}
-
-/**
- * Every reachable complete nominal instance carrying at least one represented field, in
- * deterministic type-key order. Constructions name the instance through their retained semantic
- * type, never through initializer syntax.
- */
-export const representedNominals = (
-  self: Discovery,
-  index: DeclarationFacts.Index,
-): ReadonlyArray<Type.Nominal> => {
-  const found = new Map<string, Type.Nominal>()
-  for (const instance of self.instances) {
-    const expressions = instance.function.statements
-      .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
-    for (const expression of expressions) {
-      if (expression._tag !== 'Construct' && expression._tag !== 'ArrayConstruct') continue
-      collectNominals(
-        index,
-        specializeInstanceType(expression.type, instance.key, [instance.substitution]),
-        found,
-        new Set(),
-      )
-    }
-  }
-  return Object.freeze(
-    [...found.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([, nominal]) => nominal),
-  )
-}
-
-/**
- * The shared realization index for every reachable represented executable field. Effect entries
- * remain semantic specialization facts until a concrete nominal instance proves every entry
- * supported; unsupported storage paths retain the SEM0107 construction fence.
- */
-export const callableFieldRealizations = (
-  self: Discovery,
-  index: DeclarationFacts.Index,
-): FieldRealization.Index =>
-  FieldRealization.realize(
-    index,
-    RepresentationField.resolveFields(index, representedNominals(self, index)),
-    self.callables,
-    self.effects,
-  )
 
 /** Retains an explicit unavailable entry when frontend errors prevent discovery. */
 export const invalid = (rootModule: string): Discovery =>
@@ -717,7 +362,7 @@ export const keyText = (key: InstanceKey): string =>
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,
   origin: SourceSpan.SourceSpan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (wanted._tag !== 'ProviderSelectionConstraint') {
     const proof = Constraint.proveStructural(wanted)
@@ -751,7 +396,7 @@ const specializeEvidence = (
   evidence: Constraint.ConstraintEvidence,
   substitution: Type.Substitution,
   origin: SourceSpan.SourceSpan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (evidence._tag === 'Assumed') {
     const assumed = Constraint.substitute(evidence.wanted, evidence.substitution)
@@ -811,7 +456,7 @@ const hirEvidence = (
 export const specialize = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): ConcreteSpecialization | undefined => {
   if (fn.contract._tag !== 'Contract') return undefined
   const parameters = fn.contract.parameters.map((parameter) =>
@@ -1076,7 +721,8 @@ const {
   concreteEffects,
   suspensionGraph,
 } = ExecutableOrigin.make({
-  specializeInstanceType,
+  specializeInstanceType: (type, owner, substitutions) =>
+    Specialization.specializeType(owner, type, substitutions),
   keyOf,
   keyText,
   requirementBindings,
@@ -1121,7 +767,7 @@ export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {

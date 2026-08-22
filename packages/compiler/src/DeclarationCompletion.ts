@@ -4,7 +4,6 @@ import type {
   ConformanceFact,
   ConstantFact,
   DeclarationFact,
-  Index,
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
@@ -17,6 +16,7 @@ import {
   interfaceOperationContracts,
   returnedBorrow,
 } from './DeclarationFacts.js'
+import * as DeclarationIndex from './DeclarationIndex.js'
 import {
   attachExposure,
   canonicalKey,
@@ -48,7 +48,10 @@ import * as ResolutionSeams from './ResolutionSeams.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
-export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams): Index => {
+export const complete = (
+  self: DeclarationIndex.Index,
+  resolvers: ResolutionSeams.ResolutionSeams,
+): DeclarationIndex.Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
   let modules = self.modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
@@ -996,12 +999,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
 
   // Copy syntax is validated above; now validate the property over the complete provisional field
   // graph before any downstream phase can observe the conformances as evidence.
-  const provisionalCopyIndex: Index = Object.freeze({
-    _tag: 'DeclarationIndex',
-    stage: 'Complete',
-    modules: Object.freeze(modules),
-    diagnostics: Object.freeze([]),
-  })
+  const provisionalCopyIndex = DeclarationIndex.make('Complete', modules, [])
   const invalidCopyKeys = new Set<string>()
   for (const module of modules) {
     for (const conformance of module.conformances) {
@@ -1324,10 +1322,5 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
     })
   })
 
-  return Object.freeze({
-    _tag: 'DeclarationIndex',
-    stage: 'Complete',
-    modules: Object.freeze(modules),
-    diagnostics: Diagnostic.merge(diagnostics),
-  })
+  return DeclarationIndex.make('Complete', modules, Diagnostic.merge(diagnostics))
 }

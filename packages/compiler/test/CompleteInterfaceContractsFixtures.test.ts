@@ -5,6 +5,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import type * as DeclarationFacts from '../src/DeclarationFacts.js'
+import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
@@ -34,14 +35,14 @@ const analyze = Effect.fnUntraced(function* (name: string) {
   )
 })
 const namedInterface = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   name: string,
 ): DeclarationFacts.InterfaceFact | undefined =>
   index.modules
     .flatMap((module) => module.interfaces)
     .find((candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name)
 const namedDeclaration = (
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
   name: string,
 ): DeclarationFacts.DeclarationFact | undefined =>
   index.modules

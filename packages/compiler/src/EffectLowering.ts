@@ -1215,6 +1215,65 @@ export const lowerProvidedEffect = <A>(
   return result
 }
 
+type ForwardedRequirement = Exclude<ReturnType<typeof inlineForwardedRequirement>, undefined>
+
+/** Brackets the provider introduced by an inlined forwarding wrapper. */
+const lowerForwardedProvider = <A>(
+  fn: FunctionLowering,
+  forwarded: ForwardedRequirement,
+  loanEndSpan: SourceSpan.SourceSpan,
+  use: (requirement: ProvidedRequirement) => A | undefined,
+): A | undefined => {
+  const provider = lowerExpression(fn, forwarded.provider)
+  if (provider === undefined) return undefined
+  const providerBorrow =
+    forwarded.provider._tag === 'ValueBorrow'
+      ? fn.recipeBorrow(forwarded.provider.borrow)
+      : undefined
+  let runtimeProvider = provider.result
+  let ownedLoan: Hir.BorrowId | undefined
+  if (
+    forwarded.selection.access === 'Take' &&
+    forwarded.selection.witness._tag === 'SourceConformanceWitness'
+  ) {
+    const providerType = fn.type(forwarded.selection.providerType)
+    const referenceType = fn.type(Type.reference('Exclusive', forwarded.selection.providerType))
+    if (providerType?._tag !== 'Nominal' || referenceType?._tag !== 'Reference') return undefined
+    const borrow = fn.freshSyntheticBorrow(forwarded.provider.span)
+    const reference = fn.alloc(referenceType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'BeginLoan',
+        borrow,
+        destination: reference,
+        root: provider.result,
+        selectors: Object.freeze([]),
+        sourceType: providerType,
+        type: referenceType,
+        access: 'Exclusive',
+        reborrow: false,
+        suspendsParent: false,
+        provenance: authored(forwarded.provider.span),
+      }),
+    )
+    fn.loanLocals.set(borrowKey(borrow), reference)
+    runtimeProvider = reference
+    ownedLoan = borrow
+  }
+  const result = use(Object.freeze({ ...forwarded.selection, local: runtimeProvider }))
+  if (result === undefined) return undefined
+  if (providerBorrow !== undefined) endLoans(fn, [providerBorrow], loanEndSpan)
+  if (ownedLoan !== undefined) endLoans(fn, [ownedLoan], forwarded.provider.span)
+  if (forwarded.selection.access === 'Take')
+    dropOwnedProvider(
+      fn,
+      provider.result,
+      forwarded.selection.providerType,
+      forwarded.provider.span,
+    )
+  return result
+}
+
 export const lowerReifiedEffectRecipe = (
   fn: FunctionLowering,
   subject: Hir.Expression,
@@ -1225,64 +1284,18 @@ export const lowerReifiedEffectRecipe = (
   const recipe = effectRecipe(fn, subject)
   const forwarded = inlineForwardedRequirement(fn, recipe)
   if (forwarded !== undefined) {
-    const provider = lowerExpression(fn, forwarded.provider)
-    if (provider === undefined) return undefined
-    const providerBorrow =
-      forwarded.provider._tag === 'ValueBorrow'
-        ? fn.recipeBorrow(forwarded.provider.borrow)
-        : undefined
-    let runtimeProvider = provider.result
-    let ownedLoan: { readonly borrow: Hir.BorrowId; readonly slice: Mir.LocalId } | undefined
-    if (
-      forwarded.selection.access === 'Take' &&
-      forwarded.selection.witness._tag === 'SourceConformanceWitness'
-    ) {
-      const providerType = fn.type(forwarded.selection.providerType)
-      const referenceType = fn.type(Type.reference('Exclusive', forwarded.selection.providerType))
-      if (providerType?._tag !== 'Nominal' || referenceType?._tag !== 'Reference') return undefined
-      const borrow = fn.freshSyntheticBorrow(forwarded.provider.span)
-      const reference = fn.alloc(referenceType)
-      fn.emit(
-        Object.freeze({
-          _tag: 'BeginLoan',
-          borrow,
-          destination: reference,
-          root: provider.result,
-          selectors: Object.freeze([]),
-          sourceType: providerType,
-          type: referenceType,
-          access: 'Exclusive',
-          reborrow: false,
-          suspendsParent: false,
-          provenance: authored(forwarded.provider.span),
-        }),
-      )
-      fn.loanLocals.set(borrowKey(borrow), reference)
-      runtimeProvider = reference
-      ownedLoan = Object.freeze({ borrow, slice: reference })
-    }
-    const reified = lowerReifiedEffectRecipe(
-      fn,
-      forwarded.binding.protected,
-      resultType,
-      span,
-      Object.freeze([
-        ...availableRequirements,
-        Object.freeze({ ...forwarded.selection, local: runtimeProvider }),
-      ]),
-    )
-    if (reified === undefined) return undefined
-    endRunLoans(fn, span)
-    if (providerBorrow !== undefined) endLoans(fn, [providerBorrow], span)
-    if (ownedLoan !== undefined) endLoan(fn, ownedLoan.borrow, forwarded.provider.span)
-    if (forwarded.selection.access === 'Take')
-      dropOwnedProvider(
+    return lowerForwardedProvider(fn, forwarded, span, (requirement) => {
+      const reified = lowerReifiedEffectRecipe(
         fn,
-        provider.result,
-        forwarded.selection.providerType,
-        forwarded.provider.span,
+        forwarded.binding.protected,
+        resultType,
+        span,
+        Object.freeze([...availableRequirements, requirement]),
       )
-    return reified
+      if (reified === undefined) return undefined
+      endRunLoans(fn, span)
+      return reified
+    })
   }
 
   if (recipe._tag === 'EffectBindRequirement') {
@@ -1362,69 +1375,23 @@ export const lowerEffectExecution = (
 
   const forwarded = inlineForwardedRequirement(fn, subject)
   if (forwarded !== undefined) {
-    const provider = lowerExpression(fn, forwarded.provider)
-    if (provider === undefined) return undefined
-    const providerBorrow =
-      forwarded.provider._tag === 'ValueBorrow'
-        ? fn.recipeBorrow(forwarded.provider.borrow)
-        : undefined
-    let runtimeProvider = provider.result
-    let ownedLoan: { readonly borrow: Hir.BorrowId; readonly slice: Mir.LocalId } | undefined
-    if (
-      forwarded.selection.access === 'Take' &&
-      forwarded.selection.witness._tag === 'SourceConformanceWitness'
-    ) {
-      const providerType = fn.type(forwarded.selection.providerType)
-      const referenceType = fn.type(Type.reference('Exclusive', forwarded.selection.providerType))
-      if (providerType?._tag !== 'Nominal' || referenceType?._tag !== 'Reference') return undefined
-      const borrow = fn.freshSyntheticBorrow(forwarded.provider.span)
-      const reference = fn.alloc(referenceType)
-      fn.emit(
-        Object.freeze({
-          _tag: 'BeginLoan',
-          borrow,
-          destination: reference,
-          root: provider.result,
-          selectors: Object.freeze([]),
-          sourceType: providerType,
-          type: referenceType,
-          access: 'Exclusive',
-          reborrow: false,
-          suspendsParent: false,
-          provenance: authored(forwarded.provider.span),
-        }),
-      )
-      fn.loanLocals.set(borrowKey(borrow), reference)
-      runtimeProvider = reference
-      ownedLoan = Object.freeze({ borrow, slice: reference })
-    }
-    const result = lowerEffectExecution(
-      fn,
-      forwarded.binding.protected,
-      success,
-      span,
-      Object.freeze([
-        ...availableRequirements,
-        Object.freeze({ ...forwarded.selection, local: runtimeProvider }),
-      ]),
-    )
-    if (result === undefined) return undefined
-    endRunLoans(fn, span)
-    if (providerBorrow !== undefined) endLoans(fn, [providerBorrow], span)
-    if (ownedLoan !== undefined) endLoan(fn, ownedLoan.borrow, forwarded.provider.span)
-    if (forwarded.selection.access === 'Take')
-      dropOwnedProvider(
+    return lowerForwardedProvider(fn, forwarded, span, (requirement) => {
+      const result = lowerEffectExecution(
         fn,
-        provider.result,
-        forwarded.selection.providerType,
-        forwarded.provider.span,
+        forwarded.binding.protected,
+        success,
+        span,
+        Object.freeze([...availableRequirements, requirement]),
       )
-    if (
-      forwarded.binding.protected._tag === 'EffectConstruct' ||
-      forwarded.binding.protected._tag === 'ServiceEffectConstruct'
-    )
-      endLoans(fn, forwarded.binding.protected.loanEnds, span)
-    return result
+      if (result === undefined) return undefined
+      endRunLoans(fn, span)
+      if (
+        forwarded.binding.protected._tag === 'EffectConstruct' ||
+        forwarded.binding.protected._tag === 'ServiceEffectConstruct'
+      )
+        endLoans(fn, forwarded.binding.protected.loanEnds, span)
+      return result
+    })
   }
 
   if (subject._tag === 'EffectBindRequirement') {

@@ -7,8 +7,10 @@ import * as FloatingPoint from './FloatingPoint.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
-import * as NativeFunction from './NativeFunction.js'
-import type { LoweringContext } from './NativeOperation.js'
+import * as NativeArith from './NativeArith.js'
+import type { Context } from './NativeOperationContext.js'
+import * as NativeStorage from './NativeStorage.js'
+import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
 
 type Operation = Extract<
@@ -26,17 +28,16 @@ type Operation = Extract<
   }
 >
 
-export const emit = Effect.fnUntraced(function* (context: LoweringContext, operation: Operation) {
+export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
+    arith,
     body,
     builder,
-    coerceLane,
     i32,
-    laneType,
-    lanesFor,
-    locals,
     memcmp,
     staticPointers,
+    storage: nativeStorage,
+    types,
     usizeType,
   } = context
   const initialTrapBlock = context.state.trapBlock
@@ -52,9 +53,9 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (physical === undefined) {
         throw new RangeError('LLVM match lost a pattern payload path')
       }
-      const source = NativeFunction.readLocal(locals, operation.scrutinee)
+      const source = NativeStorage.readLocal(nativeStorage, operation.scrutinee)
       const sourceLanes = operation.shape.lanes
-      const targetLanes = lanesFor(operation.binding.type)
+      const targetLanes = NativeType.lanesFor(types, operation.binding.type)
       const selected: Array<Value.Input> = []
       for (const [targetOrdinal, ordinal] of physical.entries()) {
         const value = source.at(ordinal)
@@ -64,7 +65,8 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           continue
         }
         selected.push(
-          yield* coerceLane(
+          yield* NativeArith.coerceLane(
+            arith.lane,
             value,
             sourceLane,
             targetLane,
@@ -75,17 +77,17 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (selected.length !== targetLanes.length) {
         throw new RangeError('LLVM match binding disagrees with its payload lanes')
       }
-      locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
+      nativeStorage.locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
       break
     }
     case 'Literal': {
-      const lane = lanesFor(operation.type).at(0)
+      const lane = NativeType.lanesFor(types, operation.type).at(0)
       if (lane === undefined) throw new RangeError('LLVM literal lost its lane')
-      const physicalType = laneType(lane)
+      const physicalType = NativeType.laneType(types, lane)
       const semantic = Mir.semanticType(operation.type)
       const floating = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
       if (floating?.category === 'Floating') {
-        locals.set(
+        nativeStorage.locals.set(
           operation.destination.ordinal,
           Object.freeze([
             yield* Constant.floatingRaw(
@@ -103,7 +105,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       }
       const unsigned =
         typeof semantic === 'string' && Scalar.find(semantic)?.signedness === 'Unsigned'
-      locals.set(
+      nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
           unsigned
@@ -118,7 +120,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM static view lost its data placement or usize type')
       }
-      locals.set(
+      nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
           address,
@@ -132,7 +134,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM static string lost its data placement or usize type')
       }
-      locals.set(
+      nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
           address,
@@ -142,24 +144,30 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       break
     }
     case 'StringFromUtf8Unchecked': {
-      locals.set(operation.destination.ordinal, NativeFunction.readLocal(locals, operation.bytes))
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        NativeStorage.readLocal(nativeStorage, operation.bytes),
+      )
       break
     }
     case 'StringUtf8Bytes': {
-      locals.set(operation.destination.ordinal, NativeFunction.readLocal(locals, operation.string))
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        NativeStorage.readLocal(nativeStorage, operation.string),
+      )
       break
     }
     case 'StringByteLength': {
-      const length = NativeFunction.readLocal(locals, operation.string).at(1)
+      const length = NativeStorage.readLocal(nativeStorage, operation.string).at(1)
       if (length === undefined) {
         throw new RangeError('LLVM string lost its byte-length lane')
       }
-      locals.set(operation.destination.ordinal, Object.freeze([length]))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([length]))
       break
     }
     case 'StringEqualsExact': {
-      const [leftAddress, leftLength] = NativeFunction.readLocal(locals, operation.left)
-      const [rightAddress, rightLength] = NativeFunction.readLocal(locals, operation.right)
+      const [leftAddress, leftLength] = NativeStorage.readLocal(nativeStorage, operation.left)
+      const [rightAddress, rightLength] = NativeStorage.readLocal(nativeStorage, operation.right)
       if (
         leftAddress === undefined ||
         leftLength === undefined ||
@@ -218,7 +226,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
             `string${operation.destination.ordinal}_negated`,
           )
         : exact
-      locals.set(
+      nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
           yield* FunctionBody.cast(

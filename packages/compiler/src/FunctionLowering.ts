@@ -1,6 +1,6 @@
 import { cleanupForLocal, generated } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
@@ -51,7 +51,7 @@ export class FunctionLowering {
 
   constructor(
     readonly layout: Layout.Plan,
-    readonly index: DeclarationFacts.Index,
+    readonly index: DeclarationIndex.Index,
     parameterTypes: ReadonlyArray<Mir.Type>,
     readonly ownership: Ownership.FunctionOwnership | undefined,
     readonly substitution: Type.Substitution,

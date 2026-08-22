@@ -1,3 +1,7 @@
+import * as Clock from 'effect/Clock'
+import * as Duration from 'effect/Duration'
+import * as Effect from 'effect/Effect'
+
 /** Deterministic semantic-revision counts attached to the invalidation phase. */
 export interface SemanticInvalidationCounters {
   readonly _tag: 'SemanticInvalidationCounters'
@@ -98,6 +102,34 @@ export const measureInto = <A>(
   return measured.value
 }
 
+/** Measures one Effect phase using the fiber clock. */
+export const measureEffect = Effect.fn('PhaseReport.measureEffect')(function* <A, E, R>(
+  phase: string,
+  inputs: number,
+  effect: Effect.Effect<A, E, R>,
+  outputs: (value: A) => number,
+  diagnostics: (value: A) => number = () => 0,
+  options: MeasurementOptions<A> = {},
+): Effect.fn.Return<Measured<A>, E, R> {
+  const startedAt = yield* Clock.currentTimeNanos
+  const value = yield* effect
+  const finishedAt = yield* Clock.currentTimeNanos
+  const observedHeap = options.heapBytes?.()
+  const counters = options.counters?.(value)
+  return Object.freeze({
+    value,
+    report: make({
+      phase,
+      elapsedMs: Duration.toMillis(Duration.nanos(finishedAt - startedAt)),
+      inputs,
+      outputs: outputs(value),
+      diagnostics: diagnostics(value),
+      ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
+      ...(counters === undefined ? {} : { counters }),
+    }),
+  })
+})
+
 /** Measures one Effect phase and appends its observation without duplicating timing policy. */
 export const measureEffectInto = Effect.fn('PhaseReport.measureEffectInto')(function* <A, E, R>(
   report: Array<PhaseReport>,
@@ -108,22 +140,7 @@ export const measureEffectInto = Effect.fn('PhaseReport.measureEffectInto')(func
   diagnostics: (value: A) => number = () => 0,
   options: MeasurementOptions<A> = {},
 ): Effect.fn.Return<A, E, R> {
-  const startedAt = performance.now()
-  const value = yield* effect
-  const observedHeap = options.heapBytes?.()
-  const counters = options.counters?.(value)
-  report.push(
-    make({
-      phase,
-      elapsedMs: performance.now() - startedAt,
-      inputs,
-      outputs: outputs(value),
-      diagnostics: diagnostics(value),
-      ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
-      ...(counters === undefined ? {} : { counters }),
-    }),
-  )
-  return value
+  const measured = yield* measureEffect(phase, inputs, effect, outputs, diagnostics, options)
+  report.push(measured.report)
+  return measured.value
 })
-
-import * as Effect from 'effect/Effect'

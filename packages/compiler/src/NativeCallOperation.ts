@@ -2,58 +2,38 @@ import * as Constant from '@silk-effect/llvm/Constant'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
-import * as CleanupPlan from './CleanupPlan.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeDebug from './NativeDebug.js'
+import * as NativeLanePointer from './NativeLanePointer.js'
+import type { Context } from './NativeOperationContext.js'
+import * as NativeStorage from './NativeStorage.js'
+import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
-
-/** Whether one MIR operation requires the native allocation ABI. */
-export const needsAllocation = (operation: Mir.Operation): boolean =>
-  operation._tag === 'Allocate' ||
-  operation._tag === 'RawBufferFrom' ||
-  operation._tag === 'RawBufferCount' ||
-  operation._tag === 'RawBufferSlot' ||
-  operation._tag === 'RawBufferRead' ||
-  operation._tag === 'RawBufferView' ||
-  operation._tag === 'RawBufferCopy' ||
-  operation._tag === 'RawBufferFill' ||
-  operation._tag === 'SlotWrite' ||
-  operation._tag === 'SlotTake' ||
-  operation._tag === 'SlotCopy' ||
-  operation._tag === 'SlotDrop' ||
-  (operation._tag === 'CloseEffectEntry' &&
-    operation.failures.some((failure) => CleanupPlan.reclaims(failure.cleanup))) ||
-  (operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup))
-
-import * as NativeFunction from './NativeFunction.js'
-import type { LoweringContext } from './NativeOperation.js'
 
 type Operation = Extract<LinearOperation, { readonly _tag: 'ApplyCallable' | 'Call' }>
 
-export const emit = Effect.fnUntraced(function* (context: LoweringContext, operation: Operation) {
+export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
-    addressRoots,
     body,
     builder,
     call,
-    constantBytePointer,
     declared,
     arith,
+    debug,
     entry,
     f32,
     f64,
     i32,
     integerTypes,
-    laneType,
-    locals,
-    locate,
+    lanePointers,
     program,
-    reloadAddressRoot,
-    valueLanesFor,
+    storage: nativeStorage,
+    types,
   } = context
   const initialTrapBlock = context.state.trapBlock
   const trapBlock = initialTrapBlock
@@ -75,7 +55,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (operation.callable !== undefined) {
         if (sourceType?._tag !== 'CallableValue')
           throw new RangeError('Stored callable application lost its identity')
-        const environmentValues = NativeFunction.readLocal(locals, operation.callable)
+        const environmentValues = NativeStorage.readLocal(nativeStorage, operation.callable)
         let cursor = 0
         for (const field of sourceType.environment?.fields ?? []) {
           const shape = Layout.callingShape(program.layout, field.type)
@@ -103,8 +83,10 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
             values.push(
               yield* FunctionBody.load(
                 body,
-                laneType(lane),
-                yield* constantBytePointer(
+                NativeType.laneType(types, lane),
+                yield* NativeLanePointer.lanePointer(
+                  lanePointers,
+                  body,
                   base,
                   offset,
                   `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}_ptr`,
@@ -125,7 +107,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           captureGroups.push(
             Object.freeze({
               parameterOrdinal: capture.parameterOrdinal,
-              values: NativeFunction.readLocal(locals, capture.source),
+              values: NativeStorage.readLocal(nativeStorage, capture.source),
             }),
           )
         }
@@ -136,7 +118,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       if (target._tag === 'BuiltinCallableTarget') {
         const supplied = Object.freeze([
           ...operation.arguments.flatMap((argument) => [
-            ...NativeFunction.readLocal(locals, argument),
+            ...NativeStorage.readLocal(nativeStorage, argument),
           ]),
           ...captureValues,
         ])
@@ -161,7 +143,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
               destination,
               `callable_convert${operation.destination.ordinal}`,
             )
-            locals.set(operation.destination.ordinal, Object.freeze([result]))
+            nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
             break
           }
           if (sourceScalar?.category !== 'Integer')
@@ -173,7 +155,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
             Object.freeze({ _tag: conversionTarget.spelling }),
             `callable_convert${operation.destination.ordinal}`,
           )
-          locals.set(operation.destination.ordinal, Object.freeze([result]))
+          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
           break
         }
         const floatTarget = Scalar.floatConversionTarget(target.operation)
@@ -200,7 +182,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
                   destination,
                   `callable_convert${operation.destination.ordinal}`,
                 )
-          locals.set(operation.destination.ordinal, Object.freeze([result]))
+          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
           break
         }
         if (target.operation === 'Negate' && Scalar.find(firstType._tag)?.category === 'Floating') {
@@ -210,7 +192,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
             first,
             `callable_fneg${operation.destination.ordinal}`,
           )
-          locals.set(operation.destination.ordinal, Object.freeze([result]))
+          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
           break
         }
         if (
@@ -220,10 +202,10 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           target.operation === 'SaturatingNegate' ||
           target.operation === 'BitNot'
         ) {
-          const firstLane = valueLanesFor(firstType).at(0)
+          const firstLane = NativeType.valueLanesFor(types, firstType).at(0)
           if (firstLane === undefined)
             throw new RangeError('LLVM callable unary operation lost its lane')
-          const operandType = laneType(firstLane)
+          const operandType = NativeType.laneType(types, firstLane)
           const zero = yield* Constant.integerSigned(builder, operandType, 0n)
           if (target.operation !== 'Not') {
             const unaryOperator =
@@ -249,7 +231,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
                 operation.destination.ordinal,
               ),
             ])
-            locals.set(operation.destination.ordinal, values)
+            nativeStorage.locals.set(operation.destination.ordinal, values)
             break
           }
           const boolZero = yield* Constant.integerSigned(builder, i32, 0n)
@@ -269,7 +251,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
               `callable_not${operation.destination.ordinal}`,
             ),
           ])
-          locals.set(operation.destination.ordinal, values)
+          nativeStorage.locals.set(operation.destination.ordinal, values)
           break
         }
         const second = supplied.at(1)
@@ -293,7 +275,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
             operation.destination.ordinal,
           ),
         ])
-        locals.set(operation.destination.ordinal, values)
+        nativeStorage.locals.set(operation.destination.ordinal, values)
         break
       }
       const callableTarget = declared.find((candidate) =>
@@ -306,13 +288,13 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
         callableTarget,
         Object.freeze([
           ...operation.arguments.flatMap((argument) => [
-            ...NativeFunction.readLocal(locals, argument),
+            ...NativeStorage.readLocal(nativeStorage, argument),
           ]),
           ...captureValues,
         ]),
         `callable${operation.destination.ordinal}`,
       )
-      locals.set(operation.destination.ordinal, result)
+      nativeStorage.locals.set(operation.destination.ordinal, result)
       break
     }
     case 'Call': {
@@ -325,23 +307,25 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
       const result = yield* FunctionBody.callDirect(
         body,
         target.handle,
-        operation.arguments.flatMap((argument) => [...NativeFunction.readLocal(locals, argument)]),
+        operation.arguments.flatMap((argument) => [
+          ...NativeStorage.readLocal(nativeStorage, argument),
+        ]),
         `t${operation.destination.ordinal}`,
       )
-      for (const root of [...addressRoots].sort((left, right) => left - right)) {
-        yield* reloadAddressRoot(root)
+      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
+        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
       if (target.resultLaneCount === 0) {
-        locals.set(operation.destination.ordinal, Object.freeze([]))
+        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
         break
       }
       if (result === undefined) {
         throw new RangeError('Backend call produced no value')
       }
       const instruction = yield* Value.instruction(body, result)
-      yield* locate(operation.provenance.span, instruction)
+      yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
       if (target.resultLaneCount === 1) {
-        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
         break
       }
       const values: Array<Value.Input> = []
@@ -355,7 +339,7 @@ export const emit = Effect.fnUntraced(function* (context: LoweringContext, opera
           ),
         )
       }
-      locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
   }

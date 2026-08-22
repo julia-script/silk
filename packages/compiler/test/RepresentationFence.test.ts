@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Instances from '../src/Instances.js'
+import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
@@ -279,7 +279,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
     )
 
     assert.strictEqual(
-      Instances.storedRepresentation(
+      InstanceDiagnostics.storedRepresentation(
         snapshot.index,
         Type.fixedArray(representedCallable, 0),
         'Callable',
@@ -287,7 +287,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
       'CallableType',
     )
     assert.strictEqual(
-      Instances.storedRepresentation(
+      InstanceDiagnostics.storedRepresentation(
         snapshot.index,
         Type.fixedArray(Type.fixedArray(representedCallable, 1), 1),
         'Callable',
@@ -295,7 +295,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
       'CallableType',
     )
     assert.strictEqual(
-      Instances.storedRepresentation(
+      InstanceDiagnostics.storedRepresentation(
         snapshot.index,
         Type.slice('Shared', representedEffect),
         'Effect',
@@ -303,7 +303,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
       'EffectType',
     )
     assert.strictEqual(
-      Instances.storedRepresentation(
+      InstanceDiagnostics.storedRepresentation(
         snapshot.index,
         Type.reference('Shared', representedCallable),
         'Callable',

@@ -5,10 +5,9 @@ import type {
   ConformanceFact,
   ConformanceWitness,
   ContractFact,
-  Index,
 } from './DeclarationFacts.js'
 import { byCanonical } from './DeclarationFacts.js'
-import { copyType } from './DeclarationIndex.js'
+import type { Index } from './DeclarationIndex.js'
 import { declaredRequirements, memberByNominal } from './DeclarationResolution.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -20,6 +19,13 @@ export type CopyProof =
   | { readonly _tag: 'Copy' }
   | { readonly _tag: 'NotCopy'; readonly reason: string }
   | { readonly _tag: 'UnavailableCopy'; readonly reason: string }
+
+/** Tests whether every value of one concrete type copies freely. */
+export const copyType = (
+  self: Index,
+  type: Type.Type,
+  assumptions: ReadonlySet<string> = new Set(),
+): boolean => copyProof(self, type, assumptions)._tag === 'Copy'
 
 export const contractByCapability = (
   self: Index,

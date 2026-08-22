@@ -1,5 +1,5 @@
 import * as Effect from 'effect/Effect'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleTooling from './ModuleTooling.js'
 import type * as NameResolution from './NameResolution.js'
@@ -21,7 +21,7 @@ export interface FrontendTooling {
 export const make = Effect.fn('FrontendTooling.make')(function* (
   frontend: {
     readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
-    readonly index: DeclarationFacts.Index
+    readonly index: DeclarationIndex.Index
     readonly resolution: NameResolution.Resolution
     readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   },
@@ -41,19 +41,25 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
       ordinal += 1
       continue
     }
-    const occurrenceStartedAt = performance.now()
-    const semanticOccurrences = ModuleTooling.semanticOccurrenceIndex(
-      semantics,
-      frontend.index,
-      frontend.resolution,
+    const measuredOccurrences = yield* PhaseReport.measureEffect(
+      'semantic-occurrences',
+      1,
+      Effect.sync(() =>
+        ModuleTooling.semanticOccurrenceIndex(semantics, frontend.index, frontend.resolution),
+      ),
+      () => 1,
     )
-    occurrenceElapsedMs += performance.now() - occurrenceStartedAt
-    const expressionStartedAt = performance.now()
-    const anonymousExpressions = ModuleTooling.anonymousExpressionIndex(semantics)
-    expressionElapsedMs += performance.now() - expressionStartedAt
+    occurrenceElapsedMs += measuredOccurrences.report.elapsedMs
+    const measuredExpressions = yield* PhaseReport.measureEffect(
+      'anonymous-expressions',
+      1,
+      Effect.sync(() => ModuleTooling.anonymousExpressionIndex(semantics)),
+      () => 1,
+    )
+    expressionElapsedMs += measuredExpressions.report.elapsedMs
     toolingModules.set(
       module,
-      ModuleTooling.fromIndexes(semantics, semanticOccurrences, anonymousExpressions),
+      ModuleTooling.fromIndexes(semantics, measuredOccurrences.value, measuredExpressions.value),
     )
     ordinal += 1
   }

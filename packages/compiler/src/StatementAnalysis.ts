@@ -1,6 +1,6 @@
 import { concreteCallableIdentity, executableSites } from './CallResolution.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
   BindingDeclarationFact,
@@ -54,11 +54,11 @@ export const unsafeCallDiagnostic = (
 /** Whether a borrow-shaped value is visibly backed only by program-lifetime immutable data. */
 export const isStaticallyDetachedFailure = (
   expression: ExpressionFact,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): boolean => {
   if (
     expression.type._tag === 'Available' &&
-    !DeclarationIndex.containsLexicalBorrow(index, expression.type.type)
+    !DeclarationFacts.containsLexicalBorrow(index, expression.type.type)
   )
     return true
   switch (expression._tag) {
@@ -707,7 +707,7 @@ export const analyzeStatements = (
         )
       if (
         failure !== undefined &&
-        DeclarationIndex.containsLexicalBorrow(context.resolution.index, failure) &&
+        DeclarationFacts.containsLexicalBorrow(context.resolution.index, failure) &&
         !isStaticallyDetachedFailure(expression.fact, context.resolution.index)
       )
         context.diagnostics.push(

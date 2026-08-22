@@ -1,6 +1,7 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 
 export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 
@@ -64,7 +65,7 @@ export interface FrontendSnapshot {
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
   readonly closure: ModuleClosure.Closure
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
@@ -220,7 +221,7 @@ export const resolutionFailures = (
 ): ReadonlyArray<SourceResolver.SourceResolverError> => self.closure.resolutionFailures
 
 /** Returns the closure's declaration index. */
-export const declarationIndex = (self: FrontendSnapshot): DeclarationFacts.Index => self.index
+export const declarationIndex = (self: FrontendSnapshot): DeclarationIndex.Index => self.index
 
 export const nameResolution = (self: FrontendSnapshot): NameResolution.Resolution => self.resolution
 export const moduleScope = (

@@ -1,5 +1,6 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -310,7 +311,7 @@ const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> =>
 interface BuildContext {
   readonly discovery: Instances.Discovery
   readonly layout: Layout.Plan
-  readonly index: DeclarationFacts.Index
+  readonly index: DeclarationIndex.Index
   readonly instance: Instances.Instance
   readonly bindings: ReadonlyMap<number, Hir.Expression>
   readonly effectClassifications: ReadonlyMap<string, Classification>
@@ -1029,7 +1030,7 @@ const classificationWithRegions = (
 export const build = (
   discovery: Instances.Discovery,
   layout: Layout.Plan,
-  index: DeclarationFacts.Index,
+  index: DeclarationIndex.Index,
 ): Module => {
   const buildPass = (effectClassifications: ReadonlyMap<string, Classification>): Module => {
     const executions: Array<Execution> = []
