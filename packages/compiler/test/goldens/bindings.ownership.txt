@@ -1,7 +1,7 @@
 ownership-module golden://bindings.silk
 fn golden://bindings.silk.main satisfied
-  binding b0 first copyable live [22, 36)..[0, 66)
-  binding b1 second copyable live [36, 51)..[0, 66)
+  binding b0 first copyable affinity=Unrestricted obligations=none live [22, 36)..[0, 66)
+  binding b1 second copyable affinity=Unrestricted obligations=none live [36, 51)..[0, 66)
   exit return [58, 64) loan-ends none
     release b1
     release b0

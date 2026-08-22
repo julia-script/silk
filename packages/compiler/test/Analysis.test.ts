@@ -1,7 +1,10 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
+import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as Hir from '../src/Hir.js'
+import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
@@ -551,6 +554,243 @@ it.effect('constructs a frontend snapshot without runtime realization', () =>
     assert.strictEqual(Object.hasOwn(frontend, 'layout'), false)
     assert.strictEqual(Object.hasOwn(frontend, 'mir'), false)
     assert.deepEqual(Analysis.diagnostics(frontend), [])
+  }),
+)
+
+it.effect('publishes sealed local-shared identity, affinity, and structural obligations', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+struct Generic<T> { value: T }
+struct Pair<T> { first: Intrinsic.SharedCore<T> second: Intrinsic.SharedCore<T> }
+struct LocalWrap<T> { core: Intrinsic.SharedCore<T> }
+struct Damaged { first: Missing second: AlsoMissing }
+struct Shared { value: i32 }
+struct SharedCore { value: i32 }
+struct Deferred { value: i32 }
+struct Scheduler { value: i32 }
+struct LocalRuntimeHandle { value: i32 }
+impl Copy for LocalWrap<i32> {}
+fn moveCore<T>(value: Intrinsic.SharedCore<T>) -> Intrinsic.SharedCore<T> { return move value }
+fn duplicate(value: Intrinsic.SharedCore<i32>) -> Intrinsic.SharedCore<i32> { return value }
+fn select(value: i32, core: Intrinsic.SharedCore<i32>) -> i32 { return value }
+fn capture(core: Intrinsic.SharedCore<i32>) -> once fn(i32) -> i32 { return select(move core) }
+fn moveCapture(core: Intrinsic.SharedCore<i32>) -> i32 {
+  let first = select(move core)
+  let second = move first
+  drop second
+  return 0
+}
+fn captureEffect(core: Intrinsic.SharedCore<i32>) -> i32 {
+  let pending = effect { drop move core return 0 }
+  drop pending
+  return 0
+}
+fn moveEffect(core: Intrinsic.SharedCore<i32>) -> i32 {
+  let first = effect { drop move core return 0 }
+  let second = move first
+  drop second
+  return 0
+}
+pub fn main() -> i32 { return 0 }`
+    const self = yield* Analysis.ofSource('main', ascii(source))
+    const ownership = self.ownership.get('main')
+    const moveCore = ownership?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'moveCore',
+    )
+    const binding = moveCore?.bindings.at(0)
+    const openElement = Type.parameter({ module: 'main', name: 'moveCore' }, 0, 'T')
+    const openCore = Type.sharedCore(openElement)
+
+    assert.isTrue(binding?.type !== undefined && Type.equals(binding.type, openCore))
+    assert.strictEqual(binding?.category._tag, 'MoveOnly')
+    assert.strictEqual(binding?.executionAffinity._tag, 'LocalExecution')
+    assert.strictEqual(
+      LocalSharedOwnership.count(binding?.localSharedObligations ?? LocalSharedOwnership.none),
+      1,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0001', 'SEM0001', 'SEM0083', 'OWN0003'],
+    )
+    const duplicateRead = Analysis.diagnostics(self).find(
+      (diagnostic) => diagnostic.code === 'OWN0003',
+    )
+    assert.strictEqual(
+      duplicateRead === undefined
+        ? undefined
+        : source.slice(duplicateRead.span.start, duplicateRead.span.end).trim(),
+      'value',
+    )
+    const duplicate = ownership?.functions.find(
+      (fn) =>
+        fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'duplicate',
+    )
+    assert.strictEqual(
+      LocalSharedOwnership.count(
+        duplicate?.bindings.at(0)?.localSharedObligations ?? LocalSharedOwnership.none,
+      ),
+      1,
+    )
+
+    const pair = Type.nominal('main', 'Pair', ['i32'])
+    assert.isFalse(ConformanceProof.copyType(self.index, Type.sharedCore('i32')))
+    assert.isFalse(
+      ConformanceProof.copyType(self.index, Type.sharedCore(Type.nominal('main', 'Token'))),
+    )
+    assert.strictEqual(ExecutionAffinity.ofType(self.index, pair)._tag, 'LocalExecution')
+    assert.strictEqual(LocalSharedOwnership.count(LocalSharedOwnership.ofType(self.index, pair)), 2)
+    assert.strictEqual(
+      LocalSharedOwnership.count(
+        LocalSharedOwnership.ofType(self.index, Type.fixedArray(Type.sharedCore('i32'), 2)),
+      ),
+      2,
+    )
+    const capture = ownership?.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'capture',
+    )
+    assert.strictEqual(capture?.callables.at(0)?.executionAffinity._tag, 'LocalExecution')
+    assert.strictEqual(
+      LocalSharedOwnership.count(
+        capture?.callables.at(0)?.localSharedObligations ?? LocalSharedOwnership.none,
+      ),
+      1,
+    )
+    const moveCapture = ownership?.functions.find(
+      (fn) =>
+        fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'moveCapture',
+    )
+    const movedCallable = moveCapture?.bindings.find((candidate) => candidate.name === 'second')
+    assert.strictEqual(movedCallable?.executionAffinity._tag, 'LocalExecution')
+    assert.strictEqual(
+      LocalSharedOwnership.count(
+        movedCallable?.localSharedObligations ?? LocalSharedOwnership.none,
+      ),
+      1,
+    )
+    const captureEffect = ownership?.functions.find(
+      (fn) =>
+        fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'captureEffect',
+    )
+    const pending = captureEffect?.bindings.find((candidate) => candidate.name === 'pending')
+    assert.strictEqual(pending?.executionAffinity._tag, 'LocalExecution')
+    assert.strictEqual(
+      LocalSharedOwnership.count(pending?.localSharedObligations ?? LocalSharedOwnership.none),
+      1,
+    )
+    const moveEffect = ownership?.functions.find(
+      (fn) =>
+        fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'moveEffect',
+    )
+    const movedEffect = moveEffect?.bindings.find((candidate) => candidate.name === 'second')
+    assert.strictEqual(movedEffect?.executionAffinity._tag, 'LocalExecution')
+    assert.strictEqual(
+      LocalSharedOwnership.count(movedEffect?.localSharedObligations ?? LocalSharedOwnership.none),
+      1,
+    )
+    const union = Type.union([Type.sharedCore('i32'), Type.nominal('main', 'Token')])
+    assert.strictEqual(union._tag, 'Normalized')
+    if (union._tag !== 'Normalized' || !Type.isUnion(union.type)) return
+    const unionObligations = LocalSharedOwnership.ofType(self.index, union.type)
+    assert.strictEqual(unionObligations._tag, 'ActiveUnion')
+    if (unionObligations._tag !== 'ActiveUnion') return
+    assert.deepEqual(
+      unionObligations.cases.map((entry, ordinal) => [
+        Type.isSharedCore(entry.member),
+        LocalSharedOwnership.count(unionObligations, ordinal),
+      ]),
+      [
+        [false, 0],
+        [true, 1],
+      ],
+    )
+
+    const genericParameter = Type.parameter({ module: 'main', name: 'Generic' }, 0, 'T')
+    const openGeneric = Type.nominal('main', 'Generic', [genericParameter])
+    assert.strictEqual(ExecutionAffinity.ofType(self.index, openGeneric)._tag, 'ParameterDependent')
+    assert.strictEqual(
+      ExecutionAffinity.ofType(self.index, Type.nominal('main', 'Generic', ['i32']))._tag,
+      'Unrestricted',
+    )
+    assert.strictEqual(
+      ExecutionAffinity.ofType(
+        self.index,
+        Type.nominal('main', 'Generic', [Type.sharedCore('i32')]),
+      )._tag,
+      'LocalExecution',
+    )
+    const damaged = ExecutionAffinity.ofType(self.index, Type.nominal('main', 'Damaged'))
+    assert.strictEqual(damaged._tag, 'Unavailable')
+    if (damaged._tag !== 'Unavailable') return
+    assert.deepEqual(
+      damaged.causes.map((cause) => cause.code),
+      ['SEM0001', 'SEM0001'],
+    )
+
+    assert.strictEqual(ExecutionAffinity.ofBorrow(self.index, 'i32', pair)._tag, 'LocalExecution')
+    assert.strictEqual(
+      ExecutionAffinity.ofEnvironment(self.index, [{ type: pair }])._tag,
+      'LocalExecution',
+    )
+    assert.strictEqual(
+      LocalSharedOwnership.count(
+        LocalSharedOwnership.ofEnvironment(self.index, [{ access: 'Take', type: pair }]),
+      ),
+      2,
+    )
+    for (const name of ['Shared', 'SharedCore', 'Deferred', 'Scheduler', 'LocalRuntimeHandle']) {
+      const ordinary = Type.nominal('main', name)
+      assert.isFalse(Type.isSharedCore(ordinary))
+      assert.strictEqual(ExecutionAffinity.ofType(self.index, ordinary)._tag, 'Unrestricted')
+      assert.strictEqual(
+        LocalSharedOwnership.count(LocalSharedOwnership.ofType(self.index, ordinary)),
+        0,
+      )
+    }
+    const forgedCore = Type.nominal('Intrinsic', 'SharedCore', ['i32'])
+    assert.isFalse(Type.isSharedCore(forgedCore))
+    assert.isFalse(Type.isIntrinsicNominal(forgedCore))
+    assert.strictEqual(ExecutionAffinity.ofType(self.index, forgedCore)._tag, 'Unrestricted')
+    assert.strictEqual(
+      LocalSharedOwnership.count(LocalSharedOwnership.ofType(self.index, Type.slot(openCore))),
+      0,
+    )
+
+    const fact = LocalSharedOwnership.inspect(Type.sharedCore(Type.nominal('main', 'Token')))
+    assert.deepEqual(fact, {
+      _tag: 'LocalSharedCoreFact',
+      identity: 'Intrinsic.SharedCore',
+      type: Type.sharedCore(Type.nominal('main', 'Token')),
+      element: Type.nominal('main', 'Token'),
+      role: 'LocalSharedStrong',
+      category: 'Affine',
+      affinity: { _tag: 'LocalExecution' },
+    })
+    assert.notInclude(Object.keys(fact ?? {}), 'address')
+    assert.notInclude(Object.keys(fact ?? {}), 'count')
+    assert.notInclude(Object.keys(fact ?? {}), 'layout')
+    assert.strictEqual(
+      ExecutionAffinity.encode(fact?.affinity ?? ExecutionAffinity.unrestricted),
+      'LocalExecution',
+    )
+
+    const recovery = yield* Analysis.ofSource(
+      'recovery',
+      ascii(
+        'fn inspect(value: Intrinsic.SharedCore<Missing>) -> i32 { return 0 }\npub fn main() -> i32 { return 0 }',
+      ),
+    )
+    const recovered = recovery.ownership.get('recovery')?.functions.at(0)?.bindings.at(0)
+    assert.deepEqual(
+      Analysis.diagnostics(recovery).map((diagnostic) => diagnostic.code),
+      ['SEM0001'],
+    )
+    assert.strictEqual(recovered?.category._tag, 'Unavailable')
+    assert.strictEqual(recovered?.executionAffinity._tag, 'Unavailable')
+    assert.strictEqual(recovered?.localSharedObligations._tag, 'Unavailable')
+    assert.strictEqual(
+      LocalSharedOwnership.count(recovered?.localSharedObligations ?? LocalSharedOwnership.none),
+      0,
+    )
   }),
 )
 

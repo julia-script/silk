@@ -1,0 +1,6 @@
+ownership-module golden://local-shared.silk
+fn golden://local-shared.silk.retain satisfied
+  binding p0 value move-only Intrinsic.SharedCore<T> affinity=LocalExecution obligations=LocalSharedStrong<T> live [13, 43)..[82, 93) moved [82, 93)
+  exit return [82, 93) loan-ends none releases none
+fn golden://local-shared.silk.main satisfied
+  exit return [125, 127) loan-ends none releases none

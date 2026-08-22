@@ -22,6 +22,8 @@ export interface Nominal {
   readonly module: string
   readonly name: string
   readonly arguments: ReadonlyArray<GenericArgument>
+  /** Compiler-minted provenance for sealed nominal identities unavailable to source declarations. */
+  readonly sealed?: 'Intrinsic.SharedCore'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -409,6 +411,24 @@ export const nominal = (
     arguments: Object.freeze(Array.from(arguments_)),
   })
 
+const sealedSharedCore = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'SharedCore',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.SharedCore',
+  })
+
+/** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
+export const specializeNominal = (
+  self: Nominal,
+  arguments_: ReadonlyArray<GenericArgument>,
+): Nominal =>
+  self.sealed === 'Intrinsic.SharedCore'
+    ? sealedSharedCore(arguments_)
+    : nominal(self.module, self.name, arguments_)
+
 /** Canonical allocation-free failure used by every allocator implementation. */
 export const outOfMemoryError: Nominal = nominal('silk/core', 'OutOfMemoryError')
 export const layout: Nominal = nominal('silk/layout', 'Layout')
@@ -436,6 +456,8 @@ export const unit: Nominal = nominal('silk/core', 'Unit')
 export const rawBuffer = (element: Type): Nominal => nominal('silk/core', 'RawBuffer', [element])
 /** A lexical exclusive projection into one RawBuffer element. */
 export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [element])
+/** The compiler-sealed local strong handle identity. Its representation is intentionally opaque. */
+export const sharedCore = (element: Type): Nominal => sealedSharedCore([element])
 /** Canonical recoverable success and failure members shipped by silk/option. */
 export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
 export const none: Nominal = nominal('silk/option', 'None')
@@ -484,6 +506,25 @@ export const isSlot = (
   return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
 }
 
+/** Tests the canonical sealed local-shared core identity without consulting source spelling. */
+export const isSharedCore = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'Intrinsic'
+  readonly name: 'SharedCore'
+  readonly arguments: readonly [Type]
+} => {
+  if (
+    !isNominal(self) ||
+    self.module !== 'Intrinsic' ||
+    self.name !== 'SharedCore' ||
+    self.sealed !== 'Intrinsic.SharedCore'
+  )
+    return false
+  const argument = self.arguments.at(0)
+  return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
+}
+
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
@@ -491,18 +532,31 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [dropCapability.name, dropCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],
+  ['Intrinsic.SharedCore', sealedSharedCore([])],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */
 export const intrinsicNominalArity = (self: Nominal): number =>
-  self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot') ? 1 : 0
+  (self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot')) ||
+  self.sealed === 'Intrinsic.SharedCore'
+    ? 1
+    : 0
 export const intrinsicNominalOrdinal = (self: Nominal): number =>
   [...intrinsicNominals.values()].findIndex(
-    (candidate) => candidate.module === self.module && candidate.name === self.name,
+    (candidate) =>
+      candidate.module === self.module &&
+      candidate.name === self.name &&
+      candidate.sealed === self.sealed,
   )
 
 export const isIntrinsicNominal = (self: Type): boolean =>
-  isNominal(self) && self.module === 'silk/core' && intrinsicNominals.get(self.name) !== undefined
+  isNominal(self) &&
+  [...intrinsicNominals.values()].some(
+    (candidate) =>
+      candidate.module === self.module &&
+      candidate.name === self.name &&
+      candidate.sealed === self.sealed,
+  )
 
 /** Constructs one declaration-owned generic type parameter. */
 export const parameter = (
@@ -1403,7 +1457,7 @@ const computeKey = (self: Type): string => {
   if (isBuiltin(self)) return `builtin:${self}`
   if (isNever(self)) return 'union:'
   if (isNominal(self))
-    return `nominal:${self.module}.${self.name}<${self.arguments.map(genericArgumentKey).join(',')}>`
+    return `${self.sealed === undefined ? 'nominal' : `sealed:${self.sealed}`}:${self.module}.${self.name}<${self.arguments.map(genericArgumentKey).join(',')}>`
   if (isParameter(self))
     return `parameter:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
@@ -2470,9 +2524,8 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
     return replacement !== undefined && isTypeArgument(replacement) ? replacement : self
   }
   if (isNominal(self))
-    return nominal(
-      self.module,
-      self.name,
+    return specializeNominal(
+      self,
       self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
     )
   if (isFixedArray(self)) return fixedArray(substitute(self.element, substitution), self.length)
@@ -2709,8 +2762,7 @@ export const specializeExecutableOwner = (
     return specializeType(argument)
   }
   const specializeType = (type: Type): Type => {
-    if (isNominal(type))
-      return nominal(type.module, type.name, type.arguments.map(specializeArgument))
+    if (isNominal(type)) return specializeNominal(type, type.arguments.map(specializeArgument))
     if (isFixedArray(type)) return fixedArray(specializeType(type.element), type.length)
     if (isSlice(type)) return slice(type.access, specializeType(type.element))
     if (isReference(type)) return reference(type.access, specializeType(type.target))

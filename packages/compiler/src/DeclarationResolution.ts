@@ -609,7 +609,7 @@ export const resolveDeclaredType = (
           firstConcrete !== undefined &&
           Type.isTypeArgument(firstConcrete)
             ? Type.option(firstConcrete)
-            : Type.nominal(target.fact.type.module, target.fact.type.name, concrete)
+            : Type.specializeNominal(target.fact.type, concrete)
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
