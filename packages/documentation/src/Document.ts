@@ -563,3 +563,10 @@ const blockMarkdown = (value: Block): string => {
 
 /** Renders the owned model as Markdown suitable for editor hover content. */
 export const toMarkdown = (self: Document): string => self.blocks.map(blockMarkdown).join('\n\n')
+
+/** Remaps markdown `# {title}` to `***{title}***`, because headings look giant in doc comments on vscode */
+export const toDocCommentMarkdown = (self: Document): string => {
+  let result = toMarkdown(self)
+  result = result.replaceAll(/^#+ (.+)$/gm, '***\n$1\n***')
+  return result
+}
