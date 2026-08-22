@@ -4,7 +4,7 @@ Silk separates language semantics from the ordinary library source and toolchain
 that ship together. Importing a public actor must not grant compiler privilege or silently acquire
 an unrelated platform dependency.
 
-This page records the confirmed rules accepted by the language author in SLP-0008.
+This page records the confirmed language, library, provider, and runtime-layer rules.
 
 ## Terminology
 

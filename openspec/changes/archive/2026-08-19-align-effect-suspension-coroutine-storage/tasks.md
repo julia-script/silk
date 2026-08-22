@@ -68,5 +68,5 @@
 - [x] 9.1 Run focused suspension, ownership, stored-Effect, evaluator, native, Wasm, intrinsic, diagnostics, Labs, and artifact-architecture suites.
 - [x] 9.2 Run `pnpm typecheck`, then `pnpm exec biome check .`, then `pnpm test`, and resolve every change-related failure.
 - [x] 9.3 Run `pnpm check` and `pnpm release:candidate`, reporting any proven unrelated baseline failure exactly.
-- [x] 9.4 Run strict OpenSpec validation and audit the implementation against SLP-0009 and every delta requirement before sync or archive.
+- [x] 9.4 Run strict OpenSpec validation and audit the implementation against the canonical effect-suspension rules and every delta requirement before sync or archive.
 - [x] 9.5 Confirm the final worktree contains no compatibility shim, obsolete continuation allocation path, stale allocator-only documentation, or unchecked required task.

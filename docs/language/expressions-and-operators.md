@@ -68,8 +68,7 @@ ordinary diagnostic for its own type, ownership, failure, requirement, or place 
 
 **Evidence:** [bootstrap evaluation specification](../../openspec/specs/bootstrap-evaluation/spec.md),
 [call evaluation](functions-callables-and-control-flow.md#call-001--a-call-evaluates-each-argument-once-from-left-to-right),
-[aggregate HIR evaluation order](../../packages/compiler/src/Hir.ts),
-[verified driving example](../../proposals/0004-deterministic-expressions-and-operators/proposal.md).
+[aggregate HIR evaluation order](../../packages/compiler/src/Hir.ts).
 
 ### EVAL-002 — Conditional and deferred forms state which children do not evaluate eagerly
 
@@ -278,8 +277,7 @@ writing an effect-function call alone neither runs it nor silently throws the Ef
 **Diagnostics:** An ignored non-unit result reports `SEM0087` at the expression statement and tells
 the programmer to bind, return, compose, or explicitly drop it.
 
-**Evidence:** [statements and discarded values](statements-and-discarding.md),
-[SLP-0002](../../proposals/0002-explicit-result-discard/proposal.md),
+**Evidence:** [STMT-001](statements-and-discarding.md#stmt-001--a-non-unit-expression-result-must-be-handled-explicitly),
 [expression statement analysis](../../packages/compiler/src/Elaboration.ts).
 
 ## Operator precedence and dispatch

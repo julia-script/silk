@@ -1,12 +1,15 @@
 ## Context
 
-See `proposal.md` and SLP-0012 for motivation and language direction. Import-path parsing currently
-requires `Identifier` tokens, while downstream consumers independently filter path children by that
-token kind. The standard-library manifest names `silk/effects` and records `Effect` as its preferred
-namespace. Compiler completion has one Effect-specific module lookup, while LSP import discovery
-indexes public declarations and its edit planner only creates selected-member imports. Catalog
-namespaces are also currently seeded into semantic scope, which conflicts with the explicit-import
-contract already established by the module specifications.
+See `proposal.md`,
+[IMPORT-007](../../../docs/language/modules-names-and-visibility.md#import-007--reserved-words-may-appear-in-import-paths-but-cannot-become-implicit-bindings),
+and [TOOLING-001](../../../docs/language/runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly)
+for motivation and language direction. Import-path parsing currently requires `Identifier` tokens,
+while downstream consumers independently filter path children by that token kind. The
+standard-library manifest names `silk/effects` and records `Effect` as its preferred namespace.
+Compiler completion has one Effect-specific module lookup, while LSP import discovery indexes public
+declarations and its edit planner only creates selected-member imports. Catalog namespaces are also
+currently seeded into semantic scope, which conflicts with the explicit-import contract already
+established by the module specifications.
 
 ## Goals / Non-Goals
 
@@ -106,7 +109,7 @@ tests, fixtures, and documentation. Do not retain `silk/effects` in resolution t
 3. Rename the Effect source and manifest identity, then migrate all current repository references.
 4. Regenerate checked-in distribution and documentation artifacts.
 5. Run focused tests, full repository checks, package-content verification, and an implementation
-   audit against SLP-0012 and these delta specifications.
+   audit against the canonical language rules and these delta specifications.
 
 Rollback is a normal source revert before stable release; no compatibility or data migration is
 required in this green-field repository.

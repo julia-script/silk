@@ -52,8 +52,8 @@ must identify the smallest coherent implementation handoff when reconciliation i
   — runtime guarantees, providers, distribution contents, host boundaries, reports, LSP, and
   import completion.
 - [Reconcile explicit Effect suspension](issues/06-effect-suspension.md)
-  — execute the already audited SLP-0009/OpenSpec direction after the more foundational Effect
-  contract mismatches are understood.
+  — execute the already audited [effect-suspension](../../docs/language/effect-suspension.md)
+  and OpenSpec direction after the more foundational Effect contract mismatches are understood.
 
 ## Decision index
 
@@ -86,8 +86,9 @@ handoffs.
   separates catalog/scope/runtime roles, adds source unsafe contracts, removes `Report`, builds one
   structured termination outcome, normalizes statuses, and completes explicit-import tooling.
 - [Explicit Effect suspension implementation](issues/06-effect-suspension.md)
-  — SLP-0009 and its OpenSpec remained valid; reusable compiler-owned coroutine frames now preserve
-  exact channels, ownership, cleanup, logical depth, cross-engine parity, and pay-for-use behavior.
+  — the canonical effect-suspension rules and their OpenSpec remained valid; reusable
+  compiler-owned coroutine frames now preserve exact channels, ownership, cleanup, logical depth,
+  cross-engine parity, and pay-for-use behavior.
 
 ## Result
 

@@ -32,8 +32,7 @@ adopts a general return-omission rule. A native host may expose only a target-de
 **Diagnostics:** Any other ordinary result reports an invalid entry shape naming `()` and `i32` as
 the permitted results. A missing annotation receives the ordinary missing-result diagnostic.
 
-**Evidence:** [ordinary entry rule](program-entry.md#entry-005--an-ordinary-entry-explicitly-returns--or-i32),
-[termination proposal](../../proposals/0011-program-termination-and-diagnostic-reports/proposal.md).
+**Evidence:** [ordinary entry rule](program-entry.md#entry-005--an-ordinary-entry-explicitly-returns--or-i32).
 
 ## TERM-002 — A successful effect entry returns zero
 
@@ -113,8 +112,7 @@ debug frames are optional decoration and cannot replace the stable minimum.
 **Diagnostics:** No compile-time diagnostic applies. Missing provenance caused by a compiler defect
 must not be disguised as an empty successful report.
 
-**Evidence:** [failure diagnostic context](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context),
-[termination proposal](../../proposals/0011-program-termination-and-diagnostic-reports/proposal.md).
+**Evidence:** [failure diagnostic context](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
 
 ## TERM-005 — Automatic reporting does not inspect error payload fields
 

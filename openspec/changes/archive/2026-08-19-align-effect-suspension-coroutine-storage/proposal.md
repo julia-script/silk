@@ -1,6 +1,7 @@
 ## Why
 
-The implemented `Effect.suspend` contract contradicts accepted SLP-0009: it exposes compiler
+The implemented `Effect.suspend` contract contradicts the canonical
+[effect-suspension rules](../../../../docs/language/effect-suspension.md): it exposes compiler
 continuation allocation as `OutOfMemory ? &mut Allocator` and creates separate allocator-visible
 records instead of using one reusable coroutine frame per suspendable invocation. Stabilization must
 remove that accidental public policy before code and documentation teach it as a language rule.

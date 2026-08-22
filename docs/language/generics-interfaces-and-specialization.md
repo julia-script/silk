@@ -739,8 +739,7 @@ provider argument to an interface application reports the ordinary interface-arg
 its written generic parameters contain only additional contract arguments. Bounds and
 conformances bind the provider without adding a duplicated interface argument.
 
-**Evidence:** [SLP-0006 provider decision](../../proposals/0006-static-generics-and-coherent-interfaces/proposal.md),
-[current interface parser](../../packages/compiler/src/Parser.ts),
+**Evidence:** [current interface parser](../../packages/compiler/src/Parser.ts),
 [current interface application](../../packages/compiler/src/DeclarationIndex.ts).
 
 ### INTF-002 — An interface contains compile-time operation contracts, not implementations
@@ -1075,8 +1074,7 @@ before operation mappings are checked. An invalid `Self` use retains the context
 **Current compiler:** Aligned. The provider appears only after `for`, binds `Self`, and may supply
 operations inline, by mapping, or through both forms in one conformance.
 
-**Evidence:** [SLP-0006 provider decision](../../proposals/0006-static-generics-and-coherent-interfaces/proposal.md),
-[current impl parser](../../packages/compiler/src/Parser.ts),
+**Evidence:** [current impl parser](../../packages/compiler/src/Parser.ts),
 [current conformance index](../../packages/compiler/src/DeclarationIndex.ts).
 
 ### IMPL-002 — A conformance supplies every interface operation exactly once
@@ -1503,7 +1501,7 @@ does not give any one of those areas a second interface model.
 | Operators | Operator syntax may invoke only an operation explicitly marked for that operator. Bounds and conformances select its static implementation; operation names and provider types receive no hidden numeric privilege. |
 | Modules | Only the provider's defining module declares conformances. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named. |
 | Specialization and targets | Every admitted concrete proof selects the same static operation target before evaluator, native, or Wasm lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance. |
-| Static values | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition remain SLP-0001's separate concern. |
+| Static values | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition are not defined by these rules. |
 
 Consequently, an interface or service declaration can be reused in an ordinary generic bound
 without creating an ambient dependency, and a conditional conformance can reuse effectful
@@ -1519,7 +1517,7 @@ selection.
 | Failure parameters | Generic OpenSpec and compiler use separate `!E` failure-row binders. | Use ordinary type parameter `E`; only `?R` remains a special Effect-channel kind. |
 | Explicit call arguments | Older type-system decision requires all arguments or none; current compiler accepts an ordered prefix. | Keep the current ordered-prefix model for calls and struct literals; the older rule is superseded. |
 | Provider application | `Decoder<Schema> for Schema` repeats the provider while `T: Decoder` hides an application. | Give every interface implicit `Self`; write only additional interface arguments and bind the provider after `for` or to the left of a bound. |
-| Generic operator calls | Current tests and elaboration infer bound operations from names such as `add`. | Use SLP-0004's explicit operator-eligibility declaration. |
+| Generic operator calls | Current tests and elaboration infer bound operations from names such as `add`. | Use [OP-009](expressions-and-operators.md#op-009--an-interface-operation-may-opt-into-one-existing-operator-explicitly). |
 | Service conformance | A service first passes dependency eligibility, then uses ordinary conformance proof and operation selection. | Keep only dependency eligibility special; do not introduce service-only witness behavior. |
 | Inline implementations | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function. | Implement the already confirmed general inline-or-mapped rule. |
 

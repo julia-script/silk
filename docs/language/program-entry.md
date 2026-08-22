@@ -218,7 +218,7 @@ and names both permitted types. A missing ordinary result annotation receives th
 missing-result diagnostic.
 
 **Evidence:** [confirmed stabilization decision](README.md),
-[program-termination proposal](../../proposals/0011-program-termination-and-diagnostic-reports/proposal.md).
+[TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
 
 Exact process-report behavior is defined in
 [program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass

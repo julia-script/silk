@@ -681,6 +681,39 @@ LSP uses `LSP0001` for an exact duplicate and `LSP0003` when declarations can be
 **Evidence:** [current repeated-target restriction](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [duplicate import tests](../../packages/compiler/test/NameResolution.test.ts).
 
+### IMPORT-007 — Reserved words may appear in import paths but cannot become implicit bindings
+
+**Status:** Confirmed
+
+When the parser expects an import-path segment, it accepts identifier and reserved-word tokens
+without changing their lexical classification. A reserved final segment must use an explicit legal
+namespace alias or a selected-member list so the import never creates a binding whose spelling is
+otherwise reserved.
+
+```silk
+import silk.effect as Effect
+import silk.effect { suspend }
+```
+
+Reserved segments in any nonfinal position are ordinary parts of the canonical module identity.
+Every module-closure, name-resolution, formatting, and tooling consumer observes the same ordered
+path segments.
+
+**Boundary:** Contextual acceptance is limited to import paths. A reserved word remains invalid as a
+declaration name or explicit alias. `import silk.effect` is invalid because its implicit namespace
+binding would be named `effect`; `import silk.effect as Effect` and selected-member imports are
+valid because they state legal bindings explicitly.
+
+**Diagnostics:** A reserved final segment without an alias or selected-member list reports
+`PAR0004` at that segment and explains that the import needs an explicit binding form. The parser
+retains the complete path for recovery, but name resolution does not synthesize a reserved binding.
+
+**Evidence:** [import syntax requirements](../../openspec/changes/rename-effect-module/specs/bootstrap-syntax/spec.md),
+[name-resolution requirements](../../openspec/changes/rename-effect-module/specs/bootstrap-name-resolution/spec.md),
+[contextual path parser tests](../../packages/compiler/test/Parser.test.ts),
+[canonical path consumer tests](../../packages/compiler/test/ModuleClosure.test.ts),
+[explicit completion behavior](runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly).
+
 ### PRELUDE-001 — Only language bindings are implicit
 
 **Status:** Confirmed

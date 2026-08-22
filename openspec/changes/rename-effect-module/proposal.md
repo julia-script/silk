@@ -47,4 +47,6 @@ This affects import parsing and recovery, import-path syntax queries, module clo
 name resolution, import edit planning, compiler completion data, LSP completion presentation, the
 standard-library manifest and embedded distribution artifacts, and all current source, tests,
 fixtures, and documentation that name `silk.effects`. It introduces no intrinsic, runtime, Effect
-execution, ownership, backend, or target change. The accepted language direction is SLP-0012.
+execution, ownership, backend, or target change. The canonical direction is
+[IMPORT-007](../../../docs/language/modules-names-and-visibility.md#import-007--reserved-words-may-appear-in-import-paths-but-cannot-become-implicit-bindings)
+and [TOOLING-001](../../../docs/language/runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly).

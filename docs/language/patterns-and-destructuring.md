@@ -33,7 +33,7 @@ fn sum(point: Point) -> i32 {
 **Diagnostics:** A pattern form unavailable in its current context reports the form, context, and
 nearest valid construct. No stable general code is assigned.
 
-**Evidence:** [shared-pattern proposal](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md),
+**Evidence:** [shared-pattern syntax requirements](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/specs/bootstrap-syntax/spec.md),
 [existing match grammar](../../openspec/specs/bootstrap-syntax/spec.md).
 
 ## PATT-002 — The matched expression chooses ownership access
@@ -166,7 +166,7 @@ uncovered alternatives, and suggests `if let` or `match`. A standalone wildcard 
 the ordinary explicit-discard diagnostic `SEM0087` and suggests `drop` rather than silently
 discarding the result.
 
-**Evidence:** [confirmed pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
+**Evidence:** [shared-pattern syntax requirements](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/specs/bootstrap-syntax/spec.md).
 
 ## PATT-007 — `if let` tests one refutable pattern
 
@@ -191,7 +191,7 @@ body.
 **Diagnostics:** A malformed header receives a parser diagnostic local to the pattern, initializer,
 or `=` separator. Pattern and ownership errors retain their ordinary diagnostics.
 
-**Evidence:** [confirmed conditional-pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md),
+**Evidence:** [shared-pattern semantic requirements](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/specs/bootstrap-semantic-facts/spec.md),
 [ordinary conditional rules](functions-callables-and-control-flow.md#if-001--if-selects-one-statement-branch-using-a-boolean-condition).
 
 ## PATT-008 — A consuming conditional consumes on both outcomes
@@ -261,7 +261,7 @@ valid.
 **Diagnostics:** No compiler diagnostic applies. The language service may warn and offer conversion
 to an unconditional destructuring `let`.
 
-**Evidence:** [confirmed pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md),
+**Evidence:** [shared-pattern tooling requirements](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/specs/language-server-completion/spec.md),
 [tooling policy](runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly).
 
 ## PATT-011 — Patterns execute no user code
@@ -287,7 +287,7 @@ separate language direction.
 diagnostic and is not reinterpreted as an expression.
 
 **Evidence:** [minimal compiler privilege](../../AGENTS.md),
-[confirmed pattern direction](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
+[shared-pattern implementation design](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/design.md).
 
 ## PATT-012 — Pattern diagnostics identify the failed proof
 
@@ -347,7 +347,7 @@ accept them without defined semantics.
 **Diagnostics:** An unavailable construct receives a local syntax diagnostic. Tooling may suggest
 the equivalent explicit `match`, nested `if`, or ordinary field assignment when one exists.
 
-**Evidence:** [scope decision](../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
+**Evidence:** [shared-pattern scope](../../openspec/changes/archive/2026-08-20-add-shared-pattern-destructuring/proposal.md).
 
 ## PATT-015 — A whole-value type pattern may select any exact union member
 

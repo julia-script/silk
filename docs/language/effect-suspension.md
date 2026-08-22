@@ -61,8 +61,8 @@ bounded-machine-stack path.
 **Diagnostics:** A valid explicit boundary produces no diagnostic. Missing boundaries remain valid
 under SUSP-019 rather than becoming a compiler error.
 
-**Evidence:** [accepted suspension direction](../../proposals/0009-explicit-effect-suspension/proposal.md),
-[sealed intrinsic boundary](unsafe-intrinsics-and-targets.md#intr-001--intrinsic-is-sealed-compiler-identity-available-to-every-source-module).
+**Evidence:** [sealed intrinsic boundary](unsafe-intrinsics-and-targets.md#intr-001--intrinsic-is-sealed-compiler-identity-available-to-every-source-module),
+[suspension implementation contract](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/proposal.md).
 
 ### SUSP-002 — Running a suspended Effect produces the child's ordinary outcome
 
@@ -84,8 +84,7 @@ ordinary one-layer rule.
 **Diagnostics:** Incompatible use of the child's success or failure receives the ordinary Effect,
 return, or type diagnostic.
 
-**Evidence:** [one-layer execution](effects-and-execution.md#eff-003--run-executes-exactly-one-effect-layer),
-[accepted suspension direction](../../proposals/0009-explicit-effect-suspension/proposal.md).
+**Evidence:** [one-layer execution](effects-and-execution.md#eff-003--run-executes-exactly-one-effect-layer).
 
 ### SUSP-003 — Every recursive cycle must cross suspension for bounded machine stack
 
@@ -118,7 +117,7 @@ that branch.
 **Diagnostics:** The compiler does not reject an uncovered cycle. The language service may explain
 which cycle lacks a boundary under SUSP-019.
 
-**Evidence:** [accepted suspension direction](../../proposals/0009-explicit-effect-suspension/proposal.md).
+**Evidence:** [suspendability analysis](../../packages/compiler/test/Suspendability.test.ts).
 
 ### SUSP-004 — Suspension does not cover unrelated recursion
 
@@ -142,7 +141,7 @@ not become a Silk guarantee and cannot be relied on for correctness.
 **Diagnostics:** These recursive programs remain valid and receive no mandatory compiler
 diagnostic solely because their depth is unbounded.
 
-**Evidence:** [accepted exclusions](../../proposals/0009-explicit-effect-suspension/proposal.md).
+**Evidence:** [suspendability analysis](../../packages/compiler/test/Suspendability.test.ts).
 
 ### SUSP-005 — Suspension preserves success, failure, and requirement channels exactly
 
@@ -166,7 +165,7 @@ member of `E`.
 Existing child-channel mismatches retain their ordinary codes.
 
 **Evidence:** [Effect channels](effect-contracts.md),
-[accepted channel-preservation decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[suspension composition tests](../../packages/compiler/test/EffectSuspensionComposition.test.ts).
 
 ### SUSP-006 — Execution-stack exhaustion is a fatal trap
 
@@ -183,7 +182,7 @@ fallible storage without changing `Effect.suspend`.
 runtime trap according to the program-termination rules.
 
 **Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
-[accepted execution-storage decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[execution-storage requirements](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/specs/bootstrap-evaluation/spec.md).
 
 ## Execution and composition
 
@@ -210,7 +209,7 @@ have one valid owner for later resumption.
 receive their ordinary ownership diagnostic.
 
 **Evidence:** [Effect construction](effects-and-execution.md#eff-001--calling-an-effect-function-constructs-an-effect),
-[accepted deferred-child decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[Effect suspension standard-library tests](../../packages/compiler/test/EffectSuspendStdlib.test.ts).
 
 ### SUSP-008 — Ordinary combinators are suspension-transparent
 
@@ -237,7 +236,7 @@ Suspension transparency does not authorize it to duplicate or retain a take-once
 diagnostics rather than a suspension-specific error.
 
 **Evidence:** [Effect composition](effects-and-execution.md),
-[accepted transparency decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[suspension composition tests](../../packages/compiler/test/EffectSuspensionComposition.test.ts).
 
 ## Ownership and lifecycle
 
@@ -265,7 +264,7 @@ The compiler's private representation must adapt to source-valid borrows, not in
 ordinary ownership and borrowing diagnostics at the responsible source operation.
 
 **Evidence:** [ownership rules](ownership-and-borrowing.md),
-[accepted suspension ownership decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[suspension ownership tests](../../packages/compiler/test/SuspensionOwnership.test.ts).
 
 ### SUSP-013 — Suspension preserves exact structured cleanup
 
@@ -326,7 +325,7 @@ contract separately.
 an allocator is reachable from suspendable code.
 
 **Evidence:** [service rules](requirements-and-services.md),
-[accepted allocator-independence decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[allocator-independence requirements](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/specs/bootstrap-owned-allocation/spec.md).
 
 ## Engines, limits, and tooling
 
@@ -350,8 +349,8 @@ bound the physical stack while the logical depth continues growing honestly.
 **Diagnostics:** Reaching an evaluator `CallDepth` limit reports the existing deterministic
 evaluation-limit outcome and the active logical source frames, not private helper frames.
 
-**Evidence:** [accepted CallDepth decision](../../proposals/0009-explicit-effect-suspension/proposal.md),
-[evaluation limits](../../openspec/specs/bootstrap-evaluation/spec.md).
+**Evidence:** [evaluation limits](../../openspec/specs/bootstrap-evaluation/spec.md),
+[suspension evaluation tests](../../packages/compiler/test/EffectSuspensionEvaluation.test.ts).
 
 ### SUSP-017 — Evaluation, native, and Wasm preserve the same semantics
 
@@ -370,8 +369,9 @@ policies. Those differences cannot change source-visible results or cleanup.
 **Diagnostics:** A valid program receives no engine-selection diagnostic. A target that cannot
 honor the suspension contract is unavailable for that reachable executable closure.
 
-**Evidence:** [cross-engine direction](../../proposals/0009-explicit-effect-suspension/proposal.md),
-[target availability](unsafe-intrinsics-and-targets.md#target-003--target-unavailability-is-a-compile-time-compatibility-error).
+**Evidence:** [target availability](unsafe-intrinsics-and-targets.md#target-003--target-unavailability-is-a-compile-time-compatibility-error),
+[native suspension tests](../../packages/compiler/test/EffectSuspensionNative.test.ts),
+[Wasm suspension tests](../../packages/compiler/test/EffectSuspensionWasm.test.ts).
 
 ### SUSP-018 — Non-suspending call graphs pay no coroutine cost
 
@@ -396,7 +396,7 @@ runtime branch completes before reaching the boundary.
 absence of unreachable machinery.
 
 **Evidence:** [pay-for-use runtime rule](runtime-and-standard-library.md#runtime-002--source-closure-and-executable-closure-control-separate-costs),
-[accepted pay-for-use decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[suspension MIR tests](../../packages/compiler/test/SuspensionMir.test.ts).
 
 ### SUSP-019 — Uncovered recursive Effects remain valid
 
@@ -419,7 +419,7 @@ will overflow.
 **Diagnostics:** No mandatory compiler diagnostic applies. Any LSP warning is non-blocking and must
 identify the uncovered cycle and the explicit nature of the suggested change.
 
-**Evidence:** [accepted tooling decision](../../proposals/0009-explicit-effect-suspension/proposal.md).
+**Evidence:** [suspendability analysis](../../packages/compiler/test/Suspendability.test.ts).
 
 ### SUSP-020 — Suspension promises no async or scheduler behavior
 
@@ -443,7 +443,7 @@ Using a future unavailable async construct receives that construct's own diagnos
 changing `Effect.suspend`.
 
 **Evidence:** [no ambient runtime facilities](runtime-and-standard-library.md#runtime-004--silk-has-no-ambient-runtime-facilities),
-[accepted async exclusion](../../proposals/0009-explicit-effect-suspension/proposal.md).
+[suspension implementation scope](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/proposal.md).
 
 ## Private lowering model
 
@@ -459,6 +459,5 @@ These are compiler architecture rules, not additional source obligations:
   storage. Direct Wasm uses a private, non-overlapping linear-memory region. Growth failure follows
   SUSP-006 on all three engines.
 
-The complete architecture contract remains in the
-[suspension proposal](../../proposals/0009-explicit-effect-suspension/proposal.md) and its OpenSpec
-implementation plan.
+The complete architecture contract remains in the archived
+[suspension implementation design](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/design.md).

@@ -2,8 +2,9 @@
 
 ### Requirement: Continuation storage uses explicit typed allocation
 
-**Reason**: SLP-0009 classifies coroutine frames as compiler-owned execution-stack storage. Their
-placement is not a source allocation, and exhaustion is a fatal trap rather than `OutOfMemory`.
+**Reason**: [SUSP-006](../../../../../../docs/language/effect-suspension.md#susp-006--execution-stack-exhaustion-is-a-fatal-trap)
+classifies coroutine frames as compiler-owned execution-stack storage. Their placement is not a
+source allocation, and exhaustion is a fatal trap rather than `OutOfMemory`.
 
 **Migration**: Remove continuation requests from the `Allocator` service, remove allocator-visible
 request/refusal/release events and failure ordinals, and realize one reusable private frame per

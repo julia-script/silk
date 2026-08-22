@@ -56,7 +56,7 @@ namespace injection.
   [`Parser.ts`](../../../packages/compiler/src/Parser.ts),
   [`Elaboration.ts`](../../../packages/compiler/src/Elaboration.ts),
   [`bootstrap-exhaustive-matching`](../../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
-  and [`SLP-0010`](../../../proposals/0010-shared-patterns-and-conditional-destructuring/proposal.md).
+  and the [patterns and destructuring reference](../../../docs/language/patterns-and-destructuring.md).
 - Modules and names:
   [`ModuleClosure.ts`](../../../packages/compiler/src/ModuleClosure.ts),
   [`NameResolution.ts`](../../../packages/compiler/src/NameResolution.ts),
