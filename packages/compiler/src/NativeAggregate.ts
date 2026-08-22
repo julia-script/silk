@@ -13,6 +13,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Mir from './Mir.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
@@ -339,11 +340,16 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         }
         return Object.freeze(loaded)
       })
-      yield* dropThroughPlan(
-        context,
-        plan.value,
+      const helper = declared.find((candidate) =>
+        Mir.matchesInstance(candidate.fn, LocalSharedPayloadCleanup.declaration, [plan.element]),
+      )
+      if (helper === undefined)
+        throw new RangeError('LLVM local-shared cleanup lost its payload helper')
+      yield* FunctionBody.callDirect(
+        body,
+        helper.handle,
         yield* loadLanes(plan.element, block.valueOffset, `${tag}_value`),
-        `${tag}_value`,
+        `${tag}_value_cleanup`,
       )
       yield* dropThroughPlan(
         context,

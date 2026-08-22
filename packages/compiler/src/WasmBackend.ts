@@ -22,6 +22,7 @@ import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
@@ -617,7 +618,7 @@ interface Layout {
 const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
   switch (cleanup._tag) {
     case 'LocalSharedCoreCleanup':
-      return 1 + localSharedCleanupDepth(cleanup.value)
+      return 1
     case 'RawBufferCleanup':
       return localSharedCleanupDepth(cleanup.allocation)
     case 'HookCleanup':
@@ -1610,6 +1611,55 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'LocalSharedCoreCleanup': {
+          const base = currentValues.at(0)
+          const elementLayout = LayoutPlan.entry(plan, plan_.element)
+          const block =
+            elementLayout === undefined
+              ? undefined
+              : LocalSharedControlBlock.plan(plan.target, plan_.element, elementLayout)
+          if (base === undefined || block?._tag !== 'LocalSharedControlBlockPlan')
+            throw new RangeError('Wasm local-shared cleanup lost its control-block lanes')
+          const context = requireMemory()
+          const decrement = [
+            ...base,
+            ...base,
+            Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+            Instr.i32Const(1),
+            Instr.op('i32.sub'),
+            Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
+          ]
+          const last = [
+            ...semanticLanesOf(plan_.element).flatMap((lane) => {
+              const offset = LayoutVerify.laneOffset(plan, plan_.element, lane.path)
+              if (offset === undefined)
+                throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+              return [
+                ...base,
+                Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, {
+                  offset: block.valueOffset + offset,
+                }),
+              ]
+            }),
+            Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [plan_.element])),
+            Instr.op('drop'),
+            ...base,
+            Instr.memoryAccess('i32.load', context.memory, {
+              offset:
+                block.allocationOffset + aggregateFieldOffset(SilkType.allocation, '$context'),
+            }),
+            Instr.call(requireRelease()),
+          ]
+          return Object.freeze({
+            before: Object.freeze([
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+              Instr.i32Const(1),
+              Instr.op('i32.gt_u'),
+              Instr.ifElse(Instr.emptyBlockType, decrement, last),
+            ]),
+          })
+        }
         case 'AllocationCleanup':
         case 'RawBufferCleanup': {
           const context = currentValues.at(4)
@@ -1923,8 +1973,15 @@ const makeOperationContext = (
         Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
       ]
       const last = [
-        ...releaseAtAddress(cleanup.value, base, block.valueOffset, localSharedDepth + 1),
-        ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset, localSharedDepth + 1),
+        ...semanticLanesOf(cleanup.element).flatMap((lane) => {
+          const offset = LayoutVerify.laneOffset(plan, cleanup.element, lane.path)
+          if (offset === undefined)
+            throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+          return loadAt(base, block.valueOffset + offset, lane)
+        }),
+        Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
+        Instr.op('drop'),
+        ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset, localSharedDepth),
       ]
       return [
         ...loadAt(address, byteOffset),
@@ -3591,13 +3648,23 @@ const emitDropOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { releaseInstructions, releaseAtAddress, scalar, requireMemory, plan } = state
+  const {
+    releaseInstructions,
+    releaseAtAddress,
+    semanticLanesOf,
+    loadAt,
+    resolve,
+    scalar,
+    requireMemory,
+    plan,
+  } = state
   if (operation.cleanup._tag === 'LocalSharedCoreCleanup') {
-    const elementLayout = LayoutPlan.entry(plan, operation.cleanup.element)
+    const cleanup = operation.cleanup
+    const elementLayout = LayoutPlan.entry(plan, cleanup.element)
     const block =
       elementLayout === undefined
         ? undefined
-        : LocalSharedControlBlock.plan(plan.target, operation.cleanup.element, elementLayout)
+        : LocalSharedControlBlock.plan(plan.target, cleanup.element, elementLayout)
     if (block?._tag !== 'LocalSharedControlBlockPlan')
       throw new RangeError('Wasm local-shared cleanup lost its target control-block plan')
     const base = scalar(operation.local)
@@ -3611,8 +3678,15 @@ const emitDropOperation = (
       Instr.memoryAccess('i32.store', memory, { offset: block.strongOffset }),
     ]
     const last = [
-      ...releaseAtAddress(operation.cleanup.value, base, block.valueOffset),
-      ...releaseAtAddress(operation.cleanup.allocation, base, block.allocationOffset),
+      ...semanticLanesOf(cleanup.element).flatMap((lane) => {
+        const offset = LayoutVerify.laneOffset(plan, cleanup.element, lane.path)
+        if (offset === undefined)
+          throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+        return loadAt(base, block.valueOffset + offset, lane)
+      }),
+      Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
+      Instr.op('drop'),
+      ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset),
     ]
     return [
       Instr.localGet(base),

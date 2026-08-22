@@ -2282,7 +2282,7 @@ const checkFunction = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
-  localSharedBoundary?: SourceSpan.SourceSpan,
+  localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
   const declaration = fn.declaration
   const copyAssumptions = new Set(
@@ -2311,49 +2311,83 @@ const checkFunction = (
     matches: [],
     callables: [],
   }
-  if (localSharedBoundary !== undefined) {
+  if (localSharedBoundaries.length > 0) {
     const parameter = fn.declaration.parameters.at(0)?.id
     if (parameter !== undefined) {
-      const referencesParameter = (expression: Hir.Expression): boolean =>
-        Hir.expressionTree(expression).some(
-          (candidate) =>
-            candidate._tag === 'ParameterReference' &&
-            candidate.parameter.ordinal === parameter.ordinal,
+      const bindings = new Map<number, Hir.Expression>()
+      const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+        for (const statement of statements) {
+          if (statement._tag === 'Bind')
+            bindings.set(statement.binding.ordinal, statement.initializer)
+          if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+          if (statement._tag === 'If' || statement._tag === 'IfLet') {
+            collectBindings(statement.taken)
+            collectBindings(statement.otherwise)
+          }
+          if (statement._tag === 'While') collectBindings(statement.body)
+        }
+      }
+      collectBindings(fn.statements)
+      const referencesParameter = (
+        expression: Hir.Expression,
+        seen = new Set<number>(),
+      ): boolean => {
+        if (
+          expression._tag === 'ParameterReference' &&
+          expression.parameter.ordinal === parameter.ordinal
         )
-      const returns = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
+          return true
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : referencesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
+        }
+        return Hir.expressionChildren(expression).some((child) => referencesParameter(child, seen))
+      }
+      const exits = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
         statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
           switch (statement._tag) {
             case 'Return':
+            case 'Fail':
               return [statement.expression]
             case 'Unsafe':
-              return returns(statement.statements)
+              return exits(statement.statements)
             case 'If':
             case 'IfLet':
-              return [...returns(statement.taken), ...returns(statement.otherwise)]
+              return [...exits(statement.taken), ...exits(statement.otherwise)]
             case 'While':
-              return returns(statement.body)
+              return exits(statement.body)
             default:
               return []
           }
         })
-      for (const returned of returns(fn.statements)) {
-        const tree = Hir.expressionTree(returned)
-        const suspension = tree.find((candidate) => candidate._tag === 'Run')
-        if (suspension !== undefined) {
-          state.diagnostics.push(
-            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, localSharedBoundary),
-          )
-          continue
+      const activeRuns = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
+        if (expression._tag === 'EffectBlock') return Object.freeze([])
+        return Object.freeze([
+          ...(expression._tag === 'Run' ? [expression] : []),
+          ...Hir.expressionChildren(expression).flatMap(activeRuns),
+        ])
+      }
+      const suspensionSites = fn.statements.flatMap(Hir.statementExpressions).flatMap(activeRuns)
+      const capturesParameter = (expression: Hir.Expression, seen = new Set<number>()): boolean => {
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : capturesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
         }
-        const capturesRestrictedParameter = tree.some(
-          (candidate) =>
-            (candidate._tag === 'EffectBlock' &&
-              candidate.captures.some(
-                (capture) => capture.parameter?.ordinal === parameter.ordinal,
-              )) ||
-            (candidate._tag === 'CallableSection' &&
-              candidate.captures.some((capture) => referencesParameter(capture.value))),
+        if (
+          (expression._tag === 'EffectBlock' || expression._tag === 'CallableSection') &&
+          referencesParameter(expression)
         )
+          return true
+        return Hir.expressionChildren(expression).some((child) => capturesParameter(child, seen))
+      }
+      const escapeSites = exits(fn.statements).filter((returned) => {
+        const capturesRestrictedParameter = capturesParameter(returned)
         if (
           'type' in returned &&
           localSharedResultEscapes({
@@ -2362,8 +2396,17 @@ const checkFunction = (
             referencesRestrictedParameter: referencesParameter(returned),
           })
         )
+          return true
+        return false
+      })
+      for (const boundary of localSharedBoundaries) {
+        for (const suspension of suspensionSites)
           state.diagnostics.push(
-            Diagnostic.localSharedAccessEscape('Result', returned.span, localSharedBoundary),
+            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, boundary),
+          )
+        for (const escapeSite of escapeSites)
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Result', escapeSite.span, boundary),
           )
       }
     }
@@ -3081,17 +3124,49 @@ export const checkModule = (
     target._tag === 'DeclarationCallableTarget'
       ? `${target.declaration.module}\u0000${target.declaration.name}`
       : undefined
-  const boundaries = new Map<string, SourceSpan.SourceSpan>()
+  const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
   for (const fn of result.hir.functions) {
+    const bindings = new Map<number, Hir.Expression>()
+    const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+      for (const statement of statements) {
+        if (statement._tag === 'Bind')
+          bindings.set(statement.binding.ordinal, statement.initializer)
+        if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+        if (statement._tag === 'If' || statement._tag === 'IfLet') {
+          collectBindings(statement.taken)
+          collectBindings(statement.otherwise)
+        }
+        if (statement._tag === 'While') collectBindings(statement.body)
+      }
+    }
+    collectBindings(fn.statements)
+    const callableTarget = (
+      expression: Hir.Expression,
+      seen = new Set<number>(),
+    ): Hir.CallableTarget | undefined => {
+      if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
+        return expression.target
+      if (expression._tag === 'Move') return callableTarget(expression.subject, seen)
+      if (expression._tag === 'UnionConvert') return callableTarget(expression.source, seen)
+      if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+        return undefined
+      const initializer = bindings.get(expression.binding.ordinal)
+      return initializer === undefined
+        ? undefined
+        : callableTarget(initializer, new Set(seen).add(expression.binding.ordinal))
+    }
     for (const expression of fn.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
       if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedWithMut') continue
       const use = expression.arguments.at(1)
-      const target =
-        use?._tag === 'FunctionItem' || use?._tag === 'CallableSection' ? use.target : undefined
+      const target = use === undefined ? undefined : callableTarget(use)
       const key = target === undefined ? undefined : targetKey(target)
-      if (key !== undefined && !boundaries.has(key)) boundaries.set(key, expression.span)
+      if (key !== undefined) {
+        const existing = boundaries.get(key)
+        if (existing === undefined) boundaries.set(key, [expression.span])
+        else existing.push(expression.span)
+      }
     }
   }
   const checked = result.hir.functions.map((fn, ordinal) =>
@@ -3100,10 +3175,10 @@ export const checkModule = (
       index,
       result.functions.at(ordinal),
       fn.declaration.canonical._tag === 'Canonical'
-        ? boundaries.get(
+        ? (boundaries.get(
             `${fn.declaration.canonical.id.module}\u0000${fn.declaration.canonical.id.name}`,
-          )
-        : undefined,
+          ) ?? Object.freeze([]))
+        : Object.freeze([]),
     ),
   )
   return Object.freeze({

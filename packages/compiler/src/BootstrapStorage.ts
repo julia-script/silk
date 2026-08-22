@@ -164,7 +164,7 @@ export const cleanupMembers = (
   }
   if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
   if (cleanup._tag === 'LocalSharedCoreCleanup')
-    return Object.freeze([cleanup.type, ...cleanupMembers(cleanup.value, owner)])
+    return Object.freeze([cleanup.type, cleanup.element])
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])

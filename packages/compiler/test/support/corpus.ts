@@ -1122,6 +1122,41 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  {
+    name: 'local-shared-recursive-cleanup',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+
+struct Empty {}
+struct Node { next: Intrinsic.SharedCore<Node> | Empty }
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let thirdAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  unsafe {
+    let third = Intrinsic.sharedFromAllocation<Node>(
+      move thirdAllocation,
+      Node { next: Empty {} },
+    )
+    let second = Intrinsic.sharedFromAllocation<Node>(
+      move secondAllocation,
+      Node { next: move third },
+    )
+    let first = Intrinsic.sharedFromAllocation<Node>(
+      move firstAllocation,
+      Node { next: move second },
+    )
+    drop first
+    return 42
+  }
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',

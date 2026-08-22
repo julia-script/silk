@@ -20,6 +20,7 @@ import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as LocalSharedLifecycle from './LocalSharedLifecycle.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
@@ -583,13 +584,31 @@ function* executeFunction(
           )
           return undefined
         }
-        const blocked = yield* releaseThroughPlan(
-          cleanup.value,
-          shared.value,
-          provenance,
-          localOrdinal,
+        const target = BootstrapEffect.functionFor(
+          program,
+          LocalSharedPayloadCleanup.declaration,
+          Object.freeze([cleanup.element]),
         )
-        if (blocked !== undefined) return blocked
+        if (target === undefined)
+          return blockedStep({
+            _tag: 'MissingFunction',
+            target: LocalSharedPayloadCleanup.declaration,
+            span: provenance.span,
+          })
+        trace.push(
+          Object.freeze({
+            _tag: 'Call',
+            frame: activation.frame,
+            depth: activation.depth,
+            caller: fn.id,
+            target: LocalSharedPayloadCleanup.declaration,
+            callerInstance: fn.instance,
+            targetInstance: target.instance,
+            span: provenance.span,
+          }),
+        )
+        const cleaned = yield* callFunction(target, [shared.value], provenance.span)
+        if (cleaned._tag === 'Blocked' || cleaned._tag === 'Transfer') return cleaned
         shared.strong = 0n
         if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
           return blockedStep({

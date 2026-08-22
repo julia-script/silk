@@ -3,12 +3,14 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as LocalSharedPayloadCleanup from '../src/LocalSharedPayloadCleanup.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
+import { raise } from './support/raise.js'
 
 const bytes = new Uint8Array(
   readFileSync(new URL('./fixtures/owned-allocation-guard.silk', import.meta.url)),
@@ -393,16 +395,25 @@ it.effect('rejects generic aggregate capture and suspension across local-shared 
 struct Box<A> { value: A }
 fn wrap<A>(value: A) -> Box<A> { return Box<A> { value: move value } }
 fn deferred(value: &mut Pair) -> Box<Effect<i32>> {
-  return wrap<Effect<i32>>(effect { return value.first })
+  let escaped = effect { return value.first }
+  return wrap<Effect<i32>>(move escaped)
 }
 fn deferredConflict() -> Box<Effect<i32>> {
   return wrap<Effect<i32>>(effect { return 0 })
 }
 effect fn read(value: &mut Pair) -> i32 { return value.second }
-fn suspended(value: &mut Pair) -> i32 { return run read(value) }
+fn suspended(value: &mut Pair) -> i32 {
+  let result = run read(value)
+  return result
+}
 fn numberConflict() -> i32 { return 0 }
 unsafe fn aggregateProbe(core: &Intrinsic.SharedCore<Pair>) -> Box<Effect<i32>> {
-  return Intrinsic.sharedWithMut<Pair, Box<Effect<i32>>>(core, deferred, deferredConflict)
+  let callback = deferred
+  return Intrinsic.sharedWithMut<Pair, Box<Effect<i32>>>(
+    core,
+    move callback,
+    deferredConflict,
+  )
 }
 unsafe fn suspensionProbe(core: &Intrinsic.SharedCore<Pair>) -> i32 {
   return Intrinsic.sharedWithMut<Pair, i32>(core, suspended, numberConflict)
@@ -568,6 +579,66 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
         'AllocationRelease',
       ],
     )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('cleans every core in an acyclic recursive local-shared chain', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+struct Empty {}
+struct Node { next: Intrinsic.SharedCore<Node> | Empty }
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let thirdAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  unsafe {
+    let third = Intrinsic.sharedFromAllocation<Node>(
+      move thirdAllocation,
+      Node { next: Empty {} },
+    )
+    let second = Intrinsic.sharedFromAllocation<Node>(
+      move secondAllocation,
+      Node { next: move third },
+    )
+    let first = Intrinsic.sharedFromAllocation<Node>(
+      move firstAllocation,
+      Node { next: move second },
+    )
+    drop first
+    return 42
+  }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-lifecycle/acyclic-recursive',
+      source,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const helpers = Analysis.loweredMir(snapshot).functions.filter(
+      (fn) =>
+        fn.id.module === LocalSharedPayloadCleanup.declaration.module &&
+        fn.id.name === LocalSharedPayloadCleanup.declaration.name,
+    )
+    assert.strictEqual(helpers.length, 1)
+    assert.strictEqual(
+      MirVerification.operations(
+        helpers.at(0) ?? raise('expected a payload cleanup helper'),
+      ).filter((operation) => operation._tag === 'Drop').length,
+      1,
+    )
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const events = Projections.allocationTraceEventsOf(evaluated)
+    assert.strictEqual(events.filter((event) => event._tag === 'SharedLastCleanup').length, 3)
+    assert.strictEqual(events.filter((event) => event._tag === 'AllocationRelease').length, 3)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)

@@ -32,7 +32,6 @@ export type CleanupPlan =
       readonly _tag: 'LocalSharedCoreCleanup'
       readonly type: Type.Nominal
       readonly element: Type.Type
-      readonly value: CleanupPlan
       readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
     }
   | {
@@ -107,8 +106,7 @@ export const hasHook = (self: CleanupPlan): boolean =>
     self.slots.some((slot) => hasHook(slot.cleanup))) ||
   (self._tag === 'EffectCompositeCleanup' &&
     self.alternatives.some((alternative) => hasHook(alternative))) ||
-  (self._tag === 'RawBufferCleanup' && hasHook(self.allocation)) ||
-  (self._tag === 'LocalSharedCoreCleanup' && hasHook(self.value))
+  (self._tag === 'RawBufferCleanup' && hasHook(self.allocation))
 
 export const reclaims = (self: CleanupPlan): boolean =>
   self._tag === 'AllocationCleanup' ||
@@ -186,7 +184,6 @@ export const cleanupPlan = (
           _tag: 'LocalSharedCoreCleanup',
           type,
           element,
-          value: cleanupPlan(index, element, seen),
           allocation: Object.freeze({
             _tag: 'AllocationCleanup',
             type: Type.allocation,
@@ -354,7 +351,6 @@ export const specializeCleanup = (
         _tag: 'LocalSharedCoreCleanup',
         type,
         element,
-        value: specializeCleanup(cleanup.value, substitution, resolveConcrete),
         allocation: cleanup.allocation,
       })
     }

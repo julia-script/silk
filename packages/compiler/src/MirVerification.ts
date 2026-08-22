@@ -7,6 +7,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import type {
   CleanupRegion,
@@ -956,7 +957,7 @@ const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.
     case 'RawBufferCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
     case 'LocalSharedCoreCleanup':
-      return [cleanup.type, ...cleanupTypes(cleanup.value), ...cleanupTypes(cleanup.allocation)]
+      return [cleanup.type, cleanup.element, ...cleanupTypes(cleanup.allocation)]
     case 'HookCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
@@ -1225,7 +1226,6 @@ const cleanupMatchesSemanticType = (
       cleanup._tag === 'LocalSharedCoreCleanup' &&
       element !== undefined &&
       SilkType.equals(cleanup.element, element) &&
-      cleanupMatchesSemanticType(layout, cleanup.value, element, seen) &&
       cleanup.allocation._tag === 'AllocationCleanup'
     )
   }
@@ -2277,6 +2277,54 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         rule: 'InvalidEntry',
         detail:
           'machine entry must resolve to one zero-parameter i32 function and preserve its ordinary or effect-closing contract',
+      }),
+    )
+  }
+  const sharedElements = [
+    ...new Map(
+      self.layout.entries.flatMap((entry) => {
+        if (!SilkType.isSharedCore(entry.type)) return []
+        const element = SilkType.typeArgumentAt(entry.type, 0)
+        return element === undefined ? [] : [[SilkType.key(element), element] as const]
+      }),
+    ).values(),
+  ].sort((left, right) => SilkType.key(left).localeCompare(SilkType.key(right)))
+  const payloadCleanupHelpers = self.functions.filter(
+    (fn) =>
+      fn.id.module === LocalSharedPayloadCleanup.declaration.module &&
+      fn.id.name === LocalSharedPayloadCleanup.declaration.name,
+  )
+  for (const element of sharedElements) {
+    const helpers = payloadCleanupHelpers.filter((fn) =>
+      matchesInstance(fn, LocalSharedPayloadCleanup.declaration, [element]),
+    )
+    const helper = helpers.at(0)
+    const parameter = helper?.localTypes.at(0)
+    if (
+      helpers.length !== 1 ||
+      helper === undefined ||
+      helper.parameterCount !== 1 ||
+      parameter === undefined ||
+      !SilkType.equals(semanticType(parameter), element) ||
+      helper.result._tag !== 'i32' ||
+      helper.suspension !== undefined
+    ) {
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidLocalSharedOperation',
+          ...(helper === undefined ? {} : { function: helper.id }),
+          detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
+        }),
+      )
+    }
+  }
+  if (payloadCleanupHelpers.length !== sharedElements.length) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidLocalSharedOperation',
+        detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
       }),
     )
   }
