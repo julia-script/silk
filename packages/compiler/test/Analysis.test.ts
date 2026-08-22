@@ -6,6 +6,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 import { invalidMatchCorpus } from './support/corpus.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -36,10 +37,10 @@ it.effect('answers multi-module queries from one snapshot', () =>
       Analysis.modules(self).map((module) => module.name),
       ['lib', 'root'],
     )
-    assert.strictEqual(Analysis.syntaxOf(self, 'lib')?.source.id, 'lib')
+    assert.strictEqual(Projections.syntaxOf(self, 'lib')?.source.id, 'lib')
     assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
     assert.strictEqual(Analysis.declarationByName(self, 'root', 'answer')._tag, 'Missing')
-    assert.strictEqual(Analysis.hirOf(self, 'root')?.functions.length, 1)
+    assert.strictEqual(Projections.hirOf(self, 'root')?.functions.length, 1)
     assert.strictEqual(Analysis.moduleAnalysis(self, 'absent'), undefined)
     assert.deepEqual(Analysis.cycles(self), [])
     assert.deepEqual([...Analysis.sources(self).keys()], ['lib', 'root'])
@@ -144,7 +145,7 @@ it.effect('merges diagnostics while keeping unrelated facts queryable', () =>
       ['lib', 'pub fn answer() -> i32 { return 1 }'],
     ])
     assert.strictEqual(Analysis.declarationByName(self, 'lib', 'answer')._tag, 'Resolved')
-    const libFunction = Analysis.hirOf(self, 'lib')?.functions.at(0)
+    const libFunction = Projections.hirOf(self, 'lib')?.functions.at(0)
     assert.strictEqual(
       libFunction === undefined ? undefined : Hir.returned(libFunction)._tag,
       'IntegerLiteral',
@@ -235,11 +236,11 @@ pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
       'wasm32-unknown-unknown',
     )
     const answer = (self: Analysis.Snapshot) => ({
-      semantic: Analysis.matchesOf(self, 'memory/match-facade'),
-      hir: Analysis.hirMatchesOf(self, 'memory/match-facade'),
+      semantic: Projections.matchesOf(self, 'memory/match-facade'),
+      hir: Projections.hirMatchesOf(self, 'memory/match-facade'),
       ownership: Analysis.ownershipMatchesOf(self, 'memory/match-facade'),
       mir: Analysis.mirMatchesOf(self),
-      trace: Analysis.traceOf(Analysis.evaluate(self)).filter((event) =>
+      trace: Projections.traceOf(Analysis.evaluate(self)).filter((event) =>
         event._tag.startsWith('Match'),
       ),
     })
@@ -268,7 +269,7 @@ pub fn main() -> i32 { return choose([10, 42], 1) }`
     const layouts = Analysis.repeatedLayoutsOf(self)
     const shapes = Analysis.arrayCallingShapesOf(self)
     const outcome = Analysis.evaluate(self)
-    const events = Analysis.arrayTraceEventsOf(outcome)
+    const events = Projections.arrayTraceEventsOf(outcome)
 
     assert.deepEqual(types.map(Type.encode), ['Array<i32, 2>'])
     assert.strictEqual(literals.at(0)?.state._tag, 'Complete')
@@ -435,7 +436,11 @@ it.effect('keeps invalid match corpus failures phase-owned and downstream facts 
       )
       const codes = Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
       for (const code of program.codes) assert.include(codes, code, program.name)
-      assert.isAtLeast(Analysis.matchesOf(self, `memory/${program.name}`).length, 1, program.name)
+      assert.isAtLeast(
+        Projections.matchesOf(self, `memory/${program.name}`).length,
+        1,
+        program.name,
+      )
     }
   }),
 )

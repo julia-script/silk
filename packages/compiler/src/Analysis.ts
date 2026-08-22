@@ -1,5 +1,7 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 
 export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 
@@ -8,37 +10,35 @@ import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
-import * as Elaboration from './Elaboration.js'
+import type * as Elaboration from './Elaboration.js'
+import * as Frontend from './Frontend.js'
 import * as FrontendTooling from './FrontendTooling.js'
-import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
-import * as Mir from './Mir.js'
+import * as LlvmBackend from './LlvmBackend.js'
+import type * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
-import type * as ModuleTooling from './ModuleTooling.js'
+import * as ModuleTooling from './ModuleTooling.js'
 import * as NameResolution from './NameResolution.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as PhaseReport from './PhaseReport.js'
-import * as Pipeline from './Pipeline.js'
 import * as Presentation from './Presentation.js'
-import * as ProvisionalMir from './ProvisionalMir.js'
+import * as Realization from './Realization.js'
 import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
-import * as SuspensionOwnership from './SuspensionOwnership.js'
-import type * as SyntaxFile from './SyntaxFile.js'
 import type * as SyntaxTree from './SyntaxTree.js'
-import type * as Target from './Target.js'
+import * as Target from './Target.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 import * as TypeHint from './TypeHint.js'
@@ -97,8 +97,8 @@ export interface Snapshot extends SingleRootFrontendSnapshot {
 
 /** One available anonymous expression type cached for position fallback. */
 export interface AnonymousExpression {
-  readonly span: FrontendTooling.AnonymousExpression['span']
-  readonly type: FrontendTooling.AnonymousExpression['type']
+  readonly span: ModuleTooling.AnonymousExpression['span']
+  readonly type: ModuleTooling.AnonymousExpression['type']
 }
 
 /** The occurrence-first semantic subject selected for a hover request. */
@@ -126,7 +126,7 @@ export class CodegenUnavailable extends Data.TaggedError('CodegenUnavailable')<{
 export const make = Effect.fn('Analysis.make')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<SingleRootFrontendSnapshot, never, SourceResolver.SourceResolver> {
-  const frontend = yield* Pipeline.frontend(request)
+  const frontend = yield* Frontend.frontend(request)
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
@@ -143,10 +143,10 @@ export const make = Effect.fn('Analysis.make')(function* (
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
 export const realize = (
   self: SingleRootFrontendSnapshot,
-  target: string | undefined = self.requestedTarget,
-  options: Pipeline.Options = {},
+  target: string | undefined = self.requestedTarget ?? Target.x8664UnknownLinuxGnu.id,
+  options: Frontend.Options = {},
 ): Snapshot => {
-  const realization = Pipeline.realize(self, target, options)
+  const realization = Realization.realize(self, target, options)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       ...self,
@@ -183,7 +183,7 @@ export const ofSourceRealized = (
   sourceId: string,
   bytes: Uint8Array,
   target?: string,
-  options: Pipeline.Options = {},
+  options: Frontend.Options = {},
 ): Effect.Effect<Snapshot> =>
   Effect.map(ofSource(sourceId, bytes, target), (self) => realize(self, target, options))
 
@@ -251,12 +251,6 @@ export const lookupQualifiedName = (
     : NameResolution.lookupQualified(scope, self.index, namespace, member, token)
 }
 
-/** Returns one module's syntax artifact, or `undefined` for an unknown identity. */
-export const syntaxOf = (
-  self: FrontendSnapshot,
-  module: string,
-): SyntaxFile.SyntaxFile | undefined => self.results.get(module)?.syntax
-
 /** Discovers compiler-owned auto-import actions for one unresolved source occurrence. */
 export const autoImportsAt = (
   self: FrontendSnapshot,
@@ -280,7 +274,7 @@ export const moduleDocumentation = (
   self: FrontendSnapshot,
   module: string,
 ): DocBlock.DocBlock | undefined => {
-  const syntax = syntaxOf(self, module)
+  const syntax = self.results.get(module)?.syntax
   return syntax === undefined ? undefined : DocBlock.ofModule(syntax)
 }
 
@@ -290,7 +284,7 @@ export const documentationOfSyntax = (
   module: string,
   node: SyntaxTree.Node,
 ): DocBlock.DocBlock | undefined => {
-  const syntax = syntaxOf(self, module)
+  const syntax = self.results.get(module)?.syntax
   return syntax === undefined ? undefined : DocBlock.ofNode(syntax, node)
 }
 
@@ -313,9 +307,9 @@ export const rootAnalysis = (self: FrontendSnapshot): Elaboration.Result => {
 export const declarationForIdentity = (
   self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'DeclarationIdentity' }>,
-): DeclarationIndex.MemberFact | undefined => {
+): DeclarationFacts.MemberFact | undefined => {
   if (identity.id._tag === 'CanonicalDeclarationId')
-    return DeclarationIndex.byCanonical(self.index, identity.id)
+    return DeclarationFacts.byCanonical(self.index, identity.id)
   const local = identity.id
   return self.index.modules
     .flatMap((module) => module.members)
@@ -325,7 +319,7 @@ export const declarationForIdentity = (
 const serviceOperationForIdentity = (
   self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'ServiceOperationIdentity' }>,
-): DeclarationIndex.ServiceOperationFact | undefined =>
+): DeclarationFacts.ServiceOperationFact | undefined =>
   self.index.modules
     .flatMap((module) => module.services)
     .find(
@@ -528,7 +522,7 @@ const presentationOfIdentity = (
     for (const result of self.results.values())
       for (const fn of result.functions)
         for (const statement of fn.statements)
-          for (const expression of FrontendTooling.statementExpressions(statement))
+          for (const expression of ModuleTooling.statementExpressions(statement))
             if (expression._tag === 'Match')
               for (const arm of expression.arms)
                 for (const binding of arm.bindings)
@@ -613,7 +607,7 @@ export const typeHints = (
   end: number,
 ): ReadonlyArray<TypeHint.TypeHint> =>
   TypeHint.make(
-    bindingsOf(self, module),
+    Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? []),
     module,
     NameResolution.scopeOf(self.resolution, module),
     start,
@@ -640,90 +634,6 @@ export const completionAt = (
       })
 }
 
-const nestedStatementFacts = (
-  statement: Elaboration.StatementFact,
-): ReadonlyArray<Elaboration.StatementFact> => {
-  switch (statement._tag) {
-    case 'UnsafeStatement':
-      return Object.freeze([statement, ...statement.statements.flatMap(nestedStatementFacts)])
-    case 'IfStatement':
-    case 'IfLetStatement':
-      return Object.freeze([
-        statement,
-        ...statement.taken.flatMap(nestedStatementFacts),
-        ...statement.otherwise.flatMap(nestedStatementFacts),
-      ])
-    case 'WhileStatement':
-      return Object.freeze([statement, ...statement.body.flatMap(nestedStatementFacts)])
-    default:
-      return Object.freeze([statement])
-  }
-}
-
-/** Returns every semantic statement fact in deterministic source nesting order. */
-export const statementsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Elaboration.StatementFact> =>
-  Object.freeze(
-    self.results
-      .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(nestedStatementFacts)) ?? [],
-  )
-
-/** Returns every binding with its canonical identity and immutable/mutable classification. */
-export const bindingsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Elaboration.BindingDeclarationFact> =>
-  Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? [])
-
-/** Returns every complete or unavailable assignment fact in source order. */
-export const writesOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }>> =>
-  Object.freeze(
-    statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WriteStatement' }> =>
-        statement._tag === 'WriteStatement',
-    ),
-  )
-
-/** Returns canonical loop identities, lexical parents, conditions, and ordered bodies. */
-export const loopsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }>> =>
-  Object.freeze(
-    statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<Elaboration.StatementFact, { readonly _tag: 'WhileStatement' }> =>
-        statement._tag === 'WhileStatement',
-    ),
-  )
-
-/** Returns every lexical loop transfer, including explicitly unresolved invalid transfers. */
-export const transfersOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<
-  Extract<Elaboration.StatementFact, { readonly _tag: 'BreakStatement' | 'ContinueStatement' }>
-> =>
-  Object.freeze(
-    statementsOf(self, module).filter(
-      (
-        statement,
-      ): statement is Extract<
-        Elaboration.StatementFact,
-        { readonly _tag: 'BreakStatement' | 'ContinueStatement' }
-      > => statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement',
-    ),
-  )
-
 /** Returns every semantic expression fact in deterministic source nesting order. */
 export const expressionsOf = (
   self: FrontendSnapshot,
@@ -732,32 +642,7 @@ export const expressionsOf = (
   Object.freeze(
     self.results
       .get(module)
-      ?.functions.flatMap((fn) => fn.statements.flatMap(FrontendTooling.statementExpressions)) ??
-      [],
-  )
-
-/** Returns every retained semantic match with source patterns and canonical coverage facts. */
-export const matchesOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }>> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Extract<Elaboration.ExpressionFact, { readonly _tag: 'Match' }> =>
-        expression._tag === 'Match',
-    ),
-  )
-
-/** Returns every retained struct literal fact without reconstructing field mappings. */
-export const structLiteralsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Elaboration.StructLiteralExpressionFact> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Elaboration.StructLiteralExpressionFact =>
-        expression._tag === 'StructLiteral',
-    ),
+      ?.functions.flatMap((fn) => fn.statements.flatMap(ModuleTooling.statementExpressions)) ?? [],
   )
 
 /** Returns every canonical or explicitly unavailable field-projection step. */
@@ -802,7 +687,7 @@ export const fixedArrayTypesOf = (
   module: string,
 ): ReadonlyArray<Type.FixedArray> => {
   const found = new Map<string, Type.FixedArray>()
-  const add = (type: DeclarationIndex.SemanticType): void => {
+  const add = (type: DeclarationFacts.SemanticType): void => {
     if (!Type.isFixedArray(type)) return
     found.set(Type.key(type), type)
     add(type.element)
@@ -834,140 +719,14 @@ export const fixedArrayTypesOf = (
   return Object.freeze([...found.values()])
 }
 
-/** Returns one module's HIR, or `undefined` for an unknown identity. */
-export const hirOf = (self: FrontendSnapshot, module: string): Hir.Module | undefined =>
-  self.results.get(module)?.hir
-
 /** Returns one module's ownership facts and cleanup plans, or `undefined` for an unknown identity. */
 export const ownershipOf = (
   self: FrontendSnapshot,
   module: string,
 ): Ownership.ModuleOwnership | undefined => self.ownership.get(module)
 
-/** Returns deterministic loop-header ownership fixed points for one module. */
-export const ownershipFixedPointsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Ownership.LoopFixedPoint> =>
-  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.fixedPoints) ?? [])
-
-/** Returns every lexical cleanup exit, including loop fallthrough and transfers. */
-export const cleanupExitsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Ownership.ExitPlan> =>
-  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.exits) ?? [])
-
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
-
-/** Returns declarations that own canonical type parameters in module/source order. */
-export const genericDeclarationsOf = (
-  self: FrontendSnapshot,
-): ReadonlyArray<DeclarationIndex.MemberFact> =>
-  Object.freeze(
-    self.index.modules.flatMap((module) =>
-      module.members.filter((member) => member.typeParameters.length > 0),
-    ),
-  )
-
-/** Returns every typed generic call in deterministic HIR preorder. */
-export const genericCallsOf = (
-  self: FrontendSnapshot,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Call' }>> =>
-  Object.freeze(
-    [...self.results.values()].flatMap((result) =>
-      result.hir.functions.flatMap((fn) =>
-        fn.statements
-          .flatMap(Hir.statementExpressions)
-          .flatMap(Hir.expressionTree)
-          .flatMap((expression) =>
-            expression._tag === 'Call' && expression.typeArguments.length > 0 ? [expression] : [],
-          ),
-      ),
-    ),
-  )
-
-export interface CallInstanceLink {
-  readonly call: Extract<Hir.Expression, { readonly _tag: 'Call' }>
-  readonly caller: Instances.Instance
-  readonly target: Instances.Instance
-}
-
-/** Resolves one source HIR call in every reached caller specialization. */
-export const instancesOfCall = (
-  self: Snapshot,
-  call: Extract<Hir.Expression, { readonly _tag: 'Call' }>,
-): ReadonlyArray<CallInstanceLink> =>
-  Object.freeze(
-    self.instances.instances.flatMap((caller): ReadonlyArray<CallInstanceLink> => {
-      const ownsCall = caller.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .some((expression) => expression === call)
-      if (!ownsCall) return []
-      const arguments_ = call.typeArguments.map((argument) =>
-        Type.substituteGenericArgument(argument, caller.substitution),
-      )
-      const target = self.instances.instances.find(
-        (candidate) =>
-          candidate.key.declaration.module === call.target.module &&
-          candidate.key.declaration.name === call.target.name &&
-          candidate.key.typeArguments.length === arguments_.length &&
-          candidate.key.typeArguments.every((argument, index) => {
-            const callArgument = arguments_.at(index)
-            return (
-              callArgument !== undefined &&
-              Type.genericArgumentKey(argument) === Type.genericArgumentKey(callArgument)
-            )
-          }),
-      )
-      return target === undefined ? [] : [Object.freeze({ call, caller, target })]
-    }),
-  )
-
-/** Returns concrete reached applications while excluding open generic declarations. */
-export const appliedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.entries.filter(
-          (entry) => Type.isNominal(entry.type) && entry.type.arguments.length > 0,
-        ),
-      )
-    : Object.freeze([])
-
-/** Returns concrete instances proven able to reach the suspension intrinsic. */
-export const suspendableInstancesOf = (self: Snapshot): ReadonlyArray<Instances.InstanceKey> =>
-  self.instances.suspendable
-
-/** Returns exact concrete function executions that can suspend, excluding lazy result runners. */
-export const suspendableExecutionsOf = (self: Snapshot): ReadonlyArray<Instances.InstanceKey> =>
-  self.instances.suspendableExecutions
-
-/** Returns exact hidden Effect runner identities proven able to suspend. */
-export const suspendableEffectsOf = (self: Snapshot): ReadonlyArray<string> =>
-  self.instances.suspendableEffects
-
-/** Builds target-neutral monomorphic suspension control without exposing it as executable MIR. */
-export const provisionalMirOf = (self: Snapshot): Targeted<ProvisionalMir.Module> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze({
-        _tag: 'Available',
-        value: ProvisionalMir.build(self.instances, self.layout.value, self.index),
-      })
-    : self.layout
-
-/** Plans ownership of normalized MIR locals retained by provisional complete-or-relay control. */
-export const suspensionOwnershipOf = (self: Snapshot): Targeted<SuspensionOwnership.Module> => {
-  if (self.mir._tag === 'Unavailable') return self.mir
-  const provisional = provisionalMirOf(self)
-  return provisional._tag === 'Unavailable'
-    ? provisional
-    : Object.freeze({
-        _tag: 'Available',
-        value: SuspensionOwnership.plan(self.mir.value, provisional.value, self.index),
-      })
-}
 
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target
@@ -995,14 +754,6 @@ export const repeatedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =
       )
     : Object.freeze([])
 
-/** Returns every reachable compiler-owned structural-union layout. */
-export const unionLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.entries.filter((entry) => entry.representation._tag === 'Union'),
-      )
-    : Object.freeze([])
-
 /** Returns every reachable array calling shape and its canonical physical paths. */
 export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
   self.layout._tag === 'Available'
@@ -1011,60 +762,12 @@ export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.Calli
       )
     : Object.freeze([])
 
-/** Returns every reachable structural-union sum calling shape. */
-export const unionCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
-  self.layout._tag === 'Available'
-    ? Object.freeze(self.layout.value.callingShapes.filter((shape) => Type.isUnion(shape.type)))
-    : Object.freeze([])
-
-/** Returns every explicit HIR union conversion in source semantic order. */
-export const hirUnionConversionsOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'UnionConvert' }>> =>
-  Object.freeze(
-    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
-      fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => (expression._tag === 'UnionConvert' ? [expression] : [])),
-    ),
-  )
-
-/** Returns every typed structured HIR match in deterministic expression preorder. */
-export const hirMatchesOf = (
-  self: FrontendSnapshot,
-  module: string,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'Match' }>> =>
-  Object.freeze(
-    (self.results.get(module)?.hir.functions ?? []).flatMap((fn) =>
-      fn.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .flatMap((expression) => (expression._tag === 'Match' ? [expression] : [])),
-    ),
-  )
-
 /** Returns every match-local ownership and cleanup plan in function/source order. */
 export const ownershipMatchesOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Ownership.MatchOwnership> =>
   Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? [])
-
-/** Returns every verified MIR union conversion in canonical topological order. */
-export const mirUnionConversionsOf = (
-  self: Snapshot,
-): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'ConvertUnion' }>> =>
-  self.mir._tag === 'Unavailable'
-    ? Object.freeze([])
-    : Object.freeze(
-        self.mir.value.functions.flatMap((fn) =>
-          Mir.operations(fn).flatMap((operation) =>
-            operation._tag === 'ConvertUnion' ? [operation] : [],
-          ),
-        ),
-      )
 
 /** Returns every structured MIR match, including nested expression matches, in DAG preorder. */
 export const mirMatchesOf = (
@@ -1074,53 +777,14 @@ export const mirMatchesOf = (
     ? Object.freeze([])
     : Object.freeze(
         self.mir.value.functions.flatMap((fn) =>
-          Mir.operations(fn).flatMap((operation) =>
+          MirVerification.operations(fn).flatMap((operation) =>
             operation._tag === 'Match' ? [operation] : [],
           ),
         ),
       )
 
-/** Looks up one compiler-owned aggregate calling shape from the completed runtime plan. */
-export const callingShapeOf = (self: Snapshot, type: Type.Type): Layout.CallingShape | undefined =>
-  self.layout._tag === 'Available' ? Layout.callingShape(self.layout.value, type) : undefined
-
 /** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
 export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir
-
-export interface ControlRegionFact {
-  readonly function: DeclarationIndex.CanonicalId
-  readonly region: Mir.Region
-}
-
-/** Returns every MIR region in canonical per-function topological order. */
-export const controlRegionsOf = (self: Snapshot): ReadonlyArray<ControlRegionFact> =>
-  self.mir._tag === 'Unavailable'
-    ? Object.freeze([])
-    : Object.freeze(
-        self.mir.value.functions.flatMap((fn) =>
-          Mir.topologicalRegions(fn).map((region) => Object.freeze({ function: fn.id, region })),
-        ),
-      )
-
-export interface ControlEdgeFact {
-  readonly function: DeclarationIndex.CanonicalId
-  readonly edge: Mir.ControlEdge
-}
-
-/** Returns compiler-owned structural DAG edges; lexical repeat/exit remain outcomes, not edges. */
-export const controlEdgesOf = (self: Snapshot): ReadonlyArray<ControlEdgeFact> =>
-  self.mir._tag === 'Unavailable'
-    ? Object.freeze([])
-    : Object.freeze(
-        self.mir.value.functions.flatMap((fn) =>
-          Mir.controlEdges(fn).map((edge) => Object.freeze({ function: fn.id, edge })),
-        ),
-      )
-
-/** Returns one execution's immutable, source-linked trace for tooling projections. */
-export const traceOf = (
-  outcome: BootstrapEvaluation.Outcome,
-): ReadonlyArray<BootstrapEvaluation.TraceEvent> => outcome.trace
 
 /** Returns the snapshot's lowered MIR program for callers that already established availability. */
 export const loweredMir = (self: Snapshot): Mir.Module => {
@@ -1139,39 +803,27 @@ export const declarationByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.DeclarationLookup => DeclarationIndex.lookup(self.index, module, spelling)
+): DeclarationFacts.DeclarationLookup => DeclarationFacts.lookup(self.index, module, spelling)
 
 /** Looks up a function or struct in the shared module-level namespace. */
 export const memberByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.MemberLookup => DeclarationIndex.member(self.index, module, spelling)
+): DeclarationFacts.MemberLookup => DeclarationFacts.member(self.index, module, spelling)
 
 /** Looks up one nominal struct declaration. */
 export const structByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.StructLookup => DeclarationIndex.struct(self.index, module, spelling)
+): DeclarationFacts.StructLookup => DeclarationFacts.struct(self.index, module, spelling)
 
 /** Looks up one declaration-ordered field from a resolved nominal struct. */
 export const fieldByName = (
-  declaration: DeclarationIndex.StructFact,
+  declaration: DeclarationFacts.StructFact,
   spelling: string,
-): DeclarationIndex.FieldLookup => DeclarationIndex.lookupField(declaration.fields, spelling)
-
-/** Looks up one declaration name within one module's elaborated analysis. */
-export const declarationLookup = (
-  result: Elaboration.Result,
-  spelling: string,
-): DeclarationIndex.DeclarationLookup => Elaboration.declarationByName(result, spelling)
-
-/** Looks up one parameter name within one declaration's collected parameters. */
-export const parameterLookup = (
-  declaration: DeclarationIndex.DeclarationFact,
-  spelling: string,
-): DeclarationIndex.ParameterLookup => Elaboration.parameterByName(declaration, spelling)
+): DeclarationFacts.FieldLookup => DeclarationFacts.lookupField(declaration.fields, spelling)
 
 /** The compilation's complete diagnostic sequence in deterministic driver order. */
 export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Diagnostic> =>
@@ -1208,7 +860,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* <
   }
   // The cast closes the generic default/override variance gap: omitted selection is LLVM, while
   // an explicit backend determines A at the call site.
-  const selected = backend ?? (Backend.LlvmBackend as Backend.Backend<A>)
+  const selected = backend ?? (LlvmBackend.LlvmBackend as Backend.Backend<A>)
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
     IntrinsicAvailability.backendTarget(selected.id),
@@ -1257,63 +909,9 @@ export const codegenWasm = Effect.fn('Analysis.codegenWasm')(function* (
   })
 })
 
-/** Returns backend-local control constructs with canonical region and source provenance. */
-export const backendControlOf = (
-  artifact: Backend.Artifact,
-): ReadonlyArray<Backend.ControlProvenance> => artifact.control
-
 /** Executes the snapshot's lowered MIR program through the closed bootstrap interpreter. */
 export const evaluate = (
   self: Snapshot,
   options: BootstrapEvaluation.Options = {},
 ): BootstrapEvaluation.Outcome =>
   BootstrapEvaluation.evaluate(self.instances, loweredMir(self), options)
-
-/** Returns the compact array-specific events from an explicit evaluation outcome. */
-export const arrayTraceEventsOf = (
-  outcome: BootstrapEvaluation.Outcome,
-): ReadonlyArray<
-  BootstrapEvaluation.ArrayConstructTraceEvent | BootstrapEvaluation.PlaceReadTraceEvent
-> =>
-  Object.freeze(
-    outcome.trace.filter(
-      (
-        event,
-      ): event is
-        | BootstrapEvaluation.ArrayConstructTraceEvent
-        | BootstrapEvaluation.PlaceReadTraceEvent =>
-        event._tag === 'ArrayConstruct' || event._tag === 'PlaceRead',
-    ),
-  )
-
-/** Returns logical injection and widening events without exposing physical backend tags. */
-export const unionTraceEventsOf = (
-  outcome: BootstrapEvaluation.Outcome,
-): ReadonlyArray<BootstrapEvaluation.UnionConversionTraceEvent> =>
-  Object.freeze(
-    outcome.trace.filter(
-      (event): event is BootstrapEvaluation.UnionConversionTraceEvent =>
-        event._tag === 'UnionConversion',
-    ),
-  )
-
-/** Returns logical allocation and typed-storage events without exposing host addresses. */
-export const allocationTraceEventsOf = (
-  outcome: BootstrapEvaluation.Outcome,
-): ReadonlyArray<BootstrapEvaluation.AllocationTraceEvent> =>
-  Object.freeze(
-    outcome.trace.filter(
-      (event): event is BootstrapEvaluation.AllocationTraceEvent =>
-        event._tag === 'AllocationAcquire' ||
-        event._tag === 'RawBufferForm' ||
-        event._tag === 'SlotProject' ||
-        event._tag === 'SlotWrite' ||
-        event._tag === 'SlotTake' ||
-        event._tag === 'SlotCopy' ||
-        event._tag === 'RawBufferRead' ||
-        event._tag === 'RawBufferCopy' ||
-        event._tag === 'RawBufferFill' ||
-        event._tag === 'SlotDrop' ||
-        event._tag === 'AllocationRelease',
-    ),
-  )

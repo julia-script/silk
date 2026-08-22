@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -58,7 +59,7 @@ pub fn main() -> i32 { return take([]) }`)
         true,
       )
     }
-    const main = Analysis.hirOf(self, 'fixed-arrays/main')?.functions.at(4)
+    const main = Projections.hirOf(self, 'fixed-arrays/main')?.functions.at(4)
     assert.strictEqual(main === undefined ? undefined : Hir.returned(main)._tag, 'Call')
   }),
 )
@@ -104,7 +105,7 @@ pub fn main() -> i32 { return constant([4, 5, 6]) }`)
       facts.map((fact) => fact.bounds._tag),
       ['Runtime', 'Proven'],
     )
-    const hir = Analysis.hirOf(valid, 'fixed-arrays/main')?.functions.at(0)
+    const hir = Projections.hirOf(valid, 'fixed-arrays/main')?.functions.at(0)
     assert.strictEqual(hir === undefined ? undefined : Hir.returned(hir)._tag, 'IndexPlace')
 
     const invalid = yield* snapshot(`fn low(values: [i32; 3]) -> i32 { return values[-1] }

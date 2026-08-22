@@ -10,12 +10,15 @@ import * as PlatformError from 'effect/PlatformError'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
+import * as FieldRealization from '../src/FieldRealization.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
@@ -56,31 +59,32 @@ const runNative = Effect.fnUntraced(function* (
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const destination = path.join(yield* fileSystem.makeTempDirectoryScoped(), 'program')
-  const linked = NativeToolchain.withBuildScope('stored-effect-parity', (scope) => {
-    const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-    if (object._tag !== 'ObjectArtifact') return object
-    const shim = NativeToolchain.compileShim(
-      toolchain,
-      scope,
-      target,
-      artifact.termination,
-      artifact.nativeRuntimeSymbols,
-    )
-    if (shim._tag !== 'ObjectArtifact') return shim
-    return NativeToolchain.ClangLinker.link(
-      toolchain,
-      target,
-      [object.artifact, shim.artifact],
-      [],
-      destination,
-    )
-  })
-  assert.strictEqual(
-    linked._tag,
-    'Executable',
-    linked._tag === 'ToolchainFailure' ? linked.output : linked._tag,
+  const linked = yield* NativeToolchain.withBuildScope('stored-effect-parity', (scope) =>
+    Effect.gen(function* () {
+      const object = yield* NativeToolchain.emitObject(
+        toolchain,
+        scope,
+        artifact,
+        target,
+        'release',
+      )
+      const shim = yield* NativeToolchain.compileShim(
+        toolchain,
+        scope,
+        target,
+        artifact.termination,
+        artifact.nativeRuntimeSymbols,
+      )
+      return yield* NativeToolchain.ClangLinker.link(
+        toolchain,
+        scope,
+        target,
+        [object.artifact, shim.artifact],
+        [],
+        destination,
+      )
+    }),
   )
-  if (linked._tag !== 'Executable') return unreachable('expected a native executable')
   return yield* Process.run(linked.path, [])
 })
 
@@ -125,7 +129,7 @@ const lowerSource = Effect.fnUntraced(function* (
       snapshot.index,
     ),
   )
-  assert.deepEqual(Mir.verify(module), [], name)
+  assert.deepEqual(MirVerification.verify(module), [], name)
   return Object.freeze({ snapshot, module })
 })
 
@@ -144,7 +148,7 @@ const lowerStored = Effect.fnUntraced(function* (
 })
 
 const emitLlvm = Effect.fnUntraced(function* (module: Mir.Module, label: string) {
-  const llvm = yield* Backend.emit(Backend.LlvmBackend, module, { mode: 'release' })
+  const llvm = yield* Backend.emit(LlvmBackend.LlvmBackend, module, { mode: 'release' })
   assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact', label)
   if (llvm._tag !== 'LlvmBitcodeArtifact') return unreachable('expected LLVM artifact')
   return llvm
@@ -230,7 +234,7 @@ const storedRealizations = (module: Mir.Module) =>
 const storedRunner = (module: Mir.Module, label: string) => {
   const realizations = storedRealizations(module)
   for (const realization of realizations) {
-    for (const operation of module.functions.flatMap(Mir.operations)) {
+    for (const operation of module.functions.flatMap(MirVerification.operations)) {
       if (operation._tag !== 'RunEffectValue') continue
       const runner = operation.runnerBase?.declaration ?? operation.runner
       if (runner.module === realization.runner.module && runner.name === realization.runner.name)
@@ -242,15 +246,15 @@ const storedRunner = (module: Mir.Module, label: string) => {
 
 const replaceStoredRealization = (
   plan: Layout.Plan,
-  current: CallableFieldRealization.EffectRealization,
-  replacement: CallableFieldRealization.EffectRealization,
+  current: FieldRealization.EffectRealization,
+  replacement: FieldRealization.EffectRealization,
 ): Layout.Plan =>
   Object.freeze({
     ...plan,
     entries: Object.freeze(
       plan.entries.map((entry) =>
         entry.representation._tag === 'StoredEffectEnvironment' &&
-        CallableFieldRealization.equals(entry.representation.realization, current)
+        FieldRealization.equals(entry.representation.realization, current)
           ? Object.freeze({
               ...entry,
               representation: Object.freeze({
@@ -437,7 +441,7 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
     'executes stored Effects with identical results and runner identity in every engine',
     () =>
       Effect.gen(function* () {
-        const host = yield* Target.host()
+        const host = yield* NativeToolchain.hostTarget()
         const toolchain = yield* makeToolchain()
         for (const testCase of runtimeMatrix) {
           // One module name for both targets: the runner identity must not depend on the target.
@@ -493,7 +497,7 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
             // Service provision resolves statically: the specialized runner reaches the backend, and
             // the provider travels in the environment rather than a runtime dictionary.
             const specialized = nativeLowering.module.functions
-              .flatMap(Mir.operations)
+              .flatMap(MirVerification.operations)
               .find(
                 (candidate) =>
                   candidate._tag === 'RunEffectValue' &&
@@ -662,7 +666,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     'cleans successful, unrun, and failing stored Effect environments exactly once in every engine',
     () =>
       Effect.gen(function* () {
-        const host = yield* Target.host()
+        const host = yield* NativeToolchain.hostTarget()
         const toolchain = yield* makeToolchain()
         for (const exit of ['success', 'unrun', 'failure'] as const) {
           const moduleName = `stored-effect-parity/cleanup-${exit}`
@@ -773,11 +777,11 @@ pub fn main() -> i32 {
           current.environment.at(0) ?? unreachable('expected one stored Effect capture')
         assert.isAbove(current.cleanup.unrunLanes.length, 0, 'expected cleanup dependency')
         assert.strictEqual(current.suspendable, true, 'expected suspendability dependency')
-        assert.deepEqual(Mir.verify(lowered.module), [], 'baseline MIR')
+        assert.deepEqual(MirVerification.verify(lowered.module), [], 'baseline MIR')
 
         const mutations: ReadonlyArray<{
           readonly name: string
-          readonly realization: CallableFieldRealization.EffectRealization
+          readonly realization: FieldRealization.EffectRealization
         }> = [
           {
             name: 'capture-shape',
@@ -829,11 +833,11 @@ pub fn main() -> i32 {
         )
 
         // `verifyAgainstCatalog` is the real target-phase reuse boundary: it delegates stored
-        // environment comparison to `CallableFieldRealization.equals` before MIR and either
+        // environment comparison to `FieldRealization.equals` before MIR and either
         // backend can consume the plan. A mismatch therefore rebuilds layout and emitted code.
         for (const mutation of mutations) {
           assert.isFalse(
-            CallableFieldRealization.equals(current, mutation.realization),
+            FieldRealization.equals(current, mutation.realization),
             `${mutation.name} dependency key`,
           )
           const staleLayout = replaceStoredRealization(
@@ -842,7 +846,9 @@ pub fn main() -> i32 {
             mutation.realization,
           )
           assert.include(
-            Layout.verifyAgainstCatalog(staleLayout, catalog).map((violation) => violation.rule),
+            LayoutVerify.verifyAgainstCatalog(staleLayout, catalog).map(
+              (violation) => violation.rule,
+            ),
             'CatalogMismatch',
             `${mutation.name} stale layout`,
           )
@@ -855,7 +861,7 @@ pub fn main() -> i32 {
     'resumes a suspending stored Effect with matching cleanup in every engine',
     () =>
       Effect.gen(function* () {
-        const host = yield* Target.host()
+        const host = yield* NativeToolchain.hostTarget()
         const toolchain = yield* makeToolchain()
         const moduleName = 'stored-effect-parity/suspending'
         const { snapshot, module } = yield* lowerStored(

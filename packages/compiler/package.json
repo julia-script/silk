@@ -50,13 +50,17 @@
       "types": "./dist/BackendRegistry.d.ts",
       "import": "./dist/BackendRegistry.js"
     },
+    "./LlvmBackend": {
+      "types": "./dist/LlvmBackend.d.ts",
+      "import": "./dist/LlvmBackend.js"
+    },
     "./BootstrapEvaluation": {
       "types": "./dist/BootstrapEvaluation.d.ts",
       "import": "./dist/BootstrapEvaluation.js"
     },
-    "./CallableFieldRealization": {
-      "types": "./dist/CallableFieldRealization.d.ts",
-      "import": "./dist/CallableFieldRealization.js"
+    "./FieldRealization": {
+      "types": "./dist/FieldRealization.d.ts",
+      "import": "./dist/FieldRealization.js"
     },
     "./CallableContract": {
       "types": "./dist/CallableContract.d.ts",
@@ -65,6 +69,10 @@
     "./Completion": {
       "types": "./dist/Completion.d.ts",
       "import": "./dist/Completion.js"
+    },
+    "./CleanupPlan": {
+      "types": "./dist/CleanupPlan.d.ts",
+      "import": "./dist/CleanupPlan.js"
     },
     "./PhaseReport": {
       "types": "./dist/PhaseReport.d.ts",
@@ -126,6 +134,14 @@
       "types": "./dist/HostInput.d.ts",
       "import": "./dist/HostInput.js"
     },
+    "./HeapObservation": {
+      "types": "./dist/HeapObservation.d.ts",
+      "import": "./dist/HeapObservation.js"
+    },
+    "./NodeHeapObservation": {
+      "types": "./dist/NodeHeapObservation.d.ts",
+      "import": "./dist/NodeHeapObservation.js"
+    },
     "./StandardInput": {
       "types": "./dist/StandardInput.d.ts",
       "import": "./dist/StandardInput.js"
@@ -153,6 +169,10 @@
     "./Constraint": {
       "types": "./dist/Constraint.d.ts",
       "import": "./dist/Constraint.js"
+    },
+    "./DeclarationFacts": {
+      "types": "./dist/DeclarationFacts.d.ts",
+      "import": "./dist/DeclarationFacts.js"
     },
     "./DeclarationIndex": {
       "types": "./dist/DeclarationIndex.d.ts",
@@ -206,6 +226,14 @@
       "types": "./dist/Layout.d.ts",
       "import": "./dist/Layout.js"
     },
+    "./LayoutEncode": {
+      "types": "./dist/LayoutEncode.d.ts",
+      "import": "./dist/LayoutEncode.js"
+    },
+    "./LayoutVerify": {
+      "types": "./dist/LayoutVerify.d.ts",
+      "import": "./dist/LayoutVerify.js"
+    },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
@@ -221,6 +249,14 @@
     "./Mir": {
       "types": "./dist/Mir.d.ts",
       "import": "./dist/Mir.js"
+    },
+    "./MirEncoding": {
+      "types": "./dist/MirEncoding.d.ts",
+      "import": "./dist/MirEncoding.js"
+    },
+    "./MirVerification": {
+      "types": "./dist/MirVerification.d.ts",
+      "import": "./dist/MirVerification.js"
     },
     "./ModuleClosure": {
       "types": "./dist/ModuleClosure.d.ts",

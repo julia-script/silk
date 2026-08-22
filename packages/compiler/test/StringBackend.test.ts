@@ -58,7 +58,7 @@ pub fn main() -> i32 {
   if byteCount(bytes) == 5 { return 42 }
   return 0
 }`
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       const nativeFirst = yield* Analysis.ofSourceRealized(
         'string-backend/debug-native',
         ascii(source),
@@ -99,22 +99,26 @@ pub fn main() -> i32 {
       assert.strictEqual(nativeDebugFirst.ir, nativeDebugSecond.ir)
       assert.deepEqual(nativeDebugFirst.bitcode, nativeDebugSecond.bitcode)
 
-      const objectBytes = (artifact: typeof nativeDebugFirst, name: string): Uint8Array =>
-        NativeToolchain.withBuildScope(name, (scope) => {
-          const emitted = NativeToolchain.emitObject(
-            Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
-            scope,
-            artifact,
-            host,
-            'debug',
+      const objectBytes = Effect.fnUntraced(function* (
+        artifact: typeof nativeDebugFirst,
+        name: string,
+      ) {
+        return yield* NativeToolchain.withBuildScope(name, (scope) => {
+          return Effect.map(
+            NativeToolchain.emitObject(
+              Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang' }),
+              scope,
+              artifact,
+              host,
+              'debug',
+            ),
+            (emitted) => readFileSync(emitted.artifact.path),
           )
-          assert.strictEqual(emitted._tag, 'ObjectArtifact')
-          if (emitted._tag !== 'ObjectArtifact') return new Uint8Array()
-          return readFileSync(emitted.artifact.path)
         })
+      })
       assert.deepEqual(
-        objectBytes(nativeDebugFirst, 'string-debug-object-first'),
-        objectBytes(nativeDebugSecond, 'string-debug-object-second'),
+        yield* objectBytes(nativeDebugFirst, 'string-debug-object-first'),
+        yield* objectBytes(nativeDebugSecond, 'string-debug-object-second'),
       )
 
       const wasmDebugFirst = yield* Analysis.codegenWasm(wasmFirst, { mode: 'debug' })

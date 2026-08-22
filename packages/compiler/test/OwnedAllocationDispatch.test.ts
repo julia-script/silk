@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -83,7 +84,7 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
         (event) => event._tag === 'Call' && event.target.name.startsWith('allocate'),
       ),
     )
-    assert.deepEqual(Analysis.allocationTraceEventsOf(refusedRun), [])
+    assert.deepEqual(Projections.allocationTraceEventsOf(refusedRun), [])
 
     // Success half: the witness delegates to the system provider and the block still releases
     // exactly once, with the ticket owned independently of either provider.
@@ -104,7 +105,7 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
     if (delegatedRun._tag !== 'Completed') return
     assert.strictEqual(delegatedRun.result.value, 42n)
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(delegatedRun).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(delegatedRun).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
     )
 
@@ -179,7 +180,7 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
       if (evaluated._tag !== 'Completed') continue
       assert.strictEqual(evaluated.result.value, BigInt(expected), name)
 
-      const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+      const events = Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       // Atomic rejection: a refused request acquires nothing, and every request before the
       // failing ordinal acquired exactly one block.
       assert.strictEqual(
@@ -266,7 +267,7 @@ it.effect('runs a counted quota allocator identically on the evaluator and Wasm'
       assert.strictEqual(evaluated._tag, 'Completed', `q${quota}`)
       if (evaluated._tag !== 'Completed') continue
       assert.strictEqual(evaluated.result.value, BigInt(expected), `q${quota}`)
-      const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+      const events = Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       assert.strictEqual(
         events.filter((event) => event === 'AllocationAcquire').length,
         Math.min(quota, 2),
@@ -342,7 +343,7 @@ it.effect('writes forwarded exclusive provider mutations back on the evaluator a
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 1n)
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
     )
 

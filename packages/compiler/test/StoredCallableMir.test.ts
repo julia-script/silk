@@ -4,8 +4,11 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Instances from '../src/Instances.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as Target from '../src/Target.js'
@@ -44,7 +47,7 @@ pub fn main() -> i32 {
   return parser.parse(1)
 }`
       const { module } = yield* lowerStored('stored-callable-mir/named', source)
-      const operations = module.functions.flatMap(Mir.operations)
+      const operations = module.functions.flatMap(MirVerification.operations)
       const construction = operations.find((operation) => operation._tag === 'Construct')
       const invocation = operations.find((operation) => operation._tag === 'ApplyCallable')
       const projected =
@@ -79,7 +82,7 @@ pub fn main() -> i32 {
         invocation?._tag === 'ApplyCallable' ? invocation.realization : undefined,
         'Environment',
       )
-      assert.deepEqual(Mir.verify(module), [])
+      assert.deepEqual(MirVerification.verify(module), [])
     }),
 )
 
@@ -95,7 +98,7 @@ pub fn main() -> i32 {
 }`
     const { module } = yield* lowerStored('stored-callable-mir/cleanup', source)
     const cleanups = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .flatMap((operation) => (operation._tag === 'Drop' ? [operation.cleanup] : []))
 
     assert.notInclude(
@@ -110,7 +113,7 @@ pub fn main() -> i32 {
       ),
       'CallableCleanup',
     )
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
   }),
 )
 
@@ -130,12 +133,12 @@ pub fn main() -> i32 {
     const first = yield* lowerStored('stored-callable-mir/determinism', source)
     const second = yield* lowerStored('stored-callable-mir/determinism', source)
     const facts = (snapshot: typeof first) => ({
-      layout: Layout.encode(snapshot.layout),
+      layout: LayoutEncode.encode(snapshot.layout),
       instances: snapshot.module.functions.map((fn) => Instances.keyText(fn.instance)),
       symbols: snapshot.module.functions.map((fn) =>
         Backend.symbolFor(fn, Mir.machineEntry(snapshot.module)),
       ),
-      mir: Mir.encode(snapshot.module),
+      mir: MirEncoding.encode(snapshot.module),
     })
     const encoded = facts(first)
 
@@ -144,6 +147,6 @@ pub fn main() -> i32 {
     assert.include(encoded.symbols.join('\n'), 'silk_stored_callable_mir_determinism_box__')
     assert.include(encoded.mir, 'stored=silk/i32.add')
     assert.include(encoded.mir, 'read-place %5.#0.#0')
-    assert.deepEqual(Mir.verify(first.module), [])
+    assert.deepEqual(MirVerification.verify(first.module), [])
   }),
 )

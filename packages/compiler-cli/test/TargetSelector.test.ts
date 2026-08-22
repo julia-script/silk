@@ -1,15 +1,14 @@
 import { assert, it } from '@effect/vitest'
-import * as Target from '@silk-effect/compiler/Target'
 import * as Result from 'effect/Result'
 import * as TargetSelector from '../src/TargetSelector.js'
 
 it('resolves host and canonical ids while preserving first-seen canonical order', () => {
-  const host = Target.select(undefined)
-  assert.strictEqual(host._tag, 'Resolved')
-  if (host._tag !== 'Resolved') return
+  const host = TargetSelector.resolve('host')
+  assert.strictEqual(Result.isSuccess(host), true)
+  if (Result.isFailure(host)) return
   const resolved = TargetSelector.resolveAll([
     'host',
-    host.target.id,
+    host.success.id,
     'wasm32-unknown-unknown',
     'host',
   ])
@@ -17,7 +16,7 @@ it('resolves host and canonical ids while preserving first-seen canonical order'
   if (Result.isFailure(resolved)) return
   assert.deepStrictEqual(
     resolved.success.map((target) => target.id),
-    [host.target.id, 'wasm32-unknown-unknown'],
+    [host.success.id, 'wasm32-unknown-unknown'],
   )
 })
 

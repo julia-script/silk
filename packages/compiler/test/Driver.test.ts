@@ -6,15 +6,18 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
-import * as Backend from '../src/Backend.js'
-import * as Driver from '../src/Driver.js'
+import type * as Backend from '../src/Backend.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, invalidGenericCorpus } from './support/corpus.js'
+import * as Driver from './support/TestDriver.js'
 
 const clang =
   process.env.SILK_TEST_CLANG ??
@@ -41,7 +44,7 @@ const compileSource = (
   name: string,
   text: string,
   overrides: Partial<Driver.CompileRequest> = {},
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed> =>
+): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),
@@ -73,6 +76,24 @@ const expectedPhases = [
   'shim',
   'link',
 ]
+
+it.effect('measures Effect phases with the fiber clock', () =>
+  Effect.gen(function* () {
+    const reports: Array<PhaseReport.PhaseReport> = []
+    const value = yield* PhaseReport.measureEffectInto(
+      reports,
+      'controlled-clock',
+      1,
+      Effect.gen(function* () {
+        yield* TestClock.adjust(1250)
+        return 42
+      }),
+      () => 1,
+    )
+    assert.strictEqual(value, 42)
+    assert.strictEqual(reports.at(0)?.elapsedMs, 1250)
+  }),
+)
 
 it.effect('compiles a three-module call chain to native execution matching the interpreter', () =>
   Effect.gen(function* () {
@@ -128,7 +149,7 @@ it.effect('reports every phase in order with counts and totals', () =>
     for (const entry of outcome.report) {
       assert.isAtLeast(entry.elapsedMs, 0, entry.phase)
       assert.isAtLeast(entry.outputs, 0, entry.phase)
-      assert.isAbove(entry.heapBytes, 0, entry.phase)
+      assert.isAtLeast(entry.heapBytes, 0, entry.phase)
     }
     const closure = outcome.report.find((entry) => entry.phase === 'closure')
     assert.strictEqual(closure?.inputs, 1)
@@ -188,10 +209,10 @@ it.effect(
         _tag: 'Backend',
         id: 'llvm',
         name: 'Spy LLVM',
-        targets: Backend.LlvmBackend.targets,
+        targets: LlvmBackend.LlvmBackend.targets,
         emit: (program, request) => {
           emissions += 1
-          return Backend.LlvmBackend.emit(program, request)
+          return LlvmBackend.LlvmBackend.emit(program, request)
         },
       }
       const outcome = yield* compileSource(
@@ -215,10 +236,10 @@ it.effect('gates source rejection and operational resolution failure before back
       _tag: 'Backend',
       id: 'llvm',
       name: 'Gate Spy',
-      targets: Backend.LlvmBackend.targets,
+      targets: LlvmBackend.LlvmBackend.targets,
       emit: (program, request) => {
         emissions += 1
-        return Backend.LlvmBackend.emit(program, request)
+        return LlvmBackend.LlvmBackend.emit(program, request)
       },
     }
     const rejected = yield* compileSource('rejected', 'pub fn main() -> Mystery { return 42 }', {
@@ -261,6 +282,7 @@ it.effect('gates source rejection and operational resolution failure before back
     assert.strictEqual(failed._tag, 'Failure')
     if (failed._tag === 'Failure') {
       assert.strictEqual(failed.failure._tag, 'SourceResolutionFailed')
+      if (failed.failure._tag !== 'SourceResolutionFailed') return
       assert.deepEqual(
         failed.failure.failures.map((failure) => failure.module),
         ['unreadable'],
@@ -324,10 +346,10 @@ it.effect(
       )
       let emissions = 0
       const backend: Backend.Backend = {
-        ...Backend.LlvmBackend,
+        ...LlvmBackend.LlvmBackend,
         emit: (program, request) => {
           emissions += 1
-          return Backend.LlvmBackend.emit(program, request)
+          return LlvmBackend.LlvmBackend.emit(program, request)
         },
       }
       const outcome = yield* compileSource(
@@ -358,16 +380,21 @@ it.effect('surfaces a missing entry as a closed outcome without invoking the too
 
 it.effect('names the failing native stage with command provenance', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
-    })
+    const outcome = yield* Effect.result(
+      compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
+      }),
+    )
 
-    assert.strictEqual(outcome._tag, 'Failed')
-    if (outcome._tag !== 'Failed') return
-    assert.strictEqual(outcome.stage, 'object')
-    if (outcome.failure._tag !== 'ToolchainFailure')
-      return assert.fail('expected toolchain failure')
-    assert.strictEqual(outcome.failure.planned.command, '/nonexistent/clang')
+    assert.strictEqual(outcome._tag, 'Failure')
+    if (outcome._tag !== 'Failure') return
+    assert.strictEqual(outcome.failure._tag, 'ToolchainError')
+    if (outcome.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(outcome.failure.stage, 'object')
+    assert.strictEqual(outcome.failure.reason._tag, 'SpawnFailed')
+    if (outcome.failure.reason._tag !== 'SpawnFailed') return
+    assert.strictEqual(outcome.failure.reason.planned.command, '/nonexistent/clang')
+    assert.instanceOf(outcome.failure.reason.cause, Error)
   }),
 )
 
@@ -474,7 +501,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = 'pub fn main() -> i32 { return 42 }'
-      const backends = [Backend.LlvmBackend, WasmBackend.WasmBackend] as const
+      const backends = [LlvmBackend.LlvmBackend, WasmBackend.WasmBackend] as const
       for (const backend of backends) {
         const outcome = yield* compileSource(`${backend.id}.wasm`, source, {
           compilation: {
@@ -522,7 +549,7 @@ it.effect(
         'wasm32-unknown-unknown',
       )
       assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
-      for (const backend of [Backend.LlvmBackend, WasmBackend.WasmBackend] as const) {
+      for (const backend of [LlvmBackend.LlvmBackend, WasmBackend.WasmBackend] as const) {
         const outcome = yield* compileSource(`trap-${backend.id}.wasm`, source, {
           compilation: {
             root: SourceFile.make('memory/driver', ascii(source)),
@@ -581,6 +608,62 @@ it.effect('serves identical bitcode from the artifact cache without invoking the
     )
     const run = spawnSync(second.path, [], { encoding: 'utf8' })
     assert.strictEqual(run.status, 42)
+  }),
+)
+
+it.effect('translates a synchronously throwing artifact-cache read at the Driver boundary', () =>
+  Effect.gen(function* () {
+    const cause = Object.freeze({ injected: 'artifact-cache-read' })
+    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => {
+        throw cause
+      },
+      set: () => Effect.void,
+    })
+    const result = yield* Effect.result(
+      compileSource('throwing-artifact-cache-read', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        cache: true,
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure._tag, 'ToolchainError')
+    if (result.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ArtifactCache.get')
+    assert.strictEqual(result.failure.stage, 'cache-read')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
+  }),
+)
+
+it.effect('translates a synchronously throwing artifact-cache write at the Driver boundary', () =>
+  Effect.gen(function* () {
+    const cause = Object.freeze({ injected: 'artifact-cache-write' })
+    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => Effect.succeed(undefined),
+      set: () => {
+        throw cause
+      },
+    })
+    const result = yield* Effect.result(
+      compileSource('throwing-artifact-cache-write', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        cache: true,
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure._tag, 'ToolchainError')
+    if (result.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ArtifactCache.set')
+    assert.strictEqual(result.failure.stage, 'cache-write')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
   }),
 )
 

@@ -1,9 +1,13 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Lower from '../src/Lower.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as Target from '../src/Target.js'
@@ -96,9 +100,9 @@ pub fn main() -> i32 {
   return 0
 }`,
     )
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     const construct = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation) =>
           operation._tag === 'Construct' &&
@@ -123,7 +127,7 @@ pub fn main() -> i32 {
     )
 
     const drop = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
           operation._tag === 'Drop' &&
@@ -152,8 +156,8 @@ pub fn main() -> i32 {
       return
 
     const replaceOuter = (
-      cleanup: Ownership.CleanupPlan,
-      selected: Ownership.CleanupPlan,
+      cleanup: CleanupPlan.CleanupPlan,
+      selected: CleanupPlan.CleanupPlan,
     ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
       Object.freeze({
         ...drop,
@@ -193,7 +197,7 @@ pub fn main() -> i32 {
     assert.isDefined(hookedEntry)
     if (hookedEntry === undefined || hookedEntry.representation._tag !== 'Aggregate') return
     const hookedRepresentation = hookedEntry.representation
-    assert.include(Layout.encode(module.layout), 'cleanup-hook=')
+    assert.include(LayoutEncode.encode(module.layout), 'cleanup-hook=')
     const forgedLayout: Layout.Plan = Object.freeze({
       ...module.layout,
       entries: Object.freeze(
@@ -212,16 +216,16 @@ pub fn main() -> i32 {
       ),
     })
     assert.include(
-      Layout.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
+      LayoutVerify.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
       'CatalogMismatch',
     )
-    const strippedHook: Ownership.CleanupPlan = Object.freeze({
+    const strippedHook: CleanupPlan.CleanupPlan = Object.freeze({
       ...effectSlot.cleanup,
       slots: Object.freeze([
         Object.freeze({ ...nestedEffectSlot, cleanup: nestedEffectSlot.cleanup.inner }),
       ]),
     })
-    const malformed: ReadonlyArray<readonly [Ownership.CleanupPlan, Ownership.CleanupPlan]> = [
+    const malformed: ReadonlyArray<readonly [CleanupPlan.CleanupPlan, CleanupPlan.CleanupPlan]> = [
       [Object.freeze({ _tag: 'NoCleanup', type: effectSlot.cleanup.type }), effectSlot.cleanup],
       [strippedHook, effectSlot.cleanup],
       [
@@ -241,7 +245,7 @@ pub fn main() -> i32 {
     ]
     for (const [cleanup, selected] of malformed) {
       assert.include(
-        Mir.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
+        MirVerification.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
           (violation) => violation.rule,
         ),
         'InvalidAggregateOperation',

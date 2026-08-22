@@ -6,11 +6,13 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Driver from '../src/Driver.js'
 import * as Layout from '../src/Layout.js'
-import * as Mir from '../src/Mir.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -351,7 +353,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       literalVerdicts: [{ ...first, bits: 64 }],
     }
     assert.include(
-      Layout.verify(malformedLayout).map((violation) => violation.rule),
+      LayoutVerify.verify(malformedLayout).map((violation) => violation.rule),
       'InvalidLiteralVerdict',
     )
 
@@ -375,7 +377,7 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       })),
     }
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidIntegerOperation',
     )
   }),

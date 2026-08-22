@@ -40,9 +40,7 @@ const pathOf = (
 ): string | undefined => {
   const path = SyntaxTree.directNode(declaration, 'ImportPath')
   if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) return undefined
-  const names = ImportPath.segments(path)
-  if (names.length === 0) return undefined
-  return names.map((name) => text(source, name)).join('/')
+  return ImportPath.canonicalTarget(source, path)
 }
 
 const importedSpellings = (

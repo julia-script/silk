@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -231,7 +231,7 @@ const accept = (
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [], name)
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(
@@ -370,7 +370,7 @@ it.effect('produces the same zipped result on the evaluator, LLVM, and Wasm', ()
     )
     assert.deepEqual(Analysis.diagnostics(native), [])
     assert.deepEqual(Analysis.diagnostics(wasm), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(wasm)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasm)), [])
 
     const logical = Analysis.evaluate(native)
     assert.strictEqual(

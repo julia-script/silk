@@ -2,8 +2,10 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
@@ -12,7 +14,7 @@ const snapshot = (source: string) =>
   Analysis.ofSourceRealized('provisional-mir/main', encoder.encode(source))
 
 const available = (self: Analysis.Snapshot): ProvisionalMir.Module => {
-  const provisional = Analysis.provisionalMirOf(self)
+  const provisional = Projections.provisionalMirOf(self)
   assert.strictEqual(provisional._tag, 'Available')
   if (provisional._tag === 'Available') return provisional.value
   return unreachable('expected provisional MIR')
@@ -144,7 +146,7 @@ pub fn main() -> i32 {
     assert.isDefined(get)
     if (get === undefined) return
     const other = Type.nominal('provisional-mir/main', 'Other')
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       get.function.declaration.typeParameters.map((parameter) => parameter.type),
       [other],
     )

@@ -1,5 +1,5 @@
 import type * as Constraint from './Constraint.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Match from './Match.js'
@@ -23,8 +23,8 @@ export interface Contract {
   readonly _tag: 'Contract'
   readonly functionKind?: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
-  readonly parameters: ReadonlyArray<DeclarationIndex.SemanticType>
-  readonly result: DeclarationIndex.SemanticType
+  readonly parameters: ReadonlyArray<DeclarationFacts.SemanticType>
+  readonly result: DeclarationFacts.SemanticType
   readonly failureRow?: Type.FailureRow
   readonly requirementRow?: Type.RequirementsRow
   readonly constraints: ReadonlyArray<Constraint.Constraint>
@@ -50,21 +50,21 @@ export type ContractFact =
 /** A deterministic binding identity local to its declaring function's statement order. */
 export interface BindingId {
   readonly _tag: 'HirBinding'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
 
 /** A canonical source-ordered region identity local to one function. */
 export interface RegionId {
   readonly _tag: 'HirRegion'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
 
 /** Compiler-only identity for one explicit call argument borrow. */
 export interface BorrowId {
   readonly _tag: 'BorrowId'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly callSpan: SourceSpan.SourceSpan
   readonly ordinal: number
 }
@@ -72,7 +72,7 @@ export interface BorrowId {
 /** Stable compiler-owned identity for one materialized borrowable temporary. */
 export interface TemporaryOwnerId {
   readonly _tag: 'TemporaryOwnerId'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly span: SourceSpan.SourceSpan
   readonly ordinal: number
 }
@@ -81,8 +81,8 @@ const borrowText = (borrow: BorrowId): string =>
   `${borrow.function.sourceId}:${borrow.function.ordinal}:${borrow.callSpan.start}:${borrow.callSpan.end}:${borrow.ordinal}`
 
 interface ExecutableSiteId {
-  readonly function: DeclarationIndex.DeclarationId
-  readonly owner?: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.DeclarationId
+  readonly owner?: DeclarationFacts.CanonicalId
   readonly ordinal: number
   readonly span: SourceSpan.SourceSpan
 }
@@ -113,8 +113,8 @@ export const sameExecutableSite = (
 
 /** Stable hidden Effect site for a compiler-backed selective-catch expression. */
 export const effectCatchSite = (
-  function_: DeclarationIndex.DeclarationId,
-  owner: DeclarationIndex.CanonicalId,
+  function_: DeclarationFacts.DeclarationId,
+  owner: DeclarationFacts.CanonicalId,
   span: SourceSpan.SourceSpan,
 ): EffectSiteId =>
   Object.freeze({
@@ -160,9 +160,9 @@ export const callableEnvironmentIdentity = (
 
 /** Derives the canonical hidden runner declaration owned by one effect construction site. */
 export const effectRunnerId = (
-  owner: DeclarationIndex.CanonicalId,
+  owner: DeclarationFacts.CanonicalId,
   site: EffectSiteId,
-): DeclarationIndex.CanonicalId =>
+): DeclarationFacts.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: owner.module,
@@ -172,7 +172,7 @@ export const effectRunnerId = (
 export type CallableTarget =
   | {
       readonly _tag: 'DeclarationCallableTarget'
-      readonly declaration: DeclarationIndex.CanonicalId
+      readonly declaration: DeclarationFacts.CanonicalId
     }
   | {
       readonly _tag: 'BuiltinCallableTarget'
@@ -247,7 +247,7 @@ export const matchesCallableTargetIdentity = (
 /** A canonical lexical loop identity local to one function. */
 export interface LoopId {
   readonly _tag: 'HirLoop'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly ordinal: number
 }
 
@@ -262,7 +262,7 @@ export type SliceRoot =
   | { readonly _tag: 'BindingSliceRoot'; readonly binding: BindingId }
   | {
       readonly _tag: 'ParameterSliceRoot'
-      readonly parameter: DeclarationIndex.ParameterId
+      readonly parameter: DeclarationFacts.ParameterId
     }
   | { readonly _tag: 'PatternSliceRoot'; readonly binding: Match.BindingId }
   | {
@@ -274,7 +274,7 @@ export type SliceRoot =
 export type BorrowSelector =
   | {
       readonly _tag: 'Field'
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -295,8 +295,8 @@ export type BorrowSelector =
 export type WriteSelector =
   | {
       readonly _tag: 'Field'
-      readonly field: DeclarationIndex.FieldId
-      readonly type: DeclarationIndex.SemanticType
+      readonly field: DeclarationFacts.FieldId
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -304,7 +304,7 @@ export type WriteSelector =
       readonly index: Expression
       readonly array: Type.FixedArray
       readonly bounds: BoundsMode
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
 
@@ -313,7 +313,7 @@ export interface OwnedWritePlace {
   readonly _tag: 'WritePlace'
   readonly root: BindingId
   readonly selectors: ReadonlyArray<WriteSelector>
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -322,7 +322,7 @@ export type BorrowedWriteSelector =
       readonly _tag: 'SliceIndex'
       readonly index: Expression
       readonly slice: Type.Slice
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | Extract<WriteSelector, { readonly _tag: 'Field' }>
@@ -333,7 +333,7 @@ export interface BorrowedWritePlace {
   /** The borrowed root: an exclusive slice, or an exclusive reference written through. */
   readonly slice: Type.Slice | Type.Reference
   readonly selectors: ReadonlyArray<BorrowedWriteSelector>
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -343,9 +343,9 @@ export interface PatternBinding {
   readonly id: Match.BindingId
   readonly name?: string
   /** Absent for a whole-member binding, which observes or owns the entire selected payload. */
-  readonly field?: DeclarationIndex.FieldId
-  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
-  readonly type: DeclarationIndex.SemanticType
+  readonly field?: DeclarationFacts.FieldId
+  readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+  readonly type: DeclarationFacts.SemanticType
   readonly access: Match.Access
   readonly span: SourceSpan.SourceSpan
 }
@@ -359,7 +359,7 @@ export interface PatternSelection {
   readonly member?: Type.Type
   readonly universal: boolean
   readonly bindings: ReadonlyArray<PatternBinding>
-  readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+  readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
   readonly irrefutable: boolean
   readonly span: SourceSpan.SourceSpan
 }
@@ -369,8 +369,8 @@ export type Expression =
   | {
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
-      readonly type: DeclarationIndex.SemanticType
-      readonly constant?: DeclarationIndex.CanonicalId
+      readonly type: DeclarationFacts.SemanticType
+      readonly constant?: DeclarationFacts.CanonicalId
       // A pointer-width fact rather than a spelled number. `value` carries the widest selection so
       // target-independent analysis has one; `Lower` replaces it with the selected target's value.
       readonly targetConstant?: TargetConstant.Selector
@@ -403,37 +403,37 @@ export type Expression =
   | {
       readonly _tag: 'BooleanLiteral'
       readonly value: boolean
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'CharacterLiteral'
       readonly value: number
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'ParameterReference'
-      readonly parameter: DeclarationIndex.ParameterId
-      readonly type: DeclarationIndex.SemanticType
+      readonly parameter: DeclarationFacts.ParameterId
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'BindingReference'
       readonly binding: BindingId
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'PatternBindingReference'
       readonly binding: Match.BindingId
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'Move'
       readonly subject: Expression
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -441,7 +441,7 @@ export type Expression =
       readonly _tag: 'Replace'
       readonly place: WritePlace
       readonly value: Expression
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -474,7 +474,7 @@ export type Expression =
         readonly member?: Type.Type
         readonly universal: boolean
         readonly bindings: ReadonlyArray<PatternBinding>
-        readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+        readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
         readonly guard?: Expression
         readonly result: Expression
         readonly before: ReadonlyArray<Type.Type>
@@ -482,7 +482,7 @@ export type Expression =
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
       }>
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -496,19 +496,19 @@ export type Expression =
       readonly operator: Operator.ShortCircuit
       readonly left: Expression
       readonly right: Expression
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'Construct'
       readonly nominal: Type.Nominal
       /** Field identities in language evaluation order; `fields` remains canonical storage order. */
-      readonly evaluationOrder: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly evaluationOrder: ReadonlyArray<DeclarationFacts.FieldId>
       readonly fields: ReadonlyArray<{
-        readonly field: DeclarationIndex.FieldId
+        readonly field: DeclarationFacts.FieldId
         readonly value: Expression
       }>
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -521,10 +521,10 @@ export type Expression =
       readonly _tag: 'Project'
       readonly subject: Expression
       readonly nominal: Type.Nominal
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly access: 'CopyRead' | 'ConsumeRequested'
       readonly borrowAccess?: Type.Slice['access']
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -534,7 +534,7 @@ export type Expression =
       readonly array: Type.FixedArray
       readonly access: 'CopyRead' | 'ConsumeRequested'
       readonly bounds: BoundsMode
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -587,18 +587,18 @@ export type Expression =
       readonly index: Expression
       readonly access: Type.Slice['access']
       readonly sourceType: Type.Slice
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'Call'
-      readonly target: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       /** Direct argument loans deliberately retained by a returned lexical view. */
       readonly heldLoans: ReadonlyArray<BorrowId>
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -633,12 +633,12 @@ export type Expression =
       readonly substitution: Type.Substitution
       readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
       readonly realization: 'Environment' | 'DirectErasedSection'
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'EffectConstruct'
-      readonly target: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
@@ -663,7 +663,7 @@ export type Expression =
       readonly statements: ReadonlyArray<Statement>
       readonly captures: ReadonlyArray<{
         readonly binding?: BindingId
-        readonly parameter?: DeclarationIndex.ParameterId
+        readonly parameter?: DeclarationFacts.ParameterId
         readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
         readonly span: SourceSpan.SourceSpan
       }>
@@ -673,7 +673,7 @@ export type Expression =
   | {
       readonly _tag: 'Run'
       readonly subject: Expression
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -705,12 +705,12 @@ export type Expression =
       readonly protected: Expression
       readonly provider: {
         readonly binding?: BindingId
-        readonly parameter?: DeclarationIndex.ParameterId
+        readonly parameter?: DeclarationFacts.ParameterId
         readonly selected: Type.RequirementsRow
         readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
         readonly capability?: Type.Nominal | Type.Parameter
         readonly providerType: Type.Nominal | Type.Parameter
-        readonly witness?: DeclarationIndex.ConformanceWitness
+        readonly witness?: DeclarationFacts.ConformanceWitness
         readonly role?: string
         readonly selectionAccess: 'Shared' | 'Exclusive' | 'Take'
         readonly captureAccess: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
@@ -732,14 +732,14 @@ export type Expression =
         readonly capability: Type.Nominal
         readonly provider: Type.Type
         readonly operation: string
-        readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
+        readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
       }
       readonly witnessEffectSite?: EffectSiteId
       readonly typeArguments: ReadonlyArray<Type.Type>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly heldLoans: ReadonlyArray<BorrowId>
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   /**
@@ -755,11 +755,11 @@ export type Expression =
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
-      readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
+      readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
       readonly witnessEffectSite?: EffectSiteId
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -870,7 +870,7 @@ export type Statement =
 /** One elaborated function: its header, normalized contract, and desugared body statements. */
 export interface HirFunction {
   readonly _tag: 'HirFunction'
-  readonly declaration: DeclarationIndex.DeclarationFact
+  readonly declaration: DeclarationFacts.DeclarationFact
   readonly contract: ContractFact
   readonly entryRegion: RegionId
   readonly regionOrder: ReadonlyArray<RegionId>
@@ -1003,66 +1003,6 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
 export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
   const children = expressionChildren(expression)
   return Object.freeze([expression, ...children.flatMap(expressionTree)])
-}
-
-/** Tests whether any expression in the body is an explicit unavailable state. */
-export const hasUnavailable = (self: HirFunction): boolean => {
-  const walk = (expression: Expression): boolean => {
-    switch (expression._tag) {
-      case 'Unavailable':
-        return true
-      case 'Move':
-      case 'Project':
-        return walk(expression.subject)
-      case 'RuntimeStringView':
-        return walk(expression.source)
-      case 'StringEquality':
-      case 'ShortCircuit':
-        return walk(expression.left) || walk(expression.right)
-      case 'Replace':
-        return walk(expression.value)
-      case 'UnionConvert':
-        return walk(expression.source)
-      case 'IndexPlace':
-        return walk(expression.subject) || walk(expression.index)
-      case 'SliceLength':
-        return walk(expression.slice)
-      case 'SliceIndexPlace':
-        return walk(expression.slice) || walk(expression.index)
-      case 'Construct':
-        return expression.fields.some((field) => walk(field.value))
-      case 'ArrayConstruct':
-        return expression.elements.some(walk)
-      case 'Call':
-      case 'EffectConstruct':
-      case 'ServiceEffectConstruct':
-      case 'BuiltinCall':
-      case 'BoundOperationCall':
-        return expression.arguments.some(walk)
-      case 'CallableSection':
-        return expression.captures.some((capture) => walk(capture.value))
-      case 'CallableApply':
-        return walk(expression.callee) || expression.arguments.some(walk)
-      case 'Run':
-        return walk(expression.subject)
-      case 'EffectResult':
-        return walk(expression.protected)
-      case 'EffectBindRequirement':
-        return walk(expression.protected)
-      case 'EffectCatch':
-        return walk(expression.protected) || walk(expression.handler)
-      case 'Match':
-        return (
-          walk(expression.scrutinee) ||
-          expression.arms.some(
-            (arm) => (arm.guard !== undefined && walk(arm.guard)) || walk(arm.result),
-          )
-        )
-      default:
-        return false
-    }
-  }
-  return self.statements.flatMap(statementExpressions).some(walk)
 }
 
 /** The first unavailable expression's cause and span, if the body has one. */
@@ -1410,8 +1350,8 @@ export interface Module {
 }
 
 /** Normalizes one header's contract, or keeps it explicitly unavailable with its cause. */
-export const contractOf = (declaration: DeclarationIndex.DeclarationFact): ContractFact => {
-  const parameters: Array<DeclarationIndex.SemanticType> = []
+export const contractOf = (declaration: DeclarationFacts.DeclarationFact): ContractFact => {
+  const parameters: Array<DeclarationFacts.SemanticType> = []
   for (const parameter of declaration.parameters) {
     if (parameter.declaredType._tag !== 'Resolved') {
       return Object.freeze({
@@ -1450,7 +1390,7 @@ export const contractOf = (declaration: DeclarationIndex.DeclarationFact): Contr
 
 const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
 
-const identityLabel = (declaration: DeclarationIndex.DeclarationFact): string => {
+const identityLabel = (declaration: DeclarationFacts.DeclarationFact): string => {
   switch (declaration.canonical._tag) {
     case 'Canonical':
       return `${declaration.canonical.id.module}.${declaration.canonical.id.name}`

@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicCatalog from './Intrinsic.js'
@@ -16,7 +16,7 @@ export type Presentation =
   | (Base & {
       readonly _tag: 'FunctionPresentation'
       readonly name: string
-      readonly functionKind: DeclarationIndex.DeclarationFact['functionKind']
+      readonly functionKind: DeclarationFacts.DeclarationFact['functionKind']
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServicePresentation'; readonly name: string })
@@ -40,10 +40,10 @@ export type Presentation =
     })
   | (Base & { readonly _tag: 'ExpressionTypePresentation' })
 
-const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
+const declaredType = (fact: DeclarationFacts.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
-const requirementRole = (fact: DeclarationIndex.RequirementRoleFact): string => {
+const requirementRole = (fact: DeclarationFacts.RequirementRoleFact): string => {
   switch (fact._tag) {
     case 'DefaultRole':
       return ''
@@ -53,7 +53,7 @@ const requirementRole = (fact: DeclarationIndex.RequirementRoleFact): string => 
   }
 }
 
-const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
+const rowExpression = (fact: DeclarationFacts.RowExpressionFact): string => {
   switch (fact._tag) {
     case 'EmptyRowExpression':
       return ''
@@ -72,31 +72,31 @@ const rowExpression = (fact: DeclarationIndex.RowExpressionFact): string => {
   }
 }
 
-const failureRow = (fact: DeclarationIndex.FailureRowFact): string => {
+const failureRow = (fact: DeclarationFacts.FailureRowFact): string => {
   const row = rowExpression(fact.expression)
   return row.length === 0 ? '' : ` ! ${row}`
 }
 
-const requirementRow = (fact: DeclarationIndex.RequirementRowFact): string => {
+const requirementRow = (fact: DeclarationFacts.RequirementRowFact): string => {
   const row = rowExpression(fact.expression)
   return row.length === 0 ? '' : ` ? ${row}`
 }
 
-const constraint = (fact: DeclarationIndex.ConstraintFact): string =>
+const constraint = (fact: DeclarationFacts.ConstraintFact): string =>
   fact._tag === 'MembershipConstraint'
     ? `${rowExpression(fact.selected)} in ${rowExpression(fact.source)}`
     : `${fact.mode === 'Exclusive' ? '&mut ' : fact.mode === 'Shared' ? '&' : ''}${declaredType(fact.provider)} provides ${rowExpression(fact.selected)} from ${rowExpression(fact.source)}`
 
-const constraints = (facts: ReadonlyArray<DeclarationIndex.ConstraintFact>): string =>
+const constraints = (facts: ReadonlyArray<DeclarationFacts.ConstraintFact>): string =>
   facts.length === 0 ? '' : ` where ${facts.map(constraint).join(', ')}`
 
-const typeParameterName = (parameter: DeclarationIndex.TypeParameterFact): string => {
+const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
   return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
 }
 
 /** Renders a declaration in its source-level callable form. */
-export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Presentation => {
+export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
@@ -119,7 +119,7 @@ export const functionDeclaration = (self: DeclarationIndex.DeclarationFact): Pre
 }
 
 /** Renders a nominal type declaration without expanding its body. */
-export const structDeclaration = (self: DeclarationIndex.StructFact): Presentation => {
+export const structDeclaration = (self: DeclarationFacts.StructFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const typeParameters =
@@ -135,7 +135,7 @@ export const structDeclaration = (self: DeclarationIndex.StructFact): Presentati
 
 /** Renders one nominal service contract without expanding its operation list. */
 export const serviceDeclaration = (
-  self: DeclarationIndex.ServiceFact | DeclarationIndex.InterfaceFact,
+  self: DeclarationFacts.ServiceFact | DeclarationFacts.InterfaceFact,
 ): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
@@ -151,7 +151,7 @@ export const serviceDeclaration = (
 }
 
 /** Renders one nominal dependency role declaration. */
-export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation => {
+export const roleDeclaration = (self: DeclarationFacts.RoleFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   return Object.freeze({
@@ -162,7 +162,7 @@ export const roleDeclaration = (self: DeclarationIndex.RoleFact): Presentation =
 }
 
 /** Renders a complete operation contract nested beneath a service. */
-export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): Presentation => {
+export const serviceOperation = (self: DeclarationFacts.ServiceOperationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
   const operator =
@@ -185,7 +185,7 @@ export const serviceOperation = (self: DeclarationIndex.ServiceOperationFact): P
 }
 
 /** Renders one typed compile-time scalar declaration. */
-export const constantDeclaration = (self: DeclarationIndex.ConstantFact): Presentation => {
+export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   return Object.freeze({
@@ -195,7 +195,7 @@ export const constantDeclaration = (self: DeclarationIndex.ConstantFact): Presen
   })
 }
 
-export const parameter = (self: DeclarationIndex.ParameterFact): Presentation => {
+export const parameter = (self: DeclarationFacts.ParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   return Object.freeze({
     _tag: 'ParameterPresentation',
@@ -204,13 +204,13 @@ export const parameter = (self: DeclarationIndex.ParameterFact): Presentation =>
   })
 }
 
-export const typeParameter = (self: DeclarationIndex.TypeParameterFact): Presentation => {
+export const typeParameter = (self: DeclarationFacts.TypeParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : self.type.name
   const kind = self.type.kind === 'RequirementRow' ? 'requirement row' : 'type'
   return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
 }
 
-export const field = (self: DeclarationIndex.FieldFact): Presentation => {
+export const field = (self: DeclarationFacts.FieldFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   return Object.freeze({
     _tag: 'FieldPresentation',
@@ -288,7 +288,7 @@ export const type = (
       Type.requirementRowPolicy(),
       self.requirementRow,
       (requirement) =>
-        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+        Type.encodeRequirement(requirement, (capability) => type(capability, module, scope)),
       (parameter_) => parameter_.name,
       (member) =>
         `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
@@ -325,7 +325,9 @@ export const genericArgument = (
                       Type.requirementRowPolicy(),
                       self.row,
                       (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+                        Type.encodeRequirement(requirement, (capability) =>
+                          type(capability, module, scope),
+                        ),
                       (parameter_) => parameter_.name,
                       (member) =>
                         `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,

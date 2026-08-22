@@ -384,7 +384,7 @@ pub fn main() -> i32 { return read(&) }`)
     'Unavailable',
   )
   const main = result.hir.functions.at(1)
-  assert.strictEqual(main === undefined ? undefined : Hir.hasUnavailable(main), true)
+  assert.notStrictEqual(main === undefined ? undefined : Hir.firstUnavailable(main), undefined)
 })
 
 it('verifies mismatched HIR loan endings without introducing graph cycles', () => {

@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -162,7 +162,7 @@ it.effect(
           .map((event) => event._tag),
         ['SlotCopy', 'RawBufferRead', 'RawBufferRead', 'RawBufferRead'],
       )
-      const encoded = Mir.encode(Analysis.loweredMir(snapshot))
+      const encoded = MirEncoding.encode(Analysis.loweredMir(snapshot))
       assert.include(encoded, 'slot-copy')
       assert.include(encoded, 'raw-buffer-read')
       const repeated = yield* Analysis.ofSourceRealized(
@@ -170,7 +170,7 @@ it.effect(
         ascii(unionCopyRead),
         'wasm32-unknown-unknown',
       )
-      assert.strictEqual(encoded, Mir.encode(Analysis.loweredMir(repeated)))
+      assert.strictEqual(encoded, MirEncoding.encode(Analysis.loweredMir(repeated)))
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
       const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

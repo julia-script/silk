@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -102,7 +102,7 @@ it.effect('uses a private iterative native coroutine-frame protocol', () =>
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(analysis), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(analysis)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(analysis)), [])
     assert.isTrue(
       Analysis.loweredMir(analysis).functions.some(
         (fn) => fn.suspension?.classification === 'Suspendable',

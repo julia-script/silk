@@ -1,20 +1,31 @@
+import * as BootstrapArithmetic from './BootstrapArithmetic.js'
+import * as BootstrapEffect from './BootstrapEffect.js'
+import type {
+  CallRequest,
+  LocalState,
+  MachineRequest,
+  OriginTransferRequest,
+  RelayTransferRequest,
+  Step,
+  TransferStep,
+} from './BootstrapMachine.js'
+import * as BootstrapOsIntrinsics from './BootstrapOsIntrinsics.js'
+import * as BootstrapPlace from './BootstrapPlace.js'
+import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Diagnostic from './Diagnostic.js'
+import type * as CleanupPlan from './CleanupPlan.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
-import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import * as OsFileSystemHost from './OsFileSystemHost.js'
-import type * as Ownership from './Ownership.js'
+import * as MirVerification from './MirVerification.js'
+import type * as OsFileSystemHost from './OsFileSystemHost.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
-import type * as Termination from './Termination.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 
@@ -26,655 +37,83 @@ import * as Type from './Type.js'
  */
 
 /** One exact fixed- or target-width integer. */
-export interface IntegerValue {
-  readonly _tag: 'IntegerValue'
-  readonly type: Scalar.IntegerSpelling
-  readonly value: bigint
-}
+import type {
+  AggregateValue,
+  ArrayValue,
+  CharacterValue,
+  FloatValue,
+  IntegerValue,
+  SliceValue,
+  StaticViewValue,
+  StringStorage,
+  StringValue,
+  UnionValue,
+  Value,
+} from './BootstrapValue.js'
 
-/**
- * One Unicode scalar value.
- *
- * `char` is its own scalar category rather than an integer, so it is its own value rather than an
- * integer view: nothing that reads an integer accepts it, and the only operations that read it are
- * the equality and ordering lanes the catalog declares.
- */
-export interface CharacterValue {
-  readonly _tag: 'CharacterValue'
-  readonly value: number
-}
+export type {
+  AggregateValue,
+  AllocationValue,
+  ArrayValue,
+  CallableBorrowValue,
+  CallableValue,
+  CharacterValue,
+  EffectBorrowValue,
+  EffectCompositeValue,
+  EffectOutcomeValue,
+  EffectValue,
+  FloatValue,
+  IntegerValue,
+  RawBufferValue,
+  ReferenceValue,
+  SliceValue,
+  SlotValue,
+  StaticViewValue,
+  StringStorage,
+  StringValue,
+  UnionValue,
+  Value,
+} from './BootstrapValue.js'
 
-export interface FloatValue {
-  readonly _tag: 'FloatValue'
-  readonly type: Scalar.FloatSpelling
-  readonly bits: bigint
-}
+import type {
+  ActiveFrame,
+  BlockedReason,
+  EffectTraceEvent,
+  EntryTraceEvent,
+  Outcome,
+  PlaceReadTraceEvent,
+  TraceEvent,
+} from './BootstrapTrace.js'
 
-export interface AggregateValue {
-  readonly _tag: 'AggregateValue'
-  readonly type: Type.Nominal
-  readonly fields: ReadonlyArray<{
-    readonly field: DeclarationIndex.FieldId
-    readonly value: Value
-  }>
-}
-
-export interface ArrayValue {
-  readonly _tag: 'ArrayValue'
-  readonly type: Type.FixedArray
-  readonly elements: ReadonlyArray<Value>
-}
-
-/** A logical borrowed view. Permission and loan identity remain compiler facts, not values. */
-export interface SliceValue {
-  readonly _tag: 'SliceValue'
-  readonly frame: number
-  readonly cell: number
-  readonly base: number
-  readonly length: number
-  /** Place path from the backing cell to the fixed array viewed by this slice. */
-  readonly selectors?: ReadonlyArray<
-    Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' | 'ElementSelector' }>
-  >
-  readonly indexes?: ReadonlyArray<number>
-  /** Present only for a zero-copy RawBuffer-backed slice. */
-  readonly ticket?: number
-}
-
-/** Allocation-free immutable view of one compiler-owned static-data entry. */
-export interface StaticViewValue {
-  readonly _tag: 'StaticViewValue'
-  readonly data: string
-  readonly bytes: ReadonlyArray<number>
-  readonly length: number
-}
-
-export type StringStorage =
-  | {
-      readonly _tag: 'StaticTextStorage'
-      readonly data: string
-      readonly bytes: ReadonlyArray<number>
-    }
-  | {
-      readonly _tag: 'StaticByteStorage'
-      readonly data: string
-      readonly bytes: ReadonlyArray<number>
-    }
-  | {
-      readonly _tag: 'RuntimeSliceStorage'
-      readonly view: SliceValue
-    }
-
-/** A logical valid UTF-8 view retaining storage identity and lexical backing facts. */
-export interface StringValue {
-  readonly _tag: 'StringValue'
-  readonly storage: StringStorage
-  readonly bytes: ReadonlyArray<number>
-  readonly byteLength: number
-  readonly heldLoans: ReadonlyArray<string>
-}
-
-export interface ReferenceValue {
-  readonly _tag: 'ReferenceValue'
-  readonly frame: number
-  readonly cell: number
-  readonly selectors: ReadonlyArray<Mir.PlaceSelector>
-  /** Selector ordinals captured in the frame where the loan formed. */
-  readonly indexes: ReadonlyArray<number>
-}
-
-export interface UnionValue {
-  readonly _tag: 'UnionValue'
-  readonly type: Type.StructuralUnion
-  readonly member: Type.Type
-  readonly payload: Value
-}
-
-export interface EffectOutcomeValue {
-  readonly _tag: 'EffectOutcomeValue'
-  readonly type: Type.Effect
-  readonly tag: number
-  readonly payload: Value
-}
-
-const repackFailurePayload = (
-  payload: Value,
-  sourceType: DeclarationIndex.SemanticType,
-  sourceTag: number,
-  targetType: Type.Effect,
-  targetTag: number,
-): AggregateValue => {
-  const sourceMember = Type.failureCarrierMember(
-    sourceType,
-    sourceTag,
-    Type.isEffect(sourceType) ? 'OneBased' : 'ZeroBased',
-  )
-  const targetMember = Type.failureCarrierMember(targetType, targetTag, 'OneBased')
-  if (
-    payload._tag !== 'AggregateValue' ||
-    sourceMember === undefined ||
-    targetMember === undefined ||
-    !Type.equals(sourceMember, targetMember) ||
-    !Type.equals(payload.type, sourceMember)
-  )
-    throw new RangeError('MIR failure payload does not match its canonical member mapping')
-  return payload
-}
-
-export interface EffectBorrowValue {
-  readonly _tag: 'EffectBorrowValue'
-  readonly frame: number
-  readonly cell: number
-  readonly access: 'Shared' | 'Exclusive'
-}
-
-export interface CallableBorrowValue {
-  readonly _tag: 'CallableBorrowValue'
-  readonly frame: number
-  readonly cell: number
-  readonly access: 'Shared' | 'Exclusive'
-}
-
-export interface CallableValue {
-  readonly _tag: 'CallableValue'
-  readonly ticket: number
-  readonly type: Type.Callable
-  readonly target: Hir.CallableTarget
-  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly captures: ReadonlyArray<{
-    readonly ordinal: number
-    readonly parameterOrdinal: number
-    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
-    readonly value: Value
-  }>
-}
-
-export interface EffectValue {
-  readonly _tag: 'EffectValue'
-  readonly type: Type.Effect
-  readonly site: Hir.EffectSiteId
-  readonly runner: DeclarationIndex.CanonicalId
-  readonly runnerTypeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly captures: ReadonlyArray<Value>
-}
-
-export interface EffectCompositeValue {
-  readonly _tag: 'EffectCompositeValue'
-  readonly alternative: number
-  readonly effect: EffectValue
-}
-
-/** One logical heap block; identity and liveness live in evaluator state, not JS identity. */
-export interface AllocationValue {
-  readonly _tag: 'AllocationValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly bytes: bigint
-  readonly alignment: bigint
-}
-
-export interface RawBufferValue {
-  readonly _tag: 'RawBufferValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly count: bigint
-  readonly element: Type.Type
-  readonly stride: number
-}
-
-export interface SlotValue {
-  readonly _tag: 'SlotValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly index: bigint
-  readonly element: Type.Type
-}
-
-/** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value =
-  | IntegerValue
-  | CharacterValue
-  | FloatValue
-  | AggregateValue
-  | ArrayValue
-  | SliceValue
-  | StaticViewValue
-  | StringValue
-  | ReferenceValue
-  | UnionValue
-  | EffectBorrowValue
-  | CallableBorrowValue
-  | EffectValue
-  | EffectCompositeValue
-  | CallableValue
-  | EffectOutcomeValue
-  | AllocationValue
-  | RawBufferValue
-  | SlotValue
-
-/** Entered the resolved entry instance. */
-export interface EntryTraceEvent {
-  readonly _tag: 'Entry'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Executed one call operation after its argument locals were computed. */
-export interface CallTraceEvent {
-  readonly _tag: 'Call'
-  readonly frame: number
-  readonly depth: number
-  readonly caller: DeclarationIndex.CanonicalId
-  readonly target: DeclarationIndex.CanonicalId
-  readonly callerInstance: Instances.InstanceKey
-  readonly targetInstance: Instances.InstanceKey
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Bound one computed argument value to its positional parameter local. */
-export interface BindingTraceEvent {
-  readonly _tag: 'Binding'
-  readonly frame: number
-  readonly depth: number
-  readonly target: DeclarationIndex.CanonicalId
-  readonly targetInstance: Instances.InstanceKey
-  readonly callSpan: SourceSpan.SourceSpan
-  readonly argumentOrdinal: number
-  readonly parameterOrdinal: number
-  readonly value: Value
-  readonly fromCall: boolean
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Returned one evaluated value from a lowered function. */
-export interface ReturnTraceEvent {
-  readonly _tag: 'Return'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-  readonly value: Value
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** One deterministic event emitted while replaying lowered operations. */
-export interface ConstructTraceEvent {
-  readonly _tag: 'Construct'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.Nominal
-  readonly fieldCount: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ProjectTraceEvent {
-  readonly _tag: 'Project'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.Nominal
-  readonly field: DeclarationIndex.FieldId
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ArrayConstructTraceEvent {
-  readonly _tag: 'ArrayConstruct'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.FixedArray
-  readonly elementCount: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface UnionConversionTraceEvent {
-  readonly _tag: 'UnionConversion'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly conversion: 'Inject' | 'Widen'
-  readonly source: Type.Type
-  readonly target: Type.StructuralUnion
-  readonly member: Type.Type
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface PlaceReadTraceEvent {
-  readonly _tag: 'PlaceRead'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly selectors: ReadonlyArray<
-    | { readonly _tag: 'Field'; readonly field: DeclarationIndex.FieldId }
-    | {
-        readonly _tag: 'Element'
-        readonly array: Type.FixedArray
-        readonly index: number
-        readonly bounds: 'Proven' | 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-    | {
-        readonly _tag: 'StaticElement'
-        readonly data: string
-        readonly index: number
-        readonly bounds: 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-    | {
-        readonly _tag: 'RawBufferElement'
-        readonly ticket: number
-        readonly index: number
-        readonly bounds: 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-  >
-  readonly value: Value
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CleanupTraceEvent {
-  readonly _tag: 'Cleanup'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly local: number
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface MatchTraceEvent {
-  readonly _tag:
-    | 'MatchDispatch'
-    | 'MatchCandidate'
-    | 'MatchSelected'
-    | 'MatchCleanup'
-    | 'MatchBorrowEnd'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly match: number
-  readonly arm?: number
-  readonly member: Type.Type
-  readonly access: Match.Access
-  readonly binding?: number
-  readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
-  readonly value?: Value
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ControlTraceEvent {
-  readonly _tag:
-    | 'RegionEntry'
-    | 'Condition'
-    | 'Iteration'
-    | 'WriteCheck'
-    | 'ReplacementCleanup'
-    | 'Replacement'
-    | 'Repeat'
-    | 'Exit'
-    | 'Transfer'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly region: number
-  readonly loop?: number
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface EffectTraceEvent {
-  readonly _tag: 'EffectSuccess' | 'EffectFailure'
-  readonly phase: 'Produced' | 'Propagated' | 'Closed'
-  readonly identity?: string
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly tag: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CallableTraceEvent {
-  readonly _tag: 'CallableConstruct' | 'CallableApply' | 'CallableCleanup' | 'CallableRejected'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly ticket: number
-  readonly mode: Type.CallableMode
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface AllocationTraceEvent {
-  readonly _tag:
-    | 'AllocationAcquire'
-    | 'RawBufferForm'
-    | 'SlotProject'
-    | 'SlotWrite'
-    | 'SlotTake'
-    | 'SlotCopy'
-    | 'RawBufferRead'
-    | 'RawBufferCopy'
-    | 'RawBufferFill'
-    | 'SlotDrop'
-    | 'AllocationRelease'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly ticket: number
-  readonly index?: bigint
-  readonly count?: bigint
-  readonly element?: Type.Type
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CoroutineFrameTraceEvent {
-  readonly _tag:
-    | 'SuspensionOrigin'
-    | 'CoroutineFramePush'
-    | 'CoroutineFrameStateTransition'
-    | 'CoroutineFrameResume'
-    | 'CoroutineFrameComplete'
-    | 'SuspensionChildStart'
-    | 'SuspensionChildComplete'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly point: Mir.SuspensionPointId
-  readonly ordinal?: number
-  readonly ticket?: number
-  readonly bytes?: number
-  readonly alignment?: number
-  readonly outcome?: 'Success' | 'Failure'
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** One complete attempted host write, including its deterministic typed outcome. */
-export interface StandardStreamTraceEvent {
-  readonly _tag: 'HostWrite'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly destination: StandardStreams.Destination
-  readonly bytes: ReadonlyArray<number>
-  readonly outcome: 'Written' | 'WriteFailure'
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface StringTraceEvent {
-  readonly _tag:
-    | 'StringStatic'
-    | 'StringRuntime'
-    | 'StringBytes'
-    | 'StringByteLength'
-    | 'StringEqualsExact'
-    | 'StringLoanEnd'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly storage?: StringStorage['_tag']
-  readonly byteLength?: number
-  readonly result?: boolean
-  readonly loan?: string
-  readonly span: SourceSpan.SourceSpan
-}
-
-export type TraceEvent =
-  | EntryTraceEvent
-  | CallTraceEvent
-  | BindingTraceEvent
-  | ReturnTraceEvent
-  | ConstructTraceEvent
-  | ProjectTraceEvent
-  | ArrayConstructTraceEvent
-  | UnionConversionTraceEvent
-  | PlaceReadTraceEvent
-  | CleanupTraceEvent
-  | MatchTraceEvent
-  | ControlTraceEvent
-  | EffectTraceEvent
-  | CallableTraceEvent
-  | AllocationTraceEvent
-  | CoroutineFrameTraceEvent
-  | StandardStreamTraceEvent
-  | StringTraceEvent
-
-/** Every expected reason the closed bootstrap interpreter can stop. */
-export type BlockedReason =
-  | {
-      readonly _tag: 'InvalidMir'
-      readonly violations: ReadonlyArray<Mir.Violation>
-    }
-  | {
-      readonly _tag: 'UnavailableEntry'
-      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
-    }
-  | {
-      readonly _tag: 'Trap'
-      readonly function: DeclarationIndex.CanonicalId
-      readonly reason: string
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'MissingFunction'
-      readonly target: DeclarationIndex.CanonicalId
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EvaluationLimit'
-      readonly kind: 'Steps' | 'CallDepth'
-      readonly limit: number
-      readonly count: number
-      readonly function: DeclarationIndex.CanonicalId
-      readonly span: SourceSpan.SourceSpan
-      readonly activeFrames: ReadonlyArray<ActiveFrame>
-    }
-  | {
-      readonly _tag: 'InvalidCallableReuse'
-      readonly function: DeclarationIndex.CanonicalId
-      readonly ticket: number
-      readonly state: 'Running' | 'Consumed' | 'Released'
-      readonly span: SourceSpan.SourceSpan
-    }
-  | { readonly _tag: 'MissingStandardStreams' }
-  | { readonly _tag: 'MissingStandardInput' }
-  | { readonly _tag: 'MissingChildProcess' }
-  | { readonly _tag: 'MissingHostInput' }
-  | { readonly _tag: 'MissingOsFileSystemHost' }
-  | {
-      readonly _tag: 'IntrinsicTargetUnavailable'
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-    }
-
-/** A completed exact bootstrap result. */
-export type Completed = Termination.Completed<IntegerValue, TraceEvent>
-
-/** An owned typed application failure closed by the generated effect-entry adapter. */
-export type UnhandledFailure = Termination.UnhandledFailure<TraceEvent>
-
-/** Fatal abnormal termination produced by executable MIR. */
-export type Trap = Termination.Trap<TraceEvent>
-
-/** A normal, inspectable reason bootstrap evaluation could not complete. */
-export interface Blocked {
-  readonly _tag: 'Blocked'
-  readonly entry: DeclarationIndex.CanonicalId | undefined
-  readonly reason: BlockedReason
-  readonly trace: ReadonlyArray<TraceEvent>
-}
-
-/** The closed outcome of executing one lowered program. */
-export type Outcome = Completed | UnhandledFailure | Trap | Blocked
-
-const isPhysicalEntryAdapter = (name: string): boolean =>
-  name === '$effect-entry' || name === '$unit-entry'
-
-const failureIdentity = (type: Type.Effect | Type.FailureRow, tag: number): string => {
-  const failure = Type.failureMembers(type).at(tag - 1)
-  if (failure === undefined) throw new RangeError(`Effect failure tag ${tag} has no type identity`)
-  return Type.encode(failure)
-}
-
-const logicalPathAt = (
-  trace: ReadonlyArray<TraceEvent>,
-  through: number,
-): ReadonlyArray<Termination.LogicalFrame> => {
-  const active = new Map<
-    number,
-    { readonly depth: number; readonly value: Termination.LogicalFrame }
-  >()
-  for (let index = 0; index <= through; index += 1) {
-    const event = trace.at(index)
-    if (event?._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name)) {
-      active.set(
-        event.frame,
-        Object.freeze({
-          depth: event.depth,
-          value: Object.freeze({ function: event.function, provenance: event.span }),
-        }),
-      )
-    } else if (event?._tag === 'Return') {
-      active.delete(event.frame)
-    }
-  }
-  return Object.freeze(
-    [...active.values()].sort((left, right) => left.depth - right.depth).map(({ value }) => value),
-  )
-}
-
-const causalHistory = (
-  trace: ReadonlyArray<TraceEvent>,
-  terminal: 'Success' | 'TypedFailure' | 'Trap',
-  terminalIdentity?: string,
-): ReadonlyArray<Termination.CausalFailure> => {
-  const failures = trace.flatMap((event, index) =>
-    event._tag === 'EffectFailure' && event.phase === 'Produced'
-      ? [
-          Object.freeze({
-            event,
-            index,
-            key: `${event.function.module}\u0000${event.function.name}\u0000${event.tag}\u0000${event.span.start}\u0000${event.span.end}`,
-          }),
-        ]
-      : [],
-  )
-  const distinct = failures.filter(
-    (failure, index) => failures.findIndex((candidate) => candidate.key === failure.key) === index,
-  )
-  return Object.freeze(
-    distinct.map(({ event, index }, ordinal) => {
-      const identity =
-        event.identity ?? (ordinal === distinct.length - 1 ? terminalIdentity : undefined)
-      return Object.freeze({
-        tag: event.tag,
-        ...(identity === undefined ? {} : { identity }),
-        provenance: event.span,
-        logicalPath: logicalPathAt(trace, index),
-        recovered: terminal !== 'TypedFailure' || ordinal !== distinct.length - 1,
-      })
-    }),
-  )
-}
-
-const longestCausalPath = (
-  history: ReadonlyArray<Termination.CausalFailure>,
-  fallback: ReadonlyArray<Termination.LogicalFrame>,
-): ReadonlyArray<Termination.LogicalFrame> =>
-  history.reduce(
-    (selected, candidate) =>
-      candidate.logicalPath.length > selected.length ? candidate.logicalPath : selected,
-    fallback,
-  )
-
-type Step =
-  | { readonly _tag: 'Value'; readonly value: Value }
-  | { readonly _tag: 'Blocked'; readonly reason: BlockedReason }
-  | TransferStep
-
-interface TransferStep {
-  readonly _tag: 'Transfer'
-  readonly origin: Mir.SuspendEffectRegion
-  readonly child: CallRequest
-}
+export type {
+  ActiveFrame,
+  AllocationTraceEvent,
+  ArrayConstructTraceEvent,
+  BindingTraceEvent,
+  Blocked,
+  BlockedReason,
+  CallableTraceEvent,
+  CallTraceEvent,
+  CleanupTraceEvent,
+  Completed,
+  ConstructTraceEvent,
+  ControlTraceEvent,
+  CoroutineFrameTraceEvent,
+  EffectTraceEvent,
+  EntryTraceEvent,
+  MatchTraceEvent,
+  OsCallTraceEvent,
+  Outcome,
+  PlaceReadTraceEvent,
+  ProjectTraceEvent,
+  ReturnTraceEvent,
+  StandardStreamTraceEvent,
+  StringTraceEvent,
+  TraceEvent,
+  Trap,
+  UnhandledFailure,
+  UnionConversionTraceEvent,
+} from './BootstrapTrace.js'
 
 const integerValue = (type: Scalar.IntegerSpelling, input: bigint | number): IntegerValue =>
   Object.freeze({ _tag: 'IntegerValue', type, value: BigInt(input) })
@@ -767,18 +206,6 @@ const floatingBinary = (
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
-const functionFor = (
-  program: Mir.Module,
-  id: DeclarationIndex.CanonicalId,
-  typeArguments: ReadonlyArray<Type.GenericArgument>,
-): Mir.MirFunction | undefined =>
-  program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments))
-
-interface LocalState {
-  readonly value: Value
-  readonly fromCall: boolean
-}
-
 interface EvaluationState {
   nextFrame: number
   nextAllocation: number
@@ -791,7 +218,7 @@ interface EvaluationState {
   executionStackBytes: number
   activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
-  readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
+  readonly allocations: BootstrapStorage.Allocations
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
   readonly activeLoans: Set<string>
   readonly stringLoans: Set<string>
@@ -804,32 +231,6 @@ interface EvaluationState {
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
-export interface ActiveFrame {
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-}
-
-interface CallRequest {
-  readonly _tag: 'CallRequest'
-  readonly target: Mir.MirFunction
-  readonly arguments: ReadonlyArray<Value>
-  readonly span: SourceSpan.SourceSpan
-}
-
-interface OriginTransferRequest {
-  readonly _tag: 'OriginTransferRequest'
-  readonly origin: Mir.SuspendEffectRegion
-  readonly child: CallRequest
-}
-
-interface RelayTransferRequest {
-  readonly _tag: 'RelayTransferRequest'
-  readonly transfer: TransferStep
-  readonly state?: Mir.CoroutineFrameState
-}
-
 interface TransferContext {
   readonly step: TransferStep
   readonly pending: Array<{
@@ -839,14 +240,12 @@ interface TransferContext {
   readonly parent?: TransferContext
 }
 
-type MachineRequest = CallRequest | OriginTransferRequest | RelayTransferRequest
-
 interface ActivationRecord extends ActiveFrame {
   readonly locals: Map<number, LocalState>
   readonly cells: EvaluationState['cells']
   continuation?: FunctionExecution
   pendingCall?: CallRequest
-  cleanupState?: Ownership.CleanupPlan['_tag']
+  cleanupState?: CleanupPlan.CleanupPlan['_tag']
   coroutineFrame?: {
     readonly ticket: number
     readonly bytes: number
@@ -984,35 +383,68 @@ function* executeFunction(
     return found
   }
 
-  const selectStoredPlace = (
-    root: Value,
-    selectors: NonNullable<SliceValue['selectors']>,
-    indexes: ReadonlyArray<number>,
-  ): Value => {
-    let selected = root
-    for (const [ordinal, selector] of selectors.entries()) {
-      const index = indexes.at(ordinal)
-      if (index === undefined) throw new RangeError('Stored slice place omitted a checked index')
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue')
-          throw new RangeError('Stored slice field selects a non-aggregate')
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined) throw new RangeError('Stored slice field is missing')
-        selected = field.value
-      } else {
-        if (selected._tag !== 'ArrayValue')
-          throw new RangeError('Stored slice element selects a non-array')
-        const element = selected.elements.at(index)
-        if (element === undefined) throw new RangeError('Stored slice element is missing')
-        selected = element
+  const placeAccess: BootstrapPlace.Access = {
+    readIndex: (local) => readInteger(local, 'usize').value,
+    sliceElement: (slice, index) => {
+      if (slice.ticket !== undefined) {
+        const allocation = state.allocations.get(slice.ticket)
+        const element = allocation?.values.get(String(slice.base + index))
+        if (allocation === undefined || !allocation.active || element === undefined)
+          throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
+        return element
       }
-    }
-    return selected
+      const backing = BootstrapPlace.selectStored(
+        cell(slice).value,
+        slice.selectors ?? Object.freeze([]),
+        slice.indexes ?? Object.freeze([]),
+      )
+      if (backing._tag !== 'ArrayValue')
+        throw new RangeError('MIR slice cell does not contain an array value')
+      const element = backing.elements.at(slice.base + index)
+      if (element === undefined) throw new RangeError('MIR slice range exceeds its backing cell')
+      return element
+    },
+    replaceSliceElement: (slice, index, value) => {
+      if (slice.ticket !== undefined) {
+        const allocation = state.allocations.get(slice.ticket)
+        const absolute = slice.base + index
+        if (
+          allocation === undefined ||
+          !allocation.active ||
+          !allocation.values.has(String(absolute))
+        )
+          throw new RangeError('Invalid RawBuffer slice replacement')
+        allocation.values.set(String(absolute), value)
+        return slice
+      }
+      const key = cellKey(slice.frame, slice.cell)
+      const stored = state.cells.get(key)
+      if (stored === undefined) throw new RangeError('Invalid slice backing cell replacement')
+      const prefixSelectors = slice.selectors ?? Object.freeze([])
+      const prefixIndexes = slice.indexes ?? Object.freeze([])
+      const backing = BootstrapPlace.selectStored(stored.value, prefixSelectors, prefixIndexes)
+      if (backing._tag !== 'ArrayValue')
+        throw new RangeError('Invalid slice backing cell replacement')
+      const absolute = slice.base + index
+      const updated: ArrayValue = Object.freeze({
+        _tag: 'ArrayValue',
+        type: backing.type,
+        elements: Object.freeze(
+          backing.elements.map((element, ordinal) => (ordinal === absolute ? value : element)),
+        ),
+      })
+      state.cells.set(key, {
+        value: BootstrapPlace.replacePlaceByIndexes(
+          stored.value,
+          prefixSelectors,
+          prefixIndexes,
+          updated,
+          placeAccess,
+        ),
+        fromCall: stored.fromCall,
+      })
+      return slice
+    },
   }
 
   const referenced = (local: Mir.LocalId): LocalState => {
@@ -1023,42 +455,15 @@ function* executeFunction(
     const found = state.cells.get(cellKey(reference.frame, reference.cell))
     if (found === undefined)
       throw new RangeError('MIR reference points at a missing evaluator cell')
-    let selected = found.value
-    for (const [ordinal, selector] of reference.selectors.entries()) {
-      const index = reference.indexes.at(ordinal)
-      if (index === undefined) throw new RangeError('MIR reference omitted a captured selector')
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue')
-          throw new RangeError('MIR reference selector points at a non-struct value')
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined) throw new RangeError('MIR reference selector lost its field')
-        selected = field.value
-        continue
-      }
-      if (selector._tag === 'SliceElementSelector') {
-        if (selected._tag !== 'SliceValue' || selected.ticket !== undefined)
-          throw new RangeError('MIR raw reference selector points at an unsupported slice')
-        const backing = cell(selected).value
-        if (backing._tag !== 'ArrayValue')
-          throw new RangeError('MIR slice reference lost its array backing')
-        const element = backing.elements.at(selected.base + index)
-        if (element === undefined)
-          throw new RangeError('MIR slice reference is outside its backing')
-        selected = element
-        continue
-      }
-      if (selected._tag !== 'ArrayValue')
-        throw new RangeError('MIR reference selector points at an unsupported place')
-      const element = selected.elements.at(index)
-      if (element === undefined) throw new RangeError('MIR reference selector lost its element')
-      selected = element
-    }
-    return Object.freeze({ value: selected, fromCall: found.fromCall })
+    const selected = BootstrapPlace.walkPlace(
+      found.value,
+      reference.selectors,
+      reference.indexes,
+      placeAccess,
+    )
+    if (selected._tag === 'OutOfBounds')
+      throw new RangeError('MIR reference selector is outside its checked place')
+    return Object.freeze({ value: selected.selected, fromCall: found.fromCall })
   }
 
   const readInteger = (local: Mir.LocalId, expected?: Scalar.IntegerSpelling): IntegerValue => {
@@ -1097,7 +502,7 @@ function* executeFunction(
    * consumed a ticket this plan still owns.
    */
   const releaseThroughPlan = function* (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     owner: Value,
     provenance: Mir.Provenance,
     localOrdinal: number,
@@ -1110,8 +515,7 @@ function* executeFunction(
       case 'AllocationCleanup': {
         if (owner._tag !== 'AllocationValue')
           throw new RangeError('Allocation cleanup lost its private reclaim ticket')
-        const ticket = state.allocations.get(owner.ticket)
-        if (ticket === undefined || !ticket.active) {
+        if (!BootstrapStorage.release(state.allocations, owner.ticket, false)) {
           // A caller obligation, not a compiler invariant: unsafe code can reach a second
           // release, and the run must stop as a trap rather than take down the host.
           return blockedStep({
@@ -1121,7 +525,6 @@ function* executeFunction(
             span: provenance.span,
           })
         }
-        ticket.active = false
         trace.push(
           Object.freeze({
             _tag: 'AllocationRelease',
@@ -1135,8 +538,7 @@ function* executeFunction(
       case 'RawBufferCleanup': {
         if (owner._tag !== 'RawBufferValue')
           throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
-        const ticket = state.allocations.get(owner.ticket)
-        if (ticket === undefined || !ticket.active) {
+        if (!BootstrapStorage.release(state.allocations, owner.ticket, true)) {
           return blockedStep({
             _tag: 'Trap',
             function: fn.id,
@@ -1144,8 +546,6 @@ function* executeFunction(
             span: provenance.span,
           })
         }
-        ticket.active = false
-        ticket.values.clear()
         trace.push(
           Object.freeze({
             _tag: 'AllocationRelease',
@@ -1207,7 +607,7 @@ function* executeFunction(
         return yield* releaseThroughPlan(selected, owner.effect, provenance, localOrdinal)
       }
       case 'HookCleanup': {
-        const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
+        const target = BootstrapEffect.functionFor(program, cleanup.hook, cleanup.typeArguments)
         if (target === undefined) {
           return blockedStep({
             _tag: 'MissingFunction',
@@ -1300,7 +700,7 @@ function* executeFunction(
       region._tag === 'LoopRegion' ? [[region.condition.ordinal, region] as const] : [],
     ),
   )
-  const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
+  const checkedPlaces = new Map<string, ReadonlyArray<number>>()
 
   const invokeCallableTarget = function* (
     target: Hir.CallableTarget,
@@ -1309,7 +709,7 @@ function* executeFunction(
     span: SourceSpan.SourceSpan,
   ): FunctionExecution {
     if (target._tag === 'DeclarationCallableTarget') {
-      const callee = functionFor(program, target.declaration, typeArguments)
+      const callee = BootstrapEffect.functionFor(program, target.declaration, typeArguments)
       if (callee === undefined) {
         return blockedStep({ _tag: 'MissingFunction', target: target.declaration, span })
       }
@@ -1469,19 +869,7 @@ function* executeFunction(
         rightValue !== undefined && rightValue._tag === 'IntegerValue'
           ? BigInt(rightValue.value)
           : undefined
-      const exact = operation.startsWith('CheckedConvertTo')
-        ? left
-        : operation === 'CheckedAdd' && right !== undefined
-          ? left + right
-          : operation === 'CheckedSubtract' && right !== undefined
-            ? left - right
-            : operation === 'CheckedMultiply' && right !== undefined
-              ? left * right
-              : operation === 'CheckedDivide' && right !== undefined && right !== 0n
-                ? left / right
-                : operation === 'CheckedRemainder' && right !== undefined && right !== 0n
-                  ? left % right
-                  : undefined
+      const exact = BootstrapArithmetic.checked(operation, left, right)
       const range = Scalar.range(resultScalar, program.layout.target.pointerSize === 4 ? 32 : 64)
       const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
       const semantic = Type.option(resultScalar.spelling)
@@ -1591,167 +979,35 @@ function* executeFunction(
         ),
       })
     }
-    if (
-      operation === 'Add' ||
-      operation === 'Subtract' ||
-      operation === 'Multiply' ||
-      operation === 'Divide' ||
-      operation === 'Remainder' ||
-      operation === 'Equals' ||
-      operation === 'NotEquals' ||
-      operation === 'LessThan' ||
-      operation === 'LessOrEqual' ||
-      operation === 'GreaterThan' ||
-      operation === 'GreaterOrEqual' ||
-      operation === 'BitAnd' ||
-      operation === 'BitOr' ||
-      operation === 'BitXor' ||
-      operation === 'ShiftLeft' ||
-      operation === 'ShiftRight' ||
-      operation === 'RotateLeft' ||
-      operation === 'RotateRight' ||
-      operation === 'WrappingAdd' ||
-      operation === 'WrappingSubtract' ||
-      operation === 'WrappingMultiply' ||
-      operation === 'SaturatingAdd' ||
-      operation === 'SaturatingSubtract' ||
-      operation === 'SaturatingMultiply'
-    ) {
+    if (Mir.isBinaryOperator(operation)) {
       const leftValue = arguments_.at(0)
       const rightValue = arguments_.at(1)
-      if (
-        leftValue === undefined ||
-        rightValue === undefined ||
-        leftValue._tag !== 'IntegerValue' ||
-        rightValue._tag !== 'IntegerValue'
-      ) {
-        throw new RangeError('MIR verifier allowed invalid binary callable arguments')
-      }
       const scalar = Scalar.find(target.actor)
-      if (scalar === undefined || scalar.category !== 'Integer') {
+      if (leftValue?._tag !== 'IntegerValue' || rightValue?._tag !== 'IntegerValue')
+        throw new RangeError('MIR verifier allowed invalid integer binary callable arguments')
+      const compared = BootstrapArithmetic.compare(operation, leftValue.value, rightValue.value)
+      if (compared !== undefined)
+        return Object.freeze({
+          _tag: 'Value',
+          value: integerValue('i32', compared ? 1n : 0n),
+        })
+      if (scalar?.category !== 'Integer')
         throw new RangeError('MIR verifier allowed a non-integer binary callable')
-      }
-      const left = BigInt(leftValue.value)
-      const right = BigInt(rightValue.value)
-      if (
-        operation === 'Equals' ||
-        operation === 'NotEquals' ||
-        operation === 'LessThan' ||
-        operation === 'LessOrEqual' ||
-        operation === 'GreaterThan' ||
-        operation === 'GreaterOrEqual'
-      ) {
-        const holds =
-          operation === 'Equals'
-            ? left === right
-            : operation === 'NotEquals'
-              ? left !== right
-              : operation === 'LessThan'
-                ? left < right
-                : operation === 'LessOrEqual'
-                  ? left <= right
-                  : operation === 'GreaterThan'
-                    ? left > right
-                    : left >= right
-        return Object.freeze({ _tag: 'Value', value: integerValue('i32', holds ? 1 : 0) })
-      }
-      if ((operation === 'Divide' || operation === 'Remainder') && right === 0n) {
-        return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'division by zero', span })
-      }
-      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-      const width = Scalar.bits(scalar, pointerBits)
-      if (
-        (operation === 'ShiftLeft' || operation === 'ShiftRight') &&
-        (right < 0n || right >= BigInt(width))
-      ) {
-        return blockedStep({
-          _tag: 'Trap',
-          function: fn.id,
-          reason: `invalid ${operation} count ${right}`,
-          span,
-        })
-      }
-      const fromBits = (input: bigint): bigint =>
-        scalar.signedness === 'Signed' ? BigInt.asIntN(width, input) : BigInt.asUintN(width, input)
-      const leftBits = BigInt.asUintN(width, left)
-      const rightBits = BigInt.asUintN(width, right)
-      const rotate = Number(right % BigInt(width))
-      const rotatedLeft =
-        rotate === 0
-          ? leftBits
-          : BigInt.asUintN(
-              width,
-              (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
-            )
-      const rotatedRight =
-        rotate === 0
-          ? leftBits
-          : BigInt.asUintN(
-              width,
-              (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
-            )
-      const exact =
-        operation === 'Add' || operation === 'WrappingAdd' || operation === 'SaturatingAdd'
-          ? left + right
-          : operation === 'Subtract' ||
-              operation === 'WrappingSubtract' ||
-              operation === 'SaturatingSubtract'
-            ? left - right
-            : operation === 'Multiply' ||
-                operation === 'WrappingMultiply' ||
-                operation === 'SaturatingMultiply'
-              ? left * right
-              : operation === 'Divide'
-                ? left / right
-                : operation === 'Remainder'
-                  ? left % right
-                  : operation === 'BitAnd'
-                    ? fromBits(leftBits & rightBits)
-                    : operation === 'BitOr'
-                      ? fromBits(leftBits | rightBits)
-                      : operation === 'BitXor'
-                        ? fromBits(leftBits ^ rightBits)
-                        : operation === 'ShiftLeft'
-                          ? fromBits(leftBits << right)
-                          : operation === 'ShiftRight'
-                            ? scalar.signedness === 'Signed'
-                              ? left >> right
-                              : fromBits(leftBits >> right)
-                            : operation === 'RotateLeft'
-                              ? fromBits(rotatedLeft)
-                              : fromBits(rotatedRight)
-      const range = Scalar.range(scalar, pointerBits)
-      const wrapping =
-        operation === 'WrappingAdd' ||
-        operation === 'WrappingSubtract' ||
-        operation === 'WrappingMultiply'
-      const saturating =
-        operation === 'SaturatingAdd' ||
-        operation === 'SaturatingSubtract' ||
-        operation === 'SaturatingMultiply'
-      if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
-        return blockedStep({
-          _tag: 'Trap',
-          function: fn.id,
-          reason:
-            scalar.signedness === 'Unsigned' && exact < 0n
-              ? 'arithmetic underflow'
-              : 'arithmetic overflow',
-          span,
-        })
-      }
-      const result = wrapping
-        ? fromBits(exact)
-        : saturating
-          ? exact < range.minimum
-            ? range.minimum
-            : exact > range.maximum
-              ? range.maximum
-              : exact
-          : exact
+      const result = BootstrapArithmetic.integralBinary(
+        operation,
+        scalar,
+        program.layout.target.pointerSize === 4 ? 32 : 64,
+        leftValue.value,
+        rightValue.value,
+      )
+      if (result._tag === 'Trap')
+        return blockedStep({ _tag: 'Trap', function: fn.id, reason: result.reason, span })
       return Object.freeze({
         _tag: 'Value',
-        value: integerValue(scalar.spelling, result),
+        value:
+          result._tag === 'Comparison'
+            ? integerValue('i32', result.value ? 1 : 0)
+            : integerValue(result.type, result.value),
       })
     }
     return blockedStep({
@@ -1760,92 +1016,6 @@ function* executeFunction(
       reason: `bootstrap callable ${target.actor}.${target.operation} is unavailable`,
       span,
     })
-  }
-
-  const cleanupMembers = (
-    cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
-    owner: Value,
-  ): ReadonlyArray<Type.Type> => {
-    if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
-      return Object.freeze([])
-    }
-    if (cleanup._tag === 'AllocationCleanup') return Object.freeze([Type.allocation])
-    if (cleanup._tag === 'UnionCleanup') {
-      if (owner._tag !== 'UnionValue') return Object.freeze([])
-      const active = cleanup.cases.find((candidate) => Type.equals(candidate.member, owner.member))
-      return Object.freeze([
-        owner.member,
-        ...(active === undefined ? [] : cleanupMembers(active.cleanup, owner.payload)),
-      ])
-    }
-    if (cleanup._tag === 'ArrayCleanup') {
-      return owner._tag === 'ArrayValue'
-        ? Object.freeze(
-            owner.elements.flatMap((element) => cleanupMembers(cleanup.element, element)),
-          )
-        : Object.freeze([])
-    }
-    if (cleanup._tag === 'CallableCleanup') {
-      if (owner._tag !== 'CallableValue') return Object.freeze([])
-      return Object.freeze(
-        cleanup.slots.flatMap((slot) => {
-          const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
-          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture.value)
-        }),
-      )
-    }
-    if (cleanup._tag === 'EffectCleanup') {
-      if (owner._tag !== 'EffectValue') return Object.freeze([])
-      return Object.freeze(
-        cleanup.slots.flatMap((slot) => {
-          const capture = owner.captures.at(slot.ordinal)
-          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture)
-        }),
-      )
-    }
-    if (cleanup._tag === 'EffectCompositeCleanup') {
-      if (owner._tag !== 'EffectCompositeValue') return Object.freeze([])
-      const selected = cleanup.alternatives.at(owner.alternative)
-      return selected === undefined ? Object.freeze([]) : cleanupMembers(selected, owner.effect)
-    }
-    if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
-    if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
-    // Unresolved stored-executable obligations never reach evaluation: specialization resolves
-    // them before lowering, while the executable fences retain every incomplete engine path.
-    if (
-      cleanup._tag === 'RepresentedCallableCleanup' ||
-      cleanup._tag === 'RepresentedEffectCleanup'
-    )
-      return Object.freeze([])
-    if (owner._tag !== 'AggregateValue') return Object.freeze([])
-    return Object.freeze(
-      cleanup.fields.flatMap((field) => {
-        const value = owner.fields.find(
-          (candidate) => candidate.field.ordinal === field.field.ordinal,
-        )
-        return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
-      }),
-    )
-  }
-
-  const selectFieldPath = (root: Value, path: ReadonlyArray<DeclarationIndex.FieldId>): Value => {
-    let selected: Value = root
-    for (const selector of path) {
-      if (selected._tag !== 'AggregateValue') {
-        throw new RangeError('MIR verifier allowed a match field below a non-struct value')
-      }
-      const field: AggregateValue['fields'][number] | undefined = selected.fields.find(
-        (candidate) =>
-          candidate.field.ordinal === selector.ordinal &&
-          candidate.field.struct.sourceId === selector.struct.sourceId &&
-          candidate.field.struct.ordinal === selector.struct.ordinal,
-      )
-      if (field === undefined) {
-        throw new RangeError('MIR verifier allowed a missing match field')
-      }
-      selected = field.value
-    }
-    return selected
   }
 
   const resolvePlace = (
@@ -1861,8 +1031,6 @@ function* executeFunction(
     let selected = read(root).value
     let effectiveSelectors = selectors
     let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
-    const indexes: Array<number> = []
-    // A reference root reads through the borrow: the place lives on the referenced cell.
     if (selected._tag === 'ReferenceValue') {
       const target = state.cells.get(cellKey(selected.frame, selected.cell))
       if (target === undefined)
@@ -1871,103 +1039,31 @@ function* executeFunction(
       capturedIndexes = selected.indexes
       selected = target.value
     }
-    for (const [ordinal, selector] of effectiveSelectors.entries()) {
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue') {
-          throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
-        }
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined)
-          throw new RangeError('MIR verifier allowed a missing field selector')
-        selected = field.value
-        indexes.push(selector.field.ordinal)
-        continue
-      }
-      if (selector._tag === 'SliceElementSelector') {
-        if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
-          throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
-        }
-        const captured = capturedIndexes.at(ordinal)
-        const exactIndex =
-          captured === undefined ? readInteger(selector.index, 'usize').value : BigInt(captured)
-        if (exactIndex >= BigInt(selected.length)) {
-          return {
-            _tag: 'Blocked',
-            step: blockedStep({
-              _tag: 'Trap',
-              function: fn.id,
-              reason: `slice index ${exactIndex} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
-              span: selector.provenance.span,
-            }),
-          }
-        }
-        const index = Number(exactIndex)
-        if (selected._tag === 'StaticViewValue') {
-          const byte = selected.bytes.at(index)
-          if (byte === undefined) {
-            throw new RangeError('MIR static view range exceeds its immutable bytes')
-          }
-          indexes.push(index)
-          selected = integerValue('u8', BigInt(byte))
-          continue
-        }
-        if (selected.ticket !== undefined) {
-          const allocation = state.allocations.get(selected.ticket)
-          const element = allocation?.values.get(String(selected.base + index))
-          if (allocation === undefined || !allocation.active || element === undefined) {
-            throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
-          }
-          indexes.push(index)
-          selected = element
-          continue
-        }
-        const backing = selectStoredPlace(
-          cell(selected).value,
-          selected.selectors ?? Object.freeze([]),
-          selected.indexes ?? Object.freeze([]),
-        )
-        if (backing._tag !== 'ArrayValue') {
-          throw new RangeError('MIR slice cell does not contain an array value')
-        }
-        const element = backing.elements.at(selected.base + index)
-        if (element === undefined) {
-          throw new RangeError('MIR slice range exceeds its backing cell')
-        }
-        indexes.push(index)
-        selected = element
-        continue
-      }
-      if (selected._tag !== 'ArrayValue') {
-        throw new RangeError('MIR verifier allowed an element selector on a non-array value')
-      }
-      const index =
-        capturedIndexes.at(ordinal) ??
-        (selector.index._tag === 'Proven'
-          ? selector.index.value
-          : Number(readInteger(selector.index.local, 'usize').value))
-      if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
-        return {
-          _tag: 'Blocked',
-          step: blockedStep({
-            _tag: 'Trap',
-            function: fn.id,
-            reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
-            span: selector.provenance.span,
-          }),
-        }
-      }
-      const element = selected.elements.at(index)
-      if (element === undefined)
-        throw new RangeError('MIR verifier allowed an incomplete array value')
-      indexes.push(index)
-      selected = element
+    const resolved = BootstrapPlace.walkPlace(
+      selected,
+      effectiveSelectors,
+      capturedIndexes,
+      placeAccess,
+    )
+    if (resolved._tag === 'Resolved') return resolved
+    return {
+      _tag: 'Blocked',
+      step: blockedStep({
+        _tag: 'Trap',
+        function: fn.id,
+        reason:
+          (resolved.selector._tag === 'SliceElementSelector' ? 'slice' : 'array') +
+          ' index ' +
+          String(resolved.index) +
+          ' is outside length ' +
+          String(resolved.length) +
+          ' in ' +
+          fn.id.module +
+          '.' +
+          fn.id.name,
+        span: resolved.selector.provenance.span,
+      }),
     }
-    return { _tag: 'Resolved', selected, indexes: Object.freeze(indexes) }
   }
 
   const replacePlace = (
@@ -1975,82 +1071,8 @@ function* executeFunction(
     selectors: ReadonlyArray<Mir.PlaceSelector>,
     indexes: ReadonlyArray<number>,
     replacement: Value,
-    depth = 0,
-  ): Value => {
-    const selector = selectors.at(depth)
-    if (selector === undefined) return replacement
-    const ordinal = indexes.at(depth)
-    if (ordinal === undefined) throw new RangeError('Checked place omitted one selector index')
-    if (selector._tag === 'FieldSelector') {
-      if (current._tag !== 'AggregateValue') throw new RangeError('Invalid aggregate replacement')
-      return Object.freeze({
-        _tag: 'AggregateValue',
-        type: current.type,
-        fields: Object.freeze(
-          current.fields.map((field) =>
-            field.field.ordinal === selector.field.ordinal
-              ? Object.freeze({
-                  field: field.field,
-                  value: replacePlace(field.value, selectors, indexes, replacement, depth + 1),
-                })
-              : field,
-          ),
-        ),
-      })
-    }
-    if (selector._tag === 'SliceElementSelector') {
-      if (current._tag !== 'SliceValue') throw new RangeError('Invalid slice replacement')
-      if (current.ticket !== undefined) {
-        const allocation = state.allocations.get(current.ticket)
-        const absolute = current.base + ordinal
-        const previous = allocation?.values.get(String(absolute))
-        if (allocation === undefined || !allocation.active || previous === undefined) {
-          throw new RangeError('Invalid RawBuffer slice replacement')
-        }
-        allocation.values.set(
-          String(absolute),
-          replacePlace(previous, selectors, indexes, replacement, depth + 1),
-        )
-        return current
-      }
-      const backing = cell(current)
-      const prefixSelectors = current.selectors ?? Object.freeze([])
-      const prefixIndexes = current.indexes ?? Object.freeze([])
-      const selectedBacking = selectStoredPlace(backing.value, prefixSelectors, prefixIndexes)
-      if (selectedBacking._tag !== 'ArrayValue') {
-        throw new RangeError('Invalid slice backing cell replacement')
-      }
-      const absolute = current.base + ordinal
-      const updated: ArrayValue = Object.freeze({
-        _tag: 'ArrayValue',
-        type: selectedBacking.type,
-        elements: Object.freeze(
-          selectedBacking.elements.map((element, index) =>
-            index === absolute
-              ? replacePlace(element, selectors, indexes, replacement, depth + 1)
-              : element,
-          ),
-        ),
-      })
-      state.cells.set(cellKey(current.frame, current.cell), {
-        value: replacePlace(backing.value, prefixSelectors, prefixIndexes, updated),
-        fromCall: backing.fromCall,
-      })
-      return current
-    }
-    if (current._tag !== 'ArrayValue') throw new RangeError('Invalid array replacement')
-    return Object.freeze({
-      _tag: 'ArrayValue',
-      type: current.type,
-      elements: Object.freeze(
-        current.elements.map((element, index) =>
-          index === ordinal
-            ? replacePlace(element, selectors, indexes, replacement, depth + 1)
-            : element,
-        ),
-      ),
-    })
-  }
+  ): Value =>
+    BootstrapPlace.replacePlaceByIndexes(current, selectors, indexes, replacement, placeAccess)
 
   const replaceReferenced = (local: Mir.LocalId, replacement: Value): void => {
     const reference = read(local).value
@@ -2349,7 +1371,7 @@ function* executeFunction(
                 }),
               )
               for (const binding of arm.bindings) {
-                const bound = selectFieldPath(payload, binding.path)
+                const bound = BootstrapStorage.selectFieldPath(payload, binding.path)
                 write(binding.destination, { value: bound, fromCall: false })
                 trace.push(
                   Object.freeze({
@@ -2385,8 +1407,8 @@ function* executeFunction(
               const selectedStep = yield* executeOperations(arm.selected.operations)
               if (selectedStep !== undefined) return selectedStep
               for (const cleanup of arm.selected.cleanup) {
-                const owner = selectFieldPath(payload, cleanup.path)
-                const members = cleanupMembers(cleanup.cleanup, owner)
+                const owner = BootstrapStorage.selectFieldPath(payload, cleanup.path)
+                const members = BootstrapStorage.cleanupMembers(cleanup.cleanup, owner)
                 trace.push(
                   Object.freeze({
                     _tag: 'MatchCleanup',
@@ -2863,7 +1885,7 @@ function* executeFunction(
               throw new RangeError('Layout payload omitted bytes or alignment')
             const ticket = state.nextAllocation
             state.nextAllocation += 1
-            state.allocations.set(ticket, { active: true, values: new Map() })
+            BootstrapStorage.allocate(state.allocations, ticket)
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AllocationValue',
@@ -2884,476 +1906,27 @@ function* executeFunction(
             )
             break
           }
-          case 'HostWrite': {
-            const stream = readInteger(operation.stream, 'i32')
-            const viewed = read(operation.bytes).value
-            const bytes = (() => {
-              if (viewed._tag === 'StaticViewValue') return viewed.bytes
-              if (viewed._tag !== 'SliceValue') return undefined
-              const root = cell(viewed).value
-              if (root._tag !== 'ArrayValue') return undefined
-              const selected = root.elements.slice(viewed.base, viewed.base + viewed.length)
-              if (
-                selected.some((element) => element._tag !== 'IntegerValue' || element.type !== 'u8')
-              )
-                return undefined
-              return Object.freeze(
-                selected.flatMap((element) =>
-                  element._tag === 'IntegerValue' ? [Number(element.value)] : [],
-                ),
-              )
-            })()
-            if (bytes === undefined) {
-              throw new RangeError('MIR verifier allowed a non-byte slice standard-stream write')
-            }
-            const destination: StandardStreams.Destination =
-              stream.value === 0n ? 'Stdout' : 'Stderr'
-            const result = (() => {
-              if (state.standardStreams === undefined) return undefined
-              try {
-                return state.standardStreams.writeAll(destination, bytes)
-              } catch {
-                return Object.freeze({
-                  _tag: 'WriteFailure' as const,
-                  message: 'standard stream provider threw',
-                })
-              }
-            })()
-            if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
-            trace.push(
-              Object.freeze({
-                _tag: 'HostWrite',
-                function: fn.id,
-                destination,
-                bytes: Object.freeze(Array.from(bytes)),
-                outcome: result._tag,
-                span: operation.provenance.span,
-              }),
-            )
-            if (result._tag === 'WriteFailure') {
-              return {
-                _tag: 'Value',
-                value: Object.freeze({
-                  _tag: 'EffectOutcomeValue',
-                  type: operation.propagationType.type,
-                  tag: operation.failureTag,
-                  payload: Object.freeze({
-                    _tag: 'AggregateValue',
-                    type: operation.failure,
-                    fields: Object.freeze([]),
-                  }),
-                }),
-              }
-            }
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'AggregateValue',
-                type: Type.unit,
-                fields: Object.freeze([]),
-              }),
-              fromCall: false,
-            })
-            break
-          }
+          case 'HostWrite':
           case 'OsCall': {
-            const arguments_ = operation.arguments
-            const reasonOutput = arguments_.at(-2)
-            const codeOutput = arguments_.at(-1)
-            if (reasonOutput === undefined || codeOutput === undefined)
-              throw new RangeError('OS intrinsic omitted status outputs')
-            const status = (failure?: OsFileSystemHost.Failure): void => {
-              replaceReferenced(
-                reasonOutput,
-                integerValue(
-                  'i32',
-                  failure === undefined ? 0 : OsFileSystemHost.reasonCode(failure.reason),
-                ),
-              )
-              replaceReferenced(codeOutput, integerValue('u32', BigInt(failure?.nativeCode ?? 0)))
-            }
-            const commit = (result: Value): void =>
-              write(operation.destination, { value: result, fromCall: false })
-            const name = operation.operation.name
-            if (name === 'osStandardInputRead') {
-              const input = state.standardInput
-              if (input === undefined) return blockedStep({ _tag: 'MissingStandardInput' })
-              const output = arguments_.at(0)
-              if (output === undefined) throw new RangeError('OS read omitted its output buffer')
-              const capacity = byteView(output).length
-              const result = input.read(capacity)
-              if (result._tag === 'ReadFailure') {
-                status({ _tag: 'Failure', reason: 'Other' })
-                commit(optionValue('usize'))
-                break
-              }
-              if (result.bytes.length > capacity)
-                throw new RangeError('standard-input provider overran the caller buffer')
-              writeByteView(output, result.bytes)
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-              break
-            }
-            if (name === 'osProcessExecute') {
-              const child = state.childProcess
-              if (child === undefined) return blockedStep({ _tag: 'MissingChildProcess' })
-              const program = arguments_.at(0)
-              const argumentBlock = arguments_.at(1)
-              const environmentBlock = arguments_.at(2)
-              const workingDirectory = arguments_.at(3)
-              const processStatus = arguments_.at(4)
-              const processCode = arguments_.at(5)
-              const outputLength = arguments_.at(6)
-              const errorLength = arguments_.at(7)
-              if (
-                program === undefined ||
-                argumentBlock === undefined ||
-                environmentBlock === undefined ||
-                workingDirectory === undefined ||
-                processStatus === undefined ||
-                processCode === undefined ||
-                outputLength === undefined ||
-                errorLength === undefined
-              )
-                throw new RangeError('OS execute omitted arguments')
-              const directory = byteView(workingDirectory)
-              const entries = (
-                block: ReadonlyArray<number>,
-              ): ReadonlyArray<ReadonlyArray<number>> | null => {
-                if (block.length === 0) return Object.freeze([])
-                if (block.at(-1) !== 0) return null
-                const collected: Array<ReadonlyArray<number>> = []
-                let start = 0
-                for (const [index, byte] of block.entries()) {
-                  if (byte !== 0) continue
-                  collected.push(Object.freeze(block.slice(start, index)))
-                  start = index + 1
-                }
-                return Object.freeze(collected)
-              }
-              const requestArguments = entries(byteView(argumentBlock))
-              const requestEnvironment = entries(byteView(environmentBlock))
-              const programBytes = byteView(program)
-              // The block protocol is the intrinsic's precondition, so a malformed request is a
-              // typed start failure rather than an execution the host never saw.
-              if (
-                requestArguments === null ||
-                requestEnvironment === null ||
-                programBytes.length === 0 ||
-                programBytes.includes(0) ||
-                directory.includes(0)
-              ) {
-                state.processCaptures[0] = Object.freeze([])
-                state.processCaptures[1] = Object.freeze([])
-                status({ _tag: 'Failure', reason: 'InvalidPath' })
-                commit(integerValue('i32', 0))
-                break
-              }
-              const result = child.execute(
-                Object.freeze({
-                  program: programBytes,
-                  arguments: requestArguments,
-                  environment: requestEnvironment,
-                  ...(directory.length === 0 ? {} : { workingDirectory: directory }),
-                }),
-              )
-              if (result._tag === 'ExecuteFailure') {
-                state.processCaptures[0] = Object.freeze([])
-                state.processCaptures[1] = Object.freeze([])
-                status({
-                  _tag: 'Failure',
-                  reason: result.reason,
-                  ...(result.nativeCode === undefined ? {} : { nativeCode: result.nativeCode }),
-                })
-                commit(integerValue('i32', 0))
-                break
-              }
-              state.processCaptures[0] = result.output
-              state.processCaptures[1] = result.errors
-              replaceReferenced(
-                processStatus,
-                integerValue('i32', result._tag === 'Exited' ? 0 : 1),
-              )
-              replaceReferenced(
-                processCode,
-                integerValue('i32', result._tag === 'Exited' ? result.code : result.signal),
-              )
-              replaceReferenced(outputLength, integerValue('usize', BigInt(result.output.length)))
-              replaceReferenced(errorLength, integerValue('usize', BigInt(result.errors.length)))
-              status()
-              commit(integerValue('i32', 1))
-              break
-            }
-            if (name === 'osProcessCapture') {
-              const stream = arguments_.at(0)
-              const offset = arguments_.at(1)
-              const output = arguments_.at(2)
-              if (stream === undefined || offset === undefined || output === undefined)
-                throw new RangeError('OS capture omitted arguments')
-              const selector = readInteger(stream, 'i32').value
-              const captured = state.processCaptures.at(Number(selector))
-              const start = Number(readInteger(offset, 'usize').value)
-              if (selector !== 0n && selector !== 1n) {
-                status({ _tag: 'Failure', reason: 'WrongType' })
-                commit(optionValue('usize'))
-                break
-              }
-              if (captured === undefined || start > captured.length) {
-                status({ _tag: 'Failure', reason: 'InvalidPath' })
-                commit(optionValue('usize'))
-                break
-              }
-              const transferred = captured.slice(start, start + byteView(output).length)
-              writeByteView(output, transferred)
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(transferred.length))))
-              break
-            }
-            if (name.startsWith('osHost')) {
-              const input = state.hostInput
-              if (input === undefined) return blockedStep({ _tag: 'MissingHostInput' })
-              if (name === 'osHostArgumentCount') {
-                const count = arguments_.at(0)
-                if (count === undefined) throw new RangeError('OS count omitted its output')
-                const result = input.argumentCount()
-                if (result._tag === 'LookupFailure') {
-                  status({ _tag: 'Failure', reason: 'Other' })
-                  commit(integerValue('i32', 0))
-                  break
-                }
-                replaceReferenced(count, integerValue('usize', BigInt(result.count)))
-                status()
-                commit(integerValue('i32', 1))
-                break
-              }
-              const output = arguments_.at(name === 'osHostWorkingDirectory' ? 0 : 1)
-              if (output === undefined) throw new RangeError('OS lookup omitted its output buffer')
-              const selector = arguments_.at(0)
-              if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
-              const result =
-                name === 'osHostArgument'
-                  ? input.argument(Number(readInteger(selector, 'usize').value))
-                  : name === 'osHostVariable'
-                    ? input.variable(byteView(selector))
-                    : input.workingDirectory()
-              if (result._tag !== 'Present') {
-                // Absence is the not-found reason, which the provider reads as an ordinary answer;
-                // any other reason is a host that could not answer at all.
-                status({
-                  _tag: 'Failure',
-                  reason: result._tag === 'Absent' ? 'NotFound' : 'Other',
-                })
-                commit(optionValue('usize'))
-                break
-              }
-              // The complete byte length is the result even when only a prefix fit, so the caller
-              // can size an exact buffer and ask again.
-              const capacity = byteView(output).length
-              writeByteView(output, result.bytes.slice(0, capacity))
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-              break
-            }
-            const host = state.osFileSystem
-            if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
-            try {
-              if (name === 'osFileOpen' || name === 'osDirectoryOpen') {
-                const root = arguments_.at(0)
-                const path = arguments_.at(1)
-                if (root === undefined || path === undefined)
-                  throw new RangeError('OS open omitted paths')
-                const result =
-                  name === 'osFileOpen'
-                    ? host.fileOpen(
-                        byteView(root),
-                        byteView(path),
-                        Number(readInteger(arguments_.at(2) ?? root, 'i32').value),
-                      )
-                    : host.directoryOpen(byteView(root), byteView(path))
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue(Type.osHandle))
-                } else {
-                  status()
-                  commit(optionValue(Type.osHandle, handleValue(result.handle)))
-                }
-                break
-              }
-              if (name === 'osFileRead') {
-                const handle = arguments_.at(0)
-                const output = arguments_.at(1)
-                if (handle === undefined || output === undefined)
-                  throw new RangeError('OS read omitted arguments')
-                const capacity = byteView(output).length
-                const result = host.fileRead(hostHandle(handle), capacity)
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue('usize'))
-                } else {
-                  writeByteView(output, result.bytes)
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-                }
-                break
-              }
-              if (name === 'osFileWrite') {
-                const handle = arguments_.at(0)
-                const input = arguments_.at(1)
-                const offset = arguments_.at(2)
-                if (handle === undefined || input === undefined || offset === undefined)
-                  throw new RangeError('OS write omitted arguments')
-                const result = host.fileWrite(
-                  hostHandle(handle),
-                  byteView(input).slice(Number(readInteger(offset, 'usize').value)),
-                )
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue('usize'))
-                } else {
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.count))))
-                }
-                break
-              }
-              if (name === 'osDirectoryNext') {
-                const handle = arguments_.at(0)
-                const output = arguments_.at(1)
-                const kind = arguments_.at(2)
-                const required = arguments_.at(3)
-                if (
-                  handle === undefined ||
-                  output === undefined ||
-                  kind === undefined ||
-                  required === undefined
-                )
-                  throw new RangeError('OS directory next omitted arguments')
-                const result = host.directoryNext(hostHandle(handle), byteView(output).length)
-                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
-                  const failure: OsFileSystemHost.Failure =
-                    result._tag === 'Failure'
-                      ? result
-                      : { _tag: 'Failure', reason: 'BufferTooSmall' }
-                  status(failure)
-                  if (result._tag === 'BufferTooSmall')
-                    replaceReferenced(
-                      required,
-                      integerValue('usize', BigInt(result.requiredCapacity)),
-                    )
-                  commit(optionValue('usize'))
-                } else if (result._tag === 'End') {
-                  status()
-                  commit(optionValue('usize', integerValue('usize', 0n)))
-                } else {
-                  writeByteView(output, result.name)
-                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
-                }
-                break
-              }
-              if (name === 'osDirectoryCreateUnique') {
-                const root = arguments_.at(0)
-                const parent = arguments_.at(1)
-                const prefix = arguments_.at(2)
-                const output = arguments_.at(3)
-                const required = arguments_.at(4)
-                if (
-                  root === undefined ||
-                  parent === undefined ||
-                  prefix === undefined ||
-                  output === undefined ||
-                  required === undefined
-                )
-                  throw new RangeError('OS unique directory create omitted arguments')
-                const result = host.directoryCreateUnique(
-                  byteView(root),
-                  byteView(parent),
-                  byteView(prefix),
-                  byteView(output).length,
-                )
-                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
-                  status(
-                    result._tag === 'Failure'
-                      ? result
-                      : { _tag: 'Failure', reason: 'BufferTooSmall' },
-                  )
-                  if (result._tag === 'BufferTooSmall')
-                    replaceReferenced(
-                      required,
-                      integerValue('usize', BigInt(result.requiredCapacity)),
-                    )
-                  commit(optionValue('usize'))
-                } else {
-                  writeByteView(output, result.name)
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
-                }
-                break
-              }
-              if (name === 'osPathInspect') {
-                const root = arguments_.at(0)
-                const path = arguments_.at(1)
-                const kind = arguments_.at(2)
-                const length = arguments_.at(3)
-                if (
-                  root === undefined ||
-                  path === undefined ||
-                  kind === undefined ||
-                  length === undefined
-                )
-                  throw new RangeError('OS inspect omitted arguments')
-                const result = host.pathInspect(byteView(root), byteView(path))
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(integerValue('i32', 0))
-                } else {
-                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
-                  replaceReferenced(length, integerValue('usize', BigInt(result.byteLength)))
-                  status()
-                  commit(integerValue('i32', 1))
-                }
-                break
-              }
-              const command =
-                name === 'osDirectoryCreate' ||
-                name === 'osFileRemove' ||
-                name === 'osDirectoryRemove'
-                  ? (() => {
-                      const root = arguments_.at(0)
-                      const path = arguments_.at(1)
-                      if (root === undefined || path === undefined)
-                        throw new RangeError('OS command omitted paths')
-                      return name === 'osDirectoryCreate'
-                        ? host.directoryCreate(byteView(root), byteView(path))
-                        : name === 'osFileRemove'
-                          ? host.fileRemove(byteView(root), byteView(path))
-                          : host.directoryRemove(byteView(root), byteView(path))
-                    })()
-                  : name === 'osHandleClose'
-                    ? host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput))
-                    : undefined
-              if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
-              if (command._tag === 'Failure') {
-                status(command)
-                commit(integerValue('i32', 0))
-              } else {
-                status()
-                commit(integerValue('i32', 1))
-              }
-            } catch {
-              const failure: OsFileSystemHost.Failure = { _tag: 'Failure', reason: 'Other' }
-              status(failure)
-              commit(
-                operation.type._tag === 'Union'
-                  ? optionValue(
-                      operation.type.type.members.some((member) =>
-                        Type.equals(member, Type.some(Type.osHandle)),
-                      )
-                        ? Type.osHandle
-                        : 'usize',
-                    )
-                  : integerValue('i32', 0),
-              )
-            }
+            const boundary = BootstrapOsIntrinsics.execute(
+              {
+                state,
+                fn,
+                trace,
+                read,
+                write,
+                cell,
+                readInteger,
+                replaceReferenced,
+                byteView,
+                writeByteView,
+                optionValue,
+                handleValue,
+                hostHandle,
+              },
+              operation,
+            )
+            if (boundary !== undefined) return boundary
             break
           }
           case 'RawBufferFrom': {
@@ -3458,9 +2031,8 @@ function* executeFunction(
             if (!Type.equals(buffer.element, operation.element)) {
               throw new RangeError('MIR verifier allowed mismatched RawBuffer read provenance')
             }
-            const allocation = state.allocations.get(buffer.ticket)
-            const selected = allocation?.values.get(index.value.toString())
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, buffer.ticket, index.value)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -3664,18 +2236,21 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            const allocation = state.allocations.get(buffer.ticket)
-            if (allocation === undefined || !allocation.active) {
+            if (
+              !BootstrapStorage.fill(
+                state.allocations,
+                buffer.ticket,
+                offset,
+                Number(length),
+                integerValue('u8', value.value),
+              )
+            ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
                 reason: 'RawBuffer.fill requires live storage',
                 span: operation.provenance.span,
               })
-            }
-            const byte = integerValue('u8', value.value)
-            for (let index = 0; index < Number(length); index += 1) {
-              allocation.values.set(String(offset + BigInt(index)), byte)
             }
             write(operation.destination, {
               value: Object.freeze({
@@ -3702,9 +2277,14 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.write with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            if (allocation === undefined || !allocation.active || allocation.values.has(key)) {
+            if (
+              !BootstrapStorage.write(
+                state.allocations,
+                slot.ticket,
+                slot.index,
+                read(operation.value).value,
+              )
+            ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -3712,7 +2292,6 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            allocation.values.set(key, read(operation.value).value)
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AggregateValue',
@@ -3738,10 +2317,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.take with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.take(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -3749,7 +2326,6 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            allocation.values.delete(key)
             write(operation.destination, { value: selected, fromCall: false })
             trace.push(
               Object.freeze({
@@ -3768,10 +2344,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.copy with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -3797,10 +2371,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.drop with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -3815,7 +2387,8 @@ function* executeFunction(
               operation.slot.ordinal,
             )
             if (blocked !== undefined) return blocked
-            allocation.values.delete(key)
+            if (!BootstrapStorage.drop(state.allocations, slot.ticket, slot.index))
+              throw new RangeError('evaluator slot disappeared during cleanup')
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AggregateValue',
@@ -3853,7 +2426,7 @@ function* executeFunction(
             if (Scalar.isCharacterSpelling(semantic)) {
               const left = readCharacter(operation.left).value
               const right = readCharacter(operation.right).value
-              const holds =
+              const result =
                 operation.operator === 'Equals'
                   ? left === right
                   : operation.operator === 'NotEquals'
@@ -3867,166 +2440,55 @@ function* executeFunction(
                           : operation.operator === 'GreaterOrEqual'
                             ? left >= right
                             : undefined
-              if (holds === undefined)
+              if (result === undefined)
                 throw new RangeError('MIR verifier allowed a non-comparison char operation')
               write(operation.destination, {
-                value: integerValue('i32', holds ? 1 : 0),
+                value: integerValue('i32', result ? 1 : 0),
                 fromCall: false,
               })
               break
             }
-            const leftValue = readInteger(operation.left)
-            const rightValue = readInteger(operation.right)
             const rightType = fn.localTypes.at(operation.right.ordinal)
             const operand = leftType === undefined ? undefined : Mir.semanticType(leftType)
+            const scalar = Scalar.isSpelling(operand) ? Scalar.find(operand) : undefined
             if (
               rightType === undefined ||
               operand === undefined ||
               !Type.equals(Mir.semanticType(rightType), operand) ||
               !Scalar.isSpelling(operand)
-            ) {
+            )
               throw new RangeError('MIR verifier allowed mixed integer operands')
-            }
-            const scalar = Scalar.find(operand)
-            const left = BigInt(leftValue.value)
-            const right = BigInt(rightValue.value)
-            if (
-              operation.operator === 'Equals' ||
-              operation.operator === 'NotEquals' ||
-              operation.operator === 'LessThan' ||
-              operation.operator === 'LessOrEqual' ||
-              operation.operator === 'GreaterThan' ||
-              operation.operator === 'GreaterOrEqual'
-            ) {
-              const holds =
-                operation.operator === 'Equals'
-                  ? left === right
-                  : operation.operator === 'NotEquals'
-                    ? left !== right
-                    : operation.operator === 'LessThan'
-                      ? left < right
-                      : operation.operator === 'LessOrEqual'
-                        ? left <= right
-                        : operation.operator === 'GreaterThan'
-                          ? left > right
-                          : left >= right
+            const left = readInteger(operation.left).value
+            const right = readInteger(operation.right).value
+            const compared = BootstrapArithmetic.compare(operation.operator, left, right)
+            if (compared !== undefined) {
               write(operation.destination, {
-                value: integerValue('i32', holds ? 1 : 0),
+                value: integerValue('i32', compared ? 1n : 0n),
                 fromCall: false,
               })
               break
             }
-            if (scalar === undefined || scalar.category !== 'Integer') {
+            if (scalar?.category !== 'Integer')
               throw new RangeError('MIR verifier allowed a non-integer binary operand')
-            }
-            if (
-              (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
-              right === 0n
-            ) {
+            const result = BootstrapArithmetic.integralBinary(
+              operation.operator,
+              scalar,
+              program.layout.target.pointerSize === 4 ? 32 : 64,
+              left,
+              right,
+            )
+            if (result._tag === 'Trap')
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
-                reason: 'division by zero',
+                reason: result.reason,
                 span: operation.provenance.span,
               })
-            }
-            const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-            const width = Scalar.bits(scalar, pointerBits)
-            if (
-              (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') &&
-              (right < 0n || right >= BigInt(width))
-            ) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: `invalid ${operation.operator} count ${right}`,
-                span: operation.provenance.span,
-              })
-            }
-            const fromBits = (input: bigint): bigint =>
-              scalar.signedness === 'Signed'
-                ? BigInt.asIntN(width, input)
-                : BigInt.asUintN(width, input)
-            const leftBits = BigInt.asUintN(width, left)
-            const rightBits = BigInt.asUintN(width, right)
-            const rotate = Number(right % BigInt(width))
-            const rotatedLeft =
-              rotate === 0
-                ? leftBits
-                : BigInt.asUintN(
-                    width,
-                    (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
-                  )
-            const rotatedRight =
-              rotate === 0
-                ? leftBits
-                : BigInt.asUintN(
-                    width,
-                    (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
-                  )
-            const exact =
-              operation.operator === 'Add' ||
-              operation.operator === 'WrappingAdd' ||
-              operation.operator === 'SaturatingAdd'
-                ? left + right
-                : operation.operator === 'Subtract' ||
-                    operation.operator === 'WrappingSubtract' ||
-                    operation.operator === 'SaturatingSubtract'
-                  ? left - right
-                  : operation.operator === 'Multiply' ||
-                      operation.operator === 'WrappingMultiply' ||
-                      operation.operator === 'SaturatingMultiply'
-                    ? left * right
-                    : operation.operator === 'Divide'
-                      ? left / right
-                      : operation.operator === 'Remainder'
-                        ? left % right
-                        : operation.operator === 'BitAnd'
-                          ? fromBits(leftBits & rightBits)
-                          : operation.operator === 'BitOr'
-                            ? fromBits(leftBits | rightBits)
-                            : operation.operator === 'BitXor'
-                              ? fromBits(leftBits ^ rightBits)
-                              : operation.operator === 'ShiftLeft'
-                                ? fromBits(leftBits << right)
-                                : operation.operator === 'ShiftRight'
-                                  ? scalar.signedness === 'Signed'
-                                    ? left >> right
-                                    : fromBits(leftBits >> right)
-                                  : operation.operator === 'RotateLeft'
-                                    ? fromBits(rotatedLeft)
-                                    : fromBits(rotatedRight)
-            const range = Scalar.range(scalar, pointerBits)
-            const wrapping =
-              operation.operator === 'WrappingAdd' ||
-              operation.operator === 'WrappingSubtract' ||
-              operation.operator === 'WrappingMultiply'
-            const saturating =
-              operation.operator === 'SaturatingAdd' ||
-              operation.operator === 'SaturatingSubtract' ||
-              operation.operator === 'SaturatingMultiply'
-            if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason:
-                  scalar.signedness === 'Unsigned' && exact < 0n
-                    ? 'arithmetic underflow'
-                    : 'arithmetic overflow',
-                span: operation.provenance.span,
-              })
-            }
-            const result = wrapping
-              ? fromBits(exact)
-              : saturating
-                ? exact < range.minimum
-                  ? range.minimum
-                  : exact > range.maximum
-                    ? range.maximum
-                    : exact
-                : exact
             write(operation.destination, {
-              value: integerValue(scalar.spelling, result),
+              value:
+                result._tag === 'Comparison'
+                  ? integerValue('i32', result.value ? 1 : 0)
+                  : integerValue(result.type, result.value),
               fromCall: false,
             })
             break
@@ -4155,23 +2617,7 @@ function* executeFunction(
               (target?.category !== 'Integer' && !characterConversion)
             )
               throw new RangeError('MIR verifier allowed an invalid checked scalar operation')
-            const arithmetic = operation.operation.startsWith('CheckedConvertTo')
-              ? left
-              : operation.operation === 'CheckedAdd'
-                ? left + (right ?? 0n)
-                : operation.operation === 'CheckedSubtract'
-                  ? left - (right ?? 0n)
-                  : operation.operation === 'CheckedMultiply'
-                    ? left * (right ?? 0n)
-                    : operation.operation === 'CheckedDivide'
-                      ? right === undefined || right === 0n
-                        ? undefined
-                        : left / right
-                      : operation.operation === 'CheckedRemainder'
-                        ? right === undefined || right === 0n
-                          ? undefined
-                          : left % right
-                        : undefined
+            const arithmetic = BootstrapArithmetic.checked(operation.operation, left, right)
             const success =
               arithmetic !== undefined &&
               (characterConversion
@@ -4439,7 +2885,7 @@ function* executeFunction(
           case 'CheckPlace': {
             const resolved = resolvePlace(operation.root, operation.selectors)
             if (resolved._tag === 'Blocked') return resolved.step
-            checkedPlaces.set(operation.selectors, resolved.indexes)
+            checkedPlaces.set(BootstrapPlace.selectorKey(operation.selectors), resolved.indexes)
             trace.push(
               Object.freeze({
                 _tag: 'WriteCheck',
@@ -4452,7 +2898,8 @@ function* executeFunction(
             break
           }
           case 'WritePlace': {
-            const indexes = checkedPlaces.get(operation.selectors)
+            const placeKey = BootstrapPlace.selectorKey(operation.selectors)
+            const indexes = checkedPlaces.get(placeKey)
             if (indexes === undefined)
               throw new RangeError('MIR write executed without its precheck')
             const root = read(operation.root)
@@ -4472,7 +2919,7 @@ function* executeFunction(
                 value: replacePlace(target.value, effectiveSelectors, indexes, replacement.value),
                 fromCall: replacement.fromCall,
               })
-              checkedPlaces.delete(operation.selectors)
+              checkedPlaces.delete(placeKey)
               trace.push(
                 Object.freeze({
                   _tag: 'Replacement',
@@ -4506,7 +2953,7 @@ function* executeFunction(
               value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
               fromCall: replacement.fromCall,
             })
-            checkedPlaces.delete(operation.selectors)
+            checkedPlaces.delete(placeKey)
             trace.push(
               Object.freeze({
                 _tag: 'Replacement',
@@ -4527,7 +2974,7 @@ function* executeFunction(
               operation.local.ordinal,
             )
             if (blocked !== undefined) return blocked
-            const members = cleanupMembers(operation.cleanup, dropped)
+            const members = BootstrapStorage.cleanupMembers(operation.cleanup, dropped)
             trace.push(
               Object.freeze({
                 _tag: 'Cleanup',
@@ -4681,500 +3128,47 @@ function* executeFunction(
             write(operation.destination, { value: result.value, fromCall: true })
             break
           }
-          case 'MakeEffect': {
-            const captures = operation.captures.map((capture, ordinal): Value => {
-              const field = operation.type.environment.fields.at(ordinal)
-              if (
-                capture.access === 'Copy' ||
-                capture.access === 'Take' ||
-                field?.representation === 'Callable' ||
-                field?.effectIdentity !== undefined
-              )
-                return read(capture.source).value
-              const key = cellKey(frame, capture.source.ordinal)
-              if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
-              return Object.freeze({
-                _tag: 'EffectBorrowValue',
-                frame,
-                cell: capture.source.ordinal,
-                access: capture.access,
-              })
-            })
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectValue',
-                type: operation.type.type,
-                site: operation.type.site,
-                runner: operation.runner,
-                runnerTypeArguments: operation.runnerTypeArguments,
-                captures: Object.freeze(captures),
-              }),
-              fromCall: false,
-            })
-            break
-          }
-          case 'PackEffectComposite': {
-            const effect = read(operation.source).value
-            if (effect._tag !== 'EffectValue')
-              throw new RangeError('MIR attempted to pack a non-Effect alternative')
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectCompositeValue',
-                alternative: operation.alternative,
-                effect,
-              }),
-              fromCall: false,
-            })
-            break
-          }
-          case 'PackEffectOutcome': {
-            const payload = read(operation.source).value
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.type.type,
-                tag: operation.tag,
-                payload,
-              }),
-              fromCall: false,
-            })
-            trace.push(
-              Object.freeze({
-                _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
-                phase: 'Produced',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: operation.tag,
-                ...(operation.tag === 0
-                  ? {}
-                  : {
-                      identity: failureIdentity(operation.type.type, operation.tag),
-                    }),
-                span: operation.provenance.span,
-              }),
-            )
-            break
-          }
-          case 'PackEffectFailureUnion': {
-            const source = read(operation.source).value
-            if (source._tag !== 'UnionValue')
-              throw new RangeError('MIR attempted to fail with a non-union value')
-            const mapping = operation.mappings.find((candidate) =>
-              Type.equals(
-                Type.failureCarrierMember(
-                  operation.sourceType.type,
-                  candidate.source,
-                  'ZeroBased',
-                ) ?? Type.unit,
-                source.member,
-              ),
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR failure union has no canonical E-channel mapping')
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.type.type,
-                tag: mapping.target,
-                payload: repackFailurePayload(
-                  source.payload,
-                  operation.sourceType.type,
-                  mapping.source,
-                  operation.type.type,
-                  mapping.target,
-                ),
-              }),
-              fromCall: false,
-            })
-            trace.push(
-              Object.freeze({
-                _tag: 'EffectFailure',
-                phase: 'Produced',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: mapping.target,
-                identity: failureIdentity(operation.type.type, mapping.target),
-                span: operation.provenance.span,
-              }),
-            )
-            break
-          }
-          case 'UnpackEffectSuccess': {
-            const outcome = read(operation.source)
-            if (outcome.value._tag !== 'EffectOutcomeValue' || outcome.value.tag !== 0) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: 'attempted to unpack a failed effect outcome as success',
-                span: operation.provenance.span,
-              })
-            }
-            write(operation.destination, { value: outcome.value.payload, fromCall: true })
-            break
-          }
-          case 'PropagateEffectFailure': {
-            const source = read(operation.source).value
-            const sourceTag =
-              source._tag === 'UnionValue'
-                ? operation.sourceType._tag === 'Union'
-                  ? operation.sourceType.type.members.findIndex((member) =>
-                      Type.equals(member, source.member),
-                    )
-                  : -1
-                : source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal'
-                  ? 0
-                  : -1
-            const payload =
-              source._tag === 'UnionValue'
-                ? source.payload
-                : source._tag === 'AggregateValue'
-                  ? source
-                  : undefined
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === sourceTag,
-            )
-            if (payload === undefined || mapping === undefined)
-              throw new RangeError('MIR propagated failure has no canonical tag mapping')
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            return Object.freeze({
-              _tag: 'Value',
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.propagationType.type,
-                tag: mapping.target,
-                payload: repackFailurePayload(
-                  payload,
-                  Mir.semanticType(operation.sourceType),
-                  mapping.source,
-                  operation.propagationType.type,
-                  mapping.target,
-                ),
-              }),
-            })
-          }
-          case 'RunEffect': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.target,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: operation.target,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const arguments_ = operation.arguments.map((argument) => read(argument))
-            arguments_.forEach((argument, ordinal) => {
-              trace.push(
-                Object.freeze({
-                  _tag: 'Binding',
-                  frame: state.nextFrame,
-                  depth: activation.depth + 1,
-                  target: operation.target,
-                  targetInstance: target.instance,
-                  callSpan: operation.provenance.span,
-                  argumentOrdinal: ordinal,
-                  parameterOrdinal: ordinal,
-                  value: argument.value,
-                  fromCall: argument.fromCall,
-                  span: operation.provenance.span,
-                }),
-              )
-            })
-            const result = yield* callEffectRunner(
-              target,
-              arguments_.map((argument) => argument.value),
-              operation,
-            )
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR propagated effect returned a non-outcome value')
-            const effectOutcome = result.value
-            write(operation.outcome, { value: effectOutcome, fromCall: true })
-            if (effectOutcome.tag === 0) {
-              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
-              break
-            }
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === effectOutcome.tag,
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
-            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-            if (ended !== undefined) return ended
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            const propagated: EffectOutcomeValue = Object.freeze({
-              _tag: 'EffectOutcomeValue',
-              type: operation.propagationType.type,
-              tag: mapping.target,
-              payload: repackFailurePayload(
-                effectOutcome.payload,
-                operation.outcomeType.type,
-                effectOutcome.tag,
-                operation.propagationType.type,
-                mapping.target,
-              ),
-            })
-            trace.push(
-              Object.freeze({
-                _tag: 'EffectFailure',
-                phase: 'Propagated',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: mapping.target,
-                span: operation.provenance.span,
-              }),
-              Object.freeze({
-                _tag: 'Return',
-                frame: activation.frame,
-                depth: activation.depth,
-                function: fn.id,
-                instance: fn.instance,
-                value: propagated,
-                span: operation.provenance.span,
-              }),
-            )
-            return Object.freeze({ _tag: 'Value', value: propagated })
-          }
+          case 'MakeEffect':
+          case 'PackEffectComposite':
+          case 'PackEffectOutcome':
+          case 'PackEffectFailureUnion':
+          case 'UnpackEffectSuccess':
+          case 'PropagateEffectFailure':
+          case 'RunEffect':
           case 'RunEffectComposite':
           case 'RunEffectValue':
-          case 'RunStaticEffect': {
-            const composite =
-              operation._tag === 'RunEffectComposite'
-                ? (() => {
-                    const value = read(operation.effect).value
-                    if (value._tag !== 'EffectCompositeValue')
-                      throw new RangeError('MIR attempted to run a non-composite Effect value')
-                    const alternative = operation.alternatives.at(value.alternative)
-                    if (alternative === undefined)
-                      throw new RangeError('MIR Effect composite selected an absent alternative')
-                    return Object.freeze({ value, alternative })
-                  })()
-                : undefined
-            const captures =
-              composite !== undefined
-                ? composite.value.effect.captures
-                : operation._tag === 'RunEffectValue'
-                  ? (() => {
-                      const effect = read(operation.effect).value
-                      if (effect._tag !== 'EffectValue')
-                        throw new RangeError('MIR attempted to run a non-Effect value')
-                      return effect.captures
-                    })()
-                  : operation._tag === 'RunStaticEffect'
-                    ? operation.captures.map((capture) => read(capture.source).value)
-                    : Object.freeze([])
-            const runner =
-              operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.runner ?? operation.alternatives.at(0)?.runner)
-                : operation.runner
-            const runnerTypeArguments =
-              operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.runnerTypeArguments ??
-                  operation.alternatives.at(0)?.runnerTypeArguments)
-                : operation.runnerTypeArguments
-            if (runner === undefined || runnerTypeArguments === undefined)
-              throw new RangeError('MIR Effect composite has no runnable alternative')
-            const target = functionFor(program, runner, runnerTypeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: runner,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: runner,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const runnerArguments = Object.freeze([
-              ...captures,
-              ...(operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.arguments ?? []).map((argument) => read(argument).value)
-                : operation.arguments.map((argument) => read(argument).value)),
-            ])
-            const result =
-              operation._tag === 'RunEffectValue'
-                ? yield* callEffectRunner(target, runnerArguments, operation)
-                : yield* callFunction(target, runnerArguments, operation.provenance.span)
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR Effect runner returned a non-outcome value')
-            const rawOutcome: EffectOutcomeValue = result.value
-            const effectOutcome: EffectOutcomeValue =
-              composite === undefined || rawOutcome.tag === 0
-                ? rawOutcome
-                : (() => {
-                    const mapping = composite.alternative.tagMappings.find(
-                      (candidate) => candidate.source === rawOutcome.tag,
-                    )
-                    if (mapping === undefined)
-                      throw new RangeError(
-                        'MIR Effect composite has no alternative failure mapping',
-                      )
-                    return Object.freeze({
-                      _tag: 'EffectOutcomeValue' as const,
-                      type: operation.outcomeType.type,
-                      tag: mapping.target,
-                      payload: repackFailurePayload(
-                        rawOutcome.payload,
-                        composite.alternative.type.type,
-                        rawOutcome.tag,
-                        operation.outcomeType.type,
-                        mapping.target,
-                      ),
-                    })
-                  })()
-            write(operation.outcome, { value: effectOutcome, fromCall: true })
-            if (effectOutcome.tag === 0) {
-              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
-              break
-            }
-            if (operation.propagationType === undefined) {
-              const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-              if (ended !== undefined) return ended
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: 'unhandled Effect failure escaped an infallible context',
-                span: operation.provenance.span,
-              })
-            }
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === effectOutcome.tag,
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR Effect runner has no failure-tag mapping')
-            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-            if (ended !== undefined) return ended
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            const propagated: EffectOutcomeValue = Object.freeze({
-              _tag: 'EffectOutcomeValue',
-              type: operation.propagationType.type,
-              tag: mapping.target,
-              payload: repackFailurePayload(
-                effectOutcome.payload,
-                operation.outcomeType.type,
-                effectOutcome.tag,
-                operation.propagationType.type,
-                mapping.target,
-              ),
-            })
-            return Object.freeze({ _tag: 'Value', value: propagated })
-          }
+          case 'RunStaticEffect':
           case 'ReifyEffect': {
-            const effect = read(operation.effect).value
-            if (effect._tag !== 'EffectValue')
-              throw new RangeError('MIR attempted to reify a non-Effect value')
-            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.runner,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: operation.runner,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const result = yield* callEffectRunner(
-              target,
-              Object.freeze([
-                ...effect.captures,
-                ...operation.arguments.map((argument) => read(argument).value),
-              ]),
+            const effectStep = yield* BootstrapEffect.execute(
+              {
+                program,
+                fn,
+                activation,
+                frame,
+                state,
+                trace,
+                read,
+                write,
+                callEffectRunner,
+                callFunction,
+                executeOperations,
+              },
               operation,
             )
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR Effect result runner returned a non-outcome value')
-            const outcome = result.value
-            write(operation.outcome, { value: outcome, fromCall: true })
-            const branch: AggregateValue =
-              outcome.tag === 0
-                ? Object.freeze({
-                    _tag: 'AggregateValue',
-                    type: operation.successType,
-                    fields: Object.freeze([
-                      Object.freeze({ field: operation.successField, value: outcome.payload }),
-                    ]),
-                  })
-                : (() => {
-                    const failure = Type.failureCarrierMember(
-                      operation.outcomeType.type,
-                      outcome.tag,
-                      'OneBased',
-                    )
-                    if (failure === undefined)
-                      throw new RangeError('MIR Effect result has an invalid failure tag')
-                    const failureValue: Value = Type.isUnion(operation.failureValueType)
-                      ? Object.freeze({
-                          _tag: 'UnionValue',
-                          type: operation.failureValueType,
-                          member: failure,
-                          payload: outcome.payload,
-                        })
-                      : outcome.payload
-                    return Object.freeze({
-                      _tag: 'AggregateValue' as const,
-                      type: operation.failureType,
-                      fields: Object.freeze([
-                        Object.freeze({ field: operation.failureField, value: failureValue }),
-                      ]),
-                    })
-                  })()
-            const outer: UnionValue = Object.freeze({
-              _tag: 'UnionValue',
-              type: operation.resultUnion,
-              member: outcome.tag === 0 ? operation.successType : operation.failureType,
-              payload: branch,
-            })
-            const completed: AggregateValue = Object.freeze({
-              _tag: 'AggregateValue',
-              type: operation.resultType.type,
-              fields: Object.freeze([
-                Object.freeze({ field: operation.resultField, value: outer }),
-              ]),
-            })
-            write(operation.destination, { value: completed, fromCall: true })
+            if (effectStep !== undefined) return effectStep
             break
           }
           case 'CloseEffectEntry': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
-            const runner = functionFor(program, operation.runner, operation.typeArguments)
+            const target = BootstrapEffect.functionFor(
+              program,
+              operation.target,
+              operation.typeArguments,
+            )
+            const runner = BootstrapEffect.functionFor(
+              program,
+              operation.runner,
+              operation.typeArguments,
+            )
             if (target === undefined || runner === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -5262,7 +3256,11 @@ function* executeFunction(
             break
           }
           case 'Call': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
+            const target = BootstrapEffect.functionFor(
+              program,
+              operation.target,
+              operation.typeArguments,
+            )
             if (target === undefined) {
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -5789,7 +3787,7 @@ export const evaluate = (
       trace: Object.freeze([]),
     })
   }
-  const violations = Mir.verify(program)
+  const violations = MirVerification.verify(program)
   if (violations.length > 0) {
     return Object.freeze({
       _tag: 'Blocked',
@@ -5800,7 +3798,7 @@ export const evaluate = (
   }
   const machine = Mir.machineEntry(program)
   const entry = machine.declaration
-  const fn = functionFor(program, entry, machine.typeArguments)
+  const fn = BootstrapEffect.functionFor(program, entry, machine.typeArguments)
   if (fn === undefined) {
     return Object.freeze({
       _tag: 'Blocked',
@@ -5841,7 +3839,7 @@ export const evaluate = (
   if (result._tag === 'Blocked') {
     if (result.reason._tag === 'Trap') {
       const frozenTrace = Object.freeze([...trace])
-      const history = causalHistory(frozenTrace, 'Trap')
+      const history = BootstrapEffect.causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
         _tag: 'Trap',
         classification: 'Trap',
@@ -5849,7 +3847,10 @@ export const evaluate = (
         status: 2,
         reason: result.reason.reason,
         provenance: result.reason.span,
-        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        logicalPath: BootstrapEffect.longestCausalPath(
+          history,
+          BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+        ),
         history,
         trace: frozenTrace,
       })
@@ -5879,7 +3880,7 @@ export const evaluate = (
     if (failure === undefined) {
       const provenance = argumentSpanFallback(fn)
       const frozenTrace = Object.freeze([...trace])
-      const history = causalHistory(frozenTrace, 'Trap')
+      const history = BootstrapEffect.causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
         _tag: 'Trap',
         classification: 'Trap',
@@ -5887,13 +3888,16 @@ export const evaluate = (
         status: 2,
         reason: 'effect entry returned failure status without a closed typed failure',
         provenance,
-        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        logicalPath: BootstrapEffect.longestCausalPath(
+          history,
+          BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+        ),
         history,
         trace: frozenTrace,
       })
     }
     const frozenTrace = Object.freeze([...trace])
-    const history = causalHistory(frozenTrace, 'TypedFailure', failure.identity)
+    const history = BootstrapEffect.causalHistory(frozenTrace, 'TypedFailure', failure.identity)
     const cause = history.at(-1)
     return Object.freeze({
       _tag: 'UnhandledFailure',
@@ -5903,16 +3907,19 @@ export const evaluate = (
       tag: failure.tag,
       identity: failure.identity,
       provenance: cause?.provenance ?? argumentSpanFallback(fn),
-      logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+      logicalPath: BootstrapEffect.longestCausalPath(
+        history,
+        BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+      ),
       history,
       trace: frozenTrace,
     })
   }
   const frozenTrace = Object.freeze([...trace])
-  const history = causalHistory(frozenTrace, 'Success')
+  const history = BootstrapEffect.causalHistory(frozenTrace, 'Success')
   const root = frozenTrace.find(
     (event): event is EntryTraceEvent =>
-      event._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name),
+      event._tag === 'Entry' && !BootstrapEffect.isPhysicalEntryAdapter(event.function.name),
   )
   const provenance =
     [...frozenTrace].reverse().find((event) => event._tag === 'Return')?.span ??

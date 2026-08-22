@@ -24,7 +24,7 @@ pub fn recover(problem: Problem) -> i32 { return problem.code }
       assert.isDefined(declaration)
       const raw = Analysis.documentationOfSyntax(snapshot, 'docs/main', declaration.syntax)
       assert.isDefined(raw)
-      const syntax = Analysis.syntaxOf(snapshot, 'docs/main')
+      const syntax = Analysis.moduleAnalysis(snapshot, 'docs/main')?.syntax
       assert.isDefined(syntax)
 
       const parsed = Document.parse(syntax.source, raw)
@@ -47,7 +47,7 @@ pub fn recover() -> i32 { return 1 }
     const declaration = Analysis.declarationIndex(snapshot).modules.at(0)?.declarations.at(0)
     assert.isDefined(declaration)
     const raw = Analysis.documentationOfSyntax(snapshot, 'malformed/main', declaration.syntax)
-    const syntax = Analysis.syntaxOf(snapshot, 'malformed/main')
+    const syntax = Analysis.moduleAnalysis(snapshot, 'malformed/main')?.syntax
     assert.isDefined(raw)
     assert.isDefined(syntax)
 

@@ -1,4 +1,6 @@
-import * as Backend from '@silk-effect/compiler/Backend'
+import type * as HeapObservation from '@silk-effect/compiler/HeapObservation'
+import * as LlvmBackend from '@silk-effect/compiler/LlvmBackend'
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
@@ -67,8 +69,13 @@ export interface Options {
 /** Compiles an explicitly selected root source outside the project manifest workflow. */
 export const run = Effect.fn('BuildExeCommand.run')(function* (
   options: Options,
-): Effect.fn.Return<Workflow.ExitStatus, never, FileSystem.FileSystem | Path.Path> {
-  const selected = Target.select(options.target)
+): Effect.fn.Return<
+  Workflow.ExitStatus,
+  never,
+  FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
+> {
+  const selected =
+    options.target === undefined ? NativeToolchain.hostSelection() : Target.select(options.target)
   if (selected._tag === 'Unavailable' || !Target.isNative(selected.target)) {
     yield* Console.error(
       selected._tag === 'Unavailable'
@@ -84,7 +91,7 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
   }
   const attempted = yield* Workflow.compile({
     entry: loaded.success,
-    backend: Backend.LlvmBackend,
+    backend: LlvmBackend.LlvmBackend,
     ...(options.target === undefined ? {} : { target: options.target }),
     profile: options.profile,
     destination: options.output,

@@ -1,8 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Layout from '../src/Layout.js'
-import * as Mir from '../src/Mir.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
 import * as SemanticInvalidation from '../src/SemanticInvalidation.js'
@@ -499,10 +499,13 @@ pub fn make() -> some<F: fn(i64) -> i64> F { return identity }`,
     )
       return
     assert.notStrictEqual(
-      Layout.encode(beforeRuntime.layout.value),
-      Layout.encode(afterRuntime.layout.value),
+      LayoutEncode.encode(beforeRuntime.layout.value),
+      LayoutEncode.encode(afterRuntime.layout.value),
     )
-    assert.notStrictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
+    assert.notStrictEqual(
+      MirEncoding.encode(beforeRuntime.mir.value),
+      MirEncoding.encode(afterRuntime.mir.value),
+    )
     const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
     const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
     assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
@@ -566,10 +569,13 @@ pub fn make<T>(value: T) -> some<F: fn(i32) -> i32> F { drop value return identi
       )
         return
       assert.strictEqual(
-        Layout.encode(beforeRuntime.layout.value),
-        Layout.encode(afterRuntime.layout.value),
+        LayoutEncode.encode(beforeRuntime.layout.value),
+        LayoutEncode.encode(afterRuntime.layout.value),
       )
-      assert.notStrictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
+      assert.notStrictEqual(
+        MirEncoding.encode(beforeRuntime.mir.value),
+        MirEncoding.encode(afterRuntime.mir.value),
+      )
       const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
       const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
       assert.notStrictEqual(beforeArtifact.wat, afterArtifact.wat)
@@ -632,10 +638,13 @@ pub fn make<B, A>(captured: A) -> some<F: once fn(A) -> A> F { return select<A>(
     )
       return
     assert.strictEqual(
-      Layout.encode(beforeRuntime.layout.value),
-      Layout.encode(afterRuntime.layout.value),
+      LayoutEncode.encode(beforeRuntime.layout.value),
+      LayoutEncode.encode(afterRuntime.layout.value),
     )
-    assert.strictEqual(Mir.encode(beforeRuntime.mir.value), Mir.encode(afterRuntime.mir.value))
+    assert.strictEqual(
+      MirEncoding.encode(beforeRuntime.mir.value),
+      MirEncoding.encode(afterRuntime.mir.value),
+    )
     const beforeArtifact = yield* Analysis.codegenWasm(beforeRuntime, { mode: 'release' })
     const afterArtifact = yield* Analysis.codegenWasm(afterRuntime, { mode: 'release' })
     assert.strictEqual(beforeArtifact.wat, afterArtifact.wat)

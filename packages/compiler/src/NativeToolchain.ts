@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  copyFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,22 +10,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { arch, platform, tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import * as Data from 'effect/Data'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Result from 'effect/Result'
 import type * as Backend from './Backend.js'
-import type * as Target from './Target.js'
+import * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
-/**
- * Pinned-Clang and durable-artifact orchestration: build scopes own path-backed intermediates,
- * native object/shim/link work and LLVM-Wasm finalization share one process boundary, while final
- * direct-Wasm bytes use the same atomic storage boundary without invoking Clang. The
- * `NativeLinker` service with its
- * `ClangLinker` implementation. Node-only by construction — reachable as a deep import so the
- * package root stays browser-safe. Failures are data with full command provenance.
- */
-
-/** The caller-pinned external toolchain. No PATH discovery is performed. */
 export interface Toolchain {
   readonly _tag: 'Toolchain'
   readonly clang: string
@@ -33,175 +27,379 @@ export interface Toolchain {
   readonly artifactCache?: ArtifactCache
 }
 
-/** Process-local compiled shim bytes shared explicitly across independent build scopes. */
 export interface ShimCache {
   readonly _tag: 'ShimCache'
-  readonly get: (key: string) => Uint8Array | undefined
-  readonly set: (key: string, bytes: Uint8Array) => void
+  readonly get: (key: string) => Effect.Effect<Uint8Array | undefined, ToolchainError>
+  readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
   readonly stats: () => ShimCacheStats
 }
 
-/** Operational counters for observing whether a shared shim cache is effective. */
 export interface ShimCacheStats {
   readonly entries: number
   readonly hits: number
   readonly misses: number
 }
 
-/** Makes an explicitly owned, process-local cache of path-independent shim object bytes. */
 export const makeShimCache = (): ShimCache => {
   const objects = new Map<string, Uint8Array>()
   let hits = 0
   let misses = 0
   return Object.freeze({
     _tag: 'ShimCache',
-    get: (key: string) => {
-      const bytes = objects.get(key)
-      if (bytes === undefined) misses += 1
-      else hits += 1
-      return bytes
-    },
-    set: (key: string, bytes: Uint8Array) => {
-      objects.set(key, Uint8Array.from(bytes))
-    },
+    get: (key: string) =>
+      Effect.sync(() => {
+        const bytes = objects.get(key)
+        if (bytes === undefined) misses += 1
+        else hits += 1
+        return bytes
+      }),
+    set: (key: string, bytes: Uint8Array) =>
+      Effect.sync(() => {
+        objects.set(key, Uint8Array.from(bytes))
+      }),
     stats: () => Object.freeze({ entries: objects.size, hits, misses }),
   })
 }
 
-/** Reads immutable counters from a shared shim cache. */
 export const shimCacheStats = (self: ShimCache): ShimCacheStats => self.stats()
 
-/**
- * Content-addressed storage of finished artifact bytes, keyed by everything that can change the
- * output. A hit skips the external toolchain entirely.
- */
+export type Stage =
+  | 'host-target'
+  | 'cache-key'
+  | 'cache-read'
+  | 'cache-write'
+  | 'scope-acquire'
+  | 'scope-cleanup'
+  | 'scope-write'
+  | 'object'
+  | 'shim'
+  | 'link'
+  | 'wasm-finalize'
+  | 'artifact-commit'
+  | 'artifact-cleanup'
+
+export type ToolchainErrorReason =
+  | {
+      readonly _tag: 'SpawnFailed'
+      readonly planned: ToolchainPlan.PlannedCommand
+      readonly status: number | null
+      readonly output: string
+      readonly cause?: unknown
+    }
+  | {
+      readonly _tag: 'StorageFailed'
+      readonly path: string
+      readonly cause: unknown
+    }
+  | {
+      readonly _tag: 'LinkFailed'
+      readonly planned: ToolchainPlan.PlannedCommand
+      readonly status: number | null
+      readonly output: string
+      readonly cause?: unknown
+    }
+
+/** An expected failure at the Node toolchain boundary. */
+export class ToolchainError extends Data.TaggedError('ToolchainError')<{
+  readonly operation: string
+  readonly stage: Stage
+  readonly message: string
+  readonly reason: ToolchainErrorReason
+}> {}
+
+const storageError = (
+  operation: string,
+  stage: Stage,
+  path: string,
+  cause: unknown,
+): ToolchainError =>
+  new ToolchainError({
+    operation,
+    stage,
+    message: `${operation} failed for ${path}`,
+    reason: { _tag: 'StorageFailed', path, cause },
+  })
+
+const processError = (
+  operation: string,
+  stage: 'object' | 'shim' | 'wasm-finalize',
+  planned: ToolchainPlan.PlannedCommand,
+  status: number | null,
+  output: string,
+  cause?: unknown,
+): ToolchainError =>
+  new ToolchainError({
+    operation,
+    stage,
+    message: `${operation} failed: ${output || `process exited with status ${String(status)}`}`,
+    reason: {
+      _tag: 'SpawnFailed',
+      planned,
+      status,
+      output,
+      ...(cause === undefined ? {} : { cause }),
+    },
+  })
+
+const linkError = (
+  planned: ToolchainPlan.PlannedCommand,
+  status: number | null,
+  output: string,
+  cause?: unknown,
+): ToolchainError =>
+  new ToolchainError({
+    operation: 'NativeToolchain.ClangLinker.link',
+    stage: 'link',
+    message: `NativeToolchain.ClangLinker.link failed: ${output}`,
+    reason: {
+      _tag: 'LinkFailed',
+      planned,
+      status,
+      output,
+      ...(cause === undefined ? {} : { cause }),
+    },
+  })
+
 export interface ArtifactCache {
   readonly _tag: 'ArtifactCache'
-  readonly get: (key: string) => Uint8Array | undefined
-  readonly set: (key: string, bytes: Uint8Array) => void
+  readonly get: (key: string) => Effect.Effect<Uint8Array | undefined, ToolchainError>
+  readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
 }
 
-/** Makes a durable artifact cache under `directory`, shared across processes. */
+/** Reads a caller-supplied artifact cache without allowing callback throws past the boundary. */
+export const readArtifactCache = Effect.fnUntraced(function* (
+  cache: ArtifactCache,
+  key: string,
+): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.get(key),
+    catch: (cause) => storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ToolchainError
+        ? cause
+        : storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
+    ),
+  )
+})
+
+/** Writes a caller-supplied artifact cache without allowing callback throws past the boundary. */
+export const writeArtifactCache = Effect.fnUntraced(function* (
+  cache: ArtifactCache,
+  key: string,
+  bytes: Uint8Array,
+): Effect.fn.Return<void, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.set(key, bytes),
+    catch: (cause) => storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ToolchainError
+        ? cause
+        : storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
+    ),
+  )
+})
+
+let atomicNonce = 0
+
+export interface CleanupOperation {
+  readonly remove: (
+    path: string,
+    options: { readonly force: true; readonly recursive?: boolean },
+  ) => void
+}
+
+const nodeCleanup: CleanupOperation = Object.freeze({
+  remove: (path: string, options: { readonly force: true; readonly recursive?: boolean }) =>
+    rmSync(path, options),
+})
+
+/** Removes one scoped path, retrying once while retaining both arbitrary failure causes. */
+const cleanupPath = Effect.fnUntraced(function* (
+  path: string,
+  options: { readonly force: true; readonly recursive?: boolean },
+  cleanup: CleanupOperation,
+  stage: 'scope-cleanup' | 'artifact-cleanup',
+): Effect.fn.Return<void, ToolchainError> {
+  const first = yield* Effect.result(
+    Effect.try({
+      try: () => cleanup.remove(path, options),
+      catch: (cause) => cause,
+    }),
+  )
+  if (Result.isSuccess(first)) return
+  const retry = yield* Effect.result(
+    Effect.try({
+      try: () => cleanup.remove(path, options),
+      catch: (cause) => cause,
+    }),
+  )
+  if (Result.isSuccess(retry)) return
+  const fallback = yield* Effect.result(
+    Effect.try({
+      try: () => nodeCleanup.remove(path, options),
+      catch: (cause) => cause,
+    }),
+  )
+  return yield* storageError('NativeToolchain.cleanupPath', stage, path, {
+    first: first.failure,
+    retry: retry.failure,
+    ...(Result.isFailure(fallback) ? { fallback: fallback.failure } : {}),
+  })
+})
+
+const releaseCleanup = <A, E>(
+  exit: Exit.Exit<A, E>,
+  cleanup: Effect.Effect<void, ToolchainError>,
+): Effect.Effect<void, ToolchainError> =>
+  Exit.isSuccess(exit)
+    ? cleanup
+    : cleanup.pipe(
+        Effect.catch((error) =>
+          Effect.logError(error).pipe(
+            Effect.annotateLogs('cleanupOperation', error.operation),
+            Effect.annotateLogs('cleanupStage', error.stage),
+          ),
+        ),
+      )
+
+/** Atomically writes bytes through a unique same-directory temporary sibling. */
+export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* (
+  destination: string,
+  bytes: Uint8Array,
+  options: {
+    readonly mode?: number
+    readonly stage?: Stage
+    readonly cleanup?: CleanupOperation
+  } = {},
+): Effect.fn.Return<string, ToolchainError> {
+  const path = resolve(destination)
+  const temporary = `${path}.silk-tmp-${process.pid}-${atomicNonce++}`
+  const stage = options.stage ?? 'artifact-commit'
+  return yield* Effect.acquireUseRelease(
+    Effect.try({
+      try: () => {
+        mkdirSync(dirname(path), { recursive: true })
+        return temporary
+      },
+      catch: (cause) => storageError('NativeToolchain.atomicCommit.prepare', stage, path, cause),
+    }),
+    (staged) =>
+      Effect.try({
+        try: () => {
+          writeFileSync(
+            staged,
+            bytes,
+            options.mode === undefined ? undefined : { mode: options.mode },
+          )
+          renameSync(staged, path)
+          if (options.mode !== undefined) chmodSync(path, options.mode)
+          return path
+        },
+        catch: (cause) => storageError('NativeToolchain.atomicCommit', stage, path, cause),
+      }),
+    (staged, exit) =>
+      releaseCleanup(
+        exit,
+        cleanupPath(staged, { force: true }, options.cleanup ?? nodeCleanup, 'artifact-cleanup'),
+      ),
+  )
+})
+
 export const makeDiskArtifactCache = (directory: string): ArtifactCache => {
   const root = resolve(directory)
   return Object.freeze({
     _tag: 'ArtifactCache',
-    get: (key: string) => {
+    get: Effect.fnUntraced(function* (key: string) {
       const path = join(root, key)
-      if (!existsSync(path)) return undefined
-      try {
-        return readFileSync(path)
-      } catch {
-        // ponytail: an unreadable entry is a miss, not a build failure.
-        return undefined
-      }
-    },
-    set: (key: string, bytes: Uint8Array) => {
-      try {
-        mkdirSync(root, { recursive: true })
-        // Stage then rename, so a concurrent reader never observes a partial entry.
-        const path = join(root, key)
-        const temporary = `${path}.silk-tmp-${process.pid}`
-        writeFileSync(temporary, bytes)
-        renameSync(temporary, path)
-      } catch {
-        // ponytail: caching is an optimization; a write failure must not fail the build.
-      }
-    },
+      return yield* Effect.try({
+        try: () => (existsSync(path) ? readFileSync(path) : undefined),
+        catch: (cause) =>
+          storageError('NativeToolchain.ArtifactCache.get', 'cache-read', path, cause),
+      })
+    }),
+    set: Effect.fnUntraced(function* (key: string, bytes: Uint8Array) {
+      yield* atomicCommit(join(root, key), bytes, { stage: 'cache-write' })
+    }),
   })
 }
 
 const processArtifactCache = new Map<string, Uint8Array>()
 
-/**
- * The artifact cache used when a toolchain pins none of its own: the durable disk cache under
- * `SILK_NATIVE_CACHE_DIR` when that is set, otherwise process-local memory. The variable is how
- * test runs and CI share compiled artifacts across processes without threading a cache through
- * every call site.
- */
 export const defaultArtifactCache = (): ArtifactCache => {
   const directory = process.env.SILK_NATIVE_CACHE_DIR
   if (directory !== undefined && directory !== '') return makeDiskArtifactCache(directory)
   return Object.freeze({
     _tag: 'ArtifactCache',
-    get: (key: string) => processArtifactCache.get(key),
-    set: (key: string, bytes: Uint8Array) => {
-      processArtifactCache.set(key, Uint8Array.from(bytes))
-    },
+    get: (key: string) => Effect.succeed(processArtifactCache.get(key)),
+    set: (key: string, bytes: Uint8Array) =>
+      Effect.sync(() => {
+        processArtifactCache.set(key, Uint8Array.from(bytes))
+      }),
   })
 }
 
 const clangVersions = new Map<string, string>()
 
-/**
- * The first line of `clang --version`, memoized per path. The cache key needs the version, not
- * just the path: a durable cache outlives a toolchain upgrade installed at the same location.
- * A failed probe contributes the empty string — the path still participates in the key.
- */
-const clangVersionOf = (clang: string): string => {
+const clangVersionOf = Effect.fnUntraced(function* (
+  clang: string,
+): Effect.fn.Return<string, ToolchainError> {
   const cached = clangVersions.get(clang)
   if (cached !== undefined) return cached
-  let version = ''
-  try {
-    const probe = spawnSync(clang, ['--version'], { encoding: 'utf8' })
-    version = probe.status === 0 ? (probe.stdout.split('\n', 1)[0] ?? '') : ''
-  } catch {
-    version = ''
+  const planned: ToolchainPlan.PlannedCommand = Object.freeze({
+    _tag: 'PlannedCommand',
+    stage: 'Object',
+    command: clang,
+    arguments: Object.freeze(['--version']),
+    target: Target.wasm32UnknownUnknown,
+  })
+  const result = yield* Effect.try({
+    try: () => spawnSync(clang, ['--version'], { encoding: 'utf8' }),
+    catch: (cause) =>
+      processError('NativeToolchain.clangVersionOf', 'object', planned, null, '', cause),
+  })
+  if (result.error !== undefined || result.status !== 0) {
+    return yield* processError(
+      'NativeToolchain.clangVersionOf',
+      'object',
+      planned,
+      result.status,
+      `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`,
+      result.error,
+    )
   }
+  const version = result.stdout.split('\n', 1)[0] ?? ''
   clangVersions.set(clang, version)
   return version
-}
+})
 
-/**
- * Derives the cache identity of a finished artifact. Every input that can change the emitted
- * bytes participates, so a hit is only ever served for a byte-identical build.
- */
-export const artifactCacheKey = (
+export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(function* (
   toolchain: Toolchain,
   kind: FinalArtifact['kind'],
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
   bitcode: Uint8Array | string,
   shimSource: string,
-): string => {
-  const digest = createHash('sha256')
-  digest.update(kind)
-  digest.update('\0')
-  digest.update(target.triple)
-  digest.update('\0')
-  digest.update(profile)
-  digest.update('\0')
-  digest.update(toolchain.clang)
-  digest.update('\0')
-  digest.update(clangVersionOf(toolchain.clang))
-  digest.update('\0')
-  digest.update(shimSource)
-  digest.update('\0')
-  digest.update(bitcode)
-  return `${digest.digest('hex')}.${kind === 'NativeExecutable' ? 'bin' : 'wasm'}`
-}
+): Effect.fn.Return<string, ToolchainError> {
+  const version = yield* clangVersionOf(toolchain.clang)
+  return yield* Effect.try({
+    try: () => {
+      const digest = createHash('sha256')
+      for (const value of [kind, target.id, profile, toolchain.clang, version, shimSource]) {
+        digest.update(value)
+        digest.update('\0')
+      }
+      digest.update(bitcode)
+      return `${digest.digest('hex')}.${kind === 'NativeExecutable' ? 'bin' : 'wasm'}`
+    },
+    catch: (cause) =>
+      storageError('NativeToolchain.artifactCacheKey', 'cache-key', toolchain.clang, cause),
+  })
+})
 
-/** Commits cached artifact bytes straight to their destination, bypassing the toolchain. */
-export const commitCachedArtifact = (
-  bytes: Uint8Array,
-  kind: FinalArtifact['kind'],
-  target: Target.Target,
-  destination: string,
-): FinalArtifact | StorageFailure => {
-  const path = resolve(destination)
-  const temporary = `${path}.silk-tmp-${process.pid}`
-  try {
-    // A cached native executable must be restored runnable; bytes alone do not carry the mode.
-    writeFileSync(temporary, bytes, kind === 'NativeExecutable' ? { mode: 0o755 } : undefined)
-    renameSync(temporary, path)
-    return Object.freeze({ _tag: 'FinalArtifact', kind, path, target })
-  } catch (cause) {
-    rmSync(temporary, { force: true })
-    return storageFailure(path, cause)
-  }
-}
-
-/** One owned, path-backed artifact tied to a build scope. */
 export interface PathArtifact {
   readonly _tag: 'PathArtifact'
   readonly scope: string
@@ -209,175 +407,177 @@ export interface PathArtifact {
   readonly target: Target.Target
 }
 
-/** One named build scope owning its intermediates until exit. */
 export interface BuildScope {
   readonly _tag: 'BuildScope'
   readonly name: string
   readonly root: string
 }
 
-/** A process failure retained as data: exact command, arguments, status, and output. */
-export interface ToolchainFailure {
-  readonly _tag: 'ToolchainFailure'
-  readonly planned: ToolchainPlan.PlannedCommand
-  readonly reason:
-    | { readonly _tag: 'ProcessError' }
-    | { readonly _tag: 'MissingInput'; readonly path: string }
-    | {
-        readonly _tag: 'TargetMismatch'
-        readonly expected: Target.Id
-        readonly actual: Target.Id
-      }
-  readonly status: number | null
-  readonly output: string
-}
-
-/** A successful object emission with its provenance. */
 export interface ObjectArtifact {
   readonly _tag: 'ObjectArtifact'
   readonly artifact: PathArtifact
   readonly planned: ToolchainPlan.PlannedCommand
 }
 
-/** A successfully linked executable with its provenance. */
 export interface Executable {
   readonly _tag: 'Executable'
   readonly path: string
+  readonly bytes: Uint8Array
   readonly target: Target.Target
   readonly planned: ToolchainPlan.PlannedCommand
 }
 
-/** A durable artifact produced after backend emission. */
 export interface FinalArtifact {
   readonly _tag: 'FinalArtifact'
   readonly kind: 'NativeExecutable' | 'WebAssemblyModule'
   readonly path: string
+  readonly bytes: Uint8Array
   readonly target: Target.Target
   readonly planned?: ToolchainPlan.PlannedCommand
 }
 
-/** Durable artifact storage failed outside an external process. */
-export interface StorageFailure {
-  readonly _tag: 'StorageFailure'
-  readonly operation: 'NativeToolchain.commit'
-  readonly destination: string
-  readonly message: string
-  readonly cause: unknown
-}
+export const hostTarget = Effect.fn('NativeToolchain.hostTarget')(function* (): Effect.fn.Return<
+  Target.Target,
+  Target.TargetError
+> {
+  return yield* Target.fromHost(platform(), arch())
+})
 
-export type FinalizationFailure = ToolchainFailure | StorageFailure
+/** Selects the current Node process host without pulling Node detection into the pure target actor. */
+export const hostSelection = (): Target.Selection => Target.select(undefined, platform(), arch())
 
-/**
- * Runs one function inside a named build scope. The scope's directory and every unpromoted
- * artifact are removed at exit — after success and failure alike — unless `saveTemps` retains
- * them for inspection.
- */
-export const withBuildScope = <A>(
+export const withBuildScope = Effect.fn('NativeToolchain.withBuildScope')(function* <A, E, R>(
   name: string,
-  run: (scope: BuildScope) => A,
-  options: { readonly saveTemps?: boolean } = {},
-): A => {
-  const root = mkdtempSync(join(tmpdir(), `silk-${name.replace(/[^A-Za-z0-9_-]/g, '_')}-`))
-  const scope: BuildScope = Object.freeze({ _tag: 'BuildScope', name, root })
-  try {
-    return run(scope)
-  } finally {
-    if (options.saveTemps !== true) {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }
-}
+  run: (scope: BuildScope) => Effect.Effect<A, E, R>,
+  options: { readonly saveTemps?: boolean; readonly cleanup?: CleanupOperation } = {},
+): Effect.fn.Return<A, E | ToolchainError, R> {
+  return yield* Effect.acquireUseRelease(
+    Effect.try({
+      try: () => {
+        const root = mkdtempSync(join(tmpdir(), `silk-${name.replace(/[^A-Za-z0-9_-]/g, '_')}-`))
+        return Object.freeze({ _tag: 'BuildScope' as const, name, root })
+      },
+      catch: (cause) =>
+        storageError('NativeToolchain.withBuildScope', 'scope-acquire', tmpdir(), cause),
+    }),
+    run,
+    (scope, exit) =>
+      options.saveTemps === true
+        ? Effect.succeed(undefined)
+        : releaseCleanup(
+            exit,
+            cleanupPath(
+              scope.root,
+              { recursive: true, force: true },
+              options.cleanup ?? nodeCleanup,
+              'scope-cleanup',
+            ),
+          ),
+  )
+})
 
-/** Writes bytes to a scope-owned path artifact. */
-export const writeArtifact = (
+const readShimCache = Effect.fnUntraced(function* (
+  cache: ShimCache,
+  key: string,
+): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.get(key),
+    catch: (cause) => storageError('NativeToolchain.ShimCache.get', 'cache-read', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      storageError('NativeToolchain.ShimCache.get', 'cache-read', key, cause),
+    ),
+  )
+})
+
+const writeShimCache = Effect.fnUntraced(function* (
+  cache: ShimCache,
+  key: string,
+  bytes: Uint8Array,
+): Effect.fn.Return<void, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.set(key, bytes),
+    catch: (cause) => storageError('NativeToolchain.ShimCache.set', 'cache-write', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      storageError('NativeToolchain.ShimCache.set', 'cache-write', key, cause),
+    ),
+  )
+})
+
+export const writeArtifact = Effect.fn('NativeToolchain.writeArtifact')(function* (
   scope: BuildScope,
   target: Target.Target,
   fileName: string,
   bytes: Uint8Array | string,
-): PathArtifact => {
+): Effect.fn.Return<PathArtifact, ToolchainError> {
   const path = join(scope.root, fileName)
-  writeFileSync(path, bytes)
-  return Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path, target })
-}
-
-/** Promotes a scope-owned artifact to a durable destination that survives scope exit. */
-export const promote = (artifact: PathArtifact, destination: string): string => {
-  const target = resolve(destination)
-  copyFileSync(artifact.path, target)
-  return target
-}
-
-const storageFailure = (destination: string, cause: unknown): StorageFailure =>
-  Object.freeze({
-    _tag: 'StorageFailure',
-    operation: 'NativeToolchain.commit',
-    destination,
-    message: `Cannot commit build artifact to ${destination}`,
-    cause,
+  yield* Effect.try({
+    try: () => writeFileSync(path, bytes),
+    catch: (cause) => storageError('NativeToolchain.writeArtifact', 'scope-write', path, cause),
   })
+  return Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path, target })
+})
 
-/** Atomically commits a scope-owned file through a same-directory temporary sibling. */
-const commit = (artifact: PathArtifact, destination: string): string | StorageFailure => {
-  const target = resolve(destination)
-  const temporary = `${target}.silk-tmp-${process.pid}`
-  try {
-    copyFileSync(artifact.path, temporary)
-    renameSync(temporary, target)
-    return target
-  } catch (cause) {
-    rmSync(temporary, { force: true })
-    return storageFailure(target, cause)
-  }
-}
-
-const runPlanned = (
+const runPlanned = Effect.fnUntraced(function* (
+  operation: string,
+  stage: 'object' | 'shim' | 'wasm-finalize',
   planned: ToolchainPlan.PlannedCommand,
-): { readonly status: number | null; readonly output: string } => {
-  const result = spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' })
+): Effect.fn.Return<void, ToolchainError> {
+  const result = yield* Effect.try({
+    try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
+    catch: (cause) => processError(operation, stage, planned, null, '', cause),
+  })
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
-  return { status: result.status, output }
-}
+  if (result.error !== undefined || result.status !== 0) {
+    return yield* processError(operation, stage, planned, result.status, output, result.error)
+  }
+})
 
-const failure = (
-  planned: ToolchainPlan.PlannedCommand,
-  status: number | null,
-  output: string,
-  reason: ToolchainFailure['reason'] = { _tag: 'ProcessError' },
-): ToolchainFailure => Object.freeze({ _tag: 'ToolchainFailure', planned, reason, status, output })
+const requirePath = Effect.fnUntraced(function* (
+  operation: string,
+  stage: Stage,
+  path: string,
+): Effect.fn.Return<void, ToolchainError> {
+  const exists = yield* Effect.try({
+    try: () => existsSync(path),
+    catch: (cause) => storageError(operation, stage, path, cause),
+  })
+  if (!exists)
+    return yield* storageError(operation, stage, path, new Error('expected output is missing'))
+})
 
-/**
- * Completes the backend's object contract: writes the bitcode into the scope and invokes the
- * pinned Clang with `-c` under the fixed profile, producing one relocatable target object.
- */
-export const emitObject = (
+export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
   baseName = 'program',
-): ObjectArtifact | ToolchainFailure => {
+): Effect.fn.Return<ObjectArtifact, ToolchainError> {
+  const bitcodePath = join(scope.root, `${baseName}.bc`)
   const objectPath = join(scope.root, `${baseName}.o`)
   const planned = ToolchainPlan.objectCommand(
     toolchain.clang,
     target,
     profile,
-    join(scope.root, `${baseName}.bc`),
+    bitcodePath,
     objectPath,
   )
   if (artifact.target.id !== target.id) {
-    return failure(
+    return yield* processError(
+      'NativeToolchain.emitObject',
+      'object',
       planned,
       null,
       `bitcode target ${artifact.target.id} does not match requested target ${target.id}`,
-      { _tag: 'TargetMismatch', expected: target.id, actual: artifact.target.id },
     )
   }
-  writeArtifact(scope, target, `${baseName}.bc`, artifact.bitcode)
-  const result = runPlanned(planned)
-  if (result.status !== 0 || !existsSync(objectPath)) {
-    return failure(planned, result.status, result.output)
-  }
+  yield* writeArtifact(scope, target, `${baseName}.bc`, artifact.bitcode)
+  yield* runPlanned('NativeToolchain.emitObject', 'object', planned)
+  yield* requirePath('NativeToolchain.emitObject', 'object', objectPath)
   return Object.freeze({
     _tag: 'ObjectArtifact',
     artifact: Object.freeze({
@@ -388,40 +588,36 @@ export const emitObject = (
     }),
     planned,
   })
-}
+})
 
-/** Compiles the minimal runtime shim inside the scope with the pinned Clang. */
-export const compileShim = (
+export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   target: Target.Target,
   termination: Backend.Termination,
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
-): ObjectArtifact | ToolchainFailure => {
+): Effect.fn.Return<ObjectArtifact, ToolchainError> {
   const sourceText = ToolchainPlan.shimSource(termination, nativeRuntimeSymbols)
   const cacheKey = `${toolchain.clang}\u0000${target.id}\u0000${sourceText}`
   const objectPath = join(scope.root, 'silk_shim.o')
-  const source = writeArtifact(scope, target, 'silk_shim.c', sourceText)
+  const source = yield* writeArtifact(scope, target, 'silk_shim.c', sourceText)
   const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
-  const cached = toolchain.shimCache?.get(cacheKey)
+  const cached =
+    toolchain.shimCache === undefined
+      ? undefined
+      : yield* readShimCache(toolchain.shimCache, cacheKey)
   if (cached !== undefined) {
-    writeArtifact(scope, target, 'silk_shim.o', cached)
-    return Object.freeze({
-      _tag: 'ObjectArtifact',
-      artifact: Object.freeze({
-        _tag: 'PathArtifact',
-        scope: scope.name,
-        path: objectPath,
-        target,
-      }),
-      planned,
+    yield* writeArtifact(scope, target, 'silk_shim.o', cached)
+  } else {
+    yield* runPlanned('NativeToolchain.compileShim', 'shim', planned)
+    yield* requirePath('NativeToolchain.compileShim', 'shim', objectPath)
+    const bytes = yield* Effect.try({
+      try: () => readFileSync(objectPath),
+      catch: (cause) => storageError('NativeToolchain.compileShim', 'shim', objectPath, cause),
     })
+    if (toolchain.shimCache !== undefined)
+      yield* writeShimCache(toolchain.shimCache, cacheKey, bytes)
   }
-  const result = runPlanned(planned)
-  if (result.status !== 0 || !existsSync(objectPath)) {
-    return failure(planned, result.status, result.output)
-  }
-  toolchain.shimCache?.set(cacheKey, readFileSync(objectPath))
   return Object.freeze({
     _tag: 'ObjectArtifact',
     artifact: Object.freeze({
@@ -432,163 +628,158 @@ export const compileShim = (
     }),
     planned,
   })
-}
+})
 
-/** The nominal native-linker service contract. */
-export interface NativeLinker {
-  readonly link: (
+export const ClangLinker = Object.freeze({
+  link: Effect.fn('NativeToolchain.ClangLinker.link')(function* (
     toolchain: Toolchain,
+    scope: BuildScope,
     target: Target.Target,
     objects: ReadonlyArray<PathArtifact>,
     libraries: ReadonlyArray<string>,
     destination: string,
-  ) => Executable | ToolchainFailure
-}
-
-/** The bootstrap linker driving the pinned Clang link driver with structured arguments. */
-export const ClangLinker: NativeLinker = Object.freeze({
-  link: (
-    toolchain: Toolchain,
-    target: Target.Target,
-    objects: ReadonlyArray<PathArtifact>,
-    libraries: ReadonlyArray<string>,
-    destination: string,
-  ): Executable | ToolchainFailure => {
-    const destinationPath = resolve(destination)
-    const temporaryPath = `${destinationPath}.silk-tmp-${process.pid}`
+  ): Effect.fn.Return<Executable, ToolchainError> {
+    const outputPath = join(scope.root, 'linked-program')
     const planned = ToolchainPlan.linkCommand(
       toolchain.clang,
       target,
       objects.map((object) => object.path),
       libraries,
-      temporaryPath,
+      outputPath,
     )
     for (const object of objects) {
       if (object.target.id !== target.id) {
-        return failure(
+        return yield* linkError(
           planned,
           null,
           `linker input ${object.path} targets ${object.target.id}; expected ${target.id}`,
-          { _tag: 'TargetMismatch', expected: target.id, actual: object.target.id },
         )
       }
-      if (!existsSync(object.path)) {
-        return failure(planned, null, `missing linker input: ${object.path}`, {
-          _tag: 'MissingInput',
-          path: object.path,
-        })
-      }
+      const exists = yield* Effect.try({
+        try: () => existsSync(object.path),
+        catch: (cause) =>
+          linkError(planned, null, `cannot inspect linker input ${object.path}`, cause),
+      })
+      if (!exists) return yield* linkError(planned, null, `missing linker input: ${object.path}`)
     }
-    const result = runPlanned(planned)
-    if (result.status !== 0 || !existsSync(temporaryPath)) {
-      rmSync(temporaryPath, { force: true })
-      return failure(planned, result.status, result.output)
-    }
-    try {
-      renameSync(temporaryPath, destinationPath)
-    } catch (cause) {
-      rmSync(temporaryPath, { force: true })
-      return failure(planned, null, `cannot commit linked executable: ${String(cause)}`)
-    }
-    return Object.freeze({
-      _tag: 'Executable',
-      path: destinationPath,
-      target: planned.target,
-      planned,
+    const result = yield* Effect.try({
+      try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
+      catch: (cause) => linkError(planned, null, '', cause),
     })
-  },
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
+    if (result.error !== undefined || result.status !== 0) {
+      return yield* linkError(planned, result.status, output, result.error)
+    }
+    yield* requirePath('NativeToolchain.ClangLinker.link', 'link', outputPath)
+    const bytes = yield* Effect.try({
+      try: () => readFileSync(outputPath),
+      catch: (cause) => storageError('NativeToolchain.ClangLinker.link', 'link', outputPath, cause),
+    })
+    const path = yield* atomicCommit(destination, bytes, {
+      mode: 0o755,
+      stage: 'artifact-commit',
+    })
+    return Object.freeze({ _tag: 'Executable', path, bytes, target, planned })
+  }),
 })
 
-const hasWasmHeader = (path: string): boolean => {
-  const bytes = readFileSync(path)
-  return (
-    bytes.length >= 8 &&
-    bytes[0] === 0 &&
-    bytes[1] === 97 &&
-    bytes[2] === 115 &&
-    bytes[3] === 109 &&
-    bytes[4] === 1 &&
-    bytes[5] === 0 &&
-    bytes[6] === 0 &&
-    bytes[7] === 0
-  )
-}
+const hasWasmHeader = (bytes: Uint8Array): boolean =>
+  bytes.length >= 8 &&
+  bytes[0] === 0 &&
+  bytes[1] === 97 &&
+  bytes[2] === 115 &&
+  bytes[3] === 109 &&
+  bytes[4] === 1 &&
+  bytes[5] === 0 &&
+  bytes[6] === 0 &&
+  bytes[7] === 0
 
-/** Finalizes LLVM bitcode as a standalone WebAssembly module and atomically commits it. */
-export const finalizeWasm = (
+export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
   destination: string,
-): FinalArtifact | FinalizationFailure => {
-  try {
-    const bitcode = writeArtifact(scope, target, 'program.bc', artifact.bitcode)
-    const outputPath = join(scope.root, 'program.wasm')
-    const planned = ToolchainPlan.wasmCommand(
-      toolchain.clang,
-      target,
-      profile,
-      bitcode.path,
-      outputPath,
-    )
-    if (artifact.target.id !== target.id) {
-      return failure(
-        planned,
-        null,
-        `bitcode target ${artifact.target.id} does not match requested target ${target.id}`,
-        {
-          _tag: 'TargetMismatch',
-          expected: target.id,
-          actual: artifact.target.id,
-        },
-      )
-    }
-    const result = runPlanned(planned)
-    if (result.status !== 0 || !existsSync(outputPath) || !hasWasmHeader(outputPath)) {
-      return failure(planned, result.status, result.output)
-    }
-    const committed = commit(
-      Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path: outputPath, target }),
-      destination,
-    )
-    if (typeof committed !== 'string') return committed
-    return Object.freeze({
-      _tag: 'FinalArtifact',
-      kind: 'WebAssemblyModule',
-      path: committed,
-      target,
+): Effect.fn.Return<FinalArtifact, ToolchainError> {
+  const bitcode = yield* writeArtifact(scope, target, 'program.bc', artifact.bitcode)
+  const outputPath = join(scope.root, 'program.wasm')
+  const planned = ToolchainPlan.wasmCommand(
+    toolchain.clang,
+    target,
+    profile,
+    bitcode.path,
+    outputPath,
+  )
+  if (artifact.target.id !== target.id) {
+    return yield* processError(
+      'NativeToolchain.finalizeWasm',
+      'wasm-finalize',
       planned,
-    })
-  } catch (cause) {
-    return storageFailure(destination, cause)
+      null,
+      `bitcode target ${artifact.target.id} does not match requested target ${target.id}`,
+    )
   }
-}
+  yield* runPlanned('NativeToolchain.finalizeWasm', 'wasm-finalize', planned)
+  yield* requirePath('NativeToolchain.finalizeWasm', 'wasm-finalize', outputPath)
+  const bytes = yield* Effect.try({
+    try: () => readFileSync(outputPath),
+    catch: (cause) =>
+      storageError('NativeToolchain.finalizeWasm', 'wasm-finalize', outputPath, cause),
+  })
+  if (!hasWasmHeader(bytes)) {
+    return yield* processError(
+      'NativeToolchain.finalizeWasm',
+      'wasm-finalize',
+      planned,
+      0,
+      'invalid WebAssembly output',
+    )
+  }
+  const path = yield* atomicCommit(destination, bytes)
+  return Object.freeze({
+    _tag: 'FinalArtifact',
+    kind: 'WebAssemblyModule',
+    path,
+    bytes,
+    target,
+    planned,
+  })
+})
 
-/** Atomically commits already-validated direct WebAssembly bytes without invoking Clang. */
-export const commitWasm = (
-  scope: BuildScope,
+export const commitWasm = Effect.fn('NativeToolchain.commitWasm')(function* (
   artifact: Backend.WebAssemblyModuleArtifact,
   destination: string,
-): FinalArtifact | StorageFailure => {
-  try {
-    const staged = writeArtifact(scope, artifact.target, 'program.wasm', artifact.bytes)
-    if (!hasWasmHeader(staged.path)) {
-      return storageFailure(
-        destination,
-        new TypeError('backend bytes are not a WebAssembly module'),
-      )
-    }
-    const committed = commit(staged, destination)
-    if (typeof committed !== 'string') return committed
-    return Object.freeze({
-      _tag: 'FinalArtifact',
-      kind: 'WebAssemblyModule',
-      path: committed,
-      target: artifact.target,
-    })
-  } catch (cause) {
-    return storageFailure(destination, cause)
+): Effect.fn.Return<FinalArtifact, ToolchainError> {
+  if (!hasWasmHeader(artifact.bytes)) {
+    return yield* storageError(
+      'NativeToolchain.commitWasm',
+      'artifact-commit',
+      destination,
+      new TypeError('backend bytes are not a WebAssembly module'),
+    )
   }
-}
+  const bytes = Uint8Array.from(artifact.bytes)
+  const path = yield* atomicCommit(destination, bytes)
+  return Object.freeze({
+    _tag: 'FinalArtifact',
+    kind: 'WebAssemblyModule',
+    path,
+    bytes,
+    target: artifact.target,
+  })
+})
+
+export const commitCachedArtifact = Effect.fn('NativeToolchain.commitCachedArtifact')(function* (
+  bytes: Uint8Array,
+  kind: FinalArtifact['kind'],
+  target: Target.Target,
+  destination: string,
+): Effect.fn.Return<FinalArtifact, ToolchainError> {
+  const copy = Uint8Array.from(bytes)
+  const path = yield* atomicCommit(destination, copy, {
+    ...(kind === 'NativeExecutable' ? { mode: 0o755 } : {}),
+    stage: 'artifact-commit',
+  })
+  return Object.freeze({ _tag: 'FinalArtifact', kind, path, bytes: copy, target })
+})

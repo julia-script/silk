@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as FiniteRow from '../src/FiniteRow.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceSpan from '../src/SourceSpan.js'
@@ -432,6 +433,53 @@ it('canonicalizes callable contracts and orders invocation guarantees', () => {
   )
   assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(shared, unsafe)), true)
   assert.strictEqual(TypeCompatibility.isCompatible(TypeCompatibility.check(unsafe, shared)), false)
+})
+
+it('applies the Shared < Exclusive < Take order across compatibility and inference', () => {
+  const accesses = ['Shared', 'Exclusive', 'Take'] as const
+  const expected = [
+    [true, true, true],
+    [false, true, true],
+    [false, false, true],
+  ] as const
+
+  for (const [requiredOrdinal, required] of accesses.entries()) {
+    for (const [suppliedOrdinal, supplied] of accesses.entries()) {
+      const accepted = expected.at(requiredOrdinal)?.at(suppliedOrdinal) ?? false
+      const requiredCallable = Type.callable(['i32'], 'i32', required)
+      const suppliedCallable = Type.callable(['i32'], 'i32', supplied)
+      const requiredEffect = Type.effect('i32', [], required)
+      const suppliedEffect = Type.effect('i32', [], supplied)
+
+      assert.strictEqual(Type.compareAccess(supplied, required), accepted)
+      assert.strictEqual(
+        TypeCompatibility.isCompatible(TypeCompatibility.check(requiredCallable, suppliedCallable)),
+        accepted,
+      )
+      assert.strictEqual(
+        TypeCompatibility.isCompatible(TypeCompatibility.check(requiredEffect, suppliedEffect)),
+        accepted,
+      )
+      assert.strictEqual(
+        TypeInference.infer(suppliedCallable, requiredCallable, new Map()),
+        accepted,
+      )
+      assert.strictEqual(TypeInference.infer(suppliedEffect, requiredEffect, new Map()), accepted)
+    }
+  }
+})
+
+it('searches every nested type position including requirement capabilities', () => {
+  const borrowed = Type.slice('Shared', 'u8')
+  const capability = Type.nominal('test', 'Capability', [borrowed])
+  const effect = Type.effect('i32', [], 'Shared', [
+    { capability, role: 'DefaultRole', access: 'Shared' },
+  ])
+
+  assert.strictEqual(Type.someSubterm(effect, Type.isSlice), true)
+  assert.strictEqual(Type.containsBorrow(effect), true)
+  assert.strictEqual(Type.containsViewBorrow(effect), true)
+  assert.strictEqual(Type.containsPositionRestrictedBorrow(effect), true)
 })
 
 it('normalizes finite rows and applies total exact set operations deterministically', () => {

@@ -3,7 +3,9 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -249,8 +251,8 @@ pub effect fn main() -> () ! SomeError {
 
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
-    const first = Mir.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
-    const second = Mir.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
+    const first = MirEncoding.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
+    const second = MirEncoding.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
     assert.strictEqual(first, golden('lowered.mir.txt'))
     assert.strictEqual(first, second)
   }),
@@ -269,24 +271,26 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
     const storedOperations = stored.functions.at(0)
     const directOperations = direct.functions.at(0)
 
-    assert.deepEqual(Mir.verify(stored), [])
-    assert.deepEqual(Mir.verify(direct), [])
+    assert.deepEqual(MirVerification.verify(stored), [])
+    assert.deepEqual(MirVerification.verify(direct), [])
     assert.deepEqual(
       storedOperations === undefined
         ? []
-        : Mir.operations(storedOperations).map((operation) => operation._tag),
+        : MirVerification.operations(storedOperations).map((operation) => operation._tag),
       ['Literal', 'MakeCallable', 'Move', 'Literal', 'ApplyCallable', 'Drop'],
     )
     assert.deepEqual(
       directOperations === undefined
         ? []
-        : Mir.operations(directOperations).map((operation) => operation._tag),
+        : MirVerification.operations(directOperations).map((operation) => operation._tag),
       ['Literal', 'Literal', 'ApplyCallable'],
     )
     const applied =
       directOperations === undefined
         ? undefined
-        : Mir.operations(directOperations).find((operation) => operation._tag === 'ApplyCallable')
+        : MirVerification.operations(directOperations).find(
+            (operation) => operation._tag === 'ApplyCallable',
+          )
     assert.strictEqual(
       applied?._tag === 'ApplyCallable' ? applied.realization : undefined,
       'DirectErasedSection',
@@ -324,7 +328,7 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
       ),
     })
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidCallableOperation',
     )
   }),
@@ -356,14 +360,14 @@ pub fn main() -> i32 {
     const borrowedTags =
       borrowedMain === undefined
         ? []
-        : Mir.operations(borrowedMain).map((operation) => operation._tag)
+        : MirVerification.operations(borrowedMain).map((operation) => operation._tag)
     const consumedTags =
       consumedMain === undefined
         ? []
-        : Mir.operations(consumedMain).map((operation) => operation._tag)
+        : MirVerification.operations(consumedMain).map((operation) => operation._tag)
 
-    assert.deepEqual(Mir.verify(borrowed), [])
-    assert.deepEqual(Mir.verify(consumed), [])
+    assert.deepEqual(MirVerification.verify(borrowed), [])
+    assert.deepEqual(MirVerification.verify(consumed), [])
     assert.ok(borrowedTags.indexOf('BeginLoan') < borrowedTags.indexOf('MakeCallable'))
     assert.ok(borrowedTags.indexOf('MakeCallable') < borrowedTags.indexOf('EndLoan'))
     assert.ok(borrowedTags.indexOf('EndLoan') < borrowedTags.indexOf('Drop'))
@@ -389,16 +393,18 @@ pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`),
       const composedMain = composed.functions.at(0)
       const groupedMain = grouped.functions.at(0)
 
-      assert.deepEqual(Mir.verify(composed), [])
-      assert.deepEqual(Mir.verify(grouped), [])
+      assert.deepEqual(MirVerification.verify(composed), [])
+      assert.deepEqual(MirVerification.verify(grouped), [])
       assert.include(
         composedMain === undefined
           ? []
-          : Mir.operations(composedMain).map((operation) => operation._tag),
+          : MirVerification.operations(composedMain).map((operation) => operation._tag),
         'RunStaticEffect',
       )
       assert.strictEqual(
-        groupedMain === undefined ? undefined : Mir.operations(groupedMain).at(-1)?._tag,
+        groupedMain === undefined
+          ? undefined
+          : MirVerification.operations(groupedMain).at(-1)?._tag,
         'ApplyCallable',
       )
     }),
@@ -422,10 +428,10 @@ pub fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
     for (const source of sources) {
       const first = Analysis.loweredMir(yield* snapshot(source))
       const second = Analysis.loweredMir(yield* snapshot(source))
-      assert.deepEqual(Mir.verify(first), [])
-      assert.deepEqual(Mir.verify(second), [])
-      const encoded = Mir.encode(first)
-      assert.strictEqual(encoded, Mir.encode(second))
+      assert.deepEqual(MirVerification.verify(first), [])
+      assert.deepEqual(MirVerification.verify(second), [])
+      const encoded = MirEncoding.encode(first)
+      assert.strictEqual(encoded, MirEncoding.encode(second))
       assert.include(encoded, 'apply-callable')
       if (source === sources.at(0)) assert.strictEqual(encoded, golden('generic.mir.txt'))
     }
@@ -451,12 +457,12 @@ it.effect('lowers bindings and ownership violations with generated cleanup or tr
   Effect.gen(function* () {
     const bindings = Analysis.loweredMir(yield* snapshot(bindingSource))
     const bindingFunction = bindings.functions.at(0)
-    assert.deepEqual(Mir.verify(bindings), [])
-    assert.strictEqual(Mir.encode(bindings), golden('bindings.mir.txt'))
+    assert.deepEqual(MirVerification.verify(bindings), [])
+    assert.strictEqual(MirEncoding.encode(bindings), golden('bindings.mir.txt'))
     assert.deepEqual(
       bindingFunction === undefined
         ? []
-        : Mir.operations(bindingFunction).map((operation) => operation._tag),
+        : MirVerification.operations(bindingFunction).map((operation) => operation._tag),
       ['Literal', 'Call', 'Move', 'Literal', 'Move', 'Drop', 'Drop'],
     )
 
@@ -466,7 +472,7 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`),
     )
     const violatedFunction = violated.functions.at(0)
     const outcome =
-      violatedFunction === undefined ? undefined : Mir.outcomes(violatedFunction).at(0)
+      violatedFunction === undefined ? undefined : MirVerification.outcomes(violatedFunction).at(0)
     assert.strictEqual(outcome?._tag, 'Trap')
     assert.strictEqual(outcome?._tag === 'Trap' ? outcome.reason : '', 'ownership violation')
   }),
@@ -483,7 +489,7 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
     assert.deepEqual(
       builtinFunction === undefined
         ? []
-        : Mir.operations(builtinFunction).map((operation) =>
+        : MirVerification.operations(builtinFunction).map((operation) =>
             operation._tag === 'Binary' ? `Binary:${operation.operator}` : operation._tag,
           ),
       ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
@@ -493,7 +499,9 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
     )
     const unavailableFunction = unavailable.functions.at(0)
     assert.strictEqual(
-      unavailableFunction === undefined ? undefined : Mir.outcomes(unavailableFunction).at(0)?._tag,
+      unavailableFunction === undefined
+        ? undefined
+        : MirVerification.outcomes(unavailableFunction).at(0)?._tag,
       'Trap',
     )
   }),
@@ -511,12 +519,12 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
       ['main', 'adjust'],
     )
     const mir = Analysis.loweredMir(result)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const main = mir.functions.find((fn) => fn.id.name === 'main')
     const matches =
       main === undefined
         ? []
-        : Mir.operations(main).filter((operation) => operation._tag === 'Match')
+        : MirVerification.operations(main).filter((operation) => operation._tag === 'Match')
     assert.strictEqual(matches.length, 2)
     assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
     const outerMember = matches.at(0)?.decisions.at(0)?.member
@@ -529,10 +537,10 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
       innerMember !== undefined && Type.isNominal(innerMember) ? innerMember.name : undefined,
       'Token',
     )
-    assert.strictEqual(Mir.encode(mir), golden('match.mir.txt'))
+    assert.strictEqual(MirEncoding.encode(mir), golden('match.mir.txt'))
     assert.strictEqual(
-      Mir.encode(mir),
-      Mir.encode(Analysis.loweredMir(yield* snapshot(nestedMatchSource))),
+      MirEncoding.encode(mir),
+      MirEncoding.encode(Analysis.loweredMir(yield* snapshot(nestedMatchSource))),
     )
   }),
 )
@@ -562,7 +570,7 @@ it.effect('rejects hand-built match decisions before evaluation or emission', ()
 
     assert.strictEqual(changed, true)
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidMatchDecision',
     )
   }),
@@ -575,9 +583,9 @@ it.effect('lowers branch diamonds identically across runs', () =>
   Effect.gen(function* () {
     const first = Analysis.loweredMir(yield* snapshot(branchProgram))
     const second = Analysis.loweredMir(yield* snapshot(branchProgram))
-    assert.deepEqual(Mir.verify(first), [])
-    assert.strictEqual(Mir.encode(first), golden('branch-program.mir.txt'))
-    assert.strictEqual(Mir.encode(first), Mir.encode(second))
+    assert.deepEqual(MirVerification.verify(first), [])
+    assert.strictEqual(MirEncoding.encode(first), golden('branch-program.mir.txt'))
+    assert.strictEqual(MirEncoding.encode(first), MirEncoding.encode(second))
   }),
 )
 

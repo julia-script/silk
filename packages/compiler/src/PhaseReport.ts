@@ -1,3 +1,7 @@
+import * as Clock from 'effect/Clock'
+import * as Duration from 'effect/Duration'
+import * as Effect from 'effect/Effect'
+
 /** Deterministic semantic-revision counts attached to the invalidation phase. */
 export interface SemanticInvalidationCounters {
   readonly _tag: 'SemanticInvalidationCounters'
@@ -40,6 +44,11 @@ export interface Measured<A> {
   readonly report: PhaseReport
 }
 
+export interface MeasurementOptions<A = never> {
+  readonly heapBytes?: () => number
+  readonly counters?: (value: A) => Counters
+}
+
 /** Constructs one immutable phase observation. */
 export const make = (options: {
   readonly phase: string
@@ -58,11 +67,12 @@ export const measure = <A>(
   run: () => A,
   outputs: (value: A) => number,
   diagnostics: (value: A) => number = () => 0,
-  heapBytes?: () => number,
+  options: MeasurementOptions<A> = {},
 ): Measured<A> => {
   const startedAt = performance.now()
   const value = run()
-  const observedHeap = heapBytes?.()
+  const observedHeap = options.heapBytes?.()
+  const counters = options.counters?.(value)
   return Object.freeze({
     value,
     report: make({
@@ -72,6 +82,65 @@ export const measure = <A>(
       outputs: outputs(value),
       diagnostics: diagnostics(value),
       ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
+      ...(counters === undefined ? {} : { counters }),
     }),
   })
 }
+
+/** Measures a synchronous phase and appends its observation to an accumulating report. */
+export const measureInto = <A>(
+  report: Array<PhaseReport>,
+  phase: string,
+  inputs: number,
+  run: () => A,
+  outputs: (value: A) => number,
+  diagnostics: (value: A) => number = () => 0,
+  options: MeasurementOptions<A> = {},
+): A => {
+  const measured = measure(phase, inputs, run, outputs, diagnostics, options)
+  report.push(measured.report)
+  return measured.value
+}
+
+/** Measures one Effect phase using the fiber clock. */
+export const measureEffect = Effect.fn('PhaseReport.measureEffect')(function* <A, E, R>(
+  phase: string,
+  inputs: number,
+  effect: Effect.Effect<A, E, R>,
+  outputs: (value: A) => number,
+  diagnostics: (value: A) => number = () => 0,
+  options: MeasurementOptions<A> = {},
+): Effect.fn.Return<Measured<A>, E, R> {
+  const startedAt = yield* Clock.currentTimeNanos
+  const value = yield* effect
+  const finishedAt = yield* Clock.currentTimeNanos
+  const observedHeap = options.heapBytes?.()
+  const counters = options.counters?.(value)
+  return Object.freeze({
+    value,
+    report: make({
+      phase,
+      elapsedMs: Duration.toMillis(Duration.nanos(finishedAt - startedAt)),
+      inputs,
+      outputs: outputs(value),
+      diagnostics: diagnostics(value),
+      ...(observedHeap === undefined ? {} : { heapBytes: observedHeap }),
+      ...(counters === undefined ? {} : { counters }),
+    }),
+  })
+})
+
+/** Measures one Effect phase and appends its observation without duplicating timing policy. */
+export const measureEffectInto = Effect.fn('PhaseReport.measureEffectInto')(function* <A, E, R>(
+  report: Array<PhaseReport>,
+  phase: string,
+  inputs: number,
+  effect: Effect.Effect<A, E, R>,
+  outputs: (value: A) => number,
+  diagnostics: (value: A) => number = () => 0,
+  options: MeasurementOptions<A> = {},
+): Effect.fn.Return<A, E, R> {
+  const measured = yield* measureEffect(phase, inputs, effect, outputs, diagnostics, options)
+  report.push(measured.report)
+  return measured.value
+})

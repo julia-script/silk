@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Result from 'effect/Result'
-import * as Backend from '../src/Backend.js'
 import * as BackendRegistry from '../src/BackendRegistry.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Target from '../src/Target.js'
 
 it('resolves stable backend ids independently from targets', () => {
@@ -9,7 +9,7 @@ it('resolves stable backend ids independently from targets', () => {
   const wasm = BackendRegistry.resolve('wasm')
   assert.strictEqual(Result.isSuccess(llvm), true)
   assert.strictEqual(Result.isSuccess(wasm), true)
-  if (Result.isSuccess(llvm)) assert.strictEqual(llvm.success, Backend.LlvmBackend)
+  if (Result.isSuccess(llvm)) assert.strictEqual(llvm.success, LlvmBackend.LlvmBackend)
   if (Result.isSuccess(wasm)) assert.strictEqual(wasm.success.id, 'wasm')
 })
 

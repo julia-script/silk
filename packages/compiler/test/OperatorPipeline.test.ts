@@ -4,7 +4,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const source = 'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 const encoder = new TextEncoder()
@@ -20,7 +21,7 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
       'aarch64-apple-darwin',
     )
     const fn = Analysis.loweredMir(snapshot).functions.at(0)
-    const operations = fn === undefined ? [] : Mir.operations(fn)
+    const operations = fn === undefined ? [] : MirVerification.operations(fn)
     const zero = operations.find(
       (operation) => operation._tag === 'Literal' && operation.value === 0n,
     )
@@ -51,7 +52,7 @@ it.effect('pins one operator pipeline through canonical HIR, MIR, LLVM, and WebA
     const wasmArtifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
 
     assert.strictEqual(Hir.encode(Analysis.rootAnalysis(native).hir), golden('hir.txt'))
-    assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('mir.txt'))
+    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(native)), golden('mir.txt'))
     assert.strictEqual(llvmArtifact.ir, golden('ll.txt'))
     assert.strictEqual(wasmArtifact.wat, golden('wat.txt'))
     assert.strictEqual(

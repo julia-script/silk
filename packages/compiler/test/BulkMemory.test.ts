@@ -7,11 +7,14 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Driver from '../src/Driver.js'
-import * as Mir from '../src/Mir.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -91,7 +94,7 @@ it.effect('copies a raw-storage range identically on the evaluator, LLVM, and Wa
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 76n)
     assert.strictEqual(evaluated.trace.filter((event) => event._tag === 'RawBufferCopy').length, 1)
-    const encoded = Mir.encode(Analysis.loweredMir(snapshot))
+    const encoded = MirEncoding.encode(Analysis.loweredMir(snapshot))
     assert.include(encoded, 'raw-buffer-copy')
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -302,7 +305,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 const aliasDestinationWithSource = (program: Mir.Module): Mir.Module => {
   let rewritten = 0
   const functions = program.functions.map((fn) => {
-    const operations = Mir.operations(fn)
+    const operations = MirVerification.operations(fn)
     const copy = operations.find((operation) => operation._tag === 'RawBufferCopy')
     if (copy === undefined) return fn
     const view = operations.find(
@@ -356,7 +359,7 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
     assert.strictEqual(untouched.result.value, 58n)
 
     const overlapping = aliasDestinationWithSource(Analysis.loweredMir(snapshot))
-    assert.deepEqual(Mir.verify(overlapping), [])
+    assert.deepEqual(MirVerification.verify(overlapping), [])
 
     const evaluated = BootstrapEvaluation.evaluate(Analysis.instancesOf(snapshot), overlapping)
     assert.strictEqual(evaluated._tag, 'Completed')
@@ -367,9 +370,9 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
     assert.strictEqual(runWasm(wasm.bytes), 45)
 
     const overlappingBackend: Backend.Backend = Object.freeze({
-      ...Backend.LlvmBackend,
+      ...LlvmBackend.LlvmBackend,
       emit: (program: Mir.Module, request: Backend.CodegenRequest) =>
-        Backend.LlvmBackend.emit(aliasDestinationWithSource(program), request),
+        LlvmBackend.LlvmBackend.emit(aliasDestinationWithSource(program), request),
     })
     const compiled = yield* compileNative(
       'bulk-memory/overlap',
@@ -422,7 +425,7 @@ it.effect('appends borrowed bytes through the copy intrinsic on the evaluator an
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const encoded = Mir.encode(Analysis.loweredMir(snapshot))
+    const encoded = MirEncoding.encode(Analysis.loweredMir(snapshot))
     assert.include(encoded, 'raw-buffer-copy')
 
     const evaluated = Analysis.evaluate(snapshot)

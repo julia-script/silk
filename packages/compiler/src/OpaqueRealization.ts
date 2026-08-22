@@ -1,7 +1,10 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as Canonical from './internal/Canonical.js'
+import * as Graph from './internal/Graph.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
@@ -10,7 +13,7 @@ export interface Capture {
   readonly _tag: 'OpaqueCapture'
   readonly ordinal: number
   readonly type: Type.Type
-  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly access: Type.CaptureAccess
 }
 
 /** The actual producer specialization and executable site that constructed one realization. */
@@ -41,7 +44,7 @@ export interface Definition {
     | Type.RepresentationParameterArgument
   readonly arguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<Capture>
-  readonly access: 'Shared' | 'Exclusive' | 'Take'
+  readonly access: Type.CallableMode
   readonly cleanup: 'Trivial' | 'Required'
   readonly suspendable: boolean
   readonly bodyFingerprint: string
@@ -128,7 +131,7 @@ const evidenceOf = (
     Type.equalsOpaqueFamily(argument.family, family),
   )
   if (nestedFamily) {
-    const argument = Elaboration.representationOfExpression(expression)
+    const argument = ExpressionAnalysis.representationOfExpression(expression)
     if (argument !== undefined) return Object.freeze([Object.freeze({ argument, expression })])
   }
   const expectedArgument = Type.isRepresented(expected)
@@ -140,7 +143,7 @@ const evidenceOf = (
     !Type.equalsOpaqueFamily(expectedArgument.family, family)
   )
     return Object.freeze([])
-  const argument = Elaboration.representationOfExpression(expression)
+  const argument = ExpressionAnalysis.representationOfExpression(expression)
   return argument === undefined
     ? Object.freeze([])
     : Object.freeze([Object.freeze({ argument, expression })])
@@ -148,7 +151,7 @@ const evidenceOf = (
 
 const sourceBodyFingerprint = (
   result: Elaboration.Result,
-  declaration: DeclarationIndex.DeclarationFact,
+  declaration: DeclarationFacts.DeclarationFact,
 ): string => {
   const body = SyntaxTree.directNode(declaration.syntax, 'Block')
   const span = body?.span ?? declaration.syntax.span
@@ -196,7 +199,7 @@ const constructionExpression = (
 }
 
 const captureType = (
-  reference: Elaboration.BindingDeclarationFact | DeclarationIndex.ParameterFact,
+  reference: Elaboration.BindingDeclarationFact | DeclarationFacts.ParameterFact,
 ): Type.Type | undefined => {
   if (reference._tag === 'BindingFact')
     return reference.inferredType._tag === 'Available' ? reference.inferredType.type : undefined
@@ -361,7 +364,7 @@ const specializeRealization = (
   instance: Type.OpaqueRepresentationArgument,
   realization: Type.RepresentationArgument,
 ): Type.RepresentationArgument | undefined => {
-  const substitution = Type.substitution(
+  const substitution = TypeInference.substitution(
     producer.function.declaration.typeParameters.map((parameter) => parameter.type),
     instance.arguments,
   )
@@ -374,7 +377,7 @@ const specializeDefinition = (
   found: Definition,
   instance: Type.OpaqueRepresentationArgument,
 ): Definition | undefined => {
-  const substitution = Type.substitution(found.parameters, instance.arguments)
+  const substitution = TypeInference.substitution(found.parameters, instance.arguments)
   if (substitution === undefined) return undefined
   const realization = Type.substituteGenericArgument(found.realization, substitution)
   if (!Type.isRepresentationArgument(realization)) return undefined
@@ -416,49 +419,16 @@ const stronglyConnectedCycles = (
 ): ReadonlyArray<ReadonlyArray<string>> => {
   const orderedKeys = [...new Set(keys)].sort()
   const known = new Set(orderedKeys)
-  const adjacency = new Map(
-    orderedKeys.map((key) => [
-      key,
-      Object.freeze(
-        [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
-      ),
-    ]),
+  const neighbors = (key: string): ReadonlyArray<string> =>
+    Object.freeze(
+      [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
+    )
+  return Object.freeze(
+    Graph.stronglyConnected(orderedKeys, neighbors).filter(
+      (component) =>
+        component.length > 1 || neighbors(component[0] ?? '').includes(component[0] ?? ''),
+    ),
   )
-  let nextIndex = 0
-  const indices = new Map<string, number>()
-  const lows = new Map<string, number>()
-  const stack: Array<string> = []
-  const stacked = new Set<string>()
-  const cycles: Array<ReadonlyArray<string>> = []
-  const visit = (key: string): void => {
-    indices.set(key, nextIndex)
-    lows.set(key, nextIndex)
-    nextIndex += 1
-    stack.push(key)
-    stacked.add(key)
-    for (const dependency of adjacency.get(key) ?? []) {
-      if (!indices.has(dependency)) {
-        visit(dependency)
-        lows.set(key, Math.min(lows.get(key) ?? 0, lows.get(dependency) ?? 0))
-      } else if (stacked.has(dependency)) {
-        lows.set(key, Math.min(lows.get(key) ?? 0, indices.get(dependency) ?? 0))
-      }
-    }
-    if (lows.get(key) !== indices.get(key)) return
-    const component: Array<string> = []
-    for (;;) {
-      const member = stack.pop()
-      if (member === undefined) break
-      stacked.delete(member)
-      component.push(member)
-      if (member === key) break
-    }
-    component.sort()
-    if (component.length > 1 || adjacency.get(key)?.includes(key) === true)
-      cycles.push(Object.freeze(component))
-  }
-  for (const key of orderedKeys) if (!indices.has(key)) visit(key)
-  return Object.freeze(cycles)
 }
 
 const inlineLayoutCycles = (
@@ -647,11 +617,3 @@ export const definitionOf = (
 
 /** Stable source family identity used by incremental dependency maps and test fixtures. */
 export const key = (self: Definition): string => familyKey(self.family)
-
-/** One privacy-preserving dependency summary that intentionally omits target and capture details. */
-export const publicOrigin = (
-  self: Definition,
-): {
-  readonly family: string
-  readonly bound: string
-} => Object.freeze({ family: key(self), bound: Type.key(self.instance.contract) })

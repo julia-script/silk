@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Stdlib from '../src/Stdlib.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -93,7 +93,7 @@ it.effect(
       )
       assert.isFalse(
         mir.functions.some((fn) =>
-          Mir.operations(fn).some(
+          MirVerification.operations(fn).some(
             (operation) => operation._tag === 'Call' && operation.target.name === 'counted',
           ),
         ),
@@ -107,11 +107,11 @@ it.effect(
       assert.isDefined(made)
       if (made === undefined) return
       assert.deepEqual(
-        Mir.operations(made).map((operation) => operation._tag),
+        MirVerification.operations(made).map((operation) => operation._tag),
         ['ConstructArray', 'Construct', 'ConvertUnion', 'Literal', 'Literal', 'Construct'],
       )
       assert.deepEqual(
-        Mir.operations(made).flatMap((operation) =>
+        MirVerification.operations(made).flatMap((operation) =>
           operation._tag === 'Literal'
             ? [`${operation.value.toString()} : ${operation.type._tag}`]
             : [],

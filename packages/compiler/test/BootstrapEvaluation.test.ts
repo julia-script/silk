@@ -2,7 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import { corpus } from './support/corpus.js'
 import * as Json from './support/Json.js'
 
@@ -320,7 +321,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       outcome._tag,
       'Completed',
-      `${JSON.stringify({ diagnostics: self.diagnostics, outcome }, Json.bigIntReplacer, 2)}\n${Mir.encode(Analysis.loweredMir(self))}`,
+      `${JSON.stringify({ diagnostics: self.diagnostics, outcome }, Json.bigIntReplacer, 2)}\n${MirEncoding.encode(Analysis.loweredMir(self))}`,
     )
     if (outcome._tag !== 'Completed') return
     assert.strictEqual(outcome.result.value, 43n)

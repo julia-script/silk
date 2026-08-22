@@ -1,6 +1,7 @@
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
-import * as Backend from './Backend.js'
+import type * as Backend from './Backend.js'
+import * as LlvmBackend from './LlvmBackend.js'
 import type * as Target from './Target.js'
 import * as WasmBackend from './WasmBackend.js'
 
@@ -8,7 +9,7 @@ import * as WasmBackend from './WasmBackend.js'
 
 /** Every backend the bootstrap compiler can dispatch to, in deterministic order. */
 export const backends: ReadonlyArray<Backend.Backend> = Object.freeze([
-  Backend.LlvmBackend,
+  LlvmBackend.LlvmBackend,
   WasmBackend.WasmBackend,
 ])
 

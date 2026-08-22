@@ -31,7 +31,7 @@ export const command = Command.make(
     }
     yield* CommandExit.complete(
       config.watch
-        ? yield* Workflow.watch(Workflow.build, options.success)
+        ? yield* Workflow.watch(Workflow.buildProject, options.success)
         : yield* Workflow.build(options.success),
     )
   }),

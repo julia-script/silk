@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus } from './support/corpus.js'
+import * as Driver from './support/TestDriver.js'
 
 const clang =
   process.env.SILK_TEST_CLANG ??
@@ -37,7 +37,7 @@ afterAll(() => {
 const compileSource = (
   name: string,
   text: string,
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed> =>
+): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),

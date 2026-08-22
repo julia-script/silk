@@ -1,4 +1,5 @@
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
@@ -34,14 +35,6 @@ const resumeOf = (
   path: Mir.ResumePointId['path'],
 ): Mir.ResumePointId => Object.freeze({ _tag: 'ResumePointId', point, path })
 
-const operationArguments = (
-  operation: Extract<
-    Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
-  >,
-): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect' ? operation.arguments : operation.arguments
-
 const runnerOf = (
   runner: ProvisionalMir.Runner,
   index: DeclarationIndex.Index,
@@ -51,7 +44,7 @@ const runnerOf = (
   >,
   functions: ReadonlyArray<Mir.MirFunction> = [],
 ): Mir.SuspensionRunner => {
-  const arguments_ = operation === undefined ? [] : operationArguments(operation)
+  const arguments_ = operation?.arguments ?? []
   const operationProviders = operation?._tag === 'RunEffectValue' ? operation.providers : []
   // One selection identity for both the dedup and the argument lookup below — two predicates
   // here previously let a provider count as "already selected" yet miss its runtime argument.
@@ -96,7 +89,7 @@ const runnerOf = (
       if (hasRuntimeArgument) runtimeOrdinal += 1
       const witness =
         provider.witness ??
-        DeclarationIndex.witness(index, provider.providerType, provider.capability)
+        ConformanceProof.witness(index, provider.providerType, provider.capability)
       return Object.freeze({
         ...provider,
         ...(witness === undefined ? {} : { witness }),
@@ -342,10 +335,6 @@ export const finalize = (
     functions,
   })
 }
-
-/** True when final MIR contains any target-neutral suspension control. */
-export const hasSuspension = (program: Mir.Module): boolean =>
-  program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
 
 /** Stable inspection summary for focused finalization tests. */
 export const summary = (program: Mir.Module): string =>

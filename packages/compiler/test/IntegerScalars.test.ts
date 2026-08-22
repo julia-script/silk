@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as Scalar from '../src/Scalar.js'
 
 const source = `import silk.i16 as i16
@@ -328,7 +328,7 @@ it.effect('uses concrete call and pipeline parameters as exact integer literal c
     assert.isAtLeast(contextualValues.filter((type) => type === 'u8').length, 3)
     assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 42 : u8')
     assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 13 : u8')
-    assert.include(Mir.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
+    assert.include(MirEncoding.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
 
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')

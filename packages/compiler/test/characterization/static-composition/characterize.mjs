@@ -3,10 +3,10 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../../../dist/Analysis.js'
 import * as FormattedDocument from '../../../dist/FormattedDocument.js'
 import * as Lexer from '../../../dist/Lexer.js'
-import * as Mir from '../../../dist/Mir.js'
 import * as Parser from '../../../dist/Parser.js'
 import * as SourceFile from '../../../dist/SourceFile.js'
 import * as SyntaxFormatter from '../../../dist/SyntaxFormatter.js'
+import * as MirVerification from '../../dist/MirVerification.js'
 
 const encoder = new TextEncoder()
 const sizes = [1, 8, 32, 64, 128]
@@ -124,7 +124,7 @@ for (const shape of shapes) {
         instances: wasmSnapshot.instances.instances.length,
         layouts: wasmSnapshot.layout.value.entries.length,
         mirFunctions: mir.functions.length,
-        mirOperations: mir.functions.flatMap(Mir.operations).length,
+        mirOperations: mir.functions.flatMap(MirVerification.operations).length,
         phaseMs: Object.fromEntries(
           wasmSnapshot.report.map((phase) => [phase.phase, Number(phase.elapsedMs.toFixed(3))]),
         ),

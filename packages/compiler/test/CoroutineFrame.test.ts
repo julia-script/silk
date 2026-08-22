@@ -3,7 +3,9 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Instances from '../src/Instances.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
@@ -32,7 +34,7 @@ it.effect('plans one deterministic maximum frame per specialized invocation', ()
     const left = Analysis.loweredMir(first)
     const right = Analysis.loweredMir(second)
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(Mir.verify(left), [])
+    assert.deepEqual(MirVerification.verify(left), [])
     assert.isDefined(left.coroutineFrames)
     assert.isDefined(right.coroutineFrames)
     if (left.coroutineFrames === undefined || right.coroutineFrames === undefined) return
@@ -40,7 +42,7 @@ it.effect('plans one deterministic maximum frame per specialized invocation', ()
       CoroutineFrame.summary(left.coroutineFrames),
       CoroutineFrame.summary(right.coroutineFrames),
     )
-    assert.strictEqual(Mir.encode(left), Mir.encode(right))
+    assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
 
     const descriptors = left.functions.flatMap((fn) =>
       fn.suspension?.frame === undefined ? [] : [fn.suspension.frame],
@@ -72,7 +74,7 @@ it.effect('plans one deterministic maximum frame per specialized invocation', ()
         )
       }
     }
-    assert.notInclude(Mir.encode(left), 'Allocator')
+    assert.notInclude(MirEncoding.encode(left), 'Allocator')
     assert.notInclude(CoroutineFrame.summary(left.coroutineFrames), 'allocator')
   }),
 )
@@ -82,7 +84,7 @@ it.effect('uses distinct resume states in one reusable invocation frame', () =>
     const self = yield* analyze()
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(Mir.verify(program), [])
+    assert.deepEqual(MirVerification.verify(program), [])
     const owner = program.functions.find((fn) => fn.id.name.startsWith('program$effect$'))
     const descriptor = owner?.suspension?.frame
     assert.isDefined(descriptor)
@@ -107,9 +109,9 @@ it.effect('keeps synchronous MIR free of coroutine-frame storage', () =>
     )
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(Mir.verify(program), [])
+    assert.deepEqual(MirVerification.verify(program), [])
     assert.isUndefined(program.coroutineFrames)
-    assert.notInclude(Mir.encode(program), 'coroutine-frame ')
+    assert.notInclude(MirEncoding.encode(program), 'coroutine-frame ')
   }),
 )
 
@@ -123,7 +125,9 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
     const { coroutineFrames: _coroutineFrames, ...logicalProgram } = program
     const withoutPlan: Mir.Module = Object.freeze(logicalProgram)
     assert.isTrue(
-      Mir.verify(withoutPlan).some((violation) => violation.rule === 'InvalidCoroutineFrame'),
+      MirVerification.verify(withoutPlan).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
     )
     const first = plan.entries.at(0)
     const firstState = first?.states.at(0)
@@ -147,7 +151,9 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
       }),
     })
     assert.isTrue(
-      Mir.verify(malformed).some((violation) => violation.rule === 'InvalidCoroutineFrame'),
+      MirVerification.verify(malformed).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
     )
     const stale: Mir.Module = Object.freeze({
       ...program,
@@ -156,6 +162,8 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
         entries: Object.freeze([...plan.entries, first]),
       }),
     })
-    assert.isTrue(Mir.verify(stale).some((violation) => violation.rule === 'InvalidCoroutineFrame'))
+    assert.isTrue(
+      MirVerification.verify(stale).some((violation) => violation.rule === 'InvalidCoroutineFrame'),
+    )
   }),
 )

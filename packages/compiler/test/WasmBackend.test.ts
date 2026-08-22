@@ -4,7 +4,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus } from './support/corpus.js'
 import * as WasmMain from './support/WasmMain.js'
@@ -95,7 +96,7 @@ pub fn main() -> i32 {
 }`
     const snapshot = yield* snapshotOf(source)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', evaluated._tag)
@@ -129,10 +130,10 @@ pub fn main() -> i32 {
     const snapshot = yield* snapshotOf(source)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const module = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     assert.isTrue(
       module.functions.some((fn) =>
-        Mir.operations(fn).some(
+        MirVerification.operations(fn).some(
           (operation) =>
             operation._tag === 'WritePlace' &&
             fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference',

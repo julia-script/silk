@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
@@ -16,7 +17,7 @@ const key = (instance: Instances.InstanceKey): string =>
     .join(',')}>`
 
 const names = (self: Analysis.Snapshot): ReadonlyArray<string> =>
-  Analysis.suspendableInstancesOf(self).map(key)
+  Projections.suspendableInstancesOf(self).map(key)
 
 const main = (recipe: string): string => `pub fn main() -> i32 { return run ${recipe} }`
 
@@ -105,14 +106,14 @@ effect fn program() -> i32 {
 ${main('program()')}`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const suspendable = Analysis.suspendableInstancesOf(self)
+    const suspendable = Projections.suspendableInstancesOf(self)
     assert.deepEqual(
       suspendable.map(Instances.keyText),
       [...suspendable.map(Instances.keyText)].sort(),
     )
     assert.deepEqual(
-      Analysis.suspendableEffectsOf(self),
-      [...Analysis.suspendableEffectsOf(self)].sort(),
+      Projections.suspendableEffectsOf(self),
+      [...Projections.suspendableEffectsOf(self)].sort(),
     )
     assert.isTrue(
       suspendable.some(
@@ -163,13 +164,16 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
     const first = yield* snapshot(source)
     const second = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(Analysis.suspendableInstancesOf(first), [])
-    assert.deepEqual(Analysis.suspendableEffectsOf(first), [])
+    assert.deepEqual(Projections.suspendableInstancesOf(first), [])
+    assert.deepEqual(Projections.suspendableEffectsOf(first), [])
     assert.deepEqual(
-      Analysis.suspendableInstancesOf(second),
-      Analysis.suspendableInstancesOf(first),
+      Projections.suspendableInstancesOf(second),
+      Projections.suspendableInstancesOf(first),
     )
-    assert.deepEqual(Analysis.suspendableEffectsOf(second), Analysis.suspendableEffectsOf(first))
+    assert.deepEqual(
+      Projections.suspendableEffectsOf(second),
+      Projections.suspendableEffectsOf(first),
+    )
   }),
 )
 

@@ -1,6 +1,35 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as HeapObservation from '../src/HeapObservation.js'
 import * as Target from '../src/Target.js'
+
+it('keeps the compiler root import graph free of Node built-ins', () => {
+  const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../src')
+  const pending = [resolve(sourceRoot, 'index.ts')]
+  const visited = new Set<string>()
+  while (pending.length > 0) {
+    const file = pending.pop()
+    if (file === undefined || visited.has(file)) continue
+    visited.add(file)
+    const source = readFileSync(file, 'utf8')
+    assert.notMatch(source, /from ['"]node:/, file)
+    for (const match of source.matchAll(/from ['"](\.\.?\/[^'"]+)\.js['"]/g)) {
+      const relative = match[1]
+      if (relative !== undefined) pending.push(resolve(dirname(file), `${relative}.ts`))
+    }
+  }
+  assert.isAbove(visited.size, 1)
+})
+
+it.effect('provides browser heap observation only when the browser layer is explicit', () =>
+  Effect.gen(function* () {
+    const observation = yield* HeapObservation.HeapObservation
+    assert.strictEqual(observation.heapBytes(), 0)
+  }).pipe(Effect.provide(HeapObservation.layerBrowser)),
+)
 
 it('defines the four canonical profiles in deterministic order', () => {
   assert.deepEqual(

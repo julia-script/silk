@@ -6,15 +6,14 @@ import type * as NameResolution from './NameResolution.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
 
-export type AnonymousExpression = ModuleTooling.AnonymousExpression
-
-export const statementExpressions = ModuleTooling.statementExpressions
-
 /** Tooling indexes, reusable module artifacts, and observations for one completed frontend. */
 export interface FrontendTooling {
   readonly toolingModules: ReadonlyMap<string, ModuleTooling.ModuleTooling>
   readonly semanticOccurrences: SemanticOccurrence.Index
-  readonly anonymousExpressions: ReadonlyMap<string, ReadonlyArray<AnonymousExpression>>
+  readonly anonymousExpressions: ReadonlyMap<
+    string,
+    ReadonlyArray<ModuleTooling.AnonymousExpression>
+  >
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
 }
 
@@ -42,19 +41,25 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
       ordinal += 1
       continue
     }
-    const occurrenceStartedAt = performance.now()
-    const semanticOccurrences = ModuleTooling.semanticOccurrenceIndex(
-      semantics,
-      frontend.index,
-      frontend.resolution,
+    const measuredOccurrences = yield* PhaseReport.measureEffect(
+      'semantic-occurrences',
+      1,
+      Effect.sync(() =>
+        ModuleTooling.semanticOccurrenceIndex(semantics, frontend.index, frontend.resolution),
+      ),
+      () => 1,
     )
-    occurrenceElapsedMs += performance.now() - occurrenceStartedAt
-    const expressionStartedAt = performance.now()
-    const anonymousExpressions = ModuleTooling.anonymousExpressionIndex(semantics)
-    expressionElapsedMs += performance.now() - expressionStartedAt
+    occurrenceElapsedMs += measuredOccurrences.report.elapsedMs
+    const measuredExpressions = yield* PhaseReport.measureEffect(
+      'anonymous-expressions',
+      1,
+      Effect.sync(() => ModuleTooling.anonymousExpressionIndex(semantics)),
+      () => 1,
+    )
+    expressionElapsedMs += measuredExpressions.report.elapsedMs
     toolingModules.set(
       module,
-      ModuleTooling.fromIndexes(semantics, semanticOccurrences, anonymousExpressions),
+      ModuleTooling.fromIndexes(semantics, measuredOccurrences.value, measuredExpressions.value),
     )
     ordinal += 1
   }

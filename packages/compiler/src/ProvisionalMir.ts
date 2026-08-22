@@ -1,9 +1,12 @@
-import type * as CallableFieldRealization from './CallableFieldRealization.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Suspension from './Suspension.js'
 import * as Type from './Type.js'
 
 /**
@@ -11,7 +14,7 @@ import * as Type from './Type.js'
  * not a `Mir.Module`: verification, evaluation, and backends cannot consume provisional control.
  */
 
-export type Classification = 'Synchronous' | 'Suspendable' | 'Unknown'
+export type Classification = Suspension.SuspensionClassification
 
 export type ExecutionKey =
   | {
@@ -25,7 +28,7 @@ export type ExecutionKey =
       readonly owner: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly identity: string
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
     }
   | {
       readonly _tag: 'ProvidedEffectRunnerExecution'
@@ -33,7 +36,7 @@ export type ExecutionKey =
       readonly site: Hir.EffectSiteId
       readonly identity: string
       readonly effectIdentity: string
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly providers: ReadonlyArray<Provider>
     }
 
@@ -48,61 +51,18 @@ export interface ControlId {
   readonly port: 'Origin' | 'Invoke' | 'Complete'
 }
 
-export interface Capture {
-  readonly ordinal: number
-  readonly source: 'Binding' | 'Parameter'
-  readonly sourceOrdinal: number
-  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
-  readonly type: DeclarationIndex.SemanticType
-}
+export interface Capture extends Suspension.Capture {}
 
-export interface Provider {
-  readonly capability: Type.Nominal
-  readonly providerType: Type.Nominal
-  readonly role: string
-  readonly requirementAccess: Type.Requirement['access']
-  readonly access: 'Shared' | 'Exclusive' | 'Take'
-  readonly witness?: DeclarationIndex.ConformanceWitness
-}
+export interface Provider extends Suspension.Provider {}
 
-export interface Runner {
+export interface Runner extends Suspension.RunnerBase<Capture, Provider> {
   readonly execution:
     | ExecutionKey
     | { readonly _tag: 'UnknownExecution'; readonly identity: string }
-  readonly classification: Classification
-  readonly declaration?: DeclarationIndex.CanonicalId
-  readonly instance?: Instances.InstanceKey
-  readonly effectIdentity?: string
   readonly providedIdentity?: string
-  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly outcome: Type.Effect
-  readonly captures: ReadonlyArray<Capture>
-  readonly providers: ReadonlyArray<Provider>
 }
 
-export type CompletionPolicy =
-  | {
-      readonly _tag: 'Propagate'
-      readonly outcome: Type.Effect
-      readonly failureMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
-    }
-  | {
-      readonly _tag: 'Reify'
-      readonly outcome: Type.Effect
-      readonly resultType: Type.Nominal
-      readonly resultField: DeclarationIndex.FieldId
-      readonly resultUnion: Type.StructuralUnion
-      readonly successType: Type.Nominal
-      readonly successField: DeclarationIndex.FieldId
-      readonly successTag: number
-      readonly failureType: Type.Nominal
-      readonly failureField: DeclarationIndex.FieldId
-      readonly failureTag: number
-      readonly failureValueType: Type.Type
-      readonly resultShape: Layout.CallingShape
-      readonly outcomeShape: Layout.CallingShape
-      readonly failureValueShape: Layout.CallingShape
-    }
+export type CompletionPolicy = Suspension.SuspensionCompletion
 
 export type Outcome =
   | {
@@ -319,8 +279,8 @@ const classificationOfEffect = (
       : 'Synchronous'
 
 const sameDeclaration = (
-  left: DeclarationIndex.CanonicalId,
-  right: DeclarationIndex.CanonicalId,
+  left: DeclarationFacts.CanonicalId,
+  right: DeclarationFacts.CanonicalId,
 ): boolean => left.module === right.module && left.name === right.name
 
 const providerKey = (provider: Provider): string =>
@@ -361,7 +321,7 @@ interface BuildContext {
 const storedEffectRealizationOf = (
   expression: Hir.Expression,
   context: BuildContext,
-): CallableFieldRealization.EffectRealization | undefined => {
+): FieldRealization.EffectRealization | undefined => {
   if (expression._tag === 'BindingReference') {
     const initializer = context.bindings.get(expression.binding.ordinal)
     return initializer === undefined ? undefined : storedEffectRealizationOf(initializer, context)
@@ -396,7 +356,7 @@ const serviceResultEffectOf = (
   )
   const implementation =
     provider?.witness?._tag === 'SourceConformanceWitness'
-      ? DeclarationIndex.witnessOperation(provider.witness, expression.operation)
+      ? ConformanceProof.witnessOperation(provider.witness, expression.operation)
       : undefined
   if (implementation === undefined || provider?.witness?._tag !== 'SourceConformanceWitness')
     return undefined
@@ -489,7 +449,7 @@ const providersOf = (
   if (capability === undefined || !Type.isNominal(capability) || !Type.isNominal(providerType))
     return providersOf(expression.protected, context)
   const witness =
-    expression.provider.witness ?? DeclarationIndex.witness(context.index, providerType, capability)
+    expression.provider.witness ?? ConformanceProof.witness(context.index, providerType, capability)
   return Object.freeze([
     ...providersOf(expression.protected, context),
     Object.freeze({
@@ -651,7 +611,7 @@ const runnerOf = (
           Type.equals(provider.capability, capability) && provider.role === service.role,
       )
       if (selected?.witness?._tag !== 'SourceConformanceWitness') return 'Unknown'
-      const implementation = DeclarationIndex.witnessOperation(selected.witness, service.operation)
+      const implementation = ConformanceProof.witnessOperation(selected.witness, service.operation)
       if (implementation === undefined) return 'Unknown'
       const candidates = Instances.matchingSpecialization(context.discovery, {
         declaration: implementation,
@@ -806,7 +766,7 @@ const catchHandlerRunner = (
     !Type.isEffect(handlerType.result)
   )
     return undefined
-  const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: callableIdentity.target.module,
     name: callableIdentity.target.name,
@@ -1392,7 +1352,7 @@ export const controlOfRun = (
 /** Returns the classification of an exact generated runner identity, if provisional facts name it. */
 export const classificationOfRunner = (
   self: Module,
-  runner: DeclarationIndex.CanonicalId,
+  runner: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
 ): Classification => {
   const argumentKey = typeArguments.map(Type.genericArgumentKey).join('\u0000')

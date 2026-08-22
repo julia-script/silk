@@ -3,8 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as ConformanceGoal from '../../dist/ConformanceGoal.js'
 import * as ConformanceHead from '../../dist/ConformanceHead.js'
-import * as DeclarationIndex from '../../dist/DeclarationIndex.js'
-import * as Mir from '../../dist/Mir.js'
+import * as ConformanceProof from '../../dist/ConformanceProof.js'
+import * as MirEncoding from '../../dist/MirEncoding.js'
 import * as Type from '../../dist/Type.js'
 
 /**
@@ -103,6 +103,18 @@ const optionalLoose = nominal('OptionalSchema', [loose])
  */
 const askedProviders = [nestedSchema, schema, optionalLoose, mappedTally, tally, mappedSchema]
 
+const proofDependencies = (proof) => {
+  const found = new Map()
+  const visit = (current) => {
+    if (current._tag !== 'Proved') return
+    for (const requirement of current.requirements) visit(requirement)
+    const key = ConformanceGoal.key(current.goal)
+    if (!found.has(key)) found.set(key, current.goal)
+  }
+  visit(proof)
+  return Object.freeze([...found.values()])
+}
+
 const encodeProof = ({ goal, proof }) => ({
   goal: ConformanceGoal.key(goal),
   encoded: ConformanceGoal.encode(goal),
@@ -110,7 +122,7 @@ const encodeProof = ({ goal, proof }) => ({
   selection: proof._tag === 'Proved' ? proof.selection._tag : proof.failure._tag,
   typeArguments:
     proof._tag === 'Proved' ? proof.typeArguments.map(Type.genericArgumentKey) : Object.freeze([]),
-  dependencies: ConformanceGoal.dependencies(proof).map(ConformanceGoal.key),
+  dependencies: proofDependencies(proof).map(ConformanceGoal.key),
   trace: ConformanceGoal.traceLines(proof),
 })
 
@@ -120,7 +132,7 @@ const proveAll = (target, providers) =>
   providers
     .map((provider) => ({
       goal: ConformanceGoal.make(decoder(provider), provider),
-      proof: DeclarationIndex.prove(target, provider, decoder(provider)),
+      proof: ConformanceProof.prove(target, provider, decoder(provider)),
     }))
     .map(encodeProof)
     .sort(byGoal)
@@ -249,7 +261,7 @@ process.stdout.write(
         arguments: instance.key.typeArguments.map(Type.genericArgumentKey),
         contractRow: instance.key.contractRow,
       })),
-      mir: Mir.encode(Analysis.loweredMir(wasm)),
+      mir: MirEncoding.encode(Analysis.loweredMir(wasm)),
       evaluation,
       wasm: hash(wasmArtifact.bytes),
       native: hash(nativeArtifact.bitcode),

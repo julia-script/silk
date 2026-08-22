@@ -1,12 +1,13 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
-import type * as Ownership from '../src/Ownership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -124,7 +125,7 @@ it.effect(
       assert.strictEqual(evaluated.result.value, 127n)
 
       // Six boxes, six acquires, six releases. An unhooked box traces six against two here.
-      const traced = counts(Analysis.allocationTraceEventsOf(evaluated))
+      const traced = counts(Projections.allocationTraceEventsOf(evaluated))
       assert.deepEqual(traced, { acquires: 6, releases: 6 })
 
       const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -200,7 +201,7 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
     assert.strictEqual(evaluated.result.value, 42n)
 
     // One box, one acquire, one release. Consuming the box still releases its storage exactly once.
-    assert.deepEqual(counts(Analysis.allocationTraceEventsOf(evaluated)), {
+    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
       acquires: 1,
       releases: 1,
     })
@@ -252,7 +253,7 @@ it.effect('releases an owning value held inside a box', () =>
     assert.strictEqual(evaluated.result.value, 42n)
 
     // Two allocations, the vector's buffer and the box's storage, and both come back.
-    const traced = counts(Analysis.allocationTraceEventsOf(evaluated))
+    const traced = counts(Projections.allocationTraceEventsOf(evaluated))
     assert.strictEqual(traced.acquires, 2)
     assert.strictEqual(traced.releases, traced.acquires)
 
@@ -318,7 +319,7 @@ it.effect('releases every link of a deep box chain', () =>
 
     // Sixty-four links, sixty-four allocations, and none of them abandoned by the drop that
     // unwinds them one call frame at a time.
-    assert.deepEqual(counts(Analysis.allocationTraceEventsOf(evaluated)), {
+    assert.deepEqual(counts(Projections.allocationTraceEventsOf(evaluated)), {
       acquires: 64,
       releases: 64,
     })
@@ -344,13 +345,13 @@ it.effect('plans one hook call per box rather than inlining the held value', () 
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-    const named = (plan: Ownership.CleanupPlan): string =>
+    const named = (plan: CleanupPlan.CleanupPlan): string =>
       plan._tag === 'NoCleanup' || plan._tag === 'ParameterCleanup'
         ? plan._tag
         : `${plan._tag}(${Type.encode(plan.type)})`
 
-    const plans = Analysis.cleanupExitsOf(snapshot, 'box-heap-indirection/plan').flatMap((exit) =>
-      exit.releases.map((release) => release.cleanup),
+    const plans = Projections.cleanupExitsOf(snapshot, 'box-heap-indirection/plan').flatMap(
+      (exit) => exit.releases.map((release) => release.cleanup),
     )
 
     // A box released on its own is one hook call. Nothing recursive appears in the plan.

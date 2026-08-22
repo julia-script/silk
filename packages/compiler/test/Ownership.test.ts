@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Lexer from '../src/Lexer.js'
 import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
@@ -65,11 +66,11 @@ it('keeps unavailable verdicts explicit with causes', () => {
 
 it('matches the ownership golden encodings byte-for-byte', () => {
   assert.strictEqual(
-    Ownership.encode(check('golden://accepted.silk', acceptedSource)),
+    OwnershipEncoding.encode(check('golden://accepted.silk', acceptedSource)),
     golden('accepted.ownership.txt'),
   )
   assert.strictEqual(
-    Ownership.encode(check('golden://damaged.silk', damagedSource)),
+    OwnershipEncoding.encode(check('golden://damaged.silk', damagedSource)),
     golden('damaged.ownership.txt'),
   )
 })
@@ -79,7 +80,7 @@ it('checks and encodes identically across repeated fresh runs', () => {
   const second = check('golden://repeat.silk', damagedSource)
 
   assert.deepEqual(first, second)
-  assert.strictEqual(Ownership.encode(first), Ownership.encode(second))
+  assert.strictEqual(OwnershipEncoding.encode(first), OwnershipEncoding.encode(second))
 })
 
 const bindingSource = `pub fn main() -> i32 { let first = 1 let second = 2 return first }`
@@ -181,7 +182,7 @@ pub fn main() -> i32 { let value = 42 return choose(value, move value) }`,
 
 it('matches the binding ownership golden encoding byte-for-byte', () => {
   assert.strictEqual(
-    Ownership.encode(check('golden://bindings.silk', bindingSource)),
+    OwnershipEncoding.encode(check('golden://bindings.silk', bindingSource)),
     golden('bindings.ownership.txt'),
   )
 })

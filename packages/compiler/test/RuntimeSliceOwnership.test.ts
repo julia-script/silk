@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -245,7 +245,10 @@ pub fn main() -> i32 { return restored() }`)
     assert.strictEqual(conflict?.loans.at(0)?.access, 'Exclusive')
     assert.strictEqual(conflict?.loans.at(0)?.origin, 'ReturnedView')
     const ownership = Analysis.ownershipOf(self, 'slices/Ownership')
-    assert.include(ownership === undefined ? '' : Ownership.encode(ownership), 'returned-view')
+    assert.include(
+      ownership === undefined ? '' : OwnershipEncoding.encode(ownership),
+      'returned-view',
+    )
   }),
 )
 

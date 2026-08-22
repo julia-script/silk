@@ -69,15 +69,3 @@ export const select = (
     }),
   })
 }
-
-/** Deterministic textual encoding for inventory tests, manifests, and diagnostics fixtures. */
-export const encode = (self: Inventory): string =>
-  [
-    `target ${self.target}`,
-    ...self.operations.map((operation) => `intrinsic ${operationKey(operation)}`),
-    ...self.calls.map(
-      (call) =>
-        `call ${operationKey(call.operation)} ${call.span.sourceId}:${call.span.start}:${call.span.end}`,
-    ),
-    '',
-  ].join('\n')

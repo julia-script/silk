@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../../dist/Analysis.js'
 import * as Driver from '../../../dist/Driver.js'
+import * as NodeHeapObservation from '../../../dist/NodeHeapObservation.js'
 import * as SourceFile from '../../../dist/SourceFile.js'
 import * as SourceResolver from '../../../dist/SourceResolver.js'
 
@@ -217,7 +218,7 @@ try {
         }),
         profile: 'release',
         destination,
-      }).pipe(Effect.provide(SourceResolver.empty)),
+      }).pipe(Effect.provide(SourceResolver.empty), Effect.provide(NodeHeapObservation.layer)),
     )
     if (compiled._tag !== 'Compiled') {
       throw new Error(`native compilation failed: ${JSON.stringify(compiled)}`)

@@ -11,6 +11,7 @@ import {
   nestedBindingSource,
   recoveredMemberSource,
 } from './support/editorCorpus.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -20,7 +21,7 @@ const documentationText = (
   block: ReturnType<typeof Analysis.documentationAt>,
 ) => {
   if (block === undefined) return undefined
-  const source = Analysis.syntaxOf(snapshot, block.span.sourceId)?.source
+  const source = Projections.syntaxOf(snapshot, block.span.sourceId)?.source
   if (source === undefined) return undefined
   return decoder.decode(SourceFile.toUint8Array(source).slice(block.span.start, block.span.end))
 }
@@ -250,13 +251,13 @@ pub fn main() -> i32 {
           documentation,
         )
       }
-      const vectorSource = Analysis.syntaxOf(snapshot, 'silk/vector')?.source
+      const vectorSource = Projections.syntaxOf(snapshot, 'silk/vector')?.source
       assert.isDefined(vectorSource)
       assert.include(
         vectorSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(vectorSource)),
         'RawBuffer.view<T>',
       )
-      const rawBufferSource = Analysis.syntaxOf(snapshot, 'silk/raw_buffer')?.source
+      const rawBufferSource = Projections.syntaxOf(snapshot, 'silk/raw_buffer')?.source
       assert.include(
         rawBufferSource === undefined
           ? ''
@@ -318,7 +319,7 @@ pub fn main() -> i32 {
           documentation,
         )
       }
-      const bytesSource = Analysis.syntaxOf(snapshot, 'silk/bytes')?.source
+      const bytesSource = Projections.syntaxOf(snapshot, 'silk/bytes')?.source
       assert.isDefined(bytesSource)
       const text =
         bytesSource === undefined ? '' : decoder.decode(SourceFile.toUint8Array(bytesSource))
@@ -750,7 +751,7 @@ pub fn main() -> i32 {
         'let value: i32',
       )
       assert.strictEqual(
-        Analysis.statementsOf(snapshot, 'main').filter(
+        Projections.statementsOf(snapshot, 'main').filter(
           (statement) => statement._tag === 'BindStatement',
         ).length,
         5,

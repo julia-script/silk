@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -116,7 +117,7 @@ it.effect(
 
       // The recorded counts describe the substrate honestly: three logical blocks were acquired,
       // and all three are released by the time the program returns.
-      const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+      const events = Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       assert.strictEqual(events.filter((event) => event === 'AllocationAcquire').length, 3)
       assert.strictEqual(events.filter((event) => event === 'AllocationRelease').length, 3)
 
@@ -254,7 +255,7 @@ it.effect('costs a program that never reads the metrics nothing at all', () =>
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
     )
 
@@ -327,7 +328,7 @@ pub fn main() -> i32 {
     assert.strictEqual(evaluated.result.value, 42n)
 
     // Holding and reading metrics allocates nothing.
-    assert.deepEqual(Analysis.allocationTraceEventsOf(evaluated), [])
+    assert.deepEqual(Projections.allocationTraceEventsOf(evaluated), [])
 
     const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})

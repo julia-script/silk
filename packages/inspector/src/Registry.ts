@@ -11,7 +11,8 @@
  */
 
 import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, Hir, ToolchainPlan } from '@silk-effect/compiler'
+import * as MirVerification from '@silk-effect/compiler/MirVerification'
 import { projectDataFlow } from './FlowModel.js'
 import { backendEmission, execute, toolchainCommands } from './Panels.js'
 import {
@@ -219,7 +220,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
     group: 'semantics',
     project: ({ snapshot }) => {
       const hir = Analysis.rootAnalysis(snapshot).hir
-      const conversions = Analysis.hirUnionConversionsOf(snapshot, snapshot.closure.rootModule)
+      const conversions = (snapshot.results.get(snapshot.closure.rootModule)?.hir.functions ?? [])
+        .flatMap((fn) => fn.statements.flatMap(Hir.statementExpressions))
+        .flatMap(Hir.expressionTree)
+        .filter((expression) => expression._tag === 'UnionConvert')
       return {
         rows: hirRows(hir),
         facts:
@@ -264,7 +268,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
      * Construct/Project/Cleanup events that realized them.
      */
     project: ({ snapshot, root, evaluation }) => {
-      const literals = Analysis.structLiteralsOf(snapshot, root)
+      const literals = Analysis.expressionsOf(snapshot, root).filter(
+        (expression) => expression._tag === 'StructLiteral',
+      )
       const projections = Analysis.fieldProjectionsOf(snapshot, root)
       const layout = Analysis.layoutOf(snapshot)
       const shapes = layout._tag === 'Available' ? layout.value.callingShapes : []
@@ -354,7 +360,10 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const catalog = Analysis.layoutCatalogOf(snapshot)
       const plan = Analysis.layoutOf(snapshot)
       const target = Analysis.targetOf(snapshot)
-      const unions = Analysis.unionLayoutsOf(snapshot)
+      const unions =
+        plan._tag === 'Available'
+          ? plan.value.entries.filter((entry) => entry.representation._tag === 'Union')
+          : []
       const slices =
         plan._tag === 'Available'
           ? plan.value.entries.filter((entry) => entry.representation._tag === 'Slice')
@@ -397,7 +406,9 @@ export const views: ReadonlyArray<ViewDefinition> = [
         return { rows: noRows, unavailable: `MIR unavailable — ${mir.error.message}` }
       }
       const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
-      const conversions = Analysis.mirUnionConversionsOf(snapshot)
+      const conversions = mir.value.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'ConvertUnion')
       const matches = Analysis.mirMatchesOf(snapshot)
       const normalization = Analysis.effectNormalizationOf(snapshot)
       const normalized = normalization.filter((verdict) => verdict._tag === 'Normalized')

@@ -1,5 +1,6 @@
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
+import * as ByteClass from './internal/ByteClass.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
@@ -16,18 +17,6 @@ export interface LexicalResult {
 
 const isWhitespace = (byte: number | undefined): boolean =>
   byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
-
-const isAsciiLetter = (byte: number | undefined): boolean =>
-  byte !== undefined && ((byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a))
-
-const isDecimalDigit = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x30 && byte <= 0x39
-
-const isIdentifierStart = (byte: number | undefined): boolean =>
-  byte === 0x5f || isAsciiLetter(byte)
-
-const isIdentifierContinue = (byte: number | undefined): boolean =>
-  isIdentifierStart(byte) || isDecimalDigit(byte)
 
 const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   bytes[index] === 0x2f && bytes[index + 1] === 0x2f
@@ -85,8 +74,8 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
   const byte = bytes[index]
   return (
     isWhitespace(byte) ||
-    isIdentifierStart(byte) ||
-    isDecimalDigit(byte) ||
+    ByteClass.isIdentifierStart(byte) ||
+    ByteClass.isDecimalDigit(byte) ||
     isLiteralStart(bytes, index) ||
     isLineCommentStart(bytes, index) ||
     compoundPunctuationKind(bytes, index) !== undefined ||
@@ -96,6 +85,12 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
 
 const keywordSpellings: ReadonlyArray<readonly [string, Token.TokenKind]> = Object.freeze([
   ['as', 'AsKeyword'],
+  ['fn', 'FnKeyword'],
+  ['let', 'LetKeyword'],
+  ['move', 'MoveKeyword'],
+  ['pub', 'PubKeyword'],
+  ['return', 'ReturnKeyword'],
+  ['import', 'ImportKeyword'],
   ['run', 'RunKeyword'],
   ['fail', 'FailKeyword'],
   ['drop', 'DropKeyword'],
@@ -134,58 +129,8 @@ const matchesSpelling = (
 }
 
 const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
-  if (end - start === 2 && bytes[start] === 0x66 && bytes[start + 1] === 0x6e) {
-    return 'FnKeyword'
-  }
   for (const [spelling, kind] of keywordSpellings) {
     if (matchesSpelling(bytes, start, end, spelling)) return kind
-  }
-  if (
-    end - start === 3 &&
-    bytes[start] === 0x6c &&
-    bytes[start + 1] === 0x65 &&
-    bytes[start + 2] === 0x74
-  ) {
-    return 'LetKeyword'
-  }
-  if (
-    end - start === 4 &&
-    bytes[start] === 0x6d &&
-    bytes[start + 1] === 0x6f &&
-    bytes[start + 2] === 0x76 &&
-    bytes[start + 3] === 0x65
-  ) {
-    return 'MoveKeyword'
-  }
-  if (
-    end - start === 3 &&
-    bytes[start] === 0x70 &&
-    bytes[start + 1] === 0x75 &&
-    bytes[start + 2] === 0x62
-  ) {
-    return 'PubKeyword'
-  }
-  if (
-    end - start === 6 &&
-    bytes[start] === 0x72 &&
-    bytes[start + 1] === 0x65 &&
-    bytes[start + 2] === 0x74 &&
-    bytes[start + 3] === 0x75 &&
-    bytes[start + 4] === 0x72 &&
-    bytes[start + 5] === 0x6e
-  ) {
-    return 'ReturnKeyword'
-  }
-  if (
-    end - start === 6 &&
-    bytes[start] === 0x69 &&
-    bytes[start + 1] === 0x6d &&
-    bytes[start + 2] === 0x70 &&
-    bytes[start + 3] === 0x6f &&
-    bytes[start + 4] === 0x72 &&
-    bytes[start + 5] === 0x74
-  ) {
-    return 'ImportKeyword'
   }
   return 'Identifier'
 }
@@ -376,14 +321,14 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
-    if (isIdentifierStart(byte)) {
+    if (ByteClass.isIdentifierStart(byte)) {
       index += 1
-      while (index < bytes.length && isIdentifierContinue(bytes[index])) index += 1
+      while (index < bytes.length && ByteClass.isIdentifierContinue(bytes[index])) index += 1
       pushToken(keywordKind(bytes, start, index), start, index)
       continue
     }
 
-    if (isDecimalDigit(byte)) {
+    if (ByteClass.isDecimalDigit(byte)) {
       const base = IntegerLiteral.recognize(bytes, index)
       if (base.radix !== 10) {
         index += base.width

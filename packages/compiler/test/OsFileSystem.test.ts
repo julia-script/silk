@@ -5,13 +5,13 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import type * as OsFileSystemHost from '../src/OsFileSystemHost.js'
 import * as OsRuntime from '../src/OsRuntime.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -130,6 +130,27 @@ it.effect('blocks OS evaluation without an injected adapter and uses one when su
     const evaluated = Analysis.evaluate(snapshot, { osFileSystem: provider })
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+  }),
+)
+
+it.effect('preserves an arbitrary thrown OS-provider cause in the evaluation trace', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'os-filesystem/thrown-cause',
+      ascii(lowLevelSource),
+    )
+    const cause = Object.freeze({ boundary: 'filesystem', detail: 23 })
+    const evaluated = Analysis.evaluate(snapshot, {
+      osFileSystem: Object.freeze({
+        ...provider,
+        pathInspect: () => {
+          throw cause
+        },
+      }),
+    })
+    const call = evaluated.trace.find((event) => event._tag === 'OsCall')
+    assert.isDefined(call)
+    assert.strictEqual(call?.cause, cause)
   }),
 )
 

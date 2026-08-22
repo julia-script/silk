@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
+import * as NodeHeapObservation from '@silk-effect/compiler/NodeHeapObservation'
 import * as Effect from 'effect/Effect'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from './Cli.js'
@@ -10,6 +11,7 @@ import * as Cli from './Cli.js'
  */
 Cli.command.pipe(
   Command.run({ version: '0.0.0' }),
+  Effect.provide(NodeHeapObservation.layer),
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain,
 )

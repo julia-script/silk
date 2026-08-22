@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
+import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -171,7 +173,7 @@ impl Logger for Console { enabled: Console.enabled log: Console.log }`,
     ])
     const logger = Type.nominal('root', 'Logger')
     const console = Type.nominal('root', 'Console')
-    const witness = DeclarationIndex.witness(index, console, logger)
+    const witness = ConformanceProof.witness(index, console, logger)
 
     assert.strictEqual(witness?._tag, 'SourceConformanceWitness')
     assert.deepEqual(witness?._tag === 'SourceConformanceWitness' ? witness.operations : [], [
@@ -208,7 +210,7 @@ impl Clock for SystemClock { read: SystemClock.readClock }
 pub fn main() -> i32 { return 0 }`,
       ],
     ])
-    const result = DeclarationIndex.providerMatch(
+    const result = ConformanceProof.providerMatch(
       index,
       Type.nominal('root', 'SystemClock'),
       Type.nominal('root', 'Clock'),
@@ -265,7 +267,7 @@ impl Store<i32> for IntStore { load: IntStore.load }`,
     ])
     const store = Type.nominal('root', 'Store', ['i32'])
     const provider = Type.nominal('root', 'IntStore')
-    const witness = DeclarationIndex.witness(index, provider, store)
+    const witness = ConformanceProof.witness(index, provider, store)
 
     assert.deepEqual(index.diagnostics, [])
     assert.deepEqual(witness?._tag === 'SourceConformanceWitness' ? witness.operations : [], [
@@ -389,8 +391,8 @@ pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
       true,
     )
     assert.strictEqual(Type.isBuiltin(Type.string), false)
-    assert.strictEqual(DeclarationIndex.copyType(index, Type.string), true)
-    assert.strictEqual(DeclarationIndex.containsLexicalBorrow(index, Type.string), true)
+    assert.strictEqual(ConformanceProof.copyType(index, Type.string), true)
+    assert.strictEqual(DeclarationFacts.containsLexicalBorrow(index, Type.string), true)
     assert.deepEqual(index.diagnostics, [])
   }),
 )
@@ -652,9 +654,9 @@ it.effect('orders modules canonically and answers per-module lookups', () =>
       index.modules.map((module) => module.module),
       ['alpha', 'zeta'],
     )
-    assert.strictEqual(DeclarationIndex.lookup(index, 'zeta', 'main')._tag, 'Resolved')
-    assert.strictEqual(DeclarationIndex.lookup(index, 'zeta', 'helper')._tag, 'Missing')
-    assert.strictEqual(DeclarationIndex.lookup(index, 'alpha', 'helper')._tag, 'Resolved')
+    assert.strictEqual(DeclarationFacts.lookup(index, 'zeta', 'main')._tag, 'Resolved')
+    assert.strictEqual(DeclarationFacts.lookup(index, 'zeta', 'helper')._tag, 'Missing')
+    assert.strictEqual(DeclarationFacts.lookup(index, 'alpha', 'helper')._tag, 'Resolved')
   }),
 )
 
@@ -845,7 +847,7 @@ pub fn main() -> i32 { return 0 }`,
       ['Present'],
     )
     assert.isTrue(
-      DeclarationIndex.conforms(
+      ConformanceProof.conforms(
         index,
         Type.nominal('allocator', 'TestAllocator'),
         Type.nominal('allocator', 'Allocator'),
@@ -871,7 +873,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ['ValidConformance'],
     )
     assert.isTrue(
-      DeclarationIndex.conforms(
+      ConformanceProof.conforms(
         valid,
         Type.nominal('allocator-valid', 'TestAllocator'),
         Type.nominal('allocator-valid', 'Allocator'),
@@ -899,7 +901,7 @@ impl Allocator for TestAllocator { allocate: TestAllocator.allocate }`,
       ['InvalidConformance', 'InvalidConformance'],
     )
     assert.isFalse(
-      DeclarationIndex.conforms(
+      ConformanceProof.conforms(
         invalid,
         Type.nominal('allocator-invalid', 'TestAllocator'),
         Type.nominal('allocator-invalid', 'Allocator'),
@@ -947,22 +949,22 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
         'InvalidConformance',
       )
       assert.strictEqual(
-        DeclarationIndex.prove(index, rejected, Type.dropCapability)._tag,
+        ConformanceProof.prove(index, rejected, Type.dropCapability)._tag,
         'Unproved',
       )
-      assert.isUndefined(DeclarationIndex.witness(index, rejected, Type.dropCapability))
-      assert.isFalse(DeclarationIndex.conforms(index, rejected, Type.dropCapability))
+      assert.isUndefined(ConformanceProof.witness(index, rejected, Type.dropCapability))
+      assert.isFalse(ConformanceProof.conforms(index, rejected, Type.dropCapability))
     }
     const guard = Type.nominal('drop-hooks', 'Guard')
-    assert.strictEqual(DeclarationIndex.prove(index, guard, Type.dropCapability)._tag, 'Proved')
-    assert.isDefined(DeclarationIndex.witness(index, guard, Type.dropCapability))
-    assert.isTrue(DeclarationIndex.conforms(index, guard, Type.dropCapability))
+    assert.strictEqual(ConformanceProof.prove(index, guard, Type.dropCapability)._tag, 'Proved')
+    assert.isDefined(ConformanceProof.witness(index, guard, Type.dropCapability))
+    assert.isTrue(ConformanceProof.conforms(index, guard, Type.dropCapability))
     for (const accepted of [copyValue, Type.nominal('drop-hooks', 'UnionHolder')]) {
       assert.strictEqual(
-        DeclarationIndex.prove(index, accepted, Type.dropCapability)._tag,
+        ConformanceProof.prove(index, accepted, Type.dropCapability)._tag,
         'Proved',
       )
-      assert.isTrue(DeclarationIndex.conforms(index, accepted, Type.dropCapability))
+      assert.isTrue(ConformanceProof.conforms(index, accepted, Type.dropCapability))
     }
     assert.deepEqual(
       index.diagnostics
@@ -1015,15 +1017,15 @@ impl Clock for FixedClock {}`,
     const pairOf = (element: Type.Type): Type.Nominal =>
       Type.nominal('copy-property', 'Pair', [element])
 
-    assert.isTrue(DeclarationIndex.copyType(index, point))
-    assert.isTrue(DeclarationIndex.copyType(index, Type.nominal('copy-property', 'FixedClock')))
-    assert.isFalse(DeclarationIndex.copyType(index, token))
-    assert.isTrue(DeclarationIndex.copyType(index, pairOf('i32')))
-    assert.isFalse(DeclarationIndex.copyType(index, pairOf(token)))
-    assert.isTrue(DeclarationIndex.copyType(index, Type.fixedArray(point, 2)))
+    assert.isTrue(ConformanceProof.copyType(index, point))
+    assert.isTrue(ConformanceProof.copyType(index, Type.nominal('copy-property', 'FixedClock')))
+    assert.isFalse(ConformanceProof.copyType(index, token))
+    assert.isTrue(ConformanceProof.copyType(index, pairOf('i32')))
+    assert.isFalse(ConformanceProof.copyType(index, pairOf(token)))
+    assert.isTrue(ConformanceProof.copyType(index, Type.fixedArray(point, 2)))
     const union = Type.union([point, pairOf('i32')])
     assert.strictEqual(union._tag, 'Normalized')
-    if (union._tag === 'Normalized') assert.isTrue(DeclarationIndex.copyType(index, union.type))
+    if (union._tag === 'Normalized') assert.isTrue(ConformanceProof.copyType(index, union.type))
 
     assert.deepEqual(
       index.modules

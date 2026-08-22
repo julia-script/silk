@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
@@ -39,7 +40,7 @@ const codesOf = (index: DeclarationIndex.Index): ReadonlyArray<string> =>
 const structNamed = (
   index: DeclarationIndex.Index,
   name: string,
-): DeclarationIndex.StructFact | undefined =>
+): DeclarationFacts.StructFact | undefined =>
   index.modules
     .flatMap((module) => module.structs)
     .find((struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === name)

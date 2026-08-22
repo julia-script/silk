@@ -62,20 +62,6 @@ export const semanticOccurrenceIndex = (
 ): SemanticOccurrence.ModuleIndex =>
   SemanticOccurrence.makeModule(semantics.module, semantics.elaboration, index, resolution)
 
-/** Builds one module's editor indexes from one closed semantic artifact. */
-export const make = (
-  semantics: ModuleSemantics.ModuleSemantics,
-  index: DeclarationIndex.Index,
-  resolution: NameResolution.Resolution,
-): ModuleTooling =>
-  Object.freeze({
-    _tag: 'ModuleTooling',
-    module: semantics.module,
-    semantics,
-    semanticOccurrences: semanticOccurrenceIndex(semantics, index, resolution),
-    anonymousExpressions: anonymousExpressionIndex(semantics),
-  })
-
 /** Closes already-built module indexes into one reusable tooling artifact. */
 export const fromIndexes = (
   semantics: ModuleSemantics.ModuleSemantics,

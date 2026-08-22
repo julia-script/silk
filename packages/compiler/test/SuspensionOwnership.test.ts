@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
@@ -14,7 +15,7 @@ const snapshot = (source: string) =>
   )
 
 const available = (self: Analysis.Snapshot): SuspensionOwnership.Module => {
-  const ownership = Analysis.suspensionOwnershipOf(self)
+  const ownership = Projections.suspensionOwnershipOf(self)
   assert.strictEqual(ownership._tag, 'Available')
   if (ownership._tag === 'Available') return ownership.value
   throw new RangeError('expected suspension ownership')

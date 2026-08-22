@@ -3,8 +3,10 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Mir from '../src/Mir.js'
-import * as Ownership from '../src/Ownership.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { unreachable } from './support/raise.js'
@@ -290,14 +292,14 @@ it.effect('executes the stored-callable matrix in evaluator and direct Wasm', ()
 
 it.effect('lowers the same stored-callable matrix through static native LLVM targets', () =>
   Effect.gen(function* () {
-    const target = yield* Target.host()
+    const target = yield* NativeToolchain.hostTarget()
     for (const [ordinal, testCase] of runtimeMatrix.entries()) {
       const { module } = yield* lowerStored(
         `stored-callable-runtime/native-${ordinal}`,
         testCase.source,
         target,
       )
-      const artifact = yield* Backend.emit(Backend.LlvmBackend, module, { mode: 'release' })
+      const artifact = yield* Backend.emit(LlvmBackend.LlvmBackend, module, { mode: 'release' })
       assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
       if (artifact._tag !== 'LlvmBitcodeArtifact') return
       assert.include(artifact.ir, 'define i32 @silk_main')
@@ -358,7 +360,7 @@ it.effect('ends a borrowed callable loan on every terminal and loop-exit path', 
       Target.wasm32UnknownUnknown,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     assert.strictEqual(
       completedValue(BootstrapEvaluation.evaluate(snapshot.instances, module)),
       210,
@@ -408,13 +410,13 @@ it.effect('cleans an uncalled stored callable exactly once on a typed-failure ex
     assert.strictEqual(yield* runWasm(wasm.bytes), 42)
     assert.notInclude(wasm.wat, 'call_indirect')
 
-    const host = yield* Target.host()
+    const host = yield* NativeToolchain.hostTarget()
     const native = yield* lowerStored(
       'stored-callable-runtime/typed-failure-native',
       typedFailure,
       host,
     )
-    const llvm = yield* Backend.emit(Backend.LlvmBackend, native.module, { mode: 'release' })
+    const llvm = yield* Backend.emit(LlvmBackend.LlvmBackend, native.module, { mode: 'release' })
     assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
     if (llvm._tag !== 'LlvmBitcodeArtifact') return
     assert.include(llvm.ir, 'consume')
@@ -425,7 +427,7 @@ it.effect(
   'executes owned callable capture hooks and resource cleanup on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       for (const exit of cleanupExits) {
         const resourceCleanup = cleanupProgram('return ()', exit)
         const wasm = yield* Analysis.ofSourceRealized(
@@ -500,7 +502,7 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(hookOnlyNative), [], `${exit} hook-only native`)
         const hookOnlyMir = Analysis.loweredMir(hookOnlyNative)
-        const hookOnlyOperations = hookOnlyMir.functions.flatMap(Mir.operations)
+        const hookOnlyOperations = hookOnlyMir.functions.flatMap(MirVerification.operations)
         assert.isFalse(
           hookOnlyOperations.some(
             (operation) => operation._tag === 'Allocate' || operation._tag.startsWith('RawBuffer'),
@@ -512,7 +514,7 @@ it.effect(
         )
         assert.isTrue(
           hookOnlyCleanups.some(
-            (cleanup) => Ownership.cleanupHasHook(cleanup) && !Ownership.cleanupReclaims(cleanup),
+            (cleanup) => CleanupPlan.hasHook(cleanup) && !CleanupPlan.reclaims(cleanup),
           ),
           `${exit} MIR retains a hook-only cleanup plan`,
         )

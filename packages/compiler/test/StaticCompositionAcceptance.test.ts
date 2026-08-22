@@ -7,7 +7,8 @@ import * as Analysis from '../src/Analysis.js'
 import type * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StandardStreams from '../src/StandardStreams.js'
@@ -209,13 +210,13 @@ layer(NodeServices.layer)('static composition acceptance', (it) => {
         if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n, name)
         assert.strictEqual(snapshot.mir._tag, 'Available', name)
         if (snapshot.mir._tag !== 'Available') continue
-        const operations = snapshot.mir.value.functions.flatMap(Mir.operations)
+        const operations = snapshot.mir.value.functions.flatMap(MirVerification.operations)
         assert.strictEqual(
           operations.filter((operation) => operation._tag === 'Allocate').length,
           1,
           `${name} explicit cleanup allocations`,
         )
-        const encoded = Mir.encode(snapshot.mir.value)
+        const encoded = MirEncoding.encode(snapshot.mir.value)
         assert.notInclude(encoded, 'RuntimeDictionary', name)
         assert.notInclude(encoded, 'call_indirect', name)
         fingerprints.push(

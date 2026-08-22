@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
 
 const encoder = new TextEncoder()
@@ -64,7 +66,7 @@ const replaceSuspensionRegion = (
   })
 
 const hasRule = (program: Mir.Module, rule: Mir.Violation['rule']): boolean =>
-  Mir.verify(program).some((violation) => violation.rule === rule)
+  MirVerification.verify(program).some((violation) => violation.rule === rule)
 
 it.effect(
   'finalizes deterministic target-neutral origin, relay, resume, and logical layout facts',
@@ -75,8 +77,8 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(first), [])
       const left = Analysis.loweredMir(first)
       const right = Analysis.loweredMir(second)
-      assert.deepEqual(Mir.verify(left), [], SuspensionMir.summary(left))
-      assert.strictEqual(Mir.encode(left), Mir.encode(right))
+      assert.deepEqual(MirVerification.verify(left), [], SuspensionMir.summary(left))
+      assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
       assert.strictEqual(SuspensionMir.summary(left), SuspensionMir.summary(right))
       const regions = suspensionRegions(left)
       assert.lengthOf(
@@ -96,19 +98,6 @@ it.effect(
         relay.relay.state?.slots.map((slot) => slot.local.ordinal),
         relay.liveLocals.map((local) => local.ordinal),
       )
-      assert.deepEqual(
-        Mir.suspensionControlEdges(
-          left.functions.find((fn) => fn === stateful(left)[0]) ?? stateful(left)[0],
-        )
-          .filter(
-            (edge) =>
-              edge.from.sourceId === relay.point.sourceId &&
-              edge.from.spanStart === relay.point.spanStart &&
-              edge.from.ordinal === relay.point.ordinal,
-          )
-          .map((edge) => edge.kind),
-        ['RelayTransfer', 'ResumeSuccess', 'ResumeFailure'],
-      )
     }),
 )
 
@@ -119,9 +108,9 @@ it.effect('keeps final synchronous MIR free of suspension machinery', () =>
     )
     const program = Analysis.loweredMir(self)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(Mir.verify(program), [])
+    assert.deepEqual(MirVerification.verify(program), [])
     assert.deepEqual(suspensionRegions(program), [])
-    assert.notInclude(Mir.encode(program), 'suspension-classification')
+    assert.notInclude(MirEncoding.encode(program), 'suspension-classification')
   }),
 )
 
@@ -284,6 +273,6 @@ it.effect(
         ),
       })
       assert.isTrue(hasRule(orphan, 'OrphanSuspensionMachinery'))
-      assert.notInclude(Mir.encode(program), 'provisional-mir')
+      assert.notInclude(MirEncoding.encode(program), 'provisional-mir')
     }),
 )

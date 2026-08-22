@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Json from './support/Json.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -136,7 +136,7 @@ it.effect('runs an effect entry once and retains deterministic unhandled-failure
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
     assert.strictEqual(program.entry._tag, 'EffectEntry')
-    assert.deepEqual(Mir.verify(program), [])
+    assert.deepEqual(MirVerification.verify(program), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     if (outcome._tag !== 'UnhandledFailure') return
@@ -183,7 +183,7 @@ it.effect('composes capability provision and mapping in an effect entry', () =>
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
   }),
@@ -272,7 +272,7 @@ it.effect('executes Evaluate effects in order and halts on failure across every 
       const wasm = yield* Analysis.ofSourceRealized(module, ascii(source), 'wasm32-unknown-unknown')
       assert.deepEqual(Analysis.diagnostics(logical), [])
       assert.deepEqual(Analysis.diagnostics(wasm), [])
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(logical)), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(logical)), [])
 
       const evaluated = Analysis.evaluate(logical)
       assert.strictEqual(

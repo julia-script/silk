@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
@@ -70,8 +72,8 @@ pub fn main() -> i32 {
       assert.strictEqual(represented.size, 4)
       assert.strictEqual(represented.alignment, 4)
       assert.strictEqual(deferred.representation._tag, 'Aggregate')
-      assert.deepEqual(Layout.verifyCatalog(catalog), [])
-      assert.deepEqual(Layout.verify(plan), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog), [])
+      assert.deepEqual(LayoutVerify.verify(plan), [])
     }
   }),
 )
@@ -109,7 +111,7 @@ pub fn main() -> i32 {
       unreachable('expected represented Effect calling shape')
     assert.strictEqual(shape.tree._tag, 'EffectEnvironmentShape')
     assert.strictEqual(shape.laneCount, represented.representation.fields.length)
-    assert.include(Layout.encode(plan), 'suspendable=yes')
+    assert.include(LayoutEncode.encode(plan), 'suspendable=yes')
   }),
 )
 
@@ -133,8 +135,8 @@ pub fn main() -> i32 {
       Target.wasm32UnknownUnknown,
     )
 
-    assert.strictEqual(Layout.encode(first.plan), Layout.encode(second.plan))
-    assert.deepEqual(Layout.verify(first.plan), [])
+    assert.strictEqual(LayoutEncode.encode(first.plan), LayoutEncode.encode(second.plan))
+    assert.deepEqual(LayoutVerify.verify(first.plan), [])
     assert.isFalse(first.plan.entries.some((entry) => Type.isEffect(entry.type)))
   }),
 )
@@ -176,7 +178,7 @@ pub fn main() -> i32 {
       shape.laneCount,
       shape.tree.fields.reduce((total, field) => total + field.shape.laneCount, 0),
     )
-    assert.deepEqual(Layout.verify(plan), [])
+    assert.deepEqual(LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -210,6 +212,6 @@ pub fn main() -> i32 {
       middle.fields.map((field) => field.shape._tag),
       ['EffectEnvironmentShape', 'CallableEnvironmentShape'],
     )
-    assert.deepEqual(Layout.verify(plan), [])
+    assert.deepEqual(LayoutVerify.verify(plan), [])
   }),
 )

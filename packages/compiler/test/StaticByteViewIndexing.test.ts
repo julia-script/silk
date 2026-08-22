@@ -2,8 +2,11 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -65,7 +68,7 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
     const second = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
     assert.deepEqual(Analysis.diagnostics(first), [])
 
-    const hir = Analysis.hirOf(first, moduleName)
+    const hir = Projections.hirOf(first, moduleName)
     const expressions =
       hir?.functions.flatMap((fn) =>
         fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
@@ -80,13 +83,13 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
     assert.isTrue(expressions.some((expression) => expression._tag === 'SliceLength'))
 
     const mir = Analysis.loweredMir(first)
-    assert.deepEqual(Mir.verify(mir), [])
-    assert.strictEqual(Mir.encode(mir), Mir.encode(Analysis.loweredMir(second)))
+    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.strictEqual(MirEncoding.encode(mir), MirEncoding.encode(Analysis.loweredMir(second)))
     assert.deepEqual(
       mir.staticData?.map((data) => data.bytes),
       [[153, 19, 29, 0]],
     )
-    const operations = mir.functions.flatMap(Mir.operations)
+    const operations = mir.functions.flatMap(MirVerification.operations)
     assert.isTrue(operations.some((operation) => operation._tag === 'StaticView'))
     assert.isTrue(
       operations.some(
@@ -105,7 +108,7 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
     const fnIndex = mir.functions.findIndex((fn) => fn.id.name === 'main')
     const fn = mir.functions.at(fnIndex)
     if (fn === undefined) throw new RangeError('expected static-view main MIR')
-    const operations = Mir.operations(fn)
+    const operations = MirVerification.operations(fn)
     const staticView = operations.find(
       (operation): operation is Extract<Mir.Operation, { readonly _tag: 'StaticView' }> =>
         operation._tag === 'StaticView',
@@ -134,7 +137,9 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       operation === read ? Object.freeze({ ...read, root: sliceSelector.index }) : operation,
     )
     assert.include(
-      Mir.verify(replaceFunction(mir, fnIndex, wrongRoot)).map((violation) => violation.rule),
+      MirVerification.verify(replaceFunction(mir, fnIndex, wrongRoot)).map(
+        (violation) => violation.rule,
+      ),
       'InvalidSliceOperation',
     )
 
@@ -142,7 +147,9 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       operation === read ? Object.freeze({ ...read, root: aggregate.destination }) : operation,
     )
     assert.include(
-      Mir.verify(replaceFunction(mir, fnIndex, aggregateRoot)).map((violation) => violation.rule),
+      MirVerification.verify(replaceFunction(mir, fnIndex, aggregateRoot)).map(
+        (violation) => violation.rule,
+      ),
       'InvalidSliceOperation',
     )
 
@@ -161,7 +168,9 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
         : operation,
     )
     assert.include(
-      Mir.verify(replaceFunction(mir, fnIndex, wrongIndex)).map((violation) => violation.rule),
+      MirVerification.verify(replaceFunction(mir, fnIndex, wrongIndex)).map(
+        (violation) => violation.rule,
+      ),
       'InvalidSliceOperation',
     )
 
@@ -171,7 +180,9 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
         : operation,
     )
     assert.include(
-      Mir.verify(replaceFunction(mir, fnIndex, wrongData)).map((violation) => violation.rule),
+      MirVerification.verify(replaceFunction(mir, fnIndex, wrongData)).map(
+        (violation) => violation.rule,
+      ),
       'InvalidSliceOperation',
     )
   }),

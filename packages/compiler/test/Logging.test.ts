@@ -4,12 +4,14 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as StandardStreams from '../src/StandardStreams.js'
 import * as Type from '../src/Type.js'
 import { constrainedCallableForwarding } from './support/corpus.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
@@ -60,12 +62,14 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const hir = Analysis.hirOf(self, 'silk/effect')
+    const hir = Projections.hirOf(self, 'silk/effect')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logging.Logger.log')
     const lowered = Analysis.loweredMir(self)
-    assert.strictEqual(Mir.encode(lowered), golden('logging.mir.txt'))
+    assert.strictEqual(MirEncoding.encode(lowered), golden('logging.mir.txt'))
     assert.isFalse(
-      lowered.functions.flatMap(Mir.operations).some((operation) => operation._tag.includes('Log')),
+      lowered.functions
+        .flatMap(MirVerification.operations)
+        .some((operation) => operation._tag.includes('Log')),
     )
   }),
 )
@@ -458,7 +462,7 @@ pub fn main() -> i32 {
       if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n, name)
       assert.isFalse(
         Analysis.loweredMir(frontend)
-          .functions.flatMap(Mir.operations)
+          .functions.flatMap(MirVerification.operations)
           .some((operation) => operation._tag === 'MakeCallable'),
         name,
       )
@@ -528,7 +532,7 @@ pub fn main() -> i32 {
       const lowered = Analysis.loweredMir(frontend)
       assert.isFalse(
         lowered.functions
-          .flatMap(Mir.operations)
+          .flatMap(MirVerification.operations)
           .some((operation) => operation._tag === 'MakeCallable'),
         name,
       )

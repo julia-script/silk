@@ -1,7 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
@@ -37,7 +38,7 @@ pub fn main() -> i32 {
 }`)
     assertCompleted(self, 42)
     const program = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(program), [])
+    assert.deepEqual(MirVerification.verify(program), [])
     const suspensionOutcomes = program.functions.flatMap((fn) =>
       (fn.suspension?.regions ?? []).map((region) =>
         region._tag === 'SuspendEffectRegion' ? region.deferred.outcome : region.runner.outcome,
@@ -68,7 +69,7 @@ pub fn main() -> i32 {
   return (run retried) + (run recovered) - 41
 }`)
     assertCompleted(self, 42)
-    const encoded = Mir.encode(Analysis.loweredMir(self))
+    const encoded = MirEncoding.encode(Analysis.loweredMir(self))
     assert.notInclude(encoded, 'OutOfMemoryError')
     assert.notInclude(encoded, 'ContinuationRequest')
   }),

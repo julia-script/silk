@@ -4,6 +4,7 @@ import * as Fn from 'effect/Function'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as ContractConstraint from './Constraint.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
@@ -1403,16 +1404,16 @@ export const decodeProviderMatch = Effect.fn('ModuleSurface.decodeProviderMatch'
 
 const type = (value: Type.Type): string => record('Type', [encodeSemanticType(value)])
 
-const canonicalId = (value: DeclarationIndex.CanonicalId): string =>
+const canonicalId = (value: DeclarationFacts.CanonicalId): string =>
   record('CanonicalId', [value.module, value.name])
 
-const declarationIdOrdinal = (value: DeclarationIndex.DeclarationId): string =>
+const declarationIdOrdinal = (value: DeclarationFacts.DeclarationId): string =>
   record('DeclarationOrdinal', [number(value.ordinal)])
 
-const name = (value: DeclarationIndex.DeclaredName): string =>
+const name = (value: DeclarationFacts.DeclaredName): string =>
   value._tag === 'Present' ? record('PresentName', [value.spelling]) : record('UnavailableName')
 
-const canonicalState = (value: DeclarationIndex.CanonicalState): string => {
+const canonicalState = (value: DeclarationFacts.CanonicalState): string => {
   switch (value._tag) {
     case 'Canonical':
       return record('Canonical', [canonicalId(value.id)])
@@ -1425,10 +1426,10 @@ const canonicalState = (value: DeclarationIndex.CanonicalState): string => {
   }
 }
 
-const typePath = (value: DeclarationIndex.TypePathFact): string =>
+const typePath = (value: DeclarationFacts.TypePathFact): string =>
   record('TypePath', [value.spelling, array(value.segments.map((segment) => segment.spelling))])
 
-const arrayLength = (value: DeclarationIndex.ArrayLengthFact): string => {
+const arrayLength = (value: DeclarationFacts.ArrayLengthFact): string => {
   switch (value._tag) {
     case 'Available':
       return record('AvailableLength', [number(value.value)])
@@ -1441,7 +1442,7 @@ const arrayLength = (value: DeclarationIndex.ArrayLengthFact): string => {
   }
 }
 
-const requirementRoleFact = (value: DeclarationIndex.RequirementRoleFact): string => {
+const requirementRoleFact = (value: DeclarationFacts.RequirementRoleFact): string => {
   switch (value._tag) {
     case 'DefaultRole':
       return record('DefaultRole')
@@ -1454,7 +1455,7 @@ const requirementRoleFact = (value: DeclarationIndex.RequirementRoleFact): strin
   }
 }
 
-const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
+const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
   switch (value._tag) {
     case 'Resolved':
       return record('ResolvedType', [type(value.type), boolean(value.exposureCause !== undefined)])
@@ -1544,7 +1545,7 @@ const declaredType = (value: DeclarationIndex.DeclaredTypeFact): string => {
   }
 }
 
-const opaqueResult = (value: DeclarationIndex.OpaqueResultFact | undefined): string | undefined =>
+const opaqueResult = (value: DeclarationFacts.OpaqueResultFact | undefined): string | undefined =>
   value === undefined
     ? undefined
     : record('OpaqueResult', [
@@ -1554,14 +1555,14 @@ const opaqueResult = (value: DeclarationIndex.OpaqueResultFact | undefined): str
         array(value.publicSignature.enclosingKinds),
       ])
 
-const parameter = (value: DeclarationIndex.ParameterFact): string =>
+const parameter = (value: DeclarationFacts.ParameterFact): string =>
   record('Parameter', [
     number(value.id.ordinal),
     name(value.name),
     declaredType(value.declaredType),
   ])
 
-const rowExpression = (value: DeclarationIndex.RowExpressionFact): string => {
+const rowExpression = (value: DeclarationFacts.RowExpressionFact): string => {
   switch (value._tag) {
     case 'EmptyRowExpression':
       return record('EmptyRowExpression')
@@ -1589,7 +1590,7 @@ const rowExpression = (value: DeclarationIndex.RowExpressionFact): string => {
   }
 }
 
-const constraint = (value: DeclarationIndex.ConstraintFact): string =>
+const constraint = (value: DeclarationFacts.ConstraintFact): string =>
   value._tag === 'MembershipConstraint'
     ? record('MembershipConstraint', [
         value.domain,
@@ -1603,7 +1604,7 @@ const constraint = (value: DeclarationIndex.ConstraintFact): string =>
         rowExpression(value.source),
       ])
 
-const failureRow = (value: DeclarationIndex.FailureRowFact): string =>
+const failureRow = (value: DeclarationFacts.FailureRowFact): string =>
   record('FailureRow', [
     boolean(value.available),
     array(value.members.map(declaredType)),
@@ -1613,7 +1614,7 @@ const failureRow = (value: DeclarationIndex.FailureRowFact): string =>
     RowAlgebra.key(Type.failureRowPolicy(), value.row),
   ])
 
-const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
+const requirementRow = (value: DeclarationFacts.RequirementRowFact): string =>
   record('RequirementRow', [
     boolean(value.available),
     array(
@@ -1639,7 +1640,7 @@ const requirementRow = (value: DeclarationIndex.RequirementRowFact): string =>
     ),
   ])
 
-const interfaceOperand = (value: DeclarationIndex.InterfaceOperandFact): string =>
+const interfaceOperand = (value: DeclarationFacts.InterfaceOperandFact): string =>
   record('InterfaceOperand', [
     number(value.parameter.id.ordinal),
     declaredType(value.type),
@@ -1647,7 +1648,7 @@ const interfaceOperand = (value: DeclarationIndex.InterfaceOperandFact): string 
   ])
 
 const interfaceOperationContract = (
-  value: DeclarationIndex.InterfaceOperationContractFact,
+  value: DeclarationFacts.InterfaceOperationContractFact,
 ): string =>
   record(value._tag, [
     name(value.declaration.name),
@@ -1663,7 +1664,7 @@ const interfaceOperationContract = (
   ])
 
 const interfaceOperationApplication = (
-  value: DeclarationIndex.InterfaceOperationApplicationFact,
+  value: DeclarationFacts.InterfaceOperationApplicationFact,
 ): string =>
   record(value._tag, [
     name(value.declaration.name),
@@ -1679,7 +1680,7 @@ const interfaceOperationApplication = (
     value.receiverAccess,
   ])
 
-const interfaceApplication = (value: DeclarationIndex.InterfaceApplicationFact): string =>
+const interfaceApplication = (value: DeclarationFacts.InterfaceApplicationFact): string =>
   record('InterfaceApplication', [
     value.declaration.module,
     value.declaration.name,
@@ -1691,13 +1692,13 @@ const interfaceApplication = (value: DeclarationIndex.InterfaceApplicationFact):
     array(value.operations.map(interfaceOperationApplication)),
   ])
 
-const bound = (value: DeclarationIndex.BoundFact): string => {
+const bound = (value: DeclarationFacts.BoundFact): string => {
   return value._tag === 'ResolvedBound'
     ? record('ResolvedBound', [value.spelling, interfaceApplication(value.application)])
     : record('UnresolvedBound', [value.spelling, declaredType(value.application)])
 }
 
-const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
+const typeParameter = (value: DeclarationFacts.TypeParameterFact): string =>
   record('TypeParameter', [
     type(value.type),
     name(value.name),
@@ -1705,7 +1706,7 @@ const typeParameter = (value: DeclarationIndex.TypeParameterFact): string =>
     array(value.bounds.map(bound)),
   ])
 
-const declaration = (value: DeclarationIndex.DeclarationFact): string =>
+const declaration = (value: DeclarationFacts.DeclarationFact): string =>
   record('FunctionDeclaration', [
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
@@ -1724,7 +1725,7 @@ const declaration = (value: DeclarationIndex.DeclarationFact): string =>
     array(value.constraintContracts.map(encodeConstraint)),
   ])
 
-const fieldState = (value: DeclarationIndex.FieldState): string => {
+const fieldState = (value: DeclarationFacts.FieldState): string => {
   switch (value._tag) {
     case 'Unique':
       return record('UniqueField', [number(value.id.ordinal)])
@@ -1737,7 +1738,7 @@ const fieldState = (value: DeclarationIndex.FieldState): string => {
   }
 }
 
-const field = (value: DeclarationIndex.FieldFact): string =>
+const field = (value: DeclarationFacts.FieldFact): string =>
   record('StructField', [
     number(value.id.ordinal),
     fieldState(value.state),
@@ -1746,12 +1747,12 @@ const field = (value: DeclarationIndex.FieldFact): string =>
     declaredType(value.declaredType),
   ])
 
-const structDependency = (value: DeclarationIndex.StructDependency): string =>
+const structDependency = (value: DeclarationFacts.StructDependency): string =>
   record(value._tag === 'Available' ? 'AvailableStructDependency' : 'UnavailableStructDependency', [
     array(value.types.map(type)),
   ])
 
-const struct = (value: DeclarationIndex.StructFact): string =>
+const struct = (value: DeclarationFacts.StructFact): string =>
   record('StructDeclaration', [
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
@@ -1762,7 +1763,7 @@ const struct = (value: DeclarationIndex.StructFact): string =>
     structDependency(value.dependency),
   ])
 
-const serviceOperationState = (value: DeclarationIndex.ServiceOperationState): string => {
+const serviceOperationState = (value: DeclarationFacts.ServiceOperationState): string => {
   switch (value._tag) {
     case 'Unique':
       return record('UniqueServiceOperation', [value.id.name])
@@ -1775,7 +1776,7 @@ const serviceOperationState = (value: DeclarationIndex.ServiceOperationState): s
   }
 }
 
-const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string =>
+const serviceOperation = (value: DeclarationFacts.ServiceOperationFact): string =>
   record('ServiceOperation', [
     declarationIdOrdinal(value.id),
     serviceOperationState(value.state),
@@ -1794,7 +1795,7 @@ const serviceOperation = (value: DeclarationIndex.ServiceOperationFact): string 
     array(value.constraintContracts.map(encodeConstraint)),
   ])
 
-const service = (value: DeclarationIndex.ServiceFact | DeclarationIndex.InterfaceFact): string =>
+const service = (value: DeclarationFacts.ServiceFact | DeclarationFacts.InterfaceFact): string =>
   record(value._tag, [
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
@@ -1807,7 +1808,7 @@ const service = (value: DeclarationIndex.ServiceFact | DeclarationIndex.Interfac
       : []),
   ])
 
-const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string => {
+const constantLiteral = (value: DeclarationFacts.ConstantLiteralFact): string => {
   switch (value._tag) {
     case 'BooleanLiteral':
       return record('BooleanLiteral', [boolean(value.value)])
@@ -1832,7 +1833,7 @@ const constantLiteral = (value: DeclarationIndex.ConstantLiteralFact): string =>
   }
 }
 
-const constant = (value: DeclarationIndex.ConstantFact): string =>
+const constant = (value: DeclarationFacts.ConstantFact): string =>
   record('ConstantDeclaration', [
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
@@ -1843,7 +1844,7 @@ const constant = (value: DeclarationIndex.ConstantFact): string =>
     constantLiteral(value.literal),
   ])
 
-const member = (value: DeclarationIndex.MemberFact): string => {
+const member = (value: DeclarationFacts.MemberFact): string => {
   switch (value._tag) {
     case 'FunctionDeclaration':
       return declaration(value)
@@ -1867,7 +1868,7 @@ const member = (value: DeclarationIndex.MemberFact): string => {
   }
 }
 
-const dropHook = (value: DeclarationIndex.DropHookFact): string =>
+const dropHook = (value: DeclarationFacts.DropHookFact): string =>
   record('DropHook', [
     name(value.name),
     value.functionKind,
@@ -1880,7 +1881,7 @@ const dropHook = (value: DeclarationIndex.DropHookFact): string =>
     requirementRow(value.requirementRow),
   ])
 
-const conformance = (value: DeclarationIndex.ConformanceFact): string =>
+const conformance = (value: DeclarationFacts.ConformanceFact): string =>
   record('Conformance', [
     value.module,
     number(value.ordinal),
@@ -1930,7 +1931,7 @@ const conformance = (value: DeclarationIndex.ConformanceFact): string =>
   ])
 
 /** Construct the exact surface for one module's completed headers. */
-export const make = (headers: DeclarationIndex.ModuleHeaders): ModuleSurface =>
+export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
   Object.freeze({
     _tag: 'ModuleSurface',
     module: headers.module,

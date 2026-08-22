@@ -1,3 +1,4 @@
+import * as ByteClass from './internal/ByteClass.js'
 import type * as Token from './Token.js'
 
 /** The semantic category selected by a static-literal modifier and delimiter. */
@@ -71,18 +72,6 @@ const matches = (bytes: ByteSequence, index: number, form: LiteralForm): boolean
 export const recognize = (bytes: ByteSequence, index = 0): LiteralForm | undefined =>
   forms.find((form) => matches(bytes, index, form))
 
-const isAsciiLetter = (byte: number | undefined): boolean =>
-  byte !== undefined && ((byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a))
-
-const isDecimalDigit = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x30 && byte <= 0x39
-
-const isIdentifierStart = (byte: number | undefined): boolean =>
-  byte === 0x5f || isAsciiLetter(byte)
-
-const isIdentifierContinue = (byte: number | undefined): boolean =>
-  isIdentifierStart(byte) || isDecimalDigit(byte)
-
 /** One identifier-like spelling reserved as an unrecognized adjacent literal modifier. */
 export interface UnknownIntroduction {
   readonly modifier: string
@@ -100,9 +89,9 @@ export const recognizeUnknown = (
   bytes: ByteSequence,
   index = 0,
 ): UnknownIntroduction | undefined => {
-  if (!isIdentifierStart(bytes[index])) return undefined
+  if (!ByteClass.isIdentifierStart(bytes[index])) return undefined
   let cursor = index + 1
-  while (cursor < bytes.length && isIdentifierContinue(bytes[cursor])) cursor += 1
+  while (cursor < bytes.length && ByteClass.isIdentifierContinue(bytes[cursor])) cursor += 1
   if (bytes[cursor] !== quote) return undefined
   const modifier = String.fromCharCode(...bytes.slice(index, cursor))
   if (forms.some((form) => form.modifier === modifier)) return undefined
@@ -155,38 +144,7 @@ export const scanBoundary = (
   return Object.freeze({ end: bytes.length, terminated: false })
 }
 
-const isContinuation = (byte: number | undefined): boolean =>
-  byte !== undefined && byte >= 0x80 && byte <= 0xbf
-
-/**
- * Counts the Unicode scalars one escaped body denotes, without decoding any of them.
- *
- * The count is a scalar count and never a byte count: `é` is two UTF-8 bytes and one scalar, and
- * one escape sequence denotes one scalar however it is spelled. Only the extent of an escape
- * matters here, never its meaning, so the decoder in `StaticText` stays the single authority on
- * what an escape produces and this rule stays valid for any escape it later accepts.
- */
-export const scalarCount = (bytes: ByteSequence, contentStart: number, end: number): number => {
-  let index = contentStart
-  let scalars = 0
-  while (index < end) {
-    scalars += 1
-    if (bytes[index] !== 0x5c) {
-      index += 1
-      while (index < end && isContinuation(bytes[index])) index += 1
-      continue
-    }
-    const escaped = bytes[index + 1]
-    if (escaped === 0x75 && bytes[index + 2] === 0x7b) {
-      index += 3
-      while (index < end && bytes[index] !== 0x7d) index += 1
-      index += 1
-      continue
-    }
-    index += escaped === 0x78 ? 4 : 2
-  }
-  return scalars
-}
+export { scalarCount } from './internal/Escape.js'
 
 /** Returns the token kind selected by a valid form. */
 export const tokenKind = (self: LiteralForm): Token.TokenKind => self.tokenKind

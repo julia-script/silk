@@ -7,11 +7,12 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Projections from './support/projections.js'
+import * as Driver from './support/TestDriver.js'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -85,8 +86,8 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
       ],
     )
     for (const name of moduleNames) {
-      assert.notStrictEqual(Analysis.syntaxOf(self, name), undefined)
-      assert.notStrictEqual(Analysis.hirOf(self, name), undefined)
+      assert.notStrictEqual(Projections.syntaxOf(self, name), undefined)
+      assert.notStrictEqual(Projections.hirOf(self, name), undefined)
       assert.notStrictEqual(Analysis.ownershipOf(self, name), undefined)
     }
     assert.isAbove(Analysis.instancesOf(self).instances.length, 0)
@@ -94,7 +95,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     const lowered = Analysis.loweredMir(self)
     assert.isAbove(lowered.functions.length, 0)
     assert.strictEqual(
-      `${createHash('sha256').update(Mir.encode(lowered)).digest('hex')}\n`,
+      `${createHash('sha256').update(MirEncoding.encode(lowered)).digest('hex')}\n`,
       golden('algorithmic.mir.sha256'),
     )
 

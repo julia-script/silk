@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -28,7 +30,7 @@ it.effect('mutates a scalar through a structured loop DAG', () =>
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     assert.strictEqual(
       mir.functions.at(0)?.regions.some((region) => region._tag === 'LoopRegion'),
       true,
@@ -171,13 +173,13 @@ it.effect('publishes immutable facade facts for writes, loops, transfers, and DA
   while value < 2 { value = value + 1 if value == 1 { continue } }
   return value
 }`)
-    const bindings = Analysis.bindingsOf(self, 'mutable-loops/main')
-    const writes = Analysis.writesOf(self, 'mutable-loops/main')
-    const loops = Analysis.loopsOf(self, 'mutable-loops/main')
-    const transfers = Analysis.transfersOf(self, 'mutable-loops/main')
-    const regions = Analysis.controlRegionsOf(self)
-    const edges = Analysis.controlEdgesOf(self)
-    const fixedPoints = Analysis.ownershipFixedPointsOf(self, 'mutable-loops/main')
+    const bindings = Projections.bindingsOf(self, 'mutable-loops/main')
+    const writes = Projections.writesOf(self, 'mutable-loops/main')
+    const loops = Projections.loopsOf(self, 'mutable-loops/main')
+    const transfers = Projections.transfersOf(self, 'mutable-loops/main')
+    const regions = Projections.controlRegionsOf(self)
+    const edges = Projections.controlEdgesOf(self)
+    const fixedPoints = Projections.ownershipFixedPointsOf(self, 'mutable-loops/main')
 
     assert.strictEqual(bindings.at(0)?.mutability, 'Mutable')
     assert.strictEqual(writes.length, 1)
@@ -208,7 +210,7 @@ pub fn main() -> i32 {
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(
-      Analysis.ownershipFixedPointsOf(self, 'mutable-loops/main').at(0)?.compatible,
+      Projections.ownershipFixedPointsOf(self, 'mutable-loops/main').at(0)?.compatible,
       true,
     )
     const result = Analysis.evaluate(self)
@@ -290,7 +292,7 @@ pub fn main() -> i32 {
   }
   return outer.value
 }`)
-    const transfers = Analysis.cleanupExitsOf(self, 'mutable-loops/main').filter(
+    const transfers = Projections.cleanupExitsOf(self, 'mutable-loops/main').filter(
       (exit) => exit.kind === 'Continue' || exit.kind === 'Break',
     )
     assert.deepEqual(
@@ -325,13 +327,13 @@ it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exac
     const first = yield* snapshot(source)
     const second = yield* snapshot(source)
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(first)),
-      Mir.encode(Analysis.loweredMir(second)),
+      MirEncoding.encode(Analysis.loweredMir(first)),
+      MirEncoding.encode(Analysis.loweredMir(second)),
     )
-    assert.deepEqual(Analysis.controlEdgesOf(first), Analysis.controlEdgesOf(second))
+    assert.deepEqual(Projections.controlEdgesOf(first), Projections.controlEdgesOf(second))
     assert.deepEqual(
-      Analysis.ownershipFixedPointsOf(first, 'mutable-loops/main'),
-      Analysis.ownershipFixedPointsOf(second, 'mutable-loops/main'),
+      Projections.ownershipFixedPointsOf(first, 'mutable-loops/main'),
+      Projections.ownershipFixedPointsOf(second, 'mutable-loops/main'),
     )
     assert.deepEqual(Analysis.evaluate(first), Analysis.evaluate(second))
     const firstArtifact = yield* Analysis.codegenWasm(first, { mode: 'release' })
@@ -339,8 +341,8 @@ it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exac
     assert.strictEqual(firstArtifact.wat, secondArtifact.wat)
     assert.deepEqual(firstArtifact.bytes, secondArtifact.bytes)
     assert.deepEqual(
-      Analysis.backendControlOf(firstArtifact),
-      Analysis.backendControlOf(secondArtifact),
+      Projections.backendControlOf(firstArtifact),
+      Projections.backendControlOf(secondArtifact),
     )
   }),
 )

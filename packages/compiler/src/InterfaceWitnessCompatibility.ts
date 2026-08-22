@@ -81,9 +81,6 @@ const operandShape = (type: Type.Type): OperandShape => {
   return Object.freeze({ _tag: 'Value', access: 'Take', type })
 }
 
-const accessRank = (access: Access): number =>
-  access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
-
 const incompatible = (problem: Problem): Compatibility =>
   Object.freeze({ _tag: 'Incompatible', problem })
 
@@ -94,27 +91,7 @@ const operandProblem = (
 ): Problem | undefined => {
   const promised = operandShape(contract.type)
   const required = operandShape(witness.type)
-  if (promised._tag === required._tag) {
-    if (accessRank(required.access) > accessRank(promised.access))
-      return Object.freeze({
-        _tag: 'StrongerOperandAccess',
-        ordinal,
-        name: contract.name,
-        receiver: contract.receiver,
-        promised: promised.access,
-        required: required.access,
-      })
-    if (!Type.equals(promised.type, required.type))
-      return Object.freeze({
-        _tag: 'OperandType',
-        ordinal,
-        name: contract.name,
-        promised: contract.type,
-        required: witness.type,
-      })
-    return undefined
-  }
-  if (accessRank(required.access) > accessRank(promised.access))
+  if (!Type.compareAccess(promised.access, required.access))
     return Object.freeze({
       _tag: 'StrongerOperandAccess',
       ordinal,
@@ -123,13 +100,23 @@ const operandProblem = (
       promised: promised.access,
       required: required.access,
     })
-  return Object.freeze({
-    _tag: 'OperandOwnership',
-    ordinal,
-    name: contract.name,
-    promised: promised.access,
-    required: required.access,
-  })
+  if (!Type.equals(promised.type, required.type))
+    return Object.freeze({
+      _tag: 'OperandType',
+      ordinal,
+      name: contract.name,
+      promised: contract.type,
+      required: witness.type,
+    })
+  if (promised._tag !== required._tag && promised._tag !== 'Value' && required._tag !== 'Value')
+    return Object.freeze({
+      _tag: 'OperandOwnership',
+      ordinal,
+      name: contract.name,
+      promised: promised.access,
+      required: required.access,
+    })
+  return undefined
 }
 
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
@@ -178,8 +165,7 @@ export const check = (contract: Contract, witness: Witness): Compatibility => {
         Type.equals(requirement.capability, allowed.capability) &&
         requirement.role === allowed.role,
     )
-    if (matching.some((allowed) => accessRank(requirement.access) <= accessRank(allowed.access)))
-      continue
+    if (matching.some((allowed) => Type.requirementSatisfies(allowed, requirement))) continue
     if (matching.length > 0)
       return incompatible(
         Object.freeze({

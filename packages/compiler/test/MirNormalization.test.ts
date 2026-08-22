@@ -1,9 +1,12 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 const source = `import silk.effect as Effect
@@ -31,14 +34,14 @@ const snapshot = (normalizeMir: boolean) =>
 
 const mainOperations = (program: Mir.Module): ReadonlyArray<Mir.Operation> => {
   const main = program.functions.find((fn) => fn.id.name === 'main')
-  return main === undefined ? Object.freeze([]) : Mir.operations(main)
+  return main === undefined ? Object.freeze([]) : MirVerification.operations(main)
 }
 
 const allOperations = (program: Mir.Module): ReadonlyArray<Mir.Operation> =>
-  program.functions.flatMap(Mir.operations)
+  program.functions.flatMap(MirVerification.operations)
 
 const provisionalOf = (self: Analysis.Snapshot): ProvisionalMir.Module => {
-  const provisional = Analysis.provisionalMirOf(self)
+  const provisional = Projections.provisionalMirOf(self)
   if (provisional._tag === 'Unavailable') throw provisional.error
   return provisional.value
 }
@@ -74,7 +77,7 @@ it.effect('folds copied constructor shapes and direct static runs without name p
         (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'DirectStaticRun',
       ),
     )
-    assert.deepEqual(Mir.verify(normalizedProgram), [])
+    assert.deepEqual(MirVerification.verify(normalizedProgram), [])
     assert.strictEqual(
       MirNormalization.normalize(normalizedProgram, provisionalOf(normalized)),
       normalizedProgram,
@@ -106,14 +109,14 @@ pub fn main() -> i32 {
     const program = Analysis.loweredMir(raw)
     const provisional = provisionalOf(raw)
     const rejected = MirNormalization.normalize(program, provisional)
-    assert.strictEqual(Mir.encode(rejected).includes('run-static-effect'), false)
+    assert.strictEqual(MirEncoding.encode(rejected).includes('run-static-effect'), false)
     assert.isTrue(
       (rejected.normalization ?? []).some(
         (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
       ),
     )
     assert.include(ProvisionalMir.encode(provisional), 'relay=existing')
-    assert.deepEqual(Mir.verify(rejected), [])
+    assert.deepEqual(MirVerification.verify(rejected), [])
   }),
 )
 
@@ -145,9 +148,9 @@ it.effect('retains only the exact execution whose runner fact is unknown', () =>
     assert.isTrue(
       retained.functions
         .filter((fn) => fn.id.name !== 'main')
-        .flatMap(Mir.operations)
+        .flatMap(MirVerification.operations)
         .some((operation) => operation._tag === 'RunStaticEffect'),
-      Mir.encode(retained),
+      MirEncoding.encode(retained),
     )
   }),
 )
@@ -198,7 +201,7 @@ pub fn main() -> i32 {
     const entryProgram = MirNormalization.normalize(rawEntryProgram, suspendableEntryFacts)
     assert.isTrue(
       allOperations(reifiedProgram).some((operation) => operation._tag === 'ReifyEffect'),
-      Mir.encode(reifiedProgram),
+      MirEncoding.encode(reifiedProgram),
     )
     const reify = allOperations(reifiedProgram).find(
       (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }> =>
@@ -217,21 +220,21 @@ pub fn main() -> i32 {
         if (operation === undefined) return
         Reflect.set(operation, field, tag)
         assert.include(
-          Mir.verify(forged).map((violation) => violation.rule),
+          MirVerification.verify(forged).map((violation) => violation.rule),
           'InvalidEffectOperation',
         )
       }
     }
     assert.isTrue(
       allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
-      Mir.encode(entryProgram),
+      MirEncoding.encode(entryProgram),
     )
     for (const program of [reifiedProgram, entryProgram]) {
       assert.isTrue(
         (program.normalization ?? []).some(
           (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
         ),
-        Mir.encode(program),
+        MirEncoding.encode(program),
       )
     }
   }),
@@ -265,13 +268,13 @@ pub fn main() -> i32 {
           (operation._tag === 'RunEffectValue' || operation._tag === 'ReifyEffect') &&
           operation.runner.name.includes('$provided$'),
       ),
-      Mir.encode(program),
+      MirEncoding.encode(program),
     )
     assert.isTrue(
       (program.normalization ?? []).some(
         (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
       ),
-      Mir.encode(program),
+      MirEncoding.encode(program),
     )
   }),
 )
@@ -391,7 +394,9 @@ it.effect('verifier rejects dangling normalization identities', () =>
       ]),
     })
     assert.isTrue(
-      Mir.verify(malformed).some((violation) => violation.rule === 'InvalidNormalization'),
+      MirVerification.verify(malformed).some(
+        (violation) => violation.rule === 'InvalidNormalization',
+      ),
     )
 
     const main = program.functions.find((fn) => fn.id.name === 'main')
@@ -435,7 +440,9 @@ it.effect('verifier rejects dangling normalization identities', () =>
       ),
     })
     assert.isTrue(
-      Mir.verify(inconsistent).some((violation) => violation.rule === 'InvalidNormalization'),
+      MirVerification.verify(inconsistent).some(
+        (violation) => violation.rule === 'InvalidNormalization',
+      ),
     )
   }),
 )

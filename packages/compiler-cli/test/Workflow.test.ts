@@ -1,14 +1,16 @@
 import { existsSync } from 'node:fs'
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
-import * as Backend from '@silk-effect/compiler/Backend'
-import * as Target from '@silk-effect/compiler/Target'
+import * as LlvmBackend from '@silk-effect/compiler/LlvmBackend'
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
-import * as Result from 'effect/Result'
+import * as Layer from 'effect/Layer'
+import * as Stream from 'effect/Stream'
 import * as Project from '../src/Project.js'
+import * as SourceSettlement from '../src/SourceSettlement.js'
 import * as Workflow from '../src/Workflow.js'
+import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
 const source = 'pub fn main() -> i32 { return 42 }'
@@ -41,6 +43,12 @@ const options = (workingDirectory: string): Workflow.ProjectSelection => ({
   profile: 'debug',
 })
 
+const silentWatchLayer = (fileSystem: FileSystem.FileSystem) =>
+  Layer.succeed(FileSystem.FileSystem, {
+    ...fileSystem,
+    watch: () => Stream.never,
+  })
+
 /** Polls a watch-mode side effect, which lands on a filesystem event rather than a returned value. */
 const waitUntil = Effect.fnUntraced(function* (condition: () => boolean) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -51,8 +59,8 @@ const waitUntil = Effect.fnUntraced(function* (condition: () => boolean) {
 })
 
 /**
- * Rewrites a source file until the watch reacts. The watcher registers after the first
- * compilation finishes, so a single early write can land before anything is listening.
+ * Rewrites a source file until the watch reacts. Filesystem backends may coalesce a save with an
+ * adjacent event, so watch behavior tests retry the same finished edit until it is observed.
  */
 const editUntilRecompiled = Effect.fnUntraced(function* (
   file: string,
@@ -93,27 +101,21 @@ interface Pass {
   readonly source: string
 }
 
-const unreadable = '<unreadable>'
-
 /**
- * Starts a watch whose passes are recorded, and returns once the watcher is demonstrably
- * subscribed: the first compilation has run, an edit has been seen, and the passes it caused have
- * finished. A test that counts passes needs that, because `Workflow.watch` registers the watcher
- * only after its first compilation, so an early edit can land before anything is listening.
+ * Starts a watch whose passes are recorded, then makes one edit and waits for its compilation to
+ * finish. Tests that count later passes begin from this known idle, subscribed state.
  */
 const watchRecording = Effect.fnUntraced(function* (root: string) {
   const passes: Array<Pass> = []
-  const record = (selection: Workflow.ProjectSelection) =>
-    Effect.gen(function* () {
-      // The same read `check` is about to perform, taken at the moment the pass begins.
-      const loaded = yield* Effect.result(Project.load({ workingDirectory: root }))
-      const status = yield* Workflow.check(selection)
-      const source = Result.isSuccess(loaded)
-        ? new TextDecoder().decode(loaded.success.entry.bytes)
-        : unreadable
-      passes.push({ status, source })
-      return status
-    })
+  const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+    Workflow.checkProject(project, selection).pipe(
+      Effect.tap((status) =>
+        Effect.sync(() => {
+          const source = new TextDecoder().decode(project.entry.bytes)
+          passes.push({ status, source })
+        }),
+      ),
+    )
   const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
   yield* waitUntil(() => passes.length >= 1)
   yield* editUntilRecompiled(
@@ -123,6 +125,45 @@ const watchRecording = Effect.fnUntraced(function* (root: string) {
   )
   yield* passesSettled(passes)
   return { passes, watching } as const
+})
+
+it('waits through a writer paused after truncating a source file', () => {
+  // The event debounce expires while the writer is paused after O_TRUNC, so the settle loop's
+  // first sample is already empty. The prior compiled snapshot is what makes that transition
+  // suspicious; a later observation of the same empty fingerprint must not settle it normally.
+  const afterTruncate = SourceSettlement.fromEntryTransition('empty', source.length, 0)
+  const whileWriterPaused = SourceSettlement.observe(afterTruncate, 'empty')
+  assert.strictEqual(whileWriterPaused._tag, 'Pending')
+  if (whileWriterPaused._tag !== 'Pending') return
+
+  const stillPaused = SourceSettlement.observe(whileWriterPaused.settlement, 'empty')
+  assert.strictEqual(stillPaused._tag, 'Pending')
+  if (stillPaused._tag !== 'Pending') return
+  assert.strictEqual(stillPaused.settlement.fingerprint, 'empty')
+
+  const writerFinished = SourceSettlement.observe(stillPaused.settlement, 'complete:new')
+  assert.deepStrictEqual(writerFinished, { _tag: 'Changed', fingerprint: 'complete:new' })
+  if (writerFinished._tag !== 'Changed') return
+  const firstFinishedConfirmation = SourceSettlement.observe(
+    SourceSettlement.fromEntryTransition(writerFinished.fingerprint, source.length, source.length),
+    'complete:new',
+  )
+  assert.strictEqual(firstFinishedConfirmation._tag, 'Pending')
+  if (firstFinishedConfirmation._tag !== 'Pending') return
+  const settled = SourceSettlement.observe(firstFinishedConfirmation.settlement, 'complete:new')
+  assert.deepStrictEqual(settled, { _tag: 'Settled', fingerprint: 'complete:new' })
+})
+
+it('accepts an intentional empty entry at the suspicious-transition budget', () => {
+  let observed: SourceSettlement.Observation = {
+    _tag: 'Pending',
+    settlement: SourceSettlement.fromEntryTransition('empty', source.length, 0),
+  }
+  for (let sample = 0; sample < SourceSettlement.maximumObservations; sample += 1) {
+    if (observed._tag !== 'Pending') break
+    observed = SourceSettlement.observe(observed.settlement, 'empty')
+  }
+  assert.deepStrictEqual(observed, { _tag: 'Settled', fingerprint: 'empty' })
 })
 
 it.effect('checks a whole project without creating build artifacts', () =>
@@ -140,7 +181,7 @@ it.effect('checks a whole project without creating build artifacts', () =>
 
     assert.strictEqual(status, 0)
     assert.strictEqual(yield* fileSystem.exists(`${root}/.silk`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('separates source diagnostics from operational resolver failures during check', () =>
@@ -157,7 +198,7 @@ it.effect('separates source diagnostics from operational resolver failures durin
     yield* fileSystem.makeDirectory(`${root}/src/unreadable.silk`)
     assert.strictEqual(yield* Workflow.check(options(root)), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/.silk`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect(
@@ -172,12 +213,12 @@ it.effect(
       const project = yield* Project.load({ workingDirectory: root })
 
       assert.strictEqual(status, 0)
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
         true,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -193,7 +234,7 @@ it.effect(
         '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
       )
       assert.strictEqual(yield* Workflow.build({ ...options(root), clang: wasmClang }), 0)
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
         true,
@@ -202,7 +243,7 @@ it.effect(
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         true,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -224,7 +265,7 @@ pub fn main() -> i32 {
         ...options(root),
         targets: ['host', 'wasm32-unknown-unknown'],
       })
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(status, 1)
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
@@ -234,7 +275,7 @@ pub fn main() -> i32 {
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         false,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -257,9 +298,9 @@ pub fn main() -> i32 {
     })
     assert.strictEqual(status, 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), true)
-    const host = yield* Target.host()
+    const host = yield* NativeToolchain.hostTarget()
     assert.strictEqual(yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('preflights incompatible batches before creating output', () =>
@@ -270,7 +311,7 @@ it.effect('preflights incompatible batches before creating output', () =>
     const status = yield* Workflow.build({ ...options(root), backend: 'wasm', targets: ['host'] })
     assert.strictEqual(status, 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('checks every configured target without creating output and keeps run host-only', () =>
@@ -288,7 +329,7 @@ it.effect('checks every configured target without creating output and keeps run 
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
     assert.strictEqual(yield* Workflow.run({ ...options(root), backend: 'wasm' }), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('returns source and toolchain failure classes without leaving executables', () =>
@@ -303,7 +344,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
     const destination = `${root}/broken-toolchain`
     const attempted = yield* Workflow.compile({
       entry: project.entry,
-      backend: Backend.LlvmBackend,
+      backend: LlvmBackend.LlvmBackend,
       profile: 'debug',
       destination,
       toolchain: { _tag: 'Toolchain', clang: '/silk-test/missing-clang' },
@@ -311,7 +352,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
     })
     assert.deepStrictEqual(attempted, { _tag: 'NotBuilt', status: 2 })
     assert.strictEqual(yield* fileSystem.exists(destination), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect(
@@ -325,7 +366,7 @@ it.effect(
       const status = yield* Workflow.run(options(root), ['--literal', 'argument'])
 
       assert.strictEqual(status, 42)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -345,7 +386,7 @@ it.effect(
       assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
       assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
       assert.strictEqual(yield* fileSystem.exists(`${root}/silk.toml`), true)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -358,7 +399,7 @@ it.effect('exits zero cleaning a project that was never built', () =>
 
     assert.strictEqual(yield* Workflow.clean(options(root)), 0)
     assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.live(
@@ -369,8 +410,8 @@ it.live(
       const root = yield* fileSystem.makeTempDirectoryScoped()
       yield* makeProject(root)
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 
@@ -384,7 +425,82 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.live(
+  'compiles the exact source snapshot fingerprinted during watch startup',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const entry = `${root}/src/Main.silk`
+      const replacement = 'pub fn main() -> i32 { return 7 }'
+      let injected = false
+      const startupEditLayer = Layer.succeed(FileSystem.FileSystem, {
+        ...fileSystem,
+        readFile: (path: string) =>
+          fileSystem.readFile(path).pipe(
+            Effect.tap(() => {
+              if (path !== entry || injected) return Effect.void
+              injected = true
+              return fileSystem.writeFileString(entry, replacement)
+            }),
+          ),
+        watch: () => Stream.never,
+      })
+      const observed: Array<string> = []
+      const record = Effect.fnUntraced(function* (
+        project: Project.Project,
+        _selection: Workflow.ProjectSelection,
+      ) {
+        observed.push(new TextDecoder().decode(project.entry.bytes))
+        const status: Workflow.ExitStatus = 0
+        return status
+      })
+
+      const watching = yield* Effect.forkChild(
+        Workflow.watch(record, options(root)).pipe(Effect.provide(startupEditLayer)),
+      )
+      yield* waitUntil(() => observed.length >= 1)
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(observed, [replacement])
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.live(
+  'does not lose an edit made during the initial watch pass',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const replacement = 'pub fn main() -> i32 { return 7 }'
+      const observed: Array<string> = []
+      const record = Effect.fnUntraced(function* (
+        project: Project.Project,
+        _selection: Workflow.ProjectSelection,
+      ) {
+        observed.push(new TextDecoder().decode(project.entry.bytes))
+        if (observed.length === 1) {
+          yield* fileSystem.writeFileString(`${root}/src/Main.silk`, replacement).pipe(Effect.orDie)
+        }
+        const status: Workflow.ExitStatus = 0
+        return status
+      })
+
+      const watching = yield* Effect.forkChild(
+        Workflow.watch(record, options(root)).pipe(Effect.provide(silentWatchLayer(fileSystem))),
+      )
+      yield* waitUntil(() => observed.length >= 2)
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(observed.slice(0, 2), [source, replacement])
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -400,8 +516,8 @@ it.live(
       )
       yield* writeFile(`${root}/src/library/Answer.silk`, 'pub fn answer() -> i32 { return 42 }')
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 
@@ -415,7 +531,7 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -457,7 +573,7 @@ it.live(
         observed.filter((pass) => pass.status !== 0),
         [],
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -480,7 +596,7 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.strictEqual(settled - before, 1)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -516,7 +632,7 @@ it.live(
         passes.slice(before).map((pass) => pass.source),
         edits,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -544,7 +660,7 @@ it.live(
         passes.slice(before).map((pass) => pass.source),
         [''],
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -556,8 +672,8 @@ it.live(
       const root = yield* fileSystem.makeTempDirectoryScoped()
       yield* makeProject(root, 'pub fn main() -> Mystery { return 42 }')
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 
@@ -569,6 +685,6 @@ it.live(
 
       assert.strictEqual(passes[1], 0)
       yield* Fiber.interrupt(watching)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )

@@ -9,8 +9,10 @@ import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Driver from '../../dist/Driver.js'
 import * as Instances from '../../dist/Instances.js'
-import * as Layout from '../../dist/Layout.js'
-import * as Mir from '../../dist/Mir.js'
+import * as LayoutEncode from '../../dist/LayoutEncode.js'
+import * as MirEncoding from '../../dist/MirEncoding.js'
+import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as NodeHeapObservation from '../../dist/NodeHeapObservation.js'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Target from '../../dist/Target.js'
@@ -64,7 +66,7 @@ const hash = Effect.fnUntraced(function* (value) {
 const layoutHash = Effect.fnUntraced(function* (snapshot) {
   const layout = Analysis.layoutOf(snapshot)
   return layout._tag === 'Available'
-    ? yield* hash(Layout.encode(layout.value))
+    ? yield* hash(LayoutEncode.encode(layout.value))
     : layout.error.message
 })
 
@@ -82,7 +84,7 @@ const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
-  const host = yield* Target.host()
+  const host = yield* NativeToolchain.hostTarget()
   const native = yield* Analysis.ofSourceRealized(moduleName, bytes, host.id)
   const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, Target.wasm32UnknownUnknown.id)
   const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
@@ -111,8 +113,8 @@ const program = Effect.gen(function* () {
     ),
     nativeLayout: yield* layoutHash(native),
     wasmLayout: yield* layoutHash(wasm),
-    nativeMir: yield* hash(Mir.encode(Analysis.loweredMir(native))),
-    wasmMir: yield* hash(Mir.encode(Analysis.loweredMir(wasm))),
+    nativeMir: yield* hash(MirEncoding.encode(Analysis.loweredMir(native))),
+    wasmMir: yield* hash(MirEncoding.encode(Analysis.loweredMir(wasm))),
     nativeSymbols: nativeArtifact.symbols.map((entry) => entry.symbol),
     wasmSymbols: wasmArtifact.symbols.map((entry) => entry.symbol),
     nativeArtifact: yield* hash(nativeArtifact.bitcode),
@@ -125,6 +127,10 @@ const program = Effect.gen(function* () {
       JSON.stringify(report, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
     ),
   )
-}).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+}).pipe(
+  Effect.scoped,
+  Effect.provide(NodeHeapObservation.layer),
+  Effect.provide(NodeServices.layer),
+)
 
 await Effect.runPromise(program)

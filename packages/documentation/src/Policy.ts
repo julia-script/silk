@@ -128,7 +128,7 @@ const fenceInfo = (
   module: Project.Module,
   block: Extract<Document.Block, { readonly _tag: 'CodeBlock' }>,
 ): string | undefined => {
-  const source = Analysis.syntaxOf(snapshot, module.name)?.source
+  const source = Analysis.moduleAnalysis(snapshot, module.name)?.syntax?.source
   if (source === undefined || source.id !== block.source.sourceId) return block.language
   const authored = decoder.decode(
     Uint8Array.from(source.bytes.slice(block.source.start, block.source.end)),

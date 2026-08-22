@@ -1,4 +1,5 @@
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Hir from './Hir.js'
@@ -21,16 +22,16 @@ export interface DeclarationLocation {
 export type Identity =
   | {
       readonly _tag: 'DeclarationIdentity'
-      readonly id: DeclarationIndex.CanonicalId | DeclarationIndex.DeclarationId
+      readonly id: DeclarationFacts.CanonicalId | DeclarationFacts.DeclarationId
     }
   | { readonly _tag: 'TypeParameterIdentity'; readonly id: Type.Parameter }
-  | { readonly _tag: 'ParameterIdentity'; readonly id: DeclarationIndex.ParameterId }
+  | { readonly _tag: 'ParameterIdentity'; readonly id: DeclarationFacts.ParameterId }
   | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
-  | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationIndex.FieldId }
+  | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationFacts.FieldId }
   | {
       readonly _tag: 'ServiceOperationIdentity'
-      readonly id: DeclarationIndex.ServiceOperationId
+      readonly id: DeclarationFacts.ServiceOperationId
     }
   | { readonly _tag: 'ImportNamespaceIdentity'; readonly module: string; readonly spelling: string }
   | { readonly _tag: 'IntrinsicActorIdentity'; readonly id: Intrinsic.ActorId }
@@ -70,7 +71,7 @@ export interface Index {
   readonly declarationLocations: ReadonlyMap<string, DeclarationLocation>
 }
 
-const identityOfDeclaration = (declaration: DeclarationIndex.MemberFact): Identity =>
+const identityOfDeclaration = (declaration: DeclarationFacts.MemberFact): Identity =>
   Object.freeze({
     _tag: 'DeclarationIdentity',
     id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
@@ -84,10 +85,10 @@ const location = (
 
 const currentDeclaration = (
   index: DeclarationIndex.Index,
-  declaration: DeclarationIndex.MemberFact,
-): DeclarationIndex.MemberFact =>
+  declaration: DeclarationFacts.MemberFact,
+): DeclarationFacts.MemberFact =>
   declaration.canonical._tag === 'Canonical'
-    ? (DeclarationIndex.byCanonical(index, declaration.canonical.id) ?? declaration)
+    ? (DeclarationFacts.byCanonical(index, declaration.canonical.id) ?? declaration)
     : (index.modules
         .find((module) => module.module === declaration.id.sourceId)
         ?.members.find(
@@ -98,7 +99,7 @@ const currentDeclaration = (
 
 const locationOfDeclaration = (
   index: DeclarationIndex.Index,
-  declaration: DeclarationIndex.MemberFact,
+  declaration: DeclarationFacts.MemberFact,
 ): DeclarationLocation | undefined => {
   const current = currentDeclaration(index, declaration)
   return current.name._tag === 'Present'
@@ -107,21 +108,21 @@ const locationOfDeclaration = (
 }
 
 const locationOfParameter = (
-  parameter: DeclarationIndex.ParameterFact,
+  parameter: DeclarationFacts.ParameterFact,
 ): DeclarationLocation | undefined =>
   parameter.name._tag === 'Present'
     ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
     : undefined
 
 const locationOfServiceOperation = (
-  operation: DeclarationIndex.ServiceOperationFact,
+  operation: DeclarationFacts.ServiceOperationFact,
 ): DeclarationLocation | undefined =>
   operation.name._tag === 'Present'
     ? location(operation.name.token.span.sourceId, operation.syntax.span, operation.name.token.span)
     : undefined
 
 const locationOfTypeParameter = (
-  parameter: DeclarationIndex.TypeParameterFact,
+  parameter: DeclarationFacts.TypeParameterFact,
 ): DeclarationLocation | undefined =>
   parameter.name._tag === 'Present'
     ? location(parameter.name.token.span.sourceId, parameter.syntax.span, parameter.name.token.span)
@@ -136,7 +137,7 @@ const locationOfBinding = (
 
 const locationOfField = (
   index: DeclarationIndex.Index,
-  field: DeclarationIndex.FieldFact,
+  field: DeclarationFacts.FieldFact,
 ): DeclarationLocation | undefined => {
   const current =
     index.modules
@@ -182,11 +183,11 @@ const push = (
 }
 
 const isNominalDeclaration = (
-  declaration: DeclarationIndex.MemberFact,
+  declaration: DeclarationFacts.MemberFact,
 ): declaration is
-  | DeclarationIndex.StructFact
-  | DeclarationIndex.ServiceFact
-  | DeclarationIndex.InterfaceFact =>
+  | DeclarationFacts.StructFact
+  | DeclarationFacts.ServiceFact
+  | DeclarationFacts.InterfaceFact =>
   declaration._tag === 'StructDeclaration' ||
   declaration._tag === 'ServiceDeclaration' ||
   declaration._tag === 'InterfaceDeclaration'
@@ -195,9 +196,9 @@ const declarationByNominal = (
   index: DeclarationIndex.Index,
   nominal: Type.Nominal,
 ):
-  | DeclarationIndex.StructFact
-  | DeclarationIndex.ServiceFact
-  | DeclarationIndex.InterfaceFact
+  | DeclarationFacts.StructFact
+  | DeclarationFacts.ServiceFact
+  | DeclarationFacts.InterfaceFact
   | undefined =>
   index.modules
     .find((module) => module.module === nominal.module)
@@ -205,9 +206,9 @@ const declarationByNominal = (
       (
         declaration,
       ): declaration is
-        | DeclarationIndex.StructFact
-        | DeclarationIndex.ServiceFact
-        | DeclarationIndex.InterfaceFact =>
+        | DeclarationFacts.StructFact
+        | DeclarationFacts.ServiceFact
+        | DeclarationFacts.InterfaceFact =>
         isNominalDeclaration(declaration) &&
         declaration.canonical._tag === 'Canonical' &&
         declaration.canonical.id.name === nominal.name,
@@ -216,7 +217,7 @@ const declarationByNominal = (
 const typeParameterFact = (
   index: DeclarationIndex.Index,
   type: Type.Parameter,
-): DeclarationIndex.TypeParameterFact | undefined => {
+): DeclarationFacts.TypeParameterFact | undefined => {
   for (const module of index.modules)
     for (const member of module.members) {
       const parameter = member.typeParameters.find((candidate) => Type.equals(candidate.type, type))
@@ -313,7 +314,7 @@ const collectQualifier = (
 }
 
 const collectResolvedType = (
-  fact: Extract<DeclarationIndex.DeclaredTypeFact, { readonly _tag: 'Resolved' }>,
+  fact: Extract<DeclarationFacts.DeclaredTypeFact, { readonly _tag: 'Resolved' }>,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -324,7 +325,7 @@ const collectResolvedType = (
     if (qualifier !== undefined)
       collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
     const selected = fact.exactItem.path.segments.at(-1)
-    const declaration = DeclarationIndex.byCanonical(index, fact.exactItem.declaration)
+    const declaration = DeclarationFacts.byCanonical(index, fact.exactItem.declaration)
     push(
       pending,
       selected?.token.span,
@@ -419,7 +420,7 @@ const collectResolvedType = (
 }
 
 const collectDeclaredType = (
-  fact: DeclarationIndex.DeclaredTypeFact,
+  fact: DeclarationFacts.DeclaredTypeFact,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -483,7 +484,7 @@ const collectDeclaredType = (
     const declaration =
       fact.itemCandidate === undefined
         ? undefined
-        : DeclarationIndex.byCanonical(index, fact.itemCandidate)
+        : DeclarationFacts.byCanonical(index, fact.itemCandidate)
     push(
       pending,
       selected?.token.span,
@@ -513,7 +514,7 @@ const collectDeclaredType = (
 }
 
 const collectRowExpression = (
-  fact: DeclarationIndex.RowExpressionFact,
+  fact: DeclarationFacts.RowExpressionFact,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -553,7 +554,7 @@ const collectRowExpression = (
 }
 
 const collectConstraint = (
-  fact: DeclarationIndex.ConstraintFact,
+  fact: DeclarationFacts.ConstraintFact,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -998,7 +999,7 @@ const collectStatement = (
 }
 
 const collectMember = (
-  member: DeclarationIndex.MemberFact,
+  member: DeclarationFacts.MemberFact,
   index: DeclarationIndex.Index,
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
@@ -1147,7 +1148,7 @@ const collectImports = (
         continue
       }
       if (binding._tag === 'ImportedMember') {
-        const declarationFact = DeclarationIndex.byCanonical(index, binding.declaration)
+        const declarationFact = DeclarationFacts.byCanonical(index, binding.declaration)
         const identity =
           declarationFact === undefined ? undefined : identityOfDeclaration(declarationFact)
         const tokens =

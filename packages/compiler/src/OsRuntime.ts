@@ -25,9 +25,6 @@ export const symbols = Object.freeze([
 
 export type Symbol = (typeof symbols)[number]
 
-export const isSymbol = (value: string): value is Symbol =>
-  symbols.some((candidate) => candidate === value)
-
 const common = `#if defined(__APPLE__)
 #define _DARWIN_C_SOURCE
 #elif defined(__linux__)

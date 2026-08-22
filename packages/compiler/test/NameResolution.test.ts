@@ -2,9 +2,10 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -34,7 +35,7 @@ it.effect('binds namespace aliases and selected members to canonical calls', () 
       'app/Main': 'import compiler.Syntax as Tree\npub fn main() -> i32 { return Tree.parse() }',
       'compiler/Syntax': 'pub fn parse() -> i32 { return 42 }\nfn hidden() -> i32 { return 0 }',
     })
-    const returned = Analysis.hirOf(self, 'app/Main')?.functions.at(0)
+    const returned = Projections.hirOf(self, 'app/Main')?.functions.at(0)
     const expression = returned === undefined ? undefined : Hir.returned(returned)
     assert.strictEqual(expression?._tag, 'Call')
     if (expression?._tag === 'Call') {
@@ -136,8 +137,8 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
       [...reverse.results.values()].map((result) => Hir.encode(result.hir)),
     )
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(forward)),
-      Mir.encode(Analysis.loweredMir(reverse)),
+      MirEncoding.encode(Analysis.loweredMir(forward)),
+      MirEncoding.encode(Analysis.loweredMir(reverse)),
     )
     assert.deepEqual(forward.instances, reverse.instances)
     assert.deepEqual(forward.diagnostics, reverse.diagnostics)

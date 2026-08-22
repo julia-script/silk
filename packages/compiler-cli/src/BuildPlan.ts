@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import type * as Backend from '@silk-effect/compiler/Backend'
 import * as BackendRegistry from '@silk-effect/compiler/BackendRegistry'
-import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
 import * as Data from 'effect/Data'
@@ -79,7 +79,7 @@ export const make = (
         }),
       )
     }
-    const host = Target.select(undefined)
+    const host = NativeToolchain.hostSelection()
     if (host._tag === 'Unavailable') {
       return Result.fail(
         new BuildPlanError({

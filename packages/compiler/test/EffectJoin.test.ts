@@ -2,8 +2,10 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Projections from './support/projections.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -218,7 +220,7 @@ const snapshotOf = (name: string, text: string) =>
 
 const runWasm = Effect.fnUntraced(function* (snapshot: Analysis.Snapshot, operation: string) {
   const program = Analysis.loweredMir(snapshot)
-  assert.deepEqual(Mir.verify(program), [])
+  assert.deepEqual(MirVerification.verify(program), [])
   const wasm = yield* Backend.emit(WasmBackend.WasmBackend, program, { mode: 'release' })
   return yield* WasmMain.invoke(wasm.bytes, operation)
 })
@@ -228,7 +230,7 @@ it.effect('runs the selected member of a finite Effect join', () =>
     const snapshot = yield* snapshotOf('effect-join/basic', source)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
+    assert.deepEqual(MirVerification.verify(program), [], MirEncoding.encode(program))
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(
       outcome._tag,
@@ -256,7 +258,7 @@ it.effect('joins Effects returned from distinct finite control-flow branches', (
     const snapshot = yield* snapshotOf('effect-join/branches', branchSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
+    assert.deepEqual(MirVerification.verify(program), [], MirEncoding.encode(program))
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(
       outcome._tag,
@@ -303,14 +305,14 @@ it.effect('propagates the selected alternative failure', () =>
     const snapshot = yield* snapshotOf('effect-join/selected-failure', selectedFailureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
+    assert.deepEqual(MirVerification.verify(program), [], MirEncoding.encode(program))
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'UnhandledFailure')
     if (outcome._tag === 'UnhandledFailure') {
       assert.strictEqual(
         outcome.identity,
         'effect-join/selected-failure.SecondError',
-        Mir.encode(program),
+        MirEncoding.encode(program),
       )
     }
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.selectedFailure'), 1)
@@ -330,7 +332,7 @@ it.effect('cleans up only the selected alternative capture', () =>
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
-        Analysis.allocationTraceEventsOf(outcome).map((event) => event._tag),
+        Projections.allocationTraceEventsOf(outcome).map((event) => event._tag),
         ['AllocationAcquire', 'AllocationRelease'],
       )
     }
@@ -343,7 +345,7 @@ it.effect('joins shared and exclusive capture access at the stronger access', ()
     const snapshot = yield* snapshotOf('effect-join/access', accessSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const program = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(program), [], Mir.encode(program))
+    assert.deepEqual(MirVerification.verify(program), [], MirEncoding.encode(program))
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(
       outcome._tag,
@@ -374,7 +376,7 @@ it.effect('runs the selected capture Drop hook and reclaim exactly once', () =>
         1,
       )
       assert.deepEqual(
-        Analysis.allocationTraceEventsOf(outcome).map((event) => event._tag),
+        Projections.allocationTraceEventsOf(outcome).map((event) => event._tag),
         ['AllocationAcquire', 'AllocationRelease'],
       )
     }

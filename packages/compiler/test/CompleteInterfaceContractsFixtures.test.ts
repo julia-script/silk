@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
+import type * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
@@ -36,20 +37,20 @@ const analyze = Effect.fnUntraced(function* (name: string) {
 const namedInterface = (
   index: DeclarationIndex.Index,
   name: string,
-): DeclarationIndex.InterfaceFact | undefined =>
+): DeclarationFacts.InterfaceFact | undefined =>
   index.modules
     .flatMap((module) => module.interfaces)
     .find((candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name)
 const namedDeclaration = (
   index: DeclarationIndex.Index,
   name: string,
-): DeclarationIndex.DeclarationFact | undefined =>
+): DeclarationFacts.DeclarationFact | undefined =>
   index.modules
     .flatMap((module) => module.declarations)
     .find((candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name)
-const encodedOperand = (operand: DeclarationIndex.InterfaceOperandFact): string =>
+const encodedOperand = (operand: DeclarationFacts.InterfaceOperandFact): string =>
   operand.type._tag === 'Resolved' ? Type.encode(operand.type.type) : operand.type._tag
-const encodedDeclaredType = (declared: DeclarationIndex.DeclaredTypeFact): string =>
+const encodedDeclaredType = (declared: DeclarationFacts.DeclaredTypeFact): string =>
   declared._tag === 'Resolved' ? Type.encode(declared.type) : declared._tag
 
 layer(NodeServices.layer)('complete interface contract fixtures', (it) => {

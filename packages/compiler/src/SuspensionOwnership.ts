@@ -1,8 +1,11 @@
+import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as SetOf from './internal/SetOf.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import * as Ownership from './Ownership.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -23,7 +26,7 @@ export type Access =
       readonly root: Mir.LocalId
       readonly loan: BorrowIdentity
     }
-  | { readonly _tag: 'AffineTransfer'; readonly cleanup: Ownership.CleanupPlan }
+  | { readonly _tag: 'AffineTransfer'; readonly cleanup: CleanupPlan.CleanupPlan }
 
 export interface Slot {
   readonly ordinal: number
@@ -34,7 +37,7 @@ export interface Slot {
 
 export interface Release {
   readonly local: Mir.LocalId
-  readonly cleanup: Ownership.CleanupPlan
+  readonly cleanup: CleanupPlan.CleanupPlan
 }
 
 export interface ResumePlan {
@@ -69,15 +72,6 @@ export interface Module {
   readonly violations: ReadonlyArray<Violation>
 }
 
-const union = (...sets: ReadonlyArray<ReadonlySet<number>>): Set<number> => {
-  const result = new Set<number>()
-  for (const set of sets) for (const value of set) result.add(value)
-  return result
-}
-
-const equalSet = (left: ReadonlySet<number>, right: ReadonlySet<number>): boolean =>
-  left.size === right.size && [...left].every((value) => right.has(value))
-
 const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => {
   const definitions = new Set<number>()
   for (const nested of Mir.operationTree(operation)) {
@@ -104,7 +98,7 @@ const operationInputs = (operation: Mir.Operation): ReadonlySet<number> => {
       .flatMap((nested) =>
         nested._tag === 'Drop' && nested.cleanup._tag === 'NoCleanup'
           ? []
-          : Mir.operationLocals(nested),
+          : MirVerification.operationLocals(nested),
       )
       .map((local) => local.ordinal)
       .filter((local) => !definitions.has(local)),
@@ -116,7 +110,7 @@ const transferOperation = (
   liveAfter: ReadonlySet<number>,
 ): Set<number> => {
   const definitions = operationDefinitions(operation)
-  return union(
+  return SetOf.union(
     operationInputs(operation),
     new Set([...liveAfter].filter((local) => !definitions.has(local))),
   )
@@ -161,10 +155,10 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
         .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
       const before = transferSequence(
         regionOperations(region),
-        union(new Set(successors), outcomeUses(region)),
+        SetOf.union(new Set(successors), outcomeUses(region)),
       )
       const current = liveIn.get(region.id.ordinal) ?? new Set()
-      if (!equalSet(before, current)) {
+      if (!SetOf.equal(before, current)) {
         liveIn.set(region.id.ordinal, before)
         changed = true
       }
@@ -188,12 +182,12 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
         for (const arm of operation.arms) {
           const selected = analyzeSequence(
             arm.selected.operations,
-            union(outer, new Set([arm.selected.result.ordinal])),
+            SetOf.union(outer, new Set([arm.selected.result.ordinal])),
           )
           if (arm.guard !== undefined)
             analyzeSequence(
               arm.guard.operations,
-              union(selected, new Set([arm.guard.result.ordinal])),
+              SetOf.union(selected, new Set([arm.guard.result.ordinal])),
             )
         }
       } else if (operation._tag === 'ShortCircuit') {
@@ -202,7 +196,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
         )
         analyzeSequence(
           operation.right.operations,
-          union(outer, new Set([operation.right.result.ordinal])),
+          SetOf.union(outer, new Set([operation.right.result.ordinal])),
         )
       }
       live = transferOperation(operation, live)
@@ -214,14 +208,14 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
     const successors = edges
       .filter((edge) => edge.from.ordinal === region.id.ordinal)
       .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
-    analyzeSequence(regionOperations(region), union(new Set(successors), outcomeUses(region)))
+    analyzeSequence(regionOperations(region), SetOf.union(new Set(successors), outcomeUses(region)))
   }
   return liveAfter
 }
 
 const definitionMap = (fn: Mir.MirFunction): ReadonlyMap<number, Mir.Operation> =>
   new Map(
-    Mir.operations(fn).flatMap((operation) =>
+    MirVerification.operations(fn).flatMap((operation) =>
       'destination' in operation ? [[operation.destination.ordinal, operation] as const] : [],
     ),
   )
@@ -303,7 +297,7 @@ const accessOf = (
       ? Object.freeze({ _tag: 'Copy' })
       : Object.freeze({
           _tag: 'AffineTransfer',
-          cleanup: Ownership.cleanupPlan(index, Mir.semanticType(type)),
+          cleanup: CleanupPlan.cleanupPlan(index, Mir.semanticType(type)),
         })
 
 const planFor = (
@@ -359,19 +353,17 @@ const planFor = (
     ): slot is Slot & { readonly access: Extract<Access, { readonly _tag: 'AffineTransfer' }> } =>
       slot.access._tag === 'AffineTransfer',
   )
-  const releaseOrder = Object.freeze(
-    [
-      ...releases,
-      ...[...affine]
-        .reverse()
-        .filter((slot) => !releases.some((release) => release.local.ordinal === slot.local.ordinal))
-        .map((slot) => Object.freeze({ local: slot.local, cleanup: slot.access.cleanup })),
-    ].filter(
-      (release, ordinal, all) =>
-        all.findIndex((candidate) => candidate.local.ordinal === release.local.ordinal) === ordinal,
-    ),
-  )
-  const loanEnds = Object.freeze([...borrowed].reverse().map((slot) => slot.access.loan))
+  const affineReleases = affine
+    .filter((slot) => !releases.some((release) => release.local.ordinal === slot.local.ordinal))
+    .map((slot) =>
+      Object.freeze({
+        local: slot.local,
+        cleanup: slot.access.cleanup,
+        ordinal: slot.local.ordinal,
+      }),
+    )
+  const releaseOrder = Object.freeze([...releases, ...Ownership.inReleaseOrder(affineReleases)])
+  const loanEnds = Object.freeze(Ownership.inReleaseOrder(borrowed).map((slot) => slot.access.loan))
   return Object.freeze({
     _tag: 'SuspensionOwnershipPlan',
     point: control.id,

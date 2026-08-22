@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -34,21 +35,30 @@ const installedVersion = (name: string): string =>
     readFileSync(resolve(compilerCliPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
   ).version
 
-const installConsumer = (cwd: string, ignoreWorkspace = false): void => {
-  const result = spawnSync(
-    'pnpm',
-    [
-      'install',
-      '--ignore-scripts',
-      '--offline',
-      ...(ignoreWorkspace ? ['--ignore-workspace'] : []),
-    ],
-    {
-      cwd,
-      encoding: 'utf8',
-      timeout: 60_000,
-    },
-  )
+const installedDependencyVersion = (parent: string, name: string): string =>
+  JSON.parse(
+    readFileSync(
+      resolve(
+        realpathSync(resolve(compilerCliPackageRoot, `node_modules/${parent}`)),
+        `../${name}/package.json`,
+      ),
+      'utf8',
+    ),
+  ).version
+
+const consumerWorkspace = (configuration = ''): string =>
+  `overrides:\n  'uuid': ${installedDependencyVersion('effect', 'uuid')}\n${configuration}`
+
+test('consumer workspaces pin Effect transitive ranges to installed versions', () => {
+  expect(consumerWorkspace()).toContain(`  'uuid': ${installedDependencyVersion('effect', 'uuid')}`)
+})
+
+const installConsumer = (cwd: string): void => {
+  const result = spawnSync('pnpm', ['install', '--ignore-scripts', '--offline'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 60_000,
+  })
   if (result.status === 0) return
   throw new Error(`pnpm install failed in ${cwd}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`)
 }
@@ -145,7 +155,8 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    installConsumer(consumerRoot, true)
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -273,20 +284,23 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './BackendRegistry',
       './BootstrapEvaluation',
       './CallableContract',
-      './CallableFieldRealization',
       './ChildProcess',
+      './CleanupPlan',
       './Completion',
       './ConformanceGoal',
       './ConformanceHead',
       './Constraint',
+      './DeclarationFacts',
       './DeclarationIndex',
       './Diagnostic',
       './DocBlock',
       './Driver',
       './Elaboration',
+      './FieldRealization',
       './FiniteRow',
       './FloatingPoint',
       './FormattedDocument',
+      './HeapObservation',
       './Hir',
       './HostInput',
       './ImportPath',
@@ -296,10 +310,15 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Intrinsic',
       './IntrinsicAvailability',
       './Layout',
+      './LayoutEncode',
+      './LayoutVerify',
       './Lexer',
       './LiteralForm',
+      './LlvmBackend',
       './Lower',
       './Mir',
+      './MirEncoding',
+      './MirVerification',
       './ModuleClosure',
       './ModuleSemantics',
       './ModuleSummary',
@@ -307,6 +326,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './ModuleTooling',
       './NameResolution',
       './NativeToolchain',
+      './NodeHeapObservation',
       './Operator',
       './OsFileSystemHost',
       './Ownership',
@@ -413,7 +433,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -561,7 +583,10 @@ console.log(
     toolchainIdentity: api.ToolchainIntegrity.installed().digest,
     rootNamespaces: Object.fromEntries(
       paths
-        .filter((path) => path !== './NativeToolchain' && path !== './Driver')
+        .filter(
+          (path) =>
+            path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver',
+        )
         .map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
     ),
     deep: Object.fromEntries(
@@ -666,9 +691,14 @@ console.log(
       })),
       indexes: api.Analysis.indexProjectionsOf(nativeArraySnapshot, 'memory/packed-array').map((projection) => projection.bounds),
       hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeArraySnapshot).hir),
-      ownership: api.Ownership.encode(api.Analysis.ownershipOf(nativeArraySnapshot, 'memory/packed-array')),
-      layout: api.Layout.encode(api.Analysis.layoutOf(nativeArraySnapshot).value),
-      mir: api.Mir.encode(api.Analysis.loweredMir(nativeArraySnapshot)),
+      ownershipCleanupTags: api.Analysis
+        .ownershipOf(nativeArraySnapshot, 'memory/packed-array')
+        .functions.flatMap((fn) => [
+          ...api.Ownership.allBindings(fn).map((binding) => binding.cleanup._tag),
+          ...fn.exits.flatMap((exit) => exit.releases.map((release) => release.cleanup._tag)),
+        ]),
+      layout: api.LayoutEncode.encode(api.Analysis.layoutOf(nativeArraySnapshot).value),
+      mir: api.MirEncoding.encode(api.Analysis.loweredMir(nativeArraySnapshot)),
       trace: api.Analysis.evaluate(nativeArraySnapshot).trace,
       nativeSymbols: nativeArrayArtifact.symbols,
       nativeIr: nativeArrayArtifact.ir,
@@ -680,10 +710,12 @@ console.log(
     },
     unions: {
       diagnostics: api.Analysis.diagnostics(nativeUnionSnapshot),
-      types: api.Analysis.unionLayoutsOf(nativeUnionSnapshot).map((entry) => api.Type.encode(entry.type)),
+      types: api.Analysis.layoutOf(nativeUnionSnapshot).value.entries
+        .filter((entry) => entry.representation._tag === 'Union')
+        .map((entry) => api.Type.encode(entry.type)),
       hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeUnionSnapshot).hir),
-      layout: api.Layout.encode(api.Analysis.layoutOf(nativeUnionSnapshot).value),
-      mir: api.Mir.encode(api.Analysis.loweredMir(nativeUnionSnapshot)),
+      layout: api.LayoutEncode.encode(api.Analysis.layoutOf(nativeUnionSnapshot).value),
+      mir: api.MirEncoding.encode(api.Analysis.loweredMir(nativeUnionSnapshot)),
       trace: api.Analysis.evaluate(nativeUnionSnapshot).trace,
       nativeIr: nativeUnionArtifact.ir,
       wasmWat: wasmUnionArtifact.wat,
@@ -709,19 +741,22 @@ console.log(
       'BackendRegistry',
       'BootstrapEvaluation',
       'CallableContract',
-      'CallableFieldRealization',
       'ChildProcess',
+      'CleanupPlan',
       'Completion',
       'ConformanceGoal',
       'ConformanceHead',
       'Constraint',
+      'DeclarationFacts',
       'DeclarationIndex',
       'Diagnostic',
       'DocBlock',
       'Elaboration',
+      'FieldRealization',
       'FiniteRow',
       'FloatingPoint',
       'FormattedDocument',
+      'HeapObservation',
       'Hir',
       'HostInput',
       'ImportPath',
@@ -731,12 +766,17 @@ console.log(
       'Intrinsic',
       'IntrinsicAvailability',
       'Layout',
+      'LayoutEncode',
+      'LayoutVerify',
       'Lexer',
       'LiteralForm',
+      'LlvmBackend',
       'Lower',
       'Match',
       'Mir',
+      'MirEncoding',
       'MirNormalization',
+      'MirVerification',
       'ModuleClosure',
       'ModuleSemantics',
       'ModuleSummary',
@@ -787,7 +827,7 @@ console.log(
       readonly [string, ReadonlyArray<string>]
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
-      if (path !== './NativeToolchain' && path !== './Driver')
+      if (path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver')
         expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
@@ -823,7 +863,7 @@ console.log(
     ])
     expect(api.arrays.indexes).toEqual([{ _tag: 'Runtime', length: 2 }])
     expect(api.arrays.hir).toContain('construct-array')
-    expect(api.arrays.ownership).toContain('cleanup array:')
+    expect(api.arrays.ownershipCleanupTags).toContain('ArrayCleanup')
     expect(api.arrays.layout).toContain('repr=repeated')
     expect(api.arrays.mir).toContain('read-place')
     expect(api.arrays.trace.map((event: { _tag: string }) => event._tag)).toContain('PlaceRead')
@@ -998,7 +1038,9 @@ test('the documentation release candidate exposes its formatter-neutral actors',
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
     const api = JSON.parse(
@@ -1082,7 +1124,9 @@ test('the formatter release candidate installs offline with root and deep API pa
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      consumerWorkspace(
+        `  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1219,7 +1263,9 @@ test('the compiler CLI release candidate installs with its project-first command
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      consumerWorkspace(
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1363,7 +1409,8 @@ test('the wasm release candidate is a self-contained ESM package', () => {
         dependencies: { '@silk-effect/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
-    installConsumer(consumerRoot, true)
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
 
     const deepPaths = Object.keys(manifest.exports)
       .filter((path) => path !== '.')
@@ -1521,7 +1568,9 @@ test('the lsp release candidate installs and answers an initialize request', asy
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
-      `overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      consumerWorkspace(
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-effect/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-effect/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-effect/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-effect/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-effect/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-effect/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-effect/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+      ),
     )
     installConsumer(consumerRoot)
 
@@ -1618,10 +1667,8 @@ test('the WebContainer release candidate exposes every SSR-safe actor subpath', 
         },
       }),
     )
-    execFileSync('pnpm', ['install', '--offline', '--ignore-workspace'], {
-      cwd: consumerRoot,
-      stdio: 'pipe',
-    })
+    writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
+    installConsumer(consumerRoot)
     const inspected = JSON.parse(
       execFileSync(
         process.execPath,

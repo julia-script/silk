@@ -1,7 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
@@ -72,7 +74,7 @@ it.effect('lowers every logical string path without reusing slice operations', (
     const snapshot = yield* lowered()
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    const operations = mir.functions.flatMap(Mir.operations)
+    const operations = mir.functions.flatMap(MirVerification.operations)
     const tags = operations.map((operation) => operation._tag)
 
     assert.include(tags, 'StaticString')
@@ -100,13 +102,13 @@ it.effect('lowers every logical string path without reusing slice operations', (
       runtime?._tag === 'StringFromUtf8Unchecked' ? runtime.heldLoans.length : undefined,
       1,
     )
-    const encoded = Mir.encode(mir)
+    const encoded = MirEncoding.encode(mir)
     assert.include(encoded, 'static-string')
     assert.include(encoded, 'string-from-utf8-unchecked')
     assert.include(encoded, 'string-utf8-bytes')
     assert.include(encoded, 'string-byte-length')
     assert.include(encoded, 'string-not-equals-exact')
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
   }),
 )
 
@@ -114,7 +116,7 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
   Effect.gen(function* () {
     const snapshot = yield* lowered()
     const mir = Analysis.loweredMir(snapshot)
-    const operations = mir.functions.flatMap(Mir.operations)
+    const operations = mir.functions.flatMap(MirVerification.operations)
     const raw = operations.find((operation) => operation._tag === 'StringUtf8Bytes')
     if (raw?._tag !== 'StringUtf8Bytes') throw new RangeError('expected UTF-8 byte view')
 
@@ -173,20 +175,20 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
 
     for (const candidate of [forged, mutable, confused]) {
       assert.include(
-        Mir.verify(candidate).map((violation) => violation.rule),
+        MirVerification.verify(candidate).map((violation) => violation.rule),
         'InvalidStringOperation',
       )
     }
     assert.include(
-      Mir.verify(unterminated).map((violation) => violation.rule),
+      MirVerification.verify(unterminated).map((violation) => violation.rule),
       'InvalidLoan',
     )
     assert.include(
-      Mir.verify(callMismatch).map((violation) => violation.rule),
+      MirVerification.verify(callMismatch).map((violation) => violation.rule),
       'InvalidCallShape',
     )
     assert.include(
-      Mir.verify(shapeMismatch).map((violation) => violation.rule),
+      MirVerification.verify(shapeMismatch).map((violation) => violation.rule),
       'InvalidLayout',
     )
   }),
