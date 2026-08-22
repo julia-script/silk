@@ -35,5 +35,5 @@
       verify no branch grants privilege to `Shared`, `Allocator`, `OutOfMemoryError`, Deferred,
       Scheduler, or a ready inbox, and add same-spelling ordinary `sharedLayout` and
       `sharedFromAllocation` declarations whose facts and execution remain entirely ordinary.
-- [ ] 3.3 Run `pnpm typecheck`, `pnpm exec biome check .`, and focused layout/allocation tests; verify
+- [x] 3.3 Run `pnpm typecheck`, `pnpm exec biome check .`, and focused layout/allocation tests; verify
       every command passes before lifecycle operations consume the initialized core.
