@@ -1,0 +1,6 @@
+interface:
+  display_name: "SLP 5: Implement"
+  short_description: "Step 5 — implement all OpenSpec changes of an accepted SLP"
+  default_prompt: "Use $slp-5-implement to implement every OpenSpec change handed off from this SLP."
+policy:
+  allow_implicit_invocation: false

@@ -1,11 +1,11 @@
 ---
 name: slp-1-develop
-description: "SLP step 1 of 5. Create or evolve a Draft Silk Language Proposal through an example-driven design conversation, up to the Candidate bar. Manual-only: use ONLY when the user explicitly invokes /slp-1-develop or says \"develop/draft an SLP\". Never trigger from a general language or design question."
+description: "SLP step 1 of 6. Create or evolve a Draft Silk Language Proposal through an example-driven design conversation, up to the Candidate bar. Manual-only: use ONLY when the user explicitly invokes /slp-1-develop or says \"develop/draft an SLP\". Never trigger from a general language or design question."
 ---
 
 # SLP 1: Develop
 
-Pipeline: **1 develop** → 2 review → 3 resolve → 4 handoff → 5 audit-implementation.
+Pipeline: **1 develop** → 2 review → 3 resolve → 4 handoff → 5 implement → 6 audit-implementation.
 
 Read `AGENTS.md`, `proposals/PROCESS.md`, and `proposals/TEMPLATE.md` before acting. Re-read the
 target Draft from disk when continuing one.

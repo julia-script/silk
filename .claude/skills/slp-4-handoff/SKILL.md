@@ -1,11 +1,11 @@
 ---
 name: slp-4-handoff
-description: "SLP step 4 of 5. Create the OpenSpec change(s) that realize an SLP in Accepted direction, then audit them for fidelity, normative completeness, and task/verification coverage before implementation. Manual-only: use ONLY when the user explicitly invokes /slp-4-handoff or says \"hand off this SLP to OpenSpec\". Never trigger from generic OpenSpec requests."
+description: "SLP step 4 of 6. Create the OpenSpec change(s) that realize an SLP in Accepted direction, then audit them for fidelity, normative completeness, and task/verification coverage before implementation. Manual-only: use ONLY when the user explicitly invokes /slp-4-handoff or says \"hand off this SLP to OpenSpec\". Never trigger from generic OpenSpec requests."
 ---
 
 # SLP 4: Handoff
 
-Pipeline: 1 develop → 2 review → 3 resolve → **4 handoff** → 5 audit-implementation.
+Pipeline: 1 develop → 2 review → 3 resolve → **4 handoff** → 5 implement → 6 audit-implementation.
 
 Read `AGENTS.md`, `proposals/PROCESS.md` (§ OpenSpec handoff, § Traceability gates),
 `OPENSPEC-AUDIT-TEMPLATE.md`, and the target SLP before acting. Require
@@ -63,4 +63,4 @@ stop. `Result: Ready` only when every accepted decision is covered, every observ
 scenarios and verification, artifacts agree, the privilege boundary holds, and strict validation
 passes. Otherwise record the open items in the audit record.
 
-Next: implement via `/openspec-apply-change`, then `/slp-5-audit-implementation`.
+Next: `/slp-5-implement`.

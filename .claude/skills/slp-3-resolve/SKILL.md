@@ -1,11 +1,11 @@
 ---
 name: slp-3-resolve
-description: "SLP step 3 of 5. Walk the human author through the review ledger and forks of a Silk Language Proposal, apply their decisions, record the outcome. Manual-only: use ONLY when the user explicitly invokes /slp-3-resolve or says \"resolve this SLP\"."
+description: "SLP step 3 of 6. Walk the human author through the review ledger and forks of a Silk Language Proposal, apply their decisions, record the outcome. Manual-only: use ONLY when the user explicitly invokes /slp-3-resolve or says \"resolve this SLP\"."
 ---
 
 # SLP 3: Resolve
 
-Pipeline: 1 develop → 2 review → **3 resolve** → 4 handoff → 5 audit-implementation.
+Pipeline: 1 develop → 2 review → **3 resolve** → 4 handoff → 5 implement → 6 audit-implementation.
 
 Read `AGENTS.md`, `proposals/PROCESS.md`, the target proposal, `reviews/ledger.md`, and the latest
 review record before acting. Re-read linked examples from disk.
