@@ -12,6 +12,7 @@ import * as Mir from '../src/Mir.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Projections from './support/projections.js'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -85,8 +86,8 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
       ],
     )
     for (const name of moduleNames) {
-      assert.notStrictEqual(Analysis.syntaxOf(self, name), undefined)
-      assert.notStrictEqual(Analysis.hirOf(self, name), undefined)
+      assert.notStrictEqual(Projections.syntaxOf(self, name), undefined)
+      assert.notStrictEqual(Projections.hirOf(self, name), undefined)
       assert.notStrictEqual(Analysis.ownershipOf(self, name), undefined)
     }
     assert.isAbove(Analysis.instancesOf(self).instances.length, 0)

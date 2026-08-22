@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -65,7 +66,7 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
     const second = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
     assert.deepEqual(Analysis.diagnostics(first), [])
 
-    const hir = Analysis.hirOf(first, moduleName)
+    const hir = Projections.hirOf(first, moduleName)
     const expressions =
       hir?.functions.flatMap((fn) =>
         fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),

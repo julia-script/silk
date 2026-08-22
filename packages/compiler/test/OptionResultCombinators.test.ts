@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -219,7 +220,7 @@ it.effect(
       // Every combinator drops exactly one of its two arms: three acquired allocations release
       // exactly three times, so the fallback the present arm discarded neither leaked nor
       // double-dropped.
-      const tags = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+      const tags = Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag)
       assert.strictEqual(tags.filter((tag) => tag === 'AllocationAcquire').length, 3)
       assert.strictEqual(tags.filter((tag) => tag === 'AllocationRelease').length, 3)
     }),

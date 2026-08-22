@@ -288,7 +288,7 @@ export const type = (
       Type.requirementRowPolicy(),
       self.requirementRow,
       (requirement) =>
-        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+        Type.encodeRequirement(requirement, (capability) => type(capability, module, scope)),
       (parameter_) => parameter_.name,
       (member) =>
         `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
@@ -325,7 +325,9 @@ export const genericArgument = (
                       Type.requirementRowPolicy(),
                       self.row,
                       (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${type(requirement.capability, module, scope)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+                        Type.encodeRequirement(requirement, (capability) =>
+                          type(capability, module, scope),
+                        ),
                       (parameter_) => parameter_.name,
                       (member) =>
                         `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,

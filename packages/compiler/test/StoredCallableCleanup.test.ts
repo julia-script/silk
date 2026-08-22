@@ -1,9 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
+import * as FieldRealization from '../src/FieldRealization.js'
 import * as Instances from '../src/Instances.js'
-import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
@@ -30,7 +30,7 @@ const bindingCleanup = (
   snapshot: Analysis.Snapshot,
   module: string,
   name: string,
-): Ownership.CleanupPlan => {
+): CleanupPlan.CleanupPlan => {
   const facts = snapshot.ownership.get(module) ?? unreachable(`expected ownership for ${module}`)
   const binding = facts.functions
     .flatMap((fn) => [...fn.bindings])
@@ -38,13 +38,11 @@ const bindingCleanup = (
   return binding?.cleanup ?? unreachable(`expected a cleanup plan for ${name}`)
 }
 
-const soleRealization = (
-  snapshot: Analysis.Snapshot,
-): CallableFieldRealization.CallableRealization =>
+const soleRealization = (snapshot: Analysis.Snapshot): FieldRealization.CallableRealization =>
   Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
-      CallableFieldRealization.isCallableRealization(entry.support.realization)
+      FieldRealization.isCallableRealization(entry.support.realization)
         ? [entry.support.realization]
         : [],
     )
@@ -53,18 +51,18 @@ const soleRealization = (
 const realizationOf = (
   snapshot: Analysis.Snapshot,
   owner: string,
-): CallableFieldRealization.CallableRealization =>
+): FieldRealization.CallableRealization =>
   Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
     .entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
-      CallableFieldRealization.isCallableRealization(entry.support.realization) &&
+      FieldRealization.isCallableRealization(entry.support.realization) &&
       entry.support.realization.instance.name === owner
         ? [entry.support.realization]
         : [],
     )
     .at(0) ?? unreachable(`expected a supported callable field realization for ${owner}`)
 
-const fieldCleanup = (plan: Ownership.CleanupPlan, ordinal: number): Ownership.CleanupPlan => {
+const fieldCleanup = (plan: CleanupPlan.CleanupPlan, ordinal: number): CleanupPlan.CleanupPlan => {
   assert.strictEqual(plan._tag, 'StructCleanup')
   if (plan._tag !== 'StructCleanup') return unreachable('expected a struct cleanup')
   return (
@@ -133,7 +131,7 @@ it.effect('resolves the obligation into ordered owned lanes from the shared real
 }`,
     )
     const realization = soleRealization(snapshot)
-    const resolved = Ownership.realizedCallableCleanup(snapshot.index, realization)
+    const resolved = CleanupPlan.realizedCallableCleanup(snapshot.index, realization)
 
     // Every fact comes from the realization: the specialized site and its owned capture lanes.
     assert.deepEqual(realization.cleanup.lanes, [0])
@@ -171,7 +169,7 @@ pub fn main() -> i32 {
 }`,
     )
     const realization = soleRealization(snapshot)
-    const resolved = Ownership.realizedCallableCleanup(snapshot.index, realization)
+    const resolved = CleanupPlan.realizedCallableCleanup(snapshot.index, realization)
 
     // A Copy lane is neither loaned nor cleaned, so the aggregate carries no drop obligation.
     assert.deepEqual(realization.cleanup.lanes, [])
@@ -202,15 +200,15 @@ pub fn main() -> i32 {
   return 42
 }`,
     )
-    const resolved = Ownership.realizedCallableCleanup(
+    const resolved = CleanupPlan.realizedCallableCleanup(
       snapshot.index,
       realizationOf(snapshot, 'Holder'),
     )
 
     assert.strictEqual(resolved._tag, 'CallableCleanup')
-    assert.isTrue(Ownership.cleanupHasHook(resolved))
-    assert.isFalse(Ownership.cleanupReclaims(resolved))
-    assert.isTrue(Ownership.cleanupHasEffect(resolved))
+    assert.isTrue(CleanupPlan.hasHook(resolved))
+    assert.isFalse(CleanupPlan.reclaims(resolved))
+    assert.isTrue(CleanupPlan.hasEffect(resolved))
     const captured = resolved._tag === 'CallableCleanup' ? resolved.slots.at(0)?.cleanup : undefined
     assert.strictEqual(captured?._tag, 'HookCleanup')
     const hookArgument = captured?._tag === 'HookCleanup' ? captured.typeArguments.at(0) : undefined

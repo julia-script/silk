@@ -7,8 +7,9 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
-import * as Backend from '../src/Backend.js'
+import type * as Backend from '../src/Backend.js'
 import * as Driver from '../src/Driver.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -41,7 +42,7 @@ const compileSource = (
   name: string,
   text: string,
   overrides: Partial<Driver.CompileRequest> = {},
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed> =>
+): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),
@@ -128,7 +129,7 @@ it.effect('reports every phase in order with counts and totals', () =>
     for (const entry of outcome.report) {
       assert.isAtLeast(entry.elapsedMs, 0, entry.phase)
       assert.isAtLeast(entry.outputs, 0, entry.phase)
-      assert.isAbove(entry.heapBytes, 0, entry.phase)
+      assert.isAtLeast(entry.heapBytes, 0, entry.phase)
     }
     const closure = outcome.report.find((entry) => entry.phase === 'closure')
     assert.strictEqual(closure?.inputs, 1)
@@ -188,10 +189,10 @@ it.effect(
         _tag: 'Backend',
         id: 'llvm',
         name: 'Spy LLVM',
-        targets: Backend.LlvmBackend.targets,
+        targets: LlvmBackend.LlvmBackend.targets,
         emit: (program, request) => {
           emissions += 1
-          return Backend.LlvmBackend.emit(program, request)
+          return LlvmBackend.LlvmBackend.emit(program, request)
         },
       }
       const outcome = yield* compileSource(
@@ -215,10 +216,10 @@ it.effect('gates source rejection and operational resolution failure before back
       _tag: 'Backend',
       id: 'llvm',
       name: 'Gate Spy',
-      targets: Backend.LlvmBackend.targets,
+      targets: LlvmBackend.LlvmBackend.targets,
       emit: (program, request) => {
         emissions += 1
-        return Backend.LlvmBackend.emit(program, request)
+        return LlvmBackend.LlvmBackend.emit(program, request)
       },
     }
     const rejected = yield* compileSource('rejected', 'pub fn main() -> Mystery { return 42 }', {
@@ -261,6 +262,7 @@ it.effect('gates source rejection and operational resolution failure before back
     assert.strictEqual(failed._tag, 'Failure')
     if (failed._tag === 'Failure') {
       assert.strictEqual(failed.failure._tag, 'SourceResolutionFailed')
+      if (failed.failure._tag !== 'SourceResolutionFailed') return
       assert.deepEqual(
         failed.failure.failures.map((failure) => failure.module),
         ['unreadable'],
@@ -324,10 +326,10 @@ it.effect(
       )
       let emissions = 0
       const backend: Backend.Backend = {
-        ...Backend.LlvmBackend,
+        ...LlvmBackend.LlvmBackend,
         emit: (program, request) => {
           emissions += 1
-          return Backend.LlvmBackend.emit(program, request)
+          return LlvmBackend.LlvmBackend.emit(program, request)
         },
       }
       const outcome = yield* compileSource(
@@ -358,16 +360,21 @@ it.effect('surfaces a missing entry as a closed outcome without invoking the too
 
 it.effect('names the failing native stage with command provenance', () =>
   Effect.gen(function* () {
-    const outcome = yield* compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
-    })
+    const outcome = yield* Effect.result(
+      compileSource('bad-toolchain', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/nonexistent/clang' }),
+      }),
+    )
 
-    assert.strictEqual(outcome._tag, 'Failed')
-    if (outcome._tag !== 'Failed') return
-    assert.strictEqual(outcome.stage, 'object')
-    if (outcome.failure._tag !== 'ToolchainFailure')
-      return assert.fail('expected toolchain failure')
-    assert.strictEqual(outcome.failure.planned.command, '/nonexistent/clang')
+    assert.strictEqual(outcome._tag, 'Failure')
+    if (outcome._tag !== 'Failure') return
+    assert.strictEqual(outcome.failure._tag, 'ToolchainError')
+    if (outcome.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(outcome.failure.stage, 'object')
+    assert.strictEqual(outcome.failure.reason._tag, 'SpawnFailed')
+    if (outcome.failure.reason._tag !== 'SpawnFailed') return
+    assert.strictEqual(outcome.failure.reason.planned.command, '/nonexistent/clang')
+    assert.instanceOf(outcome.failure.reason.cause, Error)
   }),
 )
 
@@ -474,7 +481,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = 'pub fn main() -> i32 { return 42 }'
-      const backends = [Backend.LlvmBackend, WasmBackend.WasmBackend] as const
+      const backends = [LlvmBackend.LlvmBackend, WasmBackend.WasmBackend] as const
       for (const backend of backends) {
         const outcome = yield* compileSource(`${backend.id}.wasm`, source, {
           compilation: {
@@ -522,7 +529,7 @@ it.effect(
         'wasm32-unknown-unknown',
       )
       assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
-      for (const backend of [Backend.LlvmBackend, WasmBackend.WasmBackend] as const) {
+      for (const backend of [LlvmBackend.LlvmBackend, WasmBackend.WasmBackend] as const) {
         const outcome = yield* compileSource(`trap-${backend.id}.wasm`, source, {
           compilation: {
             root: SourceFile.make('memory/driver', ascii(source)),

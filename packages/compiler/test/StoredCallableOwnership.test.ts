@@ -11,7 +11,7 @@ import { unreachable } from './support/raise.js'
  * exclusive receiver also invokes `mut fn`, and only a whole owner may consume a `once fn` — which
  * takes the whole aggregate rather than extracting the field out of it.
  *
- * The rule is stated once, on `CallableFieldRealization`, and these tests pin the ownership half of
+ * The rule is stated once, on `FieldRealization`, and these tests pin the ownership half of
  * it. Runtime acceptance for supported realized fields is covered separately; unsupported bare
  * structural fields remain fenced by `SEM0103`.
  */

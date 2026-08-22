@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Mir from '../src/Mir.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Projections from './support/projections.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -330,7 +331,7 @@ it.effect('cleans up only the selected alternative capture', () =>
     if (outcome._tag === 'Completed') {
       assert.strictEqual(outcome.result.value, 42n)
       assert.deepEqual(
-        Analysis.allocationTraceEventsOf(outcome).map((event) => event._tag),
+        Projections.allocationTraceEventsOf(outcome).map((event) => event._tag),
         ['AllocationAcquire', 'AllocationRelease'],
       )
     }
@@ -374,7 +375,7 @@ it.effect('runs the selected capture Drop hook and reclaim exactly once', () =>
         1,
       )
       assert.deepEqual(
-        Analysis.allocationTraceEventsOf(outcome).map((event) => event._tag),
+        Projections.allocationTraceEventsOf(outcome).map((event) => event._tag),
         ['AllocationAcquire', 'AllocationRelease'],
       )
     }

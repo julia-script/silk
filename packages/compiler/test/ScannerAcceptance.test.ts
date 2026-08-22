@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -110,7 +111,7 @@ it.effect(
         assert.strictEqual(evaluated._tag, 'Completed', label)
         if (evaluated._tag !== 'Completed') continue
         assert.strictEqual(evaluated.result.value, BigInt(expected), label)
-        const events = Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag)
+        const events = Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag)
         assert.strictEqual(
           events.filter((event) => event === 'AllocationAcquire').length,
           quota,

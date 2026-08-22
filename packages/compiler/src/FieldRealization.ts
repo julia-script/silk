@@ -14,13 +14,12 @@ import * as Type from './Type.js'
  * concrete arguments, exact compile-time rows, run access, ordered environment, cleanup, and
  * suspendability without assigning the structural `Effect` contract a standalone target ABI.
  *
- * Existing callable consumers keep reading this record. Effect consumers are deliberately not
- * enabled by this slice; when later phases arrive, they must consume the Effect tag rather than
- * recover runners from initializer syntax.
+ * Callable and Effect consumers both read this record and discriminate the realization tag;
+ * neither path recovers executable identity from initializer syntax.
  */
 
 /** How a capture reaches the callable environment stored inside the enclosing aggregate. */
-export type CaptureAccess = 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+export type CaptureAccess = Type.CaptureAccess
 
 /** The aggregate receiver access one invocation mode demands. */
 export type ReceiverAccess = Type.CallableMode
@@ -69,7 +68,7 @@ export interface Cleanup {
 
 /** One resolved callable field enriched with everything construction through cleanup needs. */
 export interface CallableRealization {
-  readonly _tag: 'CallableFieldRealization'
+  readonly _tag: 'FieldRealization'
   readonly field: RepresentationField.Id
   readonly instance: Type.Nominal
   readonly contract: Type.Callable
@@ -179,14 +178,14 @@ export type Support =
 
 /** One deterministic realization lookup entry keyed by complete instance and field identity. */
 export interface Entry {
-  readonly _tag: 'CallableFieldRealizationEntry'
+  readonly _tag: 'FieldRealizationEntry'
   readonly key: string
   readonly support: Support
 }
 
 /** Complete-instance lookup table for realized and explicitly unsupported executable fields. */
 export interface Index {
-  readonly _tag: 'CallableFieldRealizationIndex'
+  readonly _tag: 'FieldRealizationIndex'
   readonly entries: ReadonlyArray<Entry>
 }
 
@@ -463,7 +462,7 @@ const realizeCallableField = (
   return Object.freeze({
     _tag: 'Supported',
     realization: Object.freeze({
-      _tag: 'CallableFieldRealization' as const,
+      _tag: 'FieldRealization' as const,
       field: resolution.id,
       instance: resolution.instance,
       contract,
@@ -617,14 +616,14 @@ export const realize = (
     entries.set(
       entryKey,
       Object.freeze({
-        _tag: 'CallableFieldRealizationEntry' as const,
+        _tag: 'FieldRealizationEntry' as const,
         key: entryKey,
         support: realizeField(index, resolution, callables, effects),
       }),
     )
   }
   return Object.freeze({
-    _tag: 'CallableFieldRealizationIndex',
+    _tag: 'FieldRealizationIndex',
     entries: Object.freeze(
       [...entries.values()].sort((left, right) =>
         left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
@@ -655,7 +654,7 @@ export const realizationOf = (
 
 /** Narrows the shared realization union to the callable variant. */
 export const isCallableRealization = (self: Realization): self is CallableRealization =>
-  self._tag === 'CallableFieldRealization'
+  self._tag === 'FieldRealization'
 
 /** Narrows the shared realization union to the Effect variant. */
 export const isEffectRealization = (self: Realization): self is EffectRealization =>
@@ -778,7 +777,7 @@ const equalsEffect = (left: EffectRealization, right: EffectRealization): boolea
 
 /** Structural equality for the shared tagged realization fact owned by this actor. */
 export const equals = (left: Realization, right: Realization): boolean =>
-  left._tag === 'CallableFieldRealization' && right._tag === 'CallableFieldRealization'
+  left._tag === 'FieldRealization' && right._tag === 'FieldRealization'
     ? equalsCallable(left, right)
     : left._tag === 'EffectFieldRealization' && right._tag === 'EffectFieldRealization'
       ? equalsEffect(left, right)

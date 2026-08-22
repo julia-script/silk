@@ -5,7 +5,7 @@ import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
-import * as Ownership from '../../dist/Ownership.js'
+import * as OwnershipEncoding from '../../dist/OwnershipEncoding.js'
 import * as ToolchainIntegrity from '../../dist/ToolchainIntegrity.js'
 
 const bytes = new Uint8Array(
@@ -31,25 +31,25 @@ const encodeSnapshot = (self) => {
     modules: Analysis.modules(self).map((module) => module.name),
     hir: hash(
       Analysis.modules(self)
-        .map((module) => Hir.encode(Analysis.hirOf(self, module.name)))
+        .map((module) => Hir.encode(self.results.get(module.name)?.hir))
         .join('\n'),
     ),
     ownership: hash(
       Analysis.modules(self)
         .map((module) => {
           const value = Analysis.ownershipOf(self, module.name)
-          return value === undefined ? '' : Ownership.encode(value)
+          return value === undefined ? '' : OwnershipEncoding.encode(value)
         })
         .join('\n'),
     ),
     instances: hash(json(Analysis.instancesOf(self).instances.map((instance) => instance.key))),
     layout: hash(Layout.encode(Analysis.layoutOf(self).value)),
     mir: hash(Mir.encode(Analysis.loweredMir(self))),
-    evaluation: hash(json(Analysis.traceOf(evaluated))),
+    evaluation: hash(json(evaluated.trace)),
     result: evaluated._tag === 'Completed' ? evaluated.result.value : evaluated._tag,
     allocations:
       evaluated._tag === 'Completed'
-        ? Analysis.allocationTraceEventsOf(evaluated).flatMap((event) =>
+        ? evaluated.trace.flatMap((event) =>
             event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
               ? [event._tag]
               : [],

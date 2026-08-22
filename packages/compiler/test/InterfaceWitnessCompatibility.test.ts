@@ -295,7 +295,7 @@ it('rejects a requirement capability or role absent from the promised row', () =
   })
 })
 
-it('matches value operands literally without inheriting the legacy shared-borrow adapter', () => {
+it('allows a take-capable value promise to satisfy a shared-borrow witness operand', () => {
   const valueContract = Object.freeze({
     ...contract,
     functionKind: 'Ordinary' as const,
@@ -310,6 +310,39 @@ it('matches value operands literally without inheriting the legacy shared-borrow
 
   assert.strictEqual(
     InterfaceWitnessCompatibility.check(valueContract, borrowedWitness)._tag,
-    'Incompatible',
+    'Compatible',
   )
+})
+
+it('applies the Shared < Exclusive < Take order to every witness operand pair', () => {
+  const accesses = ['Shared', 'Exclusive', 'Take'] as const
+  const expected = [
+    [true, true, true],
+    [false, true, true],
+    [false, false, true],
+  ] as const
+  const operandType = (access: (typeof accesses)[number]): Type.Type =>
+    access === 'Take' ? schema : Type.reference(access, schema)
+
+  for (const [requiredOrdinal, required] of accesses.entries()) {
+    for (const [suppliedOrdinal, supplied] of accesses.entries()) {
+      const promised = Object.freeze({
+        functionKind: 'Ordinary' as const,
+        unsafe: false,
+        operands: Object.freeze([operand('value', operandType(supplied))]),
+        success: 'bool' as const,
+        failures: Object.freeze([]),
+        requirements: Object.freeze([]),
+        requirementParameters: Object.freeze([]),
+      })
+      const implementation = Object.freeze({
+        ...promised,
+        operands: Object.freeze([operand('value', operandType(required))]),
+      })
+      assert.strictEqual(
+        InterfaceWitnessCompatibility.check(promised, implementation)._tag === 'Compatible',
+        expected.at(requiredOrdinal)?.at(suppliedOrdinal) ?? false,
+      )
+    }
+  }
 })

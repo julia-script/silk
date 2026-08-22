@@ -58,7 +58,7 @@ const importModule = (
 ): string | undefined => {
   const path = SyntaxTree.directNode(declaration, 'ImportPath')
   if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) return undefined
-  return ImportPath.spelling(source, path)
+  return ImportPath.canonicalTarget(source, path)
 }
 
 interface PendingExport {

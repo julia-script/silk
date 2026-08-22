@@ -1,4 +1,5 @@
 import * as Canonical from './internal/Canonical.js'
+import * as StronglyConnectedGraph from './internal/Graph.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
@@ -163,46 +164,16 @@ interface Components {
 }
 
 const components = (input: Graph): Components => {
-  const indices = new Map<string, number>()
-  const lowLinks = new Map<string, number>()
-  const stack: Array<string> = []
-  const onStack = new Set<string>()
-  const found: Array<ReadonlyArray<string>> = []
-  let nextIndex = 0
-
-  const connect = (name: string): void => {
-    indices.set(name, nextIndex)
-    lowLinks.set(name, nextIndex)
-    nextIndex += 1
-    stack.push(name)
-    onStack.add(name)
-
-    for (const target of input.edges.get(name) ?? []) {
-      if (!indices.has(target)) {
-        connect(target)
-        lowLinks.set(name, Math.min(lowLinks.get(name) ?? 0, lowLinks.get(target) ?? 0))
-      } else if (onStack.has(target)) {
-        lowLinks.set(name, Math.min(lowLinks.get(name) ?? 0, indices.get(target) ?? 0))
-      }
-    }
-
-    if (indices.get(name) !== lowLinks.get(name)) return
-    const members: Array<string> = []
-    let member = stack.pop()
-    while (member !== undefined) {
-      onStack.delete(member)
-      members.push(member)
-      if (member === name) break
-      member = stack.pop()
-    }
-    found.push(Object.freeze(members.sort(compareName)))
-  }
-
-  for (const name of input.names) {
-    if (!indices.has(name)) connect(name)
-  }
-  found.sort((left, right) => compareName(left.at(0) ?? '', right.at(0) ?? ''))
-  const values = Object.freeze(found)
+  const values = Object.freeze(
+    [
+      ...StronglyConnectedGraph.stronglyConnected(
+        input.names,
+        (name) => input.edges.get(name) ?? [],
+      ),
+    ]
+      .map((members) => Object.freeze([...members].sort(compareName)))
+      .sort((left, right) => compareName(left.at(0) ?? '', right.at(0) ?? '')),
+  )
   return Object.freeze({
     values,
     ofModule: new Map(

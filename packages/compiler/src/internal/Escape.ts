@@ -5,6 +5,91 @@ type ByteSequence = ReadonlyArray<number> | Uint8Array
 const isContinuation = (byte: number | undefined): boolean =>
   byte !== undefined && (byte & 0xc0) === 0x80
 
+/** Decodes a fixed-width single-byte escape shared by every escaped literal form. */
+export const simpleByte = (escaped: number | undefined, delimiter: number): number | undefined => {
+  if (escaped === 0x6e) return 0x0a
+  if (escaped === 0x72) return 0x0d
+  if (escaped === 0x74) return 0x09
+  if (escaped === 0x30) return 0
+  if (escaped === 0x22 || escaped === 0x5c) return escaped
+  return escaped === 0x27 && delimiter === 0x27 ? escaped : undefined
+}
+
+export type Decoded =
+  | {
+      readonly _tag: 'Decoded'
+      readonly bytes: ReadonlyArray<number>
+      readonly next: number
+    }
+  | { readonly _tag: 'Invalid'; readonly detail: string }
+
+const utf8 = (scalar: number): ReadonlyArray<number> =>
+  Object.freeze(Array.from(new TextEncoder().encode(String.fromCodePoint(scalar))))
+
+/** Decodes one escape whose leading backslash is immediately before `escapedAt`. */
+export const decodeAt = (
+  token: ByteSequence,
+  escapedAt: number,
+  end: number,
+  delimiter: number,
+  byteString: boolean,
+): Decoded => {
+  const escaped = token[escapedAt]
+  if (escaped === 0x0a || escaped === 0x0d)
+    return Object.freeze({
+      _tag: 'Invalid',
+      detail: 'backslash cannot continue a physical line',
+    })
+  const simple = simpleByte(escaped, delimiter)
+  if (simple !== undefined)
+    return Object.freeze({ _tag: 'Decoded', bytes: Object.freeze([simple]), next: escapedAt + 1 })
+  if (escaped === 0x78) {
+    const high = ByteClass.digitValue(token[escapedAt + 1])
+    const low = ByteClass.digitValue(token[escapedAt + 2])
+    return high === undefined || low === undefined
+      ? Object.freeze({
+          _tag: 'Invalid',
+          detail: '`\\x` escape requires exactly two hexadecimal digits',
+        })
+      : Object.freeze({
+          _tag: 'Decoded',
+          bytes: Object.freeze([high * 16 + low]),
+          next: escapedAt + 3,
+        })
+  }
+  if (escaped !== 0x75) return Object.freeze({ _tag: 'Invalid', detail: 'unknown escape sequence' })
+  if (token[escapedAt + 1] !== 0x7b)
+    return Object.freeze({ _tag: 'Invalid', detail: '`\\u` escape requires `{...}`' })
+  let index = escapedAt + 2
+  let scalar = 0
+  let digits = 0
+  while (index < end && token[index] !== 0x7d) {
+    const digit = ByteClass.digitValue(token[index])
+    if (digit === undefined || digits === 6)
+      return Object.freeze({ _tag: 'Invalid', detail: 'invalid Unicode scalar escape' })
+    scalar = scalar * 16 + digit
+    digits += 1
+    index += 1
+  }
+  if (
+    digits === 0 ||
+    token[index] !== 0x7d ||
+    scalar > 0x10ffff ||
+    (scalar >= 0xd800 && scalar <= 0xdfff)
+  )
+    return Object.freeze({ _tag: 'Invalid', detail: 'invalid Unicode scalar escape' })
+  if (byteString && scalar > 0xff)
+    return Object.freeze({
+      _tag: 'Invalid',
+      detail: 'byte-string escape is outside the u8 range',
+    })
+  return Object.freeze({
+    _tag: 'Decoded',
+    bytes: byteString ? Object.freeze([scalar]) : utf8(scalar),
+    next: index + 1,
+  })
+}
+
 /**
  * Counts the Unicode scalars one escaped body denotes, without decoding any of them.
  *
@@ -33,3 +118,5 @@ export const scalarCount = (bytes: ByteSequence, contentStart: number, end: numb
   }
   return scalars
 }
+
+import * as ByteClass from './ByteClass.js'

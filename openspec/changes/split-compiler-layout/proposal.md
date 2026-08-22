@@ -1,6 +1,6 @@
 ## Why
 
-**Layout.ts** (4,548 lines) mixes five concerns — physical placement, a reachability walk, environment placement, calling-shape/ABI lanes, verification, and encoding — and repeats the struct-packing loop (cursor/alignUp/size/tailPadding) about eight times. The placed-field record is re-declared five times, the lane-width unification block is copy-pasted three times, the access vocabulary (Copy/Shared/Exclusive/Take) is re-declared per module, and **CallableFieldRealization.ts** is misnamed with a stale "not yet enabled" header even though its Effect half is fully implemented.
+**Layout.ts** (4,548 lines) mixes five concerns — physical placement, a reachability walk, environment placement, calling-shape/ABI lanes, verification, and encoding — and repeats the struct-packing loop (cursor/alignUp/size/tailPadding) about eight times. The placed-field record is re-declared five times, the lane-width unification block is copy-pasted three times, the access vocabulary (Copy/Shared/Exclusive/Take) is re-declared per module, and **FieldRealization.ts** is misnamed with a stale "not yet enabled" header even though its Effect half is fully implemented.
 
 ## What Changes
 

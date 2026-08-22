@@ -191,7 +191,7 @@ const importRedundancies = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<ImportRedundancy> => {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return []
   const source = syntax.source
   const result: Array<ImportRedundancy> = []
@@ -564,7 +564,7 @@ export const codeActions = (
   const compiler = owned(self, snapshot).flatMap((diagnostic, order) => {
     const source = published[order]
     if (source === undefined || !overlaps(source.range, range)) return []
-    const syntax = Analysis.syntaxOf(snapshot, self.module)
+    const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
     const propagation = syntax === undefined ? undefined : propagationEdit(self, syntax, diagnostic)
     const contract =
       propagation === undefined
@@ -809,7 +809,7 @@ export const signatureHelp = (
   snapshot: Analysis.FrontendSnapshot,
   position: Position,
 ): SignatureHelp | undefined => {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return undefined
   const offset = LineIndex.offsetOf(self.index, position)
   const call = enclosingCall(syntax.root, offset)
@@ -917,7 +917,7 @@ const importedModuleAt = (
   snapshot: Analysis.FrontendSnapshot,
   offset: number,
 ): ImportedModuleTarget | undefined => {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return undefined
   for (const declaration of SyntaxTree.directNodes(syntax.root, 'ImportDeclaration')) {
     const path = SyntaxTree.directNode(declaration, 'ImportPath')
@@ -1375,7 +1375,7 @@ export const completion = (
   )
     return { isIncomplete: false, items: [...items] }
 
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return { isIncomplete: false, items: [...items] }
   const visible = new Set(items.map((item) => item.label))
   const imported = new Set<string>()
@@ -1750,7 +1750,7 @@ export const semanticTokens = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): SemanticTokens => {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return { data: [] }
   const source = Analysis.sources(snapshot).get(self.module)
   const occurrences =
@@ -1828,7 +1828,7 @@ export const foldingRanges = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): ReadonlyArray<FoldingRange> => {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return []
   const ranges: Array<FoldingRange> = []
   const visit = (node: SyntaxTree.Node): void => {
@@ -2078,7 +2078,7 @@ export const format = Effect.fnUntraced(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
 ): Effect.fn.Return<ReadonlyArray<TextEdit>, never> {
-  const syntax = Analysis.syntaxOf(snapshot, self.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return []
   const formatted = yield* Effect.result(Formatter.format(syntax))
   if (Result.isFailure(formatted) || !formatted.success.changed) return []

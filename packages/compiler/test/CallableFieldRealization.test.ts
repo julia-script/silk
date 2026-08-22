@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as CallableFieldRealization from '../src/CallableFieldRealization.js'
+import * as FieldRealization from '../src/FieldRealization.js'
 import * as Instances from '../src/Instances.js'
 import * as RepresentationField from '../src/RepresentationField.js'
 import * as Type from '../src/Type.js'
@@ -28,15 +28,13 @@ const realized = Effect.fnUntraced(function* (name: string, source: string) {
 })
 
 /** Builds the realization index the same way every downstream phase reaches it. */
-const realizationsOf = (snapshot: Analysis.Snapshot): CallableFieldRealization.Index =>
+const realizationsOf = (snapshot: Analysis.Snapshot): FieldRealization.Index =>
   Instances.callableFieldRealizations(snapshot.instances, snapshot.index)
 
-const soleRealization = (
-  index: CallableFieldRealization.Index,
-): CallableFieldRealization.CallableRealization => {
+const soleRealization = (index: FieldRealization.Index): FieldRealization.CallableRealization => {
   const supported = index.entries.flatMap((entry) =>
     entry.support._tag === 'Supported' &&
-    CallableFieldRealization.isCallableRealization(entry.support.realization)
+    FieldRealization.isCallableRealization(entry.support.realization)
       ? [entry.support.realization]
       : [],
   )
@@ -45,11 +43,11 @@ const soleRealization = (
 }
 
 const soleEffectRealization = (
-  index: CallableFieldRealization.Index,
-): CallableFieldRealization.EffectRealization => {
+  index: FieldRealization.Index,
+): FieldRealization.EffectRealization => {
   const supported = index.entries.flatMap((entry) =>
     entry.support._tag === 'Supported' &&
-    CallableFieldRealization.isEffectRealization(entry.support.realization)
+    FieldRealization.isEffectRealization(entry.support.realization)
       ? [entry.support.realization]
       : [],
   )
@@ -223,7 +221,7 @@ pub fn main() -> i32 {
       )
       const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
         entry.support._tag === 'Supported' &&
-        CallableFieldRealization.isEffectRealization(entry.support.realization)
+        FieldRealization.isEffectRealization(entry.support.realization)
           ? [entry.support.realization]
           : [],
       )
@@ -266,7 +264,7 @@ pub fn main() -> i32 {
     )
     const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
-      CallableFieldRealization.isEffectRealization(entry.support.realization)
+      FieldRealization.isEffectRealization(entry.support.realization)
         ? [entry.support.realization]
         : [],
     )
@@ -362,7 +360,7 @@ pub fn main() -> i32 {
     assert.strictEqual(
       callableIdentity !== undefined &&
         snapshot.instances.callables.some((callable) =>
-          CallableFieldRealization.matchesIdentity(callableIdentity, callable),
+          FieldRealization.matchesIdentity(callableIdentity, callable),
         ),
       true,
     )
@@ -403,7 +401,7 @@ pub fn main() -> i32 {
         Type.failureValue([failure]),
         Type.requirementRowArgument([requirement]),
       ])
-      const support = CallableFieldRealization.realizeField(
+      const support = FieldRealization.realizeField(
         snapshot.index,
         Object.freeze({
           ...resolution,
@@ -416,7 +414,7 @@ pub fn main() -> i32 {
       if (support._tag !== 'Supported')
         return yield* Effect.die(`expected supported Effect evidence, got ${support.reason._tag}`)
       const realization = support.realization
-      if (!CallableFieldRealization.isEffectRealization(realization))
+      if (!FieldRealization.isEffectRealization(realization))
         return yield* Effect.die('expected one Effect realization')
 
       assert.deepEqual(realization.runnerArguments, arguments_)
@@ -438,16 +436,13 @@ it.effect('keeps the realization keyed by the shared representation field identi
 
     // The same identity #187 resolves is the identity #189 realizes; no second scheme exists.
     assert.strictEqual(
-      CallableFieldRealization.key(instance, plan.id),
+      FieldRealization.key(instance, plan.id),
       RepresentationField.key(instance, plan.id),
     )
-    const support = CallableFieldRealization.lookup(index, instance, plan.id)
+    const support = FieldRealization.lookup(index, instance, plan.id)
     assert.strictEqual(support?._tag, 'Supported')
-    assert.deepEqual(
-      CallableFieldRealization.realizationOf(index, instance, plan.id)?.field,
-      plan.id,
-    )
-    assert.strictEqual(CallableFieldRealization.supportsInstance(index, instance), true)
+    assert.deepEqual(FieldRealization.realizationOf(index, instance, plan.id)?.field, plan.id)
+    assert.strictEqual(FieldRealization.supportsInstance(index, instance), true)
   }),
 )
 
@@ -456,31 +451,25 @@ it.effect('derives invocation admissibility from the aggregate receiver access',
     const snapshot = yield* realized('callable-field/access', namedCallable)
     const realization = soleRealization(realizationsOf(snapshot))
 
-    assert.deepEqual([...CallableFieldRealization.admittedModes('Shared')], ['Shared'])
-    assert.deepEqual(
-      [...CallableFieldRealization.admittedModes('Exclusive')],
-      ['Shared', 'Exclusive'],
-    )
-    assert.deepEqual(
-      [...CallableFieldRealization.admittedModes('Take')],
-      ['Shared', 'Exclusive', 'Take'],
-    )
+    assert.deepEqual([...FieldRealization.admittedModes('Shared')], ['Shared'])
+    assert.deepEqual([...FieldRealization.admittedModes('Exclusive')], ['Shared', 'Exclusive'])
+    assert.deepEqual([...FieldRealization.admittedModes('Take')], ['Shared', 'Exclusive', 'Take'])
     // A shared `fn` field is reachable through every receiver access.
-    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Shared'), true)
-    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Exclusive'), true)
-    assert.strictEqual(CallableFieldRealization.admitsInvocation(realization, 'Take'), true)
+    assert.strictEqual(FieldRealization.admitsInvocation(realization, 'Shared'), true)
+    assert.strictEqual(FieldRealization.admitsInvocation(realization, 'Exclusive'), true)
+    assert.strictEqual(FieldRealization.admitsInvocation(realization, 'Take'), true)
 
     // Ownership rejects before specialization and the engines invoke after it; both decide through
     // these three functions, so the fence and the runtime cannot disagree about a receiver.
-    assert.strictEqual(CallableFieldRealization.admitsMode('Shared', 'Take'), false)
-    assert.strictEqual(CallableFieldRealization.admitsMode('Shared', 'Exclusive'), false)
-    assert.strictEqual(CallableFieldRealization.admitsMode('Exclusive', 'Take'), false)
-    assert.strictEqual(CallableFieldRealization.admitsMode('Take', 'Take'), true)
+    assert.strictEqual(FieldRealization.admitsMode('Shared', 'Take'), false)
+    assert.strictEqual(FieldRealization.admitsMode('Shared', 'Exclusive'), false)
+    assert.strictEqual(FieldRealization.admitsMode('Exclusive', 'Take'), false)
+    assert.strictEqual(FieldRealization.admitsMode('Take', 'Take'), true)
     // A borrow anywhere in a place weakens the whole place to that borrow's access.
-    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Shared'), 'Shared')
-    assert.strictEqual(CallableFieldRealization.weakerAccess('Shared', 'Take'), 'Shared')
-    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Exclusive'), 'Exclusive')
-    assert.strictEqual(CallableFieldRealization.weakerAccess('Take', 'Take'), 'Take')
+    assert.strictEqual(FieldRealization.weakerAccess('Take', 'Shared'), 'Shared')
+    assert.strictEqual(FieldRealization.weakerAccess('Shared', 'Take'), 'Shared')
+    assert.strictEqual(FieldRealization.weakerAccess('Take', 'Exclusive'), 'Exclusive')
+    assert.strictEqual(FieldRealization.weakerAccess('Take', 'Take'), 'Take')
   }),
 )
 
@@ -507,7 +496,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
         plan.id,
       ) ?? unreachable('expected an unavailable representation field resolution')
     assert.strictEqual(openResolution._tag, 'UnavailableRepresentationField')
-    const open = CallableFieldRealization.realizeField(
+    const open = FieldRealization.realizeField(
       snapshot.index,
       openResolution,
       snapshot.instances.callables,
@@ -521,7 +510,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
 
     // An Effect identity without its canonical discovered runner stays explicitly unsupported.
     const effect = Type.effect('i32', [])
-    const stored = CallableFieldRealization.realizeField(
+    const stored = FieldRealization.realizeField(
       snapshot.index,
       Object.freeze({
         _tag: 'ResolvedRepresentationField',
@@ -544,7 +533,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
     )
 
     // A section identity whose specialized environment was never discovered stays unsupported.
-    const missing = CallableFieldRealization.realizeField(
+    const missing = FieldRealization.realizeField(
       snapshot.index,
       Object.freeze({
         _tag: 'ResolvedRepresentationField',
@@ -655,7 +644,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
-      CallableFieldRealization.isCallableRealization(entry.support.realization) &&
+      FieldRealization.isCallableRealization(entry.support.realization) &&
       entry.support.realization.target._tag === 'Declaration' &&
       entry.support.realization.target.name === 'consume'
         ? [entry.support.realization]
@@ -693,7 +682,7 @@ pub fn main() -> i32 { return apply<i32>(0, 20) + apply<bool>(true, 20) }`
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const realizations = realizationsOf(snapshot).entries.flatMap((entry) =>
       entry.support._tag === 'Supported' &&
-      CallableFieldRealization.isCallableRealization(entry.support.realization)
+      FieldRealization.isCallableRealization(entry.support.realization)
         ? [entry.support.realization]
         : [],
     )

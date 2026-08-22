@@ -2,9 +2,10 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Instances from '../src/Instances.js'
+import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 /**
  * The bound-operation call at a source witness.
@@ -163,7 +164,7 @@ pub fn main() -> i32 { return combineOf<Cell>(Cell { weight: 20 }, Cell { weight
   }),
 )
 
-it.effect('rejects a borrowed source witness for a value-owned interface contract', () =>
+it.effect('accepts a shared source witness for a take-owned interface contract', () =>
   Effect.gen(function* () {
     const snapshot = yield* analyzed(
       'bound-operation-witness/value-contract-borrowed-witness',
@@ -179,14 +180,7 @@ impl Decoder for Cell { decode: Cell.decodeCell }
 
 pub fn main() -> i32 { return 0 }`,
     )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map(
-        (diagnostic) => `${diagnostic.code}: ${diagnostic.message}`,
-      ),
-      [
-        'SEM0083: Invalid conformance: Cell.decodeCell is incompatible with Decoder.decode: parameter value requires shared ownership but the interface promises take ownership',
-      ],
-    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 
@@ -411,7 +405,7 @@ pub fn main() -> i32 {
     assert.deepEqual(messages(raw), [])
     assert.deepEqual(messages(normalized), [])
 
-    const pending = Analysis.hirOf(raw, module)?.functions.find(
+    const pending = Projections.hirOf(raw, module)?.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
     )
     const bound = pending?.statements
@@ -583,7 +577,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(messages(snapshot), [])
 
-    const hir = Analysis.hirOf(snapshot, module)
+    const hir = Projections.hirOf(snapshot, module)
     const pending = hir?.functions.find(
       (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'pending',
     )
@@ -777,7 +771,7 @@ it.effect('reports a bound operation whose selected witness cannot be lowered', 
     // The same program with the witness function absent: the conformance still names it, so the
     // call still checks, and the index has nothing to lower the call to.
     const absent = yield* analyzed(module, witnessed.replace('fn cellDigest', 'fn cellDigested'))
-    const violations = Instances.unlowerableWitnessViolations(
+    const violations = InstanceDiagnostics.unlowerableWitnessViolations(
       Analysis.instancesOf(reachable),
       Analysis.declarationIndex(absent),
     )
@@ -817,7 +811,7 @@ pub fn main() -> i32 { return digestOf<i32>(20, 22) }`,
     for (const snapshot of [sourceWitness, intrinsicWitness]) {
       assert.deepEqual(messages(snapshot), [])
       assert.deepEqual(
-        Instances.unlowerableWitnessViolations(
+        InstanceDiagnostics.unlowerableWitnessViolations(
           Analysis.instancesOf(snapshot),
           Analysis.declarationIndex(snapshot),
         ),

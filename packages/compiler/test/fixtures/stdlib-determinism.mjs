@@ -17,7 +17,7 @@ process.stdout.write(
   JSON.stringify({
     diagnostics: Analysis.diagnostics(snapshot),
     modules: Analysis.modules(snapshot).map((module) => module.name),
-    libraryHir: Hir.encode(Analysis.hirOf(snapshot, 'silk/vector')),
+    libraryHir: Hir.encode(snapshot.results.get('silk/vector')?.hir),
     mir: Mir.encode(Analysis.loweredMir(snapshot)),
   }),
 )

@@ -299,7 +299,7 @@ describe('preset catalog', () => {
     const native = snapshotOf(typedEffectPreset, 'aarch64-apple-darwin')
     const wasm = snapshotOf(typedEffectPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
-    expect(Analysis.hirOf(native, typedEffectPreset.root)).toBeDefined()
+    expect(Analysis.moduleAnalysis(native, typedEffectPreset.root)?.hir).toBeDefined()
     expect(Analysis.layoutOf(native)._tag).toBe('Available')
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
@@ -351,7 +351,7 @@ describe('preset catalog', () => {
     const wasm = snapshotOf(loggingPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
     expect(Analysis.modules(native).map((module) => module.name)).toContain('silk/logging')
-    expect(Analysis.hirOf(native, 'silk/effect')).toBeDefined()
+    expect(Analysis.moduleAnalysis(native, 'silk/effect')?.hir).toBeDefined()
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
     expect(evaluation._tag).toBe('Completed')
@@ -422,7 +422,7 @@ describe('preset catalog', () => {
 
     const allocation = snapshotOf(allocationPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(allocation)).toEqual([])
-    expect(Analysis.hirOf(allocation, allocationPreset.root)).toBeDefined()
+    expect(Analysis.moduleAnalysis(allocation, allocationPreset.root)?.hir).toBeDefined()
     expect(Analysis.ownershipOf(allocation, allocationPreset.root)).toBeDefined()
     expect(Analysis.layoutOf(allocation)._tag).toBe('Available')
   })
@@ -605,7 +605,7 @@ describe('preset catalog', () => {
       'silk/vector',
     ])
     for (const name of Object.keys(acceptancePreset.modules)) {
-      expect(Analysis.hirOf(native, name), name).toBeDefined()
+      expect(Analysis.moduleAnalysis(native, name)?.hir, name).toBeDefined()
       expect(Analysis.ownershipOf(native, name), name).toBeDefined()
     }
     expect(Analysis.instancesOf(native).instances.length).toBeGreaterThan(0)

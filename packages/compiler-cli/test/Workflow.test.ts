@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
-import * as Backend from '@silk-effect/compiler/Backend'
-import * as Target from '@silk-effect/compiler/Target'
+import * as LlvmBackend from '@silk-effect/compiler/LlvmBackend'
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
@@ -172,7 +172,7 @@ it.effect(
       const project = yield* Project.load({ workingDirectory: root })
 
       assert.strictEqual(status, 0)
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
         true,
@@ -193,7 +193,7 @@ it.effect(
         '[package]\nname = "hello"\nversion = "0.1.0"\nroot = "src/Main.silk"\n\n[build]\nbackend = "llvm"\ntargets = ["host", "wasm32-unknown-unknown"]\n',
       )
       assert.strictEqual(yield* Workflow.build({ ...options(root), clang: wasmClang }), 0)
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
         true,
@@ -224,7 +224,7 @@ pub fn main() -> i32 {
         ...options(root),
         targets: ['host', 'wasm32-unknown-unknown'],
       })
-      const host = yield* Target.host()
+      const host = yield* NativeToolchain.hostTarget()
       assert.strictEqual(status, 1)
       assert.strictEqual(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`),
@@ -257,7 +257,7 @@ pub fn main() -> i32 {
     })
     assert.strictEqual(status, 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), true)
-    const host = yield* Target.host()
+    const host = yield* NativeToolchain.hostTarget()
     assert.strictEqual(yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`), false)
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
@@ -303,7 +303,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
     const destination = `${root}/broken-toolchain`
     const attempted = yield* Workflow.compile({
       entry: project.entry,
-      backend: Backend.LlvmBackend,
+      backend: LlvmBackend.LlvmBackend,
       profile: 'debug',
       destination,
       toolchain: { _tag: 'Toolchain', clang: '/silk-test/missing-clang' },

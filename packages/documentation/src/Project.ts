@@ -339,7 +339,7 @@ const moduleModel = (
   headers: DeclarationIndex.ModuleHeaders,
   options: Options,
 ): Module | undefined => {
-  const syntax = Analysis.syntaxOf(snapshot, headers.module)
+  const syntax = Analysis.moduleAnalysis(snapshot, headers.module)?.syntax
   if (syntax === undefined) return undefined
   const raw = Analysis.moduleDocumentation(snapshot, headers.module)
   const documentation = resolveDocumentation(

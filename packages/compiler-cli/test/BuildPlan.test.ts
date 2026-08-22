@@ -1,11 +1,12 @@
 import { assert, it } from '@effect/vitest'
-import * as Backend from '@silk-effect/compiler/Backend'
+import * as LlvmBackend from '@silk-effect/compiler/LlvmBackend'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import * as Target from '@silk-effect/compiler/Target'
 import * as WasmBackend from '@silk-effect/compiler/WasmBackend'
 import * as Result from 'effect/Result'
 import * as BuildPlan from '../src/BuildPlan.js'
 import type * as Project from '../src/Project.js'
+import * as TargetSelector from '../src/TargetSelector.js'
 
 const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.Project =>
   Object.freeze({
@@ -26,12 +27,12 @@ const project = (name = 'hello', outputDirectory = '/workspace/build'): Project.
 
 it('plans deterministic backend/target/profile/package destinations', () => {
   const first = BuildPlan.make(project(), {
-    backend: Backend.LlvmBackend,
+    backend: LlvmBackend.LlvmBackend,
     target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })
   const second = BuildPlan.make(project(), {
-    backend: Backend.LlvmBackend,
+    backend: LlvmBackend.LlvmBackend,
     target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })
@@ -47,7 +48,7 @@ it('plans deterministic backend/target/profile/package destinations', () => {
 
 it('selects the wasm extension and prevents backend collisions', () => {
   const llvm = BuildPlan.make(project(), {
-    backend: Backend.LlvmBackend,
+    backend: LlvmBackend.LlvmBackend,
     target: Target.wasm32UnknownUnknown,
     profile: 'release',
   })
@@ -85,12 +86,12 @@ it('rejects incompatible backend-target pairs during planning', () => {
 })
 
 it('keeps run host-only and requires the LLVM native backend', () => {
-  const host = Target.select(undefined)
-  assert.strictEqual(host._tag, 'Resolved')
-  if (host._tag !== 'Resolved') return
+  const host = TargetSelector.resolve('host')
+  assert.strictEqual(Result.isSuccess(host), true)
+  if (Result.isFailure(host)) return
   const accepted = BuildPlan.make(project(), {
-    backend: Backend.LlvmBackend,
-    target: host.target,
+    backend: LlvmBackend.LlvmBackend,
+    target: host.success,
     profile: 'debug',
     purpose: 'run',
   })
@@ -99,7 +100,7 @@ it('keeps run host-only and requires the LLVM native backend', () => {
 
 it('guards the plan against a non-portable project value', () => {
   const planned = BuildPlan.make(project('Not Portable'), {
-    backend: Backend.LlvmBackend,
+    backend: LlvmBackend.LlvmBackend,
     target: Target.aarch64AppleDarwin,
     profile: 'debug',
   })

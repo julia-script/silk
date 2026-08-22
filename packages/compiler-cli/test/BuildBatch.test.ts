@@ -1,9 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import * as Target from '@silk-effect/compiler/Target'
 import * as Result from 'effect/Result'
 import * as BuildBatch from '../src/BuildBatch.js'
 import type * as Project from '../src/Project.js'
+import * as TargetSelector from '../src/TargetSelector.js'
 
 const project = (): Project.Project =>
   Object.freeze({
@@ -27,18 +27,18 @@ const project = (): Project.Project =>
   })
 
 it('preflights an ordered deduplicated multi-target LLVM batch', () => {
-  const host = Target.select(undefined)
-  assert.strictEqual(host._tag, 'Resolved')
-  if (host._tag !== 'Resolved') return
+  const host = TargetSelector.resolve('host')
+  assert.strictEqual(Result.isSuccess(host), true)
+  if (Result.isFailure(host)) return
   const batch = BuildBatch.make(project(), {
-    targets: ['host', host.target.id, 'wasm32-unknown-unknown'],
+    targets: ['host', host.success.id, 'wasm32-unknown-unknown'],
     profile: 'debug',
   })
   assert.strictEqual(Result.isSuccess(batch), true)
   if (Result.isFailure(batch)) return
   assert.deepStrictEqual(
     batch.success.plans.map((plan) => plan.target.id),
-    [host.target.id, 'wasm32-unknown-unknown'],
+    [host.success.id, 'wasm32-unknown-unknown'],
   )
 })
 

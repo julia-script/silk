@@ -1,3 +1,4 @@
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Target from '@silk-effect/compiler/Target'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
@@ -24,7 +25,7 @@ export const isTargetSelector = (value: string): value is TargetSelector =>
 
 /** Resolves one selector, treating `host` as a portable alias rather than a target id. */
 export const resolve = (selector: string): Result.Result<Target.Target, TargetSelectorError> => {
-  const selected = Target.select(selector === 'host' ? undefined : selector)
+  const selected = selector === 'host' ? NativeToolchain.hostSelection() : Target.select(selector)
   return selected._tag === 'Resolved'
     ? Result.succeed(selected.target)
     : Result.fail(

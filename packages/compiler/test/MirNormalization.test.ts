@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 const source = `import silk.effect as Effect
@@ -38,7 +39,7 @@ const allOperations = (program: Mir.Module): ReadonlyArray<Mir.Operation> =>
   program.functions.flatMap(Mir.operations)
 
 const provisionalOf = (self: Analysis.Snapshot): ProvisionalMir.Module => {
-  const provisional = Analysis.provisionalMirOf(self)
+  const provisional = Projections.provisionalMirOf(self)
   if (provisional._tag === 'Unavailable') throw provisional.error
   return provisional.value
 }

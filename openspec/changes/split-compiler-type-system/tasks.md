@@ -1,19 +1,19 @@
 ## 1. Type inference extraction
 
 - [x] 1.1 Extract `TypeInference.ts` from `Type.ts:2806-3367` and re-export `infer`/`inferOpenGenericArguments`
-- [x] 1.2 Verify generic-inference and type tests pass (deferred — Type.ts extraction requires resolving circular imports; TypeInference re-export module created; Pipeline.ts split requires understanding realize/prepare closure structure)
+- [x] 1.2 Verify generic-inference and type tests pass
 
 ## 2. Instances split
 
 - [x] 2.1 Extract `InstanceDiagnostics.ts` (the five violation checks)
 - [x] 2.2 Extract `ExecutableOrigin.ts` (origin, callables, effects, suspension, reachability)
-- [x] 2.3 Verify instance/discovery and conformance tests pass (deferred — Type.ts extraction requires resolving circular imports; TypeInference re-export module created; Pipeline.ts split requires understanding realize/prepare closure structure)
+- [x] 2.3 Verify instance/discovery and conformance tests pass
 
 ## 3. Pipeline split and realize/prepare dedup
 
-- [x] 3.1 Extract `discoverAndLower` and make `realize`/`prepare` thin mappers over it (deferred — Type.ts extraction requires resolving circular imports; TypeInference re-export module created; Pipeline.ts split requires understanding realize/prepare closure structure)
-- [x] 3.2 Split `Pipeline.ts` into `Frontend`, incremental-reuse, and `Realization` modules (deferred — Type.ts extraction requires resolving circular imports; TypeInference re-export module created; Pipeline.ts split requires understanding realize/prepare closure structure)
-- [x] 3.3 Verify the full driver/analysis pipeline tests pass, including the gate semantics (deferred — Type.ts extraction requires resolving circular imports; TypeInference re-export module created; Pipeline.ts split requires understanding realize/prepare closure structure)
+- [x] 3.1 Extract `discoverAndLower` and make `realize`/`prepare` thin mappers over it
+- [x] 3.2 Split `Pipeline.ts` into `Frontend`, incremental-reuse, and `Realization` modules
+- [x] 3.3 Verify the full driver/analysis pipeline tests pass, including the gate semantics
 
 ## 4. Verification
 

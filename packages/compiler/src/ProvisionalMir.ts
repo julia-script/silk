@@ -1,9 +1,10 @@
-import type * as CallableFieldRealization from './CallableFieldRealization.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
+import type * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Suspension from './Suspension.js'
 import * as Type from './Type.js'
 
 /**
@@ -11,7 +12,7 @@ import * as Type from './Type.js'
  * not a `Mir.Module`: verification, evaluation, and backends cannot consume provisional control.
  */
 
-export type Classification = 'Synchronous' | 'Suspendable' | 'Unknown'
+export type Classification = Suspension.SuspensionClassification
 
 export type ExecutionKey =
   | {
@@ -48,61 +49,18 @@ export interface ControlId {
   readonly port: 'Origin' | 'Invoke' | 'Complete'
 }
 
-export interface Capture {
-  readonly ordinal: number
-  readonly source: 'Binding' | 'Parameter'
-  readonly sourceOrdinal: number
-  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
-  readonly type: DeclarationIndex.SemanticType
-}
+export interface Capture extends Suspension.Capture {}
 
-export interface Provider {
-  readonly capability: Type.Nominal
-  readonly providerType: Type.Nominal
-  readonly role: string
-  readonly requirementAccess: Type.Requirement['access']
-  readonly access: 'Shared' | 'Exclusive' | 'Take'
-  readonly witness?: DeclarationIndex.ConformanceWitness
-}
+export interface Provider extends Suspension.Provider {}
 
-export interface Runner {
+export interface Runner extends Suspension.RunnerBase<Capture, Provider> {
   readonly execution:
     | ExecutionKey
     | { readonly _tag: 'UnknownExecution'; readonly identity: string }
-  readonly classification: Classification
-  readonly declaration?: DeclarationIndex.CanonicalId
-  readonly instance?: Instances.InstanceKey
-  readonly effectIdentity?: string
   readonly providedIdentity?: string
-  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly outcome: Type.Effect
-  readonly captures: ReadonlyArray<Capture>
-  readonly providers: ReadonlyArray<Provider>
 }
 
-export type CompletionPolicy =
-  | {
-      readonly _tag: 'Propagate'
-      readonly outcome: Type.Effect
-      readonly failureMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
-    }
-  | {
-      readonly _tag: 'Reify'
-      readonly outcome: Type.Effect
-      readonly resultType: Type.Nominal
-      readonly resultField: DeclarationIndex.FieldId
-      readonly resultUnion: Type.StructuralUnion
-      readonly successType: Type.Nominal
-      readonly successField: DeclarationIndex.FieldId
-      readonly successTag: number
-      readonly failureType: Type.Nominal
-      readonly failureField: DeclarationIndex.FieldId
-      readonly failureTag: number
-      readonly failureValueType: Type.Type
-      readonly resultShape: Layout.CallingShape
-      readonly outcomeShape: Layout.CallingShape
-      readonly failureValueShape: Layout.CallingShape
-    }
+export type CompletionPolicy = Suspension.SuspensionCompletion
 
 export type Outcome =
   | {
@@ -361,7 +319,7 @@ interface BuildContext {
 const storedEffectRealizationOf = (
   expression: Hir.Expression,
   context: BuildContext,
-): CallableFieldRealization.EffectRealization | undefined => {
+): FieldRealization.EffectRealization | undefined => {
   if (expression._tag === 'BindingReference') {
     const initializer = context.bindings.get(expression.binding.ordinal)
     return initializer === undefined ? undefined : storedEffectRealizationOf(initializer, context)

@@ -720,9 +720,9 @@ try {
           }),
           runners,
           suspendability: Object.freeze({
-            instances: Analysis.suspendableInstancesOf(wasm).map(identity),
-            executions: Analysis.suspendableExecutionsOf(wasm).map(identity),
-            effects: Analysis.suspendableEffectsOf(wasm),
+            instances: wasm.instances.suspendable.map(identity),
+            executions: wasm.instances.suspendableExecutions.map(identity),
+            effects: wasm.instances.suspendableEffects,
           }),
           coroutineFrameDescriptors,
           pipeTokens: Object.freeze({

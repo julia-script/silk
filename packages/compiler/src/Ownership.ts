@@ -1,7 +1,8 @@
-import * as CallableFieldRealization from './CallableFieldRealization.js'
+import * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import { equal as setEqual } from './internal/SetOf.js'
 import type * as Match from './Match.js'
@@ -35,7 +36,7 @@ export interface BindingFact {
   readonly mutability: 'Immutable' | 'Mutable'
   readonly category: OwnershipCategory
   readonly type?: DeclarationIndex.SemanticType
-  readonly cleanup: CleanupPlan
+  readonly cleanup: CleanupPlan.CleanupPlan
   readonly liveFrom: SourceSpan.SourceSpan
   readonly liveTo: SourceSpan.SourceSpan
   readonly movedAt?: SourceSpan.SourceSpan
@@ -46,7 +47,7 @@ export interface Release {
   readonly _tag: 'Release'
   readonly binding: BindingFact
   readonly fields: ReadonlyArray<DeclarationIndex.FieldId>
-  readonly cleanup: CleanupPlan
+  readonly cleanup: CleanupPlan.CleanupPlan
 }
 
 /** A deterministic compiler-only identity for one direct-call or delayed-effect slice loan. */
@@ -78,7 +79,7 @@ export interface BorrowedReplacementFact {
   readonly root: DeclarationIndex.ParameterId
   readonly region: Hir.RegionId
   readonly type: DeclarationIndex.SemanticType
-  readonly displacedCleanup: CleanupPlan
+  readonly displacedCleanup: CleanupPlan.CleanupPlan
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -86,9 +87,9 @@ export interface BorrowedReplacementFact {
 export interface CallableEnvironmentSlot {
   readonly ordinal: number
   readonly parameterOrdinal: number
-  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly access: Type.CaptureAccess
   readonly type?: DeclarationIndex.SemanticType
-  readonly cleanup: CleanupPlan
+  readonly cleanup: CleanupPlan.CleanupPlan
 }
 
 /** Ownership facts for one hidden callable section environment. */
@@ -101,138 +102,6 @@ export interface CallableEnvironmentFact {
   readonly dropOrder: ReadonlyArray<number>
   readonly span: SourceSpan.SourceSpan
 }
-
-/** How a callable cleanup names the one capture environment whose lanes it owns. */
-export type CallableEnvironmentLocator =
-  | { readonly _tag: 'CallableEnvironmentSite'; readonly site: Hir.CallableSiteId }
-  | {
-      readonly _tag: 'CallableEnvironmentIdentity'
-      readonly identity: Type.CallableEnvironmentIdentity
-    }
-
-/** The symbolic recursive cleanup of one complete logical owner. */
-export type CleanupPlan =
-  | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
-  | { readonly _tag: 'ParameterCleanup'; readonly type: Type.Parameter }
-  | {
-      readonly _tag: 'AllocationCleanup'
-      readonly type: Type.Nominal
-      /** Compiler-private proof that exactly one reclaim obligation is still active. */
-      readonly ticket: 'ActiveReclaimTicket'
-    }
-  | {
-      readonly _tag: 'RawBufferCleanup'
-      readonly type: Type.Nominal
-      readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
-    }
-  | {
-      readonly _tag: 'HookCleanup'
-      readonly type: Type.Nominal
-      /** The hidden hook function synthesized from the owning Drop conformance. */
-      readonly hook: DeclarationIndex.CanonicalId
-      /** Concrete arguments for the impl's type parameters at this instantiation. */
-      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-      /** Field cleanup runs after the hook returns. */
-      readonly inner: CleanupPlan
-    }
-  | {
-      readonly _tag: 'StructCleanup'
-      readonly type: Type.Nominal
-      readonly fields: ReadonlyArray<{
-        readonly field: DeclarationIndex.FieldId
-        readonly cleanup: CleanupPlan
-      }>
-    }
-  | {
-      readonly _tag: 'ArrayCleanup'
-      readonly type: Type.FixedArray
-      readonly length: number
-      readonly element: CleanupPlan
-    }
-  | {
-      readonly _tag: 'UnionCleanup'
-      readonly type: Type.StructuralUnion
-      readonly cases: ReadonlyArray<{
-        readonly member: Type.Type
-        readonly ordinal: number
-        readonly cleanup: CleanupPlan
-      }>
-    }
-  | {
-      readonly _tag: 'CallableCleanup'
-      readonly type: Type.Callable
-      readonly environment: CallableEnvironmentLocator
-      /** Moved environment slots in deterministic last-captured, first-released order. */
-      readonly slots: ReadonlyArray<{
-        readonly ordinal: number
-        readonly cleanup: CleanupPlan
-      }>
-    }
-  | {
-      /**
-       * One nominal field storing a callable representation. Which lanes the aggregate owns is a
-       * runtime fact of the complete specialization, so the symbolic plan records the obligation and
-       * `specializeCleanup` resolves it against the shared `CallableFieldRealization`. Recording the
-       * obligation — rather than nothing — keeps an aggregate from silently dropping the owned
-       * captures of the callable it stores.
-       */
-      readonly _tag: 'RepresentedCallableCleanup'
-      readonly type: Type.Represented
-      readonly contract: Type.Callable
-    }
-  | {
-      /** The complete stored Effect environment is selected only after instance layout. */
-      readonly _tag: 'RepresentedEffectCleanup'
-      readonly type: Type.Represented
-      readonly contract: Type.Effect
-    }
-  | {
-      /** Releases only the runtime-selected member of one finite Effect representation. */
-      readonly _tag: 'EffectCompositeCleanup'
-      readonly type: Type.Represented
-      readonly alternatives: ReadonlyArray<CleanupPlan>
-    }
-  | {
-      readonly _tag: 'EffectCleanup'
-      readonly type: Type.Effect
-      readonly site: Hir.EffectSiteId
-      /** Owned environment slots in deterministic last-captured, first-released order. */
-      readonly slots: ReadonlyArray<{
-        readonly ordinal: number
-        readonly laneOffset: number
-        readonly laneCount: number
-        readonly cleanup: CleanupPlan
-      }>
-    }
-
-/** Tests whether one cleanup plan invokes a Drop hook at any nesting depth. */
-export const cleanupHasHook = (self: CleanupPlan): boolean =>
-  self._tag === 'HookCleanup' ||
-  (self._tag === 'StructCleanup' && self.fields.some((field) => cleanupHasHook(field.cleanup))) ||
-  (self._tag === 'ArrayCleanup' && cleanupHasHook(self.element)) ||
-  (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupHasHook(entry.cleanup))) ||
-  ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
-    self.slots.some((slot) => cleanupHasHook(slot.cleanup))) ||
-  (self._tag === 'EffectCompositeCleanup' &&
-    self.alternatives.some((alternative) => cleanupHasHook(alternative))) ||
-  (self._tag === 'RawBufferCleanup' && cleanupHasHook(self.allocation))
-
-/** Tests whether one cleanup plan consumes a reclaim ticket at any nesting depth. */
-export const cleanupReclaims = (self: CleanupPlan): boolean =>
-  self._tag === 'AllocationCleanup' ||
-  self._tag === 'RawBufferCleanup' ||
-  (self._tag === 'HookCleanup' && cleanupReclaims(self.inner)) ||
-  (self._tag === 'StructCleanup' && self.fields.some((field) => cleanupReclaims(field.cleanup))) ||
-  (self._tag === 'ArrayCleanup' && cleanupReclaims(self.element)) ||
-  (self._tag === 'UnionCleanup' && self.cases.some((entry) => cleanupReclaims(entry.cleanup))) ||
-  ((self._tag === 'CallableCleanup' || self._tag === 'EffectCleanup') &&
-    self.slots.some((slot) => cleanupReclaims(slot.cleanup))) ||
-  (self._tag === 'EffectCompositeCleanup' &&
-    self.alternatives.some((alternative) => cleanupReclaims(alternative)))
-
-/** Tests whether one cleanup plan has any observable runtime effect. */
-export const cleanupHasEffect = (self: CleanupPlan): boolean =>
-  cleanupHasHook(self) || cleanupReclaims(self)
 
 /**
  * Returns owned entries in deterministic last-acquired-first-released order,
@@ -343,7 +212,7 @@ export interface MatchOwnership {
     readonly bindings: ReadonlyArray<BindingSite>
     readonly cleanup: ReadonlyArray<{
       readonly path: ReadonlyArray<DeclarationIndex.FieldId>
-      readonly cleanup: CleanupPlan
+      readonly cleanup: CleanupPlan.CleanupPlan
     }>
   }>
 }
@@ -388,7 +257,7 @@ interface MutableBinding {
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
   readonly type?: DeclarationIndex.SemanticType
-  readonly cleanup?: CleanupPlan
+  readonly cleanup?: CleanupPlan.CleanupPlan
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
   readonly matchAccess?: Match.Access
@@ -462,7 +331,7 @@ const placeRoot = (place: Hir.Expression): Hir.Expression =>
 const receiverAccess = (
   state: CheckState,
   place: Hir.Expression,
-): CallableFieldRealization.ReceiverAccess => {
+): FieldRealization.ReceiverAccess => {
   if (place._tag !== 'Project' && place._tag !== 'IndexPlace') {
     const site = useSite(place)
     const matchAccess =
@@ -471,11 +340,11 @@ const receiverAccess = (
   }
   const subject = place.subject
   const subjectType = subject._tag === 'Unavailable' ? undefined : subject.type
-  const through: CallableFieldRealization.ReceiverAccess =
+  const through: FieldRealization.ReceiverAccess =
     subjectType !== undefined && (Type.isReference(subjectType) || Type.isSlice(subjectType))
       ? subjectType.access
       : 'Take'
-  return CallableFieldRealization.weakerAccess(receiverAccess(state, place.subject), through)
+  return FieldRealization.weakerAccess(receiverAccess(state, place.subject), through)
 }
 
 /**
@@ -493,7 +362,7 @@ const storedCallableInvocationAccess = (
   const contract = storedCallableContract(callee)
   if (contract === undefined) return undefined
   const receiver = receiverAccess(state, callee)
-  if (CallableFieldRealization.admitsMode(receiver, access)) return undefined
+  if (FieldRealization.admitsMode(receiver, access)) return undefined
   return Diagnostic.storedCallableInvocationAccess(
     Type.encode(callee.nominal),
     `#${callee.field.ordinal}`,
@@ -514,7 +383,7 @@ const storedEffectRunAccess = (
   const contract = storedEffectContract(subject)
   if (contract === undefined) return undefined
   const receiver = receiverAccess(state, subject)
-  if (CallableFieldRealization.admitsMode(receiver, contract.access)) return undefined
+  if (FieldRealization.admitsMode(receiver, contract.access)) return undefined
   return Diagnostic.storedEffectRunAccess(
     Type.encode(subject.nominal),
     `#${subject.field.ordinal}`,
@@ -562,7 +431,7 @@ const callableEnvironment = (
         ...(type === undefined ? {} : { type }),
         cleanup:
           capture.access === 'Take' && type !== undefined
-            ? cleanupPlan(state.index, type)
+            ? CleanupPlan.cleanupPlan(state.index, type)
             : Object.freeze({
                 _tag: 'NoCleanup' as const,
                 type: type ?? ('i32' as const),
@@ -586,7 +455,10 @@ const callableEnvironment = (
   })
 }
 
-const callableCleanup = (environment: CallableEnvironmentFact, type: Type.Callable): CleanupPlan =>
+const callableCleanup = (
+  environment: CallableEnvironmentFact,
+  type: Type.Callable,
+): CleanupPlan.CleanupPlan =>
   Object.freeze({
     _tag: 'CallableCleanup',
     type,
@@ -1036,10 +908,14 @@ const checkExpression = (
           expression.access === 'Move'
             ? [
                 ...arm.cleanup.flatMap((path) => {
-                  const type = cleanupTypeAtPath(state.index, arm.member ?? scrutineeType, path)
+                  const type = CleanupPlan.cleanupTypeAtPath(
+                    state.index,
+                    arm.member ?? scrutineeType,
+                    path,
+                  )
                   return type === undefined
                     ? []
-                    : [Object.freeze({ path, cleanup: cleanupPlan(state.index, type) })]
+                    : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(state.index, type) })]
                 }),
                 ...arm.bindings.flatMap((binding) => {
                   const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
@@ -1048,7 +924,7 @@ const checkExpression = (
                     ? [
                         Object.freeze({
                           path: binding.path,
-                          cleanup: cleanupPlan(state.index, binding.type),
+                          cleanup: CleanupPlan.cleanupPlan(state.index, binding.type),
                         }),
                       ]
                     : []
@@ -2211,368 +2087,6 @@ interface ExitDescriptor {
   readonly sites: ReadonlyArray<string>
 }
 
-const cleanupFields = (
-  index: DeclarationIndex.Index,
-  type: Type.Nominal,
-  seen = new Set<string>(),
-): ReadonlyArray<DeclarationIndex.FieldId> => {
-  const key = Type.key(type)
-  if (seen.has(key)) return Object.freeze([])
-  const nextSeen = new Set(seen).add(key)
-  const declaration = DeclarationIndex.byCanonical(index, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
-  if (declaration?._tag !== 'StructDeclaration') return Object.freeze([])
-  return Object.freeze(
-    declaration.fields.flatMap((field) => {
-      if (field.declaredType._tag !== 'Resolved') return [field.id]
-      const nested = field.declaredType.type
-      return Type.isNominal(nested)
-        ? [field.id, ...cleanupFields(index, nested, nextSeen)]
-        : [field.id]
-    }),
-  )
-}
-
-export const cleanupPlan = (
-  index: DeclarationIndex.Index,
-  type: DeclarationIndex.SemanticType,
-  seen = new Set<string>(),
-): CleanupPlan => {
-  if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isNever(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (DeclarationIndex.copyType(index, type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterCleanup', type })
-  if (Type.isSlice(type) || Type.isReference(type))
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  if (Type.equals(type, Type.allocation))
-    return Object.freeze({
-      _tag: 'AllocationCleanup',
-      type: Type.allocation,
-      ticket: 'ActiveReclaimTicket',
-    })
-  if (Type.isRawBuffer(type))
-    return Object.freeze({
-      _tag: 'RawBufferCleanup',
-      type,
-      allocation: Object.freeze({
-        _tag: 'AllocationCleanup',
-        type: Type.allocation,
-        ticket: 'ActiveReclaimTicket',
-      }),
-    })
-  if (Type.isFixedArray(type)) {
-    if (type.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
-    return Object.freeze({
-      _tag: 'ArrayCleanup',
-      type,
-      length: type.length,
-      element: cleanupPlan(index, type.element, seen),
-    })
-  }
-  if (Type.isUnion(type)) {
-    return Object.freeze({
-      _tag: 'UnionCleanup',
-      type,
-      cases: Object.freeze(
-        type.members.map((member, ordinal) =>
-          Object.freeze({
-            member,
-            ordinal,
-            cleanup: cleanupPlan(index, member, seen),
-          }),
-        ),
-      ),
-    })
-  }
-  if (Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-  // A stored executable representation owes its enclosing aggregate an exactly-once release of
-  // every owned environment lane. Concrete specialization resolves the shared realization.
-  if (Type.isRepresented(type))
-    return Type.isCallable(type.contract)
-      ? Object.freeze({ _tag: 'RepresentedCallableCleanup', type, contract: type.contract })
-      : Type.isEffect(type.contract)
-        ? Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
-        : Object.freeze({ _tag: 'NoCleanup', type })
-  const key = Type.key(type)
-  if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
-  const declaration = DeclarationIndex.byCanonical(index, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
-  if (declaration?._tag !== 'StructDeclaration') {
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  }
-  const substitution =
-    Type.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      type.arguments,
-    ) ?? new Map()
-  const nextSeen = new Set(seen).add(key)
-  const structPlan: CleanupPlan = Object.freeze({
-    _tag: 'StructCleanup',
-    type,
-    fields: Object.freeze(
-      declaration.fields.map((field) =>
-        Object.freeze({
-          field: field.id,
-          cleanup:
-            field.declaredType._tag === 'Resolved'
-              ? cleanupPlan(index, Type.substitute(field.declaredType.type, substitution), nextSeen)
-              : Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const }),
-        }),
-      ),
-    ),
-  })
-  // A source Drop conformance runs its hook before automatic field cleanup.
-  const witness = DeclarationIndex.witness(index, type, Type.dropCapability)
-  if (witness?._tag !== 'SourceConformanceWitness') return structPlan
-  const conformance = index.modules
-    .find((module) => module.module === witness.module)
-    ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
-  if (conformance?.provider._tag !== 'Resolved') return structPlan
-  const inferred = new Map<string, Type.GenericArgument>()
-  if (!Type.infer(conformance.provider.type, type, inferred)) return structPlan
-  return Object.freeze({
-    _tag: 'HookCleanup',
-    type,
-    hook: Object.freeze({
-      _tag: 'CanonicalDeclarationId' as const,
-      module: witness.module,
-      name: `drop@impl#${witness.ordinal}`,
-    }),
-    typeArguments: Object.freeze(
-      conformance.typeParameters.map(
-        (parameter) => inferred.get(Type.key(parameter.type)) ?? parameter.type,
-      ),
-    ),
-    inner: structPlan,
-  })
-}
-
-const cleanupTypeAtPath = (
-  index: DeclarationIndex.Index,
-  root: DeclarationIndex.SemanticType | undefined,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
-): DeclarationIndex.SemanticType | undefined => {
-  let current = root
-  for (const fieldId of path) {
-    if (current === undefined || !Type.isNominal(current)) return undefined
-    const declaration = DeclarationIndex.byCanonical(index, {
-      _tag: 'CanonicalDeclarationId',
-      module: current.module,
-      name: current.name,
-    })
-    if (declaration?._tag !== 'StructDeclaration') return undefined
-    const substitution = Type.substitution(
-      declaration.typeParameters.map((parameter) => parameter.type),
-      current.arguments,
-    )
-    if (substitution === undefined) return undefined
-    const field = declaration.fields.find(
-      (candidate) =>
-        candidate.id.struct.ordinal === fieldId.struct.ordinal &&
-        candidate.id.ordinal === fieldId.ordinal,
-    )
-    current =
-      field?.declaredType._tag === 'Resolved'
-        ? Type.substitute(field.declaredType.type, substitution)
-        : undefined
-  }
-  return current
-}
-
-/** Substitutes one checked symbolic cleanup proof into a concrete instance. */
-export const specializeCleanup = (
-  cleanup: CleanupPlan,
-  substitution: Type.Substitution,
-  resolveConcrete?: (type: Type.Type) => CleanupPlan,
-): CleanupPlan => {
-  const type = Type.substitute(cleanup.type, substitution)
-  switch (cleanup._tag) {
-    case 'NoCleanup':
-      return Object.freeze({ _tag: 'NoCleanup', type })
-    case 'ParameterCleanup':
-      return Type.isParameter(type)
-        ? Object.freeze({ _tag: 'ParameterCleanup', type })
-        : (resolveConcrete?.(type) ?? Object.freeze({ _tag: 'NoCleanup', type }))
-    case 'AllocationCleanup':
-      return Type.equals(type, Type.allocation)
-        ? Object.freeze({
-            _tag: 'AllocationCleanup',
-            type: Type.allocation,
-            ticket: 'ActiveReclaimTicket',
-          })
-        : Object.freeze({ _tag: 'NoCleanup', type })
-    case 'RawBufferCleanup':
-      return Type.isRawBuffer(type)
-        ? Object.freeze({
-            _tag: 'RawBufferCleanup',
-            type,
-            allocation: cleanup.allocation,
-          })
-        : Object.freeze({ _tag: 'NoCleanup', type })
-    case 'HookCleanup':
-      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'HookCleanup',
-        type,
-        hook: cleanup.hook,
-        typeArguments: Object.freeze(
-          cleanup.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, substitution),
-          ),
-        ),
-        inner: specializeCleanup(cleanup.inner, substitution, resolveConcrete),
-      })
-    case 'StructCleanup':
-      if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'StructCleanup',
-        type,
-        fields: Object.freeze(
-          cleanup.fields.map((field) =>
-            Object.freeze({
-              field: field.field,
-              cleanup: specializeCleanup(field.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
-    case 'ArrayCleanup':
-      if (!Type.isFixedArray(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'ArrayCleanup',
-        type,
-        length: type.length,
-        element: specializeCleanup(cleanup.element, substitution, resolveConcrete),
-      })
-    case 'UnionCleanup':
-      if (!Type.isUnion(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'UnionCleanup',
-        type,
-        cases: Object.freeze(
-          cleanup.cases.map((entry, ordinal) => {
-            const member = type.members.at(ordinal)
-            return Object.freeze({
-              member: member ?? entry.member,
-              ordinal: entry.ordinal,
-              cleanup: specializeCleanup(entry.cleanup, substitution, resolveConcrete),
-            })
-          }),
-        ),
-      })
-    case 'CallableCleanup':
-      if (!Type.isCallable(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'CallableCleanup',
-        type,
-        environment: cleanup.environment,
-        slots: Object.freeze(
-          cleanup.slots.map((slot) =>
-            Object.freeze({
-              ordinal: slot.ordinal,
-              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
-    case 'EffectCleanup':
-      if (!Type.isEffect(type)) return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'EffectCleanup',
-        type,
-        site: cleanup.site,
-        slots: Object.freeze(
-          cleanup.slots.map((slot) =>
-            Object.freeze({
-              ordinal: slot.ordinal,
-              laneOffset: slot.laneOffset,
-              laneCount: slot.laneCount,
-              cleanup: specializeCleanup(slot.cleanup, substitution, resolveConcrete),
-            }),
-          ),
-        ),
-      })
-    case 'EffectCompositeCleanup':
-      if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
-      return Object.freeze({
-        _tag: 'EffectCompositeCleanup',
-        type,
-        alternatives: Object.freeze(
-          cleanup.alternatives.map((alternative) =>
-            specializeCleanup(alternative, substitution, resolveConcrete),
-          ),
-        ),
-      })
-    case 'RepresentedCallableCleanup': {
-      if (!Type.isRepresented(type) || !Type.isCallable(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
-      // The caller resolves the complete instance's realization; without one the obligation stays
-      // symbolic rather than collapsing to "nothing to clean".
-      const resolved = resolveConcrete?.(type)
-      return resolved === undefined
-        ? Object.freeze({
-            _tag: 'RepresentedCallableCleanup',
-            type,
-            contract: type.contract,
-          })
-        : resolved
-    }
-    case 'RepresentedEffectCleanup': {
-      if (!Type.isRepresented(type) || !Type.isEffect(type.contract))
-        return Object.freeze({ _tag: 'NoCleanup', type })
-      const resolved = resolveConcrete?.(type)
-      return resolved === undefined
-        ? Object.freeze({ _tag: 'RepresentedEffectCleanup', type, contract: type.contract })
-        : resolved
-    }
-  }
-}
-
-/**
- * The concrete cleanup one aggregate owes for the callable it stores in a field.
- *
- * Every fact comes from the shared runtime realization: the specialized environment's site, its
- * ordered capture lanes, and which of those lanes the aggregate owns. Lanes are released
- * last-captured first, exactly as a callable binding's own environment is, so a stored callable and
- * a direct one clean in the same order.
- */
-export const realizedCallableCleanup = (
-  index: DeclarationIndex.Index,
-  realization: CallableFieldRealization.CallableRealization,
-): CleanupPlan => {
-  const type = realization.contract
-  const site = realization.site
-  const environment = realization.environment
-  const owned = realization.captures.filter((capture) => capture.owned)
-  if (site === undefined || environment === undefined || owned.length === 0)
-    return Object.freeze({ _tag: 'NoCleanup', type })
-  return Object.freeze({
-    _tag: 'CallableCleanup',
-    type,
-    environment: Object.freeze({
-      _tag: 'CallableEnvironmentIdentity',
-      identity: environment,
-    }),
-    slots: Object.freeze(
-      [...owned].reverse().map((capture) =>
-        Object.freeze({
-          ordinal: capture.ordinal,
-          cleanup: cleanupPlan(index, capture.type),
-        }),
-      ),
-    ),
-  })
-}
-
 const borrowedReplacements = (
   fn: Elaboration.FunctionFact,
   index: DeclarationIndex.Index,
@@ -2604,7 +2118,7 @@ const borrowedReplacements = (
           root: statement.root.id,
           region: statement.region,
           type: statement.destination.type.type,
-          displacedCleanup: cleanupPlan(index, statement.destination.type.type),
+          displacedCleanup: CleanupPlan.cleanupPlan(index, statement.destination.type.type),
           span: statement.syntax.span,
         }),
       )
@@ -2774,10 +2288,14 @@ const checkFunction = (
           ...selection.cleanup.flatMap((path) => {
             const subjectType =
               selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
-            const type = cleanupTypeAtPath(index, selection.member ?? subjectType ?? 'never', path)
+            const type = CleanupPlan.cleanupTypeAtPath(
+              index,
+              selection.member ?? subjectType ?? 'never',
+              path,
+            )
             return type === undefined
               ? []
-              : [Object.freeze({ path, cleanup: cleanupPlan(index, type) })]
+              : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
           }),
           ...(includeBindings
             ? selection.bindings.flatMap((binding) => {
@@ -2787,7 +2305,7 @@ const checkFunction = (
                   ? [
                       Object.freeze({
                         path: binding.path,
-                        cleanup: cleanupPlan(index, binding.type),
+                        cleanup: CleanupPlan.cleanupPlan(index, binding.type),
                       }),
                     ]
                   : []
@@ -3190,7 +2708,7 @@ const checkFunction = (
         binding.cleanup ??
         (binding.type === undefined
           ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const })
-          : cleanupPlan(index, binding.type)),
+          : CleanupPlan.cleanupPlan(index, binding.type)),
       liveFrom: binding.liveFrom,
       liveTo: binding.liveTo,
       ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
@@ -3229,7 +2747,7 @@ const checkFunction = (
                   binding: fact,
                   fields:
                     fact.category._tag === 'MoveOnly' && Type.isNominal(fact.category.type)
-                      ? cleanupFields(index, fact.category.type)
+                      ? CleanupPlan.cleanupFields(index, fact.category.type)
                       : Object.freeze([]),
                   cleanup: fact.cleanup,
                 }),
@@ -3312,158 +2830,3 @@ export const checkModule = (
     ),
   })
 }
-
-const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
-
-const identityLabel = (declaration: DeclarationIndex.DeclarationFact): string => {
-  switch (declaration.canonical._tag) {
-    case 'Canonical':
-      return `${declaration.canonical.id.module}.${declaration.canonical.id.name}`
-    case 'Duplicate':
-      return `duplicate:${declaration.canonical.original.module}.${declaration.canonical.original.name}#${declaration.id.ordinal}`
-    case 'Unidentified':
-      return `unidentified#${declaration.id.ordinal}`
-  }
-}
-
-const verdictText = (verdict: Verdict): string => {
-  switch (verdict._tag) {
-    case 'Satisfied':
-      return 'satisfied'
-    case 'Violation':
-      return 'violation'
-    case 'Unavailable':
-      return 'unavailable'
-  }
-}
-
-const siteText = (site: BindingSite): string =>
-  site._tag === 'Parameter'
-    ? `p${site.parameter.ordinal}`
-    : site._tag === 'Let'
-      ? `b${site.binding.ordinal}`
-      : site._tag === 'Pattern'
-        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
-        : `t${site.owner.span.start}.${site.owner.ordinal}`
-
-const cleanupText = (cleanup: CleanupPlan): string => {
-  if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
-  if (cleanup._tag === 'ParameterCleanup') return `parameter:${Type.key(cleanup.type)}`
-  if (cleanup._tag === 'AllocationCleanup')
-    return `allocation:${Type.encode(cleanup.type)} ticket=${cleanup.ticket}`
-  if (cleanup._tag === 'RawBufferCleanup')
-    return `raw-buffer:${Type.encode(cleanup.type)} owner=(${cleanupText(cleanup.allocation)})`
-  if (cleanup._tag === 'ArrayCleanup') {
-    return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
-  }
-  if (cleanup._tag === 'UnionCleanup') {
-    return `union:${Type.encode(cleanup.type)} cases=${cleanup.cases
-      .map(
-        (member) =>
-          `${member.ordinal}:${Type.encode(member.member)}(${cleanupText(member.cleanup)})`,
-      )
-      .join(',')}`
-  }
-  if (cleanup._tag === 'CallableCleanup') {
-    const environment =
-      cleanup.environment._tag === 'CallableEnvironmentSite'
-        ? Hir.executableSiteLabel(cleanup.environment.site)
-        : Type.callableEnvironmentKey(cleanup.environment.identity)
-    return `callable:${Type.encode(cleanup.type)} environment=${environment} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
-  }
-  if (cleanup._tag === 'EffectCleanup') {
-    return `effect:${Type.encode(cleanup.type)} site=${Hir.executableSiteLabel(cleanup.site)} slots=${cleanup.slots.map((slot) => `#${slot.ordinal}(${cleanupText(slot.cleanup)})`).join(',') || 'none'}`
-  }
-  if (cleanup._tag === 'EffectCompositeCleanup') {
-    return `effect-composite:${Type.encode(cleanup.type)} alternatives=${cleanup.alternatives.map((alternative, ordinal) => `${ordinal}(${cleanupText(alternative)})`).join(',')}`
-  }
-  if (cleanup._tag === 'RepresentedCallableCleanup') {
-    return `represented-callable:${Type.encode(cleanup.contract)}`
-  }
-  if (cleanup._tag === 'RepresentedEffectCleanup') {
-    return `represented-effect:${Type.encode(cleanup.contract)}`
-  }
-  if (cleanup._tag === 'HookCleanup') {
-    return `hook:${Type.encode(cleanup.type)} target=${cleanup.hook.module}.${cleanup.hook.name}${
-      cleanup.typeArguments.length === 0
-        ? ''
-        : `<${cleanup.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
-    } inner=(${cleanupText(cleanup.inner)})`
-  }
-  return `struct:${Type.encode(cleanup.type)} fields=${cleanup.fields
-    .map((field) => `#${field.field.ordinal}(${cleanupText(field.cleanup)})`)
-    .join(',')}`
-}
-
-/**
- * Deterministic textual encoding of one module's ownership facts and cleanup plans for
- * debugging, inspection, and golden tests. No compatibility promise attaches to this format.
- */
-export const encode = (self: ModuleOwnership): string =>
-  [
-    `ownership-module ${self.module}`,
-    ...self.functions.flatMap((fn) => [
-      `fn ${identityLabel(fn.declaration)} ${verdictText(fn.verdict)}`,
-      ...fn.bindings.map((binding) => {
-        const category =
-          binding.category._tag === 'Copyable'
-            ? 'copyable'
-            : `move-only ${Type.encode(binding.category.type)}`
-        return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
-      }),
-      ...fn.loans.map(
-        (loan) =>
-          `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${loan.origin === 'SliceReborrow' ? `reborrow parent=${loan.parent === undefined ? '?' : siteText(loan.parent)} suspended=${loan.suspendsParent}` : loan.origin === 'ReturnedView' ? 'returned-view' : 'array'} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`,
-      ),
-      ...fn.borrowedReplacements.map(
-        (replacement) =>
-          `  borrowed-replace p${replacement.root.ordinal} region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.displacedCleanup)} ${spanText(replacement.span)}`,
-      ),
-      ...fn.callables.map(
-        (callable) =>
-          `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
-      ),
-      ...fn.exits.map((exit) => {
-        const label = (() => {
-          switch (exit.kind) {
-            case 'Return':
-              return 'return'
-            case 'ArmEnd':
-              return `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
-            case 'LoopFallthrough':
-              return `loop${exit.target?.ordinal ?? '?'} fallthrough`
-            case 'Break':
-              return `break loop${exit.target?.ordinal ?? '?'}`
-            case 'Continue':
-              return `continue loop${exit.target?.ordinal ?? '?'}`
-            case 'Propagation':
-              return 'propagation'
-          }
-        })()
-        const loanEnds = exit.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'
-        return exit.releases.length === 0
-          ? `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds} releases none`
-          : [
-              `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
-              ...exit.releases.map(
-                (release) =>
-                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
-              ),
-            ].join('\n')
-      }),
-      ...fn.fixedPoints.map(
-        (point) =>
-          `  loop${point.loop.ordinal} fixed-point ${point.compatible ? 'compatible' : 'incompatible'} iterations=${point.iterations} incoming=${point.incoming.map(siteText).join(',') || 'none'} repeating=${point.repeating.map((state) => `[${state.map(siteText).join(',')}]`).join(',') || 'none'} following=${point.following.map(siteText).join(',') || 'none'}`,
-      ),
-      ...fn.matches.map((match) =>
-        [
-          `  match ${match.access.toLowerCase()} ${spanText(match.span)}`,
-          ...match.arms.map(
-            (arm) =>
-              `    arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Type.encode(arm.member)} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`,
-          ),
-        ].join('\n'),
-      ),
-    ]),
-    '',
-  ].join('\n')

@@ -2,6 +2,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as Canonical from './internal/Canonical.js'
+import * as Graph from './internal/Graph.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
@@ -10,7 +11,7 @@ export interface Capture {
   readonly _tag: 'OpaqueCapture'
   readonly ordinal: number
   readonly type: Type.Type
-  readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
+  readonly access: Type.CaptureAccess
 }
 
 /** The actual producer specialization and executable site that constructed one realization. */
@@ -41,7 +42,7 @@ export interface Definition {
     | Type.RepresentationParameterArgument
   readonly arguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<Capture>
-  readonly access: 'Shared' | 'Exclusive' | 'Take'
+  readonly access: Type.CallableMode
   readonly cleanup: 'Trivial' | 'Required'
   readonly suspendable: boolean
   readonly bodyFingerprint: string
@@ -416,49 +417,16 @@ const stronglyConnectedCycles = (
 ): ReadonlyArray<ReadonlyArray<string>> => {
   const orderedKeys = [...new Set(keys)].sort()
   const known = new Set(orderedKeys)
-  const adjacency = new Map(
-    orderedKeys.map((key) => [
-      key,
-      Object.freeze(
-        [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
-      ),
-    ]),
+  const neighbors = (key: string): ReadonlyArray<string> =>
+    Object.freeze(
+      [...new Set(dependencies(key))].filter((dependency) => known.has(dependency)).sort(),
+    )
+  return Object.freeze(
+    Graph.stronglyConnected(orderedKeys, neighbors).filter(
+      (component) =>
+        component.length > 1 || neighbors(component[0] ?? '').includes(component[0] ?? ''),
+    ),
   )
-  let nextIndex = 0
-  const indices = new Map<string, number>()
-  const lows = new Map<string, number>()
-  const stack: Array<string> = []
-  const stacked = new Set<string>()
-  const cycles: Array<ReadonlyArray<string>> = []
-  const visit = (key: string): void => {
-    indices.set(key, nextIndex)
-    lows.set(key, nextIndex)
-    nextIndex += 1
-    stack.push(key)
-    stacked.add(key)
-    for (const dependency of adjacency.get(key) ?? []) {
-      if (!indices.has(dependency)) {
-        visit(dependency)
-        lows.set(key, Math.min(lows.get(key) ?? 0, lows.get(dependency) ?? 0))
-      } else if (stacked.has(dependency)) {
-        lows.set(key, Math.min(lows.get(key) ?? 0, indices.get(dependency) ?? 0))
-      }
-    }
-    if (lows.get(key) !== indices.get(key)) return
-    const component: Array<string> = []
-    for (;;) {
-      const member = stack.pop()
-      if (member === undefined) break
-      stacked.delete(member)
-      component.push(member)
-      if (member === key) break
-    }
-    component.sort()
-    if (component.length > 1 || adjacency.get(key)?.includes(key) === true)
-      cycles.push(Object.freeze(component))
-  }
-  for (const key of orderedKeys) if (!indices.has(key)) visit(key)
-  return Object.freeze(cycles)
 }
 
 const inlineLayoutCycles = (

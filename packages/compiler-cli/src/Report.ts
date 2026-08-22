@@ -1,5 +1,6 @@
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
+import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as ToolchainIntegrity from '@silk-effect/compiler/ToolchainIntegrity'
@@ -87,7 +88,7 @@ const milliseconds = (value: number): string => `${value.toFixed(1)}ms`
 const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)}MB`
 
 /** Renders the per-phase timing table the driver records for every run. */
-export const phases = (self: ReadonlyArray<Driver.PhaseReport>): string => {
+export const phases = (self: ReadonlyArray<Driver.DriverPhaseReport>): string => {
   const rows = self.map((entry) => ({
     phase: entry.phase,
     elapsed: milliseconds(entry.elapsedMs),
@@ -109,22 +110,20 @@ export const phases = (self: ReadonlyArray<Driver.PhaseReport>): string => {
  * command provenance precisely so a build failure is reproducible by hand; dropping it here would
  * waste the only information that makes a linker error debuggable.
  */
-const toolchainFailure = (stage: string, failure: Driver.Failed['failure']): string => {
-  if (failure._tag === 'StorageFailure') {
-    return `${stage} stage failed: ${failure.message}`
+export const toolchainError = (failure: NativeToolchain.ToolchainError): string => {
+  if (failure.reason._tag === 'StorageFailed') {
+    return `${failure.stage} stage failed: ${failure.message}`
   }
-  const command = [failure.planned.command, ...failure.planned.arguments].join(' ')
+  const command = [failure.reason.planned.command, ...failure.reason.planned.arguments].join(' ')
   const reason =
-    failure.reason._tag === 'MissingInput'
-      ? `missing input ${failure.reason.path}`
-      : failure.reason._tag === 'TargetMismatch'
-        ? `target mismatch: expected ${failure.reason.expected}, got ${failure.reason.actual}`
-        : `process exited with status ${failure.status ?? 'unknown'}`
+    failure.reason.status === null
+      ? failure.message
+      : `process exited with status ${failure.reason.status}`
   return [
-    `${stage} stage failed: ${reason}`,
+    `${failure.stage} stage failed: ${reason}`,
     `  command: ${command}`,
-    ...(failure.output.trim().length > 0
-      ? failure.output
+    ...(failure.reason.output.trim().length > 0
+      ? failure.reason.output
           .trimEnd()
           .split('\n')
           .map((line) => `  | ${line}`)
@@ -152,7 +151,7 @@ const entryReason = (entry: Driver.NoEntry): string => {
     case 'InvalidEffectEntryResult':
       return 'effectful `main` must succeed with `()`'
     case 'EffectEntryRequirements':
-      return `effectful \`main\` has unresolved dependencies: ${entry.requirements?.map(Type.encodeRequirement).join(', ') ?? 'unknown'}`
+      return `effectful \`main\` has unresolved dependencies: ${entry.requirements?.map((requirement) => Type.encodeRequirement(requirement)).join(', ') ?? 'unknown'}`
     case 'InvalidSource':
       return 'source diagnostics prevented entry discovery'
   }
@@ -198,8 +197,6 @@ export const outcome = (
         `Broken toolchain: expected ${self.expectedIdentity}, observed ${self.observedIdentity}`,
         ...self.failures.map((failure) => `  ${ToolchainIntegrity.formatFailure(failure)}`),
       ].join('\n')
-    case 'Failed':
-      return toolchainFailure(self.stage, self.failure)
     case 'Rejected':
       return diagnostics(self.diagnostics, sources)
   }

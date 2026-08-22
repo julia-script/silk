@@ -9,11 +9,12 @@ import * as Instr from '@silk-effect/wasm/Instr'
 import * as Memory from '@silk-effect/wasm/Memory'
 import * as WasmType from '@silk-effect/wasm/Type'
 import * as Validate from '@silk-effect/wasm/Validate'
-import * as ValType from '@silk-effect/wasm/ValType'
+import type * as ValType from '@silk-effect/wasm/ValType'
 import * as WatText from '@silk-effect/wasm/WatText'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
+import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Instances from './Instances.js'
@@ -21,12 +22,35 @@ import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
-import * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import * as StandardStreams from './StandardStreams.js'
 import * as Target from './Target.js'
 import * as Transcendental from './Transcendental.js'
 import * as SilkType from './Type.js'
+import * as WasmCleanup from './WasmCleanup.js'
+import type * as WasmEmitContext from './WasmEmitContext.js'
+import {
+  f32,
+  f64,
+  i32,
+  i64,
+  laneKindsOf,
+  laneLoadMnemonic,
+  laneStoreMnemonic,
+  laneValueType,
+  packWasmLanes,
+  zeroConst,
+} from './WasmLanes.js'
+import type { FramePlan, MemoryContext } from './WasmMemory.js'
+import {
+  framePlan,
+  heapAllocateBody,
+  heapBase,
+  heapHeaderBytes,
+  heapReleaseBody,
+  stackLimit,
+} from './WasmMemory.js'
+import * as WasmSuspension from './WasmSuspension.js'
 
 /**
  * The Wasm backend's heap is a size-class free list over one bump region, so a released block
@@ -57,38 +81,6 @@ import * as SilkType from './Type.js'
  *
  * `heapHeaderBytes` is both the header's size and the alignment every block start keeps.
  */
-const heapHeaderBytes = 16
-/** Size classes hold payload capacities `1 << (4 + index)`, so class 0 is 16 bytes. */
-const heapClassShift = 4
-const heapClassCount = 27
-/** Blocks too large or too over-aligned for a class share one irregular list. */
-const heapIrregularClass = heapClassCount
-const heapLargestClassBytes = 1 << (heapClassShift + heapClassCount - 1)
-/** The free-list head table sits at the first heap page; wasm memory starts it zeroed. */
-const heapTableBase = 65536
-const heapBase =
-  heapTableBase + Math.ceil(((heapIrregularClass + 1) * 4) / heapHeaderBytes) * heapHeaderBytes
-
-/**
- * The shadow stack may not reach the allocator's region.
- *
- * The two bump regions share one linear memory and point at each other: the shadow stack starts at
- * the end of static data and grows up, while the heap starts at the fixed `heapTableBase` and grows
- * up from there. Without a bound between them a deep enough chain of frames walks over the
- * allocator's free-list table and then over live blocks, and nothing traps at the overwrite — the
- * corrupted bytes are read back later, by whichever guard happens to see them first (#134).
- *
- * `memory.grow` cannot stand in for this bound. Growth appends pages above everything, so the stack
- * reaches the heap long before a reservation runs past the memory that is mapped.
- */
-const stackLimit = heapTableBase
-
-/**
- * Linear memory opens with a 16-byte hole so that address 0 is never a live object. The backend
- * spends its first word on a status word: a deliberate trap writes the reason there before
- * `unreachable`, so a host that catches the trap can name what happened instead of inferring it
- * from a byte offset. Memory is exported already, and it survives the trap.
- */
 export const statusAddress = 0
 /** A frame reservation would have crossed out of the shadow stack's region. */
 export const statusStackOverflow = 1
@@ -110,345 +102,6 @@ export const statusStackOverflow = 1
  */
 
 /** The wasm value type every MIR `i32` and `bool` local lowers to. */
-const i32 = ValType.i32
-const i64 = ValType.i64
-const f32 = ValType.f32
-const f64 = ValType.f64
-
-/**
- * The lanes one MIR type occupies, for locals, signatures, and suspension transfer slots alike.
- *
- * A stored executable must resolve through its storage type's calling shape: that is the only
- * producer that prefixes each lane path with the owning `EffectCaptureSelector` or
- * `CallableCaptureSelector`. `effectEnvironmentLanes`/`callableEnvironmentLanes` emit the same
- * lane count and value types but prefix-less paths, so a caller that reads `lane.path` — such as
- * place-read realization — cannot match them against a destination lane. Every lane computation
- * shares this function so the two can never disagree.
- */
-const laneKindsOf = (
-  plan: LayoutPlan.Plan,
-  type: Mir.Type,
-): ReadonlyArray<LayoutPlan.CallingLane> => {
-  if (type._tag === 'EffectComposite') {
-    const shape = LayoutPlan.callingShape(plan, type.type)
-    if (shape !== undefined) return shape.lanes
-    const payloadTypes = type.alternatives.flatMap((alternative) =>
-      laneKindsOf(plan, alternative).map((lane) => lane.type),
-    )
-    return Object.freeze([
-      Object.freeze({
-        _tag: 'CallingLane' as const,
-        path: Object.freeze([Object.freeze({ _tag: 'UnionTagSelector' as const })]),
-        type: 'i32' as const,
-      }),
-      ...payloadTypes.map((laneType, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot })]),
-          type: laneType,
-        }),
-      ),
-    ])
-  }
-  if (type._tag === 'EffectValue' && type.storage !== undefined) {
-    const shape = LayoutPlan.callingShape(plan, type.storage.type)
-    if (shape === undefined) throw new RangeError('Wasm backend lost a stored Effect calling shape')
-    return shape.lanes
-  }
-  if (type._tag === 'EffectValue') return LayoutPlan.effectEnvironmentLanes(plan, type.environment)
-  if (type._tag === 'CallableValue' && type.storage !== undefined) {
-    const shape = LayoutPlan.callingShape(plan, type.storage.type)
-    if (shape === undefined)
-      throw new RangeError('Wasm backend lost a stored callable calling shape')
-    return shape.lanes
-  }
-  if (type._tag === 'CallableValue')
-    return type.environment === undefined
-      ? Object.freeze([])
-      : LayoutPlan.callableEnvironmentLanes(plan, type.environment)
-  const shape = LayoutPlan.callingShape(plan, Mir.semanticType(type))
-  if (shape === undefined) throw new RangeError('Wasm backend lost a calling shape')
-  return shape.lanes
-}
-
-/** Whether a MIR value carries an address into an address-taken caller frame root. */
-const carriesBorrowAddress = (plan: LayoutPlan.Plan, type: Mir.Type): boolean => {
-  if (type._tag === 'EffectBorrow') return true
-  const lanes = laneKindsOf(plan, type)
-  if (type._tag === 'EffectValue' || type._tag === 'CallableValue') {
-    return lanes.some((lane) => typeof lane.type !== 'string')
-  }
-  return lanes.some(
-    (lane) =>
-      typeof lane.type !== 'string' &&
-      lane.path.some(
-        (selector) =>
-          selector._tag === 'ReferenceAddressSelector' || selector._tag === 'SliceAddressSelector',
-      ),
-  )
-}
-
-const laneValueType = (plan: LayoutPlan.Plan, lane: LayoutPlan.CallingLane): ValType.ValType => {
-  if (typeof lane.type !== 'string') return i32
-  const scalar = Scalar.find(lane.type)
-  if (scalar === undefined) return i32
-  if (scalar.category === 'Floating') return scalar.spelling === 'f32' ? f32 : f64
-  return Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64) === 64 ? i64 : i32
-}
-
-const laneLoadMnemonic = (
-  plan: LayoutPlan.Plan,
-  lane: LayoutPlan.CallingLane,
-): Instr.MemoryAccessMnemonic => {
-  if (typeof lane.type !== 'string') return 'i32.load'
-  const scalar = Scalar.find(lane.type)
-  if (scalar?.category === 'Floating') return scalar.spelling === 'f32' ? 'f32.load' : 'f64.load'
-  if (scalar?.category !== 'Integer') return 'i32.load'
-  const bits = Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64)
-  if (bits === 64) return 'i64.load'
-  if (bits === 16) return scalar.signedness === 'Signed' ? 'i32.load16_s' : 'i32.load16_u'
-  if (bits === 8) return scalar.signedness === 'Signed' ? 'i32.load8_s' : 'i32.load8_u'
-  return 'i32.load'
-}
-
-const laneStoreMnemonic = (
-  plan: LayoutPlan.Plan,
-  lane: LayoutPlan.CallingLane,
-): Instr.MemoryAccessMnemonic => {
-  if (typeof lane.type !== 'string') return 'i32.store'
-  const scalar = Scalar.find(lane.type)
-  if (scalar?.category === 'Floating') return scalar.spelling === 'f32' ? 'f32.store' : 'f64.store'
-  if (scalar?.category !== 'Integer') return 'i32.store'
-  const bits = Scalar.bits(scalar, plan.target.pointerSize === 4 ? 32 : 64)
-  if (bits === 64) return 'i64.store'
-  if (bits === 16) return 'i32.store16'
-  if (bits === 8) return 'i32.store8'
-  return 'i32.store'
-}
-
-interface FrameRoot {
-  readonly local: number
-  readonly offset: number
-  readonly type: Exclude<Mir.Type, { readonly _tag: 'EffectBorrow' | 'EffectOutcome' }>
-}
-
-interface FramePlan {
-  readonly roots: ReadonlyMap<number, FrameRoot>
-  /**
-   * The roots whose address leaves the frame — borrow formations and borrow-shaped captures.
-   * A callee reaches exactly these through the pointer it was handed, so exactly these have to
-   * reload after a call. The remaining roots are addressed only by the cleanup sequence that
-   * materializes and reloads them itself, and reloading one after a call would overwrite a live
-   * value with frame bytes nothing ever wrote.
-   */
-  readonly escaping: ReadonlySet<number>
-  /** Address-taken frame roots reachable through each MIR local's stored pointer lanes. */
-  readonly localRoots: ReadonlyMap<number, ReadonlySet<number>>
-  readonly size: number
-  readonly alignment: number
-}
-
-const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
-  const formations = Mir.operations(fn).filter(
-    (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
-      operation._tag === 'BeginLoan',
-  )
-  const escaping = new Set([
-    ...formations.flatMap((operation) =>
-      operation.sourceType._tag === 'Slice' ||
-      fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference'
-        ? []
-        : [operation.root.ordinal],
-    ),
-    ...Mir.operations(fn).flatMap((operation) =>
-      operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
-        ? operation.captures.flatMap((capture, ordinal) =>
-            (operation._tag === 'MakeEffect'
-              ? operation.type.environment.fields.at(ordinal)?.representation === 'Borrow'
-              : capture.access === 'Shared' || capture.access === 'Exclusive') &&
-            fn.localTypes.at(capture.source.ordinal)?._tag !== 'EffectBorrow'
-              ? [capture.source.ordinal]
-              : [],
-          )
-        : [],
-    ),
-  ])
-  const rootOrdinals = new Set([
-    ...escaping,
-    // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
-    ...Mir.operations(fn).flatMap((operation) => {
-      const dropped =
-        operation._tag === 'Drop'
-          ? [operation]
-          : operation._tag === 'RunEffect' ||
-              operation._tag === 'RunEffectValue' ||
-              operation._tag === 'RunEffectComposite' ||
-              operation._tag === 'RunStaticEffect'
-            ? (operation.releases ?? [])
-            : []
-      return [
-        ...dropped.flatMap((release) =>
-          Ownership.cleanupHasHook(release.cleanup) ? [release.local.ordinal] : [],
-        ),
-        ...(operation._tag === 'CloseEffectEntry'
-          ? operation.failures.flatMap((failure) =>
-              Ownership.cleanupHasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
-            )
-          : []),
-      ]
-    }),
-  ])
-  const roots = new Map<number, FrameRoot>()
-  let cursor = 0
-  let alignment = 1
-  for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
-    const type = fn.localTypes.at(local)
-    const storage =
-      type?._tag === 'EffectValue'
-        ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
-        : type?._tag === 'EffectComposite'
-          ? Object.freeze({
-              size: type.alternatives.reduce(
-                (maximum, alternative) => Math.max(maximum, alternative.environment.size),
-                0,
-              ),
-              alignment: type.alternatives.reduce(
-                (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
-                1,
-              ),
-            })
-          : type === undefined
-            ? undefined
-            : LayoutPlan.entry(plan, Mir.semanticType(type))
-    if (
-      type === undefined ||
-      type._tag === 'EffectBorrow' ||
-      type._tag === 'EffectOutcome' ||
-      storage === undefined
-    ) {
-      throw new RangeError(
-        `Wasm frame ${fn.id.module}.${fn.id.name} lost address-taken root %${local}${type === undefined ? '' : ` (${SilkType.encode(Mir.semanticType(type))})`}`,
-      )
-    }
-    cursor = alignUp(cursor, storage.alignment)
-    roots.set(local, Object.freeze({ local, offset: cursor, type }))
-    cursor += storage.size
-    alignment = Math.max(alignment, storage.alignment)
-  }
-  const localRoots = new Map<number, Set<number>>(
-    [...escaping].map((local) => [local, new Set([local])] as const),
-  )
-  const include = (destination: Mir.LocalId, sources: ReadonlyArray<Mir.LocalId>): boolean => {
-    const destinationType = fn.localTypes.at(destination.ordinal)
-    if (destinationType === undefined || !carriesBorrowAddress(plan, destinationType)) return false
-    const selected = localRoots.get(destination.ordinal) ?? new Set<number>()
-    const previous = selected.size
-    for (const source of sources) {
-      for (const root of localRoots.get(source.ordinal) ?? []) selected.add(root)
-    }
-    if (selected.size > 0) localRoots.set(destination.ordinal, selected)
-    return selected.size !== previous
-  }
-  const operations = Mir.operations(fn)
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const operation of operations) {
-      switch (operation._tag) {
-        case 'BeginLoan':
-          changed = include(operation.destination, [operation.root]) || changed
-          break
-        case 'Move':
-        case 'Project':
-          changed = include(operation.destination, [operation.source]) || changed
-          break
-        case 'ReadPlace':
-          changed = include(operation.destination, [operation.root]) || changed
-          break
-        case 'WritePlace':
-          changed = include(operation.root, [operation.source]) || changed
-          break
-        case 'Construct':
-          changed =
-            include(
-              operation.destination,
-              operation.fields.map((field) => field.value),
-            ) || changed
-          break
-        case 'ConstructArray':
-          changed = include(operation.destination, operation.elements) || changed
-          break
-        case 'MakeEffect':
-        case 'MakeCallable':
-          changed =
-            include(
-              operation.destination,
-              operation.captures.map((capture) => capture.source),
-            ) || changed
-          break
-        case 'ApplyCallable':
-          changed =
-            include(operation.destination, [
-              ...(operation.callable === undefined ? [] : [operation.callable]),
-              ...operation.captures.map((capture) => capture.source),
-              ...operation.arguments,
-            ]) || changed
-          break
-        case 'Call':
-          changed = include(operation.destination, operation.arguments) || changed
-          break
-        case 'RunEffectValue':
-          changed =
-            include(operation.destination, [operation.effect, ...operation.arguments]) || changed
-          break
-        case 'RunStaticEffect':
-          changed =
-            include(operation.destination, [
-              ...operation.captures.map((capture) => capture.source),
-              ...operation.arguments,
-            ]) || changed
-          break
-        case 'ReifyEffect':
-          changed =
-            include(operation.destination, [operation.effect, ...operation.arguments]) || changed
-          break
-        case 'Match':
-          for (const arm of operation.arms) {
-            for (const binding of arm.bindings) {
-              changed = include(binding.destination, [operation.scrutinee]) || changed
-            }
-            changed = include(operation.destination, [arm.selected.result]) || changed
-          }
-          break
-        case 'ConvertUnion':
-        case 'UnpackEffectSuccess':
-          changed = include(operation.destination, [operation.source]) || changed
-          break
-        case 'SlotTake':
-        case 'SlotCopy':
-          changed = include(operation.destination, [operation.slot]) || changed
-          break
-        case 'RawBufferView':
-          changed = include(operation.destination, [operation.buffer]) || changed
-          break
-        default:
-          break
-      }
-    }
-  }
-  const frozenLocalRoots = new Map(
-    [...localRoots].map(([local, reachable]) => [local, new Set(reachable)] as const),
-  )
-  return Object.freeze({
-    roots,
-    escaping,
-    localRoots: frozenLocalRoots,
-    size: alignUp(cursor, alignment),
-    alignment,
-  })
-}
-
-/** Non-trapping comparisons map straight onto wasm's `i32` relational operators. */
 const comparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
   Object.freeze({
     Equals: 'i32.eq',
@@ -1187,266 +840,6 @@ const emitIntegerConversionValue = (
   ]
 }
 
-interface MemoryContext {
-  readonly memory: Memory.Memory
-  readonly stackPointer: Global.Global
-  /** Where the shadow stack starts, so a report can rewind the pointer to it. */
-  readonly stackBase: number
-  /**
-   * The first address the shadow stack may not reach, or `undefined` when this module has no heap
-   * for it to run into and only the wrap and `memory.grow` guards apply.
-   */
-  readonly stackLimit: number | undefined
-  readonly heapPointer: Global.Global
-  readonly frame: FramePlan
-  readonly plan: LayoutPlan.Plan
-  readonly staticOffsets: ReadonlyMap<string, number>
-  readonly standardWrite?: FuncActor.Func
-  /** `(bytes, alignment) -> payload address`, answering 0 when the request cannot be served. */
-  readonly heapAllocate?: FuncActor.Func
-  /** `(header address) -> ()`, returning one block to its size class. Ignores a null header. */
-  readonly heapRelease?: FuncActor.Func
-}
-
-/**
- * The body of the synthesized allocator. It serves a request from the head of the matching free
- * list when that block fits, and otherwise carves a fresh block off the bump region, growing
- * memory only when the region runs past what is already mapped.
- */
-const heapAllocateBody = (
-  memory: Memory.Memory,
-  heapPointer: Global.Global,
-): ReadonlyArray<Instr.Instr> => {
-  const [bytes, alignment, align, klass, capacity, listAddress, block, payload, cursor] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8,
-  ]
-  const load = (address: number, offset = 0): ReadonlyArray<Instr.Instr> => [
-    Instr.localGet(address),
-    Instr.memoryAccess('i32.load', memory, { offset }),
-  ]
-  const store = (
-    address: number,
-    value: ReadonlyArray<Instr.Instr>,
-    offset = 0,
-  ): ReadonlyArray<Instr.Instr> => [
-    Instr.localGet(address),
-    ...value,
-    Instr.memoryAccess('i32.store', memory, { offset }),
-  ]
-  /** Pages spanning `[0, cursor)`, as the existing bump growth check computed them. */
-  const pagesForCursor: ReadonlyArray<Instr.Instr> = [
-    Instr.localGet(cursor),
-    Instr.i32Const(1),
-    Instr.op('i32.sub'),
-    Instr.i32Const(16),
-    Instr.op('i32.shr_u'),
-    Instr.i32Const(1),
-    Instr.op('i32.add'),
-  ]
-  const refuse: ReadonlyArray<Instr.Instr> = [Instr.i32Const(0), Instr.op('return')]
-  return [
-    // align = max(alignment, 16). A block start is always 16-aligned, and a zero alignment — which
-    // `Layout` construction already rejects — must never widen the mask into every address.
-    Instr.i32Const(heapHeaderBytes),
-    Instr.localGet(alignment),
-    Instr.localGet(alignment),
-    Instr.i32Const(heapHeaderBytes),
-    Instr.op('i32.lt_u'),
-    Instr.op('select'),
-    Instr.localSet(align),
-    // A request is classified when the block's own 16-byte alignment already satisfies it and its
-    // capacity fits the largest class. Everything else shares the irregular list.
-    Instr.localGet(align),
-    Instr.i32Const(heapHeaderBytes),
-    Instr.op('i32.eq'),
-    Instr.localGet(bytes),
-    Instr.i32Const(heapLargestClassBytes),
-    Instr.op('i32.le_u'),
-    Instr.op('i32.and'),
-    Instr.ifElse(
-      Instr.emptyBlockType,
-      [
-        // klass = bytes <= 16 ? 0 : ceil(log2(bytes)) - 4, capacity = 1 << (klass + 4)
-        Instr.i32Const(0),
-        Instr.i32Const(32),
-        Instr.localGet(bytes),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.clz'),
-        Instr.op('i32.sub'),
-        Instr.i32Const(heapClassShift),
-        Instr.op('i32.sub'),
-        Instr.localGet(bytes),
-        Instr.i32Const(1 << heapClassShift),
-        Instr.op('i32.le_u'),
-        Instr.op('select'),
-        Instr.localSet(klass),
-        Instr.i32Const(1),
-        Instr.localGet(klass),
-        Instr.i32Const(heapClassShift),
-        Instr.op('i32.add'),
-        Instr.op('i32.shl'),
-        Instr.localSet(capacity),
-        Instr.localGet(klass),
-        Instr.i32Const(2),
-        Instr.op('i32.shl'),
-        Instr.i32Const(heapTableBase),
-        Instr.op('i32.add'),
-        Instr.localSet(listAddress),
-      ],
-      [
-        Instr.i32Const(-1),
-        Instr.localSet(klass),
-        Instr.localGet(bytes),
-        Instr.localSet(capacity),
-        Instr.i32Const(heapTableBase + heapIrregularClass * 4),
-        Instr.localSet(listAddress),
-      ],
-    ),
-    // Reuse the head of the list when it serves the request. Every classified block in a list has
-    // the class's capacity and a 16-aligned payload, so only an irregular head needs measuring.
-    ...load(listAddress),
-    Instr.localTee(block),
-    Instr.ifElse(
-      Instr.emptyBlockType,
-      [
-        Instr.localGet(klass),
-        Instr.i32Const(0),
-        Instr.op('i32.ge_s'),
-        ...load(block),
-        Instr.localGet(bytes),
-        Instr.op('i32.ge_u'),
-        Instr.localGet(block),
-        Instr.i32Const(heapHeaderBytes),
-        Instr.op('i32.add'),
-        Instr.localGet(align),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.and'),
-        Instr.op('i32.eqz'),
-        Instr.op('i32.and'),
-        Instr.op('i32.or'),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          [
-            ...store(listAddress, load(block, 8)),
-            ...store(block, [Instr.i32Const(0)], 8),
-            Instr.localGet(block),
-            Instr.i32Const(heapHeaderBytes),
-            Instr.op('i32.add'),
-            Instr.op('return'),
-          ],
-          [],
-        ),
-      ],
-      [],
-    ),
-    // Carve a fresh block. The bump cursor stays 16-aligned so every block start is, which is what
-    // keeps a classified payload's 16-byte alignment an invariant rather than a coincidence.
-    Instr.globalGet(heapPointer),
-    Instr.i32Const(heapHeaderBytes - 1),
-    Instr.op('i32.add'),
-    Instr.i32Const(-heapHeaderBytes),
-    Instr.op('i32.and'),
-    Instr.localSet(cursor),
-    Instr.localGet(cursor),
-    Instr.i32Const(heapHeaderBytes),
-    Instr.op('i32.add'),
-    Instr.localGet(align),
-    Instr.i32Const(1),
-    Instr.op('i32.sub'),
-    Instr.op('i32.add'),
-    Instr.i32Const(0),
-    Instr.localGet(align),
-    Instr.op('i32.sub'),
-    Instr.op('i32.and'),
-    Instr.localTee(payload),
-    Instr.localGet(cursor),
-    Instr.op('i32.lt_u'),
-    Instr.ifElse(Instr.emptyBlockType, refuse, []),
-    Instr.localGet(payload),
-    Instr.i32Const(heapHeaderBytes),
-    Instr.op('i32.sub'),
-    Instr.localSet(block),
-    Instr.localGet(payload),
-    Instr.localGet(capacity),
-    Instr.op('i32.add'),
-    Instr.i32Const(heapHeaderBytes - 1),
-    Instr.op('i32.add'),
-    Instr.localTee(cursor),
-    Instr.localGet(payload),
-    Instr.op('i32.lt_u'),
-    Instr.ifElse(Instr.emptyBlockType, refuse, []),
-    Instr.localGet(cursor),
-    Instr.i32Const(-heapHeaderBytes),
-    Instr.op('i32.and'),
-    Instr.localSet(cursor),
-    ...pagesForCursor,
-    Instr.memorySize(memory),
-    Instr.op('i32.gt_u'),
-    Instr.ifElse(
-      Instr.emptyBlockType,
-      [
-        ...pagesForCursor,
-        Instr.memorySize(memory),
-        Instr.op('i32.sub'),
-        Instr.memoryGrow(memory),
-        Instr.i32Const(-1),
-        Instr.op('i32.eq'),
-        Instr.ifElse(Instr.emptyBlockType, refuse, []),
-      ],
-      [],
-    ),
-    Instr.localGet(cursor),
-    Instr.globalSet(heapPointer),
-    ...store(block, [Instr.localGet(capacity)]),
-    ...store(block, [Instr.localGet(klass)], 4),
-    ...store(block, [Instr.i32Const(0)], 8),
-    ...store(block, [Instr.i32Const(0)], 12),
-    Instr.localGet(payload),
-  ]
-}
-
-/**
- * The body of the synthesized release. It pushes one block onto the head of its size class's free
- * list and returns. A null header is a no-op, which is what lets a union's conditional cleanup
- * select the inactive case's reclaim context to zero instead of branching around the call — the
- * same shortcut the LLVM backend takes through libc `free`.
- */
-const heapReleaseBody = (memory: Memory.Memory): ReadonlyArray<Instr.Instr> => {
-  const [header, listAddress] = [0, 1]
-  const klass: ReadonlyArray<Instr.Instr> = [
-    Instr.localGet(header),
-    Instr.memoryAccess('i32.load', memory, { offset: 4 }),
-  ]
-  return [
-    Instr.localGet(header),
-    Instr.op('i32.eqz'),
-    Instr.ifElse(Instr.emptyBlockType, [Instr.op('return')], []),
-    // An unsigned comparison folds the irregular block's -1 class in with any out-of-range index,
-    // so a header can never steer the push past the end of the head table.
-    ...klass,
-    Instr.i32Const(heapIrregularClass),
-    ...klass,
-    Instr.i32Const(heapClassCount),
-    Instr.op('i32.lt_u'),
-    Instr.op('select'),
-    Instr.i32Const(2),
-    Instr.op('i32.shl'),
-    Instr.i32Const(heapTableBase),
-    Instr.op('i32.add'),
-    Instr.localSet(listAddress),
-    Instr.localGet(header),
-    Instr.localGet(listAddress),
-    Instr.memoryAccess('i32.load', memory),
-    Instr.memoryAccess('i32.store', memory, { offset: 8 }),
-    Instr.localGet(listAddress),
-    Instr.localGet(header),
-    Instr.memoryAccess('i32.store', memory),
-  ]
-}
-
-/** Local names reach the `name` custom section, so release builds declare them unnamed. */
 const layoutOf = (
   fn: Mir.MirFunction,
   plan: LayoutPlan.Plan,
@@ -1616,28 +1009,6 @@ const matchesSuspensionOperation = (
     candidate.destination.ordinal === expected.destination.ordinal &&
     candidate.outcome.ordinal === expected.outcome.ordinal)
 
-interface PackedWasmLane {
-  readonly offset: number
-  readonly type: ValType.ValType
-}
-
-const packWasmLanes = (
-  lanes: ReadonlyArray<LayoutPlan.CallingLane>,
-  plan: LayoutPlan.Plan,
-  start = 0,
-): { readonly lanes: ReadonlyArray<PackedWasmLane>; readonly end: number } => {
-  let cursor = start
-  const packed = lanes.map((lane) => {
-    const type = laneValueType(plan, lane)
-    const width = type === i64 || type === f64 ? 8 : 4
-    cursor = alignUp(cursor, width)
-    const entry = Object.freeze({ offset: cursor, type })
-    cursor += width
-    return entry
-  })
-  return Object.freeze({ lanes: Object.freeze(packed), end: cursor })
-}
-
 interface WasmSuspensionFunctionContext {
   readonly regions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
   readonly originate: (
@@ -1648,19 +1019,12 @@ interface WasmSuspensionFunctionContext {
   ) => ReadonlyArray<Instr.Instr>
 }
 
-/** Emits one MIR operation as a wasm instruction sequence writing its destination local. */
-const emitOperation = (
-  operation: Mir.Operation,
-  layout: Layout,
-  plan: LayoutPlan.Plan,
-  resolve: (
-    target: DeclarationIndex.CanonicalId,
-    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
-  ) => FuncActor.Func,
-  memory: MemoryContext | undefined,
+const makeOperationContext = (
+  emitter: WasmEmitContext.WasmEmitContext<Layout, WasmSuspensionRuntime>,
   suspension?: WasmSuspensionFunctionContext,
   skipInvocation = false,
-): ReadonlyArray<Instr.Instr> => {
+) => {
+  const { layout, plan, resolve, memory } = emitter
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
   const scalar = (local: Mir.LocalId): number => {
     const selected = slots(local)
@@ -1712,16 +1076,7 @@ const emitOperation = (
   /** The zero one lane's own value type spells, for a union slot no member of this arm fills. */
   const zeroFor = (target: number): Instr.Instr => {
     const type = layout.physicalTypes.at(target)
-    if (type === i64) return Instr.i64Const(0n)
-    if (type === f32) return Instr.f32Const(0)
-    if (type === f64) return Instr.f64Const(0)
-    return Instr.i32Const(0)
-  }
-  const zeroForType = (type: ValType.ValType): Instr.Instr => {
-    if (type === i64) return Instr.i64Const(0n)
-    if (type === f32) return Instr.f32Const(0)
-    if (type === f64) return Instr.f64Const(0)
-    return Instr.i32Const(0)
+    return zeroConst(type ?? i32)
   }
   const failurePayload = (
     source: ReadonlyArray<number>,
@@ -1752,7 +1107,7 @@ const emitOperation = (
           const lane = repacking.lanes.find(
             (candidate) => candidate.targetOrdinal === targetOrdinal,
           )
-          if (lane === undefined) return [zeroForType(targetValueType)]
+          if (lane === undefined) return [zeroConst(targetValueType)]
           const sourceSlot = source.at(lane.sourceOrdinal)
           const sourceValueType =
             sourceSlot === undefined ? undefined : layout.physicalTypes.at(sourceSlot)
@@ -1767,9 +1122,9 @@ const emitOperation = (
         }
         if (sourceTag === undefined) {
           const mapping = mappings.at(0)
-          return mapping === undefined ? [zeroForType(targetValueType)] : payloadFor(mapping)
+          return mapping === undefined ? [zeroConst(targetValueType)] : payloadFor(mapping)
         }
-        let selected: ReadonlyArray<Instr.Instr> = [zeroForType(targetValueType)]
+        let selected: ReadonlyArray<Instr.Instr> = [zeroConst(targetValueType)]
         for (const mapping of [...mappings].reverse()) {
           selected = [
             Instr.localGet(sourceTag),
@@ -1799,7 +1154,7 @@ const emitOperation = (
         const sourceValueType =
           sourceSlot === undefined ? undefined : layout.physicalTypes.at(sourceSlot)
         if (sourceSlot === undefined || sourceLane === undefined || sourceValueType === undefined)
-          return [zeroForType(targetValueType)]
+          return [zeroConst(targetValueType)]
         const memberValueType = laneValueType(plan, sourceLane)
         return [
           Instr.localGet(sourceSlot),
@@ -1921,7 +1276,7 @@ const emitOperation = (
       .sort((left, right) => left - right)
       .flatMap(reloadRoot)
   const callableCaptureRange = (
-    cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
+    cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'CallableCleanup' }>,
     capture: number,
   ): LayoutPlan.CallableCaptureRange => {
     if (cleanup.environment._tag !== 'CallableEnvironmentIdentity')
@@ -1930,84 +1285,121 @@ const emitOperation = (
     if (range !== undefined) return range
     throw new RangeError('Wasm callable cleanup lost an owned capture lane')
   }
+  const hookReleaseWalk = (
+    cleanup: CleanupPlan.CleanupPlan,
+    addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
+  ): ReadonlyArray<Instr.Instr> => {
+    if (!CleanupPlan.hasHook(cleanup)) return []
+    if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
+    return WasmCleanup.emitCleanupWalk(cleanup, 0, (plan_, byteOffset) => {
+      switch (plan_._tag) {
+        case 'HookCleanup':
+          return Object.freeze({
+            before: Object.freeze([
+              ...addressAt(byteOffset),
+              Instr.call(resolve(plan_.hook, plan_.typeArguments)),
+            ]),
+            children: Object.freeze([Object.freeze({ cleanup: plan_.inner, state: byteOffset })]),
+          })
+        case 'CallableCleanup':
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.map((slot) =>
+                Object.freeze({
+                  cleanup: slot.cleanup,
+                  state: byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+                }),
+              ),
+            ),
+          })
+        case 'StructCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Aggregate') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.fields.flatMap((field) => {
+                if (!CleanupPlan.hasHook(field.cleanup)) return []
+                const layoutField = representation.fields.find(
+                  (candidate) =>
+                    candidate.id.ordinal === field.field.ordinal &&
+                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
+                    candidate.id.struct.sourceId === field.field.struct.sourceId,
+                )
+                return layoutField === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: field.cleanup,
+                        state: byteOffset + layoutField.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
+        case 'ArrayCleanup': {
+          if (!CleanupPlan.hasHook(plan_.element)) return Object.freeze({})
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Repeated') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              Array.from({ length: plan_.length }, (_, index) =>
+                Object.freeze({
+                  cleanup: plan_.element,
+                  state: byteOffset + index * representation.stride,
+                }),
+              ),
+            ),
+          })
+        }
+        case 'UnionCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Union') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.cases.flatMap((caseEntry) =>
+                CleanupPlan.hasHook(caseEntry.cleanup)
+                  ? [
+                      Object.freeze({
+                        cleanup: caseEntry.cleanup,
+                        state: byteOffset + representation.payloadOffset,
+                        wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                          Object.freeze([
+                            ...addressAt(byteOffset),
+                            Instr.memoryAccess('i32.load', memory.memory),
+                            Instr.i32Const(caseEntry.ordinal),
+                            Instr.op('i32.eq'),
+                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                          ]),
+                      }),
+                    ]
+                  : [],
+              ),
+            ),
+          })
+        }
+        default:
+          return Object.freeze({})
+      }
+    })
+  }
   /**
    * Runs every Drop hook one cleanup plan invokes: the owner materializes to its frame root,
    * each hook receives the address of its (possibly nested) value, and the owner's slots
    * reload afterward. The blocks the plan still owns are reclaimed separately, after the hooks.
    */
   const hookReleaseInstructions = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     local: Mir.LocalId,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!Ownership.cleanupHasHook(cleanup)) return []
+    if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
     const planned = memory.frame.roots.get(local.ordinal)
     if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
-    const walk = (plan_: Ownership.CleanupPlan, byteOffset: number): ReadonlyArray<Instr.Instr> => {
-      switch (plan_._tag) {
-        case 'HookCleanup':
-          return [
-            ...frameAddress(planned.offset + byteOffset),
-            Instr.call(resolve(plan_.hook, plan_.typeArguments)),
-            ...walk(plan_.inner, byteOffset),
-          ]
-        case 'CallableCleanup':
-          return plan_.slots.flatMap((slot) =>
-            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
-          )
-        case 'StructCleanup': {
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Aggregate') return []
-          return plan_.fields.flatMap((field) => {
-            if (!Ownership.cleanupHasHook(field.cleanup)) return []
-            const layoutField = representation.fields.find(
-              (candidate) =>
-                candidate.id.ordinal === field.field.ordinal &&
-                candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                candidate.id.struct.sourceId === field.field.struct.sourceId,
-            )
-            return layoutField === undefined
-              ? []
-              : walk(field.cleanup, byteOffset + layoutField.offset)
-          })
-        }
-        case 'ArrayCleanup': {
-          if (!Ownership.cleanupHasHook(plan_.element)) return []
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Repeated') return []
-          return Array.from({ length: plan_.length }, (_, index) =>
-            walk(plan_.element, byteOffset + index * representation.stride),
-          ).flat()
-        }
-        case 'UnionCleanup': {
-          if (plan_.cases.every((entry) => !Ownership.cleanupHasHook(entry.cleanup))) return []
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Union') return []
-          // Only the live case owns the payload, so each hook-bearing case runs guarded on the
-          // union's own tag. The tag sits at the union's base and the payload at its offset.
-          return plan_.cases.flatMap((caseEntry) =>
-            Ownership.cleanupHasHook(caseEntry.cleanup)
-              ? [
-                  ...frameAddress(planned.offset + byteOffset),
-                  Instr.memoryAccess('i32.load', memory.memory),
-                  Instr.i32Const(caseEntry.ordinal),
-                  Instr.op('i32.eq'),
-                  Instr.ifElse(
-                    Instr.emptyBlockType,
-                    walk(caseEntry.cleanup, byteOffset + representation.payloadOffset),
-                    [],
-                  ),
-                ]
-              : [],
-          )
-        }
-        default:
-          return []
-      }
-    }
+    const walk = (plan_: CleanupPlan.CleanupPlan, byteOffset: number) =>
+      hookReleaseWalk(plan_, (nestedOffset) =>
+        frameAddress(planned.offset + byteOffset + nestedOffset),
+      )
     const environmentOffsets = (
       environment: Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
       base = 0,
@@ -2059,7 +1451,7 @@ const emitOperation = (
       const choice = rootSlots.at(0)
       if (choice === undefined) throw new RangeError('Wasm Effect composite hook lost its tag')
       return cleanup.alternatives.flatMap((alternativeCleanup, ordinal) => {
-        if (!Ownership.cleanupHasHook(alternativeCleanup)) return []
+        if (!CleanupPlan.hasHook(alternativeCleanup)) return []
         if (alternativeCleanup._tag !== 'EffectCleanup') {
           throw new RangeError('Wasm Effect composite hook lost its alternative environment')
         }
@@ -2112,81 +1504,14 @@ const emitOperation = (
     return [...materializeRoot(local), ...walk(cleanup, 0), ...reloadRoot(local.ordinal)]
   }
   const hookReleaseAtAddress = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     address: number,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!Ownership.cleanupHasHook(cleanup)) return []
-    if (memory === undefined) throw new RangeError('Wasm slot cleanup has no private memory')
     const addressAt = (byteOffset: number): ReadonlyArray<Instr.Instr> => [
       Instr.localGet(address),
       ...(byteOffset === 0 ? [] : [Instr.i32Const(byteOffset), Instr.op('i32.add')]),
     ]
-    const walk = (plan_: Ownership.CleanupPlan, byteOffset: number): ReadonlyArray<Instr.Instr> => {
-      switch (plan_._tag) {
-        case 'HookCleanup':
-          return [
-            ...addressAt(byteOffset),
-            Instr.call(resolve(plan_.hook, plan_.typeArguments)),
-            ...walk(plan_.inner, byteOffset),
-          ]
-        case 'CallableCleanup':
-          return plan_.slots.flatMap((slot) =>
-            walk(slot.cleanup, byteOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset),
-          )
-        case 'StructCleanup': {
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Aggregate') return []
-          return plan_.fields.flatMap((field) => {
-            if (!Ownership.cleanupHasHook(field.cleanup)) return []
-            const layoutField = representation.fields.find(
-              (candidate) =>
-                candidate.id.ordinal === field.field.ordinal &&
-                candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                candidate.id.struct.sourceId === field.field.struct.sourceId,
-            )
-            return layoutField === undefined
-              ? []
-              : walk(field.cleanup, byteOffset + layoutField.offset)
-          })
-        }
-        case 'ArrayCleanup': {
-          if (!Ownership.cleanupHasHook(plan_.element)) return []
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Repeated') return []
-          return Array.from({ length: plan_.length }, (_, index) =>
-            walk(plan_.element, byteOffset + index * representation.stride),
-          ).flat()
-        }
-        case 'UnionCleanup': {
-          if (plan_.cases.every((entry) => !Ownership.cleanupHasHook(entry.cleanup))) return []
-          const entry = LayoutPlan.entry(memory.plan, plan_.type)
-          const representation = entry?.representation
-          if (representation?._tag !== 'Union') return []
-          // Only the live case owns the payload, so each hook-bearing case runs guarded on the
-          // union's own tag. The tag sits at the union's base and the payload at its offset.
-          return plan_.cases.flatMap((caseEntry) =>
-            Ownership.cleanupHasHook(caseEntry.cleanup)
-              ? [
-                  ...addressAt(byteOffset),
-                  Instr.memoryAccess('i32.load', memory.memory),
-                  Instr.i32Const(caseEntry.ordinal),
-                  Instr.op('i32.eq'),
-                  Instr.ifElse(
-                    Instr.emptyBlockType,
-                    walk(caseEntry.cleanup, byteOffset + representation.payloadOffset),
-                    [],
-                  ),
-                ]
-              : [],
-          )
-        }
-        default:
-          return []
-      }
-    }
-    return walk(cleanup, 0)
+    return hookReleaseWalk(cleanup, addressAt)
   }
   const semanticLanesOf = (type: SilkType.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     const shape = LayoutPlan.callingShape(plan, type)
@@ -2207,205 +1532,283 @@ const emitOperation = (
    * order the LLVM backend's single lane-driven walk produces too.
    */
   const reclaimReleaseInstructions = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     values: ReadonlyArray<ReadonlyArray<Instr.Instr>>,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!Ownership.cleanupReclaims(cleanup)) return []
-    switch (cleanup._tag) {
-      case 'AllocationCleanup':
-      case 'RawBufferCleanup': {
-        const context = values.at(4)
-        if (context === undefined) {
-          throw new RangeError('Wasm allocation cleanup lost its reclaim context')
-        }
-        return [...context, Instr.call(requireRelease())]
-      }
-      case 'HookCleanup':
-        return reclaimReleaseInstructions(cleanup.inner, values)
-      case 'CallableCleanup':
-        return cleanup.slots.flatMap((slot) => {
-          const range = callableCaptureRange(cleanup, slot.ordinal)
-          return reclaimReleaseInstructions(
-            slot.cleanup,
-            values.slice(range.laneOffset, range.laneOffset + range.laneCount),
-          )
-        })
-      case 'EffectCleanup':
-        return cleanup.slots.flatMap((slot) =>
-          reclaimReleaseInstructions(
-            slot.cleanup,
-            values.slice(slot.laneOffset, slot.laneOffset + slot.laneCount),
-          ),
-        )
-      case 'EffectCompositeCleanup': {
-        const tag = values.at(0)
-        if (tag === undefined) throw new RangeError('Wasm Effect composite cleanup lost its tag')
-        return cleanup.alternatives.flatMap((alternative, ordinal) => {
-          const inner = reclaimReleaseInstructions(alternative, values.slice(1))
-          return inner.length === 0
-            ? []
-            : [
-                ...tag,
-                Instr.i32Const(ordinal),
-                Instr.op('i32.eq'),
-                Instr.ifElse(Instr.emptyBlockType, inner, []),
-              ]
-        })
-      }
-      case 'StructCleanup': {
-        const lanes = semanticLanesOf(cleanup.type)
-        return cleanup.fields.flatMap((field) =>
-          reclaimReleaseInstructions(
-            field.cleanup,
-            lanes.flatMap((lane, ordinal) => {
-              const first = lane.path.at(0)
-              const value = values.at(ordinal)
-              return first !== undefined &&
-                first._tag === 'FieldId' &&
-                value !== undefined &&
-                first.ordinal === field.field.ordinal &&
-                first.struct.ordinal === field.field.struct.ordinal &&
-                first.struct.sourceId === field.field.struct.sourceId
-                ? [value]
-                : []
-            }),
-          ),
-        )
-      }
-      case 'ArrayCleanup': {
-        const lanes = semanticLanesOf(cleanup.type)
-        return Array.from({ length: cleanup.length }, (_, index) =>
-          reclaimReleaseInstructions(
-            cleanup.element,
-            lanes.flatMap((lane, ordinal) => {
-              const first = lane.path.at(0)
-              const value = values.at(ordinal)
-              return first !== undefined &&
-                first._tag === 'ElementSelector' &&
-                first.index === index &&
-                value !== undefined
-                ? [value]
-                : []
-            }),
-          ),
-        ).flat()
-      }
-      case 'UnionCleanup': {
-        const shape = LayoutPlan.callingShape(plan, cleanup.type)
-        const tag = values.at(0)
-        if (shape === undefined || tag === undefined) {
-          throw new RangeError('Wasm union cleanup lost its shape')
-        }
-        // Only the live case owns the payload, so each reclaiming case runs guarded on the tag.
-        return cleanup.cases.flatMap((caseEntry) => {
-          const physical = LayoutPlan.memberFieldSlots(shape, caseEntry.member, [])
-          const memberLanes = semanticLanesOf(caseEntry.member)
-          if (physical === undefined || physical.length !== memberLanes.length) return []
-          const selected = physical.flatMap((ordinal, index) => {
-            const value = values.at(ordinal)
-            const physicalLane = shape.lanes.at(ordinal)
-            const memberLane = memberLanes.at(index)
-            if (value === undefined || physicalLane === undefined || memberLane === undefined) {
-              return []
-            }
-            return [
-              Object.freeze([
-                ...value,
-                ...laneBridge(laneValueType(plan, physicalLane), laneValueType(plan, memberLane)),
-              ]),
-            ]
+    if (!CleanupPlan.reclaims(cleanup)) return []
+    return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
+      if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
+      switch (plan_._tag) {
+        case 'AllocationCleanup':
+        case 'RawBufferCleanup': {
+          const context = currentValues.at(4)
+          if (context === undefined) {
+            throw new RangeError('Wasm allocation cleanup lost its reclaim context')
+          }
+          return Object.freeze({
+            before: Object.freeze([...context, Instr.call(requireRelease())]),
           })
-          if (selected.length !== memberLanes.length) return []
-          const inner = reclaimReleaseInstructions(caseEntry.cleanup, selected)
-          return inner.length === 0
-            ? []
-            : [
-                ...tag,
-                Instr.i32Const(caseEntry.ordinal),
-                Instr.op('i32.eq'),
-                Instr.ifElse(Instr.emptyBlockType, inner, []),
-              ]
-        })
+        }
+        case 'HookCleanup':
+          return Object.freeze({
+            children: Object.freeze([
+              Object.freeze({ cleanup: plan_.inner, state: currentValues }),
+            ]),
+          })
+        case 'CallableCleanup':
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.map((slot) => {
+                const range = callableCaptureRange(plan_, slot.ordinal)
+                return Object.freeze({
+                  cleanup: slot.cleanup,
+                  state: currentValues.slice(range.laneOffset, range.laneOffset + range.laneCount),
+                })
+              }),
+            ),
+          })
+        case 'EffectCleanup':
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.map((slot) =>
+                Object.freeze({
+                  cleanup: slot.cleanup,
+                  state: currentValues.slice(slot.laneOffset, slot.laneOffset + slot.laneCount),
+                }),
+              ),
+            ),
+          })
+        case 'EffectCompositeCleanup': {
+          const tag = currentValues.at(0)
+          if (tag === undefined) throw new RangeError('Wasm Effect composite cleanup lost its tag')
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.alternatives.map((alternative, ordinal) =>
+                Object.freeze({
+                  cleanup: alternative,
+                  state: currentValues.slice(1),
+                  wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                    instructions.length === 0
+                      ? Object.freeze([])
+                      : Object.freeze([
+                          ...tag,
+                          Instr.i32Const(ordinal),
+                          Instr.op('i32.eq'),
+                          Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                        ]),
+                }),
+              ),
+            ),
+          })
+        }
+        case 'StructCleanup': {
+          const lanes = semanticLanesOf(plan_.type)
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.fields.map((field) =>
+                Object.freeze({
+                  cleanup: field.cleanup,
+                  state: lanes.flatMap((lane, ordinal) => {
+                    const first = lane.path.at(0)
+                    const value = currentValues.at(ordinal)
+                    return first !== undefined &&
+                      first._tag === 'FieldId' &&
+                      value !== undefined &&
+                      first.ordinal === field.field.ordinal &&
+                      first.struct.ordinal === field.field.struct.ordinal &&
+                      first.struct.sourceId === field.field.struct.sourceId
+                      ? [value]
+                      : []
+                  }),
+                }),
+              ),
+            ),
+          })
+        }
+        case 'ArrayCleanup': {
+          const lanes = semanticLanesOf(plan_.type)
+          return Object.freeze({
+            children: Object.freeze(
+              Array.from({ length: plan_.length }, (_, index) =>
+                Object.freeze({
+                  cleanup: plan_.element,
+                  state: lanes.flatMap((lane, ordinal) => {
+                    const first = lane.path.at(0)
+                    const value = currentValues.at(ordinal)
+                    return first !== undefined &&
+                      first._tag === 'ElementSelector' &&
+                      first.index === index &&
+                      value !== undefined
+                      ? [value]
+                      : []
+                  }),
+                }),
+              ),
+            ),
+          })
+        }
+        case 'UnionCleanup': {
+          const shape = LayoutPlan.callingShape(plan, plan_.type)
+          const tag = currentValues.at(0)
+          if (shape === undefined || tag === undefined) {
+            throw new RangeError('Wasm union cleanup lost its shape')
+          }
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.cases.flatMap((caseEntry) => {
+                const physical = LayoutPlan.memberFieldSlots(shape, caseEntry.member, [])
+                const memberLanes = semanticLanesOf(caseEntry.member)
+                if (physical === undefined || physical.length !== memberLanes.length) return []
+                const selected = physical.flatMap((ordinal, index) => {
+                  const value = currentValues.at(ordinal)
+                  const physicalLane = shape.lanes.at(ordinal)
+                  const memberLane = memberLanes.at(index)
+                  return value === undefined ||
+                    physicalLane === undefined ||
+                    memberLane === undefined
+                    ? []
+                    : [
+                        Object.freeze([
+                          ...value,
+                          ...laneBridge(
+                            laneValueType(plan, physicalLane),
+                            laneValueType(plan, memberLane),
+                          ),
+                        ]),
+                      ]
+                })
+                return selected.length !== memberLanes.length
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: caseEntry.cleanup,
+                        state: selected,
+                        wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                          instructions.length === 0
+                            ? Object.freeze([])
+                            : Object.freeze([
+                                ...tag,
+                                Instr.i32Const(caseEntry.ordinal),
+                                Instr.op('i32.eq'),
+                                Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                              ]),
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
+        default:
+          return Object.freeze({})
       }
-      default:
-        return []
-    }
+    })
   }
   /** The same reclaim walk for a value the backend only holds the address of. */
   const reclaimReleaseAtAddress = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     address: number,
     byteOffset = 0,
   ): ReadonlyArray<Instr.Instr> => {
-    if (!Ownership.cleanupReclaims(cleanup)) return []
+    if (!CleanupPlan.reclaims(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm slot reclaim has no private memory')
-    switch (cleanup._tag) {
-      case 'AllocationCleanup':
-      case 'RawBufferCleanup': {
-        const contextOffset = SilkType.isRawBuffer(cleanup.type)
-          ? aggregateFieldOffset(cleanup.type, '$allocation') +
-            aggregateFieldOffset(SilkType.allocation, '$context')
-          : aggregateFieldOffset(SilkType.allocation, '$context')
-        return [...loadAt(address, byteOffset + contextOffset), Instr.call(requireRelease())]
+    return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
+      if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
+      switch (plan_._tag) {
+        case 'AllocationCleanup':
+        case 'RawBufferCleanup': {
+          const contextOffset = SilkType.isRawBuffer(plan_.type)
+            ? aggregateFieldOffset(plan_.type, '$allocation') +
+              aggregateFieldOffset(SilkType.allocation, '$context')
+            : aggregateFieldOffset(SilkType.allocation, '$context')
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset + contextOffset),
+              Instr.call(requireRelease()),
+            ]),
+          })
+        }
+        case 'HookCleanup':
+          return Object.freeze({
+            children: Object.freeze([
+              Object.freeze({ cleanup: plan_.inner, state: currentOffset }),
+            ]),
+          })
+        case 'CallableCleanup':
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.map((slot) =>
+                Object.freeze({
+                  cleanup: slot.cleanup,
+                  state: currentOffset + callableCaptureRange(plan_, slot.ordinal).byteOffset,
+                }),
+              ),
+            ),
+          })
+        case 'StructCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Aggregate') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.fields.flatMap((field) => {
+                const layoutField = representation.fields.find(
+                  (candidate) =>
+                    candidate.id.ordinal === field.field.ordinal &&
+                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
+                    candidate.id.struct.sourceId === field.field.struct.sourceId,
+                )
+                return layoutField === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: field.cleanup,
+                        state: currentOffset + layoutField.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
+        case 'ArrayCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Repeated') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              Array.from({ length: plan_.length }, (_, index) =>
+                Object.freeze({
+                  cleanup: plan_.element,
+                  state: currentOffset + index * representation.stride,
+                }),
+              ),
+            ),
+          })
+        }
+        case 'UnionCleanup': {
+          const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
+          if (representation?._tag !== 'Union') return Object.freeze({})
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.cases.map((caseEntry) =>
+                Object.freeze({
+                  cleanup: caseEntry.cleanup,
+                  state: currentOffset + representation.payloadOffset,
+                  wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                    instructions.length === 0
+                      ? Object.freeze([])
+                      : Object.freeze([
+                          ...loadAt(address, currentOffset),
+                          Instr.i32Const(caseEntry.ordinal),
+                          Instr.op('i32.eq'),
+                          Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                        ]),
+                }),
+              ),
+            ),
+          })
+        }
+        default:
+          return Object.freeze({})
       }
-      case 'HookCleanup':
-        return reclaimReleaseAtAddress(cleanup.inner, address, byteOffset)
-      case 'CallableCleanup':
-        return cleanup.slots.flatMap((slot) =>
-          reclaimReleaseAtAddress(
-            slot.cleanup,
-            address,
-            byteOffset + callableCaptureRange(cleanup, slot.ordinal).byteOffset,
-          ),
-        )
-      case 'StructCleanup': {
-        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
-        if (representation?._tag !== 'Aggregate') return []
-        return cleanup.fields.flatMap((field) => {
-          const layoutField = representation.fields.find(
-            (candidate) =>
-              candidate.id.ordinal === field.field.ordinal &&
-              candidate.id.struct.ordinal === field.field.struct.ordinal &&
-              candidate.id.struct.sourceId === field.field.struct.sourceId,
-          )
-          return layoutField === undefined
-            ? []
-            : reclaimReleaseAtAddress(field.cleanup, address, byteOffset + layoutField.offset)
-        })
-      }
-      case 'ArrayCleanup': {
-        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
-        if (representation?._tag !== 'Repeated') return []
-        return Array.from({ length: cleanup.length }, (_, index) =>
-          reclaimReleaseAtAddress(
-            cleanup.element,
-            address,
-            byteOffset + index * representation.stride,
-          ),
-        ).flat()
-      }
-      case 'UnionCleanup': {
-        const representation = LayoutPlan.entry(memory.plan, cleanup.type)?.representation
-        if (representation?._tag !== 'Union') return []
-        return cleanup.cases.flatMap((caseEntry) => {
-          const inner = reclaimReleaseAtAddress(
-            caseEntry.cleanup,
-            address,
-            byteOffset + representation.payloadOffset,
-          )
-          return inner.length === 0
-            ? []
-            : [
-                ...loadAt(address, byteOffset),
-                Instr.i32Const(caseEntry.ordinal),
-                Instr.op('i32.eq'),
-                Instr.ifElse(Instr.emptyBlockType, inner, []),
-              ]
-        })
-      }
-      default:
-        return []
-    }
+    })
   }
   /**
    * One owned value's complete release: its Drop hooks, then the blocks its reclaim tickets still
@@ -2413,22 +1816,24 @@ const emitOperation = (
    * drop — which invokes no hook at all — still emits its reclaim.
    */
   const releaseInstructions = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     local: Mir.LocalId,
-  ): ReadonlyArray<Instr.Instr> => [
-    ...hookReleaseInstructions(cleanup, local),
-    ...reclaimReleaseInstructions(
-      cleanup,
-      slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
-    ),
-  ]
+  ): ReadonlyArray<Instr.Instr> =>
+    WasmCleanup.release(
+      hookReleaseInstructions(cleanup, local),
+      reclaimReleaseInstructions(
+        cleanup,
+        slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
+      ),
+    )
   const releaseAtAddress = (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     address: number,
-  ): ReadonlyArray<Instr.Instr> => [
-    ...hookReleaseAtAddress(cleanup, address),
-    ...reclaimReleaseAtAddress(cleanup, address),
-  ]
+  ): ReadonlyArray<Instr.Instr> =>
+    WasmCleanup.release(
+      hookReleaseAtAddress(cleanup, address),
+      reclaimReleaseAtAddress(cleanup, address),
+    )
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
     if (pointer === undefined) return []
@@ -2450,2833 +1855,3329 @@ const emitOperation = (
       ]
     })
   }
-  switch (operation._tag) {
-    case 'StaticString': {
-      const context = requireMemory()
-      const offset = context.staticOffsets.get(operation.data)
-      const [address, length] = slots(operation.destination)
-      if (offset === undefined || address === undefined || length === undefined) {
-        throw new RangeError('Wasm static string lost its data placement or logical lanes')
-      }
-      return [
-        Instr.i32Const(offset),
-        Instr.localSet(address),
-        Instr.i32Const(operation.byteLength),
-        Instr.localSet(length),
-      ]
-    }
-    case 'StringFromUtf8Unchecked':
-      return copy(slots(operation.bytes), slots(operation.destination))
-    case 'StringUtf8Bytes':
-      return copy(slots(operation.string), slots(operation.destination))
-    case 'StringByteLength': {
-      const length = slots(operation.string).at(1)
-      if (length === undefined) throw new RangeError('Wasm string lost its byte-length lane')
-      return [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
-    }
-    case 'StringEqualsExact': {
-      const context = requireMemory()
-      const [leftAddress, leftLength] = slots(operation.left)
-      const [rightAddress, rightLength] = slots(operation.right)
-      const destination = scalar(operation.destination)
-      if (
-        leftAddress === undefined ||
-        leftLength === undefined ||
-        rightAddress === undefined ||
-        rightLength === undefined
-      ) {
-        throw new RangeError('Wasm string equality lost its logical lanes')
-      }
-      const loop = [
-        Instr.localGet(layout.scratch),
-        Instr.localGet(leftLength),
-        Instr.op('i32.ge_u'),
-        Instr.brIf(1),
-        Instr.localGet(destination),
-        Instr.localGet(leftAddress),
-        Instr.localGet(layout.scratch),
-        Instr.op('i32.add'),
-        Instr.memoryAccess('i32.load8_u', context.memory),
-        Instr.localGet(rightAddress),
-        Instr.localGet(layout.scratch),
-        Instr.op('i32.add'),
-        Instr.memoryAccess('i32.load8_u', context.memory),
-        Instr.op('i32.eq'),
-        Instr.op('i32.and'),
-        Instr.localSet(destination),
-        Instr.localGet(layout.scratch),
-        Instr.i32Const(1),
-        Instr.op('i32.add'),
-        Instr.localSet(layout.scratch),
-        Instr.br(0),
-      ]
-      return [
-        Instr.localGet(leftLength),
-        Instr.localGet(rightLength),
-        Instr.op('i32.eq'),
-        Instr.localTee(destination),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          [
-            Instr.i32Const(0),
-            Instr.localSet(layout.scratch),
-            Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loop)]),
-          ],
-          [],
-        ),
-        ...(operation.negated
-          ? [Instr.localGet(destination), Instr.op('i32.eqz'), Instr.localSet(destination)]
-          : []),
-      ]
-    }
-    case 'ValidateLayout': {
-      const bytes = scalar(operation.bytes)
-      const alignment = scalar(operation.alignment)
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      const first = destination.at(1)
-      const second = destination.at(2)
-      if (tag === undefined || first === undefined || second === undefined) {
-        throw new RangeError('Wasm layout validation lost its destination lanes')
-      }
-      const members = operation.type.type.members
-      const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
-      const invalidOrdinal = members.findIndex((member) =>
-        SilkType.equals(member, SilkType.invalidAlignment),
-      )
-      if (layoutOrdinal < 0 || invalidOrdinal < 0) {
-        throw new RangeError('Wasm layout validation lost its union members')
-      }
-      return [
-        // valid = (alignment != 0) & ((alignment & (alignment - 1)) == 0), kept in scratch
-        Instr.localGet(alignment),
-        Instr.op('i32.eqz'),
-        Instr.op('i32.eqz'),
-        Instr.localGet(alignment),
-        Instr.localGet(alignment),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.and'),
-        Instr.op('i32.eqz'),
-        Instr.op('i32.and'),
-        Instr.localSet(layout.scratch),
-        // tag = valid ? Layout : InvalidAlignment
-        Instr.i32Const(layoutOrdinal),
-        Instr.i32Const(invalidOrdinal),
-        Instr.localGet(layout.scratch),
-        Instr.op('select'),
-        Instr.localSet(tag),
-        // Layout packs {bytes, alignment}; InvalidAlignment packs {alignment} at slot 0.
-        Instr.localGet(bytes),
-        Instr.localGet(alignment),
-        Instr.localGet(layout.scratch),
-        Instr.op('select'),
-        Instr.localSet(first),
-        Instr.localGet(alignment),
+  return {
+    emitter,
+    layout,
+    plan,
+    resolve,
+    memory,
+    suspension,
+    skipInvocation,
+    slots,
+    scalar,
+    laneBridge,
+    transfer,
+    zeroFor,
+    failurePayload,
+    outcomePayload,
+    copy,
+    frameAddress,
+    requireMemory,
+    aggregateFieldOffset,
+    loadAt,
+    storeAt,
+    materializeRoot,
+    reloadRoot,
+    reloadReachableRoots,
+    callableCaptureRange,
+    hookReleaseInstructions,
+    hookReleaseAtAddress,
+    semanticLanesOf,
+    requireRelease,
+    reclaimReleaseInstructions,
+    reclaimReleaseAtAddress,
+    releaseInstructions,
+    releaseAtAddress,
+    flushBorrowRoot,
+  }
+}
+
+type WasmOperationContext = ReturnType<typeof makeOperationContext>
+
+const emitStaticStringOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StaticString' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, requireMemory } = state
+
+  const context = requireMemory()
+  const offset = context.staticOffsets.get(operation.data)
+  const [address, length] = slots(operation.destination)
+  if (offset === undefined || address === undefined || length === undefined) {
+    throw new RangeError('Wasm static string lost its data placement or logical lanes')
+  }
+  return [
+    Instr.i32Const(offset),
+    Instr.localSet(address),
+    Instr.i32Const(operation.byteLength),
+    Instr.localSet(length),
+  ]
+}
+
+const emitStringFromUtf8UncheckedOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StringFromUtf8Unchecked' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(slots(operation.bytes), slots(operation.destination))
+}
+
+const emitStringUtf8BytesOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StringUtf8Bytes' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(slots(operation.string), slots(operation.destination))
+}
+
+const emitStringByteLengthOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StringByteLength' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar } = state
+
+  const length = slots(operation.string).at(1)
+  if (length === undefined) throw new RangeError('Wasm string lost its byte-length lane')
+  return [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
+}
+
+const emitStringEqualsExactOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StringEqualsExact' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, scalar, requireMemory } = state
+
+  const context = requireMemory()
+  const [leftAddress, leftLength] = slots(operation.left)
+  const [rightAddress, rightLength] = slots(operation.right)
+  const destination = scalar(operation.destination)
+  if (
+    leftAddress === undefined ||
+    leftLength === undefined ||
+    rightAddress === undefined ||
+    rightLength === undefined
+  ) {
+    throw new RangeError('Wasm string equality lost its logical lanes')
+  }
+  const loop = [
+    Instr.localGet(layout.scratch),
+    Instr.localGet(leftLength),
+    Instr.op('i32.ge_u'),
+    Instr.brIf(1),
+    Instr.localGet(destination),
+    Instr.localGet(leftAddress),
+    Instr.localGet(layout.scratch),
+    Instr.op('i32.add'),
+    Instr.memoryAccess('i32.load8_u', context.memory),
+    Instr.localGet(rightAddress),
+    Instr.localGet(layout.scratch),
+    Instr.op('i32.add'),
+    Instr.memoryAccess('i32.load8_u', context.memory),
+    Instr.op('i32.eq'),
+    Instr.op('i32.and'),
+    Instr.localSet(destination),
+    Instr.localGet(layout.scratch),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+    Instr.localSet(layout.scratch),
+    Instr.br(0),
+  ]
+  return [
+    Instr.localGet(leftLength),
+    Instr.localGet(rightLength),
+    Instr.op('i32.eq'),
+    Instr.localTee(destination),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
         Instr.i32Const(0),
-        Instr.localGet(layout.scratch),
-        Instr.op('select'),
-        Instr.localSet(second),
-        ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
-      ]
-    }
-    case 'RepeatLayout': {
-      const layoutSlots = slots(operation.layout)
-      const bytes = layoutSlots.at(0)
-      const alignment = layoutSlots.at(1)
-      const count = scalar(operation.count)
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      const first = destination.at(1)
-      const second = destination.at(2)
-      if (
-        bytes === undefined ||
-        alignment === undefined ||
-        tag === undefined ||
-        first === undefined ||
-        second === undefined
-      ) {
-        throw new RangeError('Wasm repeated layout lost its lanes')
-      }
-      const members = operation.type.type.members
-      const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
-      const overflowOrdinal = members.findIndex((member) =>
-        SilkType.equals(member, SilkType.layoutOverflow),
-      )
-      if (layoutOrdinal < 0 || overflowOrdinal < 0) {
-        throw new RangeError('Wasm repeated layout lost its union members')
-      }
-      const maximum = -1 // 0xFFFFFFFF as a signed i32 constant
-      return [
-        // safeAlignment (temporarily in the tag slot) = alignment == 0 ? 1 : alignment
-        Instr.i32Const(1),
-        Instr.localGet(alignment),
-        Instr.localGet(alignment),
-        Instr.op('i32.eqz'),
-        Instr.op('select'),
-        Instr.localSet(tag),
-        // stride (temporarily in the bytes slot): roundUp(bytes, safeAlignment), 0 when alignment == 0
-        Instr.i32Const(0),
-        Instr.localGet(bytes),
-        Instr.localGet(tag),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.add'),
-        Instr.localGet(tag),
-        Instr.op('i32.div_u'),
-        Instr.localGet(tag),
-        Instr.op('i32.mul'),
-        Instr.localGet(alignment),
-        Instr.op('i32.eqz'),
-        Instr.op('select'),
-        Instr.localSet(first),
-        // overflow (in scratch) = count != 0 & (bytes > max - (safeAlignment-1) | stride > max / safeCount)
-        Instr.i32Const(maximum),
-        Instr.localGet(tag),
-        Instr.i32Const(1),
-        Instr.op('i32.sub'),
-        Instr.op('i32.sub'),
-        Instr.localGet(bytes),
-        Instr.op('i32.lt_u'),
         Instr.localSet(layout.scratch),
-        // safeCount reuses the tag slot now that safeAlignment is no longer needed
-        Instr.i32Const(1),
-        Instr.localGet(count),
-        Instr.localGet(count),
-        Instr.op('i32.eqz'),
-        Instr.op('select'),
-        Instr.localSet(tag),
-        Instr.localGet(first),
-        Instr.i32Const(maximum),
-        Instr.localGet(tag),
-        Instr.op('i32.div_u'),
-        Instr.op('i32.gt_u'),
-        Instr.localGet(layout.scratch),
-        Instr.op('i32.or'),
-        Instr.localGet(count),
-        Instr.op('i32.eqz'),
-        Instr.op('i32.eqz'),
-        Instr.op('i32.and'),
-        Instr.localSet(layout.scratch),
-        // bytes out = overflow ? 0 : stride * count
-        Instr.i32Const(0),
-        Instr.localGet(first),
-        Instr.localGet(count),
-        Instr.op('i32.mul'),
-        Instr.localGet(layout.scratch),
-        Instr.op('select'),
-        Instr.localSet(first),
-        // final tag and passthrough alignment
-        Instr.i32Const(overflowOrdinal),
-        Instr.i32Const(layoutOrdinal),
-        Instr.localGet(layout.scratch),
-        Instr.op('select'),
-        Instr.localSet(tag),
-        Instr.localGet(alignment),
-        Instr.localSet(second),
-        ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
-      ]
-    }
-    case 'Allocate': {
-      const context = requireMemory()
-      const [bytes, alignment] = slots(operation.layout)
-      const [base, destinationBytes, destinationAlignment, reclaim, rawContext, active] = slots(
-        operation.destination,
-      )
-      if (
-        bytes === undefined ||
-        alignment === undefined ||
-        base === undefined ||
-        destinationBytes === undefined ||
-        destinationAlignment === undefined ||
-        reclaim === undefined ||
-        rawContext === undefined ||
-        active === undefined
-      ) {
-        throw new RangeError('Wasm allocation lost its compiler-planned lanes')
-      }
-      const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
-      if (propagationShape === undefined) {
-        throw new RangeError('Wasm allocation lost its failure calling shape')
-      }
-      const fail = [
+        Instr.block(Instr.emptyBlockType, [Instr.loop(Instr.emptyBlockType, loop)]),
+      ],
+      [],
+    ),
+    ...(operation.negated
+      ? [Instr.localGet(destination), Instr.op('i32.eqz'), Instr.localSet(destination)]
+      : []),
+  ]
+}
+
+const emitValidateLayoutOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ValidateLayout' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, scalar } = state
+
+  const bytes = scalar(operation.bytes)
+  const alignment = scalar(operation.alignment)
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  const first = destination.at(1)
+  const second = destination.at(2)
+  if (tag === undefined || first === undefined || second === undefined) {
+    throw new RangeError('Wasm layout validation lost its destination lanes')
+  }
+  const members = operation.type.type.members
+  const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
+  const invalidOrdinal = members.findIndex((member) =>
+    SilkType.equals(member, SilkType.invalidAlignment),
+  )
+  if (layoutOrdinal < 0 || invalidOrdinal < 0) {
+    throw new RangeError('Wasm layout validation lost its union members')
+  }
+  return [
+    // valid = (alignment != 0) & ((alignment & (alignment - 1)) == 0), kept in scratch
+    Instr.localGet(alignment),
+    Instr.op('i32.eqz'),
+    Instr.op('i32.eqz'),
+    Instr.localGet(alignment),
+    Instr.localGet(alignment),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.op('i32.and'),
+    Instr.op('i32.eqz'),
+    Instr.op('i32.and'),
+    Instr.localSet(layout.scratch),
+    // tag = valid ? Layout : InvalidAlignment
+    Instr.i32Const(layoutOrdinal),
+    Instr.i32Const(invalidOrdinal),
+    Instr.localGet(layout.scratch),
+    Instr.op('select'),
+    Instr.localSet(tag),
+    // Layout packs {bytes, alignment}; InvalidAlignment packs {alignment} at slot 0.
+    Instr.localGet(bytes),
+    Instr.localGet(alignment),
+    Instr.localGet(layout.scratch),
+    Instr.op('select'),
+    Instr.localSet(first),
+    Instr.localGet(alignment),
+    Instr.i32Const(0),
+    Instr.localGet(layout.scratch),
+    Instr.op('select'),
+    Instr.localSet(second),
+    ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
+  ]
+}
+
+const emitRepeatLayoutOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RepeatLayout' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, scalar } = state
+
+  const layoutSlots = slots(operation.layout)
+  const bytes = layoutSlots.at(0)
+  const alignment = layoutSlots.at(1)
+  const count = scalar(operation.count)
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  const first = destination.at(1)
+  const second = destination.at(2)
+  if (
+    bytes === undefined ||
+    alignment === undefined ||
+    tag === undefined ||
+    first === undefined ||
+    second === undefined
+  ) {
+    throw new RangeError('Wasm repeated layout lost its lanes')
+  }
+  const members = operation.type.type.members
+  const layoutOrdinal = members.findIndex((member) => SilkType.equals(member, SilkType.layout))
+  const overflowOrdinal = members.findIndex((member) =>
+    SilkType.equals(member, SilkType.layoutOverflow),
+  )
+  if (layoutOrdinal < 0 || overflowOrdinal < 0) {
+    throw new RangeError('Wasm repeated layout lost its union members')
+  }
+  const maximum = -1 // 0xFFFFFFFF as a signed i32 constant
+  return [
+    // safeAlignment (temporarily in the tag slot) = alignment == 0 ? 1 : alignment
+    Instr.i32Const(1),
+    Instr.localGet(alignment),
+    Instr.localGet(alignment),
+    Instr.op('i32.eqz'),
+    Instr.op('select'),
+    Instr.localSet(tag),
+    // stride (temporarily in the bytes slot): roundUp(bytes, safeAlignment), 0 when alignment == 0
+    Instr.i32Const(0),
+    Instr.localGet(bytes),
+    Instr.localGet(tag),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.op('i32.add'),
+    Instr.localGet(tag),
+    Instr.op('i32.div_u'),
+    Instr.localGet(tag),
+    Instr.op('i32.mul'),
+    Instr.localGet(alignment),
+    Instr.op('i32.eqz'),
+    Instr.op('select'),
+    Instr.localSet(first),
+    // overflow (in scratch) = count != 0 & (bytes > max - (safeAlignment-1) | stride > max / safeCount)
+    Instr.i32Const(maximum),
+    Instr.localGet(tag),
+    Instr.i32Const(1),
+    Instr.op('i32.sub'),
+    Instr.op('i32.sub'),
+    Instr.localGet(bytes),
+    Instr.op('i32.lt_u'),
+    Instr.localSet(layout.scratch),
+    // safeCount reuses the tag slot now that safeAlignment is no longer needed
+    Instr.i32Const(1),
+    Instr.localGet(count),
+    Instr.localGet(count),
+    Instr.op('i32.eqz'),
+    Instr.op('select'),
+    Instr.localSet(tag),
+    Instr.localGet(first),
+    Instr.i32Const(maximum),
+    Instr.localGet(tag),
+    Instr.op('i32.div_u'),
+    Instr.op('i32.gt_u'),
+    Instr.localGet(layout.scratch),
+    Instr.op('i32.or'),
+    Instr.localGet(count),
+    Instr.op('i32.eqz'),
+    Instr.op('i32.eqz'),
+    Instr.op('i32.and'),
+    Instr.localSet(layout.scratch),
+    // bytes out = overflow ? 0 : stride * count
+    Instr.i32Const(0),
+    Instr.localGet(first),
+    Instr.localGet(count),
+    Instr.op('i32.mul'),
+    Instr.localGet(layout.scratch),
+    Instr.op('select'),
+    Instr.localSet(first),
+    // final tag and passthrough alignment
+    Instr.i32Const(overflowOrdinal),
+    Instr.i32Const(layoutOrdinal),
+    Instr.localGet(layout.scratch),
+    Instr.op('select'),
+    Instr.localSet(tag),
+    Instr.localGet(alignment),
+    Instr.localSet(second),
+    ...destination.slice(3).flatMap((slot) => [Instr.i32Const(0), Instr.localSet(slot)]),
+  ]
+}
+
+const emitAllocateOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, requireMemory } = state
+
+  const context = requireMemory()
+  const [bytes, alignment] = slots(operation.layout)
+  const [base, destinationBytes, destinationAlignment, reclaim, rawContext, active] = slots(
+    operation.destination,
+  )
+  if (
+    bytes === undefined ||
+    alignment === undefined ||
+    base === undefined ||
+    destinationBytes === undefined ||
+    destinationAlignment === undefined ||
+    reclaim === undefined ||
+    rawContext === undefined ||
+    active === undefined
+  ) {
+    throw new RangeError('Wasm allocation lost its compiler-planned lanes')
+  }
+  const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
+  if (propagationShape === undefined) {
+    throw new RangeError('Wasm allocation lost its failure calling shape')
+  }
+  const fail = [
+    Instr.i32Const(operation.failureTag),
+    ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
+    Instr.op('return'),
+  ]
+  if (context.heapAllocate === undefined) {
+    throw new RangeError('Wasm allocation lost its heap allocator')
+  }
+  return [
+    Instr.localGet(bytes),
+    Instr.localGet(alignment),
+    Instr.call(context.heapAllocate),
+    Instr.localTee(base),
+    // No block payload can sit at address zero, so zero is the allocator's whole refusal
+    // vocabulary: an unserviceable request leaves through the same typed failure as before.
+    Instr.op('i32.eqz'),
+    Instr.ifElse(Instr.emptyBlockType, fail, []),
+    Instr.localGet(bytes),
+    Instr.localSet(destinationBytes),
+    Instr.localGet(alignment),
+    Instr.localSet(destinationAlignment),
+    Instr.i32Const(1),
+    Instr.localSet(reclaim),
+    // The reclaim-authority lane carries this block's header address. A payload always begins
+    // one header past its block, so release recovers the block with a subtraction the backend
+    // already knows, and needs no side table keyed by base pointer.
+    Instr.localGet(base),
+    Instr.i32Const(heapHeaderBytes),
+    Instr.op('i32.sub'),
+    Instr.localSet(rawContext),
+    Instr.i32Const(1),
+    Instr.localSet(active),
+  ]
+}
+
+const emitHostWriteOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'HostWrite' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, memory, slots, scalar } = state
+
+  if (memory?.standardWrite === undefined) {
+    throw new RangeError('Wasm standard-stream write lost its host import or private memory')
+  }
+  const [address, length] = slots(operation.bytes)
+  if (address === undefined || length === undefined) {
+    throw new RangeError('Wasm standard-stream write lost its byte-view lanes')
+  }
+  const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
+  if (propagationShape === undefined) {
+    throw new RangeError('Wasm standard-stream write lost its failure calling shape')
+  }
+  return [
+    Instr.localGet(scalar(operation.stream)),
+    Instr.localGet(address),
+    Instr.localGet(length),
+    Instr.call(memory.standardWrite),
+    Instr.i32Const(0),
+    Instr.op('i32.ne'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
         Instr.i32Const(operation.failureTag),
         ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
         Instr.op('return'),
-      ]
-      if (context.heapAllocate === undefined) {
-        throw new RangeError('Wasm allocation lost its heap allocator')
+      ],
+      [],
+    ),
+  ]
+}
+
+const emitOsCallOperation = (
+  _operation: Extract<Mir.Operation, { readonly _tag: 'OsCall' }>,
+  _state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  throw new RangeError('Target validation allowed a native-only OS operation into Wasm')
+}
+
+const emitRawBufferFromOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferFrom' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar, copy } = state
+
+  const allocation = slots(operation.allocation)
+  const destination = slots(operation.destination)
+  const count = scalar(operation.count)
+  const bytes = allocation.at(1)
+  const alignment = allocation.at(2)
+  const destinationCount = destination.at(-1)
+  if (
+    bytes === undefined ||
+    alignment === undefined ||
+    destinationCount === undefined ||
+    destination.length !== allocation.length + 1
+  ) {
+    throw new RangeError('Wasm RawBuffer construction lost its planned lanes')
+  }
+  return [
+    Instr.localGet(count),
+    Instr.i32Const(operation.stride),
+    Instr.op('i32.mul'),
+    Instr.localGet(bytes),
+    Instr.op('i32.ne'),
+    Instr.localGet(alignment),
+    Instr.i32Const(operation.elementAlignment),
+    Instr.op('i32.ne'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...copy(allocation, destination.slice(0, allocation.length)),
+    Instr.localGet(count),
+    Instr.localSet(destinationCount),
+  ]
+}
+
+const emitRawBufferCountOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferCount' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, scalar, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const reference = layout.types.at(operation.buffer.ordinal)
+  if (reference?._tag !== 'Reference' || !SilkType.isRawBuffer(reference.type.target)) {
+    throw new RangeError('Wasm RawBuffer.count lost its referenced buffer type')
+  }
+  return [
+    ...loadAt(address, aggregateFieldOffset(reference.type.target, 'count')),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitRawBufferSlotOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferSlot' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, scalar, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const index = scalar(operation.index)
+  const rawBuffer = SilkType.rawBuffer(operation.element)
+  const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+  const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+  const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+  const elementLayout = LayoutPlan.entry(plan, operation.element)
+  if (elementLayout === undefined) throw new RangeError('Wasm RawBuffer.slot lost element layout')
+  const stride = alignUp(elementLayout.size, elementLayout.alignment)
+  return [
+    Instr.localGet(index),
+    ...loadAt(address, countOffset),
+    Instr.op('i32.ge_u'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...loadAt(address, baseOffset),
+    Instr.localGet(index),
+    Instr.i32Const(stride),
+    Instr.op('i32.mul'),
+    Instr.op('i32.add'),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitRawBufferReadOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferRead' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, scalar, requireMemory, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const index = scalar(operation.index)
+  const rawBuffer = SilkType.rawBuffer(operation.element)
+  const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+  const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+  const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+  const elementLayout = LayoutPlan.entry(plan, operation.element)
+  const shape = LayoutPlan.callingShape(plan, operation.element)
+  if (elementLayout === undefined || shape === undefined) {
+    throw new RangeError('Wasm RawBuffer.read lost element layout')
+  }
+  const stride = alignUp(elementLayout.size, elementLayout.alignment)
+  const context = requireMemory()
+  return [
+    Instr.localGet(index),
+    ...loadAt(address, countOffset),
+    Instr.op('i32.ge_u'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...shape.lanes.flatMap((lane, ordinal) => {
+      const destination = slots(operation.destination).at(ordinal)
+      const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+      if (destination === undefined || offset === undefined) {
+        throw new RangeError('Wasm RawBuffer.read lost an element lane')
       }
       return [
-        Instr.localGet(bytes),
-        Instr.localGet(alignment),
-        Instr.call(context.heapAllocate),
-        Instr.localTee(base),
-        // No block payload can sit at address zero, so zero is the allocator's whole refusal
-        // vocabulary: an unserviceable request leaves through the same typed failure as before.
-        Instr.op('i32.eqz'),
-        Instr.ifElse(Instr.emptyBlockType, fail, []),
-        Instr.localGet(bytes),
-        Instr.localSet(destinationBytes),
-        Instr.localGet(alignment),
-        Instr.localSet(destinationAlignment),
-        Instr.i32Const(1),
-        Instr.localSet(reclaim),
-        // The reclaim-authority lane carries this block's header address. A payload always begins
-        // one header past its block, so release recovers the block with a subtraction the backend
-        // already knows, and needs no side table keyed by base pointer.
-        Instr.localGet(base),
-        Instr.i32Const(heapHeaderBytes),
-        Instr.op('i32.sub'),
-        Instr.localSet(rawContext),
-        Instr.i32Const(1),
-        Instr.localSet(active),
-      ]
-    }
-    case 'HostWrite': {
-      if (memory?.standardWrite === undefined) {
-        throw new RangeError('Wasm standard-stream write lost its host import or private memory')
-      }
-      const [address, length] = slots(operation.bytes)
-      if (address === undefined || length === undefined) {
-        throw new RangeError('Wasm standard-stream write lost its byte-view lanes')
-      }
-      const propagationShape = LayoutPlan.callingShape(plan, operation.propagationType.type)
-      if (propagationShape === undefined) {
-        throw new RangeError('Wasm standard-stream write lost its failure calling shape')
-      }
-      return [
-        Instr.localGet(scalar(operation.stream)),
-        Instr.localGet(address),
-        Instr.localGet(length),
-        Instr.call(memory.standardWrite),
-        Instr.i32Const(0),
-        Instr.op('i32.ne'),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          [
-            Instr.i32Const(operation.failureTag),
-            ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
-            Instr.op('return'),
-          ],
-          [],
-        ),
-      ]
-    }
-    case 'OsCall':
-      throw new RangeError('Target validation allowed a native-only OS operation into Wasm')
-    case 'RawBufferFrom': {
-      const allocation = slots(operation.allocation)
-      const destination = slots(operation.destination)
-      const count = scalar(operation.count)
-      const bytes = allocation.at(1)
-      const alignment = allocation.at(2)
-      const destinationCount = destination.at(-1)
-      if (
-        bytes === undefined ||
-        alignment === undefined ||
-        destinationCount === undefined ||
-        destination.length !== allocation.length + 1
-      ) {
-        throw new RangeError('Wasm RawBuffer construction lost its planned lanes')
-      }
-      return [
-        Instr.localGet(count),
-        Instr.i32Const(operation.stride),
-        Instr.op('i32.mul'),
-        Instr.localGet(bytes),
-        Instr.op('i32.ne'),
-        Instr.localGet(alignment),
-        Instr.i32Const(operation.elementAlignment),
-        Instr.op('i32.ne'),
-        Instr.op('i32.or'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ...copy(allocation, destination.slice(0, allocation.length)),
-        Instr.localGet(count),
-        Instr.localSet(destinationCount),
-      ]
-    }
-    case 'RawBufferCount': {
-      const address = scalar(operation.buffer)
-      const reference = layout.types.at(operation.buffer.ordinal)
-      if (reference?._tag !== 'Reference' || !SilkType.isRawBuffer(reference.type.target)) {
-        throw new RangeError('Wasm RawBuffer.count lost its referenced buffer type')
-      }
-      return [
-        ...loadAt(address, aggregateFieldOffset(reference.type.target, 'count')),
-        Instr.localSet(scalar(operation.destination)),
-      ]
-    }
-    case 'RawBufferSlot': {
-      const address = scalar(operation.buffer)
-      const index = scalar(operation.index)
-      const rawBuffer = SilkType.rawBuffer(operation.element)
-      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
-      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
-      const elementLayout = LayoutPlan.entry(plan, operation.element)
-      if (elementLayout === undefined)
-        throw new RangeError('Wasm RawBuffer.slot lost element layout')
-      const stride = alignUp(elementLayout.size, elementLayout.alignment)
-      return [
-        Instr.localGet(index),
-        ...loadAt(address, countOffset),
-        Instr.op('i32.ge_u'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
         ...loadAt(address, baseOffset),
         Instr.localGet(index),
         Instr.i32Const(stride),
         Instr.op('i32.mul'),
         Instr.op('i32.add'),
-        Instr.localSet(scalar(operation.destination)),
+        Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, { offset }),
+        Instr.localSet(destination),
       ]
-    }
-    case 'RawBufferRead': {
-      const address = scalar(operation.buffer)
-      const index = scalar(operation.index)
-      const rawBuffer = SilkType.rawBuffer(operation.element)
-      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
-      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
-      const elementLayout = LayoutPlan.entry(plan, operation.element)
-      const shape = LayoutPlan.callingShape(plan, operation.element)
-      if (elementLayout === undefined || shape === undefined) {
-        throw new RangeError('Wasm RawBuffer.read lost element layout')
-      }
-      const stride = alignUp(elementLayout.size, elementLayout.alignment)
-      const context = requireMemory()
-      return [
-        Instr.localGet(index),
-        ...loadAt(address, countOffset),
-        Instr.op('i32.ge_u'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ...shape.lanes.flatMap((lane, ordinal) => {
-          const destination = slots(operation.destination).at(ordinal)
-          const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
-          if (destination === undefined || offset === undefined) {
-            throw new RangeError('Wasm RawBuffer.read lost an element lane')
-          }
-          return [
-            ...loadAt(address, baseOffset),
-            Instr.localGet(index),
-            Instr.i32Const(stride),
-            Instr.op('i32.mul'),
-            Instr.op('i32.add'),
-            Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, { offset }),
-            Instr.localSet(destination),
-          ]
-        }),
-      ]
-    }
-    case 'RawBufferView': {
-      const address = scalar(operation.buffer)
-      const offset = scalar(operation.offset)
-      const length = scalar(operation.length)
-      const destination = slots(operation.destination)
-      const destinationAddress = destination.at(0)
-      const destinationLength = destination.at(1)
-      const rawBuffer = SilkType.rawBuffer(operation.element)
-      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
-      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
-      if (destinationAddress === undefined || destinationLength === undefined) {
-        throw new RangeError('Wasm RawBuffer view lost its slice lanes')
-      }
-      return [
-        Instr.localGet(offset),
-        ...loadAt(address, countOffset),
-        Instr.op('i32.gt_u'),
-        Instr.localGet(length),
-        ...loadAt(address, countOffset),
-        Instr.localGet(offset),
-        Instr.op('i32.sub'),
-        Instr.op('i32.gt_u'),
-        Instr.op('i32.or'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ...loadAt(address, baseOffset),
-        Instr.localGet(offset),
-        Instr.i32Const(operation.stride),
-        Instr.op('i32.mul'),
-        Instr.op('i32.add'),
-        Instr.localSet(destinationAddress),
-        Instr.localGet(length),
-        Instr.localSet(destinationLength),
-      ]
-    }
-    case 'RawBufferCopy': {
-      const address = scalar(operation.buffer)
-      const offset = scalar(operation.offset)
-      const length = scalar(operation.length)
-      const sourceLanes = slots(operation.source)
-      const sourceAddress = sourceLanes.at(0)
-      const sourceLength = sourceLanes.at(1)
-      const rawBuffer = SilkType.rawBuffer(operation.element)
-      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
-      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
-      if (sourceAddress === undefined || sourceLength === undefined) {
-        throw new RangeError('Wasm RawBuffer.copy lost its source slice lanes')
-      }
-      const context = requireMemory()
-      return [
-        Instr.localGet(offset),
-        ...loadAt(address, countOffset),
-        Instr.op('i32.gt_u'),
-        Instr.localGet(length),
-        ...loadAt(address, countOffset),
-        Instr.localGet(offset),
-        Instr.op('i32.sub'),
-        Instr.op('i32.gt_u'),
-        Instr.op('i32.or'),
-        Instr.localGet(length),
-        Instr.localGet(sourceLength),
-        Instr.op('i32.gt_u'),
-        Instr.op('i32.or'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ...loadAt(address, baseOffset),
-        Instr.localGet(offset),
-        Instr.i32Const(operation.stride),
-        Instr.op('i32.mul'),
-        Instr.op('i32.add'),
-        Instr.localGet(sourceAddress),
-        Instr.localGet(length),
-        Instr.i32Const(operation.stride),
-        Instr.op('i32.mul'),
-        // memory.copy is defined for overlapping ranges, which is the copy intrinsic's contract.
-        Instr.memoryCopy(context.memory, context.memory),
-      ]
-    }
-    case 'RawBufferFill': {
-      const address = scalar(operation.buffer)
-      const offset = scalar(operation.offset)
-      const length = scalar(operation.length)
-      const value = scalar(operation.value)
-      const rawBuffer = SilkType.rawBuffer('u8')
-      const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
-      const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
-      const countOffset = aggregateFieldOffset(rawBuffer, 'count')
-      const context = requireMemory()
-      return [
-        Instr.localGet(offset),
-        ...loadAt(address, countOffset),
-        Instr.op('i32.gt_u'),
-        Instr.localGet(length),
-        ...loadAt(address, countOffset),
-        Instr.localGet(offset),
-        Instr.op('i32.sub'),
-        Instr.op('i32.gt_u'),
-        Instr.op('i32.or'),
-        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-        ...loadAt(address, baseOffset),
-        Instr.localGet(offset),
-        Instr.op('i32.add'),
-        Instr.localGet(value),
-        Instr.localGet(length),
-        Instr.memoryFill(context.memory),
-      ]
-    }
-    case 'SlotWrite': {
-      const address = scalar(operation.slot)
-      const shape = LayoutPlan.callingShape(plan, operation.element)
-      if (shape === undefined) throw new RangeError('Wasm Slot.write lost its element shape')
-      return shape.lanes.flatMap((lane, ordinal) => {
-        const value = slots(operation.value).at(ordinal)
-        const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
-        if (value === undefined || offset === undefined) {
-          throw new RangeError('Wasm Slot.write lost an element lane')
-        }
-        return storeAt(address, value, offset, lane)
-      })
-    }
+    }),
+  ]
+}
 
-    case 'SlotTake':
-    case 'SlotCopy': {
-      const address = scalar(operation.slot)
-      const shape = LayoutPlan.callingShape(plan, operation.element)
-      if (shape === undefined) throw new RangeError('Wasm Slot.take lost its element shape')
-      return shape.lanes.flatMap((lane, ordinal) => {
-        const destination = slots(operation.destination).at(ordinal)
-        const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
-        if (destination === undefined || offset === undefined) {
-          throw new RangeError('Wasm Slot.take lost an element lane')
-        }
-        return [...loadAt(address, offset, lane), Instr.localSet(destination)]
-      })
+const emitRawBufferViewOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferView' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const offset = scalar(operation.offset)
+  const length = scalar(operation.length)
+  const destination = slots(operation.destination)
+  const destinationAddress = destination.at(0)
+  const destinationLength = destination.at(1)
+  const rawBuffer = SilkType.rawBuffer(operation.element)
+  const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+  const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+  const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+  if (destinationAddress === undefined || destinationLength === undefined) {
+    throw new RangeError('Wasm RawBuffer view lost its slice lanes')
+  }
+  return [
+    Instr.localGet(offset),
+    ...loadAt(address, countOffset),
+    Instr.op('i32.gt_u'),
+    Instr.localGet(length),
+    ...loadAt(address, countOffset),
+    Instr.localGet(offset),
+    Instr.op('i32.sub'),
+    Instr.op('i32.gt_u'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...loadAt(address, baseOffset),
+    Instr.localGet(offset),
+    Instr.i32Const(operation.stride),
+    Instr.op('i32.mul'),
+    Instr.op('i32.add'),
+    Instr.localSet(destinationAddress),
+    Instr.localGet(length),
+    Instr.localSet(destinationLength),
+  ]
+}
+
+const emitRawBufferCopyOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferCopy' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar, requireMemory, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const offset = scalar(operation.offset)
+  const length = scalar(operation.length)
+  const sourceLanes = slots(operation.source)
+  const sourceAddress = sourceLanes.at(0)
+  const sourceLength = sourceLanes.at(1)
+  const rawBuffer = SilkType.rawBuffer(operation.element)
+  const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+  const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+  const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+  if (sourceAddress === undefined || sourceLength === undefined) {
+    throw new RangeError('Wasm RawBuffer.copy lost its source slice lanes')
+  }
+  const context = requireMemory()
+  return [
+    Instr.localGet(offset),
+    ...loadAt(address, countOffset),
+    Instr.op('i32.gt_u'),
+    Instr.localGet(length),
+    ...loadAt(address, countOffset),
+    Instr.localGet(offset),
+    Instr.op('i32.sub'),
+    Instr.op('i32.gt_u'),
+    Instr.op('i32.or'),
+    Instr.localGet(length),
+    Instr.localGet(sourceLength),
+    Instr.op('i32.gt_u'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...loadAt(address, baseOffset),
+    Instr.localGet(offset),
+    Instr.i32Const(operation.stride),
+    Instr.op('i32.mul'),
+    Instr.op('i32.add'),
+    Instr.localGet(sourceAddress),
+    Instr.localGet(length),
+    Instr.i32Const(operation.stride),
+    Instr.op('i32.mul'),
+    // memory.copy is defined for overlapping ranges, which is the copy intrinsic's contract.
+    Instr.memoryCopy(context.memory, context.memory),
+  ]
+}
+
+const emitRawBufferFillOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RawBufferFill' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar, requireMemory, aggregateFieldOffset, loadAt } = state
+
+  const address = scalar(operation.buffer)
+  const offset = scalar(operation.offset)
+  const length = scalar(operation.length)
+  const value = scalar(operation.value)
+  const rawBuffer = SilkType.rawBuffer('u8')
+  const allocationOffset = aggregateFieldOffset(rawBuffer, '$allocation')
+  const baseOffset = allocationOffset + aggregateFieldOffset(SilkType.allocation, '$base')
+  const countOffset = aggregateFieldOffset(rawBuffer, 'count')
+  const context = requireMemory()
+  return [
+    Instr.localGet(offset),
+    ...loadAt(address, countOffset),
+    Instr.op('i32.gt_u'),
+    Instr.localGet(length),
+    ...loadAt(address, countOffset),
+    Instr.localGet(offset),
+    Instr.op('i32.sub'),
+    Instr.op('i32.gt_u'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    ...loadAt(address, baseOffset),
+    Instr.localGet(offset),
+    Instr.op('i32.add'),
+    Instr.localGet(value),
+    Instr.localGet(length),
+    Instr.memoryFill(context.memory),
+  ]
+}
+
+const emitSlotWriteOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SlotWrite' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, scalar, storeAt } = state
+
+  const address = scalar(operation.slot)
+  const shape = LayoutPlan.callingShape(plan, operation.element)
+  if (shape === undefined) throw new RangeError('Wasm Slot.write lost its element shape')
+  return shape.lanes.flatMap((lane, ordinal) => {
+    const value = slots(operation.value).at(ordinal)
+    const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+    if (value === undefined || offset === undefined) {
+      throw new RangeError('Wasm Slot.write lost an element lane')
     }
-    case 'SlotDrop':
-      return releaseAtAddress(operation.cleanup, scalar(operation.slot))
-    case 'ShortCircuit': {
-      const right = [
-        ...operation.right.operations.flatMap((nested) =>
-          emitOperation(nested, layout, plan, resolve, memory, suspension),
-        ),
-        ...copy(slots(operation.right.result), slots(operation.destination)),
-      ]
-      const decided = [
-        Instr.i32Const(operation.operator === 'Or' ? 1 : 0),
-        Instr.localSet(scalar(operation.destination)),
-      ]
-      return [
-        Instr.localGet(scalar(operation.left)),
-        // `&&` takes the right operand on a true left operand; `||` takes it on a false one.
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          operation.operator === 'And' ? right : decided,
-          operation.operator === 'And' ? decided : right,
-        ),
-      ]
+    return storeAt(address, value, offset, lane)
+  })
+}
+
+const emitSlotTakeOrSlotCopyOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SlotTake' | 'SlotCopy' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, scalar, loadAt } = state
+
+  const address = scalar(operation.slot)
+  const shape = LayoutPlan.callingShape(plan, operation.element)
+  if (shape === undefined) throw new RangeError('Wasm Slot.take lost its element shape')
+  return shape.lanes.flatMap((lane, ordinal) => {
+    const destination = slots(operation.destination).at(ordinal)
+    const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+    if (destination === undefined || offset === undefined) {
+      throw new RangeError('Wasm Slot.take lost an element lane')
     }
-    case 'Match': {
-      const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
-        operations.flatMap((nested) =>
-          emitOperation(nested, layout, plan, resolve, memory, suspension),
-        )
-      const emitCandidates = (
-        member: (typeof operation.members)[number],
-        candidates: ReadonlyArray<Match.ArmId>,
-        ordinal = 0,
-      ): ReadonlyArray<Instr.Instr> => {
-        const candidate = candidates.at(ordinal)
-        if (candidate === undefined) return [Instr.op('unreachable')]
-        const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
-        if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
-        const bindings = arm.bindings.flatMap((binding) => {
-          const physical = LayoutPlan.memberFieldSlots(
-            operation.scrutineeShape,
-            member,
-            binding.path,
-          )
-          if (physical === undefined) {
-            throw new RangeError('Wasm match lost a pattern payload path')
-          }
-          return copy(
-            physical.flatMap((lane) => {
-              const source = slots(operation.scrutinee).at(lane)
-              return source === undefined ? [] : [source]
-            }),
-            slots(binding.destination),
-          )
-        })
-        const selected = [
-          ...emitMany(arm.selected.operations),
-          ...(layout.types.at(arm.selected.result.ordinal)?._tag === 'Bottom'
-            ? []
-            : copy(slots(arm.selected.result), slots(operation.destination))),
-        ]
-        if (arm.guard === undefined) return [...bindings, ...selected]
-        return [
-          ...bindings,
-          ...emitMany(arm.guard.operations),
-          Instr.localGet(scalar(arm.guard.result)),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            selected,
-            emitCandidates(member, candidates, ordinal + 1),
-          ),
-        ]
+    return [...loadAt(address, offset, lane), Instr.localSet(destination)]
+  })
+}
+
+const emitSlotDropOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SlotDrop' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar, releaseAtAddress } = state
+  return releaseAtAddress(operation.cleanup, scalar(operation.slot))
+}
+
+const emitShortCircuitOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ShortCircuit' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { emitter, suspension, slots, scalar, copy } = state
+
+  const right = [
+    ...operation.right.operations.flatMap((nested) => emitOperation(nested, emitter, suspension)),
+    ...copy(slots(operation.right.result), slots(operation.destination)),
+  ]
+  const decided = [
+    Instr.i32Const(operation.operator === 'Or' ? 1 : 0),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+  return [
+    Instr.localGet(scalar(operation.left)),
+    // `&&` takes the right operand on a true left operand; `||` takes it on a false one.
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      operation.operator === 'And' ? right : decided,
+      operation.operator === 'And' ? decided : right,
+    ),
+  ]
+}
+
+const emitMatchOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Match' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { emitter, layout, suspension, slots, scalar, copy } = state
+
+  const emitMany = (operations: ReadonlyArray<Mir.Operation>): ReadonlyArray<Instr.Instr> =>
+    operations.flatMap((nested) => emitOperation(nested, emitter, suspension))
+  const emitCandidates = (
+    member: (typeof operation.members)[number],
+    candidates: ReadonlyArray<Match.ArmId>,
+    ordinal = 0,
+  ): ReadonlyArray<Instr.Instr> => {
+    const candidate = candidates.at(ordinal)
+    if (candidate === undefined) return [Instr.op('unreachable')]
+    const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
+    if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
+    const bindings = arm.bindings.flatMap((binding) => {
+      const physical = LayoutPlan.memberFieldSlots(operation.scrutineeShape, member, binding.path)
+      if (physical === undefined) {
+        throw new RangeError('Wasm match lost a pattern payload path')
       }
-      const emitDecisions = (ordinal = 0): ReadonlyArray<Instr.Instr> => {
-        const decision = operation.decisions.at(ordinal)
-        if (decision === undefined) return [Instr.op('unreachable')]
-        const selected = emitCandidates(decision.member, decision.candidates)
-        if (operation.scrutineeType._tag !== 'Union') return selected
-        const tag = slots(operation.scrutinee).at(0)
-        if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
-        return [
-          Instr.localGet(tag),
-          Instr.i32Const(ordinal),
-          Instr.op('i32.eq'),
-          Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
-        ]
-      }
-      return emitDecisions()
-    }
-    case 'Literal': {
-      const lane = layout.lanes.at(operation.destination.ordinal)?.at(0)
-      const semantic = Mir.semanticType(operation.type)
-      if (Scalar.isFloatSpelling(semantic)) {
-        const number = FloatingPoint.toNumber({
-          width: semantic === 'f32' ? 32 : 64,
-          bits: BigInt(operation.value),
-        })
-        return [
-          semantic === 'f32' ? Instr.f32Const(number) : Instr.f64Const(number),
-          Instr.localSet(scalar(operation.destination)),
-        ]
-      }
-      const exact = BigInt(operation.value)
-      return [
-        lane !== undefined && laneValueType(plan, lane) === i64
-          ? Instr.i64Const(BigInt.asIntN(64, exact))
-          : Instr.i32Const(Number(BigInt.asIntN(32, exact))),
-        Instr.localSet(scalar(operation.destination)),
-      ]
-    }
-    case 'StaticView': {
-      const context = requireMemory()
-      const offset = context.staticOffsets.get(operation.data)
-      const [address, length] = slots(operation.destination)
-      if (offset === undefined || address === undefined || length === undefined) {
-        throw new RangeError('Wasm static view lost its data placement or logical lanes')
-      }
-      return [
-        Instr.i32Const(offset),
-        Instr.localSet(address),
-        Instr.i32Const(operation.length),
-        Instr.localSet(length),
-      ]
-    }
-    case 'Move':
-      return copy(slots(operation.source), slots(operation.destination))
-    case 'BeginLoan':
-      if (operation.sourceType._tag === 'Slice') {
-        return copy(slots(operation.root), slots(operation.destination))
-      } else {
-        const rootType = layout.types.at(operation.root.ordinal)
-        const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
-        if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
-          const [selector, ...suffixSelectors] = operation.selectors
-          const [base, length] = slots(operation.root)
-          const [address] = slots(operation.destination)
-          if (
-            selector?._tag !== 'SliceElementSelector' ||
-            base === undefined ||
-            length === undefined ||
-            address === undefined ||
-            operation.type._tag !== 'Reference'
-          ) {
-            throw new RangeError('Wasm slice borrow lost its canonical lanes')
-          }
-          const sliceLayout = LayoutPlan.entry(plan, rootSemantic)
-          if (sliceLayout?.representation._tag !== 'Slice') {
-            throw new RangeError('Wasm slice borrow lost its compiler layout')
-          }
-          const staticSelectors: Array<LayoutPlan.Selector> = []
-          for (const candidate of suffixSelectors) {
-            if (candidate._tag === 'FieldSelector') {
-              staticSelectors.push(candidate.field)
-            } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-              staticSelectors.push(
-                Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
-              )
-            } else {
-              throw new RangeError('Wasm nested runtime slice borrow is not canonical')
-            }
-          }
-          const staticOffset = LayoutPlan.laneOffset(plan, rootSemantic.element, staticSelectors)
-          if (staticOffset === undefined) {
-            throw new RangeError('Wasm slice borrow lost its selected layout')
-          }
-          return [
-            Instr.localGet(scalar(selector.index)),
-            Instr.localGet(length),
-            Instr.op('i32.lt_u'),
-            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-            Instr.localGet(base),
-            Instr.localGet(scalar(selector.index)),
-            Instr.i32Const(sliceLayout.representation.stride),
-            Instr.op('i32.mul'),
-            Instr.op('i32.add'),
-            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-            Instr.localSet(address),
-          ]
-        }
-        let selected =
-          rootSemantic !== undefined && SilkType.isReference(rootSemantic)
-            ? rootSemantic.target
-            : rootSemantic
-        let staticOffset = 0
-        const dynamicOffsets: Array<{
-          readonly local: Mir.LocalId
-          readonly stride: number
-          readonly length: number
-        }> = []
-        for (const selector of operation.selectors) {
-          const selectedLayout =
-            selected === undefined ? undefined : LayoutPlan.entry(plan, selected)
-          if (selector._tag === 'FieldSelector') {
-            if (selectedLayout?.representation._tag !== 'Aggregate')
-              throw new RangeError('Wasm borrow field selector lost its aggregate layout')
-            const field = selectedLayout.representation.fields.find(
-              (candidate) =>
-                candidate.id.ordinal === selector.field.ordinal &&
-                candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-                candidate.id.struct.ordinal === selector.field.struct.ordinal,
-            )
-            if (field === undefined)
-              throw new RangeError('Wasm borrow field selector lost its field layout')
-            staticOffset += field.offset
-            selected = field.type
-            continue
-          }
-          if (
-            selector._tag !== 'ElementSelector' ||
-            selectedLayout?.representation._tag !== 'Repeated'
-          ) {
-            throw new RangeError('Wasm borrow element selector lost its repeated layout')
-          }
-          if (selector.index._tag === 'Proven') {
-            staticOffset += selector.index.value * selectedLayout.representation.stride
-          } else {
-            dynamicOffsets.push(
-              Object.freeze({
-                local: selector.index.local,
-                stride: selectedLayout.representation.stride,
-                length: selector.length,
-              }),
-            )
-          }
-          selected = selectedLayout.representation.element
-        }
-        const planned = memory?.frame.roots.get(operation.root.ordinal)
-        const [address, length] = slots(operation.destination)
-        if (
-          rootSemantic === undefined ||
-          address === undefined ||
-          (!SilkType.isReference(rootSemantic) && planned === undefined)
-        ) {
-          throw new RangeError('Wasm borrow formation lost its frame root or address lane')
-        }
-        const instructions: Array<Instr.Instr> = []
-        for (const offset of dynamicOffsets) {
-          instructions.push(
-            Instr.localGet(scalar(offset.local)),
-            Instr.i32Const(offset.length),
-            Instr.op('i32.lt_u'),
-            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-          )
-        }
-        instructions.push(
-          ...(SilkType.isReference(rootSemantic)
-            ? [Instr.localGet(scalar(operation.root))]
-            : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
-          ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-        )
-        for (const offset of dynamicOffsets) {
-          instructions.push(
-            Instr.localGet(scalar(offset.local)),
-            Instr.i32Const(offset.stride),
-            Instr.op('i32.mul'),
-            Instr.op('i32.add'),
-          )
-        }
-        instructions.push(Instr.localSet(address))
-        if (operation.type._tag === 'Reference') return instructions
-        if (length === undefined || operation.sourceType._tag !== 'FixedArray') {
-          throw new RangeError('Wasm slice formation lost its length lane or array root')
-        }
-        return [
-          ...instructions,
-          Instr.i32Const(operation.sourceType.type.length),
-          Instr.localSet(length),
-        ]
-      }
-    case 'EndLoan':
-      return []
-    case 'SliceLength': {
-      const length = slots(operation.slice).at(1)
-      return length === undefined
-        ? [Instr.op('unreachable')]
-        : [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
-    }
-    case 'ConvertUnion': {
-      const source = slots(operation.source)
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      if (tag === undefined) throw new RangeError('Wasm union destination has no tag lane')
-      const instructions: Array<Instr.Instr> = []
-      if (operation.conversion === 'Inject') {
-        const mapping = operation.mappings.at(0)
-        if (mapping === undefined) throw new RangeError('Wasm union injection has no member map')
-        instructions.push(Instr.i32Const(mapping.targetOrdinal), Instr.localSet(tag))
-        for (let slot = 1; slot < destination.length; slot += 1) {
-          const target = destination.at(slot)
-          const value = source.at(slot - 1)
-          if (target === undefined) continue
-          instructions.push(
-            ...(value === undefined
-              ? [zeroFor(target), Instr.localSet(target)]
-              : transfer(value, target)),
-          )
-        }
-        return instructions
-      }
-      const sourceTag = source.at(0)
-      if (sourceTag === undefined) throw new RangeError('Wasm union source has no tag lane')
-      instructions.push(Instr.i32Const(0), Instr.localSet(layout.scratch))
-      for (const mapping of operation.mappings) {
-        instructions.push(
-          Instr.i32Const(mapping.targetOrdinal),
-          Instr.localGet(layout.scratch),
-          Instr.localGet(sourceTag),
-          Instr.i32Const(mapping.sourceOrdinal),
-          Instr.op('i32.eq'),
-          Instr.op('select'),
-          Instr.localSet(layout.scratch),
-        )
-      }
-      instructions.push(Instr.localGet(layout.scratch), Instr.localSet(tag))
-      for (let slot = 1; slot < destination.length; slot += 1) {
-        const target = destination.at(slot)
-        const value = source.at(slot)
-        if (target === undefined) continue
-        instructions.push(
-          ...(value === undefined
-            ? [zeroFor(target), Instr.localSet(target)]
-            : transfer(value, target)),
-        )
-      }
-      return instructions
-    }
-    case 'Construct':
       return copy(
-        operation.fields.flatMap((field) => [...slots(field.value)]),
-        slots(operation.destination),
+        physical.flatMap((lane) => {
+          const source = slots(operation.scrutinee).at(lane)
+          return source === undefined ? [] : [source]
+        }),
+        slots(binding.destination),
       )
-    case 'ConstructArray':
-      return copy(
-        operation.elements.flatMap((element) => [...slots(element)]),
-        slots(operation.destination),
-      )
-    case 'Project': {
-      const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
-      const sourceSlots = slots(operation.source)
-      const projected = sourceLanes.flatMap((lane, index) => {
-        const field = lane.path.at(0)
-        const source = sourceSlots.at(index)
-        return field !== undefined &&
-          field._tag === 'FieldId' &&
-          source !== undefined &&
-          field.ordinal === operation.field.ordinal &&
-          field.struct.sourceId === operation.field.struct.sourceId &&
-          field.struct.ordinal === operation.field.struct.ordinal
-          ? [source]
-          : []
-      })
-      return copy(projected, slots(operation.destination))
-    }
-    case 'ReadPlace': {
-      const rootType = layout.types.at(operation.root.ordinal)
-      const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
-      if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
-        // The place lives on the referenced target: static field offsets off the address.
-        const address = scalar(operation.root)
-        const target = rootSemantic.target
-        const staticSelectors: Array<LayoutPlan.Selector> = []
-        for (const candidate of operation.selectors) {
-          if (candidate._tag !== 'FieldSelector')
-            throw new RangeError('Wasm reference place supports only field selectors')
+    })
+    const selected = [
+      ...emitMany(arm.selected.operations),
+      ...(layout.types.at(arm.selected.result.ordinal)?._tag === 'Bottom'
+        ? []
+        : copy(slots(arm.selected.result), slots(operation.destination))),
+    ]
+    if (arm.guard === undefined) return [...bindings, ...selected]
+    return [
+      ...bindings,
+      ...emitMany(arm.guard.operations),
+      Instr.localGet(scalar(arm.guard.result)),
+      Instr.ifElse(Instr.emptyBlockType, selected, emitCandidates(member, candidates, ordinal + 1)),
+    ]
+  }
+  const emitDecisions = (ordinal = 0): ReadonlyArray<Instr.Instr> => {
+    const decision = operation.decisions.at(ordinal)
+    if (decision === undefined) return [Instr.op('unreachable')]
+    const selected = emitCandidates(decision.member, decision.candidates)
+    if (operation.scrutineeType._tag !== 'Union') return selected
+    const tag = slots(operation.scrutinee).at(0)
+    if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
+    return [
+      Instr.localGet(tag),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
+    ]
+  }
+  return emitDecisions()
+}
+
+const emitLiteralOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Literal' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, scalar } = state
+
+  const lane = layout.lanes.at(operation.destination.ordinal)?.at(0)
+  const semantic = Mir.semanticType(operation.type)
+  if (Scalar.isFloatSpelling(semantic)) {
+    const number = FloatingPoint.toNumber({
+      width: semantic === 'f32' ? 32 : 64,
+      bits: BigInt(operation.value),
+    })
+    return [
+      semantic === 'f32' ? Instr.f32Const(number) : Instr.f64Const(number),
+      Instr.localSet(scalar(operation.destination)),
+    ]
+  }
+  const exact = BigInt(operation.value)
+  return [
+    lane !== undefined && laneValueType(plan, lane) === i64
+      ? Instr.i64Const(BigInt.asIntN(64, exact))
+      : Instr.i32Const(Number(BigInt.asIntN(32, exact))),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitStaticViewOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'StaticView' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, requireMemory } = state
+
+  const context = requireMemory()
+  const offset = context.staticOffsets.get(operation.data)
+  const [address, length] = slots(operation.destination)
+  if (offset === undefined || address === undefined || length === undefined) {
+    throw new RangeError('Wasm static view lost its data placement or logical lanes')
+  }
+  return [
+    Instr.i32Const(offset),
+    Instr.localSet(address),
+    Instr.i32Const(operation.length),
+    Instr.localSet(length),
+  ]
+}
+
+const emitMoveOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Move' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(slots(operation.source), slots(operation.destination))
+}
+
+const emitBeginLoanOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, memory, slots, scalar, copy, materializeRoot, frameAddress } = state
+  if (operation.sourceType._tag === 'Slice') {
+    return copy(slots(operation.root), slots(operation.destination))
+  } else {
+    const rootType = layout.types.at(operation.root.ordinal)
+    const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+    if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
+      const [selector, ...suffixSelectors] = operation.selectors
+      const [base, length] = slots(operation.root)
+      const [address] = slots(operation.destination)
+      if (
+        selector?._tag !== 'SliceElementSelector' ||
+        base === undefined ||
+        length === undefined ||
+        address === undefined ||
+        operation.type._tag !== 'Reference'
+      ) {
+        throw new RangeError('Wasm slice borrow lost its canonical lanes')
+      }
+      const sliceLayout = LayoutPlan.entry(plan, rootSemantic)
+      if (sliceLayout?.representation._tag !== 'Slice') {
+        throw new RangeError('Wasm slice borrow lost its compiler layout')
+      }
+      const staticSelectors: Array<LayoutPlan.Selector> = []
+      for (const candidate of suffixSelectors) {
+        if (candidate._tag === 'FieldSelector') {
           staticSelectors.push(candidate.field)
-        }
-        const destinationSlots = slots(operation.destination)
-        const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
-        return destinationLanes.flatMap((lane, ordinal) => {
-          const destination = destinationSlots.at(ordinal)
-          const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
-          if (destination === undefined || offset === undefined)
-            throw new RangeError('Wasm reference read lost a lane offset')
-          return [...loadAt(address, offset, lane), Instr.localSet(destination)]
-        })
-      }
-      if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
-        if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
-        const [selector, ...suffixSelectors] = operation.selectors
-        const [base, length] = slots(operation.root)
-        if (
-          selector?._tag !== 'SliceElementSelector' ||
-          base === undefined ||
-          length === undefined
-        ) {
-          throw new RangeError('Wasm slice read lost its canonical lanes')
-        }
-        const sliceLayout = LayoutPlan.entry(memory.plan, rootSemantic)
-        if (sliceLayout?.representation._tag !== 'Slice') {
-          throw new RangeError('Wasm slice read lost its compiler layout')
-        }
-        const staticSelectors: Array<LayoutPlan.Selector> = []
-        for (const candidate of suffixSelectors) {
-          if (candidate._tag === 'FieldSelector') {
-            staticSelectors.push(candidate.field)
-          } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-            staticSelectors.push(
-              Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
-            )
-          } else {
-            throw new RangeError('Wasm nested runtime slice place is not canonical')
-          }
-        }
-        const instructions: Array<Instr.Instr> = [
-          Instr.localGet(scalar(selector.index)),
-          Instr.localGet(length),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-        ]
-        const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
-        const destinationSlots = slots(operation.destination)
-        for (const [ordinal, lane] of destinationLanes.entries()) {
-          const staticOffset = LayoutPlan.laneOffset(
-            memory.plan,
-            rootSemantic.element,
-            Object.freeze([...staticSelectors, ...lane.path]),
+        } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+          staticSelectors.push(
+            Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
           )
-          const destination = destinationSlots.at(ordinal)
-          if (staticOffset === undefined || destination === undefined) {
-            throw new RangeError(`Wasm slice read lost lane ${ordinal}`)
-          }
-          instructions.push(
-            Instr.localGet(base),
-            Instr.localGet(scalar(selector.index)),
-            Instr.i32Const(sliceLayout.representation.stride),
-            Instr.op('i32.mul'),
-            Instr.op('i32.add'),
-            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-            Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
-            Instr.localSet(destination),
-          )
+        } else {
+          throw new RangeError('Wasm nested runtime slice borrow is not canonical')
         }
-        return instructions
       }
-      const sourceLanes = layout.lanes.at(operation.root.ordinal) ?? []
-      const sourceSlots = slots(operation.root)
-      const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
-      const destinationSlots = slots(operation.destination)
-      const instructions: Array<Instr.Instr> = []
-      for (const selector of operation.selectors) {
-        if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
-        instructions.push(
-          Instr.localGet(scalar(selector.index.local)),
-          Instr.i32Const(selector.length),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+      const staticOffset = LayoutPlan.laneOffset(plan, rootSemantic.element, staticSelectors)
+      if (staticOffset === undefined) {
+        throw new RangeError('Wasm slice borrow lost its selected layout')
+      }
+      return [
+        Instr.localGet(scalar(selector.index)),
+        Instr.localGet(length),
+        Instr.op('i32.lt_u'),
+        Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+        Instr.localGet(base),
+        Instr.localGet(scalar(selector.index)),
+        Instr.i32Const(sliceLayout.representation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+        Instr.localSet(address),
+      ]
+    }
+    let selected =
+      rootSemantic !== undefined && SilkType.isReference(rootSemantic)
+        ? rootSemantic.target
+        : rootSemantic
+    let staticOffset = 0
+    const dynamicOffsets: Array<{
+      readonly local: Mir.LocalId
+      readonly stride: number
+      readonly length: number
+    }> = []
+    for (const selector of operation.selectors) {
+      const selectedLayout = selected === undefined ? undefined : LayoutPlan.entry(plan, selected)
+      if (selector._tag === 'FieldSelector') {
+        if (selectedLayout?.representation._tag !== 'Aggregate')
+          throw new RangeError('Wasm borrow field selector lost its aggregate layout')
+        const field = selectedLayout.representation.fields.find(
+          (candidate) =>
+            candidate.id.ordinal === selector.field.ordinal &&
+            candidate.id.struct.sourceId === selector.field.struct.sourceId &&
+            candidate.id.struct.ordinal === selector.field.struct.ordinal,
+        )
+        if (field === undefined)
+          throw new RangeError('Wasm borrow field selector lost its field layout')
+        staticOffset += field.offset
+        selected = field.type
+        continue
+      }
+      if (
+        selector._tag !== 'ElementSelector' ||
+        selectedLayout?.representation._tag !== 'Repeated'
+      ) {
+        throw new RangeError('Wasm borrow element selector lost its repeated layout')
+      }
+      if (selector.index._tag === 'Proven') {
+        staticOffset += selector.index.value * selectedLayout.representation.stride
+      } else {
+        dynamicOffsets.push(
+          Object.freeze({
+            local: selector.index.local,
+            stride: selectedLayout.representation.stride,
+            length: selector.length,
+          }),
         )
       }
-      for (const [destinationOrdinal, destinationLane] of destinationLanes.entries()) {
-        const candidates = sourceLanes.flatMap((sourceLane, sourceOrdinal) => {
-          if (sourceLane.path.length !== operation.selectors.length + destinationLane.path.length) {
+      selected = selectedLayout.representation.element
+    }
+    const planned = memory?.frame.roots.get(operation.root.ordinal)
+    const [address, length] = slots(operation.destination)
+    if (
+      rootSemantic === undefined ||
+      address === undefined ||
+      (!SilkType.isReference(rootSemantic) && planned === undefined)
+    ) {
+      throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+    }
+    const instructions: Array<Instr.Instr> = []
+    for (const offset of dynamicOffsets) {
+      instructions.push(
+        Instr.localGet(scalar(offset.local)),
+        Instr.i32Const(offset.length),
+        Instr.op('i32.lt_u'),
+        Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+      )
+    }
+    instructions.push(
+      ...(SilkType.isReference(rootSemantic)
+        ? [Instr.localGet(scalar(operation.root))]
+        : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
+      ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+    )
+    for (const offset of dynamicOffsets) {
+      instructions.push(
+        Instr.localGet(scalar(offset.local)),
+        Instr.i32Const(offset.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+      )
+    }
+    instructions.push(Instr.localSet(address))
+    if (operation.type._tag === 'Reference') return instructions
+    if (length === undefined || operation.sourceType._tag !== 'FixedArray') {
+      throw new RangeError('Wasm slice formation lost its length lane or array root')
+    }
+    return [
+      ...instructions,
+      Instr.i32Const(operation.sourceType.type.length),
+      Instr.localSet(length),
+    ]
+  }
+}
+
+const emitEndLoanOperation = (
+  _operation: Extract<Mir.Operation, { readonly _tag: 'EndLoan' }>,
+  _state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => []
+
+const emitSliceLengthOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SliceLength' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, scalar } = state
+
+  const length = slots(operation.slice).at(1)
+  return length === undefined
+    ? [Instr.op('unreachable')]
+    : [Instr.localGet(length), Instr.localSet(scalar(operation.destination))]
+}
+
+const emitConvertUnionOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConvertUnion' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, transfer, zeroFor } = state
+
+  const source = slots(operation.source)
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  if (tag === undefined) throw new RangeError('Wasm union destination has no tag lane')
+  const instructions: Array<Instr.Instr> = []
+  if (operation.conversion === 'Inject') {
+    const mapping = operation.mappings.at(0)
+    if (mapping === undefined) throw new RangeError('Wasm union injection has no member map')
+    instructions.push(Instr.i32Const(mapping.targetOrdinal), Instr.localSet(tag))
+    for (let slot = 1; slot < destination.length; slot += 1) {
+      const target = destination.at(slot)
+      const value = source.at(slot - 1)
+      if (target === undefined) continue
+      instructions.push(
+        ...(value === undefined
+          ? [zeroFor(target), Instr.localSet(target)]
+          : transfer(value, target)),
+      )
+    }
+    return instructions
+  }
+  const sourceTag = source.at(0)
+  if (sourceTag === undefined) throw new RangeError('Wasm union source has no tag lane')
+  instructions.push(Instr.i32Const(0), Instr.localSet(layout.scratch))
+  for (const mapping of operation.mappings) {
+    instructions.push(
+      Instr.i32Const(mapping.targetOrdinal),
+      Instr.localGet(layout.scratch),
+      Instr.localGet(sourceTag),
+      Instr.i32Const(mapping.sourceOrdinal),
+      Instr.op('i32.eq'),
+      Instr.op('select'),
+      Instr.localSet(layout.scratch),
+    )
+  }
+  instructions.push(Instr.localGet(layout.scratch), Instr.localSet(tag))
+  for (let slot = 1; slot < destination.length; slot += 1) {
+    const target = destination.at(slot)
+    const value = source.at(slot)
+    if (target === undefined) continue
+    instructions.push(
+      ...(value === undefined
+        ? [zeroFor(target), Instr.localSet(target)]
+        : transfer(value, target)),
+    )
+  }
+  return instructions
+}
+
+const emitConstructOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Construct' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(
+    operation.fields.flatMap((field) => [...slots(field.value)]),
+    slots(operation.destination),
+  )
+}
+
+const emitConstructArrayOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConstructArray' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(
+    operation.elements.flatMap((element) => [...slots(element)]),
+    slots(operation.destination),
+  )
+}
+
+const emitProjectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Project' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, copy } = state
+
+  const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+  const sourceSlots = slots(operation.source)
+  const projected = sourceLanes.flatMap((lane, index) => {
+    const field = lane.path.at(0)
+    const source = sourceSlots.at(index)
+    return field !== undefined &&
+      field._tag === 'FieldId' &&
+      source !== undefined &&
+      field.ordinal === operation.field.ordinal &&
+      field.struct.sourceId === operation.field.struct.sourceId &&
+      field.struct.ordinal === operation.field.struct.ordinal
+      ? [source]
+      : []
+  })
+  return copy(projected, slots(operation.destination))
+}
+
+const emitReadPlaceOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ReadPlace' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, memory, slots, scalar, loadAt } = state
+
+  const rootType = layout.types.at(operation.root.ordinal)
+  const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+  if (rootSemantic !== undefined && SilkType.isReference(rootSemantic)) {
+    // The place lives on the referenced target: static field offsets off the address.
+    const address = scalar(operation.root)
+    const target = rootSemantic.target
+    const staticSelectors: Array<LayoutPlan.Selector> = []
+    for (const candidate of operation.selectors) {
+      if (candidate._tag !== 'FieldSelector')
+        throw new RangeError('Wasm reference place supports only field selectors')
+      staticSelectors.push(candidate.field)
+    }
+    const destinationSlots = slots(operation.destination)
+    const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+    return destinationLanes.flatMap((lane, ordinal) => {
+      const destination = destinationSlots.at(ordinal)
+      const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      if (destination === undefined || offset === undefined)
+        throw new RangeError('Wasm reference read lost a lane offset')
+      return [...loadAt(address, offset, lane), Instr.localSet(destination)]
+    })
+  }
+  if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
+    if (memory === undefined) throw new RangeError('Wasm slice read has no private memory')
+    const [selector, ...suffixSelectors] = operation.selectors
+    const [base, length] = slots(operation.root)
+    if (selector?._tag !== 'SliceElementSelector' || base === undefined || length === undefined) {
+      throw new RangeError('Wasm slice read lost its canonical lanes')
+    }
+    const sliceLayout = LayoutPlan.entry(memory.plan, rootSemantic)
+    if (sliceLayout?.representation._tag !== 'Slice') {
+      throw new RangeError('Wasm slice read lost its compiler layout')
+    }
+    const staticSelectors: Array<LayoutPlan.Selector> = []
+    for (const candidate of suffixSelectors) {
+      if (candidate._tag === 'FieldSelector') {
+        staticSelectors.push(candidate.field)
+      } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+        staticSelectors.push(
+          Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
+        )
+      } else {
+        throw new RangeError('Wasm nested runtime slice place is not canonical')
+      }
+    }
+    const instructions: Array<Instr.Instr> = [
+      Instr.localGet(scalar(selector.index)),
+      Instr.localGet(length),
+      Instr.op('i32.lt_u'),
+      Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+    ]
+    const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+    const destinationSlots = slots(operation.destination)
+    for (const [ordinal, lane] of destinationLanes.entries()) {
+      const staticOffset = LayoutPlan.laneOffset(
+        memory.plan,
+        rootSemantic.element,
+        Object.freeze([...staticSelectors, ...lane.path]),
+      )
+      const destination = destinationSlots.at(ordinal)
+      if (staticOffset === undefined || destination === undefined) {
+        throw new RangeError(`Wasm slice read lost lane ${ordinal}`)
+      }
+      instructions.push(
+        Instr.localGet(base),
+        Instr.localGet(scalar(selector.index)),
+        Instr.i32Const(sliceLayout.representation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+        Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+        Instr.localSet(destination),
+      )
+    }
+    return instructions
+  }
+  const sourceLanes = layout.lanes.at(operation.root.ordinal) ?? []
+  const sourceSlots = slots(operation.root)
+  const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
+  const destinationSlots = slots(operation.destination)
+  const instructions: Array<Instr.Instr> = []
+  for (const selector of operation.selectors) {
+    if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
+    instructions.push(
+      Instr.localGet(scalar(selector.index.local)),
+      Instr.i32Const(selector.length),
+      Instr.op('i32.lt_u'),
+      Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+    )
+  }
+  for (const [destinationOrdinal, destinationLane] of destinationLanes.entries()) {
+    const candidates = sourceLanes.flatMap((sourceLane, sourceOrdinal) => {
+      if (sourceLane.path.length !== operation.selectors.length + destinationLane.path.length) {
+        return []
+      }
+      const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
+      for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+        const physical = sourceLane.path.at(selectorOrdinal)
+        if (physical === undefined) return []
+        if (selector._tag === 'FieldSelector') {
+          if (
+            physical._tag !== 'FieldId' ||
+            physical.ordinal !== selector.field.ordinal ||
+            physical.struct.sourceId !== selector.field.struct.sourceId ||
+            physical.struct.ordinal !== selector.field.struct.ordinal
+          ) {
             return []
           }
-          const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
-          for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
-            const physical = sourceLane.path.at(selectorOrdinal)
-            if (physical === undefined) return []
-            if (selector._tag === 'FieldSelector') {
-              if (
-                physical._tag !== 'FieldId' ||
-                physical.ordinal !== selector.field.ordinal ||
-                physical.struct.sourceId !== selector.field.struct.sourceId ||
-                physical.struct.ordinal !== selector.field.struct.ordinal
-              ) {
-                return []
-              }
-            } else {
-              if (physical._tag !== 'ElementSelector') return []
-              if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
-                return []
-              }
-              if (selector.index._tag === 'Runtime') {
-                conditions.push(
-                  Object.freeze({ local: selector.index.local, element: physical.index }),
-                )
-              }
-            }
+        } else {
+          if (physical._tag !== 'ElementSelector') return []
+          if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
+            return []
           }
-          const suffix = sourceLane.path.slice(operation.selectors.length)
-          const sameSuffix = suffix.every((physical, ordinal) => {
-            const expected = destinationLane.path.at(ordinal)
-            return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
-          })
-          const source = sourceSlots.at(sourceOrdinal)
-          return sameSuffix && source !== undefined ? [Object.freeze({ source, conditions })] : []
-        })
-        const first = candidates.at(0)
-        const destination = destinationSlots.at(destinationOrdinal)
-        if (
-          first === undefined &&
-          destination !== undefined &&
-          operation.selectors.some(
-            (selector) => selector._tag === 'ElementSelector' && selector.length === 0,
-          )
-        ) {
-          instructions.push(Instr.i32Const(0), Instr.localSet(destination))
-          continue
-        }
-        if (first === undefined || destination === undefined) {
-          throw new RangeError(
-            `Wasm backend could not realize place-read lane ${destinationOrdinal}`,
-          )
-        }
-        let selection: ReadonlyArray<Instr.Instr> = [Instr.localGet(first.source)]
-        for (const candidate of candidates.slice(1)) {
-          const condition = candidate.conditions.flatMap((element, ordinal) => [
-            Instr.localGet(scalar(element.local)),
-            Instr.i32Const(element.element),
-            Instr.op('i32.eq'),
-            ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
-          ])
-          if (condition.length === 0) continue
-          selection = [
-            Instr.localGet(candidate.source),
-            ...selection,
-            ...condition,
-            Instr.op('select'),
-          ]
-        }
-        instructions.push(...selection, Instr.localSet(destination))
-      }
-      return instructions
-    }
-    case 'CheckPlace': {
-      if (layout.types.at(operation.root.ordinal)?._tag === 'Slice') {
-        const selector = operation.selectors.at(0)
-        const length = slots(operation.root).at(1)
-        if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
-          throw new RangeError('Wasm slice write check lost its canonical lanes')
-        }
-        return [
-          Instr.localGet(scalar(selector.index)),
-          Instr.localGet(length),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-        ]
-      }
-      const instructions: Array<Instr.Instr> = []
-      for (const selector of operation.selectors) {
-        if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
-        instructions.push(
-          Instr.localGet(scalar(selector.index.local)),
-          Instr.i32Const(selector.length),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-        )
-      }
-      return instructions
-    }
-    case 'WritePlace': {
-      if (operation.rootType._tag === 'Reference') {
-        // Writing through the borrow stores each value lane at its offset on the target.
-        const address = scalar(operation.root)
-        const target = operation.rootType.type.target
-        const staticSelectors: Array<LayoutPlan.Selector> = []
-        for (const candidate of operation.selectors) {
-          if (candidate._tag !== 'FieldSelector')
-            throw new RangeError('Wasm reference place supports only field selectors')
-          staticSelectors.push(candidate.field)
-        }
-        const sourceSlots = slots(operation.source)
-        const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
-        return sourceLanes.flatMap((lane, ordinal) => {
-          const value = sourceSlots.at(ordinal)
-          const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
-          if (value === undefined || offset === undefined)
-            throw new RangeError('Wasm reference write lost a lane offset')
-          return storeAt(address, value, offset, lane)
-        })
-      }
-      if (operation.rootType._tag === 'Slice') {
-        if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')
-        const [selector, ...suffixSelectors] = operation.selectors
-        const base = slots(operation.root).at(0)
-        if (selector?._tag !== 'SliceElementSelector' || base === undefined) {
-          throw new RangeError('Wasm slice write lost its canonical address lane')
-        }
-        const sliceLayout = LayoutPlan.entry(memory.plan, operation.rootType.type)
-        if (sliceLayout?.representation._tag !== 'Slice') {
-          throw new RangeError('Wasm slice write lost its compiler layout')
-        }
-        const sliceType = operation.rootType.type
-        const sliceRepresentation = sliceLayout.representation
-        const staticSelectors: Array<LayoutPlan.Selector> = []
-        for (const candidate of suffixSelectors) {
-          if (candidate._tag === 'FieldSelector') {
-            staticSelectors.push(candidate.field)
-          } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-            staticSelectors.push(
-              Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
-            )
-          } else {
-            throw new RangeError('Wasm nested runtime slice write is not canonical')
-          }
-        }
-        const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
-        const sourceSlots = slots(operation.source)
-        return sourceLanes.flatMap((lane, ordinal) => {
-          const staticOffset = LayoutPlan.laneOffset(
-            memory.plan,
-            sliceType.element,
-            Object.freeze([...staticSelectors, ...lane.path]),
-          )
-          const source = sourceSlots.at(ordinal)
-          if (staticOffset === undefined || source === undefined) {
-            throw new RangeError(`Wasm slice write lost lane ${ordinal}`)
-          }
-          return [
-            Instr.localGet(base),
-            Instr.localGet(scalar(selector.index)),
-            Instr.i32Const(sliceRepresentation.stride),
-            Instr.op('i32.mul'),
-            Instr.op('i32.add'),
-            ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
-            Instr.localGet(source),
-            Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
-          ]
-        })
-      }
-      if (operation.selectors.length === 0) {
-        return [
-          ...copy(slots(operation.source), slots(operation.root)),
-          ...flushBorrowRoot(operation.root),
-        ]
-      }
-      const rootLanes = layout.lanes.at(operation.root.ordinal) ?? []
-      const rootSlots = slots(operation.root)
-      const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
-      const sourceSlots = slots(operation.source)
-      const instructions: Array<Instr.Instr> = []
-      for (const [rootOrdinal, rootLane] of rootLanes.entries()) {
-        const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
-        let matches = true
-        for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
-          const physical = rootLane.path.at(selectorOrdinal)
-          if (physical === undefined) {
-            matches = false
-            break
-          }
-          if (selector._tag === 'FieldSelector') {
-            if (
-              physical._tag !== 'FieldId' ||
-              physical.ordinal !== selector.field.ordinal ||
-              physical.struct.sourceId !== selector.field.struct.sourceId ||
-              physical.struct.ordinal !== selector.field.struct.ordinal
-            ) {
-              matches = false
-              break
-            }
-          } else if (selector._tag === 'SliceElementSelector') {
-            matches = false
-            break
-          } else if (physical._tag !== 'ElementSelector') {
-            matches = false
-            break
-          } else if (selector.index._tag === 'Proven') {
-            if (physical.index !== selector.index.value) {
-              matches = false
-              break
-            }
-          } else {
+          if (selector.index._tag === 'Runtime') {
             conditions.push(Object.freeze({ local: selector.index.local, element: physical.index }))
           }
         }
-        if (!matches) continue
-        const suffix = rootLane.path.slice(operation.selectors.length)
-        const sourceOrdinal = sourceLanes.findIndex(
-          (lane) =>
-            lane.path.length === suffix.length &&
-            lane.path.every((physical, ordinal) => {
-              const expected = suffix.at(ordinal)
-              return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
-            }),
-        )
-        const source = sourceSlots.at(sourceOrdinal)
-        const destination = rootSlots.at(rootOrdinal)
-        if (source === undefined || destination === undefined) {
-          throw new RangeError(`Wasm backend could not realize place-write lane ${rootOrdinal}`)
-        }
-        const assignment = [Instr.localGet(source), Instr.localSet(destination)]
-        if (conditions.length === 0) {
-          instructions.push(...assignment)
-          continue
-        }
-        const condition = conditions.flatMap((element, ordinal) => [
-          Instr.localGet(scalar(element.local)),
-          Instr.i32Const(element.element),
-          Instr.op('i32.eq'),
-          ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
-        ])
-        instructions.push(...condition, Instr.ifElse(Instr.emptyBlockType, assignment, []))
       }
-      return [...instructions, ...flushBorrowRoot(operation.root)]
-    }
-    case 'Drop':
-      return releaseInstructions(operation.cleanup, operation.local)
-    case 'MakeEffect':
-    case 'MakeCallable': {
-      const destination = slots(operation.destination)
-      const instructions: Array<Instr.Instr> = []
-      let cursor = 0
-      const fields =
-        operation._tag === 'MakeEffect'
-          ? operation.type.environment.fields
-          : (operation.type.environment?.fields ?? Object.freeze([]))
-      for (const [ordinal, capture] of operation.captures.entries()) {
-        const field = fields.at(ordinal)
-        if (field === undefined) throw new RangeError('Wasm Effect capture lost its field')
-        if (field.representation !== 'Borrow') {
-          const source = slots(capture.source)
-          instructions.push(...copy(source, destination.slice(cursor, cursor + source.length)))
-          cursor += source.length
-          continue
-        }
-        const target = destination.at(cursor)
-        if (target === undefined) throw new RangeError('Wasm Effect capture lost its lane')
-        const inherited = layout.borrowPointers.get(capture.source.ordinal)
-        if (inherited !== undefined) {
-          instructions.push(Instr.localGet(inherited), Instr.localSet(target))
-        } else {
-          const planned = memory?.frame.roots.get(capture.source.ordinal)
-          if (planned === undefined) throw new RangeError('Wasm Effect capture lost its frame root')
-          instructions.push(
-            ...materializeRoot(capture.source),
-            ...frameAddress(planned.offset),
-            Instr.localSet(target),
-          )
-        }
-        cursor += 1
-      }
-      if (cursor !== destination.length)
-        throw new RangeError('Wasm Effect environment capture lanes do not match its plan')
-      return instructions
-    }
-    case 'PackEffectComposite': {
-      const source = slots(operation.source)
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      if (tag === undefined) throw new RangeError('Wasm Effect composite lost its tag lane')
-      const payload = destination.slice(1)
-      const instructions: Array<Instr.Instr> = [
-        Instr.i32Const(operation.alternative),
-        Instr.localSet(tag),
-      ]
-      for (const [ordinal, target] of payload.entries()) {
-        const selected = source.at(ordinal)
-        instructions.push(
-          ...(selected === undefined
-            ? [zeroForType(layout.physicalTypes.at(target) ?? i32)]
-            : [
-                Instr.localGet(selected),
-                ...laneBridge(
-                  layout.physicalTypes.at(selected) ?? i32,
-                  layout.physicalTypes.at(target) ?? i32,
-                ),
-              ]),
-          Instr.localSet(target),
-        )
-      }
-      return instructions
-    }
-    case 'PackEffectOutcome': {
-      const source = slots(operation.source)
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      if (tag === undefined) throw new RangeError('Wasm effect outcome lost its tag lane')
-      const sourceType = layout.types.at(operation.source.ordinal)
-      if (sourceType === undefined) throw new RangeError('Wasm effect outcome lost its source type')
-      const payload = outcomePayload(source, Mir.semanticType(sourceType), operation.type.type)
-      return [
-        Instr.i32Const(operation.tag),
-        Instr.localSet(tag),
-        ...destination
-          .slice(1)
-          .flatMap((target, index) => [
-            ...(payload.at(index) ?? [zeroFor(target)]),
-            Instr.localSet(target),
-          ]),
-      ]
-    }
-    case 'PackEffectFailureUnion': {
-      const source = slots(operation.source)
-      const destination = slots(operation.destination)
-      const sourceTag = source.at(0)
-      const destinationTag = destination.at(0)
-      if (sourceTag === undefined || destinationTag === undefined)
-        throw new RangeError('Wasm Effect failure union lost a tag lane')
-      const payload = failurePayload(
-        source,
-        operation.sourceType.type,
-        sourceTag,
-        operation.type.type,
-        operation.mappings,
+      const suffix = sourceLane.path.slice(operation.selectors.length)
+      const sameSuffix = suffix.every((physical, ordinal) => {
+        const expected = destinationLane.path.at(ordinal)
+        return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
+      })
+      const source = sourceSlots.at(sourceOrdinal)
+      return sameSuffix && source !== undefined ? [Object.freeze({ source, conditions })] : []
+    })
+    const first = candidates.at(0)
+    const destination = destinationSlots.at(destinationOrdinal)
+    if (
+      first === undefined &&
+      destination !== undefined &&
+      operation.selectors.some(
+        (selector) => selector._tag === 'ElementSelector' && selector.length === 0,
       )
-      return [
-        Instr.i32Const(-1),
-        Instr.localSet(layout.scratch),
-        ...operation.mappings.flatMap((mapping) => [
-          Instr.localGet(sourceTag),
-          Instr.i32Const(mapping.source),
-          Instr.op('i32.eq'),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-            [],
-          ),
-        ]),
-        Instr.localGet(layout.scratch),
-        Instr.localSet(destinationTag),
-        ...destination
-          .slice(1)
-          .flatMap((target, index) => [
-            ...(payload.at(index) ?? [zeroFor(target)]),
-            Instr.localSet(target),
-          ]),
-      ]
+    ) {
+      instructions.push(Instr.i32Const(0), Instr.localSet(destination))
+      continue
     }
-    case 'PropagateEffectFailure': {
-      const source = slots(operation.source)
-      const sourceTag = operation.sourceType._tag === 'Union' ? source.at(0) : undefined
-      const mapTag =
-        operation.sourceType._tag === 'Nominal'
-          ? [Instr.i32Const(operation.tagMappings.at(0)?.target ?? -1)]
-          : sourceTag === undefined
-            ? []
-            : [
-                Instr.i32Const(-1),
-                Instr.localSet(layout.scratch),
-                ...operation.tagMappings.flatMap((mapping) => [
-                  Instr.localGet(sourceTag),
-                  Instr.i32Const(mapping.source),
-                  Instr.op('i32.eq'),
-                  Instr.ifElse(
-                    Instr.emptyBlockType,
-                    [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-                    [],
-                  ),
-                ]),
-                Instr.localGet(layout.scratch),
-              ]
-      return [
-        ...(operation.releases ?? []).flatMap((release) =>
-          releaseInstructions(release.cleanup, release.local),
-        ),
-        ...mapTag,
-        ...failurePayload(
-          source,
-          Mir.semanticType(operation.sourceType),
-          sourceTag,
-          operation.propagationType.type,
-          operation.tagMappings,
-        ).flat(),
-        Instr.op('return'),
-      ]
+    if (first === undefined || destination === undefined) {
+      throw new RangeError(`Wasm backend could not realize place-read lane ${destinationOrdinal}`)
     }
-    case 'UnpackEffectSuccess':
-      return copy(
-        slots(operation.source).slice(1, 1 + slots(operation.destination).length),
-        slots(operation.destination),
-      )
-    case 'RunEffect': {
-      const suspensionRegion = suspension?.regions.get(operation)
-      if (suspensionRegion?._tag === 'SuspendEffectRegion')
-        return suspension?.originate(suspensionRegion) ?? []
-      const outcomeSlots = slots(operation.outcome)
-      const destinationSlots = slots(operation.destination)
-      const tag = outcomeSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm propagated effect lost its tag lane')
-      const mapTag = [
-        Instr.i32Const(-1),
-        Instr.localSet(layout.scratch),
-        ...operation.tagMappings.flatMap((mapping) => [
-          Instr.localGet(tag),
-          Instr.i32Const(mapping.source),
-          Instr.op('i32.eq'),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-            [],
-          ),
-        ]),
-      ]
-      const failure = [
-        // Owners still live at this site release before the failure leaves.
-        ...(operation.releases ?? []).flatMap((release) =>
-          releaseInstructions(release.cleanup, release.local),
-        ),
-        ...mapTag,
-        Instr.localGet(layout.scratch),
-        ...failurePayload(
-          outcomeSlots,
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-        ).flat(),
-        Instr.op('return'),
-      ]
-      const invoke = [
-        ...operation.arguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        Instr.call(resolve(operation.target, operation.typeArguments)),
-        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadReachableRoots(operation.arguments),
-      ]
-      const completion = [
-        Instr.localGet(tag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
-          failure,
-        ),
-      ]
-      return [
-        ...(skipInvocation ? [] : invoke),
-        ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
-          ? []
-          : (suspension?.relay(suspensionRegion) ?? [])),
-        ...completion,
-      ]
+    let selection: ReadonlyArray<Instr.Instr> = [Instr.localGet(first.source)]
+    for (const candidate of candidates.slice(1)) {
+      const condition = candidate.conditions.flatMap((element, ordinal) => [
+        Instr.localGet(scalar(element.local)),
+        Instr.i32Const(element.element),
+        Instr.op('i32.eq'),
+        ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
+      ])
+      if (condition.length === 0) continue
+      selection = [Instr.localGet(candidate.source), ...selection, ...condition, Instr.op('select')]
     }
-    case 'RunEffectValue':
-    case 'RunStaticEffect': {
-      const suspensionRegion = suspension?.regions.get(operation)
-      if (suspensionRegion?._tag === 'SuspendEffectRegion')
-        return suspension?.originate(suspensionRegion) ?? []
-      const outcomeSlots = slots(operation.outcome)
-      const destinationSlots = slots(operation.destination)
-      const tag = outcomeSlots.at(0)
-      if (tag === undefined) throw new RangeError('Wasm Effect value lost its outcome tag lane')
-      const invoke = [
-        ...(operation._tag === 'RunEffectValue'
-          ? slots(operation.effect)
-          : operation.captures.flatMap((capture) => slots(capture.source))
-        ).map((slot) => Instr.localGet(slot)),
-        ...operation.arguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
-        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadReachableRoots(
-          operation._tag === 'RunEffectValue'
-            ? [operation.effect, ...operation.arguments]
-            : [...operation.captures.map((capture) => capture.source), ...operation.arguments],
-        ),
-      ]
-      const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
-      if (operation.propagationType === undefined)
-        return [
-          ...(skipInvocation ? [] : invoke),
-          ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
-            ? []
-            : (suspension?.relay(suspensionRegion) ?? [])),
-          ...success,
-        ]
-      const mapTag = [
-        Instr.i32Const(-1),
-        Instr.localSet(layout.scratch),
-        ...operation.tagMappings.flatMap((mapping) => [
-          Instr.localGet(tag),
-          Instr.i32Const(mapping.source),
-          Instr.op('i32.eq'),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-            [],
-          ),
-        ]),
-      ]
-      const failure = [
-        // Owners still live at this site release before the failure leaves.
-        ...(operation.releases ?? []).flatMap((release) =>
-          releaseInstructions(release.cleanup, release.local),
-        ),
-        ...mapTag,
-        Instr.localGet(layout.scratch),
-        ...failurePayload(
-          outcomeSlots,
-          operation.outcomeType.type,
-          tag,
-          operation.propagationType.type,
-          operation.tagMappings,
-        ).flat(),
-        Instr.op('return'),
-      ]
-      return [
-        ...(skipInvocation ? [] : invoke),
-        ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
-          ? []
-          : (suspension?.relay(suspensionRegion) ?? [])),
-        Instr.localGet(tag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(Instr.emptyBlockType, success, failure),
-      ]
+    instructions.push(...selection, Instr.localSet(destination))
+  }
+  return instructions
+}
+
+const emitCheckPlaceOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CheckPlace' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, scalar } = state
+
+  if (layout.types.at(operation.root.ordinal)?._tag === 'Slice') {
+    const selector = operation.selectors.at(0)
+    const length = slots(operation.root).at(1)
+    if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
+      throw new RangeError('Wasm slice write check lost its canonical lanes')
     }
-    case 'RunEffectComposite': {
-      const suspensionRegion = suspension?.regions.get(operation)
-      if (suspensionRegion?._tag === 'SuspendEffectRegion')
-        return suspension?.originate(suspensionRegion) ?? []
-      const compositeSlots = slots(operation.effect)
-      const choice = compositeSlots.at(0)
-      const outcomeSlots = slots(operation.outcome)
-      const destinationSlots = slots(operation.destination)
-      const outcomeTag = outcomeSlots.at(0)
-      if (choice === undefined || outcomeTag === undefined)
-        throw new RangeError('Wasm Effect composite lost its tag lane')
-      const invokeAlternative = (
-        alternative: (typeof operation.alternatives)[number],
-      ): ReadonlyArray<Instr.Instr> => {
-        const captureLanes = laneKindsOf(plan, alternative.type)
-        const sourceOutcomeLanes = laneKindsOf(
-          plan,
-          Object.freeze({ _tag: 'EffectOutcome' as const, type: alternative.type.type }),
+    return [
+      Instr.localGet(scalar(selector.index)),
+      Instr.localGet(length),
+      Instr.op('i32.lt_u'),
+      Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+    ]
+  }
+  const instructions: Array<Instr.Instr> = []
+  for (const selector of operation.selectors) {
+    if (selector._tag !== 'ElementSelector' || selector.index._tag !== 'Runtime') continue
+    instructions.push(
+      Instr.localGet(scalar(selector.index.local)),
+      Instr.i32Const(selector.length),
+      Instr.op('i32.lt_u'),
+      Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+    )
+  }
+  return instructions
+}
+
+const emitWritePlaceOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'WritePlace' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, memory, slots, scalar, copy, storeAt, flushBorrowRoot } = state
+
+  if (operation.rootType._tag === 'Reference') {
+    // Writing through the borrow stores each value lane at its offset on the target.
+    const address = scalar(operation.root)
+    const target = operation.rootType.type.target
+    const staticSelectors: Array<LayoutPlan.Selector> = []
+    for (const candidate of operation.selectors) {
+      if (candidate._tag !== 'FieldSelector')
+        throw new RangeError('Wasm reference place supports only field selectors')
+      staticSelectors.push(candidate.field)
+    }
+    const sourceSlots = slots(operation.source)
+    const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+    return sourceLanes.flatMap((lane, ordinal) => {
+      const value = sourceSlots.at(ordinal)
+      const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      if (value === undefined || offset === undefined)
+        throw new RangeError('Wasm reference write lost a lane offset')
+      return storeAt(address, value, offset, lane)
+    })
+  }
+  if (operation.rootType._tag === 'Slice') {
+    if (memory === undefined) throw new RangeError('Wasm slice write has no private memory')
+    const [selector, ...suffixSelectors] = operation.selectors
+    const base = slots(operation.root).at(0)
+    if (selector?._tag !== 'SliceElementSelector' || base === undefined) {
+      throw new RangeError('Wasm slice write lost its canonical address lane')
+    }
+    const sliceLayout = LayoutPlan.entry(memory.plan, operation.rootType.type)
+    if (sliceLayout?.representation._tag !== 'Slice') {
+      throw new RangeError('Wasm slice write lost its compiler layout')
+    }
+    const sliceType = operation.rootType.type
+    const sliceRepresentation = sliceLayout.representation
+    const staticSelectors: Array<LayoutPlan.Selector> = []
+    for (const candidate of suffixSelectors) {
+      if (candidate._tag === 'FieldSelector') {
+        staticSelectors.push(candidate.field)
+      } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
+        staticSelectors.push(
+          Object.freeze({ _tag: 'ElementSelector', index: candidate.index.value }),
         )
-        const captureInputs = captureLanes.flatMap((lane, ordinal) => {
-          const source = compositeSlots.at(ordinal + 1)
-          if (source === undefined)
-            throw new RangeError('Wasm Effect composite lost an alternative capture lane')
-          return [
-            Instr.localGet(source),
-            ...laneBridge(layout.physicalTypes.at(source) ?? i32, laneValueType(plan, lane)),
-          ]
-        })
-        const clearUnused = outcomeSlots
-          .slice(sourceOutcomeLanes.length)
-          .flatMap((target) => [zeroFor(target), Instr.localSet(target)])
-        const storeOutcome = [...sourceOutcomeLanes]
-          .map((lane, ordinal) => ({ lane, ordinal }))
-          .reverse()
-          .flatMap(({ lane, ordinal }) => {
-            const target = outcomeSlots.at(ordinal)
-            if (target === undefined)
-              throw new RangeError('Wasm Effect composite outcome exceeds its joined carrier')
-            return [
-              ...laneBridge(laneValueType(plan, lane), layout.physicalTypes.at(target) ?? i32),
-              Instr.localSet(target),
-            ]
-          })
-        const remapFailureTag = alternative.tagMappings.flatMap((mapping) => [
-          Instr.localGet(outcomeTag),
-          Instr.i32Const(mapping.source),
-          Instr.op('i32.eq'),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            [Instr.i32Const(mapping.target), Instr.localSet(outcomeTag)],
-            [],
-          ),
-        ])
-        return [
-          ...clearUnused,
-          ...captureInputs,
-          ...alternative.arguments.flatMap((argument) =>
-            slots(argument).map((slot) => Instr.localGet(slot)),
-          ),
-          Instr.call(resolve(alternative.runner, alternative.runnerTypeArguments)),
-          ...storeOutcome,
-          ...remapFailureTag,
-          ...reloadReachableRoots([operation.effect, ...alternative.arguments]),
-        ]
+      } else {
+        throw new RangeError('Wasm nested runtime slice write is not canonical')
       }
-      let dispatch: ReadonlyArray<Instr.Instr> = [Instr.op('unreachable')]
-      for (let ordinal = operation.alternatives.length - 1; ordinal >= 0; ordinal -= 1) {
-        const alternative = operation.alternatives.at(ordinal)
-        if (alternative === undefined) continue
-        dispatch = [
-          Instr.localGet(choice),
-          Instr.i32Const(ordinal),
-          Instr.op('i32.eq'),
-          Instr.ifElse(Instr.emptyBlockType, invokeAlternative(alternative), dispatch),
-        ]
-      }
-      const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
-      const completion = (() => {
-        if (operation.propagationType === undefined) return success
-        const mapTag = [
-          Instr.i32Const(-1),
-          Instr.localSet(layout.scratch),
-          ...operation.tagMappings.flatMap((mapping) => [
-            Instr.localGet(outcomeTag),
-            Instr.i32Const(mapping.source),
-            Instr.op('i32.eq'),
-            Instr.ifElse(
-              Instr.emptyBlockType,
-              [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-              [],
-            ),
-          ]),
-        ]
-        const failure = [
-          ...(operation.releases ?? []).flatMap((release) =>
-            releaseInstructions(release.cleanup, release.local),
-          ),
-          ...mapTag,
-          Instr.localGet(layout.scratch),
-          ...failurePayload(
-            outcomeSlots,
-            operation.outcomeType.type,
-            outcomeTag,
-            operation.propagationType.type,
-            operation.tagMappings,
-          ).flat(),
-          Instr.op('return'),
-        ]
-        return [
-          Instr.localGet(outcomeTag),
-          Instr.op('i32.eqz'),
-          Instr.ifElse(Instr.emptyBlockType, success, failure),
-        ]
-      })()
-      return [
-        ...(skipInvocation ? [] : dispatch),
-        ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
-          ? []
-          : (suspension?.relay(suspensionRegion) ?? [])),
-        ...completion,
-      ]
     }
-    case 'ReifyEffect': {
-      const suspensionRegion = suspension?.regions.get(operation)
-      if (suspensionRegion?._tag === 'SuspendEffectRegion')
-        return suspension?.originate(suspensionRegion) ?? []
-      const outcomeSlots = slots(operation.outcome)
-      const destinationSlots = slots(operation.destination)
-      const outcomeTag = outcomeSlots.at(0)
-      const resultTag = destinationSlots.at(0)
-      if (outcomeTag === undefined || resultTag === undefined)
-        throw new RangeError('Wasm Effect result lost an outcome or Result tag lane')
-      const invoke = [
-        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
-        ...operation.arguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
-        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadReachableRoots([operation.effect, ...operation.arguments]),
-      ]
-      const writePayload = (
-        source: ReadonlyArray<number>,
-        destination: ReadonlyArray<number>,
-        memberLanes: ReadonlyArray<LayoutPlan.CallingLane> = Object.freeze([]),
-      ): ReadonlyArray<Instr.Instr> =>
-        destination.flatMap((target, index) => {
-          const value = source.at(index)
-          const from = value === undefined ? undefined : layout.physicalTypes.at(value)
-          const to = layout.physicalTypes.at(target)
-          const member = memberLanes.at(index)
-          const memberType = member === undefined ? undefined : laneValueType(plan, member)
-          return [
-            ...(value === undefined
-              ? [zeroFor(target)]
-              : [
-                  Instr.localGet(value),
-                  ...(from === undefined || memberType === undefined
-                    ? []
-                    : laneBridge(from, memberType)),
-                  ...(to === undefined || memberType === undefined
-                    ? from === undefined || to === undefined
-                      ? []
-                      : laneBridge(from, to)
-                    : laneBridge(memberType, to)),
-                ]),
-            Instr.localSet(target),
-          ]
-        })
-      const resultPayload = destinationSlots.slice(1)
-      const successLaneCount =
-        operation.outcomeShape.tree._tag === 'OutcomeShape'
-          ? operation.outcomeShape.tree.success.laneCount
-          : 0
-      const successShape = LayoutPlan.callingShape(plan, operation.outcomeType.type.success)
-      if (successShape === undefined)
-        throw new RangeError('Wasm Effect Result lost its success member shape')
-      const success = [
-        Instr.i32Const(operation.successTag),
-        Instr.localSet(resultTag),
-        ...writePayload(
-          outcomeSlots.slice(1, 1 + successLaneCount),
-          resultPayload,
-          successShape.lanes,
-        ),
-      ]
-      const failure =
-        SilkType.failureMembers(operation.outcomeType.type).length === 0
-          ? [Instr.op('unreachable')]
-          : [
-              Instr.i32Const(operation.failureTag),
-              Instr.localSet(resultTag),
-              ...(SilkType.isUnion(operation.failureValueType)
-                ? (() => {
-                    const innerTag = resultPayload.at(0)
-                    if (innerTag === undefined)
-                      throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
-                    return [
-                      Instr.localGet(outcomeTag),
-                      Instr.i32Const(1),
-                      Instr.op('i32.sub'),
-                      Instr.localSet(innerTag),
-                      ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
-                    ]
-                  })()
-                : writePayload(outcomeSlots.slice(1), resultPayload)),
-            ]
-      return [
-        ...(skipInvocation ? [] : invoke),
-        ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
-          ? []
-          : (suspension?.relay(suspensionRegion) ?? [])),
-        Instr.localGet(outcomeTag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(Instr.emptyBlockType, success, failure),
-      ]
-    }
-    case 'CloseEffectEntry': {
-      const outcomeSlots = slots(operation.outcome)
-      const tag = outcomeSlots.at(0)
-      const destination = scalar(operation.destination)
-      if (tag === undefined) throw new RangeError('Wasm effect entry lost its outcome tag')
-      const failureBranch = (ordinal: number): ReadonlyArray<Instr.Instr> => {
-        const failure = operation.failures.at(ordinal)
-        if (failure === undefined) return [Instr.op('unreachable')]
-        const payload = slots(failure.payload)
-        const selected = outcomeSlots.slice(1, 1 + payload.length)
-        if (selected.length !== payload.length)
-          throw new RangeError('Wasm effect entry failure payload shape is inconsistent')
-        return [
-          Instr.localGet(tag),
-          Instr.i32Const(failure.tag),
-          Instr.op('i32.eq'),
-          Instr.ifElse(
-            Instr.emptyBlockType,
-            [
-              ...copy(selected, payload),
-              ...releaseInstructions(failure.cleanup, failure.payload),
-              Instr.i32Const(1),
-              Instr.localSet(destination),
-            ],
-            failureBranch(ordinal + 1),
-          ),
-        ]
+    const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+    const sourceSlots = slots(operation.source)
+    return sourceLanes.flatMap((lane, ordinal) => {
+      const staticOffset = LayoutPlan.laneOffset(
+        memory.plan,
+        sliceType.element,
+        Object.freeze([...staticSelectors, ...lane.path]),
+      )
+      const source = sourceSlots.at(ordinal)
+      if (staticOffset === undefined || source === undefined) {
+        throw new RangeError(`Wasm slice write lost lane ${ordinal}`)
       }
       return [
-        Instr.call(resolve(operation.target, operation.typeArguments)),
-        ...[...slots(operation.effect)].reverse().map((slot) => Instr.localSet(slot)),
-        ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
-        Instr.call(resolve(operation.runner, operation.typeArguments)),
-        ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
-        Instr.localGet(tag),
-        Instr.op('i32.eqz'),
-        Instr.ifElse(
-          Instr.emptyBlockType,
-          [Instr.i32Const(0), Instr.localSet(destination)],
-          failureBranch(0),
-        ),
+        Instr.localGet(base),
+        Instr.localGet(scalar(selector.index)),
+        Instr.i32Const(sliceRepresentation.stride),
+        Instr.op('i32.mul'),
+        Instr.op('i32.add'),
+        ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
+        Instr.localGet(source),
+        Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
       ]
-    }
-    case 'Call':
-      return [
-        ...operation.arguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        Instr.call(resolve(operation.target, operation.typeArguments)),
-        ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadReachableRoots(operation.arguments),
-      ]
-    case 'ApplyCallable': {
-      const sourceType =
-        operation.callable === undefined ? undefined : layout.types.at(operation.callable.ordinal)
-      const target =
-        operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
-      if (target === undefined)
-        throw new RangeError('Wasm callable application lost its hidden identity')
-      const captureGroups: Array<{
-        readonly parameterOrdinal: number
-        readonly operands: ReadonlyArray<Instr.Instr>
-      }> = []
-      if (operation.callable !== undefined) {
-        if (sourceType?._tag !== 'CallableValue')
-          throw new RangeError('Wasm stored callable lost its identity')
-        const environmentSlots = slots(operation.callable)
-        let cursor = 0
-        for (const field of sourceType.environment?.fields ?? []) {
-          if (memory === undefined && field.representation === 'Borrow')
-            throw new RangeError('Wasm borrowed callable capture requires private memory')
-          const shape = LayoutPlan.callingShape(plan, field.type)
-          if (shape === undefined)
-            throw new RangeError('Wasm callable capture lost its calling shape')
-          if (field.representation === 'Value') {
-            captureGroups.push(
-              Object.freeze({
-                parameterOrdinal: field.parameterOrdinal,
-                operands: Object.freeze(
-                  environmentSlots
-                    .slice(cursor, cursor + shape.laneCount)
-                    .map((slot) => Instr.localGet(slot)),
-                ),
-              }),
-            )
-            cursor += shape.laneCount
-            continue
-          }
-          const pointer = environmentSlots.at(cursor)
-          if (pointer === undefined || memory === undefined)
-            throw new RangeError('Wasm borrowed callable capture lost its pointer')
-          cursor += 1
-          const operands: Array<Instr.Instr> = []
-          for (const lane of shape.lanes) {
-            const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
-            if (offset === undefined)
-              throw new RangeError('Wasm borrowed callable capture lost its lane offset')
-            operands.push(
-              Instr.localGet(pointer),
-              Instr.i32Const(offset),
-              Instr.op('i32.add'),
-              Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
-            )
-          }
-          captureGroups.push(
-            Object.freeze({
-              parameterOrdinal: field.parameterOrdinal,
-              operands: Object.freeze(operands),
-            }),
-          )
+    })
+  }
+  if (operation.selectors.length === 0) {
+    return [
+      ...copy(slots(operation.source), slots(operation.root)),
+      ...flushBorrowRoot(operation.root),
+    ]
+  }
+  const rootLanes = layout.lanes.at(operation.root.ordinal) ?? []
+  const rootSlots = slots(operation.root)
+  const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
+  const sourceSlots = slots(operation.source)
+  const instructions: Array<Instr.Instr> = []
+  for (const [rootOrdinal, rootLane] of rootLanes.entries()) {
+    const conditions: Array<{ readonly local: Mir.LocalId; readonly element: number }> = []
+    let matches = true
+    for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
+      const physical = rootLane.path.at(selectorOrdinal)
+      if (physical === undefined) {
+        matches = false
+        break
+      }
+      if (selector._tag === 'FieldSelector') {
+        if (
+          physical._tag !== 'FieldId' ||
+          physical.ordinal !== selector.field.ordinal ||
+          physical.struct.sourceId !== selector.field.struct.sourceId ||
+          physical.struct.ordinal !== selector.field.struct.ordinal
+        ) {
+          matches = false
+          break
+        }
+      } else if (selector._tag === 'SliceElementSelector') {
+        matches = false
+        break
+      } else if (physical._tag !== 'ElementSelector') {
+        matches = false
+        break
+      } else if (selector.index._tag === 'Proven') {
+        if (physical.index !== selector.index.value) {
+          matches = false
+          break
         }
       } else {
-        for (const capture of operation.captures) {
-          captureGroups.push(
-            Object.freeze({
-              parameterOrdinal: capture.parameterOrdinal,
-              operands: Object.freeze(slots(capture.source).map((slot) => Instr.localGet(slot))),
-            }),
-          )
-        }
+        conditions.push(Object.freeze({ local: selector.index.local, element: physical.index }))
       }
-      const captureOperands = [...captureGroups]
-        .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-        .flatMap((capture) => [...capture.operands])
-      if (target._tag === 'BuiltinCallableTarget') {
-        const operandSlots = [
-          ...operation.arguments.flatMap((argument) => [...slots(argument)]),
-          ...(operation.callable === undefined
-            ? operation.captures.flatMap((capture) => [...slots(capture.source)])
-            : [...slots(operation.callable)]),
-        ]
-        const left = operandSlots.at(0)
-        if (left === undefined) throw new RangeError('Wasm callable builtin lost its first operand')
-        const scalarActor = Scalar.find(target.actor)
-        const conversionTarget = Scalar.conversionTarget(target.operation)
-        if (conversionTarget !== undefined) {
-          const source = scalarActor
-          if (source?.category === 'Floating') {
-            const bits = Scalar.bits(conversionTarget, plan.target.pointerSize === 4 ? 32 : 64)
-            const mnemonic: Instr.PlainMnemonic =
-              bits === 64
-                ? source.spelling === 'f32'
-                  ? conversionTarget.signedness === 'Signed'
-                    ? 'i64.trunc_f32_s'
-                    : 'i64.trunc_f32_u'
-                  : conversionTarget.signedness === 'Signed'
-                    ? 'i64.trunc_f64_s'
-                    : 'i64.trunc_f64_u'
-                : source.spelling === 'f32'
-                  ? conversionTarget.signedness === 'Signed'
-                    ? 'i32.trunc_f32_s'
-                    : 'i32.trunc_f32_u'
-                  : conversionTarget.signedness === 'Signed'
-                    ? 'i32.trunc_f64_s'
-                    : 'i32.trunc_f64_u'
-            return [
-              Instr.localGet(left),
-              Instr.op(mnemonic),
-              ...normalizeSubword(bits, conversionTarget.signedness === 'Signed'),
-              Instr.localSet(scalar(operation.destination)),
-            ]
-          }
-          if (source === undefined || source.category !== 'Integer')
-            throw new RangeError('Wasm callable conversion lost its source actor')
-          return [
-            ...emitIntegerConversionValue(
-              source,
-              conversionTarget,
-              left,
-              plan.target.pointerSize === 4 ? 32 : 64,
+    }
+    if (!matches) continue
+    const suffix = rootLane.path.slice(operation.selectors.length)
+    const sourceOrdinal = sourceLanes.findIndex(
+      (lane) =>
+        lane.path.length === suffix.length &&
+        lane.path.every((physical, ordinal) => {
+          const expected = suffix.at(ordinal)
+          return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
+        }),
+    )
+    const source = sourceSlots.at(sourceOrdinal)
+    const destination = rootSlots.at(rootOrdinal)
+    if (source === undefined || destination === undefined) {
+      throw new RangeError(`Wasm backend could not realize place-write lane ${rootOrdinal}`)
+    }
+    const assignment = [Instr.localGet(source), Instr.localSet(destination)]
+    if (conditions.length === 0) {
+      instructions.push(...assignment)
+      continue
+    }
+    const condition = conditions.flatMap((element, ordinal) => [
+      Instr.localGet(scalar(element.local)),
+      Instr.i32Const(element.element),
+      Instr.op('i32.eq'),
+      ...(ordinal === 0 ? [] : [Instr.op('i32.and')]),
+    ])
+    instructions.push(...condition, Instr.ifElse(Instr.emptyBlockType, assignment, []))
+  }
+  return [...instructions, ...flushBorrowRoot(operation.root)]
+}
+
+const emitDropOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { releaseInstructions } = state
+  return releaseInstructions(operation.cleanup, operation.local)
+}
+
+const emitMakeEffectOrMakeCallableOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' | 'MakeCallable' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, memory, slots, copy, materializeRoot, frameAddress } = state
+
+  const destination = slots(operation.destination)
+  const instructions: Array<Instr.Instr> = []
+  let cursor = 0
+  const fields =
+    operation._tag === 'MakeEffect'
+      ? operation.type.environment.fields
+      : (operation.type.environment?.fields ?? Object.freeze([]))
+  for (const [ordinal, capture] of operation.captures.entries()) {
+    const field = fields.at(ordinal)
+    if (field === undefined) throw new RangeError('Wasm Effect capture lost its field')
+    if (field.representation !== 'Borrow') {
+      const source = slots(capture.source)
+      instructions.push(...copy(source, destination.slice(cursor, cursor + source.length)))
+      cursor += source.length
+      continue
+    }
+    const target = destination.at(cursor)
+    if (target === undefined) throw new RangeError('Wasm Effect capture lost its lane')
+    const inherited = layout.borrowPointers.get(capture.source.ordinal)
+    if (inherited !== undefined) {
+      instructions.push(Instr.localGet(inherited), Instr.localSet(target))
+    } else {
+      const planned = memory?.frame.roots.get(capture.source.ordinal)
+      if (planned === undefined) throw new RangeError('Wasm Effect capture lost its frame root')
+      instructions.push(
+        ...materializeRoot(capture.source),
+        ...frameAddress(planned.offset),
+        Instr.localSet(target),
+      )
+    }
+    cursor += 1
+  }
+  if (cursor !== destination.length)
+    throw new RangeError('Wasm Effect environment capture lanes do not match its plan')
+  return instructions
+}
+
+const emitPackEffectCompositeOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PackEffectComposite' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, laneBridge } = state
+
+  const source = slots(operation.source)
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  if (tag === undefined) throw new RangeError('Wasm Effect composite lost its tag lane')
+  const payload = destination.slice(1)
+  const instructions: Array<Instr.Instr> = [
+    Instr.i32Const(operation.alternative),
+    Instr.localSet(tag),
+  ]
+  for (const [ordinal, target] of payload.entries()) {
+    const selected = source.at(ordinal)
+    instructions.push(
+      ...(selected === undefined
+        ? [zeroConst(layout.physicalTypes.at(target) ?? i32)]
+        : [
+            Instr.localGet(selected),
+            ...laneBridge(
+              layout.physicalTypes.at(selected) ?? i32,
+              layout.physicalTypes.at(target) ?? i32,
             ),
-            Instr.localSet(scalar(operation.destination)),
+          ]),
+      Instr.localSet(target),
+    )
+  }
+  return instructions
+}
+
+const emitPackEffectOutcomeOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PackEffectOutcome' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, zeroFor, outcomePayload } = state
+
+  const source = slots(operation.source)
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  if (tag === undefined) throw new RangeError('Wasm effect outcome lost its tag lane')
+  const sourceType = layout.types.at(operation.source.ordinal)
+  if (sourceType === undefined) throw new RangeError('Wasm effect outcome lost its source type')
+  const payload = outcomePayload(source, Mir.semanticType(sourceType), operation.type.type)
+  return [
+    Instr.i32Const(operation.tag),
+    Instr.localSet(tag),
+    ...destination
+      .slice(1)
+      .flatMap((target, index) => [
+        ...(payload.at(index) ?? [zeroFor(target)]),
+        Instr.localSet(target),
+      ]),
+  ]
+}
+
+const emitPackEffectFailureUnionOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PackEffectFailureUnion' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, zeroFor, failurePayload } = state
+
+  const source = slots(operation.source)
+  const destination = slots(operation.destination)
+  const sourceTag = source.at(0)
+  const destinationTag = destination.at(0)
+  if (sourceTag === undefined || destinationTag === undefined)
+    throw new RangeError('Wasm Effect failure union lost a tag lane')
+  const payload = failurePayload(
+    source,
+    operation.sourceType.type,
+    sourceTag,
+    operation.type.type,
+    operation.mappings,
+  )
+  return [
+    Instr.i32Const(-1),
+    Instr.localSet(layout.scratch),
+    ...operation.mappings.flatMap((mapping) => [
+      Instr.localGet(sourceTag),
+      Instr.i32Const(mapping.source),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+        [],
+      ),
+    ]),
+    Instr.localGet(layout.scratch),
+    Instr.localSet(destinationTag),
+    ...destination
+      .slice(1)
+      .flatMap((target, index) => [
+        ...(payload.at(index) ?? [zeroFor(target)]),
+        Instr.localSet(target),
+      ]),
+  ]
+}
+
+const emitPropagateEffectFailureOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'PropagateEffectFailure' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, slots, failurePayload, releaseInstructions } = state
+
+  const source = slots(operation.source)
+  const sourceTag = operation.sourceType._tag === 'Union' ? source.at(0) : undefined
+  const mapTag =
+    operation.sourceType._tag === 'Nominal'
+      ? [Instr.i32Const(operation.tagMappings.at(0)?.target ?? -1)]
+      : sourceTag === undefined
+        ? []
+        : [
+            Instr.i32Const(-1),
+            Instr.localSet(layout.scratch),
+            ...operation.tagMappings.flatMap((mapping) => [
+              Instr.localGet(sourceTag),
+              Instr.i32Const(mapping.source),
+              Instr.op('i32.eq'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+                [],
+              ),
+            ]),
+            Instr.localGet(layout.scratch),
           ]
-        }
-        const floatTarget = Scalar.floatConversionTarget(target.operation)
-        if (floatTarget !== undefined && scalarActor?.category === 'Integer') {
-          const bits = Scalar.bits(scalarActor, plan.target.pointerSize === 4 ? 32 : 64)
-          const mnemonic: Instr.PlainMnemonic =
-            floatTarget.spelling === 'f32'
-              ? bits === 64
-                ? scalarActor.signedness === 'Signed'
-                  ? 'f32.convert_i64_s'
-                  : 'f32.convert_i64_u'
-                : scalarActor.signedness === 'Signed'
-                  ? 'f32.convert_i32_s'
-                  : 'f32.convert_i32_u'
-              : bits === 64
-                ? scalarActor.signedness === 'Signed'
-                  ? 'f64.convert_i64_s'
-                  : 'f64.convert_i64_u'
-                : scalarActor.signedness === 'Signed'
-                  ? 'f64.convert_i32_s'
-                  : 'f64.convert_i32_u'
-          return [
-            Instr.localGet(left),
-            Instr.op(mnemonic),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        if (floatTarget !== undefined && scalarActor?.category === 'Floating') {
-          const instruction: Instr.PlainMnemonic | undefined =
-            scalarActor.spelling === floatTarget.spelling
-              ? undefined
-              : scalarActor.spelling === 'f64'
-                ? 'f32.demote_f64'
-                : 'f64.promote_f32'
-          return [
-            Instr.localGet(left),
-            ...(instruction === undefined ? [] : [Instr.op(instruction)]),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        if (target.operation === 'ToBits' && scalarActor?.category === 'Floating')
-          return [
-            Instr.localGet(left),
-            Instr.op(
-              scalarActor.spelling === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64',
-            ),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        if (target.operation === 'FromBits' && scalarActor?.category === 'Floating')
-          return [
-            Instr.localGet(left),
-            Instr.op(
-              scalarActor.spelling === 'f32' ? 'f32.reinterpret_i32' : 'f64.reinterpret_i64',
-            ),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        if (target.operation === 'Negate' && scalarActor?.category === 'Floating')
-          return [
-            Instr.localGet(left),
-            Instr.op(`${scalarActor.spelling}.neg`),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        if (target.operation === 'Not') {
-          return [
-            Instr.localGet(left),
-            Instr.op('i32.eqz'),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        if (
-          target.operation === 'Negate' ||
-          target.operation === 'WrappingNegate' ||
-          target.operation === 'SaturatingNegate' ||
-          target.operation === 'BitNot'
-        ) {
-          const integer = Scalar.find(target.actor)
-          if (integer === undefined || integer.category !== 'Integer') {
-            throw new RangeError('Wasm callable unary operation lost its integer actor')
-          }
-          const bits = Scalar.bits(integer, plan.target.pointerSize === 4 ? 32 : 64)
-          const range = Scalar.range(integer, plan.target.pointerSize === 4 ? 32 : 64)
-          const constant = (value: bigint): Instr.Instr =>
-            bits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-          const prefix = bits === 64 ? 'i64' : 'i32'
-          if (target.operation === 'BitNot') {
-            return [
-              Instr.localGet(left),
-              constant(-1n),
-              Instr.op(`${prefix}.xor`),
-              ...normalizeSubword(bits, integer.signedness === 'Signed'),
-              Instr.localSet(scalar(operation.destination)),
-            ]
-          }
-          if (target.operation === 'SaturatingNegate') {
-            return [
-              constant(range.maximum),
-              constant(0n),
-              Instr.localGet(left),
-              Instr.op(`${prefix}.sub`),
-              Instr.localGet(left),
-              constant(range.minimum),
-              Instr.op(`${prefix}.eq`),
-              Instr.op('select'),
-              Instr.localSet(scalar(operation.destination)),
-            ]
-          }
-          return [
-            ...(target.operation === 'Negate'
-              ? [
-                  Instr.localGet(left),
-                  constant(range.minimum),
-                  Instr.op(`${prefix}.eq`),
-                  Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-                ]
-              : []),
-            constant(0n),
-            Instr.localGet(left),
-            Instr.op(`${prefix}.sub`),
-            ...normalizeSubword(bits, true),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        const right = operandSlots.at(1)
-        if (
-          right === undefined ||
-          target.operation === 'StorageAcquire' ||
-          !Mir.isBinaryOperator(target.operation)
-        ) {
-          throw new RangeError(
-            `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
-          )
-        }
-        if (
-          scalarActor?.category === 'Boolean' &&
-          (target.operation === 'Equals' || target.operation === 'NotEquals')
-        ) {
-          return [
-            Instr.localGet(left),
-            Instr.localGet(right),
-            Instr.op(target.operation === 'Equals' ? 'i32.eq' : 'i32.ne'),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        if (scalarActor?.category === 'Floating') {
-          const prefix = scalarActor.spelling
-          const mnemonic: Instr.PlainMnemonic | undefined =
-            target.operation === 'Add'
-              ? `${prefix}.add`
-              : target.operation === 'Subtract'
-                ? `${prefix}.sub`
-                : target.operation === 'Multiply'
-                  ? `${prefix}.mul`
-                  : target.operation === 'Divide'
-                    ? `${prefix}.div`
-                    : target.operation === 'Equals'
-                      ? `${prefix}.eq`
-                      : target.operation === 'NotEquals'
-                        ? `${prefix}.ne`
-                        : target.operation === 'LessThan'
-                          ? `${prefix}.lt`
-                          : target.operation === 'LessOrEqual'
-                            ? `${prefix}.le`
-                            : target.operation === 'GreaterThan'
-                              ? `${prefix}.gt`
-                              : target.operation === 'GreaterOrEqual'
-                                ? `${prefix}.ge`
-                                : undefined
-          if (mnemonic !== undefined)
-            return [
-              Instr.localGet(left),
-              Instr.localGet(right),
-              Instr.op(mnemonic),
-              Instr.localSet(scalar(operation.destination)),
-            ]
-          if (target.operation === 'Remainder')
-            return [
-              Instr.localGet(left),
-              Instr.localGet(left),
-              Instr.localGet(right),
-              Instr.op(`${prefix}.div`),
-              Instr.op(`${prefix}.trunc`),
-              Instr.localGet(right),
-              Instr.op(`${prefix}.mul`),
-              Instr.op(`${prefix}.sub`),
-              Instr.localSet(scalar(operation.destination)),
-            ]
-          throw new RangeError(`Wasm callable float ${target.operation} is unavailable`)
-        }
-        const integer = scalarActor
-        if (integer === undefined || integer.category !== 'Integer') {
-          throw new RangeError('Wasm callable binary lost its integer actor')
-        }
+  return [
+    ...(operation.releases ?? []).flatMap((release) =>
+      releaseInstructions(release.cleanup, release.local),
+    ),
+    ...mapTag,
+    ...failurePayload(
+      source,
+      Mir.semanticType(operation.sourceType),
+      sourceTag,
+      operation.propagationType.type,
+      operation.tagMappings,
+    ).flat(),
+    Instr.op('return'),
+  ]
+}
+
+const emitUnpackEffectSuccessOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'UnpackEffectSuccess' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { slots, copy } = state
+  return copy(
+    slots(operation.source).slice(1, 1 + slots(operation.destination).length),
+    slots(operation.destination),
+  )
+}
+
+const emitRunEffectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RunEffect' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const {
+    layout,
+    resolve,
+    suspension,
+    skipInvocation,
+    slots,
+    copy,
+    failurePayload,
+    reloadReachableRoots,
+    releaseInstructions,
+  } = state
+
+  const suspensionRegion = suspension?.regions.get(operation)
+  if (suspensionRegion?._tag === 'SuspendEffectRegion')
+    return suspension?.originate(suspensionRegion) ?? []
+  const outcomeSlots = slots(operation.outcome)
+  const destinationSlots = slots(operation.destination)
+  const tag = outcomeSlots.at(0)
+  if (tag === undefined) throw new RangeError('Wasm propagated effect lost its tag lane')
+  const mapTag = [
+    Instr.i32Const(-1),
+    Instr.localSet(layout.scratch),
+    ...operation.tagMappings.flatMap((mapping) => [
+      Instr.localGet(tag),
+      Instr.i32Const(mapping.source),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+        [],
+      ),
+    ]),
+  ]
+  const failure = [
+    // Owners still live at this site release before the failure leaves.
+    ...(operation.releases ?? []).flatMap((release) =>
+      releaseInstructions(release.cleanup, release.local),
+    ),
+    ...mapTag,
+    Instr.localGet(layout.scratch),
+    ...failurePayload(
+      outcomeSlots,
+      operation.outcomeType.type,
+      tag,
+      operation.propagationType.type,
+      operation.tagMappings,
+    ).flat(),
+    Instr.op('return'),
+  ]
+  const invoke = [
+    ...operation.arguments.flatMap((argument) =>
+      slots(argument).map((slot) => Instr.localGet(slot)),
+    ),
+    Instr.call(resolve(operation.target, operation.typeArguments)),
+    ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+    ...reloadReachableRoots(operation.arguments),
+  ]
+  const completion = [
+    Instr.localGet(tag),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots),
+      failure,
+    ),
+  ]
+  return [
+    ...(skipInvocation ? [] : invoke),
+    ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+      ? []
+      : (suspension?.relay(suspensionRegion) ?? [])),
+    ...completion,
+  ]
+}
+
+const emitRunEffectValueOrRunStaticEffectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' | 'RunStaticEffect' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const {
+    layout,
+    resolve,
+    suspension,
+    skipInvocation,
+    slots,
+    copy,
+    failurePayload,
+    reloadReachableRoots,
+    releaseInstructions,
+  } = state
+
+  const suspensionRegion = suspension?.regions.get(operation)
+  if (suspensionRegion?._tag === 'SuspendEffectRegion')
+    return suspension?.originate(suspensionRegion) ?? []
+  const outcomeSlots = slots(operation.outcome)
+  const destinationSlots = slots(operation.destination)
+  const tag = outcomeSlots.at(0)
+  if (tag === undefined) throw new RangeError('Wasm Effect value lost its outcome tag lane')
+  const invoke = [
+    ...(operation._tag === 'RunEffectValue'
+      ? slots(operation.effect)
+      : operation.captures.flatMap((capture) => slots(capture.source))
+    ).map((slot) => Instr.localGet(slot)),
+    ...operation.arguments.flatMap((argument) =>
+      slots(argument).map((slot) => Instr.localGet(slot)),
+    ),
+    Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
+    ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+    ...reloadReachableRoots(
+      operation._tag === 'RunEffectValue'
+        ? [operation.effect, ...operation.arguments]
+        : [...operation.captures.map((capture) => capture.source), ...operation.arguments],
+    ),
+  ]
+  const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
+  if (operation.propagationType === undefined)
+    return [
+      ...(skipInvocation ? [] : invoke),
+      ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+        ? []
+        : (suspension?.relay(suspensionRegion) ?? [])),
+      ...success,
+    ]
+  const mapTag = [
+    Instr.i32Const(-1),
+    Instr.localSet(layout.scratch),
+    ...operation.tagMappings.flatMap((mapping) => [
+      Instr.localGet(tag),
+      Instr.i32Const(mapping.source),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+        [],
+      ),
+    ]),
+  ]
+  const failure = [
+    // Owners still live at this site release before the failure leaves.
+    ...(operation.releases ?? []).flatMap((release) =>
+      releaseInstructions(release.cleanup, release.local),
+    ),
+    ...mapTag,
+    Instr.localGet(layout.scratch),
+    ...failurePayload(
+      outcomeSlots,
+      operation.outcomeType.type,
+      tag,
+      operation.propagationType.type,
+      operation.tagMappings,
+    ).flat(),
+    Instr.op('return'),
+  ]
+  return [
+    ...(skipInvocation ? [] : invoke),
+    ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+      ? []
+      : (suspension?.relay(suspensionRegion) ?? [])),
+    Instr.localGet(tag),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(Instr.emptyBlockType, success, failure),
+  ]
+}
+
+const emitRunEffectCompositeOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'RunEffectComposite' }>,
+  context: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const {
+    layout,
+    plan,
+    resolve,
+    suspension,
+    skipInvocation,
+    slots,
+    zeroFor,
+    copy,
+    laneBridge,
+    failurePayload,
+    reloadReachableRoots,
+    releaseInstructions,
+  } = context
+
+  const suspensionRegion = suspension?.regions.get(operation)
+  if (suspensionRegion?._tag === 'SuspendEffectRegion')
+    return suspension?.originate(suspensionRegion) ?? []
+  const compositeSlots = slots(operation.effect)
+  const choice = compositeSlots.at(0)
+  const outcomeSlots = slots(operation.outcome)
+  const destinationSlots = slots(operation.destination)
+  const outcomeTag = outcomeSlots.at(0)
+  if (choice === undefined || outcomeTag === undefined)
+    throw new RangeError('Wasm Effect composite lost its tag lane')
+  const invokeAlternative = (
+    alternative: (typeof operation.alternatives)[number],
+  ): ReadonlyArray<Instr.Instr> => {
+    const captureLanes = laneKindsOf(plan, alternative.type)
+    const sourceOutcomeLanes = laneKindsOf(
+      plan,
+      Object.freeze({ _tag: 'EffectOutcome' as const, type: alternative.type.type }),
+    )
+    const captureInputs = captureLanes.flatMap((lane, ordinal) => {
+      const source = compositeSlots.at(ordinal + 1)
+      if (source === undefined)
+        throw new RangeError('Wasm Effect composite lost an alternative capture lane')
+      return [
+        Instr.localGet(source),
+        ...laneBridge(layout.physicalTypes.at(source) ?? i32, laneValueType(plan, lane)),
+      ]
+    })
+    const clearUnused = outcomeSlots
+      .slice(sourceOutcomeLanes.length)
+      .flatMap((target) => [zeroFor(target), Instr.localSet(target)])
+    const storeOutcome = [...sourceOutcomeLanes]
+      .map((lane, ordinal) => ({ lane, ordinal }))
+      .reverse()
+      .flatMap(({ lane, ordinal }) => {
+        const target = outcomeSlots.at(ordinal)
+        if (target === undefined)
+          throw new RangeError('Wasm Effect composite outcome exceeds its joined carrier')
         return [
-          ...emitIntegerBinaryValue(
-            target.operation,
-            integer,
-            left,
-            right,
-            layout,
-            plan.target.pointerSize === 4 ? 32 : 64,
-          ),
+          ...laneBridge(laneValueType(plan, lane), layout.physicalTypes.at(target) ?? i32),
+          Instr.localSet(target),
+        ]
+      })
+    const remapFailureTag = alternative.tagMappings.flatMap((mapping) => [
+      Instr.localGet(outcomeTag),
+      Instr.i32Const(mapping.source),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [Instr.i32Const(mapping.target), Instr.localSet(outcomeTag)],
+        [],
+      ),
+    ])
+    return [
+      ...clearUnused,
+      ...captureInputs,
+      ...alternative.arguments.flatMap((argument) =>
+        slots(argument).map((slot) => Instr.localGet(slot)),
+      ),
+      Instr.call(resolve(alternative.runner, alternative.runnerTypeArguments)),
+      ...storeOutcome,
+      ...remapFailureTag,
+      ...reloadReachableRoots([operation.effect, ...alternative.arguments]),
+    ]
+  }
+  let dispatch: ReadonlyArray<Instr.Instr> = [Instr.op('unreachable')]
+  for (let ordinal = operation.alternatives.length - 1; ordinal >= 0; ordinal -= 1) {
+    const alternative = operation.alternatives.at(ordinal)
+    if (alternative === undefined) continue
+    dispatch = [
+      Instr.localGet(choice),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, invokeAlternative(alternative), dispatch),
+    ]
+  }
+  const success = copy(outcomeSlots.slice(1, 1 + destinationSlots.length), destinationSlots)
+  const completion = (() => {
+    if (operation.propagationType === undefined) return success
+    const mapTag = [
+      Instr.i32Const(-1),
+      Instr.localSet(layout.scratch),
+      ...operation.tagMappings.flatMap((mapping) => [
+        Instr.localGet(outcomeTag),
+        Instr.i32Const(mapping.source),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+          [],
+        ),
+      ]),
+    ]
+    const failure = [
+      ...(operation.releases ?? []).flatMap((release) =>
+        releaseInstructions(release.cleanup, release.local),
+      ),
+      ...mapTag,
+      Instr.localGet(layout.scratch),
+      ...failurePayload(
+        outcomeSlots,
+        operation.outcomeType.type,
+        outcomeTag,
+        operation.propagationType.type,
+        operation.tagMappings,
+      ).flat(),
+      Instr.op('return'),
+    ]
+    return [
+      Instr.localGet(outcomeTag),
+      Instr.op('i32.eqz'),
+      Instr.ifElse(Instr.emptyBlockType, success, failure),
+    ]
+  })()
+  return [
+    ...(skipInvocation ? [] : dispatch),
+    ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+      ? []
+      : (suspension?.relay(suspensionRegion) ?? [])),
+    ...completion,
+  ]
+}
+
+const emitReifyEffectOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ReifyEffect' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const {
+    layout,
+    plan,
+    resolve,
+    suspension,
+    skipInvocation,
+    slots,
+    laneBridge,
+    zeroFor,
+    reloadReachableRoots,
+  } = state
+
+  const suspensionRegion = suspension?.regions.get(operation)
+  if (suspensionRegion?._tag === 'SuspendEffectRegion')
+    return suspension?.originate(suspensionRegion) ?? []
+  const outcomeSlots = slots(operation.outcome)
+  const destinationSlots = slots(operation.destination)
+  const outcomeTag = outcomeSlots.at(0)
+  const resultTag = destinationSlots.at(0)
+  if (outcomeTag === undefined || resultTag === undefined)
+    throw new RangeError('Wasm Effect result lost an outcome or Result tag lane')
+  const invoke = [
+    ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+    ...operation.arguments.flatMap((argument) =>
+      slots(argument).map((slot) => Instr.localGet(slot)),
+    ),
+    Instr.call(resolve(operation.runner, operation.runnerTypeArguments)),
+    ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+    ...reloadReachableRoots([operation.effect, ...operation.arguments]),
+  ]
+  const writePayload = (
+    source: ReadonlyArray<number>,
+    destination: ReadonlyArray<number>,
+    memberLanes: ReadonlyArray<LayoutPlan.CallingLane> = Object.freeze([]),
+  ): ReadonlyArray<Instr.Instr> =>
+    destination.flatMap((target, index) => {
+      const value = source.at(index)
+      const from = value === undefined ? undefined : layout.physicalTypes.at(value)
+      const to = layout.physicalTypes.at(target)
+      const member = memberLanes.at(index)
+      const memberType = member === undefined ? undefined : laneValueType(plan, member)
+      return [
+        ...(value === undefined
+          ? [zeroFor(target)]
+          : [
+              Instr.localGet(value),
+              ...(from === undefined || memberType === undefined
+                ? []
+                : laneBridge(from, memberType)),
+              ...(to === undefined || memberType === undefined
+                ? from === undefined || to === undefined
+                  ? []
+                  : laneBridge(from, to)
+                : laneBridge(memberType, to)),
+            ]),
+        Instr.localSet(target),
+      ]
+    })
+  const resultPayload = destinationSlots.slice(1)
+  const successLaneCount =
+    operation.outcomeShape.tree._tag === 'OutcomeShape'
+      ? operation.outcomeShape.tree.success.laneCount
+      : 0
+  const successShape = LayoutPlan.callingShape(plan, operation.outcomeType.type.success)
+  if (successShape === undefined)
+    throw new RangeError('Wasm Effect Result lost its success member shape')
+  const success = [
+    Instr.i32Const(operation.successTag),
+    Instr.localSet(resultTag),
+    ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload, successShape.lanes),
+  ]
+  const failure =
+    SilkType.failureMembers(operation.outcomeType.type).length === 0
+      ? [Instr.op('unreachable')]
+      : [
+          Instr.i32Const(operation.failureTag),
+          Instr.localSet(resultTag),
+          ...(SilkType.isUnion(operation.failureValueType)
+            ? (() => {
+                const innerTag = resultPayload.at(0)
+                if (innerTag === undefined)
+                  throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
+                return [
+                  Instr.localGet(outcomeTag),
+                  Instr.i32Const(1),
+                  Instr.op('i32.sub'),
+                  Instr.localSet(innerTag),
+                  ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
+                ]
+              })()
+            : writePayload(outcomeSlots.slice(1), resultPayload)),
+        ]
+  return [
+    ...(skipInvocation ? [] : invoke),
+    ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
+      ? []
+      : (suspension?.relay(suspensionRegion) ?? [])),
+    Instr.localGet(outcomeTag),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(Instr.emptyBlockType, success, failure),
+  ]
+}
+
+const emitCloseEffectEntryOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CloseEffectEntry' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { resolve, slots, scalar, copy, releaseInstructions } = state
+
+  const outcomeSlots = slots(operation.outcome)
+  const tag = outcomeSlots.at(0)
+  const destination = scalar(operation.destination)
+  if (tag === undefined) throw new RangeError('Wasm effect entry lost its outcome tag')
+  const failureBranch = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+    const failure = operation.failures.at(ordinal)
+    if (failure === undefined) return [Instr.op('unreachable')]
+    const payload = slots(failure.payload)
+    const selected = outcomeSlots.slice(1, 1 + payload.length)
+    if (selected.length !== payload.length)
+      throw new RangeError('Wasm effect entry failure payload shape is inconsistent')
+    return [
+      Instr.localGet(tag),
+      Instr.i32Const(failure.tag),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [
+          ...copy(selected, payload),
+          ...releaseInstructions(failure.cleanup, failure.payload),
+          Instr.i32Const(1),
+          Instr.localSet(destination),
+        ],
+        failureBranch(ordinal + 1),
+      ),
+    ]
+  }
+  return [
+    Instr.call(resolve(operation.target, operation.typeArguments)),
+    ...[...slots(operation.effect)].reverse().map((slot) => Instr.localSet(slot)),
+    ...slots(operation.effect).map((slot) => Instr.localGet(slot)),
+    Instr.call(resolve(operation.runner, operation.typeArguments)),
+    ...[...outcomeSlots].reverse().map((slot) => Instr.localSet(slot)),
+    Instr.localGet(tag),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [Instr.i32Const(0), Instr.localSet(destination)],
+      failureBranch(0),
+    ),
+  ]
+}
+
+const emitCallOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Call' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { resolve, slots, reloadReachableRoots } = state
+  return [
+    ...operation.arguments.flatMap((argument) =>
+      slots(argument).map((slot) => Instr.localGet(slot)),
+    ),
+    Instr.call(resolve(operation.target, operation.typeArguments)),
+    ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+    ...reloadReachableRoots(operation.arguments),
+  ]
+}
+
+const emitApplyCallableOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, resolve, memory, slots, scalar, reloadReachableRoots } = state
+
+  const sourceType =
+    operation.callable === undefined ? undefined : layout.types.at(operation.callable.ordinal)
+  const target =
+    operation.target ?? (sourceType?._tag === 'CallableValue' ? sourceType.target : undefined)
+  if (target === undefined)
+    throw new RangeError('Wasm callable application lost its hidden identity')
+  const captureGroups: Array<{
+    readonly parameterOrdinal: number
+    readonly operands: ReadonlyArray<Instr.Instr>
+  }> = []
+  if (operation.callable !== undefined) {
+    if (sourceType?._tag !== 'CallableValue')
+      throw new RangeError('Wasm stored callable lost its identity')
+    const environmentSlots = slots(operation.callable)
+    let cursor = 0
+    for (const field of sourceType.environment?.fields ?? []) {
+      if (memory === undefined && field.representation === 'Borrow')
+        throw new RangeError('Wasm borrowed callable capture requires private memory')
+      const shape = LayoutPlan.callingShape(plan, field.type)
+      if (shape === undefined) throw new RangeError('Wasm callable capture lost its calling shape')
+      if (field.representation === 'Value') {
+        captureGroups.push(
+          Object.freeze({
+            parameterOrdinal: field.parameterOrdinal,
+            operands: Object.freeze(
+              environmentSlots
+                .slice(cursor, cursor + shape.laneCount)
+                .map((slot) => Instr.localGet(slot)),
+            ),
+          }),
+        )
+        cursor += shape.laneCount
+        continue
+      }
+      const pointer = environmentSlots.at(cursor)
+      if (pointer === undefined || memory === undefined)
+        throw new RangeError('Wasm borrowed callable capture lost its pointer')
+      cursor += 1
+      const operands: Array<Instr.Instr> = []
+      for (const lane of shape.lanes) {
+        const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+        if (offset === undefined)
+          throw new RangeError('Wasm borrowed callable capture lost its lane offset')
+        operands.push(
+          Instr.localGet(pointer),
+          Instr.i32Const(offset),
+          Instr.op('i32.add'),
+          Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+        )
+      }
+      captureGroups.push(
+        Object.freeze({
+          parameterOrdinal: field.parameterOrdinal,
+          operands: Object.freeze(operands),
+        }),
+      )
+    }
+  } else {
+    for (const capture of operation.captures) {
+      captureGroups.push(
+        Object.freeze({
+          parameterOrdinal: capture.parameterOrdinal,
+          operands: Object.freeze(slots(capture.source).map((slot) => Instr.localGet(slot))),
+        }),
+      )
+    }
+  }
+  const captureOperands = [...captureGroups]
+    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+    .flatMap((capture) => [...capture.operands])
+  if (target._tag === 'BuiltinCallableTarget') {
+    const operandSlots = [
+      ...operation.arguments.flatMap((argument) => [...slots(argument)]),
+      ...(operation.callable === undefined
+        ? operation.captures.flatMap((capture) => [...slots(capture.source)])
+        : [...slots(operation.callable)]),
+    ]
+    const left = operandSlots.at(0)
+    if (left === undefined) throw new RangeError('Wasm callable builtin lost its first operand')
+    const scalarActor = Scalar.find(target.actor)
+    const conversionTarget = Scalar.conversionTarget(target.operation)
+    if (conversionTarget !== undefined) {
+      const source = scalarActor
+      if (source?.category === 'Floating') {
+        const bits = Scalar.bits(conversionTarget, plan.target.pointerSize === 4 ? 32 : 64)
+        const mnemonic: Instr.PlainMnemonic =
+          bits === 64
+            ? source.spelling === 'f32'
+              ? conversionTarget.signedness === 'Signed'
+                ? 'i64.trunc_f32_s'
+                : 'i64.trunc_f32_u'
+              : conversionTarget.signedness === 'Signed'
+                ? 'i64.trunc_f64_s'
+                : 'i64.trunc_f64_u'
+            : source.spelling === 'f32'
+              ? conversionTarget.signedness === 'Signed'
+                ? 'i32.trunc_f32_s'
+                : 'i32.trunc_f32_u'
+              : conversionTarget.signedness === 'Signed'
+                ? 'i32.trunc_f64_s'
+                : 'i32.trunc_f64_u'
+        return [
+          Instr.localGet(left),
+          Instr.op(mnemonic),
+          ...normalizeSubword(bits, conversionTarget.signedness === 'Signed'),
           Instr.localSet(scalar(operation.destination)),
         ]
       }
-      return [
-        ...operation.arguments.flatMap((argument) =>
-          slots(argument).map((slot) => Instr.localGet(slot)),
-        ),
-        ...captureOperands,
-        Instr.call(resolve(target.declaration, operation.typeArguments)),
-        ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-        ...reloadReachableRoots([
-          ...(operation.callable === undefined ? [] : [operation.callable]),
-          ...operation.captures.map((capture) => capture.source),
-          ...operation.arguments,
-        ]),
-      ]
-    }
-    case 'ConvertInteger': {
-      const source = Scalar.find(operation.sourceType._tag)
-      const target = Scalar.find(operation.type._tag)
-      if (
-        source === undefined ||
-        source.category !== 'Integer' ||
-        target === undefined ||
-        target.category !== 'Integer'
-      )
-        throw new RangeError('Wasm integer conversion lost its scalar types')
+      if (source === undefined || source.category !== 'Integer')
+        throw new RangeError('Wasm callable conversion lost its source actor')
       return [
         ...emitIntegerConversionValue(
           source,
-          target,
-          scalar(operation.source),
+          conversionTarget,
+          left,
           plan.target.pointerSize === 4 ? 32 : 64,
         ),
         Instr.localSet(scalar(operation.destination)),
       ]
     }
-    case 'ConvertScalar': {
-      const source = Scalar.find(operation.sourceType._tag)
-      const target = Scalar.find(operation.type._tag)
-      if (
-        source === undefined ||
-        target === undefined ||
-        source.category === 'Boolean' ||
-        target.category === 'Boolean'
-      )
-        throw new RangeError('Wasm scalar conversion lost its types')
-      const sourceSlot = scalar(operation.source)
-      const targetSlot = scalar(operation.destination)
-      if (source.category === 'Character' && target.spelling === 'u32')
-        return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
-      if (source.category === 'Floating' && target.category === 'Floating') {
-        if (source.spelling === target.spelling)
-          return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
-        return [
-          Instr.localGet(sourceSlot),
-          Instr.op(source.spelling === 'f64' ? 'f32.demote_f64' : 'f64.promote_f32'),
-          Instr.localSet(targetSlot),
-        ]
-      }
-      if (source.category === 'Integer' && target.category === 'Floating') {
-        const bits = Scalar.bits(source, plan.target.pointerSize === 4 ? 32 : 64)
-        const mnemonic: Instr.PlainMnemonic =
-          target.spelling === 'f32'
-            ? bits === 64
-              ? source.signedness === 'Signed'
-                ? 'f32.convert_i64_s'
-                : 'f32.convert_i64_u'
-              : source.signedness === 'Signed'
-                ? 'f32.convert_i32_s'
-                : 'f32.convert_i32_u'
-            : bits === 64
-              ? source.signedness === 'Signed'
-                ? 'f64.convert_i64_s'
-                : 'f64.convert_i64_u'
-              : source.signedness === 'Signed'
-                ? 'f64.convert_i32_s'
-                : 'f64.convert_i32_u'
-        return [Instr.localGet(sourceSlot), Instr.op(mnemonic), Instr.localSet(targetSlot)]
-      }
-      if (source.category === 'Floating' && target.category === 'Integer') {
-        const bits = Scalar.bits(target, plan.target.pointerSize === 4 ? 32 : 64)
-        const mnemonic: Instr.PlainMnemonic =
-          bits === 64
-            ? source.spelling === 'f32'
-              ? target.signedness === 'Signed'
-                ? 'i64.trunc_f32_s'
-                : 'i64.trunc_f32_u'
-              : target.signedness === 'Signed'
-                ? 'i64.trunc_f64_s'
-                : 'i64.trunc_f64_u'
-            : source.spelling === 'f32'
-              ? target.signedness === 'Signed'
-                ? 'i32.trunc_f32_s'
-                : 'i32.trunc_f32_u'
-              : target.signedness === 'Signed'
-                ? 'i32.trunc_f64_s'
-                : 'i32.trunc_f64_u'
-        return [
-          Instr.localGet(sourceSlot),
-          Instr.op(mnemonic),
-          ...normalizeSubword(bits, target.signedness === 'Signed'),
-          Instr.localSet(targetSlot),
-        ]
-      }
-      throw new RangeError('Wasm scalar conversion was not numeric')
-    }
-    case 'ReinterpretScalar': {
-      const source = Scalar.find(operation.sourceType._tag)
-      const target = Scalar.find(operation.type._tag)
-      if (source === undefined || target === undefined)
-        throw new RangeError('Wasm reinterpretation lost its types')
+    const floatTarget = Scalar.floatConversionTarget(target.operation)
+    if (floatTarget !== undefined && scalarActor?.category === 'Integer') {
+      const bits = Scalar.bits(scalarActor, plan.target.pointerSize === 4 ? 32 : 64)
       const mnemonic: Instr.PlainMnemonic =
-        source.spelling === 'f32' && target.spelling === 'u32'
-          ? 'i32.reinterpret_f32'
-          : source.spelling === 'f64' && target.spelling === 'u64'
-            ? 'i64.reinterpret_f64'
-            : source.spelling === 'u32' && target.spelling === 'f32'
-              ? 'f32.reinterpret_i32'
-              : source.spelling === 'u64' && target.spelling === 'f64'
-                ? 'f64.reinterpret_i64'
-                : (() => {
-                    throw new RangeError('Wasm reinterpretation widths do not match')
-                  })()
+        floatTarget.spelling === 'f32'
+          ? bits === 64
+            ? scalarActor.signedness === 'Signed'
+              ? 'f32.convert_i64_s'
+              : 'f32.convert_i64_u'
+            : scalarActor.signedness === 'Signed'
+              ? 'f32.convert_i32_s'
+              : 'f32.convert_i32_u'
+          : bits === 64
+            ? scalarActor.signedness === 'Signed'
+              ? 'f64.convert_i64_s'
+              : 'f64.convert_i64_u'
+            : scalarActor.signedness === 'Signed'
+              ? 'f64.convert_i32_s'
+              : 'f64.convert_i32_u'
       return [
-        Instr.localGet(scalar(operation.source)),
+        Instr.localGet(left),
         Instr.op(mnemonic),
         Instr.localSet(scalar(operation.destination)),
       ]
     }
-    case 'FloatUnary': {
-      const source = Scalar.find(operation.sourceType._tag)
-      if (source?.category !== 'Floating')
-        throw new RangeError('Wasm float unary lost its source type')
-      const input = scalar(operation.source)
-      const destination = scalar(operation.destination)
-      const prefix = source.spelling
-      if (operation.operation === 'Negate')
-        return [Instr.localGet(input), Instr.op(`${prefix}.neg`), Instr.localSet(destination)]
-      // IEEE-754 mandates a correctly rounded square root, so the native opcode is bit-exact.
-      if (operation.operation === 'Sqrt')
-        return [Instr.localGet(input), Instr.op(`${prefix}.sqrt`), Instr.localSet(destination)]
-      if (operation.operation === 'IsSignNegative') {
-        return prefix === 'f32'
-          ? [
-              Instr.localGet(input),
-              Instr.op('i32.reinterpret_f32'),
-              Instr.i32Const(0),
-              Instr.op('i32.lt_s'),
-              Instr.localSet(destination),
-            ]
-          : [
-              Instr.localGet(input),
-              Instr.op('i64.reinterpret_f64'),
-              Instr.i64Const(0n),
-              Instr.op('i64.lt_s'),
-              Instr.localSet(destination),
-            ]
-      }
-      if (operation.operation === 'IsNaN')
-        return [
-          Instr.localGet(input),
-          Instr.localGet(input),
-          Instr.op(`${prefix}.ne`),
-          Instr.localSet(destination),
-        ]
-      const infinity =
-        prefix === 'f32'
-          ? Instr.f32Const(Number.POSITIVE_INFINITY)
-          : Instr.f64Const(Number.POSITIVE_INFINITY)
-      if (operation.operation === 'IsInfinite')
-        return [
-          Instr.localGet(input),
-          Instr.op(`${prefix}.abs`),
-          infinity,
-          Instr.op(`${prefix}.eq`),
-          Instr.localSet(destination),
-        ]
-      if (operation.operation === 'IsFinite')
-        return [
-          Instr.localGet(input),
-          Instr.op(`${prefix}.abs`),
-          infinity,
-          Instr.op(`${prefix}.lt`),
-          Instr.localSet(destination),
-        ]
-      const minimum = prefix === 'f32' ? Instr.f32Const(2 ** -126) : Instr.f64Const(2 ** -1022)
-      if (operation.operation === 'IsNormal')
-        return [
-          Instr.localGet(input),
-          Instr.op(`${prefix}.abs`),
-          minimum,
-          Instr.op(`${prefix}.ge`),
-          Instr.localGet(input),
-          Instr.op(`${prefix}.abs`),
-          infinity,
-          Instr.op(`${prefix}.lt`),
-          Instr.op('i32.and'),
-          Instr.localSet(destination),
-        ]
+    if (floatTarget !== undefined && scalarActor?.category === 'Floating') {
+      const instruction: Instr.PlainMnemonic | undefined =
+        scalarActor.spelling === floatTarget.spelling
+          ? undefined
+          : scalarActor.spelling === 'f64'
+            ? 'f32.demote_f64'
+            : 'f64.promote_f32'
       return [
-        Instr.localGet(input),
-        Instr.op(`${prefix}.abs`),
-        prefix === 'f32' ? Instr.f32Const(0) : Instr.f64Const(0),
-        Instr.op(`${prefix}.gt`),
-        Instr.localGet(input),
-        Instr.op(`${prefix}.abs`),
-        minimum,
-        Instr.op(`${prefix}.lt`),
-        Instr.op('i32.and'),
-        Instr.localSet(destination),
-      ]
-    }
-    case 'FloatTranscendental': {
-      const source = Scalar.find(operation.sourceType._tag)
-      if (source?.category !== 'Floating')
-        throw new RangeError('Wasm transcendental lost its source type')
-      const width = source.spelling === 'f32' ? 32 : 64
-      const prefix = source.spelling
-      const self = Transcendental.plan(width)
-      const input = scalar(operation.source)
-      const destination = scalar(operation.destination)
-      const scratchFloat = source.spelling === 'f32' ? layout.scratchF32 : layout.scratchF64
-      if (scratchFloat === undefined)
-        throw new RangeError('Wasm transcendental lost its floating scratch lanes')
-      const [scratchA, scratchB] = scratchFloat
-      const floatType = source.spelling === 'f32' ? f32 : f64
-      const constant = (bits: bigint): Instr.Instr => {
-        const value = FloatingPoint.toNumber({ width, bits })
-        return source.spelling === 'f32' ? Instr.f32Const(value) : Instr.f64Const(value)
-      }
-      const horner = (coefficients: ReadonlyArray<bigint>): ReadonlyArray<Instr.Instr> => {
-        const instructions: Array<Instr.Instr> = [constant(coefficients.at(-1) ?? 0n)]
-        for (let index = coefficients.length - 2; index >= 0; index -= 1) {
-          instructions.push(
-            Instr.localGet(scratchB),
-            Instr.op(`${prefix}.mul`),
-            constant(coefficients[index] ?? 0n),
-            Instr.op(`${prefix}.add`),
-          )
-        }
-        return instructions
-      }
-      const sine = [
-        Instr.localGet(destination),
-        Instr.localGet(destination),
-        Instr.localGet(scratchB),
-        Instr.op(`${prefix}.mul`),
-        ...horner(self.sine),
-        Instr.op(`${prefix}.mul`),
-        Instr.op(`${prefix}.add`),
-      ]
-      const cosine = [
-        constant(self.one),
-        constant(self.half),
-        Instr.localGet(scratchB),
-        Instr.op(`${prefix}.mul`),
-        Instr.op(`${prefix}.sub`),
-        Instr.localGet(scratchB),
-        Instr.localGet(scratchB),
-        Instr.op(`${prefix}.mul`),
-        ...horner(self.cosine),
-        Instr.op(`${prefix}.mul`),
-        Instr.op(`${prefix}.add`),
-      ]
-      const quadrantCase = (quadrant: number): ReadonlyArray<Instr.Instr> => {
-        const sineResult =
-          quadrant === 0
-            ? [Instr.localGet(scratchA)]
-            : quadrant === 1
-              ? [Instr.localGet(scratchB)]
-              : quadrant === 2
-                ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
-                : [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
-        const cosineResult =
-          quadrant === 0
-            ? [Instr.localGet(scratchB)]
-            : quadrant === 1
-              ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
-              : quadrant === 2
-                ? [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
-                : [Instr.localGet(scratchA)]
-        return operation.operation === 'Sin' ? sineResult : cosineResult
-      }
-      const selectQuadrant = (quadrant = 0): ReadonlyArray<Instr.Instr> =>
-        quadrant === 3
-          ? quadrantCase(3)
-          : [
-              Instr.localGet(layout.scratch64),
-              Instr.i64Const(BigInt(quadrant)),
-              Instr.op('i64.eq'),
-              Instr.ifElse(
-                Instr.valueBlockType(floatType),
-                quadrantCase(quadrant),
-                selectQuadrant(quadrant + 1),
-              ),
-            ]
-      const finite = [
-        Instr.localGet(input),
-        constant(self.inverseHalfPi),
-        Instr.op(`${prefix}.mul`),
-        constant(self.half),
-        Instr.op(`${prefix}.neg`),
-        constant(self.half),
-        Instr.localGet(input),
-        constant(0n),
-        Instr.op(`${prefix}.lt`),
-        Instr.op('select'),
-        Instr.op(`${prefix}.add`),
-        Instr.op(`i64.trunc_${prefix}_s`),
-        Instr.localSet(layout.scratch64),
-        Instr.localGet(input),
-        Instr.localSet(destination),
-        ...self.halfPi.flatMap((part) => [
-          Instr.localGet(destination),
-          Instr.localGet(layout.scratch64),
-          Instr.op(`${prefix}.convert_i64_s`),
-          constant(part),
-          Instr.op(`${prefix}.mul`),
-          Instr.op(`${prefix}.sub`),
-          Instr.localSet(destination),
-        ]),
-        Instr.localGet(destination),
-        Instr.localTee(destination),
-        Instr.localGet(destination),
-        Instr.op(`${prefix}.mul`),
-        Instr.localSet(scratchB),
-        ...sine,
-        Instr.localSet(scratchA),
-        ...cosine,
-        Instr.localSet(scratchB),
-        Instr.localGet(layout.scratch64),
-        Instr.i64Const(3n),
-        Instr.op('i64.and'),
-        Instr.localSet(layout.scratch64),
-        ...selectQuadrant(),
-      ]
-      return [
-        Instr.localGet(input),
-        Instr.localGet(input),
-        Instr.op(`${prefix}.ne`),
-        Instr.localGet(input),
-        Instr.op(`${prefix}.abs`),
-        source.spelling === 'f32'
-          ? Instr.f32Const(Number.POSITIVE_INFINITY)
-          : Instr.f64Const(Number.POSITIVE_INFINITY),
-        Instr.op(`${prefix}.eq`),
-        Instr.op('i32.or'),
-        Instr.ifElse(
-          Instr.valueBlockType(floatType),
-          [constant(self.canonicalNaN)],
-          [
-            Instr.localGet(input),
-            constant(0n),
-            Instr.op(`${prefix}.eq`),
-            Instr.ifElse(
-              Instr.valueBlockType(floatType),
-              operation.operation === 'Sin' ? [Instr.localGet(input)] : [constant(self.one)],
-              finite,
-            ),
-          ],
-        ),
-        Instr.localSet(destination),
-      ]
-    }
-    case 'CheckedScalar': {
-      const destination = slots(operation.destination)
-      const tag = destination.at(0)
-      const payload = destination.at(1)
-      const left = operation.operands.at(0)
-      const right = operation.operands.at(1)
-      const source = Scalar.find(operation.sourceType._tag)
-      const target = Scalar.find(operation.valueType._tag)
-      if (
-        operation.operation === 'CheckedConvertToChar' &&
-        tag !== undefined &&
-        payload !== undefined &&
-        left !== undefined &&
-        source?.spelling === 'u32' &&
-        target?.category === 'Character'
-      ) {
-        const successOrdinal = operation.type.type.members.findIndex((member) =>
-          SilkType.equals(member, operation.success),
-        )
-        const failureOrdinal = operation.type.type.members.findIndex((member) =>
-          SilkType.equals(member, operation.failure),
-        )
-        if (successOrdinal < 0 || failureOrdinal < 0)
-          throw new RangeError('Wasm checked char operation lost its Option members')
-        const leftSlot = scalar(left)
-        return [
-          Instr.localGet(leftSlot),
-          Instr.i32Const(0x10ffff),
-          Instr.op('i32.gt_u'),
-          Instr.localGet(leftSlot),
-          Instr.i32Const(0xd800),
-          Instr.op('i32.ge_u'),
-          Instr.localGet(leftSlot),
-          Instr.i32Const(0xdfff),
-          Instr.op('i32.le_u'),
-          Instr.op('i32.and'),
-          Instr.op('i32.or'),
-          Instr.localSet(tag),
-          Instr.i32Const(failureOrdinal),
-          Instr.i32Const(successOrdinal),
-          Instr.localGet(tag),
-          Instr.op('select'),
-          Instr.localSet(tag),
-          Instr.localGet(leftSlot),
-          Instr.localSet(payload),
-        ]
-      }
-      if (
-        tag === undefined ||
-        payload === undefined ||
-        left === undefined ||
-        source?.category !== 'Integer' ||
-        target?.category !== 'Integer'
-      )
-        throw new RangeError('Wasm checked scalar operation lost its Option lanes')
-      const leftSlot = scalar(left)
-      const rightSlot = right === undefined ? undefined : scalar(right)
-      const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
-      const sourceBits = Scalar.bits(source, pointerBits)
-      const targetBits = Scalar.bits(target, pointerBits)
-      const sourcePrefix = sourceBits === 64 ? 'i64' : 'i32'
-      const targetPrefix = targetBits === 64 ? 'i64' : 'i32'
-      const sourceConstant = (value: bigint): Instr.Instr =>
-        sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-      const targetConstant = (value: bigint): Instr.Instr =>
-        targetBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-      const successOrdinal = operation.type.type.members.findIndex((member) =>
-        SilkType.equals(member, operation.success),
-      )
-      const failureOrdinal = operation.type.type.members.findIndex((member) =>
-        SilkType.equals(member, operation.failure),
-      )
-      if (successOrdinal < 0 || failureOrdinal < 0)
-        throw new RangeError('Wasm checked scalar operation lost its Option members')
-      const setTag = [
-        Instr.i32Const(failureOrdinal),
-        Instr.i32Const(successOrdinal),
-        Instr.localGet(tag),
-        Instr.op('select'),
-        Instr.localSet(tag),
-      ]
-      if (operation.operation.startsWith('CheckedConvertTo')) {
-        const sourceRange = Scalar.range(source, pointerBits)
-        const targetRange = Scalar.range(target, pointerBits)
-        const invalid: Array<Instr.Instr> = []
-        if (targetRange.minimum > sourceRange.minimum)
-          invalid.push(
-            Instr.localGet(leftSlot),
-            sourceConstant(targetRange.minimum),
-            Instr.op(`${sourcePrefix}.lt_${source.signedness === 'Signed' ? 's' : 'u'}`),
-          )
-        if (targetRange.maximum < sourceRange.maximum) {
-          invalid.push(
-            Instr.localGet(leftSlot),
-            sourceConstant(targetRange.maximum),
-            Instr.op(`${sourcePrefix}.gt_${source.signedness === 'Signed' ? 's' : 'u'}`),
-          )
-          if (targetRange.minimum > sourceRange.minimum) invalid.push(Instr.op('i32.or'))
-        }
-        const conversion: ReadonlyArray<Instr.Instr> =
-          sourceBits < 64 && targetBits === 64
-            ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
-            : sourceBits === 64 && targetBits < 64
-              ? [Instr.op('i32.wrap_i64')]
-              : []
-        return [
-          ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
-          Instr.localSet(tag),
-          ...setTag,
-          Instr.localGet(leftSlot),
-          ...conversion,
-          ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-          Instr.localSet(payload),
-        ]
-      }
-      if (rightSlot === undefined)
-        throw new RangeError('Wasm checked arithmetic lost its right operand')
-      if (
-        operation.operation === 'CheckedAdd' ||
-        operation.operation === 'CheckedSubtract' ||
-        operation.operation === 'CheckedMultiply'
-      ) {
-        const shape: OverflowShape =
-          operation.operation === 'CheckedAdd'
-            ? 'Add'
-            : operation.operation === 'CheckedSubtract'
-              ? 'Subtract'
-              : 'Multiply'
-        const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
-        return [
-          ...checkedArithmeticOutcome(
-            shape,
-            target,
-            leftSlot,
-            rightSlot,
-            resultScratch,
-            pointerBits,
-          ),
-          Instr.localSet(tag),
-          ...setTag,
-          Instr.localGet(resultScratch),
-          ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-          Instr.localSet(payload),
-        ]
-      }
-      const minimum = Scalar.range(target, pointerBits).minimum
-      const signedOverflow =
-        target.signedness === 'Signed' && operation.operation === 'CheckedDivide'
-          ? [
-              Instr.localGet(leftSlot),
-              targetConstant(minimum),
-              Instr.op(`${targetPrefix}.eq`),
-              Instr.localGet(rightSlot),
-              targetConstant(-1n),
-              Instr.op(`${targetPrefix}.eq`),
-              Instr.op('i32.and'),
-            ]
-          : [Instr.i32Const(0)]
-      const division: Instr.PlainMnemonic =
-        operation.operation === 'CheckedDivide'
-          ? `${targetPrefix}.div_${target.signedness === 'Signed' ? 's' : 'u'}`
-          : `${targetPrefix}.rem_${target.signedness === 'Signed' ? 's' : 'u'}`
-      return [
-        Instr.localGet(rightSlot),
-        Instr.op(`${targetPrefix}.eqz`),
-        ...signedOverflow,
-        Instr.op('i32.or'),
-        Instr.localSet(tag),
-        Instr.localGet(tag),
-        Instr.ifElse(
-          Instr.valueBlockType(targetBits === 64 ? i64 : i32),
-          [targetConstant(0n)],
-          [Instr.localGet(leftSlot), Instr.localGet(rightSlot), Instr.op(division)],
-        ),
-        ...normalizeSubword(targetBits, target.signedness === 'Signed'),
-        Instr.localSet(payload),
-        ...setTag,
-      ]
-    }
-    case 'Binary': {
-      const leftType = layout.types.at(operation.left.ordinal)
-      const semantic = leftType === undefined ? undefined : Mir.semanticType(leftType)
-      const scalarType = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
-      if (scalarType?.category === 'Floating') {
-        const prefix = scalarType.spelling
-        if (operation.operator === 'TotalOrder') {
-          const temporary = prefix === 'f32' ? layout.scratch : layout.scratch64
-          if (temporary === undefined)
-            throw new RangeError('Wasm total order lost its scratch local')
-          const integer = prefix === 'f32' ? 'i32' : 'i64'
-          const all = prefix === 'f32' ? Instr.i32Const(-1) : Instr.i64Const(-1n)
-          const sign =
-            prefix === 'f32' ? Instr.i32Const(-2147483648) : Instr.i64Const(-9223372036854775808n)
-          const zero = prefix === 'f32' ? Instr.i32Const(0) : Instr.i64Const(0n)
-          const reinterpret: Instr.PlainMnemonic =
-            prefix === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64'
-          const key = (local: number): ReadonlyArray<Instr.Instr> => [
-            Instr.localGet(local),
-            Instr.op(reinterpret),
-            all,
-            sign,
-            Instr.localGet(local),
-            Instr.op(reinterpret),
-            zero,
-            Instr.op(`${integer}.lt_s`),
-            Instr.op('select'),
-            Instr.op(`${integer}.xor`),
-          ]
-          return [
-            ...key(scalar(operation.left)),
-            Instr.localSet(temporary),
-            Instr.localGet(temporary),
-            ...key(scalar(operation.right)),
-            Instr.op(`${integer}.le_u`),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        }
-        const comparison: Instr.PlainMnemonic | undefined =
-          operation.operator === 'Equals'
-            ? `${prefix}.eq`
-            : operation.operator === 'NotEquals'
-              ? `${prefix}.ne`
-              : operation.operator === 'LessThan'
-                ? `${prefix}.lt`
-                : operation.operator === 'LessOrEqual'
-                  ? `${prefix}.le`
-                  : operation.operator === 'GreaterThan'
-                    ? `${prefix}.gt`
-                    : operation.operator === 'GreaterOrEqual'
-                      ? `${prefix}.ge`
-                      : undefined
-        if (comparison !== undefined)
-          return [
-            Instr.localGet(scalar(operation.left)),
-            Instr.localGet(scalar(operation.right)),
-            Instr.op(comparison),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        const arithmetic: Instr.PlainMnemonic | undefined =
-          operation.operator === 'Add'
-            ? `${prefix}.add`
-            : operation.operator === 'Subtract'
-              ? `${prefix}.sub`
-              : operation.operator === 'Multiply'
-                ? `${prefix}.mul`
-                : operation.operator === 'Divide'
-                  ? `${prefix}.div`
-                  : undefined
-        if (arithmetic !== undefined)
-          return [
-            Instr.localGet(scalar(operation.left)),
-            Instr.localGet(scalar(operation.right)),
-            Instr.op(arithmetic),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        if (operation.operator === 'Remainder')
-          return [
-            Instr.localGet(scalar(operation.left)),
-            Instr.localGet(scalar(operation.left)),
-            Instr.localGet(scalar(operation.right)),
-            Instr.op(`${prefix}.div`),
-            Instr.op(`${prefix}.trunc`),
-            Instr.localGet(scalar(operation.right)),
-            Instr.op(`${prefix}.mul`),
-            Instr.op(`${prefix}.sub`),
-            Instr.localSet(scalar(operation.destination)),
-          ]
-        throw new RangeError(`Wasm float operation ${operation.operator} is unavailable`)
-      }
-      if (
-        scalarType?.category === 'Boolean' &&
-        (operation.operator === 'Equals' || operation.operator === 'NotEquals')
-      ) {
-        return [
-          Instr.localGet(scalar(operation.left)),
-          Instr.localGet(scalar(operation.right)),
-          Instr.op(operation.operator === 'Equals' ? 'i32.eq' : 'i32.ne'),
-          Instr.localSet(scalar(operation.destination)),
-        ]
-      }
-      // A Unicode scalar value occupies one 32-bit lane and orders by that value, so its
-      // comparisons are the unsigned 32-bit comparisons and it declares nothing else.
-      if (scalarType?.category === 'Character') {
-        const comparison: Instr.PlainMnemonic | undefined =
-          operation.operator === 'Equals'
-            ? 'i32.eq'
-            : operation.operator === 'NotEquals'
-              ? 'i32.ne'
-              : operation.operator === 'LessThan'
-                ? 'i32.lt_u'
-                : operation.operator === 'LessOrEqual'
-                  ? 'i32.le_u'
-                  : operation.operator === 'GreaterThan'
-                    ? 'i32.gt_u'
-                    : operation.operator === 'GreaterOrEqual'
-                      ? 'i32.ge_u'
-                      : undefined
-        if (comparison === undefined)
-          throw new RangeError(`Wasm char operation ${operation.operator} is unavailable`)
-        return [
-          Instr.localGet(scalar(operation.left)),
-          Instr.localGet(scalar(operation.right)),
-          Instr.op(comparison),
-          Instr.localSet(scalar(operation.destination)),
-        ]
-      }
-      const integer = scalarType
-      if (integer === undefined || integer.category !== 'Integer')
-        throw new RangeError(`Wasm binary operation ${operation.operator} lost its integer type`)
-      return [
-        ...emitIntegerBinaryValue(
-          operation.operator,
-          integer,
-          scalar(operation.left),
-          scalar(operation.right),
-          layout,
-          plan.target.pointerSize === 4 ? 32 : 64,
-        ),
+        Instr.localGet(left),
+        ...(instruction === undefined ? [] : [Instr.op(instruction)]),
         Instr.localSet(scalar(operation.destination)),
       ]
     }
+    if (target.operation === 'ToBits' && scalarActor?.category === 'Floating')
+      return [
+        Instr.localGet(left),
+        Instr.op(scalarActor.spelling === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64'),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    if (target.operation === 'FromBits' && scalarActor?.category === 'Floating')
+      return [
+        Instr.localGet(left),
+        Instr.op(scalarActor.spelling === 'f32' ? 'f32.reinterpret_i32' : 'f64.reinterpret_i64'),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    if (target.operation === 'Negate' && scalarActor?.category === 'Floating')
+      return [
+        Instr.localGet(left),
+        Instr.op(`${scalarActor.spelling}.neg`),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    if (target.operation === 'Not') {
+      return [
+        Instr.localGet(left),
+        Instr.op('i32.eqz'),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    if (
+      target.operation === 'Negate' ||
+      target.operation === 'WrappingNegate' ||
+      target.operation === 'SaturatingNegate' ||
+      target.operation === 'BitNot'
+    ) {
+      const integer = Scalar.find(target.actor)
+      if (integer === undefined || integer.category !== 'Integer') {
+        throw new RangeError('Wasm callable unary operation lost its integer actor')
+      }
+      const bits = Scalar.bits(integer, plan.target.pointerSize === 4 ? 32 : 64)
+      const range = Scalar.range(integer, plan.target.pointerSize === 4 ? 32 : 64)
+      const constant = (value: bigint): Instr.Instr =>
+        bits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+      const prefix = bits === 64 ? 'i64' : 'i32'
+      if (target.operation === 'BitNot') {
+        return [
+          Instr.localGet(left),
+          constant(-1n),
+          Instr.op(`${prefix}.xor`),
+          ...normalizeSubword(bits, integer.signedness === 'Signed'),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      }
+      if (target.operation === 'SaturatingNegate') {
+        return [
+          constant(range.maximum),
+          constant(0n),
+          Instr.localGet(left),
+          Instr.op(`${prefix}.sub`),
+          Instr.localGet(left),
+          constant(range.minimum),
+          Instr.op(`${prefix}.eq`),
+          Instr.op('select'),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      }
+      return [
+        ...(target.operation === 'Negate'
+          ? [
+              Instr.localGet(left),
+              constant(range.minimum),
+              Instr.op(`${prefix}.eq`),
+              Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+            ]
+          : []),
+        constant(0n),
+        Instr.localGet(left),
+        Instr.op(`${prefix}.sub`),
+        ...normalizeSubword(bits, true),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    const right = operandSlots.at(1)
+    if (
+      right === undefined ||
+      target.operation === 'StorageAcquire' ||
+      !Mir.isBinaryOperator(target.operation)
+    ) {
+      throw new RangeError(
+        `Wasm callable builtin ${target.actor}.${target.operation} is unavailable`,
+      )
+    }
+    if (
+      scalarActor?.category === 'Boolean' &&
+      (target.operation === 'Equals' || target.operation === 'NotEquals')
+    ) {
+      return [
+        Instr.localGet(left),
+        Instr.localGet(right),
+        Instr.op(target.operation === 'Equals' ? 'i32.eq' : 'i32.ne'),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    if (scalarActor?.category === 'Floating') {
+      const prefix = scalarActor.spelling
+      const mnemonic: Instr.PlainMnemonic | undefined =
+        target.operation === 'Add'
+          ? `${prefix}.add`
+          : target.operation === 'Subtract'
+            ? `${prefix}.sub`
+            : target.operation === 'Multiply'
+              ? `${prefix}.mul`
+              : target.operation === 'Divide'
+                ? `${prefix}.div`
+                : target.operation === 'Equals'
+                  ? `${prefix}.eq`
+                  : target.operation === 'NotEquals'
+                    ? `${prefix}.ne`
+                    : target.operation === 'LessThan'
+                      ? `${prefix}.lt`
+                      : target.operation === 'LessOrEqual'
+                        ? `${prefix}.le`
+                        : target.operation === 'GreaterThan'
+                          ? `${prefix}.gt`
+                          : target.operation === 'GreaterOrEqual'
+                            ? `${prefix}.ge`
+                            : undefined
+      if (mnemonic !== undefined)
+        return [
+          Instr.localGet(left),
+          Instr.localGet(right),
+          Instr.op(mnemonic),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      if (target.operation === 'Remainder')
+        return [
+          Instr.localGet(left),
+          Instr.localGet(left),
+          Instr.localGet(right),
+          Instr.op(`${prefix}.div`),
+          Instr.op(`${prefix}.trunc`),
+          Instr.localGet(right),
+          Instr.op(`${prefix}.mul`),
+          Instr.op(`${prefix}.sub`),
+          Instr.localSet(scalar(operation.destination)),
+        ]
+      throw new RangeError(`Wasm callable float ${target.operation} is unavailable`)
+    }
+    const integer = scalarActor
+    if (integer === undefined || integer.category !== 'Integer') {
+      throw new RangeError('Wasm callable binary lost its integer actor')
+    }
+    return [
+      ...emitIntegerBinaryValue(
+        target.operation,
+        integer,
+        left,
+        right,
+        layout,
+        plan.target.pointerSize === 4 ? 32 : 64,
+      ),
+      Instr.localSet(scalar(operation.destination)),
+    ]
+  }
+  return [
+    ...operation.arguments.flatMap((argument) =>
+      slots(argument).map((slot) => Instr.localGet(slot)),
+    ),
+    ...captureOperands,
+    Instr.call(resolve(target.declaration, operation.typeArguments)),
+    ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+    ...reloadReachableRoots([
+      ...(operation.callable === undefined ? [] : [operation.callable]),
+      ...operation.captures.map((capture) => capture.source),
+      ...operation.arguments,
+    ]),
+  ]
+}
+
+const emitConvertIntegerOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConvertInteger' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, scalar } = state
+
+  const source = Scalar.find(operation.sourceType._tag)
+  const target = Scalar.find(operation.type._tag)
+  if (
+    source === undefined ||
+    source.category !== 'Integer' ||
+    target === undefined ||
+    target.category !== 'Integer'
+  )
+    throw new RangeError('Wasm integer conversion lost its scalar types')
+  return [
+    ...emitIntegerConversionValue(
+      source,
+      target,
+      scalar(operation.source),
+      plan.target.pointerSize === 4 ? 32 : 64,
+    ),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitConvertScalarOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ConvertScalar' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, scalar } = state
+
+  const source = Scalar.find(operation.sourceType._tag)
+  const target = Scalar.find(operation.type._tag)
+  if (
+    source === undefined ||
+    target === undefined ||
+    source.category === 'Boolean' ||
+    target.category === 'Boolean'
+  )
+    throw new RangeError('Wasm scalar conversion lost its types')
+  const sourceSlot = scalar(operation.source)
+  const targetSlot = scalar(operation.destination)
+  if (source.category === 'Character' && target.spelling === 'u32')
+    return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
+  if (source.category === 'Floating' && target.category === 'Floating') {
+    if (source.spelling === target.spelling)
+      return [Instr.localGet(sourceSlot), Instr.localSet(targetSlot)]
+    return [
+      Instr.localGet(sourceSlot),
+      Instr.op(source.spelling === 'f64' ? 'f32.demote_f64' : 'f64.promote_f32'),
+      Instr.localSet(targetSlot),
+    ]
+  }
+  if (source.category === 'Integer' && target.category === 'Floating') {
+    const bits = Scalar.bits(source, plan.target.pointerSize === 4 ? 32 : 64)
+    const mnemonic: Instr.PlainMnemonic =
+      target.spelling === 'f32'
+        ? bits === 64
+          ? source.signedness === 'Signed'
+            ? 'f32.convert_i64_s'
+            : 'f32.convert_i64_u'
+          : source.signedness === 'Signed'
+            ? 'f32.convert_i32_s'
+            : 'f32.convert_i32_u'
+        : bits === 64
+          ? source.signedness === 'Signed'
+            ? 'f64.convert_i64_s'
+            : 'f64.convert_i64_u'
+          : source.signedness === 'Signed'
+            ? 'f64.convert_i32_s'
+            : 'f64.convert_i32_u'
+    return [Instr.localGet(sourceSlot), Instr.op(mnemonic), Instr.localSet(targetSlot)]
+  }
+  if (source.category === 'Floating' && target.category === 'Integer') {
+    const bits = Scalar.bits(target, plan.target.pointerSize === 4 ? 32 : 64)
+    const mnemonic: Instr.PlainMnemonic =
+      bits === 64
+        ? source.spelling === 'f32'
+          ? target.signedness === 'Signed'
+            ? 'i64.trunc_f32_s'
+            : 'i64.trunc_f32_u'
+          : target.signedness === 'Signed'
+            ? 'i64.trunc_f64_s'
+            : 'i64.trunc_f64_u'
+        : source.spelling === 'f32'
+          ? target.signedness === 'Signed'
+            ? 'i32.trunc_f32_s'
+            : 'i32.trunc_f32_u'
+          : target.signedness === 'Signed'
+            ? 'i32.trunc_f64_s'
+            : 'i32.trunc_f64_u'
+    return [
+      Instr.localGet(sourceSlot),
+      Instr.op(mnemonic),
+      ...normalizeSubword(bits, target.signedness === 'Signed'),
+      Instr.localSet(targetSlot),
+    ]
+  }
+  throw new RangeError('Wasm scalar conversion was not numeric')
+}
+
+const emitReinterpretScalarOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ReinterpretScalar' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar } = state
+
+  const source = Scalar.find(operation.sourceType._tag)
+  const target = Scalar.find(operation.type._tag)
+  if (source === undefined || target === undefined)
+    throw new RangeError('Wasm reinterpretation lost its types')
+  const mnemonic: Instr.PlainMnemonic =
+    source.spelling === 'f32' && target.spelling === 'u32'
+      ? 'i32.reinterpret_f32'
+      : source.spelling === 'f64' && target.spelling === 'u64'
+        ? 'i64.reinterpret_f64'
+        : source.spelling === 'u32' && target.spelling === 'f32'
+          ? 'f32.reinterpret_i32'
+          : source.spelling === 'u64' && target.spelling === 'f64'
+            ? 'f64.reinterpret_i64'
+            : (() => {
+                throw new RangeError('Wasm reinterpretation widths do not match')
+              })()
+  return [
+    Instr.localGet(scalar(operation.source)),
+    Instr.op(mnemonic),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+const emitFloatUnaryOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'FloatUnary' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar } = state
+
+  const source = Scalar.find(operation.sourceType._tag)
+  if (source?.category !== 'Floating') throw new RangeError('Wasm float unary lost its source type')
+  const input = scalar(operation.source)
+  const destination = scalar(operation.destination)
+  const prefix = source.spelling
+  if (operation.operation === 'Negate')
+    return [Instr.localGet(input), Instr.op(`${prefix}.neg`), Instr.localSet(destination)]
+  // IEEE-754 mandates a correctly rounded square root, so the native opcode is bit-exact.
+  if (operation.operation === 'Sqrt')
+    return [Instr.localGet(input), Instr.op(`${prefix}.sqrt`), Instr.localSet(destination)]
+  if (operation.operation === 'IsSignNegative') {
+    return prefix === 'f32'
+      ? [
+          Instr.localGet(input),
+          Instr.op('i32.reinterpret_f32'),
+          Instr.i32Const(0),
+          Instr.op('i32.lt_s'),
+          Instr.localSet(destination),
+        ]
+      : [
+          Instr.localGet(input),
+          Instr.op('i64.reinterpret_f64'),
+          Instr.i64Const(0n),
+          Instr.op('i64.lt_s'),
+          Instr.localSet(destination),
+        ]
+  }
+  if (operation.operation === 'IsNaN')
+    return [
+      Instr.localGet(input),
+      Instr.localGet(input),
+      Instr.op(`${prefix}.ne`),
+      Instr.localSet(destination),
+    ]
+  const infinity =
+    prefix === 'f32'
+      ? Instr.f32Const(Number.POSITIVE_INFINITY)
+      : Instr.f64Const(Number.POSITIVE_INFINITY)
+  if (operation.operation === 'IsInfinite')
+    return [
+      Instr.localGet(input),
+      Instr.op(`${prefix}.abs`),
+      infinity,
+      Instr.op(`${prefix}.eq`),
+      Instr.localSet(destination),
+    ]
+  if (operation.operation === 'IsFinite')
+    return [
+      Instr.localGet(input),
+      Instr.op(`${prefix}.abs`),
+      infinity,
+      Instr.op(`${prefix}.lt`),
+      Instr.localSet(destination),
+    ]
+  const minimum = prefix === 'f32' ? Instr.f32Const(2 ** -126) : Instr.f64Const(2 ** -1022)
+  if (operation.operation === 'IsNormal')
+    return [
+      Instr.localGet(input),
+      Instr.op(`${prefix}.abs`),
+      minimum,
+      Instr.op(`${prefix}.ge`),
+      Instr.localGet(input),
+      Instr.op(`${prefix}.abs`),
+      infinity,
+      Instr.op(`${prefix}.lt`),
+      Instr.op('i32.and'),
+      Instr.localSet(destination),
+    ]
+  return [
+    Instr.localGet(input),
+    Instr.op(`${prefix}.abs`),
+    prefix === 'f32' ? Instr.f32Const(0) : Instr.f64Const(0),
+    Instr.op(`${prefix}.gt`),
+    Instr.localGet(input),
+    Instr.op(`${prefix}.abs`),
+    minimum,
+    Instr.op(`${prefix}.lt`),
+    Instr.op('i32.and'),
+    Instr.localSet(destination),
+  ]
+}
+
+const emitFloatTranscendentalOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'FloatTranscendental' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, scalar } = state
+
+  const source = Scalar.find(operation.sourceType._tag)
+  if (source?.category !== 'Floating')
+    throw new RangeError('Wasm transcendental lost its source type')
+  const width = source.spelling === 'f32' ? 32 : 64
+  const prefix = source.spelling
+  const self = Transcendental.plan(width)
+  const input = scalar(operation.source)
+  const destination = scalar(operation.destination)
+  const scratchFloat = source.spelling === 'f32' ? layout.scratchF32 : layout.scratchF64
+  if (scratchFloat === undefined)
+    throw new RangeError('Wasm transcendental lost its floating scratch lanes')
+  const [scratchA, scratchB] = scratchFloat
+  const floatType = source.spelling === 'f32' ? f32 : f64
+  const constant = (bits: bigint): Instr.Instr => {
+    const value = FloatingPoint.toNumber({ width, bits })
+    return source.spelling === 'f32' ? Instr.f32Const(value) : Instr.f64Const(value)
+  }
+  const horner = (coefficients: ReadonlyArray<bigint>): ReadonlyArray<Instr.Instr> => {
+    const instructions: Array<Instr.Instr> = [constant(coefficients.at(-1) ?? 0n)]
+    for (let index = coefficients.length - 2; index >= 0; index -= 1) {
+      instructions.push(
+        Instr.localGet(scratchB),
+        Instr.op(`${prefix}.mul`),
+        constant(coefficients[index] ?? 0n),
+        Instr.op(`${prefix}.add`),
+      )
+    }
+    return instructions
+  }
+  const sine = [
+    Instr.localGet(destination),
+    Instr.localGet(destination),
+    Instr.localGet(scratchB),
+    Instr.op(`${prefix}.mul`),
+    ...horner(self.sine),
+    Instr.op(`${prefix}.mul`),
+    Instr.op(`${prefix}.add`),
+  ]
+  const cosine = [
+    constant(self.one),
+    constant(self.half),
+    Instr.localGet(scratchB),
+    Instr.op(`${prefix}.mul`),
+    Instr.op(`${prefix}.sub`),
+    Instr.localGet(scratchB),
+    Instr.localGet(scratchB),
+    Instr.op(`${prefix}.mul`),
+    ...horner(self.cosine),
+    Instr.op(`${prefix}.mul`),
+    Instr.op(`${prefix}.add`),
+  ]
+  const quadrantCase = (quadrant: number): ReadonlyArray<Instr.Instr> => {
+    const sineResult =
+      quadrant === 0
+        ? [Instr.localGet(scratchA)]
+        : quadrant === 1
+          ? [Instr.localGet(scratchB)]
+          : quadrant === 2
+            ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+            : [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+    const cosineResult =
+      quadrant === 0
+        ? [Instr.localGet(scratchB)]
+        : quadrant === 1
+          ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+          : quadrant === 2
+            ? [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+            : [Instr.localGet(scratchA)]
+    return operation.operation === 'Sin' ? sineResult : cosineResult
+  }
+  const selectQuadrant = (quadrant = 0): ReadonlyArray<Instr.Instr> =>
+    quadrant === 3
+      ? quadrantCase(3)
+      : [
+          Instr.localGet(layout.scratch64),
+          Instr.i64Const(BigInt(quadrant)),
+          Instr.op('i64.eq'),
+          Instr.ifElse(
+            Instr.valueBlockType(floatType),
+            quadrantCase(quadrant),
+            selectQuadrant(quadrant + 1),
+          ),
+        ]
+  const finite = [
+    Instr.localGet(input),
+    constant(self.inverseHalfPi),
+    Instr.op(`${prefix}.mul`),
+    constant(self.half),
+    Instr.op(`${prefix}.neg`),
+    constant(self.half),
+    Instr.localGet(input),
+    constant(0n),
+    Instr.op(`${prefix}.lt`),
+    Instr.op('select'),
+    Instr.op(`${prefix}.add`),
+    Instr.op(`i64.trunc_${prefix}_s`),
+    Instr.localSet(layout.scratch64),
+    Instr.localGet(input),
+    Instr.localSet(destination),
+    ...self.halfPi.flatMap((part) => [
+      Instr.localGet(destination),
+      Instr.localGet(layout.scratch64),
+      Instr.op(`${prefix}.convert_i64_s`),
+      constant(part),
+      Instr.op(`${prefix}.mul`),
+      Instr.op(`${prefix}.sub`),
+      Instr.localSet(destination),
+    ]),
+    Instr.localGet(destination),
+    Instr.localTee(destination),
+    Instr.localGet(destination),
+    Instr.op(`${prefix}.mul`),
+    Instr.localSet(scratchB),
+    ...sine,
+    Instr.localSet(scratchA),
+    ...cosine,
+    Instr.localSet(scratchB),
+    Instr.localGet(layout.scratch64),
+    Instr.i64Const(3n),
+    Instr.op('i64.and'),
+    Instr.localSet(layout.scratch64),
+    ...selectQuadrant(),
+  ]
+  return [
+    Instr.localGet(input),
+    Instr.localGet(input),
+    Instr.op(`${prefix}.ne`),
+    Instr.localGet(input),
+    Instr.op(`${prefix}.abs`),
+    source.spelling === 'f32'
+      ? Instr.f32Const(Number.POSITIVE_INFINITY)
+      : Instr.f64Const(Number.POSITIVE_INFINITY),
+    Instr.op(`${prefix}.eq`),
+    Instr.op('i32.or'),
+    Instr.ifElse(
+      Instr.valueBlockType(floatType),
+      [constant(self.canonicalNaN)],
+      [
+        Instr.localGet(input),
+        constant(0n),
+        Instr.op(`${prefix}.eq`),
+        Instr.ifElse(
+          Instr.valueBlockType(floatType),
+          operation.operation === 'Sin' ? [Instr.localGet(input)] : [constant(self.one)],
+          finite,
+        ),
+      ],
+    ),
+    Instr.localSet(destination),
+  ]
+}
+
+const emitCheckedScalarOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, slots, scalar } = state
+
+  const destination = slots(operation.destination)
+  const tag = destination.at(0)
+  const payload = destination.at(1)
+  const left = operation.operands.at(0)
+  const right = operation.operands.at(1)
+  const source = Scalar.find(operation.sourceType._tag)
+  const target = Scalar.find(operation.valueType._tag)
+  if (
+    operation.operation === 'CheckedConvertToChar' &&
+    tag !== undefined &&
+    payload !== undefined &&
+    left !== undefined &&
+    source?.spelling === 'u32' &&
+    target?.category === 'Character'
+  ) {
+    const successOrdinal = operation.type.type.members.findIndex((member) =>
+      SilkType.equals(member, operation.success),
+    )
+    const failureOrdinal = operation.type.type.members.findIndex((member) =>
+      SilkType.equals(member, operation.failure),
+    )
+    if (successOrdinal < 0 || failureOrdinal < 0)
+      throw new RangeError('Wasm checked char operation lost its Option members')
+    const leftSlot = scalar(left)
+    return [
+      Instr.localGet(leftSlot),
+      Instr.i32Const(0x10ffff),
+      Instr.op('i32.gt_u'),
+      Instr.localGet(leftSlot),
+      Instr.i32Const(0xd800),
+      Instr.op('i32.ge_u'),
+      Instr.localGet(leftSlot),
+      Instr.i32Const(0xdfff),
+      Instr.op('i32.le_u'),
+      Instr.op('i32.and'),
+      Instr.op('i32.or'),
+      Instr.localSet(tag),
+      Instr.i32Const(failureOrdinal),
+      Instr.i32Const(successOrdinal),
+      Instr.localGet(tag),
+      Instr.op('select'),
+      Instr.localSet(tag),
+      Instr.localGet(leftSlot),
+      Instr.localSet(payload),
+    ]
+  }
+  if (
+    tag === undefined ||
+    payload === undefined ||
+    left === undefined ||
+    source?.category !== 'Integer' ||
+    target?.category !== 'Integer'
+  )
+    throw new RangeError('Wasm checked scalar operation lost its Option lanes')
+  const leftSlot = scalar(left)
+  const rightSlot = right === undefined ? undefined : scalar(right)
+  const pointerBits = plan.target.pointerSize === 4 ? 32 : 64
+  const sourceBits = Scalar.bits(source, pointerBits)
+  const targetBits = Scalar.bits(target, pointerBits)
+  const sourcePrefix = sourceBits === 64 ? 'i64' : 'i32'
+  const targetPrefix = targetBits === 64 ? 'i64' : 'i32'
+  const sourceConstant = (value: bigint): Instr.Instr =>
+    sourceBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+  const targetConstant = (value: bigint): Instr.Instr =>
+    targetBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
+  const successOrdinal = operation.type.type.members.findIndex((member) =>
+    SilkType.equals(member, operation.success),
+  )
+  const failureOrdinal = operation.type.type.members.findIndex((member) =>
+    SilkType.equals(member, operation.failure),
+  )
+  if (successOrdinal < 0 || failureOrdinal < 0)
+    throw new RangeError('Wasm checked scalar operation lost its Option members')
+  const setTag = [
+    Instr.i32Const(failureOrdinal),
+    Instr.i32Const(successOrdinal),
+    Instr.localGet(tag),
+    Instr.op('select'),
+    Instr.localSet(tag),
+  ]
+  if (operation.operation.startsWith('CheckedConvertTo')) {
+    const sourceRange = Scalar.range(source, pointerBits)
+    const targetRange = Scalar.range(target, pointerBits)
+    const invalid: Array<Instr.Instr> = []
+    if (targetRange.minimum > sourceRange.minimum)
+      invalid.push(
+        Instr.localGet(leftSlot),
+        sourceConstant(targetRange.minimum),
+        Instr.op(`${sourcePrefix}.lt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+      )
+    if (targetRange.maximum < sourceRange.maximum) {
+      invalid.push(
+        Instr.localGet(leftSlot),
+        sourceConstant(targetRange.maximum),
+        Instr.op(`${sourcePrefix}.gt_${source.signedness === 'Signed' ? 's' : 'u'}`),
+      )
+      if (targetRange.minimum > sourceRange.minimum) invalid.push(Instr.op('i32.or'))
+    }
+    const conversion: ReadonlyArray<Instr.Instr> =
+      sourceBits < 64 && targetBits === 64
+        ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
+        : sourceBits === 64 && targetBits < 64
+          ? [Instr.op('i32.wrap_i64')]
+          : []
+    return [
+      ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
+      Instr.localSet(tag),
+      ...setTag,
+      Instr.localGet(leftSlot),
+      ...conversion,
+      ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+      Instr.localSet(payload),
+    ]
+  }
+  if (rightSlot === undefined)
+    throw new RangeError('Wasm checked arithmetic lost its right operand')
+  if (
+    operation.operation === 'CheckedAdd' ||
+    operation.operation === 'CheckedSubtract' ||
+    operation.operation === 'CheckedMultiply'
+  ) {
+    const shape: OverflowShape =
+      operation.operation === 'CheckedAdd'
+        ? 'Add'
+        : operation.operation === 'CheckedSubtract'
+          ? 'Subtract'
+          : 'Multiply'
+    const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
+    return [
+      ...checkedArithmeticOutcome(shape, target, leftSlot, rightSlot, resultScratch, pointerBits),
+      Instr.localSet(tag),
+      ...setTag,
+      Instr.localGet(resultScratch),
+      ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+      Instr.localSet(payload),
+    ]
+  }
+  const minimum = Scalar.range(target, pointerBits).minimum
+  const signedOverflow =
+    target.signedness === 'Signed' && operation.operation === 'CheckedDivide'
+      ? [
+          Instr.localGet(leftSlot),
+          targetConstant(minimum),
+          Instr.op(`${targetPrefix}.eq`),
+          Instr.localGet(rightSlot),
+          targetConstant(-1n),
+          Instr.op(`${targetPrefix}.eq`),
+          Instr.op('i32.and'),
+        ]
+      : [Instr.i32Const(0)]
+  const division: Instr.PlainMnemonic =
+    operation.operation === 'CheckedDivide'
+      ? `${targetPrefix}.div_${target.signedness === 'Signed' ? 's' : 'u'}`
+      : `${targetPrefix}.rem_${target.signedness === 'Signed' ? 's' : 'u'}`
+  return [
+    Instr.localGet(rightSlot),
+    Instr.op(`${targetPrefix}.eqz`),
+    ...signedOverflow,
+    Instr.op('i32.or'),
+    Instr.localSet(tag),
+    Instr.localGet(tag),
+    Instr.ifElse(
+      Instr.valueBlockType(targetBits === 64 ? i64 : i32),
+      [targetConstant(0n)],
+      [Instr.localGet(leftSlot), Instr.localGet(rightSlot), Instr.op(division)],
+    ),
+    ...normalizeSubword(targetBits, target.signedness === 'Signed'),
+    Instr.localSet(payload),
+    ...setTag,
+  ]
+}
+
+const emitBinaryOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'Binary' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, plan, scalar } = state
+
+  const leftType = layout.types.at(operation.left.ordinal)
+  const semantic = leftType === undefined ? undefined : Mir.semanticType(leftType)
+  const scalarType = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
+  if (scalarType?.category === 'Floating') {
+    const prefix = scalarType.spelling
+    if (operation.operator === 'TotalOrder') {
+      const temporary = prefix === 'f32' ? layout.scratch : layout.scratch64
+      if (temporary === undefined) throw new RangeError('Wasm total order lost its scratch local')
+      const integer = prefix === 'f32' ? 'i32' : 'i64'
+      const all = prefix === 'f32' ? Instr.i32Const(-1) : Instr.i64Const(-1n)
+      const sign =
+        prefix === 'f32' ? Instr.i32Const(-2147483648) : Instr.i64Const(-9223372036854775808n)
+      const zero = prefix === 'f32' ? Instr.i32Const(0) : Instr.i64Const(0n)
+      const reinterpret: Instr.PlainMnemonic =
+        prefix === 'f32' ? 'i32.reinterpret_f32' : 'i64.reinterpret_f64'
+      const key = (local: number): ReadonlyArray<Instr.Instr> => [
+        Instr.localGet(local),
+        Instr.op(reinterpret),
+        all,
+        sign,
+        Instr.localGet(local),
+        Instr.op(reinterpret),
+        zero,
+        Instr.op(`${integer}.lt_s`),
+        Instr.op('select'),
+        Instr.op(`${integer}.xor`),
+      ]
+      return [
+        ...key(scalar(operation.left)),
+        Instr.localSet(temporary),
+        Instr.localGet(temporary),
+        ...key(scalar(operation.right)),
+        Instr.op(`${integer}.le_u`),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    }
+    const comparison: Instr.PlainMnemonic | undefined =
+      operation.operator === 'Equals'
+        ? `${prefix}.eq`
+        : operation.operator === 'NotEquals'
+          ? `${prefix}.ne`
+          : operation.operator === 'LessThan'
+            ? `${prefix}.lt`
+            : operation.operator === 'LessOrEqual'
+              ? `${prefix}.le`
+              : operation.operator === 'GreaterThan'
+                ? `${prefix}.gt`
+                : operation.operator === 'GreaterOrEqual'
+                  ? `${prefix}.ge`
+                  : undefined
+    if (comparison !== undefined)
+      return [
+        Instr.localGet(scalar(operation.left)),
+        Instr.localGet(scalar(operation.right)),
+        Instr.op(comparison),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    const arithmetic: Instr.PlainMnemonic | undefined =
+      operation.operator === 'Add'
+        ? `${prefix}.add`
+        : operation.operator === 'Subtract'
+          ? `${prefix}.sub`
+          : operation.operator === 'Multiply'
+            ? `${prefix}.mul`
+            : operation.operator === 'Divide'
+              ? `${prefix}.div`
+              : undefined
+    if (arithmetic !== undefined)
+      return [
+        Instr.localGet(scalar(operation.left)),
+        Instr.localGet(scalar(operation.right)),
+        Instr.op(arithmetic),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    if (operation.operator === 'Remainder')
+      return [
+        Instr.localGet(scalar(operation.left)),
+        Instr.localGet(scalar(operation.left)),
+        Instr.localGet(scalar(operation.right)),
+        Instr.op(`${prefix}.div`),
+        Instr.op(`${prefix}.trunc`),
+        Instr.localGet(scalar(operation.right)),
+        Instr.op(`${prefix}.mul`),
+        Instr.op(`${prefix}.sub`),
+        Instr.localSet(scalar(operation.destination)),
+      ]
+    throw new RangeError(`Wasm float operation ${operation.operator} is unavailable`)
+  }
+  if (
+    scalarType?.category === 'Boolean' &&
+    (operation.operator === 'Equals' || operation.operator === 'NotEquals')
+  ) {
+    return [
+      Instr.localGet(scalar(operation.left)),
+      Instr.localGet(scalar(operation.right)),
+      Instr.op(operation.operator === 'Equals' ? 'i32.eq' : 'i32.ne'),
+      Instr.localSet(scalar(operation.destination)),
+    ]
+  }
+  // A Unicode scalar value occupies one 32-bit lane and orders by that value, so its
+  // comparisons are the unsigned 32-bit comparisons and it declares nothing else.
+  if (scalarType?.category === 'Character') {
+    const comparison: Instr.PlainMnemonic | undefined =
+      operation.operator === 'Equals'
+        ? 'i32.eq'
+        : operation.operator === 'NotEquals'
+          ? 'i32.ne'
+          : operation.operator === 'LessThan'
+            ? 'i32.lt_u'
+            : operation.operator === 'LessOrEqual'
+              ? 'i32.le_u'
+              : operation.operator === 'GreaterThan'
+                ? 'i32.gt_u'
+                : operation.operator === 'GreaterOrEqual'
+                  ? 'i32.ge_u'
+                  : undefined
+    if (comparison === undefined)
+      throw new RangeError(`Wasm char operation ${operation.operator} is unavailable`)
+    return [
+      Instr.localGet(scalar(operation.left)),
+      Instr.localGet(scalar(operation.right)),
+      Instr.op(comparison),
+      Instr.localSet(scalar(operation.destination)),
+    ]
+  }
+  const integer = scalarType
+  if (integer === undefined || integer.category !== 'Integer')
+    throw new RangeError(`Wasm binary operation ${operation.operator} lost its integer type`)
+  return [
+    ...emitIntegerBinaryValue(
+      operation.operator,
+      integer,
+      scalar(operation.left),
+      scalar(operation.right),
+      layout,
+      plan.target.pointerSize === 4 ? 32 : 64,
+    ),
+    Instr.localSet(scalar(operation.destination)),
+  ]
+}
+
+/** Emits one MIR operation through its independently addressable sibling emitter. */
+const emitOperationWithContext = (
+  operation: Mir.Operation,
+  context: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  switch (operation._tag) {
+    case 'StaticString':
+      return emitStaticStringOperation(operation, context)
+    case 'StringFromUtf8Unchecked':
+      return emitStringFromUtf8UncheckedOperation(operation, context)
+    case 'StringUtf8Bytes':
+      return emitStringUtf8BytesOperation(operation, context)
+    case 'StringByteLength':
+      return emitStringByteLengthOperation(operation, context)
+    case 'StringEqualsExact':
+      return emitStringEqualsExactOperation(operation, context)
+    case 'ValidateLayout':
+      return emitValidateLayoutOperation(operation, context)
+    case 'RepeatLayout':
+      return emitRepeatLayoutOperation(operation, context)
+    case 'Allocate':
+      return emitAllocateOperation(operation, context)
+    case 'HostWrite':
+      return emitHostWriteOperation(operation, context)
+    case 'OsCall':
+      return emitOsCallOperation(operation, context)
+    case 'RawBufferFrom':
+      return emitRawBufferFromOperation(operation, context)
+    case 'RawBufferCount':
+      return emitRawBufferCountOperation(operation, context)
+    case 'RawBufferSlot':
+      return emitRawBufferSlotOperation(operation, context)
+    case 'RawBufferRead':
+      return emitRawBufferReadOperation(operation, context)
+    case 'RawBufferView':
+      return emitRawBufferViewOperation(operation, context)
+    case 'RawBufferCopy':
+      return emitRawBufferCopyOperation(operation, context)
+    case 'RawBufferFill':
+      return emitRawBufferFillOperation(operation, context)
+    case 'SlotWrite':
+      return emitSlotWriteOperation(operation, context)
+    case 'SlotTake':
+      return emitSlotTakeOrSlotCopyOperation(operation, context)
+    case 'SlotCopy':
+      return emitSlotTakeOrSlotCopyOperation(operation, context)
+    case 'SlotDrop':
+      return emitSlotDropOperation(operation, context)
+    case 'ShortCircuit':
+      return emitShortCircuitOperation(operation, context)
+    case 'Match':
+      return emitMatchOperation(operation, context)
+    case 'Literal':
+      return emitLiteralOperation(operation, context)
+    case 'StaticView':
+      return emitStaticViewOperation(operation, context)
+    case 'Move':
+      return emitMoveOperation(operation, context)
+    case 'BeginLoan':
+      return emitBeginLoanOperation(operation, context)
+    case 'EndLoan':
+      return emitEndLoanOperation(operation, context)
+    case 'SliceLength':
+      return emitSliceLengthOperation(operation, context)
+    case 'ConvertUnion':
+      return emitConvertUnionOperation(operation, context)
+    case 'Construct':
+      return emitConstructOperation(operation, context)
+    case 'ConstructArray':
+      return emitConstructArrayOperation(operation, context)
+    case 'Project':
+      return emitProjectOperation(operation, context)
+    case 'ReadPlace':
+      return emitReadPlaceOperation(operation, context)
+    case 'CheckPlace':
+      return emitCheckPlaceOperation(operation, context)
+    case 'WritePlace':
+      return emitWritePlaceOperation(operation, context)
+    case 'Drop':
+      return emitDropOperation(operation, context)
+    case 'MakeEffect':
+      return emitMakeEffectOrMakeCallableOperation(operation, context)
+    case 'MakeCallable':
+      return emitMakeEffectOrMakeCallableOperation(operation, context)
+    case 'PackEffectComposite':
+      return emitPackEffectCompositeOperation(operation, context)
+    case 'PackEffectOutcome':
+      return emitPackEffectOutcomeOperation(operation, context)
+    case 'PackEffectFailureUnion':
+      return emitPackEffectFailureUnionOperation(operation, context)
+    case 'PropagateEffectFailure':
+      return emitPropagateEffectFailureOperation(operation, context)
+    case 'UnpackEffectSuccess':
+      return emitUnpackEffectSuccessOperation(operation, context)
+    case 'RunEffect':
+      return emitRunEffectOperation(operation, context)
+    case 'RunEffectValue':
+      return emitRunEffectValueOrRunStaticEffectOperation(operation, context)
+    case 'RunStaticEffect':
+      return emitRunEffectValueOrRunStaticEffectOperation(operation, context)
+    case 'RunEffectComposite':
+      return emitRunEffectCompositeOperation(operation, context)
+    case 'ReifyEffect':
+      return emitReifyEffectOperation(operation, context)
+    case 'CloseEffectEntry':
+      return emitCloseEffectEntryOperation(operation, context)
+    case 'Call':
+      return emitCallOperation(operation, context)
+    case 'ApplyCallable':
+      return emitApplyCallableOperation(operation, context)
+    case 'ConvertInteger':
+      return emitConvertIntegerOperation(operation, context)
+    case 'ConvertScalar':
+      return emitConvertScalarOperation(operation, context)
+    case 'ReinterpretScalar':
+      return emitReinterpretScalarOperation(operation, context)
+    case 'FloatUnary':
+      return emitFloatUnaryOperation(operation, context)
+    case 'FloatTranscendental':
+      return emitFloatTranscendentalOperation(operation, context)
+    case 'CheckedScalar':
+      return emitCheckedScalarOperation(operation, context)
+    case 'Binary':
+      return emitBinaryOperation(operation, context)
   }
 }
+
+const emitOperation = (
+  operation: Mir.Operation,
+  context: WasmEmitContext.WasmEmitContext<Layout, WasmSuspensionRuntime>,
+  suspension?: WasmSuspensionFunctionContext,
+  skipInvocation = false,
+): ReadonlyArray<Instr.Instr> =>
+  emitOperationWithContext(operation, makeOperationContext(context, suspension, skipInvocation))
 
 type Label =
   | { readonly _tag: 'If' }
@@ -5312,16 +5213,9 @@ const branchDepth = (
 
 /** Direct structured emission from canonical regions; no CFG recovery or dispatch loop exists. */
 const emitBody = (
-  fn: Mir.MirFunction,
-  layout: Layout,
-  plan: LayoutPlan.Plan,
-  resolve: (
-    target: DeclarationIndex.CanonicalId,
-    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
-  ) => FuncActor.Func,
-  memory: MemoryContext | undefined,
-  suspensionRuntime?: WasmSuspensionRuntime,
+  context: WasmEmitContext.WasmEmitContext<Layout, WasmSuspensionRuntime>,
 ): ReadonlyArray<Instr.Instr> => {
+  const { fn, layout, plan, memory, suspensionRuntime } = context
   const regions = new Map(fn.regions.map((region) => [region.id.ordinal, region] as const))
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
   const copySlots = (
@@ -5459,17 +5353,9 @@ const emitBody = (
     }
     return laneKindsOf(plan, fn.result)
   })()
-  const zeroOf = (type: ValType.ValType): Instr.Instr =>
-    type === i64
-      ? Instr.i64Const(0n)
-      : type === f32
-        ? Instr.f32Const(0)
-        : type === f64
-          ? Instr.f64Const(0)
-          : Instr.i32Const(0)
   const returnTransfer = (): ReadonlyArray<Instr.Instr> => [
     ...restoreFrame(),
-    ...resultLanes.map((lane) => zeroOf(laneValueType(plan, lane))),
+    ...resultLanes.map((lane) => zeroConst(laneValueType(plan, lane))),
     Instr.op('return'),
   ]
   const coroutineFrame =
@@ -5759,9 +5645,7 @@ const emitBody = (
     if (region._tag === 'OperationRegion' || region._tag === 'CleanupRegion') {
       const operations = region._tag === 'OperationRegion' ? region.operations : region.releases
       return [
-        ...operations.flatMap((operation) =>
-          emitOperation(operation, layout, plan, resolve, memory, suspensionContext),
-        ),
+        ...operations.flatMap((operation) => emitOperation(operation, context, suspensionContext)),
         ...emitOutcome(region.outcome, labels, stop),
       ]
     }
@@ -5788,7 +5672,7 @@ const emitBody = (
     ])
     const loopBody = [
       ...condition.operations.flatMap((operation) =>
-        emitOperation(operation, layout, plan, resolve, memory, suspensionContext),
+        emitOperation(operation, context, suspensionContext),
       ),
       Instr.localGet(scalar(region.conditionValue)),
       Instr.op('i32.eqz'),
@@ -5858,10 +5742,7 @@ const emitBody = (
       })
       const completeSuspendedOperation = emitOperation(
         region.operation,
-        layout,
-        plan,
-        resolve,
-        memory,
+        context,
         suspensionContext,
         true,
       )
@@ -5873,9 +5754,7 @@ const emitBody = (
           const following = [
             ...operations
               .slice(operationOrdinal + 1)
-              .flatMap((entry) =>
-                emitOperation(entry, layout, plan, resolve, memory, suspensionContext),
-              ),
+              .flatMap((entry) => emitOperation(entry, context, suspensionContext)),
             ...continuation,
           ]
           if (matchesSuspensionOperation(operation, region.operation)) {
@@ -5951,7 +5830,13 @@ const emitBody = (
   ]
 }
 
-const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
+interface EmittedProgram {
+  readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly ir: string
+  readonly bitcode: Uint8Array
+}
+
+const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenRequest) =>
   Effect.gen(function* () {
     const i32Layout = LayoutPlan.entry(program.layout, 'i32')
     if (i32Layout === undefined) {
@@ -6000,53 +5885,13 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         ])
       return laneKindsOf(program.layout, type)
     }
-    const originRecords = program.functions
-      .flatMap((fn) =>
-        (fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'SuspendEffectRegion' ? [Object.freeze({ fn, region })] : [],
-        ),
-      )
-      .sort((left, right) =>
-        Backend.suspensionPointKey(left.region.point).localeCompare(
-          Backend.suspensionPointKey(right.region.point),
-        ),
-      )
-    const resumeRecords = program.functions
-      .flatMap((fn) =>
-        (fn.suspension?.regions ?? []).flatMap((region) =>
-          region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
-            ? [Object.freeze({ fn, region })]
-            : [],
-        ),
-      )
-      .sort((left, right) =>
-        Backend.suspensionPointKey(left.region.point).localeCompare(
-          Backend.suspensionPointKey(right.region.point),
-        ),
-      )
-    const originIds = new Map(
-      originRecords.map((record, ordinal) => [
-        Backend.suspensionPointKey(record.region.point),
-        ordinal + 1,
-      ]),
-    )
-    const resumeIds = new Map(
-      resumeRecords.map((record, ordinal) => [
-        Backend.suspensionPointKey(record.region.point),
-        ordinal + 1,
-      ]),
-    )
-    const coroutineFrames = new Map(
-      (program.coroutineFrames?.entries ?? []).map((entry) => [
-        Instances.keyText(entry.function),
-        entry,
-      ]),
-    )
-    const coroutineFrameStates = new Map(
-      (program.coroutineFrames?.entries ?? []).flatMap((entry) =>
-        entry.states.map((state) => [Backend.suspensionPointKey(state.point), state] as const),
-      ),
-    )
+    const suspensionRecords = WasmSuspension.records(program)
+    const originRecords = suspensionRecords.origins
+    const resumeRecords = suspensionRecords.resumes
+    const originIds = suspensionRecords.originIds
+    const resumeIds = suspensionRecords.resumeIds
+    const coroutineFrames = suspensionRecords.frames
+    const coroutineFrameStates = suspensionRecords.layouts
     const transferHeaderSize = program.layout.target.pointerSize * 3
     const originArgumentSize = program.functions.reduce((maximum, fn) => {
       const size = (fn.suspension?.regions ?? []).reduce((innerMaximum, region) => {
@@ -6086,7 +5931,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
       staticEnd = alignUp(staticEnd + Math.max(transferStorageSize, 16), 16)
     // A cleanup plan can reclaim a block this module never allocated itself — a caller's owner
     // dropped here — so the release helper is needed wherever a reclaim ticket is consumed too.
-    const releasesBlocks = (plan: Ownership.CleanupPlan): boolean => Ownership.cleanupReclaims(plan)
+    const releasesBlocks = (plan: CleanupPlan.CleanupPlan): boolean => CleanupPlan.reclaims(plan)
     const needsHeap = program.functions.some((fn) =>
       Mir.operations(fn).some(
         (operation) =>
@@ -6421,12 +6266,16 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
         entry.fn.regions.length === 0
           ? [Instr.op('unreachable')]
           : emitBody(
-              entry.fn,
-              layout,
-              program.layout,
-              resolve,
-              memory,
-              entry.suspendable ? suspensionRuntime : undefined,
+              Object.freeze({
+                fn: entry.fn,
+                layout,
+                plan: program.layout,
+                resolve,
+                memory,
+                ...(entry.suspendable && suspensionRuntime !== undefined
+                  ? { suspensionRuntime }
+                  : {}),
+              }),
             )
       // Body validation happens here, inside the wasm builder, and its failure names only the
       // operation. Naming the function turns "expected i64, found i32" into a report that points
@@ -6584,15 +6433,7 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
           Instr.globalSet(suspendStatus),
           Instr.i32Const(id),
           Instr.globalSet(suspendResumePath),
-          ...parameterLanes.map((lane) =>
-            laneValueType(program.layout, lane) === i64
-              ? Instr.i64Const(0n)
-              : laneValueType(program.layout, lane) === f32
-                ? Instr.f32Const(0)
-                : laneValueType(program.layout, lane) === f64
-                  ? Instr.f64Const(0)
-                  : Instr.i32Const(0),
-          ),
+          ...parameterLanes.map((lane) => zeroConst(laneValueType(program.layout, lane))),
           Instr.call(owner.handle),
           ...ownerResultLanes
             .map((_lane, laneOrdinal) => laneOrdinal)
@@ -6762,6 +6603,24 @@ const emitProgram = (program: Mir.Module, request: Backend.CodegenRequest) =>
     }
   })
 
+const emitProgram = Effect.fnUntraced(function* (
+  program: Mir.Module,
+  request: Backend.CodegenRequest,
+): Effect.fn.Return<EmittedProgram, Backend.BackendError> {
+  return yield* emitProgramUnmapped(program, request).pipe(
+    Effect.catchTag('WasmError', (cause) =>
+      Effect.fail(
+        new Backend.BackendError({
+          operation: 'Backend.emit',
+          backend: 'WebAssembly',
+          message: `WebAssembly emission failed for ${program.module}`,
+          reason: { _tag: 'WrappedFailure', cause },
+        }),
+      ),
+    ),
+  )
+})
+
 const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlProvenance> =>
   Object.freeze(
     program.functions.flatMap((fn) => {
@@ -6879,7 +6738,7 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
 
 /**
  * The WebAssembly backend over the Silk wasm builder. It satisfies the same nominal `Backend`
- * contract as `Backend.LlvmBackend`, while its artifact kind selects a different finalizer.
+ * contract as the LLVM backend actor, while its artifact kind selects a different finalizer.
  */
 export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = Object.freeze({
   _tag: 'Backend',
@@ -6890,18 +6749,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
     program: Mir.Module,
     request: Backend.CodegenRequest,
   ): Effect.fn.Return<Backend.WebAssemblyModuleArtifact, Backend.BackendError> {
-    const output = yield* emitProgram(program, request).pipe(
-      Effect.mapError((cause) =>
-        cause._tag === 'BackendError'
-          ? cause
-          : new Backend.BackendError({
-              operation: 'Backend.emit',
-              backend: 'WebAssembly',
-              message: `WebAssembly emission failed for ${program.module}`,
-              reason: { _tag: 'WrappedFailure', cause },
-            }),
-      ),
-    )
+    const output = yield* emitProgram(program, request)
     return Object.freeze({
       _tag: 'WebAssemblyModuleArtifact',
       backend: 'wasm',

@@ -11,6 +11,7 @@ import * as Driver from '../../dist/Driver.js'
 import * as Instances from '../../dist/Instances.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
+import * as NativeToolchain from '../../dist/NativeToolchain.js'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Target from '../../dist/Target.js'
@@ -82,7 +83,7 @@ const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const destinationRoot = yield* fileSystem.makeTempDirectoryScoped()
-  const host = yield* Target.host()
+  const host = yield* NativeToolchain.hostTarget()
   const native = yield* Analysis.ofSourceRealized(moduleName, bytes, host.id)
   const wasm = yield* Analysis.ofSourceRealized(moduleName, bytes, Target.wasm32UnknownUnknown.id)
   const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })

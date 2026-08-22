@@ -6,6 +6,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -43,7 +44,7 @@ it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels'
       'pub effect fn suspend<A, E, ?R>',
     )
 
-    const analyzed = Analysis.syntaxOf(snapshot, 'silk/effect')?.source
+    const analyzed = Projections.syntaxOf(snapshot, 'silk/effect')?.source
     assert.isDefined(analyzed)
     const analyzedBytes = analyzed === undefined ? undefined : SourceFile.toUint8Array(analyzed)
     assert.deepEqual(analyzedBytes, Stdlib.find('silk/effect')?.bytes)

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import * as MirSamples from './support/mirSamples.js'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -16,13 +17,13 @@ const operationRegion = (region: Mir.Region | undefined): Mir.OperationRegion =>
 }
 
 it('verifies the hand-built samples clean', () => {
-  for (const sample of Mir.samples()) {
+  for (const sample of MirSamples.samples()) {
     assert.deepEqual(Mir.verify(sample), [])
   }
 })
 
 it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const sample = straight ?? raise('expected sample')
   const fn = sample.functions.at(0) ?? raise('expected sample function')
   const unavailable = Type.nominal('sample://unavailable.silk', 'Outer', [
@@ -64,7 +65,7 @@ it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
 })
 
 it('retains invalid return types as a verifier invariant', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const sample = straight ?? raise('expected sample')
   const fn = sample.functions.at(0) ?? raise('expected sample function')
   const invalid: Mir.Module = {
@@ -79,7 +80,7 @@ it('retains invalid return types as a verifier invariant', () => {
 })
 
 it('reports broken graphs deterministically as data', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const fn = straight?.functions.at(0) ?? raise('expected the sample function')
   const first = operationRegion(fn.regions.at(0))
   const broken: Mir.Module = {
@@ -126,7 +127,7 @@ it('reports broken graphs deterministically as data', () => {
 })
 
 it('rejects structural cycles without treating lexical repetition as an edge', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const sample = straight ?? raise('expected sample')
   const fn = sample.functions.at(0) ?? raise('expected sample function')
   const first = operationRegion(fn.regions.at(0))
@@ -157,7 +158,7 @@ it('rejects structural cycles without treating lexical repetition as an edge', (
 })
 
 it('rejects repeat and exit ports that name no lexical loop owner', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const sample = straight ?? raise('expected sample')
   const fn = sample.functions.at(0) ?? raise('expected sample function')
   const first = operationRegion(fn.regions.at(0))
@@ -187,7 +188,7 @@ it('rejects repeat and exit ports that name no lexical loop owner', () => {
 })
 
 it('requires every yield to be one uniquely owned loop condition', () => {
-  const [, branching] = Mir.samples()
+  const [, branching] = MirSamples.samples()
   const sample = branching ?? raise('expected branching sample')
   const fn = sample.functions.at(0) ?? raise('expected sample function')
   const returned = operationRegion(fn.regions.at(1))
@@ -263,7 +264,7 @@ it('requires every yield to be one uniquely owned loop condition', () => {
 })
 
 it('carries and encodes exactly one compiler-owned target layout plan', () => {
-  const [straight] = Mir.samples()
+  const [straight] = MirSamples.samples()
   const sample = straight ?? raise('expected sample')
 
   assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
@@ -272,7 +273,7 @@ it('carries and encodes exactly one compiler-owned target layout plan', () => {
 })
 
 it('marks generated outcomes and preserves programmer provenance', () => {
-  const [, branching] = Mir.samples()
+  const [, branching] = MirSamples.samples()
   const encoded = Mir.encode(branching ?? raise('expected branching sample'))
 
   assert.include(encoded, 'conditional condition=%0')
@@ -280,15 +281,15 @@ it('marks generated outcomes and preserves programmer provenance', () => {
 })
 
 it('matches the MIR golden encodings byte-for-byte', () => {
-  const [straight, branching] = Mir.samples()
+  const [straight, branching] = MirSamples.samples()
 
   assert.strictEqual(Mir.encode(straight ?? raise('expected sample')), golden('straight.mir.txt'))
   assert.strictEqual(Mir.encode(branching ?? raise('expected sample')), golden('branching.mir.txt'))
 })
 
 it('constructs and encodes byte-identically across repeated runs', () => {
-  const first = Mir.samples()
-  const second = Mir.samples()
+  const first = MirSamples.samples()
+  const second = MirSamples.samples()
 
   assert.deepEqual(first, second)
   assert.deepEqual(first.map(Mir.encode), second.map(Mir.encode))

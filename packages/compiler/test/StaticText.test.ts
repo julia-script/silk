@@ -8,6 +8,7 @@ import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StaticText from '../src/StaticText.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
@@ -149,7 +150,7 @@ pub fn main() -> i32 { return 42 }`),
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0085'],
     )
-    assert.strictEqual(Analysis.hirOf(snapshot, 'static/recovery')?.functions.length, 2)
+    assert.strictEqual(Projections.hirOf(snapshot, 'static/recovery')?.functions.length, 2)
   }),
 )
 
@@ -166,7 +167,7 @@ it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['LEX0002'],
     )
-    assert.strictEqual(Analysis.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
+    assert.strictEqual(Projections.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
   }),
 )
 

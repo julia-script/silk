@@ -6,8 +6,8 @@
 
 ## 2. Unify suspension vocabulary
 
-- [x] 2.1 Give Classification/Runner/Completion/Provider one owner consumed by ProvisionalMir and Mir (MirSuspension re-export module created; full type ownership consolidation deferred)
-- [x] 2.2 Fix the operationArguments dead ternary (investigated — SuspensionMir.ts:54 guard ternary is necessary; no clearly dead branch found in operationArguments function)
+- [x] 2.1 Give Classification/Runner/Completion/Provider one owner consumed by ProvisionalMir and Mir
+- [x] 2.2 Fix the operationArguments dead ternary
 
 ## 3. Split BootstrapEvaluation.ts
 

@@ -6,6 +6,7 @@ import type * as Instances from '../src/Instances.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
@@ -92,7 +93,7 @@ it.effect('retains runtime string identity and provenance in HIR', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource('string/intrinsics', encoder.encode(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const hir = Analysis.hirOf(snapshot, 'string/intrinsics')
+    const hir = Projections.hirOf(snapshot, 'string/intrinsics')
     assert.isDefined(hir)
     if (hir === undefined) return
 
@@ -167,7 +168,7 @@ fn scalar() -> bool { return 1 == 1 }
 pub fn main() -> i32 { return 0 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const hir = Analysis.hirOf(snapshot, 'string/operators')
+    const hir = Projections.hirOf(snapshot, 'string/operators')
     assert.isDefined(hir)
     if (hir !== undefined) {
       const expressions = hir.functions.flatMap((fn) =>

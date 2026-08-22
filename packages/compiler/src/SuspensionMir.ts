@@ -34,14 +34,6 @@ const resumeOf = (
   path: Mir.ResumePointId['path'],
 ): Mir.ResumePointId => Object.freeze({ _tag: 'ResumePointId', point, path })
 
-const operationArguments = (
-  operation: Extract<
-    Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
-  >,
-): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect' ? operation.arguments : operation.arguments
-
 const runnerOf = (
   runner: ProvisionalMir.Runner,
   index: DeclarationIndex.Index,
@@ -51,7 +43,7 @@ const runnerOf = (
   >,
   functions: ReadonlyArray<Mir.MirFunction> = [],
 ): Mir.SuspensionRunner => {
-  const arguments_ = operation === undefined ? [] : operationArguments(operation)
+  const arguments_ = operation?.arguments ?? []
   const operationProviders = operation?._tag === 'RunEffectValue' ? operation.providers : []
   // One selection identity for both the dedup and the argument lookup below — two predicates
   // here previously let a provider count as "already selected" yet miss its runtime argument.

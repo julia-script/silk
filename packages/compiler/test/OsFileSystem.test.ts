@@ -133,6 +133,27 @@ it.effect('blocks OS evaluation without an injected adapter and uses one when su
   }),
 )
 
+it.effect('preserves an arbitrary thrown OS-provider cause in the evaluation trace', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'os-filesystem/thrown-cause',
+      ascii(lowLevelSource),
+    )
+    const cause = Object.freeze({ boundary: 'filesystem', detail: 23 })
+    const evaluated = Analysis.evaluate(snapshot, {
+      osFileSystem: Object.freeze({
+        ...provider,
+        pathInspect: () => {
+          throw cause
+        },
+      }),
+    })
+    const call = evaluated.trace.find((event) => event._tag === 'OsCall')
+    assert.isDefined(call)
+    assert.strictEqual(call?.cause, cause)
+  }),
+)
+
 it.effect(
   'runs partial I/O and preserves primary failures through the injected evaluator host',
   () =>

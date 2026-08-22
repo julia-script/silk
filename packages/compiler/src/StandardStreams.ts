@@ -11,7 +11,7 @@ export interface WriteEvent {
 /** The typed provider result: a write commits completely or fails without a partial event. */
 export type WriteResult =
   | { readonly _tag: 'Written' }
-  | { readonly _tag: 'WriteFailure'; readonly message: string }
+  | { readonly _tag: 'WriteFailure'; readonly message: string; readonly cause?: unknown }
 
 /** The explicit host boundary used by evaluation and WebAssembly hosting. */
 export interface Provider {

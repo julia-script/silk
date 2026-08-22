@@ -48,7 +48,7 @@ export const objectCommand = (
     target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.triple}`,
+      `--target=${target.id}`,
       '-c',
       '-x',
       'ir',
@@ -72,7 +72,7 @@ export const linkCommand = (
     target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.triple}`,
+      `--target=${target.id}`,
       ...objects,
       ...libraries.map((library) => `-l${library}`),
       '-o',
@@ -92,7 +92,7 @@ export const shimCommand = (
     target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.triple}`,
+      `--target=${target.id}`,
       '-c',
       '-x',
       'c',
@@ -116,7 +116,7 @@ export const wasmCommand = (
     target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.triple}`,
+      `--target=${target.id}`,
       '-nostdlib',
       '-x',
       'ir',

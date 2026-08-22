@@ -103,6 +103,18 @@ const optionalLoose = nominal('OptionalSchema', [loose])
  */
 const askedProviders = [nestedSchema, schema, optionalLoose, mappedTally, tally, mappedSchema]
 
+const proofDependencies = (proof) => {
+  const found = new Map()
+  const visit = (current) => {
+    if (current._tag !== 'Proved') return
+    for (const requirement of current.requirements) visit(requirement)
+    const key = ConformanceGoal.key(current.goal)
+    if (!found.has(key)) found.set(key, current.goal)
+  }
+  visit(proof)
+  return Object.freeze([...found.values()])
+}
+
 const encodeProof = ({ goal, proof }) => ({
   goal: ConformanceGoal.key(goal),
   encoded: ConformanceGoal.encode(goal),
@@ -110,7 +122,7 @@ const encodeProof = ({ goal, proof }) => ({
   selection: proof._tag === 'Proved' ? proof.selection._tag : proof.failure._tag,
   typeArguments:
     proof._tag === 'Proved' ? proof.typeArguments.map(Type.genericArgumentKey) : Object.freeze([]),
-  dependencies: ConformanceGoal.dependencies(proof).map(ConformanceGoal.key),
+  dependencies: proofDependencies(proof).map(ConformanceGoal.key),
   trace: ConformanceGoal.traceLines(proof),
 })
 

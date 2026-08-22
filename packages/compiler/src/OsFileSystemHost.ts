@@ -32,6 +32,7 @@ export interface Failure {
   readonly _tag: 'Failure'
   readonly reason: Reason
   readonly nativeCode?: number
+  readonly cause?: unknown
 }
 
 export interface Handle {

@@ -10,6 +10,7 @@
 import type {
   Backend,
   BootstrapEvaluation,
+  CleanupPlan,
   DeclarationIndex,
   Elaboration,
   Instances,
@@ -314,7 +315,7 @@ const loanSiteText = (site: Ownership.BindingSite): string =>
         ? `pattern b${site.binding.ordinal}`
         : `temporary @${site.owner.span.start}`
 
-const cleanupText = (cleanup: Ownership.CleanupPlan): string => {
+const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
   switch (cleanup._tag) {
     case 'NoCleanup':
       return 'no cleanup'
@@ -1174,6 +1175,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `complete suspended child · ${event.outcome?.toLowerCase() ?? '?'}`
     case 'HostWrite':
       return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
+    case 'OsCall':
+      return `${event.operation.actor}.${event.operation.name} · ${event.outcome.toLowerCase()}`
     case 'StringStatic':
       return `string ${event.storage ?? 'static'} · ${event.byteLength ?? 0} UTF-8 bytes`
     case 'StringRuntime':
@@ -1245,6 +1248,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'SuspensionChildStart':
     case 'SuspensionChildComplete':
     case 'HostWrite':
+    case 'OsCall':
     case 'StringStatic':
     case 'StringRuntime':
     case 'StringBytes':

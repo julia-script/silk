@@ -54,22 +54,22 @@ const decoder = new TextDecoder()
 const tokenText = (source: SourceFile.SourceFile, token: Token.Token): string =>
   decoder.decode(Uint8Array.from(source.bytes.slice(token.span.start, token.span.end)))
 
-/** Renders the import path in source-spelling form (segments joined by "/"). */
+/** Renders the import path exactly as source modules spell it (segments joined by "."). */
 export const spelling = (
   source: SourceFile.SourceFile,
   path: SyntaxTree.Node,
 ): string | undefined => {
   const pathSegments = segments(path)
   if (pathSegments.length === 0) return undefined
-  return pathSegments.map((segment) => tokenText(source, segment)).join('/')
+  return pathSegments.map((segment) => tokenText(source, segment)).join('.')
 }
 
-/** Renders the import path in canonical form (segments joined by "."). */
+/** Renders the resolver's canonical module identity (segments joined by "/"). */
 export const canonicalTarget = (
   source: SourceFile.SourceFile,
   path: SyntaxTree.Node,
 ): string | undefined => {
   const pathSegments = segments(path)
   if (pathSegments.length === 0) return undefined
-  return pathSegments.map((segment) => tokenText(source, segment)).join('.')
+  return pathSegments.map((segment) => tokenText(source, segment)).join('/')
 }

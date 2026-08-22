@@ -64,6 +64,25 @@ it('admits every Effect representation contract only at equal or weaker-use boun
   )
 })
 
+it('uses the access order for directional representation-shape comparison', () => {
+  const accesses = ['Shared', 'Exclusive', 'Take'] as const
+  const expected = [
+    [true, true, true],
+    [false, true, true],
+    [false, false, true],
+  ] as const
+
+  for (const [requiredOrdinal, required] of accesses.entries())
+    for (const [suppliedOrdinal, supplied] of accesses.entries())
+      assert.strictEqual(
+        Type.haveSameRepresentationShape(
+          Type.effect('i32', [], required),
+          Type.effect('i32', [], supplied),
+        ),
+        expected.at(requiredOrdinal)?.at(suppliedOrdinal) ?? false,
+      )
+})
+
 it('keeps one ordered kinded argument vector on nominal applications', () => {
   const failure = Type.parameter(owner, 2, 'E')
   const requirements = Type.parameter(owner, 3, 'R', 'RequirementRow')

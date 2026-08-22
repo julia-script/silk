@@ -65,26 +65,6 @@ export const key = (self: ConformanceGoal): string =>
 export const encode = (self: ConformanceGoal): string =>
   `${self.capability.name} for ${Type.encode(self.provider)}`
 
-/**
- * Flattens one proof to the goals it rests on, innermost first and without repetition.
- *
- * The order is the proof's own: a goal appears only after every goal it was proved from, so the
- * sequence reads as the chain of witnesses a specialization needed and is independent of the order
- * the goals happened to be asked in. Instance discovery consumes the corresponding proof nodes;
- * this goal-only view is the stable shape a reader, report, or determinism fixture compares.
- */
-export const dependencies = (self: Proof): ReadonlyArray<ConformanceGoal> => {
-  const found = new Map<string, ConformanceGoal>()
-  const visit = (proof: Proof): void => {
-    if (proof._tag !== 'Proved') return
-    for (const requirement of proof.requirements) visit(requirement)
-    const goalKey = key(proof.goal)
-    if (!found.has(goalKey)) found.set(goalKey, proof.goal)
-  }
-  visit(self)
-  return Object.freeze([...found.values()])
-}
-
 /** Renders one failure as the sentence a diagnostic reports. */
 export const describe = (self: Failure): string => {
   switch (self._tag) {

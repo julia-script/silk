@@ -10,6 +10,7 @@ import * as StandardStreams from '../src/StandardStreams.js'
 import * as Type from '../src/Type.js'
 import { constrainedCallableForwarding } from './support/corpus.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
@@ -60,7 +61,7 @@ it.effect('dispatches complete ordered messages through an ordinary source Logge
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const hir = Analysis.hirOf(self, 'silk/effect')
+    const hir = Projections.hirOf(self, 'silk/effect')
     assert.include(hir === undefined ? '' : Hir.encode(hir), 'service-call silk/logging.Logger.log')
     const lowered = Analysis.loweredMir(self)
     assert.strictEqual(Mir.encode(lowered), golden('logging.mir.txt'))

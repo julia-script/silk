@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
@@ -309,7 +310,7 @@ pub fn main() -> i32 {
     if (field?.cleanup._tag !== 'EffectCleanup') return
     const slot = field.cleanup.slots.at(0) ?? unreachable('expected owned stored Effect slot')
     const withEffectCleanup = (
-      cleanup: Extract<Ownership.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+      cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
     ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
       Object.freeze({
         ...drop,

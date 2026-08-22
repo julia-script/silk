@@ -11,7 +11,7 @@ import * as Layout from '../src/Layout.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
-import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -21,6 +21,7 @@ import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 
 const source = `fn identity<T>(value: T) -> T { return move value }
@@ -102,7 +103,7 @@ it.effect('rejects residual rows at the complete-application specialization fron
 }
 pub fn main() -> i32 { return 0 }`),
     )
-    const fn = Analysis.hirOf(snapshot, module)?.functions.find(
+    const fn = Projections.hirOf(snapshot, module)?.functions.find(
       (candidate) =>
         candidate.declaration.canonical._tag === 'Canonical' &&
         candidate.declaration.canonical.id.name === 'forward',
@@ -742,7 +743,7 @@ it.effect('does not fabricate a second identity for duplicate type parameters', 
         'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> i32 { return 42 }',
       ),
     )
-    const declaration = Analysis.genericDeclarationsOf(snapshot).at(0)
+    const declaration = Projections.genericDeclarationsOf(snapshot).at(0)
     const first = declaration?.typeParameters.at(0)
     const duplicate = declaration?.typeParameters.at(1)
     assert.notStrictEqual(first, undefined)
@@ -763,7 +764,7 @@ pub fn main() -> i32 { return discard<Payload>(Payload {}) }`),
     const ownership = Analysis.ownershipOf(snapshot, 'generics/Cleanup')
     assert.notStrictEqual(ownership, undefined)
     if (ownership !== undefined) {
-      assert.include(Ownership.encode(ownership), 'release p0')
+      assert.include(OwnershipEncoding.encode(ownership), 'release p0')
       const discard = ownership.functions.find(
         (fn) =>
           fn.declaration.canonical._tag === 'Canonical' &&
@@ -1098,13 +1099,13 @@ pub fn main() -> i32 {
   return 0
 }`),
     )
-    const call = Analysis.genericCallsOf(snapshot).find(
+    const call = Projections.genericCallsOf(snapshot).find(
       (candidate) => candidate.target.name === 'inner',
     )
     assert.notStrictEqual(call, undefined)
     if (call === undefined) return
     assert.deepEqual(
-      Analysis.instancesOfCall(snapshot, call).map((link) =>
+      Projections.instancesOfCall(snapshot, call).map((link) =>
         link.target.key.typeArguments.map(Type.encodeGenericArgument),
       ),
       [['bool'], ['i32']],

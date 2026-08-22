@@ -3,6 +3,7 @@ import type * as Backend from '@silk-effect/compiler/Backend'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as Driver from '@silk-effect/compiler/Driver'
 import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
+import * as NodeHeapObservation from '@silk-effect/compiler/NodeHeapObservation'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
@@ -95,7 +96,6 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
     case 'Rejected':
     case 'BackendFailed':
       return 1
-    case 'Failed':
     case 'TargetFailed':
     case 'ToolchainFailed':
       return 2
@@ -129,11 +129,18 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       destination: options.destination,
       scopeName: options.scopeName,
       saveTemps: options.saveTemps ?? false,
-    }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
+    }).pipe(
+      Effect.provide(NodeHeapObservation.layer),
+      Effect.provide(FileSourceResolver.layer(resolver)),
+    ),
   )
 
   if (Result.isFailure(attempted)) {
     const failure = attempted.failure
+    if (failure._tag === 'ToolchainError') {
+      yield* Console.error(Report.toolchainError(failure))
+      return { _tag: 'NotBuilt', status: 2 }
+    }
     const summary = Report.sourceResolutionFailed(
       failure,
       Report.catalog(resolver, failure.sources, path),

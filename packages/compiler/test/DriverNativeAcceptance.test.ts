@@ -37,7 +37,7 @@ afterAll(() => {
 const compileSource = (
   name: string,
   text: string,
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed> =>
+): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),

@@ -6,6 +6,7 @@ import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as Hir from '../src/Hir.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
@@ -21,6 +22,7 @@ import {
   heterogeneousOwnedFailureResultDrop,
 } from './support/corpus.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
@@ -791,7 +793,7 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
     )
     assert.deepEqual(Analysis.diagnostics(raw), [])
     const rawModule = Analysis.loweredMir(raw)
-    const provisional = Analysis.provisionalMirOf(raw)
+    const provisional = Projections.provisionalMirOf(raw)
     const normalizedModule = MirNormalization.normalize(
       rawModule,
       provisional._tag === 'Unavailable'
@@ -1205,7 +1207,7 @@ it.effect('requires failure-path loan endings on every MIR run form', () =>
       yield* WasmMain.invoke(wasm.bytes, 'SelectiveCatch.invokeFailureLoanRunFormsWasm'),
       5,
     )
-    const llvm = yield* Backend.emit(Backend.LlvmBackend, normalizedModule, { mode: 'release' })
+    const llvm = yield* Backend.emit(LlvmBackend.LlvmBackend, normalizedModule, { mode: 'release' })
     assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
   }),
 )
@@ -1220,7 +1222,7 @@ it.effect('rejects failure-only loan metadata on every infallible MIR run form',
     )
     assert.deepEqual(Analysis.diagnostics(raw), [])
     const rawModule = Analysis.loweredMir(raw)
-    const provisional = Analysis.provisionalMirOf(raw)
+    const provisional = Projections.provisionalMirOf(raw)
     const normalizedModule = MirNormalization.normalize(
       rawModule,
       provisional._tag === 'Unavailable'
@@ -2242,7 +2244,7 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
     const selectedPropagation =
       mixedOrderPropagation ?? unreachable('expected residual propagation after the prefix')
     assert.deepEqual(Mir.verify(mixedOrder), [])
-    const llvm = yield* Backend.emit(Backend.LlvmBackend, mixedOrder, { mode: 'release' })
+    const llvm = yield* Backend.emit(LlvmBackend.LlvmBackend, mixedOrder, { mode: 'release' })
     assert.isTrue(
       llvm.control.some(
         (entry) =>

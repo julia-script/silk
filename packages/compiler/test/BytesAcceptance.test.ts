@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -77,7 +77,8 @@ it.effect(
 
       const ownership = Analysis.ownershipOf(wasmSnapshot, 'bytes-acceptance/parity')
       assert.isDefined(ownership)
-      if (ownership !== undefined) assert.include(Ownership.encode(ownership), 'returned-view')
+      if (ownership !== undefined)
+        assert.include(OwnershipEncoding.encode(ownership), 'returned-view')
 
       const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
       const module = new WebAssembly.Module(wasm.bytes.slice())

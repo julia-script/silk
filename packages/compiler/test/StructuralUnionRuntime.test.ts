@@ -6,6 +6,7 @@ import * as Layout from '../src/Layout.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -88,7 +89,7 @@ it.effect('lowers injection and widening through shared sum layouts and evaluate
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
 
-    const hir = Analysis.hirOf(self, 'unions/main')
+    const hir = Projections.hirOf(self, 'unions/main')
     const conversions =
       hir?.functions.flatMap((fn) =>
         fn.statements.flatMap((statement) =>
@@ -235,7 +236,7 @@ pub fn main() -> i32 { drop selected() return 42 }`,
         [],
         program.name,
       )
-      const executableConversion = Analysis.hirOf(self, `union-executable/${program.name}`)
+      const executableConversion = Projections.hirOf(self, `union-executable/${program.name}`)
         ?.functions.flatMap((fn) => fn.statements.flatMap(Hir.statementExpressions))
         .flatMap(expressions)
         .find(

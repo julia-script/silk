@@ -2,7 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
+import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
@@ -51,10 +52,10 @@ pub fn main() -> i32 { return 0 }`)
     const moduleOwnership = Analysis.ownershipOf(self, 'string/ownership')
     assert.isDefined(moduleOwnership)
     if (moduleOwnership !== undefined) {
-      assert.include(Ownership.encode(moduleOwnership), 'returned-view')
+      assert.include(OwnershipEncoding.encode(moduleOwnership), 'returned-view')
     }
 
-    const hir = Analysis.hirOf(self, 'string/ownership')
+    const hir = Projections.hirOf(self, 'string/ownership')
     assert.isDefined(hir)
     if (hir !== undefined) {
       const views = hir.functions.flatMap((fn) =>

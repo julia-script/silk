@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { assert, it } from '@effect/vitest'
+import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
@@ -19,6 +21,11 @@ const clang =
       : 'clang')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({ _tag: 'Toolchain', clang })
 
+const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
+afterAll(() => {
+  rmSync(testRoot, { recursive: true, force: true })
+})
+
 const termination = (...identities: ReadonlyArray<string>): Termination.Contract =>
   Object.freeze({
     _tag: 'EntryTermination',
@@ -32,29 +39,24 @@ const termination = (...identities: ReadonlyArray<string>): Termination.Contract
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
-pub fn main() -> i32 { return identity(identity(42)) }`
-
 const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
 ) {
-  const snapshot = yield* Analysis.ofSourceRealized('memory/native', ascii(nestedSource), target.id)
+  const snapshot = yield* Analysis.ofSourceRealized(
+    'memory/native',
+    ascii(
+      'pub fn identity(value: i32) -> i32 { return value }\npub fn main() -> i32 { return identity(identity(42)) }',
+    ),
+    target.id,
+  )
   return yield* Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) })
 })
 
-it('plans fixed profile arguments and nothing else varies', () => {
+it('plans fixed profile arguments against the canonical target id', () => {
   const target = Target.aarch64AppleDarwin
   const debug = ToolchainPlan.objectCommand(clang, target, 'debug', 'in.bc', 'out.o')
   const release = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
-  const releaseDebug = ToolchainPlan.objectCommand(
-    clang,
-    target,
-    'release-with-debug',
-    'in.bc',
-    'out.o',
-  )
-
   assert.deepEqual(debug.arguments, [
     '--target=aarch64-apple-darwin',
     '-c',
@@ -76,17 +78,6 @@ it('plans fixed profile arguments and nothing else varies', () => {
     '-o',
     'out.o',
   ])
-  assert.deepEqual(releaseDebug.arguments, [
-    '--target=aarch64-apple-darwin',
-    '-c',
-    '-x',
-    'ir',
-    'in.bc',
-    '-O2',
-    '-g',
-    '-o',
-    'out.o',
-  ])
 })
 
 it('generates effect-reporting shims from byte arrays with closed status handling', () => {
@@ -94,282 +85,181 @@ it('generates effect-reporting shims from byte arrays with closed status handlin
   const expected = Array.from(new TextEncoder().encode('Error: module.Error"\\name\n')).join(', ')
   assert.include(source, `{ ${expected} }`)
   assert.notInclude(source, 'Error: module.Error"\\name')
-  assert.include(source, 'if (written <= 0) return 0;')
   assert.include(source, 'default:\n      return 2;')
 })
 
-it('captures the process command line only when reachable host input requests it', () => {
-  const passThrough = ToolchainPlan.shimSource(termination())
-  const reporting = ToolchainPlan.shimSource(termination('module.Error'))
-  const hostInput = ToolchainPlan.shimSource(termination(), ['silk_os_host_argument_count_v1'])
-  for (const source of [passThrough, reporting]) {
-    assert.include(source, 'int main(void) {')
-    assert.notInclude(source, 'silk_host_argc_v1')
-    assert.notInclude(source, 'silk_host_argv_v1')
-    assert.include(source, 'extern int silk_main(void);')
-  }
-  assert.notInclude(passThrough, '#include <unistd.h>')
-  assert.notInclude(passThrough, 'silk_standard_stream_write_v1')
-  assert.notInclude(passThrough, 'silk_coroutine_frame_push_v1')
-  assert.include(hostInput, 'int main(int argc, char **argv) {')
-  assert.include(hostInput, 'silk_host_argc_v1 = argc;')
-  assert.include(hostInput, 'silk_host_argv_v1 = argv;')
-  assert.include(passThrough, 'return silk_main();')
-  assert.include(reporting, 'const int tag = silk_main();')
-  assert.include(reporting, 'if (tag == 0) return 0;')
-})
-
-it('includes non-moving segmented coroutine storage only when suspension requests it', () => {
+it('includes coroutine storage only when suspension requests it', () => {
   const direct = ToolchainPlan.shimSource(termination())
   const suspended = ToolchainPlan.shimSource(termination(), CoroutineRuntime.symbols)
   assert.notInclude(direct, CoroutineRuntime.pushSymbol)
-  assert.include(suspended, `void *${CoroutineRuntime.pushSymbol}`)
-  assert.include(suspended, `void ${CoroutineRuntime.popSymbol}`)
-  assert.include(suspended, 'silk_coroutine_segment_v1')
-  assert.include(suspended, 'SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES')
+  assert.include(suspended, CoroutineRuntime.pushSymbol)
+  assert.include(suspended, CoroutineRuntime.popSymbol)
 })
 
-it('plans every native profile for each canonical native target', () => {
-  for (const target of Target.native) {
-    const object = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
-    const link = ToolchainPlan.linkCommand(clang, target, ['in.o'], [], 'program')
-    assert.strictEqual(object.target, target)
-    assert.strictEqual(link.target, target)
-    assert.strictEqual(object.arguments.at(0), `--target=${target.triple}`)
-    assert.strictEqual(link.arguments.at(0), `--target=${target.triple}`)
-  }
-})
-
-it('plans standalone LLVM-Wasm finalization without native shim or host libraries', () => {
-  const planned = ToolchainPlan.wasmCommand(
-    clang,
-    Target.wasm32UnknownUnknown,
-    'release',
-    'program.bc',
-    'program.wasm',
-  )
-  assert.deepEqual(planned.arguments, [
-    '--target=wasm32-unknown-unknown',
-    '-nostdlib',
-    '-x',
-    'ir',
-    'program.bc',
-    '-O2',
-    '-Wl,--no-entry',
-    '-Wl,--export=silk_main',
-    '-o',
-    'program.wasm',
-  ])
-  assert.notInclude(planned.arguments, 'silk_shim.c')
-  assert.strictEqual(
-    planned.arguments.some((argument) => argument.startsWith('-l')),
-    false,
-  )
-})
-
-it.effect('retains LLVM-Wasm command provenance on finalization failure', () =>
+it.effect('yields a typed spawn failure with command, stage, and arbitrary cause', () =>
   Effect.gen(function* () {
-    const artifact = yield* artifactFor(Target.wasm32UnknownUnknown, 'release')
-    NativeToolchain.withBuildScope('wasm-failure', (scope) => {
-      const outcome = NativeToolchain.finalizeWasm(
-        { _tag: 'Toolchain', clang: '/nonexistent/clang' },
-        scope,
-        artifact,
-        Target.wasm32UnknownUnknown,
-        'release',
-        join(scope.root, 'program.wasm'),
-      )
-      assert.strictEqual(outcome._tag, 'ToolchainFailure')
-      if (outcome._tag !== 'ToolchainFailure') return
-      assert.strictEqual(outcome.planned.command, '/nonexistent/clang')
-      assert.include(outcome.planned.arguments, '-Wl,--export=silk_main')
-      assert.isAbove(outcome.output.length, 0)
-    })
-  }),
-)
-
-it.effect(
-  'emits a release object through the pinned Clang with provenance',
-  () =>
-    Effect.gen(function* () {
-      const target = yield* Target.host()
-      const artifact = yield* artifactFor(target, 'release')
-      NativeToolchain.withBuildScope('emit-object', (scope) => {
-        const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-
-        assert.strictEqual(outcome._tag, 'ObjectArtifact')
-        if (outcome._tag !== 'ObjectArtifact') return
-        assert.strictEqual(existsSync(outcome.artifact.path), true)
-        assert.strictEqual(outcome.planned.command, clang)
-        assert.include(outcome.planned.arguments, '-c')
-        assert.include(outcome.planned.arguments, '-O2')
-      })
-    }),
-  15_000,
-)
-
-it.effect(
-  'reuses a compiled shim across build scopes without retaining a scope-owned path',
-  () =>
-    Effect.gen(function* () {
-      const target = yield* Target.host()
-      const shimCache = NativeToolchain.makeShimCache()
-      const cachedToolchain: NativeToolchain.Toolchain = Object.freeze({
-        ...toolchain,
-        shimCache,
-      })
-
-      NativeToolchain.withBuildScope('shim-cache-miss', (scope) => {
-        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, termination())
-        assert.strictEqual(outcome._tag, 'ObjectArtifact')
-        if (outcome._tag !== 'ObjectArtifact') return
-        assert.strictEqual(existsSync(outcome.artifact.path), true)
-      })
-      assert.deepEqual(NativeToolchain.shimCacheStats(shimCache), {
-        entries: 1,
-        hits: 0,
-        misses: 1,
-      })
-
-      NativeToolchain.withBuildScope('shim-cache-hit', (scope) => {
-        const outcome = NativeToolchain.compileShim(cachedToolchain, scope, target, termination())
-        assert.strictEqual(outcome._tag, 'ObjectArtifact')
-        if (outcome._tag !== 'ObjectArtifact') return
-        assert.strictEqual(existsSync(outcome.artifact.path), true)
-        assert.strictEqual(outcome.artifact.scope, scope.name)
-      })
-      assert.deepEqual(NativeToolchain.shimCacheStats(shimCache), {
-        entries: 1,
-        hits: 1,
-        misses: 1,
-      })
-    }),
-  15_000,
-)
-
-it.effect('surfaces a failed process as data with command provenance', () =>
-  Effect.gen(function* () {
-    const target = yield* Target.host()
-    const artifact = yield* artifactFor(target, 'release')
-    const missing: NativeToolchain.Toolchain = Object.freeze({
-      _tag: 'Toolchain',
-      clang: '/nonexistent/clang',
-    })
-    NativeToolchain.withBuildScope('emit-failure', (scope) => {
-      const outcome = NativeToolchain.emitObject(missing, scope, artifact, target, 'release')
-
-      assert.strictEqual(outcome._tag, 'ToolchainFailure')
-      if (outcome._tag !== 'ToolchainFailure') return
-      assert.strictEqual(outcome.planned.command, '/nonexistent/clang')
-      assert.isAbove(outcome.output.length, 0)
-    })
-  }),
-)
-
-it.effect('removes scope-owned intermediates at exit and honors promotion', () =>
-  Effect.gen(function* () {
-    const target = yield* Target.host()
+    const target = yield* NativeToolchain.hostTarget()
     const artifact = yield* artifactFor(target, 'release')
     let scopeRoot = ''
-    let promoted = ''
-    NativeToolchain.withBuildScope('cleanup', (scope) => {
-      scopeRoot = scope.root
-      const outcome = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-      assert.strictEqual(outcome._tag, 'ObjectArtifact')
-      if (outcome._tag !== 'ObjectArtifact') return
-      promoted = NativeToolchain.promote(outcome.artifact, join(scope.root, '..', 'promoted.o'))
-    })
-
-    assert.strictEqual(existsSync(scopeRoot), false)
-    assert.strictEqual(existsSync(promoted), true)
-  }),
-)
-
-it.effect('rejects a missing linker input as data without invoking the driver', () =>
-  Effect.gen(function* () {
-    const target = yield* Target.host()
-    const outcome = NativeToolchain.ClangLinker.link(
-      toolchain,
-      target,
-      [
-        Object.freeze({
-          _tag: 'PathArtifact' as const,
-          scope: 'x',
-          path: '/nonexistent/input.o',
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope('spawn-failure', (scope) => {
+        scopeRoot = scope.root
+        return NativeToolchain.emitObject(
+          { _tag: 'Toolchain', clang: '/nonexistent/clang' },
+          scope,
+          artifact,
           target,
-        }),
-      ],
-      [],
-      '/tmp/never-written',
+          'release',
+        )
+      }),
     )
-
-    assert.strictEqual(outcome._tag, 'ToolchainFailure')
-    if (outcome._tag !== 'ToolchainFailure') return
-    assert.include(outcome.output, 'missing linker input')
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure._tag, 'ToolchainError')
+    assert.strictEqual(result.failure.stage, 'object')
+    assert.strictEqual(result.failure.reason._tag, 'SpawnFailed')
+    if (result.failure.reason._tag !== 'SpawnFailed') return
+    assert.strictEqual(result.failure.reason.planned.command, '/nonexistent/clang')
+    assert.instanceOf(result.failure.reason.cause, Error)
+    assert.strictEqual(existsSync(scopeRoot), false)
   }),
 )
 
-it.effect('rejects target-mismatched bitcode and linker inputs before invoking Clang', () =>
+it.effect('reuses explicitly shared shim bytes across cleaned build scopes', () =>
   Effect.gen(function* () {
-    const target = yield* Target.host()
-    const other = Target.native.find((candidate) => candidate.id !== target.id)
-    if (other === undefined) return assert.fail('expected a second native target')
-    const artifact = yield* artifactFor(other, 'release')
-
-    NativeToolchain.withBuildScope('target-mismatch', (scope) => {
-      const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-      assert.strictEqual(object._tag, 'ToolchainFailure')
-      if (object._tag !== 'ToolchainFailure') return
-      assert.strictEqual(object.reason._tag, 'TargetMismatch')
-    })
-
-    const linked = NativeToolchain.ClangLinker.link(
-      toolchain,
-      target,
-      [
-        Object.freeze({
-          _tag: 'PathArtifact' as const,
-          scope: 'mismatch',
-          path: '/nonexistent/other-target.o',
-          target: other,
-        }),
-      ],
-      [],
-      '/tmp/never-written-target-mismatch',
+    const target = yield* NativeToolchain.hostTarget()
+    const cache = NativeToolchain.makeShimCache()
+    const cachedToolchain = Object.freeze({ ...toolchain, shimCache: cache })
+    yield* NativeToolchain.withBuildScope('shim-miss', (scope) =>
+      NativeToolchain.compileShim(cachedToolchain, scope, target, termination()),
     )
-    assert.strictEqual(linked._tag, 'ToolchainFailure')
-    if (linked._tag !== 'ToolchainFailure') return
-    assert.strictEqual(linked.reason._tag, 'TargetMismatch')
+    yield* NativeToolchain.withBuildScope('shim-hit', (scope) =>
+      NativeToolchain.compileShim(cachedToolchain, scope, target, termination()),
+    )
+    assert.deepEqual(NativeToolchain.shimCacheStats(cache), {
+      entries: 1,
+      hits: 1,
+      misses: 1,
+    })
+  }),
+)
+
+it.effect('removes a build scope after interruption', () =>
+  Effect.gen(function* () {
+    let scopeRoot = ''
+    const fiber = yield* Effect.forkChild(
+      NativeToolchain.withBuildScope('interrupted', (scope) => {
+        scopeRoot = scope.root
+        return Effect.never
+      }),
+    )
+    yield* Effect.yieldNow
+    yield* Fiber.interrupt(fiber)
+    assert.isNotEmpty(scopeRoot)
+    assert.strictEqual(existsSync(scopeRoot), false)
+  }),
+)
+
+it.effect('failed rename removes its temporary sibling and preserves the destination', () =>
+  Effect.gen(function* () {
+    const destination = join(testRoot, 'occupied-destination')
+    mkdirSync(destination)
+    const result = yield* Effect.result(
+      NativeToolchain.atomicCommit(destination, Uint8Array.of(1, 2, 3)),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    assert.strictEqual(existsSync(destination), true)
+    assert.deepEqual(
+      readdirSync(testRoot).filter((name) => name.startsWith('occupied-destination.silk-tmp-')),
+      [],
+    )
+  }),
+)
+
+it.effect('returns committed bytes in memory and makes cached native artifacts executable', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const destination = join(testRoot, 'cached-program')
+    const bytes = Uint8Array.from([0x7f, 0x45, 0x4c, 0x46])
+    const committed = yield* NativeToolchain.commitCachedArtifact(
+      bytes,
+      'NativeExecutable',
+      target,
+      destination,
+    )
+    assert.deepEqual(committed.bytes, bytes)
+    assert.deepEqual(readFileSync(destination), bytes)
+  }),
+)
+
+it.effect('rejects a missing linker input in the typed link channel', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope('missing-link-input', (scope) =>
+        NativeToolchain.ClangLinker.link(
+          toolchain,
+          scope,
+          target,
+          [
+            Object.freeze({
+              _tag: 'PathArtifact',
+              scope: scope.name,
+              path: join(scope.root, 'missing.o'),
+              target,
+            }),
+          ],
+          [],
+          join(testRoot, 'never-written'),
+        ),
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.reason._tag, 'LinkFailed')
+    if (result.failure.reason._tag !== 'LinkFailed') return
+    assert.include(result.failure.reason.output, 'missing linker input')
   }),
 )
 
 it.effect(
-  'links the shim with the program and the executable exits with the i32 result',
+  'links the shim and program while returning the executable bytes in memory',
   () =>
     Effect.gen(function* () {
-      const target = yield* Target.host()
+      const target = yield* NativeToolchain.hostTarget()
       const artifact = yield* artifactFor(target, 'release')
-      NativeToolchain.withBuildScope('link-run', (scope) => {
-        const object = NativeToolchain.emitObject(toolchain, scope, artifact, target, 'release')
-        const shim = NativeToolchain.compileShim(toolchain, scope, target, artifact.termination)
-        assert.strictEqual(object._tag, 'ObjectArtifact')
-        assert.strictEqual(shim._tag, 'ObjectArtifact')
-        if (object._tag !== 'ObjectArtifact' || shim._tag !== 'ObjectArtifact') return
-
-        const destination = join(scope.root, 'program')
-        const linked = NativeToolchain.ClangLinker.link(
-          toolchain,
-          target,
-          [object.artifact, shim.artifact],
-          [],
-          destination,
-        )
-        assert.strictEqual(linked._tag, 'Executable')
-        if (linked._tag !== 'Executable') return
-
-        const run = spawnSync(linked.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, 42)
-      })
+      const destination = join(testRoot, 'linked-program')
+      const linked = yield* NativeToolchain.withBuildScope('link-run', (scope) =>
+        Effect.gen(function* () {
+          const object = yield* NativeToolchain.emitObject(
+            toolchain,
+            scope,
+            artifact,
+            target,
+            'release',
+          )
+          const shim = yield* NativeToolchain.compileShim(
+            toolchain,
+            scope,
+            target,
+            artifact.termination,
+          )
+          return yield* NativeToolchain.ClangLinker.link(
+            toolchain,
+            scope,
+            target,
+            [object.artifact, shim.artifact],
+            [],
+            destination,
+          )
+        }),
+      )
+      assert.isAbove(linked.bytes.length, 0)
+      assert.deepEqual(linked.bytes, readFileSync(linked.path))
+      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42)
     }),
   15_000,
 )

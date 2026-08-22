@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -224,7 +225,7 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
     assert.strictEqual(evaluated._tag, 'Completed')
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 41n)
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       [
         'AllocationAcquire',
         'RawBufferForm',
@@ -270,7 +271,7 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
     assert.strictEqual(evaluated._tag, 'Completed')
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 63n)
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       [
         'AllocationAcquire',
         'RawBufferForm',

@@ -5,6 +5,7 @@ import * as Intrinsic from '../src/Intrinsic.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -267,7 +268,7 @@ pub fn main() -> i32 { return 42 }`
     assert.strictEqual(occurrence?.declaration?.module, 'silk/string')
     assert.isDefined(occurrence?.declaration?.selectionSpan)
 
-    const canonical = Analysis.syntaxOf(snapshot, 'silk/string')?.source
+    const canonical = Projections.syntaxOf(snapshot, 'silk/string')?.source
     assert.isDefined(canonical)
     const canonicalText =
       canonical === undefined ? '' : new TextDecoder().decode(SourceFile.toUint8Array(canonical))

@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
+import * as Projections from './support/projections.js'
 
 const bytes = new Uint8Array(
   readFileSync(new URL('./fixtures/owned-allocation-guard.silk', import.meta.url)),
@@ -31,7 +32,7 @@ it.effect('keeps one owned allocation in parity across the evaluator and Wasm', 
     // Exactly one logical block is acquired and released, and every typed storage step in
     // between is ordered: no take precedes its write, and no release precedes the last take.
     assert.deepEqual(
-      Analysis.allocationTraceEventsOf(evaluated).map((event) => event._tag),
+      Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       [
         'AllocationAcquire',
         'RawBufferForm',

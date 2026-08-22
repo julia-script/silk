@@ -12,6 +12,7 @@ import {
   ownedProviderSuspendedFailure,
   ownedProviderSuspendedSuccess,
 } from './support/ownedAllocatorSuspension.js'
+import * as Projections from './support/projections.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const encoder = new TextEncoder()
@@ -42,7 +43,7 @@ it.effect('dispatches a shared source service through its complete witness', () 
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
-    const hir = Analysis.hirOf(self, 'user-services/main')
+    const hir = Projections.hirOf(self, 'user-services/main')
     assert.include(
       hir === undefined ? '' : Hir.encode(hir),
       'service-call user-services/main.Counter.get',
@@ -317,7 +318,7 @@ pub fn main() -> i32 {
   return ${provider.access === 'Exclusive' ? 'first + second + firstCell.value + secondCell.value' : 'first + second'} + branches
 }`
         const self = yield* snapshot(source, 'wasm32-unknown-unknown')
-        const hir = Analysis.hirOf(self, 'user-services/main')
+        const hir = Projections.hirOf(self, 'user-services/main')
         assert.deepEqual(Analysis.diagnostics(self), [], hir === undefined ? '' : Hir.encode(hir))
         assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
 
@@ -383,7 +384,7 @@ it.effect('retains an affine owned provider while a pre-read scalar suspends and
       fn.id.name.startsWith('read$effect$-1$provided$'),
     )
     assert.isDefined(providedRead)
-    const provisional = Analysis.provisionalMirOf(self)
+    const provisional = Projections.provisionalMirOf(self)
     assert.strictEqual(provisional._tag, 'Available')
     const providedExecution =
       provisional._tag === 'Available' && providedRead !== undefined
@@ -484,7 +485,7 @@ it.effect('keeps mixed provider specializations exact at one service site', () =
     const specialized = mir.functions.filter((fn) =>
       fn.id.name.startsWith('use$effect$-1$provided$'),
     )
-    const provisional = Analysis.provisionalMirOf(self)
+    const provisional = Projections.provisionalMirOf(self)
     assert.isAtLeast(specialized.length, 2)
     const synchronous = specialized.filter(
       (fn) => fn.suspension?.classification === 'Synchronous' || fn.suspension === undefined,

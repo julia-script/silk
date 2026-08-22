@@ -65,7 +65,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
   if (Type.isCallable(source) && Type.isCallable(target)) {
     if (
       (!source.unsafe || target.unsafe) &&
-      Type.compareAccess(source.mode, target.mode) &&
+      Type.compareAccess(target.mode, source.mode) &&
       source.parameters.length === target.parameters.length &&
       source.parameters.every((parameter, index) =>
         Type.equals(parameter, target.parameters.at(index) ?? 'never'),
@@ -87,7 +87,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
           expected !== undefined &&
           Type.equals(requirement.capability, expected.capability) &&
           requirement.role === expected.role &&
-          Type.requirementSatisfies(requirement, expected)
+          Type.requirementSatisfies(expected, requirement)
         )
       }) &&
       Type.requirementRowParameters(source).length ===
@@ -95,7 +95,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       Type.requirementRowParameters(source).every((parameter, index) =>
         Type.equals(parameter, Type.requirementRowParameters(target).at(index) ?? 'never'),
       )
-    if (Type.compareAccess(source.access, target.access) && sameOutputs && compatibleRequirements)
+    if (Type.compareAccess(target.access, source.access) && sameOutputs && compatibleRequirements)
       return Object.freeze({ _tag: 'EffectAccess', source, target })
   }
   const members = sourceMembers(source)

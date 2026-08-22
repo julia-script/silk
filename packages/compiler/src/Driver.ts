@@ -1,15 +1,16 @@
-import { readFileSync } from 'node:fs'
-import { memoryUsage } from 'node:process'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import type * as Diagnostic from './Diagnostic.js'
+import * as Frontend from './Frontend.js'
+import * as HeapObservation from './HeapObservation.js'
 import type * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
+import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeToolchain from './NativeToolchain.js'
-import * as PhaseObservation from './PhaseReport.js'
-import * as Pipeline from './Pipeline.js'
+import * as PhaseReport from './PhaseReport.js'
+import * as Realization from './Realization.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
@@ -26,11 +27,11 @@ import type * as Type from './Type.js'
  */
 
 /** One phase's observability entry. Reports are data, not artifacts — exempt from byte-identity. */
-export interface PhaseReport extends Omit<PhaseObservation.PhaseReport, 'heapBytes'> {
+export interface DriverPhaseReport extends Omit<PhaseReport.PhaseReport, 'heapBytes'> {
   readonly heapBytes: number
 }
 
-const phaseWithHeap = (entry: PhaseObservation.PhaseReport): PhaseReport => {
+const phaseWithHeap = (entry: PhaseReport.PhaseReport): DriverPhaseReport => {
   if (entry.heapBytes === undefined)
     throw new RangeError(`Driver phase ${entry.phase} lost its engine heap observation`)
   return Object.freeze({ ...entry, heapBytes: entry.heapBytes })
@@ -61,7 +62,7 @@ export interface Compiled {
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
   readonly termination: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
   readonly toolchainIdentity: string
 }
 
@@ -71,15 +72,7 @@ export interface NoEntry {
   readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
   readonly requirements?: ReadonlyArray<Type.Requirement>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
-}
-
-/** A finalization stage failed; the outcome retains command or storage provenance. */
-export interface Failed {
-  readonly _tag: 'Failed'
-  readonly stage: 'object' | 'shim' | 'link' | 'wasm-finalize' | 'artifact-commit'
-  readonly failure: NativeToolchain.FinalizationFailure
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** Target selection stopped compilation before MIR lowering. */
@@ -87,7 +80,7 @@ export interface TargetFailed {
   readonly _tag: 'TargetFailed'
   readonly error: Target.TargetError
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** Shared MIR validation, compatibility, or backend construction stopped emission. */
@@ -95,7 +88,7 @@ export interface BackendFailed {
   readonly _tag: 'BackendFailed'
   readonly error: Backend.BackendError
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** A missing, malformed, or mismatched compiler distribution stopped compilation. */
@@ -104,7 +97,7 @@ export interface ToolchainFailed {
   readonly expectedIdentity: string
   readonly observedIdentity: string
   readonly failures: ReadonlyArray<ToolchainIntegrity.IntegrityFailure>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** Source diagnostics rejected artifact production after the recoverable frontend completed. */
@@ -112,7 +105,7 @@ export interface Rejected {
   readonly _tag: 'Rejected'
   readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** Imported source storage failed operationally after retaining the available frontend facts. */
@@ -122,66 +115,50 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
   readonly failures: ReadonlyArray<SourceResolver.SourceResolverError>
   readonly sources: ReadonlyMap<string, SourceFile.SourceFile>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<PhaseReport>
+  readonly report: ReadonlyArray<DriverPhaseReport>
 }> {}
 
 /** The closed outcome of one driver run. */
-export type Outcome =
-  | Compiled
-  | Rejected
-  | NoEntry
-  | TargetFailed
-  | BackendFailed
-  | ToolchainFailed
-  | Failed
+export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | ToolchainFailed
 
 /** Compiles one request end to end, writing its final artifact to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(function* (
   request: CompileRequest,
-): Effect.fn.Return<Outcome, SourceResolutionFailed, SourceResolver.SourceResolver> {
-  const report: Array<PhaseReport> = []
-  const heapBytes = () => memoryUsage().heapUsed
+): Effect.fn.Return<
+  Outcome,
+  SourceResolutionFailed | NativeToolchain.ToolchainError,
+  SourceResolver.SourceResolver
+> {
+  const report: Array<DriverPhaseReport> = []
+  const heapObservation = yield* HeapObservation.HeapObservation
+  const heapBytes = heapObservation.heapBytes
   const distribution = request.distribution ?? ToolchainIntegrity.installed()
-  const phase = <A>(
-    name: string,
-    inputs: number,
-    run: () => A,
-    outputs: (result: A) => number,
-    diagnostics: (result: A) => number = () => 0,
-  ): A => {
-    const measured = PhaseObservation.measure(name, inputs, run, outputs, diagnostics, heapBytes)
-    report.push(phaseWithHeap(measured.report))
-    return measured.value
-  }
 
-  const integrityStartedAt = performance.now()
-  const packaged = yield* SourceResolver.toolchainSources().pipe(
-    Effect.map((sources) => Object.freeze({ _tag: 'Available' as const, sources })),
-    Effect.catchTag('SourceResolverError', (error) =>
-      Effect.succeed(Object.freeze({ _tag: 'Unavailable' as const, error })),
-    ),
-  )
-  const frontendIntegrity =
-    packaged._tag === 'Available'
-      ? ToolchainIntegrity.validateFrontend(
+  const frontendIntegrity = yield* PhaseReport.measureEffectInto(
+    report,
+    'toolchain-integrity',
+    distribution.components.length,
+    SourceResolver.toolchainSources().pipe(
+      Effect.map((sources) =>
+        ToolchainIntegrity.validateFrontend(
           distribution,
-          new Map([...packaged.sources].map(([module, source]) => [module, source.bytes] as const)),
-        )
-      : Object.freeze({
-          _tag: 'Invalid' as const,
-          failures: Object.freeze([
-            ToolchainIntegrity.unreadableSource(packaged.error.module, packaged.error.message),
-          ]),
-        })
-  report.push(
-    Object.freeze({
-      phase: 'toolchain-integrity',
-      elapsedMs: performance.now() - integrityStartedAt,
-      inputs: distribution.components.length,
-      outputs: frontendIntegrity._tag === 'Matched' ? distribution.components.length : 0,
-      diagnostics: frontendIntegrity._tag === 'Invalid' ? frontendIntegrity.failures.length : 0,
-      heapBytes: memoryUsage().heapUsed,
-    }),
+          new Map([...sources].map(([module, source]) => [module, source.bytes] as const)),
+        ),
+      ),
+      Effect.catchTag('SourceResolverError', (error) =>
+        Effect.succeed(
+          Object.freeze({
+            _tag: 'Invalid' as const,
+            failures: Object.freeze([
+              ToolchainIntegrity.unreadableSource(error.module, error.message),
+            ]),
+          }),
+        ),
+      ),
+    ),
+    (result) => (result._tag === 'Matched' ? distribution.components.length : 0),
+    (result) => (result._tag === 'Invalid' ? result.failures.length : 0),
+    { heapBytes },
   )
   if (frontendIntegrity._tag === 'Invalid')
     return Object.freeze({
@@ -192,7 +169,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
 
-  const frontend = yield* Pipeline.frontend(request.compilation, { heapBytes })
+  const frontend = yield* Frontend.frontend(request.compilation, { heapBytes })
   report.push(...frontend.report.map(phaseWithHeap))
   const closure = frontend.closure
   if (closure.resolutionFailures.length > 0) {
@@ -205,8 +182,20 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   }
-  const backend = request.backend ?? Backend.LlvmBackend
-  const preparation = Pipeline.prepare(frontend, backend, request.compilation.target, { heapBytes })
+  const backend = request.backend ?? LlvmBackend.LlvmBackend
+  const hostSelection =
+    request.compilation.target === undefined ? NativeToolchain.hostSelection() : undefined
+  if (hostSelection?._tag === 'Unavailable')
+    return Object.freeze({
+      _tag: 'TargetFailed',
+      error: hostSelection.error,
+      diagnostics: frontend.diagnostics,
+      report: Object.freeze([...report]),
+    })
+  const targetId =
+    request.compilation.target ??
+    (hostSelection?._tag === 'Resolved' ? hostSelection.target.id : undefined)
+  const preparation = Realization.prepare(frontend, backend, targetId, { heapBytes })
   const integrityReport = report.at(0)
   report.splice(
     0,
@@ -244,25 +233,21 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   const { diagnostics, program, target } = preparation
-  const targetIntegrityStartedAt = performance.now()
-  const targetIntegrity = ToolchainIntegrity.validateTarget(
-    distribution,
-    IntrinsicAvailability.backendTarget(backend.id),
-    program.intrinsics,
-    closure.sources.keys(),
-  )
-  report.push(
-    Object.freeze({
-      phase: 'toolchain-target',
-      elapsedMs: performance.now() - targetIntegrityStartedAt,
-      inputs: program.intrinsics.length,
-      outputs:
-        targetIntegrity._tag === 'Matched'
-          ? targetIntegrity.providers.length + targetIntegrity.runtimeSupport.length
-          : 0,
-      diagnostics: targetIntegrity._tag === 'Invalid' ? targetIntegrity.failures.length : 0,
-      heapBytes: memoryUsage().heapUsed,
-    }),
+  const targetIntegrity = PhaseReport.measureInto(
+    report,
+    'toolchain-target',
+    program.intrinsics.length,
+    () =>
+      ToolchainIntegrity.validateTarget(
+        distribution,
+        IntrinsicAvailability.backendTarget(backend.id),
+        program.intrinsics,
+        closure.sources.keys(),
+      ),
+    (result) =>
+      result._tag === 'Matched' ? result.providers.length + result.runtimeSupport.length : 0,
+    (result) => (result._tag === 'Invalid' ? result.failures.length : 0),
+    { heapBytes },
   )
   if (targetIntegrity._tag === 'UnsupportedTarget')
     return Object.freeze({
@@ -279,27 +264,24 @@ export const compile = Effect.fn('Driver.compile')(function* (
       failures: targetIntegrity.failures,
       report: Object.freeze([...report]),
     })
-  const backendStartedAt = performance.now()
-  const emitted = yield* Backend.emit(backend, program, {
-    mode: request.profile === 'release' ? 'release' : 'debug',
-    sources: new Map(
-      [...closure.sources].map(([module, source]) => [module, SourceFile.toUint8Array(source)]),
+  const emitted = yield* PhaseReport.measureEffectInto(
+    report,
+    'backend',
+    program.functions.length,
+    Backend.emit(backend, program, {
+      mode: request.profile === 'release' ? 'release' : 'debug',
+      sources: new Map(
+        [...closure.sources].map(([module, source]) => [module, SourceFile.toUint8Array(source)]),
+      ),
+    }).pipe(
+      Effect.map((artifact) => Object.freeze({ _tag: 'Emitted' as const, artifact })),
+      Effect.catchTag('BackendError', (error) =>
+        Effect.succeed(Object.freeze({ _tag: 'Rejected' as const, error })),
+      ),
     ),
-  }).pipe(
-    Effect.map((artifact) => Object.freeze({ _tag: 'Emitted' as const, artifact })),
-    Effect.catchTag('BackendError', (error) =>
-      Effect.succeed(Object.freeze({ _tag: 'Rejected' as const, error })),
-    ),
-  )
-  report.push(
-    Object.freeze({
-      phase: 'backend',
-      elapsedMs: performance.now() - backendStartedAt,
-      inputs: program.functions.length,
-      outputs: emitted._tag === 'Emitted' ? emitted.artifact.symbols.length : 0,
-      diagnostics: 0,
-      heapBytes: memoryUsage().heapUsed,
-    }),
+    (result) => (result._tag === 'Emitted' ? result.artifact.symbols.length : 0),
+    () => 0,
+    { heapBytes },
   )
   if (emitted._tag === 'Rejected') {
     return Object.freeze({
@@ -320,7 +302,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       : undefined
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
-      ? NativeToolchain.artifactCacheKey(
+      ? yield* NativeToolchain.artifactCacheKey(
           request.toolchain,
           cacheKind,
           target,
@@ -334,22 +316,17 @@ export const compile = Effect.fn('Driver.compile')(function* (
     cacheKey !== undefined &&
     artifact._tag === 'LlvmBitcodeArtifact'
   ) {
-    const bytes = artifactCache.get(cacheKey)
+    const bytes = yield* artifactCache.get(cacheKey)
     if (bytes !== undefined) {
-      const committed = phase(
+      const committed = yield* PhaseReport.measureEffectInto(
+        report,
         'artifact-cache',
         1,
-        () => NativeToolchain.commitCachedArtifact(bytes, cacheKind, target, request.destination),
-        (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
+        NativeToolchain.commitCachedArtifact(bytes, cacheKind, target, request.destination),
+        () => 1,
+        () => 0,
+        { heapBytes },
       )
-      if (committed._tag === 'StorageFailure') {
-        return Object.freeze({
-          _tag: 'Failed',
-          stage: 'artifact-commit',
-          failure: committed,
-          report: Object.freeze([...report]),
-        })
-      }
       return Object.freeze({
         _tag: 'Compiled',
         backend: artifact.backend,
@@ -365,43 +342,39 @@ export const compile = Effect.fn('Driver.compile')(function* (
     }
   }
 
-  return NativeToolchain.withBuildScope(
+  return yield* NativeToolchain.withBuildScope(
     request.scopeName ?? 'driver',
-    (scope) => {
-      if (artifact._tag === 'WebAssemblyModuleArtifact') {
-        const committed = phase(
-          'artifact-commit',
-          1,
-          () => NativeToolchain.commitWasm(scope, artifact, request.destination),
-          (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
-        )
-        if (committed._tag === 'StorageFailure') {
+    (scope) =>
+      Effect.gen(function* () {
+        if (artifact._tag === 'WebAssemblyModuleArtifact') {
+          const committed = yield* PhaseReport.measureEffectInto(
+            report,
+            'artifact-commit',
+            1,
+            NativeToolchain.commitWasm(artifact, request.destination),
+            () => 1,
+            () => 0,
+            { heapBytes },
+          )
           return Object.freeze({
-            _tag: 'Failed',
-            stage: 'artifact-commit',
-            failure: committed,
+            _tag: 'Compiled',
+            backend: artifact.backend,
+            artifactKind: committed.kind,
+            path: committed.path,
+            target: committed.target,
+            symbols: artifact.symbols,
+            termination: artifact.termination,
+            diagnostics,
             report: Object.freeze([...report]),
+            toolchainIdentity: distribution.digest,
           })
         }
-        return Object.freeze({
-          _tag: 'Compiled',
-          backend: artifact.backend,
-          artifactKind: committed.kind,
-          path: committed.path,
-          target: committed.target,
-          symbols: artifact.symbols,
-          termination: artifact.termination,
-          diagnostics,
-          report: Object.freeze([...report]),
-          toolchainIdentity: distribution.digest,
-        })
-      }
 
-      if (!Target.isNative(target)) {
-        const finalized = phase(
-          'wasm-finalize',
-          1,
-          () =>
+        if (!Target.isNative(target)) {
+          const finalized = yield* PhaseReport.measureEffectInto(
+            report,
+            'wasm-finalize',
+            1,
             NativeToolchain.finalizeWasm(
               request.toolchain,
               scope,
@@ -410,52 +383,40 @@ export const compile = Effect.fn('Driver.compile')(function* (
               request.profile,
               request.destination,
             ),
-          (result) => (result._tag === 'FinalArtifact' ? 1 : 0),
-        )
-        if (finalized._tag !== 'FinalArtifact') {
+            () => 1,
+            () => 0,
+            { heapBytes },
+          )
+          if (artifactCache !== undefined && cacheKey !== undefined) {
+            yield* artifactCache.set(cacheKey, finalized.bytes)
+          }
           return Object.freeze({
-            _tag: 'Failed',
-            stage: 'wasm-finalize',
-            failure: finalized,
+            _tag: 'Compiled',
+            backend: artifact.backend,
+            artifactKind: finalized.kind,
+            path: finalized.path,
+            target: finalized.target,
+            symbols: artifact.symbols,
+            termination: artifact.termination,
+            diagnostics,
             report: Object.freeze([...report]),
+            toolchainIdentity: distribution.digest,
           })
         }
-        if (artifactCache !== undefined && cacheKey !== undefined) {
-          artifactCache.set(cacheKey, readFileSync(finalized.path))
-        }
-        return Object.freeze({
-          _tag: 'Compiled',
-          backend: artifact.backend,
-          artifactKind: finalized.kind,
-          path: finalized.path,
-          target: finalized.target,
-          symbols: artifact.symbols,
-          termination: artifact.termination,
-          diagnostics,
-          report: Object.freeze([...report]),
-          toolchainIdentity: distribution.digest,
-        })
-      }
 
-      const object = phase(
-        'object',
-        1,
-        () =>
+        const object = yield* PhaseReport.measureEffectInto(
+          report,
+          'object',
+          1,
           NativeToolchain.emitObject(request.toolchain, scope, artifact, target, request.profile),
-        (result) => (result._tag === 'ObjectArtifact' ? 1 : 0),
-      )
-      if (object._tag === 'ToolchainFailure') {
-        return Object.freeze({
-          _tag: 'Failed',
-          stage: 'object',
-          failure: object,
-          report: Object.freeze([...report]),
-        })
-      }
-      const shim = phase(
-        'shim',
-        1,
-        () =>
+          () => 1,
+          () => 0,
+          { heapBytes },
+        )
+        const shim = yield* PhaseReport.measureEffectInto(
+          report,
+          'shim',
+          1,
           NativeToolchain.compileShim(
             request.toolchain,
             scope,
@@ -463,53 +424,42 @@ export const compile = Effect.fn('Driver.compile')(function* (
             artifact.termination,
             artifact.nativeRuntimeSymbols,
           ),
-        (result) => (result._tag === 'ObjectArtifact' ? 1 : 0),
-      )
-      if (shim._tag === 'ToolchainFailure') {
-        return Object.freeze({
-          _tag: 'Failed',
-          stage: 'shim',
-          failure: shim,
-          report: Object.freeze([...report]),
-        })
-      }
-      const linked = phase(
-        'link',
-        2,
-        () =>
+          () => 1,
+          () => 0,
+          { heapBytes },
+        )
+        const linked = yield* PhaseReport.measureEffectInto(
+          report,
+          'link',
+          2,
           NativeToolchain.ClangLinker.link(
             request.toolchain,
+            scope,
             target,
             [object.artifact, shim.artifact],
             [],
             request.destination,
           ),
-        (result) => (result._tag === 'Executable' ? 1 : 0),
-      )
-      if (linked._tag === 'ToolchainFailure') {
+          () => 1,
+          () => 0,
+          { heapBytes },
+        )
+        if (artifactCache !== undefined && cacheKey !== undefined) {
+          yield* artifactCache.set(cacheKey, linked.bytes)
+        }
         return Object.freeze({
-          _tag: 'Failed',
-          stage: 'link',
-          failure: linked,
+          _tag: 'Compiled',
+          backend: artifact.backend,
+          artifactKind: 'NativeExecutable',
+          path: linked.path,
+          target: linked.target,
+          symbols: artifact.symbols,
+          termination: artifact.termination,
+          diagnostics,
           report: Object.freeze([...report]),
+          toolchainIdentity: distribution.digest,
         })
-      }
-      if (artifactCache !== undefined && cacheKey !== undefined) {
-        artifactCache.set(cacheKey, readFileSync(linked.path))
-      }
-      return Object.freeze({
-        _tag: 'Compiled',
-        backend: artifact.backend,
-        artifactKind: 'NativeExecutable',
-        path: linked.path,
-        target: linked.target,
-        symbols: artifact.symbols,
-        termination: artifact.termination,
-        diagnostics,
-        report: Object.freeze([...report]),
-        toolchainIdentity: distribution.digest,
-      })
-    },
+      }),
     { saveTemps: request.saveTemps ?? false },
   )
 })

@@ -1,20 +1,22 @@
+import * as BootstrapArithmetic from './BootstrapArithmetic.js'
+import * as BootstrapEffect from './BootstrapEffect.js'
+import * as BootstrapOsIntrinsics from './BootstrapOsIntrinsics.js'
+import * as BootstrapPlace from './BootstrapPlace.js'
+import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
+import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
-import type * as Diagnostic from './Diagnostic.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
-import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
-import type * as Ownership from './Ownership.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
-import type * as Termination from './Termination.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
 
@@ -26,644 +28,86 @@ import * as Type from './Type.js'
  */
 
 /** One exact fixed- or target-width integer. */
-export interface IntegerValue {
-  readonly _tag: 'IntegerValue'
-  readonly type: Scalar.IntegerSpelling
-  readonly value: bigint
-}
+import type {
+  AggregateValue,
+  ArrayValue,
+  CharacterValue,
+  EffectOutcomeValue,
+  FloatValue,
+  IntegerValue,
+  SliceValue,
+  StaticViewValue,
+  StringStorage,
+  StringValue,
+  UnionValue,
+  Value,
+} from './BootstrapValue.js'
 
-/**
- * One Unicode scalar value.
- *
- * `char` is its own scalar category rather than an integer, so it is its own value rather than an
- * integer view: nothing that reads an integer accepts it, and the only operations that read it are
- * the equality and ordering lanes the catalog declares.
- */
-export interface CharacterValue {
-  readonly _tag: 'CharacterValue'
-  readonly value: number
-}
+export type {
+  AggregateValue,
+  AllocationValue,
+  ArrayValue,
+  CallableBorrowValue,
+  CallableValue,
+  CharacterValue,
+  EffectBorrowValue,
+  EffectCompositeValue,
+  EffectOutcomeValue,
+  EffectValue,
+  FloatValue,
+  IntegerValue,
+  RawBufferValue,
+  ReferenceValue,
+  SliceValue,
+  SlotValue,
+  StaticViewValue,
+  StringStorage,
+  StringValue,
+  UnionValue,
+  Value,
+} from './BootstrapValue.js'
 
-export interface FloatValue {
-  readonly _tag: 'FloatValue'
-  readonly type: Scalar.FloatSpelling
-  readonly bits: bigint
-}
+import type {
+  ActiveFrame,
+  BlockedReason,
+  EffectTraceEvent,
+  EntryTraceEvent,
+  Outcome,
+  PlaceReadTraceEvent,
+  TraceEvent,
+} from './BootstrapTrace.js'
 
-export interface AggregateValue {
-  readonly _tag: 'AggregateValue'
-  readonly type: Type.Nominal
-  readonly fields: ReadonlyArray<{
-    readonly field: DeclarationIndex.FieldId
-    readonly value: Value
-  }>
-}
+export type {
+  ActiveFrame,
+  AllocationTraceEvent,
+  ArrayConstructTraceEvent,
+  BindingTraceEvent,
+  Blocked,
+  BlockedReason,
+  CallableTraceEvent,
+  CallTraceEvent,
+  CleanupTraceEvent,
+  Completed,
+  ConstructTraceEvent,
+  ControlTraceEvent,
+  CoroutineFrameTraceEvent,
+  EffectTraceEvent,
+  EntryTraceEvent,
+  MatchTraceEvent,
+  OsCallTraceEvent,
+  Outcome,
+  PlaceReadTraceEvent,
+  ProjectTraceEvent,
+  ReturnTraceEvent,
+  StandardStreamTraceEvent,
+  StringTraceEvent,
+  TraceEvent,
+  Trap,
+  UnhandledFailure,
+  UnionConversionTraceEvent,
+} from './BootstrapTrace.js'
 
-export interface ArrayValue {
-  readonly _tag: 'ArrayValue'
-  readonly type: Type.FixedArray
-  readonly elements: ReadonlyArray<Value>
-}
-
-/** A logical borrowed view. Permission and loan identity remain compiler facts, not values. */
-export interface SliceValue {
-  readonly _tag: 'SliceValue'
-  readonly frame: number
-  readonly cell: number
-  readonly base: number
-  readonly length: number
-  /** Place path from the backing cell to the fixed array viewed by this slice. */
-  readonly selectors?: ReadonlyArray<
-    Extract<Mir.PlaceSelector, { readonly _tag: 'FieldSelector' | 'ElementSelector' }>
-  >
-  readonly indexes?: ReadonlyArray<number>
-  /** Present only for a zero-copy RawBuffer-backed slice. */
-  readonly ticket?: number
-}
-
-/** Allocation-free immutable view of one compiler-owned static-data entry. */
-export interface StaticViewValue {
-  readonly _tag: 'StaticViewValue'
-  readonly data: string
-  readonly bytes: ReadonlyArray<number>
-  readonly length: number
-}
-
-export type StringStorage =
-  | {
-      readonly _tag: 'StaticTextStorage'
-      readonly data: string
-      readonly bytes: ReadonlyArray<number>
-    }
-  | {
-      readonly _tag: 'StaticByteStorage'
-      readonly data: string
-      readonly bytes: ReadonlyArray<number>
-    }
-  | {
-      readonly _tag: 'RuntimeSliceStorage'
-      readonly view: SliceValue
-    }
-
-/** A logical valid UTF-8 view retaining storage identity and lexical backing facts. */
-export interface StringValue {
-  readonly _tag: 'StringValue'
-  readonly storage: StringStorage
-  readonly bytes: ReadonlyArray<number>
-  readonly byteLength: number
-  readonly heldLoans: ReadonlyArray<string>
-}
-
-export interface ReferenceValue {
-  readonly _tag: 'ReferenceValue'
-  readonly frame: number
-  readonly cell: number
-  readonly selectors: ReadonlyArray<Mir.PlaceSelector>
-  /** Selector ordinals captured in the frame where the loan formed. */
-  readonly indexes: ReadonlyArray<number>
-}
-
-export interface UnionValue {
-  readonly _tag: 'UnionValue'
-  readonly type: Type.StructuralUnion
-  readonly member: Type.Type
-  readonly payload: Value
-}
-
-export interface EffectOutcomeValue {
-  readonly _tag: 'EffectOutcomeValue'
-  readonly type: Type.Effect
-  readonly tag: number
-  readonly payload: Value
-}
-
-const repackFailurePayload = (
-  payload: Value,
-  sourceType: DeclarationIndex.SemanticType,
-  sourceTag: number,
-  targetType: Type.Effect,
-  targetTag: number,
-): AggregateValue => {
-  const sourceMember = Type.failureCarrierMember(
-    sourceType,
-    sourceTag,
-    Type.isEffect(sourceType) ? 'OneBased' : 'ZeroBased',
-  )
-  const targetMember = Type.failureCarrierMember(targetType, targetTag, 'OneBased')
-  if (
-    payload._tag !== 'AggregateValue' ||
-    sourceMember === undefined ||
-    targetMember === undefined ||
-    !Type.equals(sourceMember, targetMember) ||
-    !Type.equals(payload.type, sourceMember)
-  )
-    throw new RangeError('MIR failure payload does not match its canonical member mapping')
-  return payload
-}
-
-export interface EffectBorrowValue {
-  readonly _tag: 'EffectBorrowValue'
-  readonly frame: number
-  readonly cell: number
-  readonly access: 'Shared' | 'Exclusive'
-}
-
-export interface CallableBorrowValue {
-  readonly _tag: 'CallableBorrowValue'
-  readonly frame: number
-  readonly cell: number
-  readonly access: 'Shared' | 'Exclusive'
-}
-
-export interface CallableValue {
-  readonly _tag: 'CallableValue'
-  readonly ticket: number
-  readonly type: Type.Callable
-  readonly target: Hir.CallableTarget
-  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly captures: ReadonlyArray<{
-    readonly ordinal: number
-    readonly parameterOrdinal: number
-    readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
-    readonly value: Value
-  }>
-}
-
-export interface EffectValue {
-  readonly _tag: 'EffectValue'
-  readonly type: Type.Effect
-  readonly site: Hir.EffectSiteId
-  readonly runner: DeclarationIndex.CanonicalId
-  readonly runnerTypeArguments: ReadonlyArray<Type.GenericArgument>
-  readonly captures: ReadonlyArray<Value>
-}
-
-export interface EffectCompositeValue {
-  readonly _tag: 'EffectCompositeValue'
-  readonly alternative: number
-  readonly effect: EffectValue
-}
-
-/** One logical heap block; identity and liveness live in evaluator state, not JS identity. */
-export interface AllocationValue {
-  readonly _tag: 'AllocationValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly bytes: bigint
-  readonly alignment: bigint
-}
-
-export interface RawBufferValue {
-  readonly _tag: 'RawBufferValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly count: bigint
-  readonly element: Type.Type
-  readonly stride: number
-}
-
-export interface SlotValue {
-  readonly _tag: 'SlotValue'
-  readonly type: Type.Nominal
-  readonly ticket: number
-  readonly index: bigint
-  readonly element: Type.Type
-}
-
-/** One immutable logical evaluator value, independent of backend lane realization. */
-export type Value =
-  | IntegerValue
-  | CharacterValue
-  | FloatValue
-  | AggregateValue
-  | ArrayValue
-  | SliceValue
-  | StaticViewValue
-  | StringValue
-  | ReferenceValue
-  | UnionValue
-  | EffectBorrowValue
-  | CallableBorrowValue
-  | EffectValue
-  | EffectCompositeValue
-  | CallableValue
-  | EffectOutcomeValue
-  | AllocationValue
-  | RawBufferValue
-  | SlotValue
-
-/** Entered the resolved entry instance. */
-export interface EntryTraceEvent {
-  readonly _tag: 'Entry'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Executed one call operation after its argument locals were computed. */
-export interface CallTraceEvent {
-  readonly _tag: 'Call'
-  readonly frame: number
-  readonly depth: number
-  readonly caller: DeclarationIndex.CanonicalId
-  readonly target: DeclarationIndex.CanonicalId
-  readonly callerInstance: Instances.InstanceKey
-  readonly targetInstance: Instances.InstanceKey
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Bound one computed argument value to its positional parameter local. */
-export interface BindingTraceEvent {
-  readonly _tag: 'Binding'
-  readonly frame: number
-  readonly depth: number
-  readonly target: DeclarationIndex.CanonicalId
-  readonly targetInstance: Instances.InstanceKey
-  readonly callSpan: SourceSpan.SourceSpan
-  readonly argumentOrdinal: number
-  readonly parameterOrdinal: number
-  readonly value: Value
-  readonly fromCall: boolean
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** Returned one evaluated value from a lowered function. */
-export interface ReturnTraceEvent {
-  readonly _tag: 'Return'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-  readonly value: Value
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** One deterministic event emitted while replaying lowered operations. */
-export interface ConstructTraceEvent {
-  readonly _tag: 'Construct'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.Nominal
-  readonly fieldCount: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ProjectTraceEvent {
-  readonly _tag: 'Project'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.Nominal
-  readonly field: DeclarationIndex.FieldId
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ArrayConstructTraceEvent {
-  readonly _tag: 'ArrayConstruct'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly type: Type.FixedArray
-  readonly elementCount: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface UnionConversionTraceEvent {
-  readonly _tag: 'UnionConversion'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly conversion: 'Inject' | 'Widen'
-  readonly source: Type.Type
-  readonly target: Type.StructuralUnion
-  readonly member: Type.Type
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface PlaceReadTraceEvent {
-  readonly _tag: 'PlaceRead'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly selectors: ReadonlyArray<
-    | { readonly _tag: 'Field'; readonly field: DeclarationIndex.FieldId }
-    | {
-        readonly _tag: 'Element'
-        readonly array: Type.FixedArray
-        readonly index: number
-        readonly bounds: 'Proven' | 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-    | {
-        readonly _tag: 'StaticElement'
-        readonly data: string
-        readonly index: number
-        readonly bounds: 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-    | {
-        readonly _tag: 'RawBufferElement'
-        readonly ticket: number
-        readonly index: number
-        readonly bounds: 'Checked'
-        readonly span: SourceSpan.SourceSpan
-      }
-  >
-  readonly value: Value
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CleanupTraceEvent {
-  readonly _tag: 'Cleanup'
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly local: number
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface MatchTraceEvent {
-  readonly _tag:
-    | 'MatchDispatch'
-    | 'MatchCandidate'
-    | 'MatchSelected'
-    | 'MatchCleanup'
-    | 'MatchBorrowEnd'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly match: number
-  readonly arm?: number
-  readonly member: Type.Type
-  readonly access: Match.Access
-  readonly binding?: number
-  readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
-  readonly value?: Value
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface ControlTraceEvent {
-  readonly _tag:
-    | 'RegionEntry'
-    | 'Condition'
-    | 'Iteration'
-    | 'WriteCheck'
-    | 'ReplacementCleanup'
-    | 'Replacement'
-    | 'Repeat'
-    | 'Exit'
-    | 'Transfer'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly region: number
-  readonly loop?: number
-  readonly members?: ReadonlyArray<Type.Type>
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface EffectTraceEvent {
-  readonly _tag: 'EffectSuccess' | 'EffectFailure'
-  readonly phase: 'Produced' | 'Propagated' | 'Closed'
-  readonly identity?: string
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly tag: number
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CallableTraceEvent {
-  readonly _tag: 'CallableConstruct' | 'CallableApply' | 'CallableCleanup' | 'CallableRejected'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly ticket: number
-  readonly mode: Type.CallableMode
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface AllocationTraceEvent {
-  readonly _tag:
-    | 'AllocationAcquire'
-    | 'RawBufferForm'
-    | 'SlotProject'
-    | 'SlotWrite'
-    | 'SlotTake'
-    | 'SlotCopy'
-    | 'RawBufferRead'
-    | 'RawBufferCopy'
-    | 'RawBufferFill'
-    | 'SlotDrop'
-    | 'AllocationRelease'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly ticket: number
-  readonly index?: bigint
-  readonly count?: bigint
-  readonly element?: Type.Type
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface CoroutineFrameTraceEvent {
-  readonly _tag:
-    | 'SuspensionOrigin'
-    | 'CoroutineFramePush'
-    | 'CoroutineFrameStateTransition'
-    | 'CoroutineFrameResume'
-    | 'CoroutineFrameComplete'
-    | 'SuspensionChildStart'
-    | 'SuspensionChildComplete'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly point: Mir.SuspensionPointId
-  readonly ordinal?: number
-  readonly ticket?: number
-  readonly bytes?: number
-  readonly alignment?: number
-  readonly outcome?: 'Success' | 'Failure'
-  readonly span: SourceSpan.SourceSpan
-}
-
-/** One complete attempted host write, including its deterministic typed outcome. */
-export interface StandardStreamTraceEvent {
-  readonly _tag: 'HostWrite'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly destination: StandardStreams.Destination
-  readonly bytes: ReadonlyArray<number>
-  readonly outcome: 'Written' | 'WriteFailure'
-  readonly span: SourceSpan.SourceSpan
-}
-
-export interface StringTraceEvent {
-  readonly _tag:
-    | 'StringStatic'
-    | 'StringRuntime'
-    | 'StringBytes'
-    | 'StringByteLength'
-    | 'StringEqualsExact'
-    | 'StringLoanEnd'
-  readonly function: DeclarationIndex.CanonicalId
-  readonly storage?: StringStorage['_tag']
-  readonly byteLength?: number
-  readonly result?: boolean
-  readonly loan?: string
-  readonly span: SourceSpan.SourceSpan
-}
-
-export type TraceEvent =
-  | EntryTraceEvent
-  | CallTraceEvent
-  | BindingTraceEvent
-  | ReturnTraceEvent
-  | ConstructTraceEvent
-  | ProjectTraceEvent
-  | ArrayConstructTraceEvent
-  | UnionConversionTraceEvent
-  | PlaceReadTraceEvent
-  | CleanupTraceEvent
-  | MatchTraceEvent
-  | ControlTraceEvent
-  | EffectTraceEvent
-  | CallableTraceEvent
-  | AllocationTraceEvent
-  | CoroutineFrameTraceEvent
-  | StandardStreamTraceEvent
-  | StringTraceEvent
-
-/** Every expected reason the closed bootstrap interpreter can stop. */
-export type BlockedReason =
-  | {
-      readonly _tag: 'InvalidMir'
-      readonly violations: ReadonlyArray<Mir.Violation>
-    }
-  | {
-      readonly _tag: 'UnavailableEntry'
-      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
-    }
-  | {
-      readonly _tag: 'Trap'
-      readonly function: DeclarationIndex.CanonicalId
-      readonly reason: string
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'MissingFunction'
-      readonly target: DeclarationIndex.CanonicalId
-      readonly span: SourceSpan.SourceSpan
-    }
-  | {
-      readonly _tag: 'EvaluationLimit'
-      readonly kind: 'Steps' | 'CallDepth'
-      readonly limit: number
-      readonly count: number
-      readonly function: DeclarationIndex.CanonicalId
-      readonly span: SourceSpan.SourceSpan
-      readonly activeFrames: ReadonlyArray<ActiveFrame>
-    }
-  | {
-      readonly _tag: 'InvalidCallableReuse'
-      readonly function: DeclarationIndex.CanonicalId
-      readonly ticket: number
-      readonly state: 'Running' | 'Consumed' | 'Released'
-      readonly span: SourceSpan.SourceSpan
-    }
-  | { readonly _tag: 'MissingStandardStreams' }
-  | { readonly _tag: 'MissingStandardInput' }
-  | { readonly _tag: 'MissingChildProcess' }
-  | { readonly _tag: 'MissingHostInput' }
-  | { readonly _tag: 'MissingOsFileSystemHost' }
-  | {
-      readonly _tag: 'IntrinsicTargetUnavailable'
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-    }
-
-/** A completed exact bootstrap result. */
-export type Completed = Termination.Completed<IntegerValue, TraceEvent>
-
-/** An owned typed application failure closed by the generated effect-entry adapter. */
-export type UnhandledFailure = Termination.UnhandledFailure<TraceEvent>
-
-/** Fatal abnormal termination produced by executable MIR. */
-export type Trap = Termination.Trap<TraceEvent>
-
-/** A normal, inspectable reason bootstrap evaluation could not complete. */
-export interface Blocked {
-  readonly _tag: 'Blocked'
-  readonly entry: DeclarationIndex.CanonicalId | undefined
-  readonly reason: BlockedReason
-  readonly trace: ReadonlyArray<TraceEvent>
-}
-
-/** The closed outcome of executing one lowered program. */
-export type Outcome = Completed | UnhandledFailure | Trap | Blocked
-
-const isPhysicalEntryAdapter = (name: string): boolean =>
-  name === '$effect-entry' || name === '$unit-entry'
-
-const failureIdentity = (type: Type.Effect | Type.FailureRow, tag: number): string => {
-  const failure = Type.failureMembers(type).at(tag - 1)
-  if (failure === undefined) throw new RangeError(`Effect failure tag ${tag} has no type identity`)
-  return Type.encode(failure)
-}
-
-const logicalPathAt = (
-  trace: ReadonlyArray<TraceEvent>,
-  through: number,
-): ReadonlyArray<Termination.LogicalFrame> => {
-  const active = new Map<
-    number,
-    { readonly depth: number; readonly value: Termination.LogicalFrame }
-  >()
-  for (let index = 0; index <= through; index += 1) {
-    const event = trace.at(index)
-    if (event?._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name)) {
-      active.set(
-        event.frame,
-        Object.freeze({
-          depth: event.depth,
-          value: Object.freeze({ function: event.function, provenance: event.span }),
-        }),
-      )
-    } else if (event?._tag === 'Return') {
-      active.delete(event.frame)
-    }
-  }
-  return Object.freeze(
-    [...active.values()].sort((left, right) => left.depth - right.depth).map(({ value }) => value),
-  )
-}
-
-const causalHistory = (
-  trace: ReadonlyArray<TraceEvent>,
-  terminal: 'Success' | 'TypedFailure' | 'Trap',
-  terminalIdentity?: string,
-): ReadonlyArray<Termination.CausalFailure> => {
-  const failures = trace.flatMap((event, index) =>
-    event._tag === 'EffectFailure' && event.phase === 'Produced'
-      ? [
-          Object.freeze({
-            event,
-            index,
-            key: `${event.function.module}\u0000${event.function.name}\u0000${event.tag}\u0000${event.span.start}\u0000${event.span.end}`,
-          }),
-        ]
-      : [],
-  )
-  const distinct = failures.filter(
-    (failure, index) => failures.findIndex((candidate) => candidate.key === failure.key) === index,
-  )
-  return Object.freeze(
-    distinct.map(({ event, index }, ordinal) => {
-      const identity =
-        event.identity ?? (ordinal === distinct.length - 1 ? terminalIdentity : undefined)
-      return Object.freeze({
-        tag: event.tag,
-        ...(identity === undefined ? {} : { identity }),
-        provenance: event.span,
-        logicalPath: logicalPathAt(trace, index),
-        recovered: terminal !== 'TypedFailure' || ordinal !== distinct.length - 1,
-      })
-    }),
-  )
-}
-
-const longestCausalPath = (
-  history: ReadonlyArray<Termination.CausalFailure>,
-  fallback: ReadonlyArray<Termination.LogicalFrame>,
-): ReadonlyArray<Termination.LogicalFrame> =>
-  history.reduce(
-    (selected, candidate) =>
-      candidate.logicalPath.length > selected.length ? candidate.logicalPath : selected,
-    fallback,
-  )
+import { repackFailurePayload } from './BootstrapValue.js'
 
 type Step =
   | { readonly _tag: 'Value'; readonly value: Value }
@@ -804,13 +248,6 @@ interface EvaluationState {
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
-export interface ActiveFrame {
-  readonly frame: number
-  readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
-  readonly instance: Instances.InstanceKey
-}
-
 interface CallRequest {
   readonly _tag: 'CallRequest'
   readonly target: Mir.MirFunction
@@ -846,7 +283,7 @@ interface ActivationRecord extends ActiveFrame {
   readonly cells: EvaluationState['cells']
   continuation?: FunctionExecution
   pendingCall?: CallRequest
-  cleanupState?: Ownership.CleanupPlan['_tag']
+  cleanupState?: CleanupPlan.CleanupPlan['_tag']
   coroutineFrame?: {
     readonly ticket: number
     readonly bytes: number
@@ -984,35 +421,68 @@ function* executeFunction(
     return found
   }
 
-  const selectStoredPlace = (
-    root: Value,
-    selectors: NonNullable<SliceValue['selectors']>,
-    indexes: ReadonlyArray<number>,
-  ): Value => {
-    let selected = root
-    for (const [ordinal, selector] of selectors.entries()) {
-      const index = indexes.at(ordinal)
-      if (index === undefined) throw new RangeError('Stored slice place omitted a checked index')
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue')
-          throw new RangeError('Stored slice field selects a non-aggregate')
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined) throw new RangeError('Stored slice field is missing')
-        selected = field.value
-      } else {
-        if (selected._tag !== 'ArrayValue')
-          throw new RangeError('Stored slice element selects a non-array')
-        const element = selected.elements.at(index)
-        if (element === undefined) throw new RangeError('Stored slice element is missing')
-        selected = element
+  const placeAccess: BootstrapPlace.Access = {
+    readIndex: (local) => readInteger(local, 'usize').value,
+    sliceElement: (slice, index) => {
+      if (slice.ticket !== undefined) {
+        const allocation = state.allocations.get(slice.ticket)
+        const element = allocation?.values.get(String(slice.base + index))
+        if (allocation === undefined || !allocation.active || element === undefined)
+          throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
+        return element
       }
-    }
-    return selected
+      const backing = BootstrapPlace.selectStored(
+        cell(slice).value,
+        slice.selectors ?? Object.freeze([]),
+        slice.indexes ?? Object.freeze([]),
+      )
+      if (backing._tag !== 'ArrayValue')
+        throw new RangeError('MIR slice cell does not contain an array value')
+      const element = backing.elements.at(slice.base + index)
+      if (element === undefined) throw new RangeError('MIR slice range exceeds its backing cell')
+      return element
+    },
+    replaceSliceElement: (slice, index, value) => {
+      if (slice.ticket !== undefined) {
+        const allocation = state.allocations.get(slice.ticket)
+        const absolute = slice.base + index
+        if (
+          allocation === undefined ||
+          !allocation.active ||
+          !allocation.values.has(String(absolute))
+        )
+          throw new RangeError('Invalid RawBuffer slice replacement')
+        allocation.values.set(String(absolute), value)
+        return slice
+      }
+      const key = cellKey(slice.frame, slice.cell)
+      const stored = state.cells.get(key)
+      if (stored === undefined) throw new RangeError('Invalid slice backing cell replacement')
+      const prefixSelectors = slice.selectors ?? Object.freeze([])
+      const prefixIndexes = slice.indexes ?? Object.freeze([])
+      const backing = BootstrapPlace.selectStored(stored.value, prefixSelectors, prefixIndexes)
+      if (backing._tag !== 'ArrayValue')
+        throw new RangeError('Invalid slice backing cell replacement')
+      const absolute = slice.base + index
+      const updated: ArrayValue = Object.freeze({
+        _tag: 'ArrayValue',
+        type: backing.type,
+        elements: Object.freeze(
+          backing.elements.map((element, ordinal) => (ordinal === absolute ? value : element)),
+        ),
+      })
+      state.cells.set(key, {
+        value: BootstrapPlace.replacePlaceByIndexes(
+          stored.value,
+          prefixSelectors,
+          prefixIndexes,
+          updated,
+          placeAccess,
+        ),
+        fromCall: stored.fromCall,
+      })
+      return slice
+    },
   }
 
   const referenced = (local: Mir.LocalId): LocalState => {
@@ -1023,42 +493,15 @@ function* executeFunction(
     const found = state.cells.get(cellKey(reference.frame, reference.cell))
     if (found === undefined)
       throw new RangeError('MIR reference points at a missing evaluator cell')
-    let selected = found.value
-    for (const [ordinal, selector] of reference.selectors.entries()) {
-      const index = reference.indexes.at(ordinal)
-      if (index === undefined) throw new RangeError('MIR reference omitted a captured selector')
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue')
-          throw new RangeError('MIR reference selector points at a non-struct value')
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined) throw new RangeError('MIR reference selector lost its field')
-        selected = field.value
-        continue
-      }
-      if (selector._tag === 'SliceElementSelector') {
-        if (selected._tag !== 'SliceValue' || selected.ticket !== undefined)
-          throw new RangeError('MIR raw reference selector points at an unsupported slice')
-        const backing = cell(selected).value
-        if (backing._tag !== 'ArrayValue')
-          throw new RangeError('MIR slice reference lost its array backing')
-        const element = backing.elements.at(selected.base + index)
-        if (element === undefined)
-          throw new RangeError('MIR slice reference is outside its backing')
-        selected = element
-        continue
-      }
-      if (selected._tag !== 'ArrayValue')
-        throw new RangeError('MIR reference selector points at an unsupported place')
-      const element = selected.elements.at(index)
-      if (element === undefined) throw new RangeError('MIR reference selector lost its element')
-      selected = element
-    }
-    return Object.freeze({ value: selected, fromCall: found.fromCall })
+    const selected = BootstrapPlace.walkPlace(
+      found.value,
+      reference.selectors,
+      reference.indexes,
+      placeAccess,
+    )
+    if (selected._tag === 'OutOfBounds')
+      throw new RangeError('MIR reference selector is outside its checked place')
+    return Object.freeze({ value: selected.selected, fromCall: found.fromCall })
   }
 
   const readInteger = (local: Mir.LocalId, expected?: Scalar.IntegerSpelling): IntegerValue => {
@@ -1097,7 +540,7 @@ function* executeFunction(
    * consumed a ticket this plan still owns.
    */
   const releaseThroughPlan = function* (
-    cleanup: Ownership.CleanupPlan,
+    cleanup: CleanupPlan.CleanupPlan,
     owner: Value,
     provenance: Mir.Provenance,
     localOrdinal: number,
@@ -1300,7 +743,7 @@ function* executeFunction(
       region._tag === 'LoopRegion' ? [[region.condition.ordinal, region] as const] : [],
     ),
   )
-  const checkedPlaces = new Map<ReadonlyArray<Mir.PlaceSelector>, ReadonlyArray<number>>()
+  const checkedPlaces = new Map<string, ReadonlyArray<number>>()
 
   const invokeCallableTarget = function* (
     target: Hir.CallableTarget,
@@ -1469,19 +912,7 @@ function* executeFunction(
         rightValue !== undefined && rightValue._tag === 'IntegerValue'
           ? BigInt(rightValue.value)
           : undefined
-      const exact = operation.startsWith('CheckedConvertTo')
-        ? left
-        : operation === 'CheckedAdd' && right !== undefined
-          ? left + right
-          : operation === 'CheckedSubtract' && right !== undefined
-            ? left - right
-            : operation === 'CheckedMultiply' && right !== undefined
-              ? left * right
-              : operation === 'CheckedDivide' && right !== undefined && right !== 0n
-                ? left / right
-                : operation === 'CheckedRemainder' && right !== undefined && right !== 0n
-                  ? left % right
-                  : undefined
+      const exact = BootstrapArithmetic.checked(operation, left, right)
       const range = Scalar.range(resultScalar, program.layout.target.pointerSize === 4 ? 32 : 64)
       const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
       const semantic = Type.option(resultScalar.spelling)
@@ -1591,167 +1022,35 @@ function* executeFunction(
         ),
       })
     }
-    if (
-      operation === 'Add' ||
-      operation === 'Subtract' ||
-      operation === 'Multiply' ||
-      operation === 'Divide' ||
-      operation === 'Remainder' ||
-      operation === 'Equals' ||
-      operation === 'NotEquals' ||
-      operation === 'LessThan' ||
-      operation === 'LessOrEqual' ||
-      operation === 'GreaterThan' ||
-      operation === 'GreaterOrEqual' ||
-      operation === 'BitAnd' ||
-      operation === 'BitOr' ||
-      operation === 'BitXor' ||
-      operation === 'ShiftLeft' ||
-      operation === 'ShiftRight' ||
-      operation === 'RotateLeft' ||
-      operation === 'RotateRight' ||
-      operation === 'WrappingAdd' ||
-      operation === 'WrappingSubtract' ||
-      operation === 'WrappingMultiply' ||
-      operation === 'SaturatingAdd' ||
-      operation === 'SaturatingSubtract' ||
-      operation === 'SaturatingMultiply'
-    ) {
+    if (Mir.isBinaryOperator(operation)) {
       const leftValue = arguments_.at(0)
       const rightValue = arguments_.at(1)
-      if (
-        leftValue === undefined ||
-        rightValue === undefined ||
-        leftValue._tag !== 'IntegerValue' ||
-        rightValue._tag !== 'IntegerValue'
-      ) {
-        throw new RangeError('MIR verifier allowed invalid binary callable arguments')
-      }
       const scalar = Scalar.find(target.actor)
-      if (scalar === undefined || scalar.category !== 'Integer') {
+      if (leftValue?._tag !== 'IntegerValue' || rightValue?._tag !== 'IntegerValue')
+        throw new RangeError('MIR verifier allowed invalid integer binary callable arguments')
+      const compared = BootstrapArithmetic.compare(operation, leftValue.value, rightValue.value)
+      if (compared !== undefined)
+        return Object.freeze({
+          _tag: 'Value',
+          value: integerValue('i32', compared ? 1n : 0n),
+        })
+      if (scalar?.category !== 'Integer')
         throw new RangeError('MIR verifier allowed a non-integer binary callable')
-      }
-      const left = BigInt(leftValue.value)
-      const right = BigInt(rightValue.value)
-      if (
-        operation === 'Equals' ||
-        operation === 'NotEquals' ||
-        operation === 'LessThan' ||
-        operation === 'LessOrEqual' ||
-        operation === 'GreaterThan' ||
-        operation === 'GreaterOrEqual'
-      ) {
-        const holds =
-          operation === 'Equals'
-            ? left === right
-            : operation === 'NotEquals'
-              ? left !== right
-              : operation === 'LessThan'
-                ? left < right
-                : operation === 'LessOrEqual'
-                  ? left <= right
-                  : operation === 'GreaterThan'
-                    ? left > right
-                    : left >= right
-        return Object.freeze({ _tag: 'Value', value: integerValue('i32', holds ? 1 : 0) })
-      }
-      if ((operation === 'Divide' || operation === 'Remainder') && right === 0n) {
-        return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'division by zero', span })
-      }
-      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-      const width = Scalar.bits(scalar, pointerBits)
-      if (
-        (operation === 'ShiftLeft' || operation === 'ShiftRight') &&
-        (right < 0n || right >= BigInt(width))
-      ) {
-        return blockedStep({
-          _tag: 'Trap',
-          function: fn.id,
-          reason: `invalid ${operation} count ${right}`,
-          span,
-        })
-      }
-      const fromBits = (input: bigint): bigint =>
-        scalar.signedness === 'Signed' ? BigInt.asIntN(width, input) : BigInt.asUintN(width, input)
-      const leftBits = BigInt.asUintN(width, left)
-      const rightBits = BigInt.asUintN(width, right)
-      const rotate = Number(right % BigInt(width))
-      const rotatedLeft =
-        rotate === 0
-          ? leftBits
-          : BigInt.asUintN(
-              width,
-              (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
-            )
-      const rotatedRight =
-        rotate === 0
-          ? leftBits
-          : BigInt.asUintN(
-              width,
-              (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
-            )
-      const exact =
-        operation === 'Add' || operation === 'WrappingAdd' || operation === 'SaturatingAdd'
-          ? left + right
-          : operation === 'Subtract' ||
-              operation === 'WrappingSubtract' ||
-              operation === 'SaturatingSubtract'
-            ? left - right
-            : operation === 'Multiply' ||
-                operation === 'WrappingMultiply' ||
-                operation === 'SaturatingMultiply'
-              ? left * right
-              : operation === 'Divide'
-                ? left / right
-                : operation === 'Remainder'
-                  ? left % right
-                  : operation === 'BitAnd'
-                    ? fromBits(leftBits & rightBits)
-                    : operation === 'BitOr'
-                      ? fromBits(leftBits | rightBits)
-                      : operation === 'BitXor'
-                        ? fromBits(leftBits ^ rightBits)
-                        : operation === 'ShiftLeft'
-                          ? fromBits(leftBits << right)
-                          : operation === 'ShiftRight'
-                            ? scalar.signedness === 'Signed'
-                              ? left >> right
-                              : fromBits(leftBits >> right)
-                            : operation === 'RotateLeft'
-                              ? fromBits(rotatedLeft)
-                              : fromBits(rotatedRight)
-      const range = Scalar.range(scalar, pointerBits)
-      const wrapping =
-        operation === 'WrappingAdd' ||
-        operation === 'WrappingSubtract' ||
-        operation === 'WrappingMultiply'
-      const saturating =
-        operation === 'SaturatingAdd' ||
-        operation === 'SaturatingSubtract' ||
-        operation === 'SaturatingMultiply'
-      if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
-        return blockedStep({
-          _tag: 'Trap',
-          function: fn.id,
-          reason:
-            scalar.signedness === 'Unsigned' && exact < 0n
-              ? 'arithmetic underflow'
-              : 'arithmetic overflow',
-          span,
-        })
-      }
-      const result = wrapping
-        ? fromBits(exact)
-        : saturating
-          ? exact < range.minimum
-            ? range.minimum
-            : exact > range.maximum
-              ? range.maximum
-              : exact
-          : exact
+      const result = BootstrapArithmetic.integralBinary(
+        operation,
+        scalar,
+        program.layout.target.pointerSize === 4 ? 32 : 64,
+        leftValue.value,
+        rightValue.value,
+      )
+      if (result._tag === 'Trap')
+        return blockedStep({ _tag: 'Trap', function: fn.id, reason: result.reason, span })
       return Object.freeze({
         _tag: 'Value',
-        value: integerValue(scalar.spelling, result),
+        value:
+          result._tag === 'Comparison'
+            ? integerValue('i32', result.value ? 1 : 0)
+            : integerValue(result.type, result.value),
       })
     }
     return blockedStep({
@@ -1760,92 +1059,6 @@ function* executeFunction(
       reason: `bootstrap callable ${target.actor}.${target.operation} is unavailable`,
       span,
     })
-  }
-
-  const cleanupMembers = (
-    cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
-    owner: Value,
-  ): ReadonlyArray<Type.Type> => {
-    if (cleanup._tag === 'NoCleanup' || cleanup._tag === 'ParameterCleanup') {
-      return Object.freeze([])
-    }
-    if (cleanup._tag === 'AllocationCleanup') return Object.freeze([Type.allocation])
-    if (cleanup._tag === 'UnionCleanup') {
-      if (owner._tag !== 'UnionValue') return Object.freeze([])
-      const active = cleanup.cases.find((candidate) => Type.equals(candidate.member, owner.member))
-      return Object.freeze([
-        owner.member,
-        ...(active === undefined ? [] : cleanupMembers(active.cleanup, owner.payload)),
-      ])
-    }
-    if (cleanup._tag === 'ArrayCleanup') {
-      return owner._tag === 'ArrayValue'
-        ? Object.freeze(
-            owner.elements.flatMap((element) => cleanupMembers(cleanup.element, element)),
-          )
-        : Object.freeze([])
-    }
-    if (cleanup._tag === 'CallableCleanup') {
-      if (owner._tag !== 'CallableValue') return Object.freeze([])
-      return Object.freeze(
-        cleanup.slots.flatMap((slot) => {
-          const capture = owner.captures.find((candidate) => candidate.ordinal === slot.ordinal)
-          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture.value)
-        }),
-      )
-    }
-    if (cleanup._tag === 'EffectCleanup') {
-      if (owner._tag !== 'EffectValue') return Object.freeze([])
-      return Object.freeze(
-        cleanup.slots.flatMap((slot) => {
-          const capture = owner.captures.at(slot.ordinal)
-          return capture === undefined ? [] : cleanupMembers(slot.cleanup, capture)
-        }),
-      )
-    }
-    if (cleanup._tag === 'EffectCompositeCleanup') {
-      if (owner._tag !== 'EffectCompositeValue') return Object.freeze([])
-      const selected = cleanup.alternatives.at(owner.alternative)
-      return selected === undefined ? Object.freeze([]) : cleanupMembers(selected, owner.effect)
-    }
-    if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
-    if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
-    // Unresolved stored-executable obligations never reach evaluation: specialization resolves
-    // them before lowering, while the executable fences retain every incomplete engine path.
-    if (
-      cleanup._tag === 'RepresentedCallableCleanup' ||
-      cleanup._tag === 'RepresentedEffectCleanup'
-    )
-      return Object.freeze([])
-    if (owner._tag !== 'AggregateValue') return Object.freeze([])
-    return Object.freeze(
-      cleanup.fields.flatMap((field) => {
-        const value = owner.fields.find(
-          (candidate) => candidate.field.ordinal === field.field.ordinal,
-        )
-        return value === undefined ? [] : cleanupMembers(field.cleanup, value.value)
-      }),
-    )
-  }
-
-  const selectFieldPath = (root: Value, path: ReadonlyArray<DeclarationIndex.FieldId>): Value => {
-    let selected: Value = root
-    for (const selector of path) {
-      if (selected._tag !== 'AggregateValue') {
-        throw new RangeError('MIR verifier allowed a match field below a non-struct value')
-      }
-      const field: AggregateValue['fields'][number] | undefined = selected.fields.find(
-        (candidate) =>
-          candidate.field.ordinal === selector.ordinal &&
-          candidate.field.struct.sourceId === selector.struct.sourceId &&
-          candidate.field.struct.ordinal === selector.struct.ordinal,
-      )
-      if (field === undefined) {
-        throw new RangeError('MIR verifier allowed a missing match field')
-      }
-      selected = field.value
-    }
-    return selected
   }
 
   const resolvePlace = (
@@ -1861,8 +1074,6 @@ function* executeFunction(
     let selected = read(root).value
     let effectiveSelectors = selectors
     let capturedIndexes: ReadonlyArray<number> = Object.freeze([])
-    const indexes: Array<number> = []
-    // A reference root reads through the borrow: the place lives on the referenced cell.
     if (selected._tag === 'ReferenceValue') {
       const target = state.cells.get(cellKey(selected.frame, selected.cell))
       if (target === undefined)
@@ -1871,103 +1082,31 @@ function* executeFunction(
       capturedIndexes = selected.indexes
       selected = target.value
     }
-    for (const [ordinal, selector] of effectiveSelectors.entries()) {
-      if (selector._tag === 'FieldSelector') {
-        if (selected._tag !== 'AggregateValue') {
-          throw new RangeError('MIR verifier allowed a field selector on a non-struct value')
-        }
-        const field = selected.fields.find(
-          (candidate) =>
-            candidate.field.ordinal === selector.field.ordinal &&
-            candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.field.struct.ordinal === selector.field.struct.ordinal,
-        )
-        if (field === undefined)
-          throw new RangeError('MIR verifier allowed a missing field selector')
-        selected = field.value
-        indexes.push(selector.field.ordinal)
-        continue
-      }
-      if (selector._tag === 'SliceElementSelector') {
-        if (selected._tag !== 'SliceValue' && selected._tag !== 'StaticViewValue') {
-          throw new RangeError('MIR verifier allowed a slice selector on a non-slice value')
-        }
-        const captured = capturedIndexes.at(ordinal)
-        const exactIndex =
-          captured === undefined ? readInteger(selector.index, 'usize').value : BigInt(captured)
-        if (exactIndex >= BigInt(selected.length)) {
-          return {
-            _tag: 'Blocked',
-            step: blockedStep({
-              _tag: 'Trap',
-              function: fn.id,
-              reason: `slice index ${exactIndex} is outside length ${selected.length} in ${fn.id.module}.${fn.id.name}`,
-              span: selector.provenance.span,
-            }),
-          }
-        }
-        const index = Number(exactIndex)
-        if (selected._tag === 'StaticViewValue') {
-          const byte = selected.bytes.at(index)
-          if (byte === undefined) {
-            throw new RangeError('MIR static view range exceeds its immutable bytes')
-          }
-          indexes.push(index)
-          selected = integerValue('u8', BigInt(byte))
-          continue
-        }
-        if (selected.ticket !== undefined) {
-          const allocation = state.allocations.get(selected.ticket)
-          const element = allocation?.values.get(String(selected.base + index))
-          if (allocation === undefined || !allocation.active || element === undefined) {
-            throw new RangeError('MIR RawBuffer slice selected uninitialized storage')
-          }
-          indexes.push(index)
-          selected = element
-          continue
-        }
-        const backing = selectStoredPlace(
-          cell(selected).value,
-          selected.selectors ?? Object.freeze([]),
-          selected.indexes ?? Object.freeze([]),
-        )
-        if (backing._tag !== 'ArrayValue') {
-          throw new RangeError('MIR slice cell does not contain an array value')
-        }
-        const element = backing.elements.at(selected.base + index)
-        if (element === undefined) {
-          throw new RangeError('MIR slice range exceeds its backing cell')
-        }
-        indexes.push(index)
-        selected = element
-        continue
-      }
-      if (selected._tag !== 'ArrayValue') {
-        throw new RangeError('MIR verifier allowed an element selector on a non-array value')
-      }
-      const index =
-        capturedIndexes.at(ordinal) ??
-        (selector.index._tag === 'Proven'
-          ? selector.index.value
-          : Number(readInteger(selector.index.local, 'usize').value))
-      if (index < 0 || !Number.isSafeInteger(index) || index >= selector.length) {
-        return {
-          _tag: 'Blocked',
-          step: blockedStep({
-            _tag: 'Trap',
-            function: fn.id,
-            reason: `array index ${index} is outside length ${selector.length} in ${fn.id.module}.${fn.id.name}`,
-            span: selector.provenance.span,
-          }),
-        }
-      }
-      const element = selected.elements.at(index)
-      if (element === undefined)
-        throw new RangeError('MIR verifier allowed an incomplete array value')
-      indexes.push(index)
-      selected = element
+    const resolved = BootstrapPlace.walkPlace(
+      selected,
+      effectiveSelectors,
+      capturedIndexes,
+      placeAccess,
+    )
+    if (resolved._tag === 'Resolved') return resolved
+    return {
+      _tag: 'Blocked',
+      step: blockedStep({
+        _tag: 'Trap',
+        function: fn.id,
+        reason:
+          (resolved.selector._tag === 'SliceElementSelector' ? 'slice' : 'array') +
+          ' index ' +
+          String(resolved.index) +
+          ' is outside length ' +
+          String(resolved.length) +
+          ' in ' +
+          fn.id.module +
+          '.' +
+          fn.id.name,
+        span: resolved.selector.provenance.span,
+      }),
     }
-    return { _tag: 'Resolved', selected, indexes: Object.freeze(indexes) }
   }
 
   const replacePlace = (
@@ -1975,82 +1114,8 @@ function* executeFunction(
     selectors: ReadonlyArray<Mir.PlaceSelector>,
     indexes: ReadonlyArray<number>,
     replacement: Value,
-    depth = 0,
-  ): Value => {
-    const selector = selectors.at(depth)
-    if (selector === undefined) return replacement
-    const ordinal = indexes.at(depth)
-    if (ordinal === undefined) throw new RangeError('Checked place omitted one selector index')
-    if (selector._tag === 'FieldSelector') {
-      if (current._tag !== 'AggregateValue') throw new RangeError('Invalid aggregate replacement')
-      return Object.freeze({
-        _tag: 'AggregateValue',
-        type: current.type,
-        fields: Object.freeze(
-          current.fields.map((field) =>
-            field.field.ordinal === selector.field.ordinal
-              ? Object.freeze({
-                  field: field.field,
-                  value: replacePlace(field.value, selectors, indexes, replacement, depth + 1),
-                })
-              : field,
-          ),
-        ),
-      })
-    }
-    if (selector._tag === 'SliceElementSelector') {
-      if (current._tag !== 'SliceValue') throw new RangeError('Invalid slice replacement')
-      if (current.ticket !== undefined) {
-        const allocation = state.allocations.get(current.ticket)
-        const absolute = current.base + ordinal
-        const previous = allocation?.values.get(String(absolute))
-        if (allocation === undefined || !allocation.active || previous === undefined) {
-          throw new RangeError('Invalid RawBuffer slice replacement')
-        }
-        allocation.values.set(
-          String(absolute),
-          replacePlace(previous, selectors, indexes, replacement, depth + 1),
-        )
-        return current
-      }
-      const backing = cell(current)
-      const prefixSelectors = current.selectors ?? Object.freeze([])
-      const prefixIndexes = current.indexes ?? Object.freeze([])
-      const selectedBacking = selectStoredPlace(backing.value, prefixSelectors, prefixIndexes)
-      if (selectedBacking._tag !== 'ArrayValue') {
-        throw new RangeError('Invalid slice backing cell replacement')
-      }
-      const absolute = current.base + ordinal
-      const updated: ArrayValue = Object.freeze({
-        _tag: 'ArrayValue',
-        type: selectedBacking.type,
-        elements: Object.freeze(
-          selectedBacking.elements.map((element, index) =>
-            index === absolute
-              ? replacePlace(element, selectors, indexes, replacement, depth + 1)
-              : element,
-          ),
-        ),
-      })
-      state.cells.set(cellKey(current.frame, current.cell), {
-        value: replacePlace(backing.value, prefixSelectors, prefixIndexes, updated),
-        fromCall: backing.fromCall,
-      })
-      return current
-    }
-    if (current._tag !== 'ArrayValue') throw new RangeError('Invalid array replacement')
-    return Object.freeze({
-      _tag: 'ArrayValue',
-      type: current.type,
-      elements: Object.freeze(
-        current.elements.map((element, index) =>
-          index === ordinal
-            ? replacePlace(element, selectors, indexes, replacement, depth + 1)
-            : element,
-        ),
-      ),
-    })
-  }
+  ): Value =>
+    BootstrapPlace.replacePlaceByIndexes(current, selectors, indexes, replacement, placeAccess)
 
   const replaceReferenced = (local: Mir.LocalId, replacement: Value): void => {
     const reference = read(local).value
@@ -2349,7 +1414,7 @@ function* executeFunction(
                 }),
               )
               for (const binding of arm.bindings) {
-                const bound = selectFieldPath(payload, binding.path)
+                const bound = BootstrapStorage.selectFieldPath(payload, binding.path)
                 write(binding.destination, { value: bound, fromCall: false })
                 trace.push(
                   Object.freeze({
@@ -2385,8 +1450,8 @@ function* executeFunction(
               const selectedStep = yield* executeOperations(arm.selected.operations)
               if (selectedStep !== undefined) return selectedStep
               for (const cleanup of arm.selected.cleanup) {
-                const owner = selectFieldPath(payload, cleanup.path)
-                const members = cleanupMembers(cleanup.cleanup, owner)
+                const owner = BootstrapStorage.selectFieldPath(payload, cleanup.path)
+                const members = BootstrapStorage.cleanupMembers(cleanup.cleanup, owner)
                 trace.push(
                   Object.freeze({
                     _tag: 'MatchCleanup',
@@ -2913,11 +1978,7 @@ function* executeFunction(
               try {
                 return state.standardStreams.writeAll(destination, bytes)
               } catch (cause) {
-                return Object.freeze({
-                  _tag: 'WriteFailure' as const,
-                  message: 'standard stream provider threw',
-                  cause,
-                })
+                return BootstrapOsIntrinsics.writeFailure(cause)
               }
             })()
             if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
@@ -2928,6 +1989,9 @@ function* executeFunction(
                 destination,
                 bytes: Object.freeze(Array.from(bytes)),
                 outcome: result._tag,
+                ...(result._tag === 'WriteFailure' && result.cause !== undefined
+                  ? { cause: result.cause }
+                  : {}),
                 span: operation.provenance.span,
               }),
             )
@@ -2971,6 +2035,18 @@ function* executeFunction(
                 ),
               )
               replaceReferenced(codeOutput, integerValue('u32', BigInt(failure?.nativeCode ?? 0)))
+              trace.push(
+                Object.freeze({
+                  _tag: 'OsCall',
+                  function: fn.id,
+                  operation: operation.operation,
+                  outcome: failure === undefined ? 'Completed' : 'Failure',
+                  ...(failure === undefined ? {} : { reason: failure.reason }),
+                  ...(failure?.nativeCode === undefined ? {} : { nativeCode: failure.nativeCode }),
+                  ...(failure?.cause === undefined ? {} : { cause: failure.cause }),
+                  span: operation.provenance.span,
+                }),
+              )
             }
             const commit = (result: Value): void =>
               write(operation.destination, { value: result, fromCall: false })
@@ -3341,11 +2417,7 @@ function* executeFunction(
                 commit(integerValue('i32', 1))
               }
             } catch (cause) {
-              const failure: OsFileSystemHost.Failure = {
-                _tag: 'Failure',
-                reason: 'Other',
-                ...(cause instanceof Error ? { cause } : {}),
-              } as OsFileSystemHost.Failure
+              const failure = BootstrapOsIntrinsics.osFailure(cause)
               status(failure)
               commit(
                 operation.type._tag === 'Union'
@@ -3858,7 +2930,7 @@ function* executeFunction(
             if (Scalar.isCharacterSpelling(semantic)) {
               const left = readCharacter(operation.left).value
               const right = readCharacter(operation.right).value
-              const holds =
+              const result =
                 operation.operator === 'Equals'
                   ? left === right
                   : operation.operator === 'NotEquals'
@@ -3872,166 +2944,55 @@ function* executeFunction(
                           : operation.operator === 'GreaterOrEqual'
                             ? left >= right
                             : undefined
-              if (holds === undefined)
+              if (result === undefined)
                 throw new RangeError('MIR verifier allowed a non-comparison char operation')
               write(operation.destination, {
-                value: integerValue('i32', holds ? 1 : 0),
+                value: integerValue('i32', result ? 1 : 0),
                 fromCall: false,
               })
               break
             }
-            const leftValue = readInteger(operation.left)
-            const rightValue = readInteger(operation.right)
             const rightType = fn.localTypes.at(operation.right.ordinal)
             const operand = leftType === undefined ? undefined : Mir.semanticType(leftType)
+            const scalar = Scalar.isSpelling(operand) ? Scalar.find(operand) : undefined
             if (
               rightType === undefined ||
               operand === undefined ||
               !Type.equals(Mir.semanticType(rightType), operand) ||
               !Scalar.isSpelling(operand)
-            ) {
+            )
               throw new RangeError('MIR verifier allowed mixed integer operands')
-            }
-            const scalar = Scalar.find(operand)
-            const left = BigInt(leftValue.value)
-            const right = BigInt(rightValue.value)
-            if (
-              operation.operator === 'Equals' ||
-              operation.operator === 'NotEquals' ||
-              operation.operator === 'LessThan' ||
-              operation.operator === 'LessOrEqual' ||
-              operation.operator === 'GreaterThan' ||
-              operation.operator === 'GreaterOrEqual'
-            ) {
-              const holds =
-                operation.operator === 'Equals'
-                  ? left === right
-                  : operation.operator === 'NotEquals'
-                    ? left !== right
-                    : operation.operator === 'LessThan'
-                      ? left < right
-                      : operation.operator === 'LessOrEqual'
-                        ? left <= right
-                        : operation.operator === 'GreaterThan'
-                          ? left > right
-                          : left >= right
+            const left = readInteger(operation.left).value
+            const right = readInteger(operation.right).value
+            const compared = BootstrapArithmetic.compare(operation.operator, left, right)
+            if (compared !== undefined) {
               write(operation.destination, {
-                value: integerValue('i32', holds ? 1 : 0),
+                value: integerValue('i32', compared ? 1n : 0n),
                 fromCall: false,
               })
               break
             }
-            if (scalar === undefined || scalar.category !== 'Integer') {
+            if (scalar?.category !== 'Integer')
               throw new RangeError('MIR verifier allowed a non-integer binary operand')
-            }
-            if (
-              (operation.operator === 'Divide' || operation.operator === 'Remainder') &&
-              right === 0n
-            ) {
+            const result = BootstrapArithmetic.integralBinary(
+              operation.operator,
+              scalar,
+              program.layout.target.pointerSize === 4 ? 32 : 64,
+              left,
+              right,
+            )
+            if (result._tag === 'Trap')
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
-                reason: 'division by zero',
+                reason: result.reason,
                 span: operation.provenance.span,
               })
-            }
-            const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
-            const width = Scalar.bits(scalar, pointerBits)
-            if (
-              (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') &&
-              (right < 0n || right >= BigInt(width))
-            ) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: `invalid ${operation.operator} count ${right}`,
-                span: operation.provenance.span,
-              })
-            }
-            const fromBits = (input: bigint): bigint =>
-              scalar.signedness === 'Signed'
-                ? BigInt.asIntN(width, input)
-                : BigInt.asUintN(width, input)
-            const leftBits = BigInt.asUintN(width, left)
-            const rightBits = BigInt.asUintN(width, right)
-            const rotate = Number(right % BigInt(width))
-            const rotatedLeft =
-              rotate === 0
-                ? leftBits
-                : BigInt.asUintN(
-                    width,
-                    (leftBits << BigInt(rotate)) | (leftBits >> BigInt(width - rotate)),
-                  )
-            const rotatedRight =
-              rotate === 0
-                ? leftBits
-                : BigInt.asUintN(
-                    width,
-                    (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)),
-                  )
-            const exact =
-              operation.operator === 'Add' ||
-              operation.operator === 'WrappingAdd' ||
-              operation.operator === 'SaturatingAdd'
-                ? left + right
-                : operation.operator === 'Subtract' ||
-                    operation.operator === 'WrappingSubtract' ||
-                    operation.operator === 'SaturatingSubtract'
-                  ? left - right
-                  : operation.operator === 'Multiply' ||
-                      operation.operator === 'WrappingMultiply' ||
-                      operation.operator === 'SaturatingMultiply'
-                    ? left * right
-                    : operation.operator === 'Divide'
-                      ? left / right
-                      : operation.operator === 'Remainder'
-                        ? left % right
-                        : operation.operator === 'BitAnd'
-                          ? fromBits(leftBits & rightBits)
-                          : operation.operator === 'BitOr'
-                            ? fromBits(leftBits | rightBits)
-                            : operation.operator === 'BitXor'
-                              ? fromBits(leftBits ^ rightBits)
-                              : operation.operator === 'ShiftLeft'
-                                ? fromBits(leftBits << right)
-                                : operation.operator === 'ShiftRight'
-                                  ? scalar.signedness === 'Signed'
-                                    ? left >> right
-                                    : fromBits(leftBits >> right)
-                                  : operation.operator === 'RotateLeft'
-                                    ? fromBits(rotatedLeft)
-                                    : fromBits(rotatedRight)
-            const range = Scalar.range(scalar, pointerBits)
-            const wrapping =
-              operation.operator === 'WrappingAdd' ||
-              operation.operator === 'WrappingSubtract' ||
-              operation.operator === 'WrappingMultiply'
-            const saturating =
-              operation.operator === 'SaturatingAdd' ||
-              operation.operator === 'SaturatingSubtract' ||
-              operation.operator === 'SaturatingMultiply'
-            if (!wrapping && !saturating && (exact < range.minimum || exact > range.maximum)) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason:
-                  scalar.signedness === 'Unsigned' && exact < 0n
-                    ? 'arithmetic underflow'
-                    : 'arithmetic overflow',
-                span: operation.provenance.span,
-              })
-            }
-            const result = wrapping
-              ? fromBits(exact)
-              : saturating
-                ? exact < range.minimum
-                  ? range.minimum
-                  : exact > range.maximum
-                    ? range.maximum
-                    : exact
-                : exact
             write(operation.destination, {
-              value: integerValue(scalar.spelling, result),
+              value:
+                result._tag === 'Comparison'
+                  ? integerValue('i32', result.value ? 1 : 0)
+                  : integerValue(result.type, result.value),
               fromCall: false,
             })
             break
@@ -4160,23 +3121,7 @@ function* executeFunction(
               (target?.category !== 'Integer' && !characterConversion)
             )
               throw new RangeError('MIR verifier allowed an invalid checked scalar operation')
-            const arithmetic = operation.operation.startsWith('CheckedConvertTo')
-              ? left
-              : operation.operation === 'CheckedAdd'
-                ? left + (right ?? 0n)
-                : operation.operation === 'CheckedSubtract'
-                  ? left - (right ?? 0n)
-                  : operation.operation === 'CheckedMultiply'
-                    ? left * (right ?? 0n)
-                    : operation.operation === 'CheckedDivide'
-                      ? right === undefined || right === 0n
-                        ? undefined
-                        : left / right
-                      : operation.operation === 'CheckedRemainder'
-                        ? right === undefined || right === 0n
-                          ? undefined
-                          : left % right
-                        : undefined
+            const arithmetic = BootstrapArithmetic.checked(operation.operation, left, right)
             const success =
               arithmetic !== undefined &&
               (characterConversion
@@ -4444,7 +3389,7 @@ function* executeFunction(
           case 'CheckPlace': {
             const resolved = resolvePlace(operation.root, operation.selectors)
             if (resolved._tag === 'Blocked') return resolved.step
-            checkedPlaces.set(operation.selectors, resolved.indexes)
+            checkedPlaces.set(BootstrapPlace.selectorKey(operation.selectors), resolved.indexes)
             trace.push(
               Object.freeze({
                 _tag: 'WriteCheck',
@@ -4457,7 +3402,8 @@ function* executeFunction(
             break
           }
           case 'WritePlace': {
-            const indexes = checkedPlaces.get(operation.selectors)
+            const placeKey = BootstrapPlace.selectorKey(operation.selectors)
+            const indexes = checkedPlaces.get(placeKey)
             if (indexes === undefined)
               throw new RangeError('MIR write executed without its precheck')
             const root = read(operation.root)
@@ -4477,7 +3423,7 @@ function* executeFunction(
                 value: replacePlace(target.value, effectiveSelectors, indexes, replacement.value),
                 fromCall: replacement.fromCall,
               })
-              checkedPlaces.delete(operation.selectors)
+              checkedPlaces.delete(placeKey)
               trace.push(
                 Object.freeze({
                   _tag: 'Replacement',
@@ -4511,7 +3457,7 @@ function* executeFunction(
               value: replacePlace(root.value, operation.selectors, indexes, replacement.value),
               fromCall: replacement.fromCall,
             })
-            checkedPlaces.delete(operation.selectors)
+            checkedPlaces.delete(placeKey)
             trace.push(
               Object.freeze({
                 _tag: 'Replacement',
@@ -4532,7 +3478,7 @@ function* executeFunction(
               operation.local.ordinal,
             )
             if (blocked !== undefined) return blocked
-            const members = cleanupMembers(operation.cleanup, dropped)
+            const members = BootstrapStorage.cleanupMembers(operation.cleanup, dropped)
             trace.push(
               Object.freeze({
                 _tag: 'Cleanup',
@@ -4754,7 +3700,7 @@ function* executeFunction(
                 ...(operation.tag === 0
                   ? {}
                   : {
-                      identity: failureIdentity(operation.type.type, operation.tag),
+                      identity: BootstrapEffect.failureIdentity(operation.type.type, operation.tag),
                     }),
                 span: operation.provenance.span,
               }),
@@ -4800,7 +3746,7 @@ function* executeFunction(
                 depth: activation.depth,
                 function: fn.id,
                 tag: mapping.target,
-                identity: failureIdentity(operation.type.type, mapping.target),
+                identity: BootstrapEffect.failureIdentity(operation.type.type, mapping.target),
                 span: operation.provenance.span,
               }),
             )
@@ -5846,7 +4792,7 @@ export const evaluate = (
   if (result._tag === 'Blocked') {
     if (result.reason._tag === 'Trap') {
       const frozenTrace = Object.freeze([...trace])
-      const history = causalHistory(frozenTrace, 'Trap')
+      const history = BootstrapEffect.causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
         _tag: 'Trap',
         classification: 'Trap',
@@ -5854,7 +4800,10 @@ export const evaluate = (
         status: 2,
         reason: result.reason.reason,
         provenance: result.reason.span,
-        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        logicalPath: BootstrapEffect.longestCausalPath(
+          history,
+          BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+        ),
         history,
         trace: frozenTrace,
       })
@@ -5884,7 +4833,7 @@ export const evaluate = (
     if (failure === undefined) {
       const provenance = argumentSpanFallback(fn)
       const frozenTrace = Object.freeze([...trace])
-      const history = causalHistory(frozenTrace, 'Trap')
+      const history = BootstrapEffect.causalHistory(frozenTrace, 'Trap')
       return Object.freeze({
         _tag: 'Trap',
         classification: 'Trap',
@@ -5892,13 +4841,16 @@ export const evaluate = (
         status: 2,
         reason: 'effect entry returned failure status without a closed typed failure',
         provenance,
-        logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+        logicalPath: BootstrapEffect.longestCausalPath(
+          history,
+          BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+        ),
         history,
         trace: frozenTrace,
       })
     }
     const frozenTrace = Object.freeze([...trace])
-    const history = causalHistory(frozenTrace, 'TypedFailure', failure.identity)
+    const history = BootstrapEffect.causalHistory(frozenTrace, 'TypedFailure', failure.identity)
     const cause = history.at(-1)
     return Object.freeze({
       _tag: 'UnhandledFailure',
@@ -5908,16 +4860,19 @@ export const evaluate = (
       tag: failure.tag,
       identity: failure.identity,
       provenance: cause?.provenance ?? argumentSpanFallback(fn),
-      logicalPath: longestCausalPath(history, logicalPathAt(frozenTrace, frozenTrace.length - 1)),
+      logicalPath: BootstrapEffect.longestCausalPath(
+        history,
+        BootstrapEffect.logicalPathAt(frozenTrace, frozenTrace.length - 1),
+      ),
       history,
       trace: frozenTrace,
     })
   }
   const frozenTrace = Object.freeze([...trace])
-  const history = causalHistory(frozenTrace, 'Success')
+  const history = BootstrapEffect.causalHistory(frozenTrace, 'Success')
   const root = frozenTrace.find(
     (event): event is EntryTraceEvent =>
-      event._tag === 'Entry' && !isPhysicalEntryAdapter(event.function.name),
+      event._tag === 'Entry' && !BootstrapEffect.isPhysicalEntryAdapter(event.function.name),
   )
   const provenance =
     [...frozenTrace].reverse().find((event) => event._tag === 'Return')?.span ??

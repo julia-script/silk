@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
@@ -12,7 +13,7 @@ const snapshot = (source: string) =>
   Analysis.ofSourceRealized('provisional-mir/main', encoder.encode(source))
 
 const available = (self: Analysis.Snapshot): ProvisionalMir.Module => {
-  const provisional = Analysis.provisionalMirOf(self)
+  const provisional = Projections.provisionalMirOf(self)
   assert.strictEqual(provisional._tag, 'Available')
   if (provisional._tag === 'Available') return provisional.value
   return unreachable('expected provisional MIR')

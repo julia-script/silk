@@ -7,6 +7,7 @@ import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate } from './support/elaborate.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -77,7 +78,7 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
       assert.deepEqual(bytes.data?.bytes, [104, 195, 169])
     }
 
-    const hir = Analysis.hirOf(snapshot, 'string/literals')
+    const hir = Projections.hirOf(snapshot, 'string/literals')
     assert.isDefined(hir)
     if (hir !== undefined) {
       const expressions = hir.functions.flatMap((fn) =>

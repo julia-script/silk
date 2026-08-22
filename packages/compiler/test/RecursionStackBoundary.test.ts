@@ -9,6 +9,7 @@ import * as Driver from '../src/Driver.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Projections from './support/projections.js'
 
 /**
  * Ordinary recursion is bounded by the machine stack, deliberately: the compiler adds no shadow
@@ -350,7 +351,7 @@ it.effect(
 
       // The walk counted every link and the teardown released every one of them: 64 boxes, 64
       // acquires, 64 releases. Borrowing and ownership are unchanged by the depth question.
-      const events = Analysis.allocationTraceEventsOf(evaluated)
+      const events = Projections.allocationTraceEventsOf(evaluated)
       const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length
       const releases = events.filter((event) => event._tag === 'AllocationRelease').length
       assert.strictEqual(acquires, depth)
@@ -479,7 +480,7 @@ it.effect(
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 0n)
 
-      const events = Analysis.allocationTraceEventsOf(evaluated)
+      const events = Projections.allocationTraceEventsOf(evaluated)
       const acquires = events.filter((event) => event._tag === 'AllocationAcquire').length
       const releases = events.filter((event) => event._tag === 'AllocationRelease').length
       assert.strictEqual(acquires, depth)

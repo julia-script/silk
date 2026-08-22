@@ -5,6 +5,7 @@ import * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
+import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
@@ -595,7 +596,7 @@ pub fn main() -> i32 {
       ['F', 'A'],
     )
 
-    const hir = Analysis.hirOf(snapshot, module)
+    const hir = Projections.hirOf(snapshot, module)
     assert.isDefined(hir)
     if (hir === undefined) return
     const encodedHir = Hir.encode(hir)
@@ -715,7 +716,7 @@ pub fn main() -> i32 {
   return decodeOf<OptionalSchema<Schema>>(OptionalSchema<Schema> { source: Schema { tag: 1 } })
 }`,
     )
-    const hir = Analysis.hirOf(snapshot, 'conditional-conformance/generic-hir')
+    const hir = Projections.hirOf(snapshot, 'conditional-conformance/generic-hir')
     assert.isDefined(hir)
     if (hir === undefined) return
     const encoded = Hir.encode(hir)

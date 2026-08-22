@@ -6,6 +6,7 @@ import * as Intrinsic from '../src/Intrinsic.js'
 import * as Mir from '../src/Mir.js'
 import * as Type from '../src/Type.js'
 import * as Json from './support/Json.js'
+import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -414,7 +415,7 @@ it.effect(
       const layout = Analysis.layoutOf(logical)
       const oom =
         layout._tag === 'Available'
-          ? Analysis.callingShapeOf(logical, Type.outOfMemoryError)
+          ? Projections.callingShapeOf(logical, Type.outOfMemoryError)
           : undefined
       assert.strictEqual(oom?.lanes.length, 0)
       const evaluated = Analysis.evaluate(logical)
@@ -789,7 +790,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
       'pub effect fn flatten',
     )
 
-    const constructed = (Analysis.hirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>
+    const constructed = (Projections.hirOf(snapshot, module)?.functions ?? []).flatMap((fn) =>
       fn.statements.flatMap((statement) =>
         statement._tag === 'Bind' && statement.initializer._tag === 'EffectConstruct'
           ? [

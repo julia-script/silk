@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
+import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
+import * as Target from '@silk-effect/compiler/Target'
 import * as ToolchainIntegrity from '@silk-effect/compiler/ToolchainIntegrity'
 import * as Report from '../src/Report.js'
 
@@ -143,24 +145,23 @@ it('names the executable, target, and symbol count on success', () => {
 })
 
 it('keeps the failing command so a toolchain failure is reproducible by hand', () => {
-  const outcome: Driver.Outcome = {
-    _tag: 'Failed',
+  const failure = new NativeToolchain.ToolchainError({
+    operation: 'NativeToolchain.ClangLinker.link',
     stage: 'link',
-    failure: {
-      _tag: 'ToolchainFailure',
+    message: 'link failed',
+    reason: {
+      _tag: 'LinkFailed',
       planned: {
         _tag: 'PlannedCommand',
-        target: { id: 'aarch64-apple-darwin' } as Driver.Compiled['target'],
+        target: Target.aarch64AppleDarwin,
         command: 'clang',
         arguments: ['-o', 'a.out'],
       },
-      reason: { _tag: 'ProcessError' },
       status: 1,
       output: 'ld: symbol not found',
-    } as Driver.Failed['failure'],
-    report: [],
-  }
-  const rendered = Report.outcome(outcome, source(''), 'main.silk')
+    },
+  })
+  const rendered = Report.toolchainError(failure)
   assert.strictEqual(
     rendered,
     [

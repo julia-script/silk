@@ -5,11 +5,12 @@ import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
-import * as Ownership from '../src/Ownership.js'
+import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
+import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
 
 const analyze = (id: string, source: string): Elaboration.Result =>
@@ -304,7 +305,7 @@ pub fn main() -> i32 {
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const hir = Analysis.hirOf(self, 'statement-pattern-runtime')
+    const hir = Projections.hirOf(self, 'statement-pattern-runtime')
     assert.notStrictEqual(hir, undefined)
     if (hir === undefined) return
     assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
@@ -492,7 +493,7 @@ pub fn inspect(input: Box) -> i32 {
     [{ path: [0], cleanup: 'StructCleanup' }],
   )
   assert.include(
-    Ownership.encode(ownershipFacts),
+    OwnershipEncoding.encode(ownershipFacts),
     'cleanup=#0(struct:cleanup-owner.Payload fields=)',
   )
 })

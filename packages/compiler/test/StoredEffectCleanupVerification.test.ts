@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
@@ -152,8 +153,8 @@ pub fn main() -> i32 {
       return
 
     const replaceOuter = (
-      cleanup: Ownership.CleanupPlan,
-      selected: Ownership.CleanupPlan,
+      cleanup: CleanupPlan.CleanupPlan,
+      selected: CleanupPlan.CleanupPlan,
     ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
       Object.freeze({
         ...drop,
@@ -215,13 +216,13 @@ pub fn main() -> i32 {
       Layout.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
       'CatalogMismatch',
     )
-    const strippedHook: Ownership.CleanupPlan = Object.freeze({
+    const strippedHook: CleanupPlan.CleanupPlan = Object.freeze({
       ...effectSlot.cleanup,
       slots: Object.freeze([
         Object.freeze({ ...nestedEffectSlot, cleanup: nestedEffectSlot.cleanup.inner }),
       ]),
     })
-    const malformed: ReadonlyArray<readonly [Ownership.CleanupPlan, Ownership.CleanupPlan]> = [
+    const malformed: ReadonlyArray<readonly [CleanupPlan.CleanupPlan, CleanupPlan.CleanupPlan]> = [
       [Object.freeze({ _tag: 'NoCleanup', type: effectSlot.cleanup.type }), effectSlot.cleanup],
       [strippedHook, effectSlot.cleanup],
       [

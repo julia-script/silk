@@ -1,4 +1,3 @@
-import { arch, platform } from 'node:os'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 
@@ -13,7 +12,6 @@ export type Id =
 export interface Target {
   readonly _tag: 'Target'
   readonly id: Id
-  readonly triple: Id
   readonly kind: 'Native' | 'WebAssembly'
   readonly pointerSize: 4 | 8
   readonly pointerAlignment: 4 | 8
@@ -41,7 +39,6 @@ const make = (id: Id, kind: Target['kind'], pointerSize: 4 | 8): Target =>
   Object.freeze({
     _tag: 'Target',
     id,
-    triple: id,
     kind,
     pointerSize,
     pointerAlignment: pointerSize,
@@ -86,14 +83,17 @@ const unavailable = (
 /** Selects an explicit target or the supplied host as immutable queryable data. */
 export const select = (
   requested: string | undefined,
-  hostPlatform: NodeJS.Platform = platform(),
-  hostArch: string = arch(),
+  hostPlatform?: string,
+  hostArch?: string,
 ): Selection => {
   if (requested !== undefined) {
     const found = all.find((candidate) => candidate.id === requested)
     return found === undefined
       ? unavailable('Target.resolve', requested, 'target')
       : Object.freeze({ _tag: 'Resolved', target: found })
+  }
+  if (hostPlatform === undefined || hostArch === undefined) {
+    return unavailable('Target.host', 'unspecified-host', 'host')
   }
   const hostId =
     hostPlatform === 'darwin' && hostArch === 'arm64'
@@ -120,17 +120,12 @@ export const resolve = Effect.fn('Target.resolve')(function* (
 
 /** Resolves host facts supplied by the application edge. */
 export const fromHost = Effect.fn('Target.host')(function* (
-  hostPlatform: NodeJS.Platform,
+  hostPlatform: string,
   hostArch: string,
 ): Effect.fn.Return<Target, TargetError> {
   const selected = select(undefined, hostPlatform, hostArch)
   if (selected._tag === 'Resolved') return selected.target
   return yield* selected.error
-})
-
-/** Resolves the current process host when it belongs to the native bootstrap matrix. */
-export const host = Effect.fn('Target.host')(function* (): Effect.fn.Return<Target, TargetError> {
-  return yield* fromHost(platform(), arch())
 })
 
 /** Requires a compiler target that can proceed through native object emission and linking. */
@@ -162,7 +157,6 @@ export const isCanonical = (self: Target): boolean =>
   all.some(
     (candidate) =>
       candidate.id === self.id &&
-      candidate.triple === self.triple &&
       candidate.kind === self.kind &&
       candidate.pointerSize === self.pointerSize &&
       candidate.pointerAlignment === self.pointerAlignment &&

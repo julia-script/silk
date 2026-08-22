@@ -86,6 +86,23 @@ it.effect('records complete ordered writes and typed provider failure determinis
   }),
 )
 
+it.effect('preserves an arbitrary thrown stream-provider cause in the evaluation trace', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot()
+    const cause = Object.freeze({ boundary: 'stream', code: 17 })
+    const failed = Analysis.evaluate(self, {
+      standardStreams: {
+        writeAll: () => {
+          throw cause
+        },
+      },
+    })
+    const write = failed.trace.find((event) => event._tag === 'HostWrite')
+    assert.isDefined(write)
+    assert.strictEqual(write?.cause, cause)
+  }),
+)
+
 it.effect('lowers target-neutral writes through native and hosted Wasm boundaries', () =>
   Effect.gen(function* () {
     const native = yield* snapshot()

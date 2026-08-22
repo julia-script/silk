@@ -273,8 +273,8 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './BackendRegistry',
       './BootstrapEvaluation',
       './CallableContract',
-      './CallableFieldRealization',
       './ChildProcess',
+      './CleanupPlan',
       './Completion',
       './ConformanceGoal',
       './ConformanceHead',
@@ -284,9 +284,11 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './DocBlock',
       './Driver',
       './Elaboration',
+      './FieldRealization',
       './FiniteRow',
       './FloatingPoint',
       './FormattedDocument',
+      './HeapObservation',
       './Hir',
       './HostInput',
       './ImportPath',
@@ -298,6 +300,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Layout',
       './Lexer',
       './LiteralForm',
+      './LlvmBackend',
       './Lower',
       './Mir',
       './ModuleClosure',
@@ -307,6 +310,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './ModuleTooling',
       './NameResolution',
       './NativeToolchain',
+      './NodeHeapObservation',
       './Operator',
       './OsFileSystemHost',
       './Ownership',
@@ -561,7 +565,10 @@ console.log(
     toolchainIdentity: api.ToolchainIntegrity.installed().digest,
     rootNamespaces: Object.fromEntries(
       paths
-        .filter((path) => path !== './NativeToolchain' && path !== './Driver')
+        .filter(
+          (path) =>
+            path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver',
+        )
         .map((path) => [path, Object.keys(api[path.slice(2)]).sort()]),
     ),
     deep: Object.fromEntries(
@@ -666,7 +673,12 @@ console.log(
       })),
       indexes: api.Analysis.indexProjectionsOf(nativeArraySnapshot, 'memory/packed-array').map((projection) => projection.bounds),
       hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeArraySnapshot).hir),
-      ownership: api.Ownership.encode(api.Analysis.ownershipOf(nativeArraySnapshot, 'memory/packed-array')),
+      ownershipCleanupTags: api.Analysis
+        .ownershipOf(nativeArraySnapshot, 'memory/packed-array')
+        .functions.flatMap((fn) => [
+          ...api.Ownership.allBindings(fn).map((binding) => binding.cleanup._tag),
+          ...fn.exits.flatMap((exit) => exit.releases.map((release) => release.cleanup._tag)),
+        ]),
       layout: api.Layout.encode(api.Analysis.layoutOf(nativeArraySnapshot).value),
       mir: api.Mir.encode(api.Analysis.loweredMir(nativeArraySnapshot)),
       trace: api.Analysis.evaluate(nativeArraySnapshot).trace,
@@ -680,7 +692,9 @@ console.log(
     },
     unions: {
       diagnostics: api.Analysis.diagnostics(nativeUnionSnapshot),
-      types: api.Analysis.unionLayoutsOf(nativeUnionSnapshot).map((entry) => api.Type.encode(entry.type)),
+      types: api.Analysis.layoutOf(nativeUnionSnapshot).value.entries
+        .filter((entry) => entry.representation._tag === 'Union')
+        .map((entry) => api.Type.encode(entry.type)),
       hir: api.Hir.encode(api.Analysis.rootAnalysis(nativeUnionSnapshot).hir),
       layout: api.Layout.encode(api.Analysis.layoutOf(nativeUnionSnapshot).value),
       mir: api.Mir.encode(api.Analysis.loweredMir(nativeUnionSnapshot)),
@@ -709,8 +723,8 @@ console.log(
       'BackendRegistry',
       'BootstrapEvaluation',
       'CallableContract',
-      'CallableFieldRealization',
       'ChildProcess',
+      'CleanupPlan',
       'Completion',
       'ConformanceGoal',
       'ConformanceHead',
@@ -719,9 +733,11 @@ console.log(
       'Diagnostic',
       'DocBlock',
       'Elaboration',
+      'FieldRealization',
       'FiniteRow',
       'FloatingPoint',
       'FormattedDocument',
+      'HeapObservation',
       'Hir',
       'HostInput',
       'ImportPath',
@@ -733,6 +749,7 @@ console.log(
       'Layout',
       'Lexer',
       'LiteralForm',
+      'LlvmBackend',
       'Lower',
       'Match',
       'Mir',
@@ -787,7 +804,7 @@ console.log(
       readonly [string, ReadonlyArray<string>]
     >) {
       expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
-      if (path !== './NativeToolchain' && path !== './Driver')
+      if (path !== './NativeToolchain' && path !== './NodeHeapObservation' && path !== './Driver')
         expect(api.rootNamespaces[path]).toEqual(exports)
     }
     expect(api.deep['./Lexer']).toContain('lex')
@@ -823,7 +840,7 @@ console.log(
     ])
     expect(api.arrays.indexes).toEqual([{ _tag: 'Runtime', length: 2 }])
     expect(api.arrays.hir).toContain('construct-array')
-    expect(api.arrays.ownership).toContain('cleanup array:')
+    expect(api.arrays.ownershipCleanupTags).toContain('ArrayCleanup')
     expect(api.arrays.layout).toContain('repr=repeated')
     expect(api.arrays.mir).toContain('read-place')
     expect(api.arrays.trace.map((event: { _tag: string }) => event._tag)).toContain('PlaceRead')

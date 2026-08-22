@@ -8,6 +8,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as Driver from '../src/Driver.js'
+import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -367,9 +368,9 @@ it.effect('treats an overlapping copy as a defined move on all three engines', (
     assert.strictEqual(runWasm(wasm.bytes), 45)
 
     const overlappingBackend: Backend.Backend = Object.freeze({
-      ...Backend.LlvmBackend,
+      ...LlvmBackend.LlvmBackend,
       emit: (program: Mir.Module, request: Backend.CodegenRequest) =>
-        Backend.LlvmBackend.emit(aliasDestinationWithSource(program), request),
+        LlvmBackend.LlvmBackend.emit(aliasDestinationWithSource(program), request),
     })
     const compiled = yield* compileNative(
       'bulk-memory/overlap',
