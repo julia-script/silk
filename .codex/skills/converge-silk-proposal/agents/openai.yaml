@@ -1,6 +1,0 @@
-interface:
-  display_name: "Converge Silk Proposal"
-  short_description: "Autonomously converge a Silk proposal"
-  default_prompt: "Use $converge-silk-proposal to autonomously review and revise this Candidate until agent convergence."
-policy:
-  allow_implicit_invocation: false

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Audit Silk OpenSpec"
-  short_description: "Check OpenSpec artifacts for coverage and alignment"
-  default_prompt: "Use $audit-silk-openspec to review an OpenSpec change for complete and faithful realization of its SLP."
-policy:
-  allow_implicit_invocation: false

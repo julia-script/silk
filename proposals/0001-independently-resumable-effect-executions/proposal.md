@@ -8,6 +8,7 @@ Created: 2026-08-21
 Updated: 2026-08-22
 Discussion: —
 Review record: [r001](reviews/r001.md), [r002](reviews/r002.md), [r004](reviews/r004.md), [r005](reviews/r005.md), [r006](reviews/r006.md), [r007](reviews/r007.md), [r008](reviews/r008.md), [r009](reviews/r009.md), [r010](reviews/r010.md), [r011](reviews/r011.md), [r012](reviews/r012.md), [r013](reviews/r013.md)
+Review state: Cap — 13 legacy unbounded rounds ended at r013; next `slp-3-resolve`
 Depends on: [values and types](../../docs/language/values-and-types.md), [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md), [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md), [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md), [Effect suspension](../../docs/language/effect-suspension.md), SLP-0002
 Split from: —
 Split into: SLP-0002, SLP-0003

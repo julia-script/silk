@@ -1,0 +1,6 @@
+interface:
+  display_name: "SLP 2: Review"
+  short_description: "Step 2 — bounded adversarial review of a Candidate (max 3 rounds)"
+  default_prompt: "Use $slp-2-review to run the bounded review loop on this Candidate SLP."
+policy:
+  allow_implicit_invocation: false

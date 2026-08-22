@@ -1,6 +1,0 @@
-interface:
-  display_name: "Review Silk Proposal"
-  short_description: "Adversarially review a Silk proposal"
-  default_prompt: "Use $review-silk-proposal to run adversarial reviews of this Candidate."
-policy:
-  allow_implicit_invocation: false

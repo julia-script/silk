@@ -16,22 +16,23 @@ proposals/NNNN-slug/
 ├── proposal.md
 ├── examples/                 # optional standalone pressure programs
 ├── reviews/
+│   ├── ledger.md             # finding ledger shared across rounds
 │   └── rNNN.md               # one fixed-revision proposal review round
 └── audits/
     ├── openspec-<change>-oNNN.md
     └── implementation-<change>-iNNN.md
 ```
 
-Use [TEMPLATE.md](TEMPLATE.md) for `proposal.md` and [REVIEW-TEMPLATE.md](REVIEW-TEMPLATE.md) for
-proposal review records. Use [OPENSPEC-AUDIT-TEMPLATE.md](OPENSPEC-AUDIT-TEMPLATE.md) and
+Use [TEMPLATE.md](TEMPLATE.md) for `proposal.md`, [REVIEW-TEMPLATE.md](REVIEW-TEMPLATE.md) for
+review rounds, and [LEDGER-TEMPLATE.md](LEDGER-TEMPLATE.md) for the finding ledger. Use [OPENSPEC-AUDIT-TEMPLATE.md](OPENSPEC-AUDIT-TEMPLATE.md) and
 [IMPLEMENTATION-AUDIT-TEMPLATE.md](IMPLEMENTATION-AUDIT-TEMPLATE.md) for traceability audits. Keep
 the table in [README.md](README.md) synchronized when a proposal is created, renamed, or changes
 status.
 
 ## Authority and lifecycle
 
-The human author owns the proposal and its outcome. AI agents may draft, challenge, revise, and
-converge a Candidate; their agreement is evidence rather than approval.
+The human author owns the proposal and its outcome. AI agents may draft, challenge, and revise a
+Candidate within a bounded review loop; their agreement is evidence rather than approval.
 
 ```text
 Draft -> Candidate --review/revision--> Candidate -> outcome
@@ -143,9 +144,27 @@ A proposal is ready for Candidate only when:
 - risks, falsifiers, acceptance blockers, and OpenSpec realization questions are separated; and
 - the author explicitly chooses Candidate.
 
-## Adversarial review
+## Bounded adversarial review
 
-Review one fixed Candidate revision through three independent lenses:
+Review is a bounded, evidence-gated loop. Critics propose reasons to continue; they never decide
+whether the loop continues. "Iterate until no critic objects" is not a stopping rule: critics are
+stochastic, hallucinate defects, and can always find one more plausible improvement.
+
+### Freeze the contract (round 0)
+
+Before the first round, record in the review record:
+
+- the Candidate revision and SHA-256 digest;
+- the thesis and the in-scope claims under review (`C1`, `C2`, ...);
+- explicit out-of-scope items.
+
+Critics may not add requirements. A finding that needs a claim outside the contract is
+`OUT_OF_SCOPE`: it goes to `Future directions` or a proposed split, never into the blocking set.
+
+### Run a round
+
+Review one fixed revision through three independent lenses (fresh agents, raw artifacts, no other
+reviewer's conclusions, no file edits):
 
 1. **Scope and language coherence** — attempt to split the thesis, find implicit special cases,
    challenge invariants, and search for a simpler subtractive model.
@@ -155,25 +174,46 @@ Review one fixed Candidate revision through three independent lenses:
    target neutrality and cost transparency, and identify feasibility facts that could reverse the
    direction.
 
-Reviewers return concrete objections, examples, and counterproposals. They do not edit the dossier,
-score it, vote, or approve it. The coordinating agent writes one synthesized review record and
-separates material proposal blockers from editorial edits and safe OpenSpec realization questions.
+Every finding is structured, not prose: `id`, `claim` (which `Cn`), `severity`, `evidence`
+(a concrete counterexample, counterproposal, repository fact, or Silk constraint), and
+`new | duplicate-of <id>`. Reviewers reference existing ledger ids when re-raising an issue.
 
-## Agent convergence
+### Verify and classify
 
-An autonomous convergence run repeats fixed-revision review and revision. Use fresh independent
-reviewers each round. Revise every material finding that repository evidence and accepted Silk
-constraints can settle, update examples before closing objections with prose, increment the revision,
-and record the response.
+The coordinating agent owns the ledger (`proposals/NNNN-slug/reviews/ledger.md`) across rounds.
+For each finding it checks the evidence against the proposal, examples, and repository, then
+assigns severity from consequence, not from the critic's language:
 
-Convergence requires two consecutive fresh rounds with no unresolved material proposal blocker. A
-finding is material when resolving it could change the thesis, scope, programmer model, semantics,
-examples, or compiler/standard-library boundary.
+| Severity | Meaning | Loop effect |
+| --- | --- | --- |
+| Critical | The thesis or privilege boundary is unsound as stated | Blocks |
+| High | A central claim, driving example, or interaction is wrong or missing | Blocks |
+| Medium | Bounded defect with a known workaround or a delegable OpenSpec question | Recorded, non-blocking |
+| Low | Editorial, naming, stylistic, speculative improvement | Recorded, non-blocking |
 
-Stop without convergence only when the same foundational objection survives three consecutive
-rounds, a fork requires the author's taste or values, or named prototype/research evidence is
-missing. Return one compact decision fork: competing models, strongest examples, exact tradeoff, and
-a recommendation. Convergence leaves the SLP in Candidate.
+A finding **blocks** only when it is in scope, Critical/High, evidence-backed, and not a duplicate.
+Unverifiable opinion, rephrased duplicates, and out-of-scope requirements never block. Ledger
+states: `PROPOSED -> VERIFIED -> FIXED -> CLOSED`, or `REJECTED`, `DUPLICATE`, `OUT_OF_SCOPE`,
+`DEFERRED`, `REOPENED`.
+
+### Revise
+
+Revise only for open verified blockers. Repair examples before closing objections with prose.
+Increment `Revision`, record the response per finding, and keep the best validated revision — a
+revision that introduces a new blocker is rolled back, not iterated on.
+
+### Stop
+
+Maximum **3** review rounds per Candidate. After each round, stop when any holds (check in order):
+
+1. **Clean** — no open verified blocker. One clean round suffices.
+2. **Fork** — the same finding was reopened twice, or a blocker is contested between reviewer and
+   coordinator with no new evidence. Present one decision fork to the author instead of another round.
+3. **No progress** — a round produced no new verified blocker but a prior one remains open.
+4. **Cap** — three rounds used. Present the best validated revision plus the open ledger.
+
+Every stop writes `Stop reason` in the review record and `Review state` in the proposal. The SLP
+stays in Candidate; only the author assigns an outcome. Clean is a review result, not acceptance.
 
 ## OpenSpec handoff
 

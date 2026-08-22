@@ -4,42 +4,32 @@ Proposal: `proposals/NNNN-slug/proposal.md`
 Proposal revision: N
 Proposal digest: `<sha256>`
 Date: YYYY-MM-DD
-Mode: Manual review | Convergence round N
-Result: Material findings | Clean
+Round: N of 3
+Result: Clean | Blockers | Fork | No progress | Cap
 
-## Scope and language coherence
+## Contract
 
-### Findings
+<!-- Round 1 only. Thesis, in-scope claims C1..Cn, explicit out-of-scope. Later rounds link r001. -->
 
-### Proposed split, if any
+## Findings
 
-## Examples and programmer model
+<!-- One row per finding after verification. Ids are stable across rounds; use the ledger. -->
 
-### Findings
+| Id | Lens | Claim | Severity | Evidence | State |
+| --- | --- | --- | --- | --- | --- |
 
-### Missing or corrected cases
+## Blockers
 
-## Compiler privilege and realizability
-
-### Findings
-
-### Smaller boundary, if any
-
-## Synthesis
-
-### Proposal-level blockers
-
-### Editorial improvements
-
-### OpenSpec realization questions
-
-### Reviewer disagreements
+<!-- Open, verified, in-scope, Critical/High, non-duplicate. Empty means Clean. -->
 
 ## Revision response
 
-<!-- Complete during resolution or convergence. Map each material finding to a revision or rationale. -->
+<!-- Per blocker: revised (section/example) | rejected (evidence) | fork. -->
+
+## Stop reason
+
+<!-- Clean | Fork: <id> | No progress | Cap. One line. -->
 
 ## Next state
 
-<!-- Revised Candidate, clean round count, decision fork, or author outcome. -->
-
+<!-- Revised Candidate rN for round N+1, or author decision required with the compact fork. -->

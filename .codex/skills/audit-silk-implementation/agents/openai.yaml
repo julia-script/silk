@@ -1,6 +1,0 @@
-interface:
-  display_name: "Audit Silk Implementation"
-  short_description: "Check code against its SLP and OpenSpec contract"
-  default_prompt: "Use $audit-silk-implementation to review a completed change against its SLP and OpenSpec contract."
-policy:
-  allow_implicit_invocation: false

@@ -8,6 +8,7 @@ Created: 2026-08-22
 Updated: 2026-08-22
 Discussion: —
 Review record: —
+Review state: —
 Depends on: [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md), [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md), [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md), [Effect suspension](../../docs/language/effect-suspension.md), SLP-0001
 Split from: SLP-0001
 Split into: —

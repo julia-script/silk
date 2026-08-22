@@ -9,9 +9,10 @@ SLP (direction and coherence)
     -> canonical specs and docs (implemented language truth)
 ```
 
-- [Process](PROCESS.md) — lifecycle, evidence, review, convergence, and OpenSpec boundary.
+- [Process](PROCESS.md) — lifecycle, evidence, bounded review, and OpenSpec boundary.
 - [Template](TEMPLATE.md) — required proposal metadata and sections.
 - [Review template](REVIEW-TEMPLATE.md) — durable record for one fixed-revision review round.
+- [Ledger template](LEDGER-TEMPLATE.md) — finding ledger shared across review rounds.
 - [OpenSpec audit template](OPENSPEC-AUDIT-TEMPLATE.md) — planning coverage and alignment record.
 - [Implementation audit template](IMPLEMENTATION-AUDIT-TEMPLATE.md) — post-implementation conformance record.
 

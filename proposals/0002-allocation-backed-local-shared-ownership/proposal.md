@@ -8,6 +8,7 @@ Created: 2026-08-21
 Updated: 2026-08-21
 Discussion: —
 Review record: [r001](reviews/r001.md)
+Review state: —
 Depends on: [values and types](../../docs/language/values-and-types.md), [generics, interfaces, and specialization](../../docs/language/generics-interfaces-and-specialization.md), [unsafe code, intrinsics, and targets](../../docs/language/unsafe-intrinsics-and-targets.md), [runtime and standard-library boundary](../../docs/language/runtime-and-standard-library.md)
 Split from: SLP-0001
 Split into: —
