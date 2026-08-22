@@ -5,6 +5,7 @@ import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
+import type * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import type * as Match from './Match.js'
 import { instanceText, operationLocals } from './MirVerification.js'
 import type * as Scalar from './Scalar.js'
@@ -448,6 +449,18 @@ export type Operation =
       readonly element: DeclarationFacts.SemanticType
       readonly stride: number
       readonly elementAlignment: number
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Consumes one exact allocation and T into one initialized local-shared control block. */
+      readonly _tag: 'SharedFromAllocation'
+      readonly destination: LocalId
+      readonly allocation: LocalId
+      readonly value: LocalId
+      readonly element: DeclarationFacts.SemanticType
+      readonly block: LocalSharedControlBlock.Plan
+      readonly allocationBlock: LocalSharedControlBlock.Plan
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
@@ -1410,6 +1423,7 @@ export interface Violation {
     | 'InvalidStandardStreamOperation'
     | 'InvalidOsOperation'
     | 'InvalidRawStorageOperation'
+    | 'InvalidLocalSharedOperation'
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'

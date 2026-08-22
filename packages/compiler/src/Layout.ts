@@ -18,6 +18,8 @@ import type {
 } from './internal/CallingShape.js'
 import * as Packing from './internal/Packing.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -208,6 +210,7 @@ export interface Plan {
   readonly callingShapes: ReadonlyArray<CallingShape>
   readonly staticData?: ReadonlyArray<StaticDataPlacement>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly localSharedAllocationProvenance: LocalSharedAllocationProvenance.Plan
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -809,9 +812,22 @@ export const catalog = (
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     if (Type.isSharedCore(type)) {
-      const result = unavailable(type, Object.freeze([]), {
-        _tag: 'InvalidDeclaration',
-        detail: 'sealed local shared ownership has no target representation in this layer',
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: false,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+        representation: Object.freeze({
+          _tag: 'Reference',
+          target: type,
+          address: Object.freeze({
+            bits: target.pointerSize === 4 ? 32 : 64,
+            offset: 0,
+            size: target.pointerSize,
+            alignment: target.pointerAlignment,
+          }),
+        }),
       })
       completed.set(key, result)
       return result
@@ -2288,8 +2304,33 @@ const usizeLiteralVerdicts = (
   })
 }
 
+const nestedStatements = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Statement> =>
+  Object.freeze(
+    statements.flatMap((statement): ReadonlyArray<Hir.Statement> => {
+      switch (statement._tag) {
+        case 'Unsafe':
+          return [statement, ...nestedStatements(statement.statements)]
+        case 'If':
+        case 'IfLet':
+          return [
+            statement,
+            ...nestedStatements(statement.taken),
+            ...nestedStatements(statement.otherwise),
+          ]
+        case 'While':
+          return [statement, ...nestedStatements(statement.body)]
+        default:
+          return [statement]
+      }
+    }),
+  )
+
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
-export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
+export const plan = (
+  self: Catalog,
+  discovery: Instances.Discovery,
+  index: DeclarationIndex.Index,
+): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
   if (
@@ -2355,6 +2396,34 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
   const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
+  const localSharedAllocationProvenance = LocalSharedAllocationProvenance.plan(discovery, index)
+  const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
+      const raw = expression.typeArguments.at(0)
+      const element =
+        raw !== undefined && Type.isTypeArgument(raw)
+          ? Type.substitute(raw, instance.substitution)
+          : undefined
+      const elementLayout = element === undefined ? undefined : resolve(element)
+      if (
+        element !== undefined &&
+        elementLayout !== undefined &&
+        LocalSharedControlBlock.plan(self.target, element, elementLayout)._tag ===
+          'LocalSharedControlBlockUnavailable'
+      )
+        localSharedDiagnostics.push(
+          Diagnostic.intrinsicTargetUnavailable(
+            'Intrinsic.sharedLayout',
+            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            expression.span,
+          ),
+        )
+    }
+  }
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
     if (
@@ -2411,7 +2480,12 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     ),
     staticData,
     literalVerdicts: literals.verdicts,
-    diagnostics: literals.diagnostics,
+    localSharedAllocationProvenance,
+    diagnostics: Diagnostic.merge([
+      ...literals.diagnostics,
+      ...localSharedDiagnostics,
+      ...localSharedAllocationProvenance.diagnostics,
+    ]),
   })
 }
 
@@ -2430,6 +2504,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     callingShapes: callingShapes(target, orderedEntries),
     staticData: Object.freeze([]),
     literalVerdicts: Object.freeze([]),
+    localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
     diagnostics: Object.freeze([]),
   })
 }
@@ -2588,6 +2663,21 @@ const shapeNode = (
         type: Object.freeze({
           _tag: 'Address',
           element: type.target,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      laneCount: 1,
+    })
+  }
+  if (Type.isSharedCore(type)) {
+    return Object.freeze({
+      _tag: 'AddressShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type,
           bits: target.pointerSize === 4 ? 32 : 64,
         }),
         lane: 0,

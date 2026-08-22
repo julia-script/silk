@@ -109,7 +109,7 @@ const lowerSource = Effect.fnUntraced(function* (
     JSON.stringify(diagnostics.map(({ code, message }) => ({ code, message }))),
   )
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances)
+  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
   const ownership =
     Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership facts')
   const lowered = Lower.lowerProgram(

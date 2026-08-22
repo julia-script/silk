@@ -18,7 +18,7 @@ const storedLayout = Effect.fnUntraced(function* (
 ) {
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
-  return Layout.plan(catalog, snapshot.instances)
+  return Layout.plan(catalog, snapshot.instances, snapshot.index)
 })
 
 const representedEntry = (plan: Layout.Plan): Layout.Entry =>

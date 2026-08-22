@@ -23,7 +23,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     Target.wasm32UnknownUnknown.id,
   )
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances)
+  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
   const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
   const module = Lower.lowerProgram(
     snapshot.instances,

@@ -189,6 +189,8 @@ export interface CallableIdentityArgument {
 
 const nonScalarBuiltinOperations = Object.freeze([
   'LayoutOf',
+  'SharedLayout',
+  'SharedFromAllocation',
   'EffectSuspend',
   'StorageAcquire',
   'HostWrite',

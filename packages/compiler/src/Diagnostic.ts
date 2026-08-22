@@ -173,6 +173,8 @@ export const operatorNotApplicableCode = 'SEM0135' as const
 export const ambiguousOperatorCode = 'SEM0136' as const
 /** Stable code for an unsafe acknowledgement that does not complete an unsafe invocation. */
 export const misplacedUnsafeAcknowledgementCode = 'SEM0137' as const
+/** Stable code for a statically known allocation/layout specialization mismatch. */
+export const localSharedLayoutMismatchCode = 'SEM0138' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -388,6 +390,7 @@ export type Code =
   | typeof operatorNotApplicableCode
   | typeof ambiguousOperatorCode
   | typeof misplacedUnsafeAcknowledgementCode
+  | typeof localSharedLayoutMismatchCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -513,6 +516,11 @@ export type Reason =
   | { readonly _tag: 'UnknownOwnedCallableReturn' }
   | { readonly _tag: 'MissingUnsafeBoundary'; readonly operation: string }
   | { readonly _tag: 'MisplacedUnsafeAcknowledgement' }
+  | {
+      readonly _tag: 'LocalSharedLayoutMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
   | {
@@ -2956,6 +2964,29 @@ export const intrinsicTargetUnavailable = (
     message: `${operation} is unavailable for ${target}`,
     reason: Object.freeze({ _tag: 'IntrinsicTargetUnavailable', operation, target }),
     span,
+  })
+
+/** Diagnoses a known mismatch before MIR consumes either affine initializer argument. */
+export const localSharedLayoutMismatch = (
+  expected: string,
+  actual: string,
+  allocationSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: localSharedLayoutMismatchCode,
+    severity: 'error',
+    message: `Local-shared allocation was planned for ${actual}, not ${expected}`,
+    reason: Object.freeze({ _tag: 'LocalSharedLayoutMismatch', expected, actual }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({
+        label: 'allocation layout provenance originates here',
+        span: allocationSpan,
+      }),
+    ]),
   })
 
 export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>

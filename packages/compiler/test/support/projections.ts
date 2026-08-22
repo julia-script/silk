@@ -253,6 +253,7 @@ export const allocationTraceEventsOf = (outcome: BootstrapEvaluation.Outcome) =>
       (event): event is BootstrapEvaluation.AllocationTraceEvent =>
         event._tag === 'AllocationAcquire' ||
         event._tag === 'RawBufferForm' ||
+        event._tag === 'SharedInitialize' ||
         event._tag === 'SlotProject' ||
         event._tag === 'SlotWrite' ||
         event._tag === 'SlotTake' ||

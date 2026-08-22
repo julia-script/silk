@@ -43,6 +43,7 @@ import type {
   CharacterValue,
   FloatValue,
   IntegerValue,
+  SharedCoreValue,
   SliceValue,
   StaticViewValue,
   StringStorage,
@@ -66,6 +67,7 @@ export type {
   IntegerValue,
   RawBufferValue,
   ReferenceValue,
+  SharedCoreValue,
   SliceValue,
   SlotValue,
   StaticViewValue,
@@ -1965,6 +1967,48 @@ function* executeFunction(
                 ticket: allocation.ticket,
                 count: count.value,
                 element: operation.element,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SharedFromAllocation': {
+            const allocation = read(operation.allocation).value
+            const value = read(operation.value).value
+            if (allocation._tag !== 'AllocationValue')
+              throw new RangeError('MIR verifier allowed invalid local-shared allocation')
+            if (
+              allocation.bytes !== BigInt(operation.block.size) ||
+              allocation.alignment !== BigInt(operation.block.alignment) ||
+              !BootstrapStorage.initializeShared(
+                state.allocations,
+                allocation.ticket,
+                operation.element,
+                operation.block.provenance,
+                value,
+              )
+            )
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Local-shared allocation provenance or initializedness mismatch',
+                span: operation.provenance.span,
+              })
+            const core: SharedCoreValue = Object.freeze({
+              _tag: 'SharedCoreValue',
+              type: operation.type.type,
+              ticket: allocation.ticket,
+              element: operation.element,
+            })
+            write(operation.destination, { value: core, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'SharedInitialize',
+                function: fn.id,
+                ticket: allocation.ticket,
+                element: operation.element,
+                strong: 1n,
+                access: 'Available',
                 span: operation.provenance.span,
               }),
             )

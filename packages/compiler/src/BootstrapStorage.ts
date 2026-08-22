@@ -6,6 +6,13 @@ import * as Type from './Type.js'
 export interface Allocation {
   active: boolean
   readonly values: Map<string, Value>
+  shared?: {
+    readonly element: Type.Type
+    readonly provenance: string
+    readonly value: Value
+    strong: bigint
+    access: 'Available'
+  }
 }
 
 export type Allocations = Map<number, Allocation>
@@ -14,6 +21,25 @@ export type Allocations = Map<number, Allocation>
 export const allocate = (allocations: Allocations, ticket: number): void => {
   allocations.set(ticket, { active: true, values: new Map() })
 }
+
+/** Atomically installs one initialized local-shared core into a live empty allocation. */
+export const initializeShared = (
+  allocations: Allocations,
+  ticket: number,
+  element: Type.Type,
+  provenance: string,
+  value: Value,
+): boolean => {
+  const allocation = allocations.get(ticket)
+  if (allocation === undefined || !allocation.active || allocation.shared !== undefined)
+    return false
+  allocation.shared = { element, provenance, value, strong: 1n, access: 'Available' }
+  return true
+}
+
+/** Inspects evaluator-owned opaque state without publishing storage lanes to Silk source. */
+export const shared = (allocations: Allocations, ticket: number): Allocation['shared'] =>
+  allocations.get(ticket)?.shared
 
 /** Releases one live allocation and optionally clears its initialized slots. */
 export const release = (allocations: Allocations, ticket: number, clear: boolean): boolean => {
