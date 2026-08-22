@@ -8,7 +8,9 @@ no payload cleanup. The drop that changes the count from one to zero SHALL exclu
 exactly once and then release the retained allocation exactly once. Strong-count state SHALL remain
 independent of access state, so clone and non-last drop MAY occur during active access without
 creating another reference or changing the active access owner. A strong cycle SHALL remain live and
-leak; every acyclic graph SHALL reach exact last cleanup.
+leak. Every acyclic graph whose handles are all discharged through structured execution SHALL reach
+exact last cleanup. A fatal trap SHALL retain the language's no-unwind rule and MUST NOT claim that
+live handles, payloads, or allocations were cleaned.
 
 #### Scenario: Drop two handles in order
 
@@ -39,6 +41,9 @@ conflict path before another reference is formed. The borrow SHALL end before ac
 before the result returns. It MUST NOT escape directly or through a generic result, aggregate,
 failure value, Effect capture, callable capture, or suspended computation. Diagnostics SHALL retain
 the access boundary and the attempted escape or suspension provenance.
+Every direct, narrowed, generic, aggregate, failure, Effect, callable, or suspension rejection SHALL
+use one stable local-shared-access diagnostic identity and retain the access-boundary span plus the
+specific escape or suspension span.
 
 #### Scenario: Return an ordinary value
 

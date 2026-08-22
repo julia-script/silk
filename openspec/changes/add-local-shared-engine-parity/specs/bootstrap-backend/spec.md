@@ -13,6 +13,9 @@ mutation, keep strong-count and access state independent, form at most one callb
 active access unchanged on conflict, restore access only after normal callback return, and clean `T`
 exactly once before the final allocation release. Allocation exhaustion SHALL remain the ordinary
 construction failure; clone, access, suspension, and return MUST NOT acquire an allocator channel.
+Clone and access MUST NOT allocate or reallocate storage privately. Their lowering MUST NOT introduce
+locks, atomics, scheduler machinery, garbage-collected backing, background work, or a runtime actor
+selected by source spelling.
 Fatal traps SHALL retain the existing no-unwind behavior, and strong cycles SHALL remain uncollected.
 
 #### Scenario: Agree on successful access and cleanup
@@ -39,6 +42,11 @@ Fatal traps SHALL retain the existing no-unwind behavior, and strong cycles SHAL
 
 - **WHEN** native and Wasm choose different private block layouts or reclaim metadata
 - **THEN** source observes no layout lanes or address identity and all logical ownership outcomes remain equal
+
+#### Scenario: Keep clone and access allocation-free
+
+- **WHEN** either backend lowers and executes clone and callback access after one successful construction
+- **THEN** structural and runtime evidence shows no further allocation or reallocation, lock, atomic, scheduler, collector, or background operation
 
 #### Scenario: Leave a strong cycle allocated
 

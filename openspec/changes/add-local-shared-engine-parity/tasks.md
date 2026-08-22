@@ -2,7 +2,8 @@
 
 - [ ] 1.1 Add target-neutral MIR operations for local-shared layout, initialization, clone, callback
       access, and opaque drop; verify MIR rejects mismatched provenance, malformed callbacks, escaping
-      results, unavailable types, and unconsumed initialization inputs.
+      results, unavailable types, and reused or unconsumed initialization inputs with stable
+      diagnostic identities and source provenance before any engine or partial artifact is entered.
 - [ ] 1.2 Encode deterministic MIR inspection data without actor names, addresses, or backend field
       offsets; verify committed goldens are byte-identical across repeated analysis.
 
@@ -26,7 +27,9 @@
 - [ ] 3.2 Lower the same operations in direct Wasm using its existing reclaim path; verify non-LIFO
       final release returns storage and no scheduler, collector, atomics, or background work appears.
 - [ ] 3.3 Verify both backends keep conflict observation non-mutating, restore access only after normal
-      callback return, and preserve the language's no-unwind trap behavior.
+      callback return, preserve the language's no-unwind trap behavior, and use structural/runtime
+      probes to prove clone and access perform no private allocation or reallocation and introduce no
+      lock, atomic, scheduler, collector, background work, or source-spelled runtime actor.
 
 ## 4. Differential Acceptance
 

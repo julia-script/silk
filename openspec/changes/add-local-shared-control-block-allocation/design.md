@@ -28,6 +28,13 @@ exact request accepted by `sharedFromAllocation<T>`. Physical field order and re
 remain backend-private; the canonical layout fact retains the target, concrete `T`, size, alignment,
 and a provenance identity tying the two operations together.
 
+The intrinsic is available only when the selected target can represent the complete concrete block.
+Header addition, alignment rounding, or payload placement overflow makes that specialization's
+target-layout fact unavailable and rejects the reachable call before MIR or execution, retaining a
+stable diagnostic at the `sharedLayout<T>` call. It is not runtime `LayoutOverflow` data because no
+runtime repetition is being requested, and it is not a trap or an allocation failure; therefore the
+accepted total source signature gains no failure branch.
+
 Alternatives rejected: a universal byte formula would either expose private lanes or be wrong on a
 target; allocating inside `sharedFromAllocation` would hide the allocator dependency; a `RawBuffer`
 header would publish unsafe storage power broader than this sealed ownership use case.
@@ -55,7 +62,8 @@ with valid inputs it has no failure channel and cannot publish partial state.
 
 - **Risk: layout and initializer select different concrete specializations** → carry one canonical
   provenance identity through semantic facts and verified MIR; reject mismatches before execution.
-- **Risk: backend-private reclaim metadata changes size** → make the target layout planner the sole
-  source of the public `Layout` result and compare committed layout facts, not hard-coded offsets.
+- **Risk: backend-private reclaim metadata changes size or overflows the target word** → make the
+  target layout planner the sole source of the public `Layout` result, reject an unrepresentable
+  specialization before MIR, and compare committed layout facts rather than hard-coded offsets.
 - **Risk: initialization defects leak an allocation or `T`** → express one consuming MIR transition
   and verify it before any engine lowers the operation.

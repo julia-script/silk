@@ -25,6 +25,7 @@ None.
 
 ### Modified Capabilities
 
+- `bootstrap-mir`: verify target-neutral local-shared operations and reject malformed ownership, provenance, and callback contracts before execution.
 - `bootstrap-evaluation`: make evaluation the deterministic local-shared transition and cleanup oracle.
 - `bootstrap-backend`: require native LLVM and direct Wasm to realize the verified transition system identically.
 
