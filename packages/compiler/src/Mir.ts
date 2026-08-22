@@ -460,6 +460,7 @@ export type Operation =
       readonly value: LocalId
       readonly element: DeclarationFacts.SemanticType
       readonly block: LocalSharedControlBlock.Plan
+      readonly allocationBlock: LocalSharedControlBlock.Plan
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }

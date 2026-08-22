@@ -7,6 +7,7 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
+import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import { borrowKey, isOsOperation, usize } from './Lower.js'
 import * as Mir from './Mir.js'
@@ -165,13 +166,31 @@ export const lowerBuiltinExpression = (
       element === undefined || elementLayout === undefined
         ? undefined
         : LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
+    const allocationProvenance = LocalSharedAllocationProvenance.find(
+      fn.layout.localSharedAllocationProvenance,
+      fn.owner.key,
+      expression,
+    )
+    const allocationElementLayout =
+      allocationProvenance === undefined
+        ? undefined
+        : Layout.entry(fn.layout, allocationProvenance.element)
+    const allocationBlock =
+      allocationProvenance === undefined || allocationElementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(
+            fn.layout.target,
+            allocationProvenance.element,
+            allocationElementLayout,
+          )
     if (
       allocation === undefined ||
       value === undefined ||
       type?._tag !== 'Nominal' ||
       !Type.isSharedCore(type.type) ||
       element === undefined ||
-      block?._tag !== 'LocalSharedControlBlockPlan'
+      block?._tag !== 'LocalSharedControlBlockPlan' ||
+      allocationBlock?._tag !== 'LocalSharedControlBlockPlan'
     )
       return undefined
     const destination = fn.alloc(type)
@@ -183,6 +202,7 @@ export const lowerBuiltinExpression = (
         value,
         element,
         block,
+        allocationBlock,
         type,
         provenance: authored(expression.span),
       }),

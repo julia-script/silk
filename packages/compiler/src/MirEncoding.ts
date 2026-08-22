@@ -88,7 +88,7 @@ const operationText = (operation: Operation): string => {
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SharedFromAllocation':
-      return `${localText(operation.destination)} = shared-from-allocation ${localText(operation.allocation)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} count=1 access=available : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = shared-from-allocation ${localText(operation.allocation)}, ${localText(operation.value)} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} allocation-layout=${operation.allocationBlock.provenance} count=1 access=available : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCount':
       return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : usize ${provenanceText(operation.provenance)}`
     case 'RawBufferSlot':

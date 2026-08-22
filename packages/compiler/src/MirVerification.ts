@@ -3067,6 +3067,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(destination.type.arguments[0], operation.element) ||
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
             expected.provenance !== operation.block.provenance ||
+            operation.allocationBlock.provenance !== operation.block.provenance ||
+            operation.allocationBlock.target !== operation.block.target ||
+            !SilkType.equals(operation.allocationBlock.element, operation.block.element) ||
+            operation.allocationBlock.size !== operation.block.size ||
+            operation.allocationBlock.alignment !== operation.block.alignment ||
+            operation.allocationBlock.strongOffset !== operation.block.strongOffset ||
+            operation.allocationBlock.accessOffset !== operation.block.accessOffset ||
+            operation.allocationBlock.allocationOffset !== operation.block.allocationOffset ||
+            operation.allocationBlock.valueOffset !== operation.block.valueOffset ||
             expected.size !== operation.block.size ||
             expected.alignment !== operation.block.alignment ||
             expected.strongOffset !== operation.block.strongOffset ||

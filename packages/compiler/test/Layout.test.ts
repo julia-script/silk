@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
+import * as LocalSharedAllocationProvenance from '../src/LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from '../src/LocalSharedControlBlock.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
@@ -109,7 +110,7 @@ it.effect('plans only concrete types reached through discovered instances', () =
 pub fn main() -> i32 { return 42 }`),
     )
     const catalog = Layout.catalog(Target.aarch64AppleDarwin, Analysis.declarationIndex(snapshot))
-    const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot))
+    const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
@@ -609,6 +610,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       callableEnvironments: [],
       callingShapes: [],
       literalVerdicts: [],
+      localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
       diagnostics: [],
     }
 

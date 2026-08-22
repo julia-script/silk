@@ -148,7 +148,7 @@ function discoverAndLower(
         selection,
         target: selection.target,
         catalog,
-        layout: Layout.plan(catalog, instances),
+        layout: Layout.plan(catalog, instances, self.index),
       })
     },
     (value) => (value._tag === 'Available' ? value.layout.entries.length : 0),

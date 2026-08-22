@@ -135,9 +135,9 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
                             ? operation
                             : Object.freeze({
                                 ...operation,
-                                block: Object.freeze({
-                                  ...operation.block,
-                                  size: operation.block.size + 1,
+                                allocationBlock: Object.freeze({
+                                  ...operation.allocationBlock,
+                                  size: operation.allocationBlock.size + 1,
                                 }),
                               }),
                         ),
@@ -227,6 +227,62 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
   }),
 )
 
+it.effect('transports exact local-shared allocation provenance through an ordinary helper', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+fn forward(allocation: Allocation) -> Allocation { return move allocation }
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let acquired = run Intrinsic.systemAllocationAcquire(move layout)
+  let allocation = forward(move acquired)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/helper',
+      source,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
+
+it.effect('proves exact local-shared provenance through the selected allocator provider', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+import silk.core { SystemAllocator }
+import silk.effect as Effect
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let recipe = Allocator.allocate(Intrinsic.sharedLayout<i32>())
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let allocation = run recipe
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/provider',
+      source,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
+
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
@@ -266,6 +322,119 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
 import silk.effect as Effect
 effect fn store() -> i32 ! OutOfMemoryError {
   let layout = Intrinsic.sharedLayout<i64>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-ordinary-layout',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+import silk.layout { Layout }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = Layout.of<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-helper-provenance-mismatch',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+fn forward(allocation: Allocation) -> Allocation { return move allocation }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<u32>()
+  let acquired = run Intrinsic.systemAllocationAcquire(move layout)
+  let allocation = forward(move acquired)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-conditional-helper-provenance-mismatch',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+fn choose(flag: bool, wrong: Allocation, right: Allocation) -> Allocation {
+  if flag {
+    drop right
+    return move wrong
+  }
+  drop wrong
+  return move right
+}
+effect fn store() -> i32 ! OutOfMemoryError {
+  let wrongLayout = Intrinsic.sharedLayout<u32>()
+  let wrong = run Intrinsic.systemAllocationAcquire(move wrongLayout)
+  let rightLayout = Intrinsic.sharedLayout<i32>()
+  let right = run Intrinsic.systemAllocationAcquire(move rightLayout)
+  let allocation = choose(true, move wrong, move right)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-provider-forges-provenance',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+import silk.layout { Layout }
+service Forge {
+  effect fn allocate(layout: Layout) -> Allocation ! OutOfMemoryError ? &mut Forge
+}
+struct BadForge {}
+effect fn allocate(self: &mut BadForge, layout: Layout) -> Allocation ! OutOfMemoryError {
+  drop layout
+  return run Intrinsic.systemAllocationAcquire(Layout.of<i32>())
+}
+impl Forge for BadForge { allocate: BadForge.allocate }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let mut forge = BadForge {}
+  let recipe = Forge.allocate(Intrinsic.sharedLayout<i32>())
+    |> Effect.provideMut<Forge>(&mut forge)
+  let allocation = run recipe
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
+        'SEM0138',
+      ],
+      [
+        'local-shared-same-spelling-layout',
+        `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+import silk.layout { Layout }
+fn sharedLayout() -> Layout { return Layout.of<i32>() }
+effect fn store() -> i32 ! OutOfMemoryError {
+  let layout = sharedLayout()
   let allocation = run Intrinsic.systemAllocationAcquire(move layout)
   unsafe {
     let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
@@ -395,6 +564,8 @@ pub fn main() -> i32 { return 0 }`,
         code,
         `${name}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
       )
+      if (code === 'SEM0138')
+        assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
     }
   }),
 )
