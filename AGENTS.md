@@ -30,9 +30,8 @@ pipeline order and are manual-only — never invoke one without an explicit user
 1. `slp-1-develop` — draft/evolve an SLP to the Candidate bar.
 2. `slp-2-review` — bounded adversarial review (max 3 rounds, evidence-gated ledger).
 3. `slp-3-resolve` — author decides forks and records the outcome.
-4. `slp-4-handoff` — create OpenSpec change(s) from an SLP in Accepted direction.
-5. `slp-5-audit-openspec` — audit OpenSpec artifacts against the accepted SLP before implementation.
-6. `slp-6-audit-implementation` — audit code against SLP and OpenSpec before archive.
+4. `slp-4-handoff` — create and audit OpenSpec change(s) from an SLP in Accepted direction.
+5. `slp-5-audit-implementation` — audit code against SLP and OpenSpec before archive.
 
 ### Issue tracker
 

@@ -1,11 +1,11 @@
 ---
-name: slp-6-audit-implementation
-description: "SLP step 6 of 6. Audit a completed implementation against its accepted SLP and OpenSpec contract, classify divergences, and write the archive gate. Manual-only: use ONLY when the user explicitly invokes $slp-6-audit-implementation. Never trigger from generic review or archive requests."
+name: slp-5-audit-implementation
+description: "SLP step 5 of 5. Audit a completed implementation against its accepted SLP and OpenSpec contract, classify divergences, and write the archive gate. Manual-only: use ONLY when the user explicitly invokes $slp-5-audit-implementation. Never trigger from generic review or archive requests."
 ---
 
-# SLP 6: Audit implementation
+# SLP 5: Audit implementation
 
-Pipeline: 1 develop → 2 review → 3 resolve → 4 handoff → 5 audit-openspec → **6 audit-implementation**.
+Pipeline: 1 develop → 2 review → 3 resolve → 4 handoff → **5 audit-implementation**.
 
 Read `AGENTS.md`, `proposals/PROCESS.md` (§ Traceability gates), `IMPLEMENTATION-AUDIT-TEMPLATE.md`,
 the target SLP, its OpenSpec audit, and every apply `contextFiles` artifact before acting. Review
@@ -13,7 +13,7 @@ only: no implementation edits, no task checkboxes. One pass; no loop.
 
 ## Freeze the baseline
 
-Select the change and store as in step 5. Run `openspec status` and `openspec instructions apply`
+Select the change and store as in step 4. Run `openspec status` and `openspec instructions apply`
 (`--json`); require complete tasks, else report premature. Fix the implementation point (explicit
 commit, change history, or merge-base; ask if ambiguous). Record SLP/OpenSpec digests in the next
 `proposals/NNNN-slug/audits/implementation-<change>-iNNN.md`. Run required checks and focused
@@ -39,5 +39,5 @@ interaction map, boundary, revision record) and link the audit; the author picks
 
 Result is one of: **Conformant** | **Planning amendment required** | **SLP amendment drafted** |
 **Implementation changes required** | **Author decision required**. Report check failures exactly.
-Archive only after Conformant. Routes: planning → `$openspec-update-change` + `$slp-5-audit-openspec`;
+Archive only after Conformant. Routes: planning → `$slp-4-handoff --audit-only`;
 SLP amendment → `$slp-2-review`; implementation → `$openspec-apply-change` then rerun this skill.

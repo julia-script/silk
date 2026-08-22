@@ -1,6 +1,0 @@
-interface:
-  display_name: "SLP 6: Audit implementation"
-  short_description: "Step 6 — check code against SLP and OpenSpec before archive"
-  default_prompt: "Use $slp-6-audit-implementation to audit the completed change against its SLP and OpenSpec contract."
-policy:
-  allow_implicit_invocation: false

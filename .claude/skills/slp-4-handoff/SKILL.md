@@ -1,14 +1,16 @@
 ---
 name: slp-4-handoff
-description: "SLP step 4 of 6. Create the OpenSpec change(s) that realize an SLP in Accepted direction, carrying its invariants, decisions, and capability slices into proposal/design/specs/tasks. Manual-only: use ONLY when the user explicitly invokes /slp-4-handoff or says \"hand off this SLP to OpenSpec\". Never trigger from generic OpenSpec requests."
+description: "SLP step 4 of 5. Create the OpenSpec change(s) that realize an SLP in Accepted direction, then audit them for fidelity, normative completeness, and task/verification coverage before implementation. Manual-only: use ONLY when the user explicitly invokes /slp-4-handoff or says \"hand off this SLP to OpenSpec\". Never trigger from generic OpenSpec requests."
 ---
 
 # SLP 4: Handoff
 
-Pipeline: 1 develop → 2 review → 3 resolve → **4 handoff** → 5 audit-openspec → 6 audit-implementation.
+Pipeline: 1 develop → 2 review → 3 resolve → **4 handoff** → 5 audit-implementation.
 
-Read `AGENTS.md`, `proposals/PROCESS.md` (§ OpenSpec handoff, § Traceability gates), and the target
-SLP before acting. Require `Status: Accepted direction`; otherwise stop and point to `/slp-3-resolve`.
+Read `AGENTS.md`, `proposals/PROCESS.md` (§ OpenSpec handoff, § Traceability gates),
+`OPENSPEC-AUDIT-TEMPLATE.md`, and the target SLP before acting. Require
+`Status: Accepted direction`; otherwise stop and point to `/slp-3-resolve`. `--audit-only` skips
+creation and audits the existing linked change(s).
 
 ## Plan the slices
 
@@ -34,9 +36,31 @@ OpenSpec may refine mechanics but may not reverse the accepted thesis or add com
 Each change's `proposal.md` links the SLP path, revision, digest, and slice it realizes. Set the
 SLP's `OpenSpec handoff` field to the change list.
 
-## Finish
+## Audit each change
 
-Run `openspec validate <change> --strict --json --no-interactive` for each change. Report the
-slices created and anything the SLP left underspecified that the author must settle in OpenSpec.
+Freeze: run `openspec status --change <name> --json` and `openspec instructions apply --change
+<name> --json`; read every artifact and every canonical spec touched by a delta. Record SLP
+revision/digest and artifact digests in the next `proposals/NNNN-slug/audits/openspec-<change>-oNNN.md`.
+Run `openspec validate <change> --strict --json --no-interactive` and keep the result.
 
-Next: `/slp-5-audit-openspec` on each change before implementation.
+Spawn three fresh agents in parallel (raw artifacts, findings only with exact references):
+
+1. **SLP fidelity** — map model, invariants, examples, falsifiers, interaction map, and privilege
+   split to requirements; find omissions, inventions, contradictions, scope drift.
+2. **Normative completeness** — do requirements/scenarios cover success, typed failure, invalid
+   programs, diagnostics, ownership/Effects interactions, target parity, costs where material?
+3. **Realization coverage** — map every scenario to design, tasks, tests, docs, artifacts; find
+   orphans both ways.
+
+A checked task or validation pass proves existence, not semantic coverage.
+
+## Fix and gate
+
+Classify findings: **OpenSpec revision required**, **SLP decision required**, **Editorial**.
+Apply OpenSpec revisions and editorial fixes directly to the change artifacts, then re-validate —
+at most **2** fix passes; no re-spawning of lenses. Route SLP decisions to `/slp-3-resolve` and
+stop. `Result: Ready` only when every accepted decision is covered, every observable behavior has
+scenarios and verification, artifacts agree, the privilege boundary holds, and strict validation
+passes. Otherwise record the open items in the audit record.
+
+Next: implement via `/openspec-apply-change`, then `/slp-5-audit-implementation`.

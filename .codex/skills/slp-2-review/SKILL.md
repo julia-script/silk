@@ -1,11 +1,11 @@
 ---
 name: slp-2-review
-description: "SLP step 2 of 6. Run the bounded adversarial review loop (max 3 rounds, evidence-gated, ledger-tracked) on a Candidate Silk Language Proposal and stop with a recorded reason. Manual-only: use ONLY when the user explicitly invokes $slp-2-review or says \"review this SLP\". Never trigger from generic review requests."
+description: "SLP step 2 of 5. Run the bounded adversarial review loop (max 3 rounds, evidence-gated, ledger-tracked) on a Candidate Silk Language Proposal and stop with a recorded reason. Manual-only: use ONLY when the user explicitly invokes $slp-2-review or says \"review this SLP\". Never trigger from generic review requests."
 ---
 
 # SLP 2: Review
 
-Pipeline: 1 develop → **2 review** → 3 resolve → 4 handoff → 5 audit-openspec → 6 audit-implementation.
+Pipeline: 1 develop → **2 review** → 3 resolve → 4 handoff → 5 audit-implementation.
 
 Read `AGENTS.md`, `proposals/PROCESS.md` (§ Bounded adversarial review), `REVIEW-TEMPLATE.md`,
 `LEDGER-TEMPLATE.md`, the target Candidate, linked examples, and any existing ledger before acting.

@@ -1,6 +1,0 @@
-interface:
-  display_name: "SLP 5: Audit OpenSpec"
-  short_description: "Step 5 — check OpenSpec artifacts realize the accepted SLP"
-  default_prompt: "Use $slp-5-audit-openspec to audit this OpenSpec change against its SLP before implementation."
-policy:
-  allow_implicit_invocation: false
