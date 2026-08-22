@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
@@ -10,7 +11,7 @@ import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
-import * as SemanticInvalidation from './SemanticInvalidation.js'
+import type * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
@@ -42,21 +43,6 @@ export interface ProjectFrontend extends FrontendFacts {
   readonly closure: ModuleClosure.ProjectClosure
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
 }
-
-/** Prior immutable project facts permitted to seed module semantic structural sharing. */
-export interface ProjectReuseBasis {
-  readonly closure: ModuleClosure.ProjectClosure
-  readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
-  readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
-  readonly opaqueRealizations: OpaqueRealization.Catalog
-  readonly environment: string
-}
-
-const moduleBatchSize = 8
-
-const checkpointModuleBatch = Effect.fnUntraced(function* (ordinal: number) {
-  if (ordinal > 0 && ordinal % moduleBatchSize === 0) yield* Effect.yieldNow
-})
 
 interface HeaderFacts {
   readonly index: DeclarationIndex.Index
@@ -134,7 +120,7 @@ const elaborateModules = Effect.fnUntraced(function* (
   const results = new Map<string, Elaboration.Result>()
   const computed = new Map<string, Elaboration.Result>()
   for (const [ordinal, module] of closure.modules.entries()) {
-    yield* checkpointModuleBatch(ordinal)
+    yield* IncrementalReuse.checkpointModuleBatch(ordinal)
     const reused = retained.get(module.name) ?? precomputed.get(module.name)
     if (reused !== undefined) {
       results.set(module.name, reused)
@@ -164,7 +150,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   report: Array<PhaseReport.PhaseReport>,
   options: Options,
   reuse?: {
-    readonly previous: ProjectReuseBasis
+    readonly previous: IncrementalReuse.ProjectReuseBasis
     readonly invalidation: SemanticInvalidation.SemanticInvalidation
   },
   precomputed?: {
@@ -172,26 +158,11 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     readonly opaqueRealizations?: OpaqueRealization.Catalog
   },
 ): Effect.fn.Return<Omit<FrontendFacts, keyof HeaderFacts | 'report'>> {
-  const reusable = new Set(
-    reuse?.invalidation.observations.flatMap((observation) =>
-      observation._tag === 'Reusable' ? [observation.module] : [],
-    ) ?? [],
-  )
-  const retained = new Map<string, ModuleSemantics.ModuleSemantics>()
-  for (const [ordinal, module] of closure.modules.entries()) {
-    yield* checkpointModuleBatch(ordinal)
-    if (!reusable.has(module.name)) continue
-    const artifact = reuse?.previous.semantics.get(module.name)
-    if (
-      artifact !== undefined &&
-      artifact.module === module.name &&
-      artifact.elaboration.syntax === module.syntax
-    )
-      retained.set(module.name, artifact)
-  }
-  const retainedElaborations = new Map(
-    [...retained].map(([module, semantics]) => [module, semantics.elaboration]),
-  )
+  const retained =
+    reuse === undefined
+      ? new Map<string, ModuleSemantics.ModuleSemantics>()
+      : yield* IncrementalReuse.retainedSemantics(closure, reuse.previous, reuse.invalidation)
+  const retainedElaborations = IncrementalReuse.retainedElaborations(retained)
   const results = yield* PhaseReport.measureEffectInto(
     report,
     'elaboration',
@@ -219,7 +190,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
       const ownership = new Map<string, Ownership.ModuleOwnership>()
       let ordinal = 0
       for (const [name, result] of results) {
-        yield* checkpointModuleBatch(ordinal)
+        yield* IncrementalReuse.checkpointModuleBatch(ordinal)
         ownership.set(
           name,
           retained.get(name)?.ownership ?? Ownership.checkModule(result, headers.index),
@@ -254,7 +225,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   const semantics = new Map<string, ModuleSemantics.ModuleSemantics>()
   let semanticOrdinal = 0
   for (const [module, elaboration] of results) {
-    yield* checkpointModuleBatch(semanticOrdinal)
+    yield* IncrementalReuse.checkpointModuleBatch(semanticOrdinal)
     const reused = retained.get(module)
     if (reused !== undefined) semantics.set(module, reused)
     else {
@@ -299,23 +270,19 @@ const analyzeFrontend = Effect.fnUntraced(function* (
 })
 
 /** Constructs the complete recoverable compiler frontend for one compilation request. */
-export const frontend = Effect.fn('Pipeline.frontend')(function* (
+export const frontend = Effect.fn('Frontend.frontend')(function* (
   request: ModuleClosure.CompilationRequest,
   options: Options = {},
 ): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport.PhaseReport> = []
-  const closureStartedAt = performance.now()
-  const closure = yield* ModuleClosure.load(request)
-  const closureHeap = options.heapBytes?.()
-  report.push(
-    PhaseReport.make({
-      phase: 'closure',
-      elapsedMs: performance.now() - closureStartedAt,
-      inputs: 1,
-      outputs: closure.modules.length,
-      diagnostics: closure.diagnostics.length,
-      ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
-    }),
+  const closure = yield* PhaseReport.measureEffectInto(
+    report,
+    'closure',
+    1,
+    ModuleClosure.load(request),
+    (value) => value.modules.length,
+    (value) => value.diagnostics.length,
+    options,
   )
   yield* Effect.yieldNow
   const facts = yield* analyzeFrontend(closure, report, options)
@@ -330,77 +297,37 @@ export const frontend = Effect.fn('Pipeline.frontend')(function* (
 })
 
 /** Constructs one complete compiler frontend for the union closure of project roots. */
-export const frontendProject = Effect.fn('Pipeline.frontendProject')(function* (
+export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   request: ModuleClosure.ProjectRequest,
   options: Options = {},
-  previous?: ProjectReuseBasis,
+  previous?: IncrementalReuse.ProjectReuseBasis,
 ): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport.PhaseReport> = []
-  const closureStartedAt = performance.now()
-  const closure = yield* ModuleClosure.loadProject(request)
-  const closureHeap = options.heapBytes?.()
-  report.push(
-    PhaseReport.make({
-      phase: 'closure',
-      elapsedMs: performance.now() - closureStartedAt,
-      inputs: closure.rootModules.length,
-      outputs: closure.modules.length,
-      diagnostics: closure.diagnostics.length,
-      ...(closureHeap === undefined ? {} : { heapBytes: closureHeap }),
-    }),
+  const closure = yield* PhaseReport.measureEffectInto(
+    report,
+    'closure',
+    request.roots.length,
+    ModuleClosure.loadProject(request),
+    (value) => value.modules.length,
+    (value) => value.diagnostics.length,
+    options,
   )
   yield* Effect.yieldNow
   const headers = yield* analyzeHeaders(closure, report, options)
-  const syntaxRetained = new Map(
-    closure.modules.flatMap((module) => {
-      const artifact = previous?.semantics.get(module.name)
-      return artifact?.elaboration.syntax === module.syntax
-        ? ([[module.name, artifact.elaboration]] as const)
-        : []
-    }),
-  )
+  const syntaxRetained = IncrementalReuse.syntaxRetained(closure, previous)
   const currentElaboration = yield* elaborateModules(closure, headers, syntaxRetained)
   const currentResults = currentElaboration.results
   const currentOpaqueRealizations = OpaqueRealization.analyze(currentResults)
   yield* Effect.yieldNow
-  const previousSyntax = new Map(
-    previous?.closure.modules.map((module) => [module.name, module.syntax]),
-  )
-  const revisions = new Map(
-    closure.modules.map((module) => [
-      module.name,
-      Object.freeze({
-        _tag:
-          previousSyntax.get(module.name) === undefined
-            ? ('Fresh' as const)
-            : previousSyntax.get(module.name) === module.syntax
-              ? ('Reused' as const)
-              : ('Changed' as const),
-      }),
-    ]),
-  )
   const invalidation = PhaseReport.measure(
     'semantic-invalidation',
     closure.modules.length,
     () =>
-      SemanticInvalidation.make({
-        current: Object.freeze({
-          closure,
-          surfaces: headers.surfaces,
-          opaqueRealizations: currentOpaqueRealizations,
-          environment: SemanticInvalidation.environment,
-        }),
-        revisions,
-        ...(previous === undefined
-          ? {}
-          : {
-              previous: Object.freeze({
-                closure: previous.closure,
-                surfaces: previous.surfaces,
-                opaqueRealizations: previous.opaqueRealizations,
-                environment: previous.environment,
-              }),
-            }),
+      IncrementalReuse.invalidate({
+        closure,
+        surfaces: headers.surfaces,
+        opaqueRealizations: currentOpaqueRealizations,
+        ...(previous === undefined ? {} : { previous }),
       }),
     (value) => value.totals.recomputed,
     () => 0,

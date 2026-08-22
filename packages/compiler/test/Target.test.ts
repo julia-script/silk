@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as HeapObservation from '../src/HeapObservation.js'
 import * as Target from '../src/Target.js'
 
 it('keeps the compiler root import graph free of Node built-ins', () => {
@@ -22,6 +23,13 @@ it('keeps the compiler root import graph free of Node built-ins', () => {
   }
   assert.isAbove(visited.size, 1)
 })
+
+it.effect('provides browser heap observation only when the browser layer is explicit', () =>
+  Effect.gen(function* () {
+    const observation = yield* HeapObservation.HeapObservation
+    assert.strictEqual(observation.heapBytes(), 0)
+  }).pipe(Effect.provide(HeapObservation.layerBrowser)),
+)
 
 it('defines the four canonical profiles in deterministic order', () => {
   assert.deepEqual(

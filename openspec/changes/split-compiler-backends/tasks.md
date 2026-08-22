@@ -1,7 +1,7 @@
 ## 1. Extract the shared contract
 
-- [x] 1.1 Create BackendShared.ts (contract, errors, symbols, lineTable) and move those exports
-- [x] 1.2 Rename Backend.ts to LlvmBackend.ts with a thin re-export for existing importers
+- [x] 1.1 Make `Backend.ts` the final shared contract actor (contract, errors, symbols, line table)
+- [x] 1.2 Move LLVM lowering to `LlvmBackend.ts`, update every caller, and retain no compatibility re-export
 - [x] 1.3 Move linearize/expandMatches/llvmControl beside Mir
 - [x] 1.4 Update WasmBackend to import shared symbols (incl. suspensionPointKey) and verify backends still emit identically
 
@@ -30,3 +30,8 @@
 - [x] 4.1 Run pnpm typecheck and verify clean
 - [x] 4.2 Run pnpm exec biome check . and verify clean
 - [x] 4.3 Run pnpm test
+
+## 5. Convergence findings
+
+- [x] 5.1 Introduce the explicit native `LoweringContext` and move the actual type, declaration, debug, function, call, arithmetic, aggregate, operation, control, and suspension lowering implementations into their `Native*` actors
+- [x] 5.2 Make `LlvmBackend.emitProgram` a thin coordinator and verify native IR/bitcode goldens and differential execution remain unchanged

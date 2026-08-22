@@ -13,7 +13,6 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import {
   borrowedWriteRoot,
-  dropOwnedProvider,
   endLoans,
   endReturnedViewLoans,
   endRunLoans,
@@ -23,7 +22,6 @@ import {
   lowerPlace,
   lowerReifiedEffectRecipe,
   lowerRunEffectComposite,
-  lowerRunEffectValue,
 } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -38,17 +36,8 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
-import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
-import {
-  bool,
-  borrowKey,
-  character,
-  isOsOperation,
-  local,
-  patternKey,
-  specializeProvider,
-  usize,
-} from './Lower.js'
+import type { DelayedEffectState } from './Lower.js'
+import { bool, borrowKey, character, isOsOperation, local, patternKey, usize } from './Lower.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -803,7 +792,7 @@ export function lowerExpressionInner(
           if (result !== undefined) endRunLoans(fn, expression.span)
           return result
         }
-        if (recipe?._tag === 'EffectBindRequirement' && recipe.protected._tag !== 'BuiltinCall')
+        if (recipe?._tag === 'EffectBindRequirement')
           return lowerEffectExecution(fn, recipe, expression.type, expression.span)
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectSuspend') {
           const deferred = recipe.arguments.at(0)
@@ -903,135 +892,8 @@ export function lowerExpressionInner(
               provenance: authored(expression.span),
             }),
           )
-          for (const authored of recipe.loanEnds) {
-            const borrow = fn.recipeBorrow(authored)
-            const held = fn.loanLocals.get(borrowKey(borrow))
-            if (held === undefined) continue
-            fn.emit(
-              Object.freeze({
-                _tag: 'EndLoan' as const,
-                borrow,
-                slice: held,
-                provenance: generated(expression.span),
-              }),
-            )
-            fn.loanLocals.delete(borrowKey(borrow))
-          }
+          endLoans(fn, recipe.loanEnds, expression.span)
           return Object.freeze({ result: destination })
-        }
-        if (recipe?._tag === 'EffectBindRequirement') {
-          const provider =
-            recipe.provider.binding !== undefined
-              ? fn.bindingLocals.get(recipe.provider.binding.ordinal)
-              : recipe.provider.parameter !== undefined
-                ? fn.parameterLocals.get(recipe.provider.parameter.ordinal)
-                : undefined
-          if (provider === undefined) return undefined
-          const selectedProvider = specializeProvider(fn, recipe.provider)
-          if (selectedProvider === undefined) return undefined
-          const loweredProtected = lowerExpression(fn, recipe.protected)
-          const protectedType =
-            loweredProtected === undefined
-              ? undefined
-              : fn.localTypes.at(loweredProtected.result.ordinal)
-          if (loweredProtected === undefined || protectedType?._tag !== 'EffectValue')
-            return undefined
-          if (selectedProvider.witness._tag !== 'SourceConformanceWitness') {
-            const result = lowerRunEffectValue(
-              fn,
-              loweredProtected.result,
-              protectedType,
-              expression.type,
-              expression.span,
-              Object.freeze([...fn.providedRequirements, selectedProvider]),
-            )
-            if (result !== undefined) {
-              endRunLoans(fn, expression.span)
-              if (recipe.protected._tag === 'EffectConstruct')
-                endLoans(fn, recipe.protected.loanEnds, expression.span)
-              if (recipe.provider.selectionAccess === 'Take')
-                dropOwnedProvider(fn, provider, selectedProvider.providerType, recipe.provider.span)
-            }
-            return result
-          }
-          const providerAccess =
-            recipe.provider.selectionAccess === 'Take'
-              ? ('Exclusive' as const)
-              : recipe.provider.selectionAccess
-          const providerType = fn.type(selectedProvider.providerType)
-          const referenceType = fn.type(
-            Object.freeze({
-              _tag: 'ReferenceType' as const,
-              access: providerAccess,
-              target: selectedProvider.providerType,
-            }),
-          )
-          const loan = fn.ownership?.loans.find(
-            (candidate) =>
-              candidate.origin === 'EffectCapture' &&
-              candidate.access === providerAccess &&
-              candidate.startSpan.start === recipe.provider.span.start &&
-              candidate.startSpan.end === recipe.provider.span.end,
-          )
-          const authoredBorrow =
-            loan?.id ??
-            (recipe.provider.selectionAccess === 'Take'
-              ? fn.freshSyntheticBorrow(recipe.provider.span)
-              : undefined)
-          const borrow =
-            authoredBorrow === undefined ? undefined : fn.beginRecipeBorrow(authoredBorrow)
-          if (
-            providerType?._tag !== 'Nominal' ||
-            referenceType?._tag !== 'Reference' ||
-            borrow === undefined
-          )
-            return undefined
-          const reference = fn.alloc(referenceType)
-          fn.emit(
-            Object.freeze({
-              _tag: 'BeginLoan',
-              borrow,
-              destination: reference,
-              root: provider,
-              selectors: Object.freeze([]),
-              sourceType: providerType,
-              type: referenceType,
-              access: providerAccess,
-              reborrow: false,
-              suspendsParent: false,
-              provenance: authored(recipe.provider.span),
-            }),
-          )
-          fn.loanLocals.set(borrowKey(borrow), reference)
-          const provided: ProvidedRequirement = Object.freeze({
-            ...selectedProvider,
-            local: reference,
-          })
-          const result = lowerRunEffectValue(
-            fn,
-            loweredProtected.result,
-            protectedType,
-            expression.type,
-            expression.span,
-            Object.freeze([...fn.providedRequirements, provided]),
-          )
-          if (result === undefined) return undefined
-          const closeProviderLoan = fn.loanLocals.delete(borrowKey(borrow))
-          endRunLoans(fn, expression.span)
-          if (recipe.protected._tag === 'EffectConstruct')
-            endLoans(fn, recipe.protected.loanEnds, expression.span)
-          if (closeProviderLoan)
-            fn.emit(
-              Object.freeze({
-                _tag: 'EndLoan',
-                borrow,
-                slice: reference,
-                provenance: generated(recipe.provider.span),
-              }),
-            )
-          if (recipe.provider.selectionAccess === 'Take')
-            dropOwnedProvider(fn, provider, selectedProvider.providerType, recipe.provider.span)
-          return result
         }
         if (recipe?._tag !== 'EffectConstruct') return undefined
         const arguments_: Array<Mir.LocalId> = []

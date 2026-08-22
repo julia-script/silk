@@ -7,12 +7,12 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Driver from '../src/Driver.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as WasmBackend from '../src/WasmBackend.js'
+import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))

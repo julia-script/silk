@@ -22,3 +22,8 @@
 - [x] 4.1 Run pnpm typecheck and verify clean
 - [x] 4.2 Run pnpm exec biome check . and verify clean
 - [x] 4.3 Run pnpm test
+
+## 5. Convergence findings
+
+- [x] 5.1 Move actual host/OS execution, storage mutation, and Effect execution implementations into `BootstrapOsIntrinsics`, `BootstrapStorage`, and `BootstrapEffect`; keep `BootstrapEvaluation` as coordinator
+- [x] 5.2 Verify evaluator differential, host I/O, storage, and Effect execution suites

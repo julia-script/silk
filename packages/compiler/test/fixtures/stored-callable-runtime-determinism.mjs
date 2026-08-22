@@ -12,6 +12,7 @@ import * as Instances from '../../dist/Instances.js'
 import * as Layout from '../../dist/Layout.js'
 import * as Mir from '../../dist/Mir.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
+import * as NodeHeapObservation from '../../dist/NodeHeapObservation.js'
 import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Target from '../../dist/Target.js'
@@ -126,6 +127,10 @@ const program = Effect.gen(function* () {
       JSON.stringify(report, (_, value) => (typeof value === 'bigint' ? value.toString() : value)),
     ),
   )
-}).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+}).pipe(
+  Effect.scoped,
+  Effect.provide(NodeHeapObservation.layer),
+  Effect.provide(NodeServices.layer),
+)
 
 await Effect.runPromise(program)

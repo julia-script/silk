@@ -235,7 +235,7 @@ interface EvaluationState {
   executionStackBytes: number
   activeFrames: ReadonlyArray<ActiveFrame>
   readonly cells: Map<string, LocalState>
-  readonly allocations: Map<number, { active: boolean; readonly values: Map<string, Value> }>
+  readonly allocations: BootstrapStorage.Allocations
   readonly callables: Map<number, { state: 'Available' | 'Running' | 'Consumed' | 'Released' }>
   readonly activeLoans: Set<string>
   readonly stringLoans: Set<string>
@@ -553,8 +553,7 @@ function* executeFunction(
       case 'AllocationCleanup': {
         if (owner._tag !== 'AllocationValue')
           throw new RangeError('Allocation cleanup lost its private reclaim ticket')
-        const ticket = state.allocations.get(owner.ticket)
-        if (ticket === undefined || !ticket.active) {
+        if (!BootstrapStorage.release(state.allocations, owner.ticket, false)) {
           // A caller obligation, not a compiler invariant: unsafe code can reach a second
           // release, and the run must stop as a trap rather than take down the host.
           return blockedStep({
@@ -564,7 +563,6 @@ function* executeFunction(
             span: provenance.span,
           })
         }
-        ticket.active = false
         trace.push(
           Object.freeze({
             _tag: 'AllocationRelease',
@@ -578,8 +576,7 @@ function* executeFunction(
       case 'RawBufferCleanup': {
         if (owner._tag !== 'RawBufferValue')
           throw new RangeError('RawBuffer cleanup lost its private reclaim ticket')
-        const ticket = state.allocations.get(owner.ticket)
-        if (ticket === undefined || !ticket.active) {
+        if (!BootstrapStorage.release(state.allocations, owner.ticket, true)) {
           return blockedStep({
             _tag: 'Trap',
             function: fn.id,
@@ -587,8 +584,6 @@ function* executeFunction(
             span: provenance.span,
           })
         }
-        ticket.active = false
-        ticket.values.clear()
         trace.push(
           Object.freeze({
             _tag: 'AllocationRelease',
@@ -1928,7 +1923,7 @@ function* executeFunction(
               throw new RangeError('Layout payload omitted bytes or alignment')
             const ticket = state.nextAllocation
             state.nextAllocation += 1
-            state.allocations.set(ticket, { active: true, values: new Map() })
+            BootstrapStorage.allocate(state.allocations, ticket)
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AllocationValue',
@@ -1973,14 +1968,10 @@ function* executeFunction(
             }
             const destination: StandardStreams.Destination =
               stream.value === 0n ? 'Stdout' : 'Stderr'
-            const result = (() => {
-              if (state.standardStreams === undefined) return undefined
-              try {
-                return state.standardStreams.writeAll(destination, bytes)
-              } catch (cause) {
-                return BootstrapOsIntrinsics.writeFailure(cause)
-              }
-            })()
+            const result =
+              state.standardStreams === undefined
+                ? undefined
+                : BootstrapOsIntrinsics.writeAll(state.standardStreams, destination, bytes)
             if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
             trace.push(
               Object.freeze({
@@ -2240,12 +2231,16 @@ function* executeFunction(
                   throw new RangeError('OS open omitted paths')
                 const result =
                   name === 'osFileOpen'
-                    ? host.fileOpen(
-                        byteView(root),
-                        byteView(path),
-                        Number(readInteger(arguments_.at(2) ?? root, 'i32').value),
+                    ? BootstrapOsIntrinsics.invoke(() =>
+                        host.fileOpen(
+                          byteView(root),
+                          byteView(path),
+                          Number(readInteger(arguments_.at(2) ?? root, 'i32').value),
+                        ),
                       )
-                    : host.directoryOpen(byteView(root), byteView(path))
+                    : BootstrapOsIntrinsics.invoke(() =>
+                        host.directoryOpen(byteView(root), byteView(path)),
+                      )
                 if (result._tag === 'Failure') {
                   status(result)
                   commit(optionValue(Type.osHandle))
@@ -2261,7 +2256,9 @@ function* executeFunction(
                 if (handle === undefined || output === undefined)
                   throw new RangeError('OS read omitted arguments')
                 const capacity = byteView(output).length
-                const result = host.fileRead(hostHandle(handle), capacity)
+                const result = BootstrapOsIntrinsics.invoke(() =>
+                  host.fileRead(hostHandle(handle), capacity),
+                )
                 if (result._tag === 'Failure') {
                   status(result)
                   commit(optionValue('usize'))
@@ -2278,9 +2275,11 @@ function* executeFunction(
                 const offset = arguments_.at(2)
                 if (handle === undefined || input === undefined || offset === undefined)
                   throw new RangeError('OS write omitted arguments')
-                const result = host.fileWrite(
-                  hostHandle(handle),
-                  byteView(input).slice(Number(readInteger(offset, 'usize').value)),
+                const result = BootstrapOsIntrinsics.invoke(() =>
+                  host.fileWrite(
+                    hostHandle(handle),
+                    byteView(input).slice(Number(readInteger(offset, 'usize').value)),
+                  ),
                 )
                 if (result._tag === 'Failure') {
                   status(result)
@@ -2303,7 +2302,9 @@ function* executeFunction(
                   required === undefined
                 )
                   throw new RangeError('OS directory next omitted arguments')
-                const result = host.directoryNext(hostHandle(handle), byteView(output).length)
+                const result = BootstrapOsIntrinsics.invoke(() =>
+                  host.directoryNext(hostHandle(handle), byteView(output).length),
+                )
                 if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
                   const failure: OsFileSystemHost.Failure =
                     result._tag === 'Failure'
@@ -2341,11 +2342,13 @@ function* executeFunction(
                   required === undefined
                 )
                   throw new RangeError('OS unique directory create omitted arguments')
-                const result = host.directoryCreateUnique(
-                  byteView(root),
-                  byteView(parent),
-                  byteView(prefix),
-                  byteView(output).length,
+                const result = BootstrapOsIntrinsics.invoke(() =>
+                  host.directoryCreateUnique(
+                    byteView(root),
+                    byteView(parent),
+                    byteView(prefix),
+                    byteView(output).length,
+                  ),
                 )
                 if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
                   status(
@@ -2378,7 +2381,9 @@ function* executeFunction(
                   length === undefined
                 )
                   throw new RangeError('OS inspect omitted arguments')
-                const result = host.pathInspect(byteView(root), byteView(path))
+                const result = BootstrapOsIntrinsics.invoke(() =>
+                  host.pathInspect(byteView(root), byteView(path)),
+                )
                 if (result._tag === 'Failure') {
                   status(result)
                   commit(integerValue('i32', 0))
@@ -2399,14 +2404,18 @@ function* executeFunction(
                       const path = arguments_.at(1)
                       if (root === undefined || path === undefined)
                         throw new RangeError('OS command omitted paths')
-                      return name === 'osDirectoryCreate'
-                        ? host.directoryCreate(byteView(root), byteView(path))
-                        : name === 'osFileRemove'
-                          ? host.fileRemove(byteView(root), byteView(path))
-                          : host.directoryRemove(byteView(root), byteView(path))
+                      return BootstrapOsIntrinsics.invoke(() =>
+                        name === 'osDirectoryCreate'
+                          ? host.directoryCreate(byteView(root), byteView(path))
+                          : name === 'osFileRemove'
+                            ? host.fileRemove(byteView(root), byteView(path))
+                            : host.directoryRemove(byteView(root), byteView(path)),
+                      )
                     })()
                   : name === 'osHandleClose'
-                    ? host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput))
+                    ? BootstrapOsIntrinsics.invoke(() =>
+                        host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput)),
+                      )
                     : undefined
               if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
               if (command._tag === 'Failure') {
@@ -2535,9 +2544,8 @@ function* executeFunction(
             if (!Type.equals(buffer.element, operation.element)) {
               throw new RangeError('MIR verifier allowed mismatched RawBuffer read provenance')
             }
-            const allocation = state.allocations.get(buffer.ticket)
-            const selected = allocation?.values.get(index.value.toString())
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, buffer.ticket, index.value)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2741,18 +2749,21 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            const allocation = state.allocations.get(buffer.ticket)
-            if (allocation === undefined || !allocation.active) {
+            if (
+              !BootstrapStorage.fill(
+                state.allocations,
+                buffer.ticket,
+                offset,
+                Number(length),
+                integerValue('u8', value.value),
+              )
+            ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
                 reason: 'RawBuffer.fill requires live storage',
                 span: operation.provenance.span,
               })
-            }
-            const byte = integerValue('u8', value.value)
-            for (let index = 0; index < Number(length); index += 1) {
-              allocation.values.set(String(offset + BigInt(index)), byte)
             }
             write(operation.destination, {
               value: Object.freeze({
@@ -2779,9 +2790,14 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.write with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            if (allocation === undefined || !allocation.active || allocation.values.has(key)) {
+            if (
+              !BootstrapStorage.write(
+                state.allocations,
+                slot.ticket,
+                slot.index,
+                read(operation.value).value,
+              )
+            ) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2789,7 +2805,6 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            allocation.values.set(key, read(operation.value).value)
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AggregateValue',
@@ -2815,10 +2830,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.take with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.take(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2826,7 +2839,6 @@ function* executeFunction(
                 span: operation.provenance.span,
               })
             }
-            allocation.values.delete(key)
             write(operation.destination, { value: selected, fromCall: false })
             trace.push(
               Object.freeze({
@@ -2845,10 +2857,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.copy with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2874,10 +2884,8 @@ function* executeFunction(
             if (slot._tag !== 'SlotValue' || !Type.equals(slot.element, operation.element)) {
               throw new RangeError('MIR verifier allowed Slot.drop with mismatched provenance')
             }
-            const allocation = state.allocations.get(slot.ticket)
-            const key = slot.index.toString()
-            const selected = allocation?.values.get(key)
-            if (allocation === undefined || !allocation.active || selected === undefined) {
+            const selected = BootstrapStorage.read(state.allocations, slot.ticket, slot.index)
+            if (selected === undefined) {
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2892,7 +2900,8 @@ function* executeFunction(
               operation.slot.ordinal,
             )
             if (blocked !== undefined) return blocked
-            allocation.values.delete(key)
+            if (!BootstrapStorage.drop(state.allocations, slot.ticket, slot.index))
+              throw new RangeError('evaluator slot disappeared during cleanup')
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AggregateValue',
@@ -3633,33 +3642,11 @@ function* executeFunction(
             break
           }
           case 'MakeEffect': {
-            const captures = operation.captures.map((capture, ordinal): Value => {
-              const field = operation.type.environment.fields.at(ordinal)
-              if (
-                capture.access === 'Copy' ||
-                capture.access === 'Take' ||
-                field?.representation === 'Callable' ||
-                field?.effectIdentity !== undefined
-              )
-                return read(capture.source).value
-              const key = cellKey(frame, capture.source.ordinal)
-              if (!state.cells.has(key)) state.cells.set(key, read(capture.source))
-              return Object.freeze({
-                _tag: 'EffectBorrowValue',
-                frame,
-                cell: capture.source.ordinal,
-                access: capture.access,
-              })
-            })
             write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectValue',
-                type: operation.type.type,
-                site: operation.type.site,
-                runner: operation.runner,
-                runnerTypeArguments: operation.runnerTypeArguments,
-                captures: Object.freeze(captures),
-              }),
+              value: BootstrapEffect.makeValue(
+                Object.freeze({ frame, cells: state.cells, read, cellKey }),
+                operation,
+              ),
               fromCall: false,
             })
             break
@@ -3905,47 +3892,12 @@ function* executeFunction(
           case 'RunEffectComposite':
           case 'RunEffectValue':
           case 'RunStaticEffect': {
-            const composite =
-              operation._tag === 'RunEffectComposite'
-                ? (() => {
-                    const value = read(operation.effect).value
-                    if (value._tag !== 'EffectCompositeValue')
-                      throw new RangeError('MIR attempted to run a non-composite Effect value')
-                    const alternative = operation.alternatives.at(value.alternative)
-                    if (alternative === undefined)
-                      throw new RangeError('MIR Effect composite selected an absent alternative')
-                    return Object.freeze({ value, alternative })
-                  })()
-                : undefined
-            const captures =
-              composite !== undefined
-                ? composite.value.effect.captures
-                : operation._tag === 'RunEffectValue'
-                  ? (() => {
-                      const effect = read(operation.effect).value
-                      if (effect._tag !== 'EffectValue')
-                        throw new RangeError('MIR attempted to run a non-Effect value')
-                      return effect.captures
-                    })()
-                  : operation._tag === 'RunStaticEffect'
-                    ? operation.captures.map((capture) => read(capture.source).value)
-                    : Object.freeze([])
-            const runner =
-              operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.runner ?? operation.alternatives.at(0)?.runner)
-                : operation.runner
-            const runnerTypeArguments =
-              operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.runnerTypeArguments ??
-                  operation.alternatives.at(0)?.runnerTypeArguments)
-                : operation.runnerTypeArguments
-            if (runner === undefined || runnerTypeArguments === undefined)
-              throw new RangeError('MIR Effect composite has no runnable alternative')
-            const target = functionFor(program, runner, runnerTypeArguments)
+            const execution = BootstrapEffect.prepareExecution(operation, read)
+            const target = functionFor(program, execution.runner, execution.runnerTypeArguments)
             if (target === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
-                target: runner,
+                target: execution.runner,
                 span: operation.provenance.span,
               })
             trace.push(
@@ -3954,51 +3906,25 @@ function* executeFunction(
                 frame: activation.frame,
                 depth: activation.depth,
                 caller: fn.id,
-                target: runner,
+                target: execution.runner,
                 callerInstance: fn.instance,
                 targetInstance: target.instance,
                 span: operation.provenance.span,
               }),
             )
-            const runnerArguments = Object.freeze([
-              ...captures,
-              ...(operation._tag === 'RunEffectComposite'
-                ? (composite?.alternative.arguments ?? []).map((argument) => read(argument).value)
-                : operation.arguments.map((argument) => read(argument).value)),
-            ])
             const result =
               operation._tag === 'RunEffectValue'
-                ? yield* callEffectRunner(target, runnerArguments, operation)
-                : yield* callFunction(target, runnerArguments, operation.provenance.span)
+                ? yield* callEffectRunner(target, execution.arguments, operation)
+                : yield* callFunction(target, execution.arguments, operation.provenance.span)
             if (result._tag === 'Blocked') return result
             if (result._tag === 'Transfer') return result
             if (result.value._tag !== 'EffectOutcomeValue')
               throw new RangeError('MIR Effect runner returned a non-outcome value')
-            const rawOutcome: EffectOutcomeValue = result.value
-            const effectOutcome: EffectOutcomeValue =
-              composite === undefined || rawOutcome.tag === 0
-                ? rawOutcome
-                : (() => {
-                    const mapping = composite.alternative.tagMappings.find(
-                      (candidate) => candidate.source === rawOutcome.tag,
-                    )
-                    if (mapping === undefined)
-                      throw new RangeError(
-                        'MIR Effect composite has no alternative failure mapping',
-                      )
-                    return Object.freeze({
-                      _tag: 'EffectOutcomeValue' as const,
-                      type: operation.outcomeType.type,
-                      tag: mapping.target,
-                      payload: repackFailurePayload(
-                        rawOutcome.payload,
-                        composite.alternative.type.type,
-                        rawOutcome.tag,
-                        operation.outcomeType.type,
-                        mapping.target,
-                      ),
-                    })
-                  })()
+            const effectOutcome = BootstrapEffect.normalizeOutcome(
+              operation,
+              result.value,
+              execution,
+            )
             write(operation.outcome, { value: effectOutcome, fromCall: true })
             if (effectOutcome.tag === 0) {
               write(operation.destination, { value: effectOutcome.payload, fromCall: true })

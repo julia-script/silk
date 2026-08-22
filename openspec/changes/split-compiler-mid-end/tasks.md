@@ -23,3 +23,8 @@
 - [x] 4.1 Run `pnpm typecheck` and verify clean
 - [x] 4.2 Run `pnpm exec biome check .` and verify clean
 - [x] 4.3 Run `pnpm test`
+
+## 5. Convergence findings
+
+- [x] 5.1 Route OS provider-loan endings through `endLoans` and replace duplicated `EffectBindRequirement` lowering in `LowerExpression` with `lowerProvidedEffect`
+- [x] 5.2 Verify loan identity, end ordering, and provider replacement behavior across evaluator, wasm, and native paths

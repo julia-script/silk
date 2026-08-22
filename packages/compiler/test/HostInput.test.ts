@@ -5,12 +5,12 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as HostInput from '../src/HostInput.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
 import * as Mir from '../src/Mir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Driver from './support/TestDriver.js'
 
 const encoder = new TextEncoder()
 

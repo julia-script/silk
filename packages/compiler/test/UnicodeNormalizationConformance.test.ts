@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Driver from '../src/Driver.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as Driver from './support/TestDriver.js'
 
 /**
  * The pinned Unicode conformance data, run through the standard library's own normalizer.

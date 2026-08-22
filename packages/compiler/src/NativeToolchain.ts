@@ -27,8 +27,8 @@ export interface Toolchain {
 
 export interface ShimCache {
   readonly _tag: 'ShimCache'
-  readonly get: (key: string) => Uint8Array | undefined
-  readonly set: (key: string, bytes: Uint8Array) => void
+  readonly get: (key: string) => Effect.Effect<Uint8Array | undefined, ToolchainError>
+  readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
   readonly stats: () => ShimCacheStats
 }
 
@@ -44,15 +44,17 @@ export const makeShimCache = (): ShimCache => {
   let misses = 0
   return Object.freeze({
     _tag: 'ShimCache',
-    get: (key: string) => {
-      const bytes = objects.get(key)
-      if (bytes === undefined) misses += 1
-      else hits += 1
-      return bytes
-    },
-    set: (key: string, bytes: Uint8Array) => {
-      objects.set(key, Uint8Array.from(bytes))
-    },
+    get: (key: string) =>
+      Effect.sync(() => {
+        const bytes = objects.get(key)
+        if (bytes === undefined) misses += 1
+        else hits += 1
+        return bytes
+      }),
+    set: (key: string, bytes: Uint8Array) =>
+      Effect.sync(() => {
+        objects.set(key, Uint8Array.from(bytes))
+      }),
     stats: () => Object.freeze({ entries: objects.size, hits, misses }),
   })
 }
@@ -162,11 +164,58 @@ export interface ArtifactCache {
 
 let atomicNonce = 0
 
+export interface CleanupOperation {
+  readonly remove: (
+    path: string,
+    options: { readonly force: true; readonly recursive?: boolean },
+  ) => void
+}
+
+const nodeCleanup: CleanupOperation = Object.freeze({
+  remove: (path: string, options: { readonly force: true; readonly recursive?: boolean }) =>
+    rmSync(path, options),
+})
+
+/**
+ * Cleanup is deliberately infallible at the Effect level so a release failure cannot replace the
+ * protected success/failure/interruption. A second owner-provided attempt handles transient races;
+ * the Node boundary then performs the required final removal even when an injected cleanup keeps
+ * failing.
+ */
+const cleanupPath = (
+  path: string,
+  options: { readonly force: true; readonly recursive?: boolean },
+  cleanup: CleanupOperation,
+): Effect.Effect<void> => {
+  const attempt = (operation: CleanupOperation): Effect.Effect<void, unknown> =>
+    Effect.try({
+      try: () => operation.remove(path, options),
+      catch: (cause) => cause,
+    })
+  const retry = attempt(cleanup).pipe(
+    Effect.matchEffect({
+      onFailure: () => attempt(nodeCleanup),
+      onSuccess: () => Effect.succeed(undefined),
+    }),
+  )
+  return attempt(cleanup).pipe(
+    Effect.matchEffect({
+      onFailure: () => retry,
+      onSuccess: () => Effect.succeed(undefined),
+    }),
+    Effect.orElseSucceed(() => undefined),
+  )
+}
+
 /** Atomically writes bytes through a unique same-directory temporary sibling. */
 export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* (
   destination: string,
   bytes: Uint8Array,
-  options: { readonly mode?: number; readonly stage?: Stage } = {},
+  options: {
+    readonly mode?: number
+    readonly stage?: Stage
+    readonly cleanup?: CleanupOperation
+  } = {},
 ): Effect.fn.Return<string, ToolchainError> {
   const path = resolve(destination)
   const temporary = `${path}.silk-tmp-${process.pid}-${atomicNonce++}`
@@ -193,10 +242,7 @@ export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* 
         },
         catch: (cause) => storageError('NativeToolchain.atomicCommit', stage, path, cause),
       }),
-    (staged) =>
-      Effect.sync(() => {
-        rmSync(staged, { force: true })
-      }),
+    (staged) => cleanupPath(staged, { force: true }, options.cleanup ?? nodeCleanup),
   )
 })
 
@@ -340,7 +386,7 @@ export const hostSelection = (): Target.Selection => Target.select(undefined, pl
 export const withBuildScope = <A, E, R>(
   name: string,
   run: (scope: BuildScope) => Effect.Effect<A, E, R>,
-  options: { readonly saveTemps?: boolean } = {},
+  options: { readonly saveTemps?: boolean; readonly cleanup?: CleanupOperation } = {},
 ): Effect.Effect<A, E | ToolchainError, R> =>
   Effect.acquireUseRelease(
     Effect.try({
@@ -353,10 +399,41 @@ export const withBuildScope = <A, E, R>(
     }),
     run,
     (scope) =>
-      Effect.sync(() => {
-        if (options.saveTemps !== true) rmSync(scope.root, { recursive: true, force: true })
-      }),
+      options.saveTemps === true
+        ? Effect.succeed(undefined)
+        : cleanupPath(scope.root, { recursive: true, force: true }, options.cleanup ?? nodeCleanup),
   )
+
+const readShimCache = Effect.fnUntraced(function* (
+  cache: ShimCache,
+  key: string,
+): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.get(key),
+    catch: (cause) => storageError('NativeToolchain.ShimCache.get', 'cache-read', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      storageError('NativeToolchain.ShimCache.get', 'cache-read', key, cause),
+    ),
+  )
+})
+
+const writeShimCache = Effect.fnUntraced(function* (
+  cache: ShimCache,
+  key: string,
+  bytes: Uint8Array,
+): Effect.fn.Return<void, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.set(key, bytes),
+    catch: (cause) => storageError('NativeToolchain.ShimCache.set', 'cache-write', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      storageError('NativeToolchain.ShimCache.set', 'cache-write', key, cause),
+    ),
+  )
+})
 
 export const writeArtifact = Effect.fn('NativeToolchain.writeArtifact')(function* (
   scope: BuildScope,
@@ -453,7 +530,10 @@ export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
   const objectPath = join(scope.root, 'silk_shim.o')
   const source = yield* writeArtifact(scope, target, 'silk_shim.c', sourceText)
   const planned = ToolchainPlan.shimCommand(toolchain.clang, target, source.path, objectPath)
-  const cached = toolchain.shimCache?.get(cacheKey)
+  const cached =
+    toolchain.shimCache === undefined
+      ? undefined
+      : yield* readShimCache(toolchain.shimCache, cacheKey)
   if (cached !== undefined) {
     yield* writeArtifact(scope, target, 'silk_shim.o', cached)
   } else {
@@ -463,7 +543,8 @@ export const compileShim = Effect.fn('NativeToolchain.compileShim')(function* (
       try: () => readFileSync(objectPath),
       catch: (cause) => storageError('NativeToolchain.compileShim', 'shim', objectPath, cause),
     })
-    toolchain.shimCache?.set(cacheKey, bytes)
+    if (toolchain.shimCache !== undefined)
+      yield* writeShimCache(toolchain.shimCache, cacheKey, bytes)
   }
   return Object.freeze({
     _tag: 'ObjectArtifact',

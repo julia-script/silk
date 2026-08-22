@@ -21,3 +21,8 @@
 - [x] 4.1 Run `pnpm typecheck` and verify clean
 - [x] 4.2 Run `pnpm exec biome check .` and verify clean
 - [x] 4.3 Run `pnpm test` and verify golden/determinism suites pass
+
+## 5. Convergence findings
+
+- [x] 5.1 Rename frontend trace spans to their owning actor and route the remaining closure measurements through `PhaseReport.measure`/`measureEffectInto`
+- [x] 5.2 Verify phase order, counters, heap observations, and report rendering remain stable

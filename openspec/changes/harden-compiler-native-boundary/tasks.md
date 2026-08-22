@@ -33,3 +33,9 @@
 - [x] 6.1 Run `pnpm typecheck` and verify clean
 - [x] 6.2 Run `pnpm exec biome check .` and verify clean
 - [x] 6.3 Run `pnpm test` and verify the suite passes with new typed-failure and cleanup tests
+
+## 7. Convergence findings
+
+- [x] 7.1 Make build-scope and atomic-commit cleanup non-defecting while preserving the protected exit and removing every staged sibling; add injected cleanup-failure tests
+- [x] 7.2 Make `ShimCache` operations Effect-valued with cache-stage `ToolchainError` translation and throwing-cache tests
+- [x] 7.3 Make `HeapObservation` required and provide the Node layer at CLI/native application edges plus explicit browser/test layers

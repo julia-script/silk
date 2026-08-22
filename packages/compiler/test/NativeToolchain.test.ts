@@ -160,6 +160,37 @@ it.effect('removes a build scope after interruption', () =>
   }),
 )
 
+it.effect('retries a throwing scope cleanup without replacing the protected failure', () =>
+  Effect.gen(function* () {
+    const protectedFailure = Object.freeze({ _tag: 'ProtectedFailure' as const })
+    let scopeRoot = ''
+    let cleanupAttempts = 0
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope(
+        'cleanup-retry',
+        (scope) => {
+          scopeRoot = scope.root
+          return Effect.fail(protectedFailure)
+        },
+        {
+          cleanup: {
+            remove: (path, options) => {
+              cleanupAttempts += 1
+              if (cleanupAttempts === 1) throw new Error('injected cleanup failure')
+              rmSync(path, options)
+            },
+          },
+        },
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure, protectedFailure)
+    assert.strictEqual(cleanupAttempts, 2)
+    assert.strictEqual(existsSync(scopeRoot), false)
+  }),
+)
+
 it.effect('failed rename removes its temporary sibling and preserves the destination', () =>
   Effect.gen(function* () {
     const destination = join(testRoot, 'occupied-destination')
@@ -175,6 +206,121 @@ it.effect('failed rename removes its temporary sibling and preserves the destina
       readdirSync(testRoot).filter((name) => name.startsWith('occupied-destination.silk-tmp-')),
       [],
     )
+  }),
+)
+
+it.effect('retries throwing atomic cleanup and leaves no staged sibling', () =>
+  Effect.gen(function* () {
+    const destination = join(testRoot, 'occupied-cleanup-retry')
+    mkdirSync(destination)
+    let cleanupAttempts = 0
+    const result = yield* Effect.result(
+      NativeToolchain.atomicCommit(destination, Uint8Array.of(4, 5, 6), {
+        cleanup: {
+          remove: (path, options) => {
+            cleanupAttempts += 1
+            if (cleanupAttempts === 1) throw new Error('injected cleanup failure')
+            rmSync(path, options)
+          },
+        },
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    assert.strictEqual(cleanupAttempts, 2)
+    assert.deepEqual(
+      readdirSync(testRoot).filter((name) => name.startsWith('occupied-cleanup-retry.silk-tmp-')),
+      [],
+    )
+  }),
+)
+
+it.effect('falls back to Node cleanup when injected atomic cleanup keeps failing', () =>
+  Effect.gen(function* () {
+    const destination = join(testRoot, 'occupied-cleanup-fallback')
+    mkdirSync(destination)
+    let cleanupAttempts = 0
+    const result = yield* Effect.result(
+      NativeToolchain.atomicCommit(destination, Uint8Array.of(7, 8, 9), {
+        cleanup: {
+          remove: () => {
+            cleanupAttempts += 1
+            throw new Error('injected persistent cleanup failure')
+          },
+        },
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    assert.strictEqual(cleanupAttempts, 2)
+    assert.deepEqual(
+      readdirSync(testRoot).filter((name) =>
+        name.startsWith('occupied-cleanup-fallback.silk-tmp-'),
+      ),
+      [],
+    )
+  }),
+)
+
+it.effect('translates synchronously throwing shim-cache reads with cache-stage provenance', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const cause = Object.freeze({ injected: 'cache-read' })
+    const cache: NativeToolchain.ShimCache = Object.freeze({
+      _tag: 'ShimCache',
+      get: () => {
+        throw cause
+      },
+      set: () => Effect.succeed(undefined),
+      stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
+    })
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope('cache-read-failure', (scope) =>
+        NativeToolchain.compileShim(
+          Object.freeze({ ...toolchain, shimCache: cache }),
+          scope,
+          target,
+          termination(),
+        ),
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.stage, 'cache-read')
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ShimCache.get')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
+  }),
+)
+
+it.effect('translates synchronously throwing shim-cache writes with cache-stage provenance', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const cause = Object.freeze({ injected: 'cache-write' })
+    const cache: NativeToolchain.ShimCache = Object.freeze({
+      _tag: 'ShimCache',
+      get: () => Effect.succeed(undefined),
+      set: () => {
+        throw cause
+      },
+      stats: () => Object.freeze({ entries: 0, hits: 0, misses: 0 }),
+    })
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
+        NativeToolchain.compileShim(
+          Object.freeze({ ...toolchain, shimCache: cache }),
+          scope,
+          target,
+          termination(),
+        ),
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.stage, 'cache-write')
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ShimCache.set')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
   }),
 )
 

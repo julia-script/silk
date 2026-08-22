@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- **Extract the shared cross-backend contract** — Backend, BackendError, Artifact, CodegenRequest, ControlProvenance, terminationOf, formatModuleViolations, symbolFor, suspensionPointKey, and lineTable helpers — into a shared module so WasmBackend stops importing the LLVM file by name. Rename Backend.ts to LlvmBackend.ts (with a re-export for existing callers) and move the target-neutral MIR linearization beside Mir.
+- **Give the shared cross-backend contract one final actor** — `Backend.ts` owns Backend, BackendError, Artifact, CodegenRequest, ControlProvenance, terminationOf, formatModuleViolations, symbolFor, suspensionPointKey, and line-table helpers. `LlvmBackend.ts` owns only LLVM lowering, all callers import the correct actor directly, and no compatibility re-export remains. Target-neutral MIR linearization moves beside Mir.
 - **Split Backend emitProgram** into NativeType / NativeDeclare / NativeDebug / NativeFunction / NativeCall / NativeArith / NativeAggregate / NativeOperation / NativeControl / NativeSuspension, driven by an explicit LoweringContext record.
 - **Deduplicate scalar arithmetic** (the byte-identical comparisonPredicates table and checked overflow/div/range blocks) into a single NativeArith seam; merge the six lane-pointer helpers into one.
 - **Move the transcendental sin/cos/tan kernel** beside Transcendental.plan.

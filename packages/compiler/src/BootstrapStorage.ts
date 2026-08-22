@@ -3,6 +3,89 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Type from './Type.js'
 
+export interface Allocation {
+  active: boolean
+  readonly values: Map<string, Value>
+}
+
+export type Allocations = Map<number, Allocation>
+
+/** Acquires one empty evaluator allocation ticket. */
+export const allocate = (allocations: Allocations, ticket: number): void => {
+  allocations.set(ticket, { active: true, values: new Map() })
+}
+
+/** Releases one live allocation and optionally clears its initialized slots. */
+export const release = (allocations: Allocations, ticket: number, clear: boolean): boolean => {
+  const allocation = allocations.get(ticket)
+  if (allocation === undefined || !allocation.active) return false
+  allocation.active = false
+  if (clear) allocation.values.clear()
+  return true
+}
+
+/** Reads one initialized slot from live raw storage. */
+export const read = (
+  allocations: Allocations,
+  ticket: number,
+  index: bigint,
+): Value | undefined => {
+  const allocation = allocations.get(ticket)
+  return allocation === undefined || !allocation.active
+    ? undefined
+    : allocation.values.get(index.toString())
+}
+
+/** Writes one value only when the raw slot is live and uninitialized. */
+export const write = (
+  allocations: Allocations,
+  ticket: number,
+  index: bigint,
+  value: Value,
+): boolean => {
+  const allocation = allocations.get(ticket)
+  const key = index.toString()
+  if (allocation === undefined || !allocation.active || allocation.values.has(key)) return false
+  allocation.values.set(key, value)
+  return true
+}
+
+/** Takes one initialized raw slot, leaving it uninitialized. */
+export const take = (
+  allocations: Allocations,
+  ticket: number,
+  index: bigint,
+): Value | undefined => {
+  const allocation = allocations.get(ticket)
+  const key = index.toString()
+  const selected = allocation?.values.get(key)
+  if (allocation === undefined || !allocation.active || selected === undefined) return undefined
+  allocation.values.delete(key)
+  return selected
+}
+
+/** Removes one initialized slot after its value has been released. */
+export const drop = (allocations: Allocations, ticket: number, index: bigint): boolean => {
+  const allocation = allocations.get(ticket)
+  if (allocation === undefined || !allocation.active) return false
+  return allocation.values.delete(index.toString())
+}
+
+/** Initializes a byte range of one live raw allocation. */
+export const fill = (
+  allocations: Allocations,
+  ticket: number,
+  offset: bigint,
+  length: number,
+  value: Value,
+): boolean => {
+  const allocation = allocations.get(ticket)
+  if (allocation === undefined || !allocation.active) return false
+  for (let index = 0; index < length; index += 1)
+    allocation.values.set(String(offset + BigInt(index)), value)
+  return true
+}
+
 /** Lists the semantic owners visited by one concrete cleanup execution. */
 export const cleanupMembers = (
   cleanup: CleanupPlan.CleanupPlan,

@@ -1,10 +1,91 @@
-import type * as Mir from './Mir.js'
+import type * as Builder from '@silk-effect/llvm/Builder'
+import * as Constant from '@silk-effect/llvm/Constant'
+import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
+import type * as LlvmError from '@silk-effect/llvm/LlvmError'
+import type * as LlvmType from '@silk-effect/llvm/Type'
+import type * as Value from '@silk-effect/llvm/Value'
+import * as Effect from 'effect/Effect'
+import * as Layout from './Layout.js'
+import * as Mir from './Mir.js'
 import { destinationOf, type LinearBlock, opensRuntimeContinuation } from './MirLinearization.js'
 
 export interface MutableRoots {
   readonly mutable: ReadonlySet<number>
   readonly address: ReadonlySet<number>
 }
+
+/** Per-function LLVM storage state used by mutation and address-taking lowering. */
+export interface StorageContext {
+  readonly builder: Builder.Builder
+  readonly body: FunctionBody.FunctionBody
+  readonly byteType: LlvmType.Type
+  readonly offsetType: LlvmType.Type
+  readonly fn: Mir.MirFunction
+  readonly layout: Layout.Plan
+  readonly mutableRoots: ReadonlySet<number>
+  readonly mutableStorage: ReadonlyMap<number, ReadonlyArray<Value.Input>>
+  readonly addressStorage: ReadonlyMap<number, Value.Input>
+  readonly locals: Map<number, ReadonlyArray<Value.Input>>
+  readonly valueLanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
+  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+}
+
+/** Reloads memory-backed roots at a control-flow join into the current SSA cache. */
+export const reloadMutableRoots = Effect.fnUntraced(function* (
+  context: StorageContext,
+  tag: string,
+): Effect.fn.Return<void, LlvmError.LlvmError> {
+  for (const root of [...context.mutableRoots].sort((left, right) => left - right)) {
+    const storage = context.mutableStorage.get(root)
+    if (storage === undefined) continue
+    const loaded: Array<Value.Input> = []
+    const logicalType = context.fn.localTypes.at(root)
+    if (logicalType === undefined) throw new RangeError('Mutable root lost its type')
+    for (const [lane, pointer] of storage.entries()) {
+      const callingLane = context.valueLanesFor(logicalType).at(lane)
+      if (callingLane === undefined) throw new RangeError('Mutable root lost a lane')
+      loaded.push(
+        yield* FunctionBody.load(
+          context.body,
+          context.laneType(callingLane),
+          pointer,
+          `mut${root}_${lane}_load_${tag}`,
+        ),
+      )
+    }
+    context.locals.set(root, Object.freeze(loaded))
+  }
+})
+
+/** Stores every physical lane of an address-taken root into its stable byte storage. */
+export const storeAddressRootValues = Effect.fnUntraced(function* (
+  context: StorageContext,
+  root: number,
+  values: ReadonlyArray<Value.Input>,
+  name: string,
+): Effect.fn.Return<void, LlvmError.LlvmError> {
+  const base = context.addressStorage.get(root)
+  const logicalType = context.fn.localTypes.at(root)
+  if (base === undefined || logicalType === undefined)
+    throw new RangeError(`Backend lost address storage for %${root}`)
+  for (const [ordinal, lane] of context.valueLanesFor(logicalType).entries()) {
+    const offset = Layout.laneOffset(context.layout, Mir.semanticType(logicalType), lane.path)
+    const stored = values.at(ordinal)
+    if (offset === undefined || stored === undefined)
+      throw new RangeError(`Backend lost address lane ${ordinal} for %${root}`)
+    yield* FunctionBody.store(
+      context.body,
+      stored,
+      yield* FunctionBody.getElementPtr(
+        context.body,
+        context.byteType,
+        base,
+        [yield* Constant.integerUnsigned(context.builder, context.offsetType, BigInt(offset))],
+        `${name}_${ordinal}_ptr`,
+      ),
+    )
+  }
+})
 
 /** Finds locals that need stable stack storage across mutation, calls, and suspension control. */
 export const mutableRoots = (

@@ -4,7 +4,7 @@ See proposal.md. The @silk-effect/llvm boundary is already thin and Effect-nativ
 
 ## Decisions
 
-- **Shared contract module** (e.g. BackendShared.ts, or Artifact.ts + Symbol.ts): move CodegenRequest, ControlProvenance, Artifact, BackendError, Backend, emit, terminationOf, formatModuleViolations, sanitize/injectivePart/symbolFor/suspensionPointKey, and lineTable/positionOf. WasmBackend imports symbolFor/suspensionPointKey/terminationOf/formatModuleViolations/ControlProvenance from here instead of from Backend.ts. Rename Backend.ts to LlvmBackend.ts; BackendRegistry and Pipeline import changes are mechanical.
+- **Backend contract actor**: `Backend.ts` owns CodegenRequest, ControlProvenance, Artifact, BackendError, Backend, emit, terminationOf, formatModuleViolations, sanitize/injectivePart/symbolFor/suspensionPointKey, and lineTable/positionOf. `WasmBackend` imports the shared contract from this actor. `LlvmBackend.ts` exclusively owns LLVM lowering; callers import the final actor directly and no compatibility re-export remains.
 
 - **Linearization**: move expandMatches/linearize/llvmControl (484–920) to a target-neutral module beside Mir (it is candidate-neutral control-flow lowering).
 

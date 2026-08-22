@@ -8,7 +8,6 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Analysis from '../src/Analysis.js'
 import type * as Backend from '../src/Backend.js'
-import * as Driver from '../src/Driver.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -16,6 +15,7 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import * as WasmBackend from '../src/WasmBackend.js'
 import { corpus, invalidGenericCorpus } from './support/corpus.js'
+import * as Driver from './support/TestDriver.js'
 
 const clang =
   process.env.SILK_TEST_CLANG ??

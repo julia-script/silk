@@ -20,3 +20,8 @@
 - [x] 4.1 Run `pnpm typecheck` and verify clean
 - [x] 4.2 Run `pnpm exec biome check .` and verify clean
 - [x] 4.3 Run `pnpm test`
+
+## 5. Convergence findings
+
+- [x] 5.1 Extract `IncrementalReuse.ts` with `ProjectReuseBasis`, invalidation, structural sharing, and checkpointing; keep `Frontend` focused on phase orchestration
+- [x] 5.2 Verify incremental reuse and full frontend/project gate behavior

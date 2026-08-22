@@ -127,7 +127,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
 ): Effect.fn.Return<
   Outcome,
   SourceResolutionFailed | NativeToolchain.ToolchainError,
-  SourceResolver.SourceResolver
+  SourceResolver.SourceResolver | HeapObservation.HeapObservation
 > {
   const report: Array<DriverPhaseReport> = []
   const heapObservation = yield* HeapObservation.HeapObservation
