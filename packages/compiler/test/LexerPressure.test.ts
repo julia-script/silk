@@ -7,7 +7,7 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import type * as Token from '../src/Token.js'
@@ -407,7 +407,7 @@ it.effect('publishes only general MIR operations for the pressure program', () =
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const tags = new Set(
       Analysis.loweredMir(snapshot).functions.flatMap((fn) =>
-        Mir.operations(fn).map((operation) => operation._tag),
+        MirVerification.operations(fn).map((operation) => operation._tag),
       ),
     )
     assert.strictEqual(tags.has('Allocate'), true)

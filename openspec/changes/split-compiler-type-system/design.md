@@ -1,12 +1,12 @@
 ## Context
 
-See proposal.md. Each split follows a seam already present in the code; the phase entry points (`instances`, `discover`, `frontend`, `realize`, `prepare`) stay put and callers are unchanged.
+See proposal.md. Each split follows a seam already present in the code. Public phase behavior is unchanged, while internal callers migrate to each final owning actor and no forwarding facade remains.
 
 ## Decisions
 
-- **`Type.ts` → `TypeInference.ts`**: move `GenericArgumentConflict` through `substitution` (bind, infer, row/failure/requirement argument inference, `prefixSubstitution`) as one self-contained actor that only reads `Type` predicates. `Type.ts` keeps the vocabulary, keys/encoding, row policies, and re-exports `infer`/`inferOpenGenericArguments`.
+- **`Type.ts` → `TypeInference.ts`**: move `GenericArgumentConflict` through `substitution` (bind, infer, row/failure/requirement argument inference, `prefixSubstitution`) as one self-contained actor that only reads `Type` predicates. `Type.ts` keeps the vocabulary, keys/encoding, and row policies; inference callers import `TypeInference` directly.
 - **`Instances.ts` split**: keep `discover`/`resolveEntry`/`specialize`/`keyOf`/`concreteConstraintEvidence` in `Instances`; move `copyDropViolations`/`requirementBindingViolations`/`unlowerableWitnessViolations`/`storedExecutableViolations`/`violationDiagnostics` to `InstanceDiagnostics.ts`; move `callableOriginOf`/`effectOriginOf`/`resultEffectIdentity`/`concreteCallables`/`concreteEffects`/`suspensionGraph`/`suspendableNodes`/`reachableIntrinsics`/`interfaceWitnessTargets`/`callTargets` to `ExecutableOrigin.ts`.
-- **`Pipeline.ts` split**: `realize` (Analysis-facing) and `prepare` (Driver-facing) share one `discoverAndLower(self, options)` returning `{ instances, diagnostics, target, layout, mir, report }`; each public entry maps that result through its own gates. `frontend` and `frontendProject` move to their own modules with the reuse machinery (`ProjectReuseBasis`, `checkpointModuleBatch`).
+- **`Pipeline.ts` split**: `realize` (Analysis-facing) and `prepare` (Driver-facing) share one `discoverAndLower(self, options)` returning `{ instances, diagnostics, target, layout, mir, report }`; each public entry maps that result through its own gates. `Frontend` owns phase orchestration, while `IncrementalReuse` owns `ProjectReuseBasis`, invalidation, structural sharing, and checkpointing.
 
 ## Risks / Trade-offs
 

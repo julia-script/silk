@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as Projections from './support/projections.js'
 
 const bytes = new Uint8Array(
@@ -169,8 +169,8 @@ it.effect('produces byte-identical artifacts across repeated analyses', () =>
     const second = yield* Analysis.ofSourceRealized(moduleName, bytes, 'wasm32-unknown-unknown')
 
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(first)),
-      Mir.encode(Analysis.loweredMir(second)),
+      MirEncoding.encode(Analysis.loweredMir(first)),
+      MirEncoding.encode(Analysis.loweredMir(second)),
     )
     const firstWasm = yield* Analysis.codegenWasm(first, { mode: 'release' })
     const secondWasm = yield* Analysis.codegenWasm(second, { mode: 'release' })

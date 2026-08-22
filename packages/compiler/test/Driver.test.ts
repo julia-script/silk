@@ -591,6 +591,62 @@ it.effect('serves identical bitcode from the artifact cache without invoking the
   }),
 )
 
+it.effect('translates a synchronously throwing artifact-cache read at the Driver boundary', () =>
+  Effect.gen(function* () {
+    const cause = Object.freeze({ injected: 'artifact-cache-read' })
+    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => {
+        throw cause
+      },
+      set: () => Effect.void,
+    })
+    const result = yield* Effect.result(
+      compileSource('throwing-artifact-cache-read', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        cache: true,
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure._tag, 'ToolchainError')
+    if (result.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ArtifactCache.get')
+    assert.strictEqual(result.failure.stage, 'cache-read')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
+  }),
+)
+
+it.effect('translates a synchronously throwing artifact-cache write at the Driver boundary', () =>
+  Effect.gen(function* () {
+    const cause = Object.freeze({ injected: 'artifact-cache-write' })
+    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+      _tag: 'ArtifactCache',
+      get: () => Effect.succeed(undefined),
+      set: () => {
+        throw cause
+      },
+    })
+    const result = yield* Effect.result(
+      compileSource('throwing-artifact-cache-write', 'pub fn main() -> i32 { return 42 }', {
+        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+        cache: true,
+      }),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure._tag, 'ToolchainError')
+    if (result.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.ArtifactCache.set')
+    assert.strictEqual(result.failure.stage, 'cache-write')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.strictEqual(result.failure.reason.cause, cause)
+  }),
+)
+
 it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default', () =>
   Effect.gen(function* () {
     const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-default-cache-'))

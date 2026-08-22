@@ -1,3 +1,4 @@
+import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
  *
@@ -11,7 +12,6 @@ import type {
   Backend,
   BootstrapEvaluation,
   CleanupPlan,
-  DeclarationIndex,
   Elaboration,
   Instances,
   Layout,
@@ -20,6 +20,7 @@ import type {
   Ownership,
 } from '@silk-effect/compiler'
 import { Mir } from '@silk-effect/compiler'
+import * as MirVerification from '@silk-effect/compiler/MirVerification'
 import * as Type from '@silk-effect/compiler/Type'
 import type { RowModel, Span } from './Row.js'
 import { spanOf as asSpan } from './Row.js'
@@ -103,14 +104,14 @@ export const closureRows = (closure: ModuleClosure.Closure): ReadonlyArray<RowMo
   return rows
 }
 
-const declaredTypeText = (fact: DeclarationIndex.DeclaredTypeFact): string =>
+const declaredTypeText = (fact: DeclarationFacts.DeclaredTypeFact): string =>
   fact._tag === 'Resolved'
     ? typeText(fact.type)
     : fact._tag === 'Unresolved'
       ? fact.spelling
       : 'unavailable'
 
-const memberSignature = (member: DeclarationIndex.MemberFact): string => {
+const memberSignature = (member: DeclarationFacts.MemberFact): string => {
   if (member._tag === 'RoleDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}role`
   const parameters =
@@ -140,13 +141,13 @@ const memberSignature = (member: DeclarationIndex.MemberFact): string => {
   )}${failures}`
 }
 
-const memberName = (member: DeclarationIndex.MemberFact): string =>
+const memberName = (member: DeclarationFacts.MemberFact): string =>
   member.name._tag === 'Present' ? member.name.spelling : 'unavailable name'
 
-const declaredName = (name: DeclarationIndex.DeclaredName): string =>
+const declaredName = (name: DeclarationFacts.DeclaredName): string =>
   name._tag === 'Present' ? name.spelling : 'unavailable name'
 
-const conformanceLabel = (conformance: DeclarationIndex.ConformanceFact): string => {
+const conformanceLabel = (conformance: DeclarationFacts.ConformanceFact): string => {
   const parameters =
     conformance.typeParameters.length === 0
       ? ''
@@ -154,7 +155,7 @@ const conformanceLabel = (conformance: DeclarationIndex.ConformanceFact): string
   return `impl${parameters} ${declaredTypeText(conformance.capability)} for ${declaredTypeText(conformance.provider)}`
 }
 
-export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel> => {
+export const indexRows = (index: DeclarationFacts.Index): ReadonlyArray<RowModel> => {
   const rows: Array<RowModel> = []
 
   for (const module of index.modules) {
@@ -877,7 +878,7 @@ export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
       fn.instance.typeArguments.map(Type.genericArgumentKey),
       fn.instance.contractRow,
     ])}`
-    const operationCount = Mir.operations(fn).length
+    const operationCount = MirVerification.operations(fn).length
     rows.push({
       key: fnKey,
       dot: 'symbol',

@@ -191,6 +191,68 @@ it.effect('retries a throwing scope cleanup without replacing the protected fail
   }),
 )
 
+it.effect('surfaces persistent cleanup failure after a successful protected operation', () =>
+  Effect.gen(function* () {
+    const cleanupFailure = Object.freeze({ injected: 'persistent-scope-cleanup' })
+    let scopeRoot = ''
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope(
+        'cleanup-failure-after-success',
+        (scope) => {
+          scopeRoot = scope.root
+          return Effect.succeed(42)
+        },
+        {
+          cleanup: {
+            remove: () => {
+              throw cleanupFailure
+            },
+          },
+        },
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.operation, 'NativeToolchain.cleanupPath')
+    assert.strictEqual(result.failure.stage, 'scope-cleanup')
+    assert.strictEqual(result.failure.reason._tag, 'StorageFailed')
+    if (result.failure.reason._tag !== 'StorageFailed') return
+    assert.deepEqual(result.failure.reason.cause, {
+      first: cleanupFailure,
+      retry: cleanupFailure,
+    })
+    assert.strictEqual(existsSync(scopeRoot), false)
+  }),
+)
+
+it.effect('preserves a primary failure when persistent cleanup also fails', () =>
+  Effect.gen(function* () {
+    const primaryFailure = Object.freeze({ _tag: 'ProtectedFailure' as const })
+    const cleanupFailure = Object.freeze({ injected: 'persistent-scope-cleanup' })
+    let scopeRoot = ''
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope(
+        'primary-and-cleanup-failure',
+        (scope) => {
+          scopeRoot = scope.root
+          return Effect.fail(primaryFailure)
+        },
+        {
+          cleanup: {
+            remove: () => {
+              throw cleanupFailure
+            },
+          },
+        },
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure, primaryFailure)
+    assert.strictEqual(existsSync(scopeRoot), false)
+  }),
+)
+
 it.effect('failed rename removes its temporary sibling and preserves the destination', () =>
   Effect.gen(function* () {
     const destination = join(testRoot, 'occupied-destination')

@@ -1,6 +1,6 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
 import type * as AutoImport from '@silk-effect/compiler/AutoImport'
-import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
+import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
 import * as ImportPath from '@silk-effect/compiler/ImportPath'
@@ -1883,7 +1883,7 @@ export const foldingRanges = (
 
 /** Builds the protocol item naming one source-backed declaration of the analyzed project. */
 const callHierarchyItem = (
-  declaration: DeclarationIndex.MemberFact,
+  declaration: DeclarationFacts.MemberFact,
   indexOf: (module: string) => LineIndex.LineIndex | undefined,
   uriOf: (module: string) => string | undefined,
 ): CallHierarchyItem | undefined => {
@@ -1913,7 +1913,7 @@ const callHierarchyItem = (
 /** Every function declaration of the analyzed project, in canonical module and source order. */
 const functionDeclarations = (
   snapshot: Analysis.FrontendSnapshot,
-): ReadonlyArray<DeclarationIndex.MemberFact> =>
+): ReadonlyArray<DeclarationFacts.MemberFact> =>
   Analysis.declarationIndex(snapshot)
     .modules.flatMap((module) => module.members)
     .filter((member) => member._tag === 'FunctionDeclaration')
@@ -1923,7 +1923,7 @@ const enclosingDeclaration = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   span: SourceSpan.SourceSpan,
-): DeclarationIndex.MemberFact | undefined =>
+): DeclarationFacts.MemberFact | undefined =>
   functionDeclarations(snapshot).find((declaration) => {
     const declarationSpan = SyntaxTree.span(declaration.syntax)
     return (
@@ -1966,7 +1966,7 @@ export const prepareCallHierarchy = (
 const declarationOfItem = (
   snapshot: Analysis.FrontendSnapshot,
   item: CallHierarchyItem,
-): DeclarationIndex.MemberFact | undefined =>
+): DeclarationFacts.MemberFact | undefined =>
   functionDeclarations(snapshot).find(
     (declaration) =>
       SemanticOccurrence.identityKey(

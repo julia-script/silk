@@ -1,5 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
@@ -14,6 +15,7 @@ import type {
   Selector,
 } from './internal/CallingShape.js'
 import * as Packing from './internal/Packing.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -30,9 +32,9 @@ export interface PlacedField extends Packing.PlacedField {}
 /** One declaration-ordered physical field within an aggregate representation. */
 export interface Field extends PlacedField {
   readonly _tag: 'LayoutField'
-  readonly id: DeclarationIndex.FieldId
+  readonly id: DeclarationFacts.FieldId
   readonly name: string
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
 }
 
 /** The initial closed representation vocabulary for concrete runtime types. */
@@ -47,7 +49,7 @@ export type Representation =
       readonly tailPadding: number
       /** Static cleanup hook required before structural field cleanup; contributes no ABI bytes. */
       readonly cleanupHook?: {
-        readonly hook: DeclarationIndex.CanonicalId
+        readonly hook: DeclarationFacts.CanonicalId
         readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       }
     }
@@ -65,13 +67,13 @@ export type Representation =
     }
   | {
       readonly _tag: 'Repeated'
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly length: number
       readonly stride: number
     }
   | {
       readonly _tag: 'Slice'
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly address: {
         readonly bits: 32 | 64
         readonly offset: 0
@@ -106,7 +108,7 @@ export type Representation =
     }
   | {
       readonly _tag: 'Reference'
-      readonly target: DeclarationIndex.SemanticType
+      readonly target: DeclarationFacts.SemanticType
       readonly address: {
         readonly bits: 32 | 64
         readonly offset: 0
@@ -133,7 +135,7 @@ export type Representation =
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
   readonly _tag: 'LayoutEntry'
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   /** Concrete sealed Copy evidence carried unchanged into MIR and every backend. */
   readonly copy: boolean
   readonly size: number
@@ -145,7 +147,7 @@ export interface Entry {
     readonly fields: ReadonlyArray<
       PlacedField & {
         readonly capture: number
-        readonly type: DeclarationIndex.SemanticType
+        readonly type: DeclarationFacts.SemanticType
         readonly access: Type.CaptureAccess
         readonly representation: 'Value' | 'Borrow' | 'Callable'
         readonly offset: number
@@ -164,15 +166,15 @@ export type UnavailableReason =
   | { readonly _tag: 'InvalidDeclaration'; readonly detail: string }
   | {
       readonly _tag: 'UnavailableField'
-      readonly field?: DeclarationIndex.FieldId
+      readonly field?: DeclarationFacts.FieldId
       readonly detail: string
     }
-  | { readonly _tag: 'UnavailableDependency'; readonly dependency: DeclarationIndex.SemanticType }
+  | { readonly _tag: 'UnavailableDependency'; readonly dependency: DeclarationFacts.SemanticType }
 
 /** One retained nominal layout failure that does not prevent unrelated layouts. */
 export interface UnavailableEntry {
   readonly _tag: 'UnavailableLayoutEntry'
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly dependencies: ReadonlyArray<Type.Nominal>
   readonly reason: UnavailableReason
   readonly cause?: Diagnostic.Identity
@@ -241,7 +243,7 @@ export interface EffectEnvironmentField extends PlacedField {
   readonly source: 'Binding' | 'Parameter'
   readonly ordinal: number
   readonly access: Type.CaptureAccess
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly representation: 'Value' | 'Borrow' | 'Callable'
   readonly effectIdentity?: string
   readonly callableIdentity?: Type.CallableIdentityArgument
@@ -277,7 +279,7 @@ export interface CallableEnvironmentField extends PlacedField {
   readonly ordinal: number
   readonly parameterOrdinal: number
   readonly access: Type.CaptureAccess
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly representation: 'Value' | 'Borrow'
 }
 
@@ -336,7 +338,7 @@ export interface Violation {
     | 'InvalidCallingShape'
     | 'InvalidLiteralVerdict'
     | 'CatalogMismatch'
-  readonly type?: DeclarationIndex.SemanticType
+  readonly type?: DeclarationFacts.SemanticType
   readonly detail: string
 }
 
@@ -518,13 +520,13 @@ export const neverEntry = (): Entry =>
     }),
   })
 
-const nominalOf = (struct: DeclarationIndex.StructFact): Type.Nominal | undefined =>
+const nominalOf = (struct: DeclarationFacts.StructFact): Type.Nominal | undefined =>
   struct.canonical._tag === 'Canonical'
     ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
     : undefined
 
 const dependenciesOf = (
-  struct: DeclarationIndex.StructFact,
+  struct: DeclarationFacts.StructFact,
   substitution: Type.Substitution = new Map(),
 ): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
@@ -541,7 +543,7 @@ const dependenciesOf = (
 }
 
 const unavailable = (
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
   dependencies: ReadonlyArray<Type.Nominal>,
   reason: UnavailableReason,
   cause?: Diagnostic.Identity,
@@ -557,7 +559,7 @@ const unavailable = (
 /** Computes every canonical nominal layout before runtime reachability or backend work. */
 export const catalog = (
   target: Target.Target,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   discovery?: Instances.Discovery,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Catalog => {
@@ -806,7 +808,7 @@ export const catalog = (
       const ordinal = Type.equals(type, Type.unit)
         ? Type.intrinsicNominals.size
         : Type.intrinsicNominalOrdinal(type)
-      const structId: DeclarationIndex.DeclarationId = Object.freeze({
+      const structId: DeclarationFacts.DeclarationId = Object.freeze({
         _tag: 'DeclarationId',
         sourceId: type.module,
         ordinal,
@@ -902,7 +904,7 @@ export const catalog = (
       })
     }
     const parameters = declaration.struct.typeParameters.map((parameter) => parameter.type)
-    const substitution = Type.substitution(parameters, type.arguments)
+    const substitution = TypeInference.substitution(parameters, type.arguments)
     if (substitution === undefined) {
       return unavailable(type, Object.freeze([]), {
         _tag: 'InvalidDeclaration',
@@ -972,7 +974,7 @@ export const catalog = (
         (plan) => plan.id.ordinal === field.id.ordinal,
       )
       let representationOrdinal = 0
-      const layoutFieldType = (candidate: DeclarationIndex.SemanticType): CatalogEntry => {
+      const layoutFieldType = (candidate: DeclarationFacts.SemanticType): CatalogEntry => {
         if (Type.isRepresented(candidate)) {
           const plan = representationPlans.at(representationOrdinal)
           representationOrdinal += 1
@@ -1047,7 +1049,7 @@ export const catalog = (
       _tag: 'LayoutEntry',
       type,
       copy:
-        DeclarationIndex.hasCopyDeclaration(index, type) &&
+        ConformanceProof.hasCopyDeclaration(index, type) &&
         fieldsCopy &&
         cleanup._tag !== 'HookCleanup',
       size: packed.size,
@@ -1287,7 +1289,7 @@ export const catalog = (
   }
 
   const layoutType = (
-    type: DeclarationIndex.SemanticType,
+    type: DeclarationFacts.SemanticType,
     executableUnionMember = false,
   ): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
@@ -1405,8 +1407,8 @@ export const catalog = (
     return entry
   }
 
-  const referenced = new Map<string, DeclarationIndex.SemanticType>()
-  const addReferenced = (type: DeclarationIndex.SemanticType): void => {
+  const referenced = new Map<string, DeclarationFacts.SemanticType>()
+  const addReferenced = (type: DeclarationFacts.SemanticType): void => {
     if (!Type.isRuntimeConcrete(type)) return
     referenced.set(Type.key(type), type)
     if (Type.isFixedArray(type)) addReferenced(type.element)
@@ -1537,7 +1539,7 @@ export const catalog = (
 }
 
 const addExpressionTypes = (
-  types: Map<string, DeclarationIndex.SemanticType>,
+  types: Map<string, DeclarationFacts.SemanticType>,
   expression: Hir.Expression,
   substitution: Type.Substitution = new Map(),
 ): void => {
@@ -1657,7 +1659,7 @@ const addExpressionTypes = (
 }
 
 const addStatementTypes = (
-  types: Map<string, DeclarationIndex.SemanticType>,
+  types: Map<string, DeclarationFacts.SemanticType>,
   statements: ReadonlyArray<Hir.Statement>,
   substitution: Type.Substitution = new Map(),
 ): void => {
@@ -1715,7 +1717,7 @@ const addStatementTypes = (
 }
 
 const addFunctionTypes = (
-  types: Map<string, DeclarationIndex.SemanticType>,
+  types: Map<string, DeclarationFacts.SemanticType>,
   instance: Instances.Instance,
 ): void => {
   const fn = instance.function
@@ -1780,7 +1782,7 @@ const effectEnvironments = (
       ),
     ).size
     for (const instance of [...discovery.instances].reverse()) {
-      const bindingTypes = new Map<number, DeclarationIndex.SemanticType>()
+      const bindingTypes = new Map<number, DeclarationFacts.SemanticType>()
       const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
         for (const statement of statements) {
           if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
@@ -2276,7 +2278,7 @@ const usizeLiteralVerdicts = (
 
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
 export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
-  const reached = new Map<string, DeclarationIndex.SemanticType>()
+  const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
   if (
     discovery.entry._tag === 'Resolved' &&
@@ -2288,7 +2290,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     for (const capture of callable.captures) reached.set(Type.key(capture.type), capture.type)
   }
   const entries = new Map<string, Entry>()
-  const resolve = (type: DeclarationIndex.SemanticType): Entry | undefined => {
+  const resolve = (type: DeclarationFacts.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
     if (Type.isString(type)) return stringEntry(self.target)
     if (Type.isNever(type)) return neverEntry()
@@ -2304,7 +2306,7 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     const element = resolve(type.element)
     return element === undefined ? undefined : repeatedEntry(type, element)
   }
-  const add = (type: DeclarationIndex.SemanticType): void => {
+  const add = (type: DeclarationFacts.SemanticType): void => {
     const key = Type.key(type)
     if (Type.isEffect(type)) {
       add(type.success)
@@ -2436,7 +2438,7 @@ const withActiveShape = (context: ShapeContext, identity: string): ShapeContext 
 
 const borrowedShape = (
   context: ShapeContext,
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
 ): Extract<CallingShapeNode, { readonly _tag: 'AddressShape' }> =>
   Object.freeze({
     _tag: 'AddressShape',
@@ -2521,7 +2523,7 @@ const executableEnvironmentFieldShape = (
 }
 
 const shapeNode = (
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
   context: ShapeContext,
 ): CallingShapeNode => {
   const { target, entries } = context
@@ -2931,7 +2933,7 @@ const materializeLanes = (
 
 const shapeOf = (
   target: Target.Target,
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
   entries: ReadonlyMap<string, Entry>,
   effectEnvironments: ReadonlyArray<EffectEnvironment>,
   callableEnvironments: ReadonlyArray<CallableEnvironment>,
@@ -2962,7 +2964,7 @@ const shapeOf = (
 export const callingShapes = (
   target: Target.Target,
   entries: ReadonlyArray<Entry>,
-  types: ReadonlyArray<DeclarationIndex.SemanticType> = entries.map((entry) => entry.type),
+  types: ReadonlyArray<DeclarationFacts.SemanticType> = entries.map((entry) => entry.type),
   effectEnvironments: ReadonlyArray<EffectEnvironment> = Object.freeze([]),
   callableEnvironments: ReadonlyArray<CallableEnvironment> = Object.freeze([]),
 ): ReadonlyArray<CallingShape> => {
@@ -2973,13 +2975,13 @@ export const callingShapes = (
 }
 
 /** Looks up one canonical runtime-plan entry. */
-export const entry = (self: Plan, type: DeclarationIndex.SemanticType): Entry | undefined =>
+export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | undefined =>
   self.entries.find((candidate) => Type.equals(candidate.type, type))
 
 /** Looks up one compiler-owned calling shape by logical type. */
 export const callingShape = (
   self: Plan,
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
 ): CallingShape | undefined =>
   self.callingShapes.find((candidate) => Type.equals(candidate.type, type))
 
@@ -2993,7 +2995,7 @@ export const callingShape = (
  */
 export const failurePayloadRepacking = (
   self: Plan,
-  sourceType: DeclarationIndex.SemanticType,
+  sourceType: DeclarationFacts.SemanticType,
   sourceTag: number,
   targetType: Type.Effect,
   targetTag: number,
@@ -3156,7 +3158,7 @@ export const callableCaptureRange = (
 
 const fieldSlice = (
   node: CallingShapeNode,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
   offset = 0,
 ): { readonly offset: number; readonly length: number } | undefined => {
   const [field, ...rest] = path
@@ -3180,7 +3182,7 @@ const fieldSlice = (
 export const memberFieldSlots = (
   shape: CallingShape,
   member: Type.Type,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): ReadonlyArray<number> | undefined => {
   if (path.length === 0 && Type.equals(shape.type, member))
     return Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
@@ -3210,14 +3212,5 @@ export const memberFieldSlots = (
 /** Looks up one available or unavailable nominal catalog entry. */
 export const catalogEntry = (
   self: Catalog,
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
 ): CatalogEntry | undefined => self.entries.find((candidate) => Type.equals(candidate.type, type))
-
-export { encode, encodeCatalog } from './LayoutEncode.js'
-export {
-  laneOffset,
-  selectorEquals,
-  verify,
-  verifyAgainstCatalog,
-  verifyCatalog,
-} from './LayoutVerify.js'

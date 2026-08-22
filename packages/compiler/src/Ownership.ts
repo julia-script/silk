@@ -1,4 +1,5 @@
 import * as CleanupPlan from './CleanupPlan.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -19,11 +20,11 @@ import * as Type from './Type.js'
 /** The ownership category of one binding. Nominal structs are whole-value move-only owners. */
 export type OwnershipCategory =
   | { readonly _tag: 'Copyable' }
-  | { readonly _tag: 'MoveOnly'; readonly type: DeclarationIndex.SemanticType }
+  | { readonly _tag: 'MoveOnly'; readonly type: DeclarationFacts.SemanticType }
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
-  | { readonly _tag: 'Parameter'; readonly parameter: DeclarationIndex.ParameterId }
+  | { readonly _tag: 'Parameter'; readonly parameter: DeclarationFacts.ParameterId }
   | { readonly _tag: 'Let'; readonly binding: Hir.BindingId }
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
   | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
@@ -35,7 +36,7 @@ export interface BindingFact {
   readonly name: string | undefined
   readonly mutability: 'Immutable' | 'Mutable'
   readonly category: OwnershipCategory
-  readonly type?: DeclarationIndex.SemanticType
+  readonly type?: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
   readonly liveFrom: SourceSpan.SourceSpan
   readonly liveTo: SourceSpan.SourceSpan
@@ -46,7 +47,7 @@ export interface BindingFact {
 export interface Release {
   readonly _tag: 'Release'
   readonly binding: BindingFact
-  readonly fields: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly fields: ReadonlyArray<DeclarationFacts.FieldId>
   readonly cleanup: CleanupPlan.CleanupPlan
 }
 
@@ -76,9 +77,9 @@ export interface LoanFact {
 
 export interface BorrowedReplacementFact {
   readonly _tag: 'BorrowedReplacement'
-  readonly root: DeclarationIndex.ParameterId
+  readonly root: DeclarationFacts.ParameterId
   readonly region: Hir.RegionId
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly displacedCleanup: CleanupPlan.CleanupPlan
   readonly span: SourceSpan.SourceSpan
 }
@@ -88,7 +89,7 @@ export interface CallableEnvironmentSlot {
   readonly ordinal: number
   readonly parameterOrdinal: number
   readonly access: Type.CaptureAccess
-  readonly type?: DeclarationIndex.SemanticType
+  readonly type?: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
 }
 
@@ -159,7 +160,7 @@ export type Verdict =
 /** One function's ownership facts and its target-neutral cleanup plan. */
 export interface FunctionOwnership {
   readonly _tag: 'FunctionOwnership'
-  readonly declaration: DeclarationIndex.DeclarationFact
+  readonly declaration: DeclarationFacts.DeclarationFact
   /**
    * Bindings this function's own statements introduce: parameters, `let` statements, and match
    * patterns the enclosing flow reaches. Deliberately excludes deferred effect bodies, so it is
@@ -211,7 +212,7 @@ export interface MatchOwnership {
     readonly provisionalGuard: boolean
     readonly bindings: ReadonlyArray<BindingSite>
     readonly cleanup: ReadonlyArray<{
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly path: ReadonlyArray<DeclarationFacts.FieldId>
       readonly cleanup: CleanupPlan.CleanupPlan
     }>
   }>
@@ -230,8 +231,8 @@ const satisfied: Verdict = Object.freeze({ _tag: 'Satisfied' })
 const copyable: OwnershipCategory = Object.freeze({ _tag: 'Copyable' })
 
 const categoryOf = (
-  index: DeclarationIndex.Index,
-  type: DeclarationIndex.SemanticType | undefined,
+  index: DeclarationFacts.Index,
+  type: DeclarationFacts.SemanticType | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): OwnershipCategory =>
   type === undefined ||
@@ -256,7 +257,7 @@ interface MutableBinding {
   readonly mutability: 'Immutable' | 'Mutable'
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
-  readonly type?: DeclarationIndex.SemanticType
+  readonly type?: DeclarationFacts.SemanticType
   readonly cleanup?: CleanupPlan.CleanupPlan
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
@@ -264,7 +265,7 @@ interface MutableBinding {
 }
 
 interface CheckState {
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly copyAssumptions: ReadonlySet<string>
   readonly bindings: Map<string, MutableBinding>
   readonly order: Array<MutableBinding>
@@ -1105,7 +1106,7 @@ const borrowedPlaceAccess = (
 
 const analyzeLoans = (
   fn: Elaboration.FunctionFact,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   copyAssumptions: ReadonlySet<string>,
 ): LoanAnalysis => {
   const loans: Array<LoanFact> = []
@@ -2089,7 +2090,7 @@ interface ExitDescriptor {
 
 const borrowedReplacements = (
   fn: Elaboration.FunctionFact,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<BorrowedReplacementFact> => {
   const replacements: Array<BorrowedReplacementFact> = []
   const walk = (statements: ReadonlyArray<Elaboration.StatementFact>): void => {
@@ -2130,7 +2131,7 @@ const borrowedReplacements = (
 
 const checkFunction = (
   fn: Hir.HirFunction,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   semantic?: Elaboration.FunctionFact,
 ): CheckedFunction => {
   const declaration = fn.declaration
@@ -2816,7 +2817,7 @@ const checkFunction = (
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (
   result: Elaboration.Result,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ModuleOwnership => {
   const checked = result.hir.functions.map((fn, ordinal) =>
     checkFunction(fn, index, result.functions.at(ordinal)),

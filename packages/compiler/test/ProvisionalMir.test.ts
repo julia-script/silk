@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
@@ -145,7 +146,7 @@ pub fn main() -> i32 {
     assert.isDefined(get)
     if (get === undefined) return
     const other = Type.nominal('provisional-mir/main', 'Other')
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       get.function.declaration.typeParameters.map((parameter) => parameter.type),
       [other],
     )

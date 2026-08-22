@@ -1,6 +1,6 @@
 ## 1. Type inference extraction
 
-- [x] 1.1 Extract `TypeInference.ts` from `Type.ts:2806-3367` and re-export `infer`/`inferOpenGenericArguments`
+- [x] 1.1 Extract `TypeInference.ts` from `Type.ts:2806-3367`, migrate callers to the owning actor, and remove `Type` forwarding exports
 - [x] 1.2 Verify generic-inference and type tests pass
 
 ## 2. Instances split

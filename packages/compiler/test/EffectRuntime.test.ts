@@ -3,7 +3,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as Json from './support/Json.js'
 import * as Projections from './support/projections.js'
@@ -304,12 +305,12 @@ it.effect('passes, returns, stores, captures, and specializes closed Effect valu
       ).size,
       2,
     )
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(wasm)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasm)), [])
     const evaluated = Analysis.evaluate(logical)
     assert.strictEqual(
       evaluated._tag,
       'Completed',
-      `${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${Mir.encode(Analysis.loweredMir(logical))}`,
+      `${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${MirEncoding.encode(Analysis.loweredMir(logical))}`,
     )
     assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
     const native = yield* Analysis.codegen(logical, { mode: 'release' })
@@ -332,12 +333,12 @@ it.effect('preserves exclusive and take-once Effect access across ordinary calls
         'wasm32-unknown-unknown',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [], name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(
         evaluated._tag,
         'Completed',
-        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${Mir.encode(Analysis.loweredMir(snapshot))}`,
+        `${name}: ${JSON.stringify(evaluated, Json.bigIntReplacer)}\n${MirEncoding.encode(Analysis.loweredMir(snapshot))}`,
       )
       assert.strictEqual(
         evaluated._tag === 'Completed' ? evaluated.result.value : undefined,
@@ -445,7 +446,7 @@ it.effect('executes the same handled failure through the evaluator and Wasm', ()
     )
     assert.deepEqual(Analysis.diagnostics(logicalSnapshot), [])
     assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(wasmSnapshot)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasmSnapshot)), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -482,7 +483,7 @@ it.effect('keeps callable Effect mapping in evaluator, LLVM, and Wasm parity', (
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     const main = instance.exports.silk_main
 
-    assert.strictEqual(Mir.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
+    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(native)), golden('effect.mir.txt'))
     assert.strictEqual(logical._tag, 'Completed')
     assert.strictEqual(logical._tag === 'Completed' ? logical.result.value : undefined, 42n)
     assert.include(llvm.ir, '@silk_silk_i32_add')
@@ -500,7 +501,7 @@ it.effect('keeps grouped, reverse, data-first, and stored pipelines equivalent',
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [], sample.name)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [], sample.name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], sample.name)
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(
         evaluated._tag,
@@ -528,7 +529,7 @@ it.effect('composes flatMap and tap with mapping and provision', () =>
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [], name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(
         evaluated._tag,
@@ -559,7 +560,7 @@ it.effect('continues transforming recovered and retried effects', () =>
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [], name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(
         evaluated._tag,
@@ -704,7 +705,7 @@ it.effect('retries with fresh locals and persistent captures across evaluator an
     )
     assert.deepEqual(Analysis.diagnostics(logicalSnapshot), [])
     assert.deepEqual(Analysis.diagnostics(wasmSnapshot), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(wasmSnapshot)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasmSnapshot)), [])
     const logical = Analysis.evaluate(logicalSnapshot)
     const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
@@ -733,7 +734,7 @@ it.effect('flattens one nested Effect layer across evaluator, LLVM, and Wasm', (
       )
       assert.deepEqual(Analysis.diagnostics(native), [], name)
       assert.deepEqual(Analysis.diagnostics(wasm), [], name)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(wasm)), [], name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wasm)), [], name)
 
       const logical = Analysis.evaluate(native)
       assert.strictEqual(

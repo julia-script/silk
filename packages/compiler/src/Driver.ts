@@ -316,7 +316,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     cacheKey !== undefined &&
     artifact._tag === 'LlvmBitcodeArtifact'
   ) {
-    const bytes = yield* artifactCache.get(cacheKey)
+    const bytes = yield* NativeToolchain.readArtifactCache(artifactCache, cacheKey)
     if (bytes !== undefined) {
       const committed = yield* PhaseReport.measureEffectInto(
         report,
@@ -388,7 +388,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             { heapBytes },
           )
           if (artifactCache !== undefined && cacheKey !== undefined) {
-            yield* artifactCache.set(cacheKey, finalized.bytes)
+            yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, finalized.bytes)
           }
           return Object.freeze({
             _tag: 'Compiled',
@@ -445,7 +445,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           { heapBytes },
         )
         if (artifactCache !== undefined && cacheKey !== undefined) {
-          yield* artifactCache.set(cacheKey, linked.bytes)
+          yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, linked.bytes)
         }
         return Object.freeze({
           _tag: 'Compiled',

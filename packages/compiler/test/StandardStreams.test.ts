@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as StandardStreams from '../src/StandardStreams.js'
@@ -107,9 +108,9 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
   Effect.gen(function* () {
     const native = yield* snapshot()
     const mir = Analysis.loweredMir(native)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const hostWrite = mir.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation): operation is Extract<Mir.Operation, { readonly _tag: 'HostWrite' }> =>
           operation._tag === 'HostWrite',
@@ -118,19 +119,20 @@ it.effect('lowers target-neutral writes through native and hosted Wasm boundarie
     for (const failureTag of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
       const forged = structuredClone(mir)
       const operation = forged.functions
-        .flatMap(Mir.operations)
+        .flatMap(MirVerification.operations)
         .find((candidate) => candidate._tag === 'HostWrite')
       assert.isDefined(operation)
       if (operation === undefined) return
       Reflect.set(operation, 'failureTag', failureTag)
       assert.include(
-        Mir.verify(forged).map((violation) => violation.rule),
+        MirVerification.verify(forged).map((violation) => violation.rule),
         'InvalidStandardStreamOperation',
       )
     }
     assert.strictEqual(
-      mir.functions.flatMap(Mir.operations).filter((operation) => operation._tag === 'HostWrite')
-        .length,
+      mir.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'HostWrite').length,
       1,
     )
     const llvm = yield* Analysis.codegen(native, { mode: 'release' })
@@ -222,7 +224,7 @@ pub effect fn main() -> () ! StreamWriteError {
     assert.strictEqual(outcome._tag, 'Completed')
     assert.strictEqual(
       Analysis.loweredMir(replaced)
-        .functions.flatMap(Mir.operations)
+        .functions.flatMap(MirVerification.operations)
         .some((operation) => operation._tag === 'HostWrite'),
       false,
     )

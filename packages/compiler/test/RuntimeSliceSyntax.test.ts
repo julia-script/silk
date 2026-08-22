@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FormattedDocument from '../src/FormattedDocument.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -79,7 +80,10 @@ it('keeps slice identity, substitution, inference, and borrow containment canoni
   assert.deepEqual(Type.substitute(shared, substitution), Type.slice('Shared', exclusive.element))
 
   const inferred = new Map<string, Type.Type>()
-  assert.strictEqual(Type.infer(shared, Type.slice('Shared', exclusive.element), inferred), true)
+  assert.strictEqual(
+    TypeInference.infer(shared, Type.slice('Shared', exclusive.element), inferred),
+    true,
+  )
   assert.deepEqual(inferred.get(Type.key(parameter)), exclusive.element)
-  assert.strictEqual(Type.infer(shared, exclusive, new Map()), false)
+  assert.strictEqual(TypeInference.infer(shared, exclusive, new Map()), false)
 })

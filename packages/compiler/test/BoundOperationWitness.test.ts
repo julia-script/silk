@@ -3,7 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 
@@ -353,7 +354,7 @@ pub fn main() -> i32 {
 }`
     const snapshot = yield* analyzed('bound-operation-witness/replayed-source-operand', source)
     assert.deepEqual(messages(snapshot), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
 
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed', describe(evaluated))
@@ -434,7 +435,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Type.failureMembers(runner.result.type).map(Type.encode), [
       `${module}.Problem`,
     ])
-    const operations = Mir.operations(runner)
+    const operations = MirVerification.operations(runner)
     assert.strictEqual(
       operations.filter(
         (operation) => operation._tag === 'Call' && operation.target.name === 'decodeCell',
@@ -447,7 +448,7 @@ pub fn main() -> i32 {
       ),
       'a pure witness should not retain unreachable failure execution machinery',
     )
-    const encoded = Mir.encode(rawMir)
+    const encoded = MirEncoding.encode(rawMir)
     for (const spelling of [
       'dictionary',
       'vtable',
@@ -462,7 +463,7 @@ pub fn main() -> i32 {
       (fn) => fn.id.module === runnerId.module && fn.id.name === runnerId.name,
     )
     const staticRun = normalizedMir.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation) =>
           operation._tag === 'RunStaticEffect' &&

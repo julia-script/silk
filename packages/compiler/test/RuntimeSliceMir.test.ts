@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -33,10 +35,10 @@ it.effect(
       const self = yield* snapshot(source)
       assert.deepEqual(Analysis.diagnostics(self), [])
       const mir = Analysis.loweredMir(self)
-      assert.deepEqual(Mir.verify(mir), [])
+      assert.deepEqual(MirVerification.verify(mir), [])
 
       const shared = mir.functions.find((fn) => fn.id.name === 'shared')
-      const sharedOperations = shared === undefined ? [] : Mir.operations(shared)
+      const sharedOperations = shared === undefined ? [] : MirVerification.operations(shared)
       assert.deepEqual(
         sharedOperations
           .filter(
@@ -50,7 +52,7 @@ it.effect(
       )
 
       const inspect = mir.functions.find((fn) => fn.id.name === 'inspect')
-      const inspectOperations = inspect === undefined ? [] : Mir.operations(inspect)
+      const inspectOperations = inspect === undefined ? [] : MirVerification.operations(inspect)
       assert.strictEqual(
         inspectOperations.some((operation) => operation._tag === 'SliceLength'),
         true,
@@ -66,7 +68,7 @@ it.effect(
 
       const replace = mir.functions.find((fn) => fn.id.name === 'replace')
       if (replace === undefined) throw new RangeError('expected replace MIR function')
-      const replaceOperations = Mir.operations(replace)
+      const replaceOperations = MirVerification.operations(replace)
       const check = replaceOperations.findIndex((operation) => operation._tag === 'CheckPlace')
       const addition = replaceOperations.findIndex(
         (operation) => operation._tag === 'Binary' && operation.operator === 'Add',
@@ -80,7 +82,7 @@ it.effect(
         new Set(Mir.topologicalRegions(replace).map((region) => region.id.ordinal)).size,
         replace.regions.length,
       )
-      assert.strictEqual(Mir.encode(mir), Mir.encode(Analysis.loweredMir(self)))
+      assert.strictEqual(MirEncoding.encode(mir), MirEncoding.encode(Analysis.loweredMir(self)))
     }),
 )
 
@@ -115,7 +117,7 @@ it.effect('rejects missing endings and mismatched slice access as verifier data'
       ]),
     })
     assert.include(
-      Mir.verify(missing).map((violation) => violation.rule),
+      MirVerification.verify(missing).map((violation) => violation.rule),
       'InvalidLoan',
     )
 
@@ -159,7 +161,7 @@ it.effect('rejects missing endings and mismatched slice access as verifier data'
       ]),
     })
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidSliceOperation',
     )
   }),

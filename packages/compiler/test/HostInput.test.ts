@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as HostInput from '../src/HostInput.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Driver from './support/TestDriver.js'
@@ -465,7 +465,7 @@ it.effect('lowers the native reads to reachable-only native runtime symbols', ()
   Effect.gen(function* () {
     const self = yield* snapshot(nativeProgram)
     const operations = Analysis.loweredMir(self)
-      .functions.flatMap(Mir.operations)
+      .functions.flatMap(MirVerification.operations)
       .filter((operation) => operation._tag === 'OsCall')
     assert.deepEqual([...new Set(operations.map((operation) => operation.operation.name))].sort(), [
       'osHostArgument',

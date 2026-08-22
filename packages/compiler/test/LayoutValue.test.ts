@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -36,7 +36,7 @@ it.effect('constructs valid zero-sized and over-aligned Layout values', () =>
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')
       assert.strictEqual(evaluated._tag === 'Completed' ? evaluated.result.value : undefined, 42n)
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }
   }),
 )

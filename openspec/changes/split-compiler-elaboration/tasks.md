@@ -4,6 +4,7 @@
 - [x] 1.2 Extract `CallResolution.ts` (the 8566–9030 tail + its sub-actors)
 - [x] 1.3 Extract `StatementAnalysis.ts`
 - [x] 1.4 Extract `HirLowering.ts` and verify elaboration tests pass at each step
+- [x] 1.5 Migrate expression-analysis callers to `ExpressionAnalysis` and remove `Elaboration` forwarding exports
 
 ## 2. Merge the duplicated walks
 

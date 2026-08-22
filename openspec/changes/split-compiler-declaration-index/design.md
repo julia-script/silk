@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md. collect and complete are the only phase entry points (NameResolution.analyze and ModuleSurface.fromIndex are untouched), so the split is mechanical.
+See proposal.md. `DeclarationCollection.collect` and `DeclarationCompletion.complete` are the phase entry points. Facts, resolution, completion, and conformance callers import their owning actors directly; `DeclarationIndex` retains only index-coordinator behavior and no forwarding facade.
 
 ## Decisions
 

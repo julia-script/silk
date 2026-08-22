@@ -1,5 +1,6 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as DeclarationFacts from './DeclarationFacts.js'
 
 export { AnalysisUnavailable } from './AnalysisUnavailable.js'
 
@@ -8,7 +9,6 @@ import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
 import type * as Elaboration from './Elaboration.js'
@@ -19,7 +19,8 @@ import * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
 import * as LlvmBackend from './LlvmBackend.js'
-import * as Mir from './Mir.js'
+import type * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
@@ -63,7 +64,7 @@ export interface FrontendSnapshot {
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
   readonly closure: ModuleClosure.Closure
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
@@ -219,7 +220,7 @@ export const resolutionFailures = (
 ): ReadonlyArray<SourceResolver.SourceResolverError> => self.closure.resolutionFailures
 
 /** Returns the closure's declaration index. */
-export const declarationIndex = (self: FrontendSnapshot): DeclarationIndex.Index => self.index
+export const declarationIndex = (self: FrontendSnapshot): DeclarationFacts.Index => self.index
 
 export const nameResolution = (self: FrontendSnapshot): NameResolution.Resolution => self.resolution
 export const moduleScope = (
@@ -305,9 +306,9 @@ export const rootAnalysis = (self: FrontendSnapshot): Elaboration.Result => {
 export const declarationForIdentity = (
   self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'DeclarationIdentity' }>,
-): DeclarationIndex.MemberFact | undefined => {
+): DeclarationFacts.MemberFact | undefined => {
   if (identity.id._tag === 'CanonicalDeclarationId')
-    return DeclarationIndex.byCanonical(self.index, identity.id)
+    return DeclarationFacts.byCanonical(self.index, identity.id)
   const local = identity.id
   return self.index.modules
     .flatMap((module) => module.members)
@@ -317,7 +318,7 @@ export const declarationForIdentity = (
 const serviceOperationForIdentity = (
   self: FrontendSnapshot,
   identity: Extract<SemanticOccurrence.Identity, { readonly _tag: 'ServiceOperationIdentity' }>,
-): DeclarationIndex.ServiceOperationFact | undefined =>
+): DeclarationFacts.ServiceOperationFact | undefined =>
   self.index.modules
     .flatMap((module) => module.services)
     .find(
@@ -685,7 +686,7 @@ export const fixedArrayTypesOf = (
   module: string,
 ): ReadonlyArray<Type.FixedArray> => {
   const found = new Map<string, Type.FixedArray>()
-  const add = (type: DeclarationIndex.SemanticType): void => {
+  const add = (type: DeclarationFacts.SemanticType): void => {
     if (!Type.isFixedArray(type)) return
     found.set(Type.key(type), type)
     add(type.element)
@@ -775,7 +776,7 @@ export const mirMatchesOf = (
     ? Object.freeze([])
     : Object.freeze(
         self.mir.value.functions.flatMap((fn) =>
-          Mir.operations(fn).flatMap((operation) =>
+          MirVerification.operations(fn).flatMap((operation) =>
             operation._tag === 'Match' ? [operation] : [],
           ),
         ),
@@ -801,27 +802,27 @@ export const declarationByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.DeclarationLookup => DeclarationIndex.lookup(self.index, module, spelling)
+): DeclarationFacts.DeclarationLookup => DeclarationFacts.lookup(self.index, module, spelling)
 
 /** Looks up a function or struct in the shared module-level namespace. */
 export const memberByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.MemberLookup => DeclarationIndex.member(self.index, module, spelling)
+): DeclarationFacts.MemberLookup => DeclarationFacts.member(self.index, module, spelling)
 
 /** Looks up one nominal struct declaration. */
 export const structByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationIndex.StructLookup => DeclarationIndex.struct(self.index, module, spelling)
+): DeclarationFacts.StructLookup => DeclarationFacts.struct(self.index, module, spelling)
 
 /** Looks up one declaration-ordered field from a resolved nominal struct. */
 export const fieldByName = (
-  declaration: DeclarationIndex.StructFact,
+  declaration: DeclarationFacts.StructFact,
   spelling: string,
-): DeclarationIndex.FieldLookup => DeclarationIndex.lookupField(declaration.fields, spelling)
+): DeclarationFacts.FieldLookup => DeclarationFacts.lookupField(declaration.fields, spelling)
 
 /** The compilation's complete diagnostic sequence in deterministic driver order. */
 export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Diagnostic> =>

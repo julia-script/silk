@@ -32,13 +32,13 @@ import type {
   TypeParameterFact,
   TypePathFact,
   TypeResolution,
-} from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
+import { interfaceOperationContracts, presentParameterEntries } from './DeclarationFacts.js'
 import {
   childNode,
   collectedRequirementRole,
   constantLiteral,
   declaredTypeNode,
-  interfaceOperationContracts,
   isDeclaredTypeNode,
   presentName,
   requirementRoleIdentity,
@@ -898,19 +898,6 @@ const analyzeParameter = (
     diagnostics: type.diagnostics,
   })
 }
-
-export const presentParameterEntries = (parameters: ReadonlyArray<ParameterFact>) =>
-  parameters.flatMap((parameter) =>
-    parameter.name._tag === 'Present'
-      ? [
-          Object.freeze({
-            spelling: parameter.name.spelling,
-            token: parameter.name.token,
-            parameter,
-          }),
-        ]
-      : [],
-  )
 
 const duplicateParameterDiagnostics = (parameters: ReadonlyArray<ParameterFact>) => {
   const first = new Map<string, ReturnType<typeof presentParameterEntries>[number]>()

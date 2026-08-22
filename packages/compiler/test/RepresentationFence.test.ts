@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -29,7 +29,8 @@ const assertRealizedCallable = (snapshot: Analysis.Snapshot): void => {
   assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
   assert.strictEqual(snapshot.layout._tag, 'Available')
   assert.strictEqual(snapshot.mir._tag, 'Available')
-  if (snapshot.mir._tag === 'Available') assert.deepEqual(Mir.verify(snapshot.mir.value), [])
+  if (snapshot.mir._tag === 'Available')
+    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
 }
 
 const assertRealizedEffect = (snapshot: Analysis.Snapshot): void => {
@@ -40,7 +41,8 @@ const assertRealizedEffect = (snapshot: Analysis.Snapshot): void => {
   assert.strictEqual(snapshot.layoutCatalog._tag, 'Available')
   assert.strictEqual(snapshot.layout._tag, 'Available')
   assert.strictEqual(snapshot.mir._tag, 'Available')
-  if (snapshot.mir._tag === 'Available') assert.deepEqual(Mir.verify(snapshot.mir.value), [])
+  if (snapshot.mir._tag === 'Available')
+    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
 }
 
 it.effect('realizes exact represented callable storage through layout and MIR', () =>

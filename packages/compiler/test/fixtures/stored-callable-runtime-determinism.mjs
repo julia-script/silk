@@ -9,8 +9,8 @@ import { ChildProcess } from 'effect/unstable/process'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Driver from '../../dist/Driver.js'
 import * as Instances from '../../dist/Instances.js'
-import * as Layout from '../../dist/Layout.js'
-import * as Mir from '../../dist/Mir.js'
+import * as LayoutEncode from '../../dist/LayoutEncode.js'
+import * as MirEncoding from '../../dist/MirEncoding.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
 import * as NodeHeapObservation from '../../dist/NodeHeapObservation.js'
 import * as SourceFile from '../../dist/SourceFile.js'
@@ -66,7 +66,7 @@ const hash = Effect.fnUntraced(function* (value) {
 const layoutHash = Effect.fnUntraced(function* (snapshot) {
   const layout = Analysis.layoutOf(snapshot)
   return layout._tag === 'Available'
-    ? yield* hash(Layout.encode(layout.value))
+    ? yield* hash(LayoutEncode.encode(layout.value))
     : layout.error.message
 })
 
@@ -113,8 +113,8 @@ const program = Effect.gen(function* () {
     ),
     nativeLayout: yield* layoutHash(native),
     wasmLayout: yield* layoutHash(wasm),
-    nativeMir: yield* hash(Mir.encode(Analysis.loweredMir(native))),
-    wasmMir: yield* hash(Mir.encode(Analysis.loweredMir(wasm))),
+    nativeMir: yield* hash(MirEncoding.encode(Analysis.loweredMir(native))),
+    wasmMir: yield* hash(MirEncoding.encode(Analysis.loweredMir(wasm))),
     nativeSymbols: nativeArtifact.symbols.map((entry) => entry.symbol),
     wasmSymbols: wasmArtifact.symbols.map((entry) => entry.symbol),
     nativeArtifact: yield* hash(nativeArtifact.bitcode),

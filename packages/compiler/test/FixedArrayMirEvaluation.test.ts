@@ -2,7 +2,9 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -21,9 +23,9 @@ pub fn main() -> i32 {
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const choose = mir.functions.find((fn) => fn.id.name === 'choose')
-    const operations = choose === undefined ? [] : Mir.operations(choose)
+    const operations = choose === undefined ? [] : MirVerification.operations(choose)
     const reads = operations.filter((operation) => operation._tag === 'ReadPlace')
     assert.strictEqual(reads.length, 1)
     assert.deepEqual(
@@ -150,7 +152,7 @@ it.effect('rejects incomplete array construction before evaluation', () =>
       ),
     }
 
-    const violations = Mir.verify(malformed)
+    const violations = MirVerification.verify(malformed)
     assert.deepEqual(
       violations.map((violation) => violation.rule),
       ['InvalidAggregateOperation'],
@@ -159,6 +161,6 @@ it.effect('rejects incomplete array construction before evaluation', () =>
     assert.strictEqual(outcome._tag, 'Blocked')
     assert.strictEqual(outcome._tag === 'Blocked' ? outcome.reason._tag : undefined, 'InvalidMir')
     assert.deepEqual(outcome.trace, [])
-    assert.strictEqual(Mir.encode(mir), Mir.encode(mir))
+    assert.strictEqual(MirEncoding.encode(mir), MirEncoding.encode(mir))
   }),
 )

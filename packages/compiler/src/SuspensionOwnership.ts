@@ -1,10 +1,11 @@
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as SetOf from './internal/SetOf.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import * as Ownership from './Ownership.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -97,7 +98,7 @@ const operationInputs = (operation: Mir.Operation): ReadonlySet<number> => {
       .flatMap((nested) =>
         nested._tag === 'Drop' && nested.cleanup._tag === 'NoCleanup'
           ? []
-          : Mir.operationLocals(nested),
+          : MirVerification.operationLocals(nested),
       )
       .map((local) => local.ordinal)
       .filter((local) => !definitions.has(local)),
@@ -214,7 +215,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
 
 const definitionMap = (fn: Mir.MirFunction): ReadonlyMap<number, Mir.Operation> =>
   new Map(
-    Mir.operations(fn).flatMap((operation) =>
+    MirVerification.operations(fn).flatMap((operation) =>
       'destination' in operation ? [[operation.destination.ordinal, operation] as const] : [],
     ),
   )
@@ -284,7 +285,7 @@ const releasesOf = (operation: Mir.Operation): ReadonlyArray<Release> =>
 
 const accessOf = (
   program: Mir.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   fn: Mir.MirFunction,
   definitions: ReadonlyMap<number, Mir.Operation>,
   local: Mir.LocalId,
@@ -301,7 +302,7 @@ const accessOf = (
 
 const planFor = (
   program: Mir.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   fn: Mir.MirFunction,
   region: Mir.Region,
   operation: Mir.Operation,
@@ -392,7 +393,7 @@ const comparePlan = (left: Plan, right: Plan): number =>
 export const plan = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): Module => {
   const plans: Array<Plan> = []
   const violations: Array<Violation> = []

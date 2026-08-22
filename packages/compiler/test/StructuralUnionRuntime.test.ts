@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Layout from '../src/Layout.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
 import * as Projections from './support/projections.js'
@@ -116,10 +116,10 @@ it.effect('lowers injection and widening through shared sum layouts and evaluate
     assert.strictEqual(shape?.laneCount, 3)
 
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     assert.deepEqual(
       mir.functions
-        .flatMap(Mir.operations)
+        .flatMap(MirVerification.operations)
         .filter((operation) => operation._tag === 'ConvertUnion')
         .map((operation) => operation.conversion),
       ['Inject', 'Widen'],
@@ -182,7 +182,7 @@ pub fn main() -> i32 {
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') {
@@ -262,7 +262,7 @@ pub fn main() -> i32 { drop selected() return 42 }`,
           program.name,
         )
       }
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [], program.name)
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [], program.name)
       const outcome = Analysis.evaluate(self)
       assert.strictEqual(outcome._tag, 'Completed', program.name)
       if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n, program.name)
@@ -287,9 +287,9 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const unionCleanup = mir.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .flatMap((operation) =>
         operation._tag === 'Drop' && operation.cleanup._tag === 'UnionCleanup'
           ? [operation.cleanup]

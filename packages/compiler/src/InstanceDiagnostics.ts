@@ -1,3 +1,5 @@
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
@@ -7,7 +9,7 @@ import * as Type from './Type.js'
 /** Rejects reachable Drop-hook instances whose concrete provider is Copy. */
 export const copyDropViolations = (
   self: Instances.Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
     self.instances.flatMap((instance) => {
@@ -31,7 +33,7 @@ export const copyDropViolations = (
 /** Rejects concrete requirement bindings whose provider does not implement the capability. */
 export const requirementBindingViolations = (
   self: Instances.Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
     self.instances.flatMap((instance) =>
@@ -43,7 +45,7 @@ export const requirementBindingViolations = (
         if (
           capability !== undefined &&
           Type.isNominal(capability) &&
-          DeclarationIndex.witness(index, provider, capability) !== undefined
+          ConformanceProof.witness(index, provider, capability) !== undefined
         )
           return []
         return [
@@ -59,7 +61,7 @@ export const requirementBindingViolations = (
 /** Rejects reachable bound calls whose selected witness has no lowerable implementation. */
 export const unlowerableWitnessViolations = (
   self: Instances.Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
     self.instances.flatMap((instance) =>
@@ -71,13 +73,13 @@ export const unlowerableWitnessViolations = (
           const capability = Type.substitute(expression.capability, instance.substitution)
           const provider = Type.substitute(expression.provider, instance.substitution)
           if (!Type.isNominal(capability)) return []
-          const intrinsic = DeclarationIndex.interfaceOperationIntrinsic(
+          const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
             index,
             provider,
             capability,
             expression.operation,
           )
-          const witness = DeclarationIndex.interfaceWitnessImplementation(
+          const witness = ConformanceProof.interfaceWitnessImplementation(
             index,
             provider,
             capability,
@@ -98,14 +100,14 @@ export const unlowerableWitnessViolations = (
 /** Rejects reachable constructions that retain bare or represented callable values. */
 export const storedCallableViolations = (
   self: Instances.Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Instances.storedExecutableViolations(self, index, 'Callable')
 
 /** Rejects reachable constructions that retain represented Effect values. */
 export const storedEffectViolations = (
   self: Instances.Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Instances.storedExecutableViolations(self, index, 'Effect')
 

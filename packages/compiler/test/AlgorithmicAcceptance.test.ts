@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import type * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -95,7 +95,7 @@ it.effect('accepts the compiler-shaped fold through every compiler phase', () =>
     const lowered = Analysis.loweredMir(self)
     assert.isAbove(lowered.functions.length, 0)
     assert.strictEqual(
-      `${createHash('sha256').update(Mir.encode(lowered)).digest('hex')}\n`,
+      `${createHash('sha256').update(MirEncoding.encode(lowered)).digest('hex')}\n`,
       golden('algorithmic.mir.sha256'),
     )
 

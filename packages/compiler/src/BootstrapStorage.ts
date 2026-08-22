@@ -1,6 +1,6 @@
 import type { AggregateValue, Value } from './BootstrapValue.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Type from './Type.js'
 
 export interface Allocation {
@@ -146,7 +146,7 @@ export const cleanupMembers = (
 /** Selects a declaration field path from one checked aggregate value. */
 export const selectFieldPath = (
   root: Value,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): Value => {
   let selected: Value = root
   for (const selector of path) {

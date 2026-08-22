@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs'
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as LlvmBackend from '@silk-effect/compiler/LlvmBackend'
 import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
@@ -9,6 +8,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import * as Project from '../src/Project.js'
 import * as Workflow from '../src/Workflow.js'
+import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
 const source = 'pub fn main() -> i32 { return 42 }'
@@ -140,7 +140,7 @@ it.effect('checks a whole project without creating build artifacts', () =>
 
     assert.strictEqual(status, 0)
     assert.strictEqual(yield* fileSystem.exists(`${root}/.silk`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('separates source diagnostics from operational resolver failures during check', () =>
@@ -157,7 +157,7 @@ it.effect('separates source diagnostics from operational resolver failures durin
     yield* fileSystem.makeDirectory(`${root}/src/unreadable.silk`)
     assert.strictEqual(yield* Workflow.check(options(root)), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/.silk`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect(
@@ -177,7 +177,7 @@ it.effect(
         yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/${project.name}`),
         true,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -202,7 +202,7 @@ it.effect(
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         true,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -234,7 +234,7 @@ pub fn main() -> i32 {
         yield* fileSystem.exists(`${root}/build/llvm/wasm32-unknown-unknown/debug/hello.wasm`),
         false,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -259,7 +259,7 @@ pub fn main() -> i32 {
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), true)
     const host = yield* NativeToolchain.hostTarget()
     assert.strictEqual(yield* fileSystem.exists(`${root}/build/llvm/${host.id}/debug/hello`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('preflights incompatible batches before creating output', () =>
@@ -270,7 +270,7 @@ it.effect('preflights incompatible batches before creating output', () =>
     const status = yield* Workflow.build({ ...options(root), backend: 'wasm', targets: ['host'] })
     assert.strictEqual(status, 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('checks every configured target without creating output and keeps run host-only', () =>
@@ -288,7 +288,7 @@ it.effect('checks every configured target without creating output and keeps run 
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
     assert.strictEqual(yield* Workflow.run({ ...options(root), backend: 'wasm' }), 2)
     assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('returns source and toolchain failure classes without leaving executables', () =>
@@ -311,7 +311,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
     })
     assert.deepStrictEqual(attempted, { _tag: 'NotBuilt', status: 2 })
     assert.strictEqual(yield* fileSystem.exists(destination), false)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect(
@@ -325,7 +325,7 @@ it.effect(
       const status = yield* Workflow.run(options(root), ['--literal', 'argument'])
 
       assert.strictEqual(status, 42)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -345,7 +345,7 @@ it.effect(
       assert.strictEqual(yield* fileSystem.exists(`${root}/build`), false)
       assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
       assert.strictEqual(yield* fileSystem.exists(`${root}/silk.toml`), true)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -358,7 +358,7 @@ it.effect('exits zero cleaning a project that was never built', () =>
 
     assert.strictEqual(yield* Workflow.clean(options(root)), 0)
     assert.strictEqual(yield* fileSystem.exists(`${root}/src/Main.silk`), true)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.live(
@@ -384,7 +384,7 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -415,7 +415,7 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -457,7 +457,7 @@ it.live(
         observed.filter((pass) => pass.status !== 0),
         [],
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -480,7 +480,7 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.strictEqual(settled - before, 1)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -516,7 +516,7 @@ it.live(
         passes.slice(before).map((pass) => pass.source),
         edits,
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -544,7 +544,7 @@ it.live(
         passes.slice(before).map((pass) => pass.source),
         [''],
       )
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -569,6 +569,6 @@ it.live(
 
       assert.strictEqual(passes[1], 0)
       yield* Fiber.interrupt(watching)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )

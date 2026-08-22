@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as DeclarationIndex from '../src/DeclarationIndex.js'
+import type * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -14,7 +14,7 @@ const ascii = (value: string): Uint8Array =>
 const collect = (
   rootModule: string,
   entries: ReadonlyArray<readonly [string, string]>,
-): Effect.Effect<DeclarationIndex.Index> => {
+): Effect.Effect<DeclarationFacts.Index> => {
   const rootText = entries.find(([name]) => name === rootModule)?.[1]
   if (rootText === undefined) throw new RangeError(`Fixture has no root source ${rootModule}`)
   return Effect.map(
@@ -33,13 +33,13 @@ const collect = (
   )
 }
 
-const codesOf = (index: DeclarationIndex.Index): ReadonlyArray<string> =>
+const codesOf = (index: DeclarationFacts.Index): ReadonlyArray<string> =>
   index.diagnostics.map((diagnostic) => diagnostic.code)
 
 const structNamed = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   name: string,
-): DeclarationIndex.StructFact | undefined =>
+): DeclarationFacts.StructFact | undefined =>
   index.modules
     .flatMap((module) => module.structs)
     .find((struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === name)

@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
+import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Instances from '../../src/Instances.js'
 import * as Layout from '../../src/Layout.js'
 import type { LocalId, Module, Provenance, RegionId, Type } from '../../src/Mir.js'
@@ -19,9 +19,9 @@ const local = (ordinal: number): LocalId => Object.freeze({ _tag: 'Local', ordin
 const region = (ordinal: number): RegionId => Object.freeze({ _tag: 'Region', ordinal })
 const i32: Type = Object.freeze({ _tag: 'i32' })
 const bool: Type = Object.freeze({ _tag: 'bool' })
-const canonical = (module: string, name: string): DeclarationIndex.CanonicalId =>
+const canonical = (module: string, name: string): DeclarationFacts.CanonicalId =>
   Object.freeze({ _tag: 'CanonicalDeclarationId', module, name })
-const instance = (declaration: DeclarationIndex.CanonicalId): Instances.InstanceKey =>
+const instance = (declaration: DeclarationFacts.CanonicalId): Instances.InstanceKey =>
   Object.freeze({
     _tag: 'InstanceKey',
     declaration,

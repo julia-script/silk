@@ -1,4 +1,5 @@
 import { concreteCallableIdentity, executableSites } from './CallResolution.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
@@ -53,7 +54,7 @@ export const unsafeCallDiagnostic = (
 /** Whether a borrow-shaped value is visibly backed only by program-lifetime immutable data. */
 export const isStaticallyDetachedFailure = (
   expression: ExpressionFact,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): boolean => {
   if (
     expression.type._tag === 'Available' &&
@@ -652,7 +653,7 @@ export const analyzeStatements = (
         !context.effectBlock && context.declaration.returnType._tag === 'Resolved'
           ? context.declaration.returnType.type
           : undefined,
-        !context.effectBlock && DeclarationIndex.returnedBorrow(context.declaration) !== undefined,
+        !context.effectBlock && DeclarationFacts.returnedBorrow(context.declaration) !== undefined,
       )
       if (expression === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
@@ -904,13 +905,13 @@ export const analyzeFunctionBody = (
     blockNode,
     Object.freeze({ parameters: declaration.parameters, bindings: [], patternBindings: [] }),
   )
-  const returnedBorrow = DeclarationIndex.returnedBorrow(declaration)
+  const returnedBorrow = DeclarationFacts.returnedBorrow(declaration)
 
-  const bindingOrigins = new Map<number, DeclarationIndex.ParameterFact | undefined>()
+  const bindingOrigins = new Map<number, DeclarationFacts.ParameterFact | undefined>()
   const originOf = (
     expression: ExpressionFact,
-    patternOrigins: ReadonlyMap<string, DeclarationIndex.ParameterFact | undefined> = new Map(),
-  ): DeclarationIndex.ParameterFact | undefined => {
+    patternOrigins: ReadonlyMap<string, DeclarationFacts.ParameterFact | undefined> = new Map(),
+  ): DeclarationFacts.ParameterFact | undefined => {
     if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
     if (expression._tag === 'Identifier') {
       if (expression.reference._tag === 'Resolved') return expression.reference.parameter

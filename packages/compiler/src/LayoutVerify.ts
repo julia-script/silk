@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import { alignUp } from './internal/Align.js'
@@ -227,7 +227,7 @@ const executablePlanEquals = (left: Entry['executable'], right: Entry['executabl
 
 const invalid = (
   rule: Violation['rule'],
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
   detail: string,
 ): Violation => Object.freeze({ _tag: 'LayoutViolation', rule, type, detail })
 
@@ -661,7 +661,7 @@ const commonViolations = (
     ),
   )
   const seen = new Set<string>()
-  let previous: DeclarationIndex.SemanticType | undefined
+  let previous: DeclarationFacts.SemanticType | undefined
   for (const candidate of entries) {
     const key = Type.key(candidate.type)
     if (seen.has(key)) {
@@ -691,7 +691,7 @@ const commonViolations = (
   return Object.freeze(violations)
 }
 
-const fieldIdEquals = (left: DeclarationIndex.FieldId, right: DeclarationIndex.FieldId): boolean =>
+const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.FieldId): boolean =>
   left.ordinal === right.ordinal &&
   left.struct.sourceId === right.struct.sourceId &&
   left.struct.ordinal === right.struct.ordinal
@@ -723,10 +723,10 @@ export const selectorEquals = (left: Selector, right: Selector): boolean =>
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (
   self: Plan,
-  root: DeclarationIndex.SemanticType,
+  root: DeclarationFacts.SemanticType,
   path: ReadonlyArray<Selector>,
 ): number | undefined => {
-  let current: DeclarationIndex.SemanticType = root
+  let current: DeclarationFacts.SemanticType = root
   let offset = 0
   for (const [ordinal, selector] of path.entries()) {
     const candidate = entry(self, current)

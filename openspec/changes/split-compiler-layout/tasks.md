@@ -13,6 +13,7 @@
 - [x] 3.1 Extract CallingShape.ts
 - [x] 3.2 Extract LayoutVerify.ts
 - [x] 3.3 Extract LayoutEncode.ts and verify goldens
+- [x] 3.4 Migrate encoding and verification callers to their owning actors and remove `Layout` forwarding exports
 
 ## 4. Rename realization module
 

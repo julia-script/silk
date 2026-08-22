@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Json from './support/Json.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -92,7 +92,7 @@ it.effect(
       // No vector-shaped operation exists in MIR: only the substrate's own vocabulary appears.
       const operations = new Set(
         Analysis.loweredMir(snapshot).functions.flatMap((fn) =>
-          Mir.operations(fn).map((operation) => operation._tag),
+          MirVerification.operations(fn).map((operation) => operation._tag),
         ),
       )
       assert.isFalse([...operations].some((tag) => tag.toLowerCase().includes('vector')))
@@ -163,7 +163,7 @@ it.effect(
       assert.strictEqual(evaluated.result.value, 42n)
       assert.isTrue(
         Analysis.loweredMir(wasmSnapshot).functions.some((fn) =>
-          Mir.operations(fn).some((operation) => operation._tag === 'RawBufferView'),
+          MirVerification.operations(fn).some((operation) => operation._tag === 'RawBufferView'),
         ),
       )
       const wasm = yield* Analysis.codegenWasm(wasmSnapshot, { mode: 'release' })

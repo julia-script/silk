@@ -5,6 +5,7 @@
 - [x] 1.3 Extract DeclarationResolution.ts
 - [x] 1.4 Extract DeclarationCompletion.ts
 - [x] 1.5 Extract ConformanceProof.ts and verify index tests pass
+- [x] 1.6 Migrate fact, resolution, completion, and conformance callers to their owning actors and remove `DeclarationIndex` forwarding exports
 
 ## 2. Dedup row analysis
 

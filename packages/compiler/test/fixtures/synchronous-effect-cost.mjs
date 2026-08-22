@@ -7,6 +7,8 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
 import * as Mir from '../../dist/Mir.js'
+import * as MirEncoding from '../../dist/MirEncoding.js'
+import * as MirVerification from '../../dist/MirVerification.js'
 
 const encoder = new TextEncoder()
 const hash = (value) => createHash('sha256').update(value).digest('hex')
@@ -480,7 +482,7 @@ const countTags = (values) =>
 const runnerClassifications = (program) => {
   const classifications = []
   for (const owner of program.functions) {
-    for (const operation of Mir.operations(owner)) {
+    for (const operation of MirVerification.operations(owner)) {
       if (operation._tag !== 'RunStaticEffect') continue
       const runner = program.functions.find((candidate) =>
         Mir.matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
@@ -489,8 +491,8 @@ const runnerClassifications = (program) => {
         throw new Error(`missing static runner ${identity(operation.runner)}`)
       }
       const regions = Mir.topologicalRegions(runner)
-      const operations = Mir.operations(runner)
-      const outcomes = Mir.outcomes(runner)
+      const operations = MirVerification.operations(runner)
+      const outcomes = MirVerification.outcomes(runner)
       const operationTags = countTags(operations)
       const regionTags = countTags(regions)
       const outcomeTags = countTags(outcomes)
@@ -644,7 +646,7 @@ try {
         `${sample.id} (unnormalized)`,
       )
       const hir = normalize(Hir.encode(Analysis.rootAnalysis(native).hir))
-      const mir = normalize(Mir.encode(Analysis.loweredMir(native)))
+      const mir = normalize(MirEncoding.encode(Analysis.loweredMir(native)))
       const debugLlvm = normalize(debug.ir)
       const releaseLlvm = normalize(release.ir)
       const optimizedLlvm = clangText(release.bitcode, `${sample.id}-optimized`, [
@@ -682,7 +684,7 @@ try {
       const verdicts = Analysis.effectNormalizationOf(wasm)
       const loweredWasm = Analysis.loweredMir(wasm)
       const runners = runnerClassifications(loweredWasm)
-      const mirOperationTags = countTags(loweredWasm.functions.flatMap(Mir.operations))
+      const mirOperationTags = countTags(loweredWasm.functions.flatMap(MirVerification.operations))
       const coroutineFrameDescriptors = loweredWasm.functions.filter(
         (fn) => fn.suspension?.frame !== undefined,
       ).length

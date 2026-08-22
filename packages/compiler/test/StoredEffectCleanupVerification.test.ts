@@ -3,8 +3,11 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Lower from '../src/Lower.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as Target from '../src/Target.js'
@@ -97,9 +100,9 @@ pub fn main() -> i32 {
   return 0
 }`,
     )
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     const construct = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation) =>
           operation._tag === 'Construct' &&
@@ -124,7 +127,7 @@ pub fn main() -> i32 {
     )
 
     const drop = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
           operation._tag === 'Drop' &&
@@ -194,7 +197,7 @@ pub fn main() -> i32 {
     assert.isDefined(hookedEntry)
     if (hookedEntry === undefined || hookedEntry.representation._tag !== 'Aggregate') return
     const hookedRepresentation = hookedEntry.representation
-    assert.include(Layout.encode(module.layout), 'cleanup-hook=')
+    assert.include(LayoutEncode.encode(module.layout), 'cleanup-hook=')
     const forgedLayout: Layout.Plan = Object.freeze({
       ...module.layout,
       entries: Object.freeze(
@@ -213,7 +216,7 @@ pub fn main() -> i32 {
       ),
     })
     assert.include(
-      Layout.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
+      LayoutVerify.verifyAgainstCatalog(forgedLayout, catalog).map((violation) => violation.rule),
       'CatalogMismatch',
     )
     const strippedHook: CleanupPlan.CleanupPlan = Object.freeze({
@@ -242,7 +245,7 @@ pub fn main() -> i32 {
     ]
     for (const [cleanup, selected] of malformed) {
       assert.include(
-        Mir.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
+        MirVerification.verify(replaceDrop(module, drop, replaceOuter(cleanup, selected))).map(
           (violation) => violation.rule,
         ),
         'InvalidAggregateOperation',

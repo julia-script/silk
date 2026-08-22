@@ -1,6 +1,9 @@
+import * as ConformanceProof from './ConformanceProof.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
 import type * as Hir from './Hir.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
 
 export type CallableEnvironmentLocator =
@@ -12,7 +15,7 @@ export type CallableEnvironmentLocator =
 
 /** The symbolic recursive cleanup of one complete logical owner. */
 export type CleanupPlan =
-  | { readonly _tag: 'NoCleanup'; readonly type: DeclarationIndex.SemanticType }
+  | { readonly _tag: 'NoCleanup'; readonly type: DeclarationFacts.SemanticType }
   | { readonly _tag: 'ParameterCleanup'; readonly type: Type.Parameter }
   | {
       readonly _tag: 'AllocationCleanup'
@@ -27,7 +30,7 @@ export type CleanupPlan =
   | {
       readonly _tag: 'HookCleanup'
       readonly type: Type.Nominal
-      readonly hook: DeclarationIndex.CanonicalId
+      readonly hook: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly inner: CleanupPlan
     }
@@ -35,7 +38,7 @@ export type CleanupPlan =
       readonly _tag: 'StructCleanup'
       readonly type: Type.Nominal
       readonly fields: ReadonlyArray<{
-        readonly field: DeclarationIndex.FieldId
+        readonly field: DeclarationFacts.FieldId
         readonly cleanup: CleanupPlan
       }>
     }
@@ -112,14 +115,14 @@ export const reclaims = (self: CleanupPlan): boolean =>
 
 export const hasEffect = (self: CleanupPlan): boolean => hasHook(self) || reclaims(self)
 export const cleanupFields = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   type: Type.Nominal,
   seen = new Set<string>(),
-): ReadonlyArray<DeclarationIndex.FieldId> => {
+): ReadonlyArray<DeclarationFacts.FieldId> => {
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze([])
   const nextSeen = new Set(seen).add(key)
-  const declaration = DeclarationIndex.byCanonical(index, {
+  const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
@@ -137,8 +140,8 @@ export const cleanupFields = (
 }
 
 export const cleanupPlan = (
-  index: DeclarationIndex.Index,
-  type: DeclarationIndex.SemanticType,
+  index: DeclarationFacts.Index,
+  type: DeclarationFacts.SemanticType,
   seen = new Set<string>(),
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
@@ -200,7 +203,7 @@ export const cleanupPlan = (
         : Object.freeze({ _tag: 'NoCleanup', type })
   const key = Type.key(type)
   if (seen.has(key)) return Object.freeze({ _tag: 'NoCleanup', type })
-  const declaration = DeclarationIndex.byCanonical(index, {
+  const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
@@ -209,7 +212,7 @@ export const cleanupPlan = (
     return Object.freeze({ _tag: 'NoCleanup', type })
   }
   const substitution =
-    Type.substitution(
+    TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
@@ -230,14 +233,14 @@ export const cleanupPlan = (
     ),
   })
   // A source Drop conformance runs its hook before automatic field cleanup.
-  const witness = DeclarationIndex.witness(index, type, Type.dropCapability)
+  const witness = ConformanceProof.witness(index, type, Type.dropCapability)
   if (witness?._tag !== 'SourceConformanceWitness') return structPlan
   const conformance = index.modules
     .find((module) => module.module === witness.module)
     ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
   if (conformance?.provider._tag !== 'Resolved') return structPlan
   const inferred = new Map<string, Type.GenericArgument>()
-  if (!Type.infer(conformance.provider.type, type, inferred)) return structPlan
+  if (!TypeInference.infer(conformance.provider.type, type, inferred)) return structPlan
   return Object.freeze({
     _tag: 'HookCleanup',
     type,
@@ -256,20 +259,20 @@ export const cleanupPlan = (
 }
 
 export const cleanupTypeAtPath = (
-  index: DeclarationIndex.Index,
-  root: DeclarationIndex.SemanticType | undefined,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
-): DeclarationIndex.SemanticType | undefined => {
+  index: DeclarationFacts.Index,
+  root: DeclarationFacts.SemanticType | undefined,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): DeclarationFacts.SemanticType | undefined => {
   let current = root
   for (const fieldId of path) {
     if (current === undefined || !Type.isNominal(current)) return undefined
-    const declaration = DeclarationIndex.byCanonical(index, {
+    const declaration = DeclarationFacts.byCanonical(index, {
       _tag: 'CanonicalDeclarationId',
       module: current.module,
       name: current.name,
     })
     if (declaration?._tag !== 'StructDeclaration') return undefined
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       current.arguments,
     )
@@ -446,7 +449,7 @@ export const specializeCleanup = (
  * a direct one clean in the same order.
  */
 export const realizedCallableCleanup = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   realization: FieldRealization.CallableRealization,
 ): CleanupPlan => {
   const type = realization.contract

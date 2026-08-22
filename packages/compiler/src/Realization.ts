@@ -1,3 +1,5 @@
+import type * as DeclarationFacts from './DeclarationFacts.js'
+
 /**
  * Every diagnostic family judged against reachable concrete instances, collected once so that
  * `realize` and `prepare` cannot drift apart on which checks a specialized program must pass.
@@ -289,7 +291,6 @@ import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import type { Frontend, Options } from './Frontend.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
@@ -317,7 +318,7 @@ const normalizeMir = (
 const finalizeMir = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   options: Options,
 ): Mir.Module => {
   const normalized = normalizeMir(program, provisional, options)
@@ -387,7 +388,7 @@ export type Preparation =
     }
 
 const hasInvalidGenericBody = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
 ): boolean =>
   index.modules.some((module) =>

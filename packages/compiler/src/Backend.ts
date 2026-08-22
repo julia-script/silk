@@ -1,10 +1,11 @@
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import type * as TerminationModel from './Termination.js'
@@ -17,7 +18,7 @@ export interface CodegenRequest {
 }
 
 export interface SymbolEntry {
-  readonly declaration: DeclarationIndex.CanonicalId
+  readonly declaration: DeclarationFacts.CanonicalId
   readonly instance: Mir.MirFunction['instance']
   readonly symbol: string
 }
@@ -25,7 +26,7 @@ export interface SymbolEntry {
 export interface ControlProvenance {
   readonly _tag: 'BackendControlProvenance'
   readonly backend: 'LLVM' | 'WebAssembly'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly instance: Mir.MirFunction['instance']
   readonly region: Mir.RegionId
   readonly construct:
@@ -134,7 +135,7 @@ export const emit = Effect.fn('Backend.emit')(function* <A extends Artifact>(
       reason: { _tag: 'UnsupportedIntrinsic', diagnostics: availability.diagnostics },
     })
   }
-  const violations = Mir.verify(program)
+  const violations = MirVerification.verify(program)
   if (violations.length > 0) {
     return yield* new BackendError({
       operation: 'Backend.emit',

@@ -2,8 +2,8 @@ import * as Analysis from '@silk-effect/compiler/Analysis'
 import type * as Backend from '@silk-effect/compiler/Backend'
 import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import * as Driver from '@silk-effect/compiler/Driver'
+import type * as HeapObservation from '@silk-effect/compiler/HeapObservation'
 import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
-import * as NodeHeapObservation from '@silk-effect/compiler/NodeHeapObservation'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as Target from '@silk-effect/compiler/Target'
 import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
@@ -105,7 +105,11 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
 /** Compiles one already-materialized entry and classifies source versus operational failures. */
 export const compile = Effect.fn('Workflow.compile')(function* (
   options: CompileOptions,
-): Effect.fn.Return<BuildAttempt, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  BuildAttempt,
+  never,
+  FileSystem.FileSystem | Path.Path | HeapObservation.HeapObservation
+> {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const resolver = FileSourceResolver.make(options.entry.sourceRoot)
@@ -129,10 +133,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       destination: options.destination,
       scopeName: options.scopeName,
       saveTemps: options.saveTemps ?? false,
-    }).pipe(
-      Effect.provide(NodeHeapObservation.layer),
-      Effect.provide(FileSourceResolver.layer(resolver)),
-    ),
+    }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
   )
 
   if (Result.isFailure(attempted)) {
@@ -236,7 +237,11 @@ export const check = Effect.fn('Workflow.check')(function* (
 /** Preflights and builds every selected project target sequentially. */
 export const build = Effect.fn('Workflow.build')(function* (
   options: ProjectSelection,
-): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  ExitStatus,
+  never,
+  FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
+> {
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
   const planned = planBatch(loaded.success, options)
@@ -381,12 +386,10 @@ const settledFingerprint = Effect.fnUntraced(function* (
  * compiled whole rather than at the zero length the truncate left behind, and one edit produces
  * one pass rather than one per raw event.
  */
-export const watch = Effect.fn('Workflow.watch')(function* (
-  run: (
-    options: ProjectSelection,
-  ) => Effect.Effect<ExitStatus, never, FileSystem.FileSystem | Path.Path>,
+export const watch = Effect.fn('Workflow.watch')(function* <R>(
+  run: (options: ProjectSelection) => Effect.Effect<ExitStatus, never, R>,
   options: ProjectSelection,
-): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path | R> {
   const fileSystem = yield* FileSystem.FileSystem
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
@@ -449,7 +452,10 @@ export const run = Effect.fn('Workflow.run')(function* (
 ): Effect.fn.Return<
   number,
   never,
-  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | HeapObservation.HeapObservation
+  | Path.Path
 > {
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)

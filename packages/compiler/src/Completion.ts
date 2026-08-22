@@ -1,5 +1,5 @@
 import * as Option from 'effect/Option'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as NameResolution from './NameResolution.js'
@@ -85,7 +85,7 @@ const replacementSpan = (
 }
 
 const declarationIdentity = (
-  declaration: DeclarationIndex.MemberFact,
+  declaration: DeclarationFacts.MemberFact,
 ): SemanticOccurrence.Identity =>
   Object.freeze({
     _tag: 'DeclarationIdentity',
@@ -207,7 +207,7 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
     }),
   )
 
-const serviceCandidates = (service: DeclarationIndex.ServiceFact): ReadonlyArray<Candidate> =>
+const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
   Object.freeze(
     service.operations.flatMap(
       (operation): ReadonlyArray<Candidate> =>
@@ -228,7 +228,7 @@ const serviceCandidates = (service: DeclarationIndex.ServiceFact): ReadonlyArray
   )
 
 const namespaceCandidates = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   module: string,
 ): ReadonlyArray<Candidate> =>
   (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
@@ -309,7 +309,7 @@ const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined =
 }
 
 const fieldCandidates = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   type: Type.Nominal | undefined,
   module: string,
 ): ReadonlyArray<Candidate> => {
@@ -338,7 +338,7 @@ const fieldCandidates = (
 
 const typeCandidates = (
   module: string,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   scope: NameResolution.ModuleScope | undefined,
   fn: Elaboration.FunctionFact | undefined,
 ): ReadonlyArray<Candidate> => {
@@ -411,7 +411,7 @@ const typeCandidates = (
       )
   for (const binding of scope?.bindings ?? []) {
     if (binding._tag !== 'ImportedMember') continue
-    const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+    const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
     if (
       declaration?._tag !== 'StructDeclaration' &&
       declaration?._tag !== 'ServiceDeclaration' &&
@@ -436,7 +436,7 @@ const typeCandidates = (
 
 const expressionCandidates = (
   module: string,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   scope: NameResolution.ModuleScope | undefined,
   result: Elaboration.Result,
   fn: Elaboration.FunctionFact | undefined,
@@ -517,7 +517,7 @@ const expressionCandidates = (
       )
   for (const binding of scope?.bindings ?? []) {
     if (binding._tag === 'ImportedMember') {
-      const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+      const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
       if (declaration === undefined) continue
       candidates.push(
         candidate({
@@ -616,7 +616,7 @@ export const complete = (options: {
   readonly source: SourceFile.SourceFile
   readonly module: string
   readonly offset: number
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly resolution: NameResolution.Resolution
   readonly result: Elaboration.Result
 }): Result => {

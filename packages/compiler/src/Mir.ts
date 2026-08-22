@@ -1,9 +1,10 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
+import * as LayoutVerify from './LayoutVerify.js'
 import type * as Match from './Match.js'
 import { instanceText, operationLocals } from './MirVerification.js'
 import type * as Scalar from './Scalar.js'
@@ -43,7 +44,7 @@ export type Type =
   | { readonly _tag: 'Union'; readonly type: SilkType.StructuralUnion }
   | {
       readonly _tag: 'EffectBorrow'
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly access: 'Shared' | 'Exclusive'
     }
   | {
@@ -89,7 +90,7 @@ export type Type =
     }
   | { readonly _tag: 'EffectOutcome'; readonly type: SilkType.Effect }
 
-export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
+export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
   if (self._tag === 'CallableValue' || self._tag === 'EffectValue')
     return self.storage?.type ?? self.type
   if (self._tag === 'EffectComposite') return self.type
@@ -108,7 +109,7 @@ export const semanticType = (self: Type): DeclarationIndex.SemanticType => {
 
 export const typeText = (self: Type): string => SilkType.encode(semanticType(self))
 /** Reads the concrete sealed Copy verdict published by target layout. */
-export const isCopy = (layout: Layout.Plan, type: DeclarationIndex.SemanticType): boolean =>
+export const isCopy = (layout: Layout.Plan, type: DeclarationFacts.SemanticType): boolean =>
   Layout.entry(layout, type)?.copy === true
 
 const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingScalar): boolean =>
@@ -132,7 +133,7 @@ export const callingShapeEquals = (
       lane.path.length === candidate.path.length &&
       lane.path.every((selector, index) => {
         const other = candidate.path.at(index)
-        return other !== undefined && Layout.selectorEquals(selector, other)
+        return other !== undefined && LayoutVerify.selectorEquals(selector, other)
       })
     )
   })
@@ -171,7 +172,7 @@ export type NormalizationVerdict =
   | {
       readonly _tag: 'Normalized'
       readonly kind: 'FoldedConstructor' | 'DirectStaticRun'
-      readonly function: DeclarationIndex.CanonicalId
+      readonly function: DeclarationFacts.CanonicalId
       readonly region: RegionId
       readonly local: LocalId
       readonly guards: ReadonlyArray<
@@ -182,7 +183,7 @@ export type NormalizationVerdict =
   | {
       readonly _tag: 'Rejected'
       readonly reason: NormalizationRejection
-      readonly function: DeclarationIndex.CanonicalId
+      readonly function: DeclarationFacts.CanonicalId
       readonly region: RegionId
       readonly local: LocalId
       readonly provenance: Provenance
@@ -245,7 +246,7 @@ export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is 
 export type PlaceSelector =
   | {
       readonly _tag: 'FieldSelector'
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly provenance: Provenance
     }
   | {
@@ -444,7 +445,7 @@ export type Operation =
       readonly destination: LocalId
       readonly allocation: LocalId
       readonly count: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly stride: number
       readonly elementAlignment: number
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
@@ -462,7 +463,7 @@ export type Operation =
       readonly destination: LocalId
       readonly buffer: LocalId
       readonly index: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
@@ -472,7 +473,7 @@ export type Operation =
       readonly destination: LocalId
       readonly buffer: LocalId
       readonly index: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -483,7 +484,7 @@ export type Operation =
       readonly buffer: LocalId
       readonly offset: LocalId
       readonly length: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly stride: number
       readonly access: SilkType.Slice['access']
       readonly type: Extract<Type, { readonly _tag: 'Slice' }>
@@ -501,7 +502,7 @@ export type Operation =
       readonly offset: LocalId
       readonly source: LocalId
       readonly length: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly stride: number
       /**
        * True when the element type is structurally Copy. A move of a Copy element leaves the
@@ -527,7 +528,7 @@ export type Operation =
       readonly destination: LocalId
       readonly slot: LocalId
       readonly value: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
@@ -535,7 +536,7 @@ export type Operation =
       readonly _tag: 'SlotTake'
       readonly destination: LocalId
       readonly slot: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -544,7 +545,7 @@ export type Operation =
       readonly _tag: 'SlotCopy'
       readonly destination: LocalId
       readonly slot: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -552,7 +553,7 @@ export type Operation =
       readonly _tag: 'SlotDrop'
       readonly destination: LocalId
       readonly slot: LocalId
-      readonly element: DeclarationIndex.SemanticType
+      readonly element: DeclarationFacts.SemanticType
       readonly cleanup: CleanupPlan.CleanupPlan
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
@@ -600,7 +601,7 @@ export type Operation =
   | {
       readonly _tag: 'Call'
       readonly destination: LocalId
-      readonly target: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly type: Type
@@ -609,7 +610,7 @@ export type Operation =
   | {
       readonly _tag: 'MakeEffect'
       readonly destination: LocalId
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly source: LocalId
@@ -705,7 +706,7 @@ export type Operation =
       readonly _tag: 'RunEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
-      readonly target: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -727,18 +728,18 @@ export type Operation =
       readonly destination: LocalId
       readonly outcome: LocalId
       readonly effect: LocalId
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       /** Exact unsupplied runner retained when `runner` is a statically provided specialization. */
       readonly runnerBase?: {
-        readonly declaration: DeclarationIndex.CanonicalId
+        readonly declaration: DeclarationFacts.CanonicalId
         readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       }
       /** Ordered compile-time provider selections proving the exact requirement row. */
       readonly providers: ReadonlyArray<{
         readonly capability: SilkType.Nominal
         readonly providerType: SilkType.Nominal
-        readonly witness: DeclarationIndex.ConformanceWitness
+        readonly witness: DeclarationFacts.ConformanceWitness
         readonly role: string
         readonly requirementAccess: SilkType.Requirement['access']
         readonly access: 'Shared' | 'Exclusive' | 'Take'
@@ -767,7 +768,7 @@ export type Operation =
       readonly effect: LocalId
       readonly alternatives: ReadonlyArray<{
         readonly type: Extract<Type, { readonly _tag: 'EffectValue' }>
-        readonly runner: DeclarationIndex.CanonicalId
+        readonly runner: DeclarationFacts.CanonicalId
         readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
         readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
         readonly arguments: ReadonlyArray<LocalId>
@@ -787,7 +788,7 @@ export type Operation =
       readonly _tag: 'RunStaticEffect'
       readonly destination: LocalId
       readonly outcome: LocalId
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly captures: ReadonlyArray<{
         readonly source: LocalId
@@ -810,18 +811,18 @@ export type Operation =
       readonly destination: LocalId
       readonly outcome: LocalId
       readonly effect: LocalId
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly resultType: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly resultField: DeclarationIndex.FieldId
+      readonly resultField: DeclarationFacts.FieldId
       readonly resultUnion: SilkType.StructuralUnion
       readonly successType: SilkType.Nominal
-      readonly successField: DeclarationIndex.FieldId
+      readonly successField: DeclarationFacts.FieldId
       readonly successTag: number
       readonly failureType: SilkType.Nominal
-      readonly failureField: DeclarationIndex.FieldId
+      readonly failureField: DeclarationFacts.FieldId
       readonly failureTag: number
       readonly failureValueType: SilkType.Type
       readonly resultShape: Layout.CallingShape
@@ -836,8 +837,8 @@ export type Operation =
       readonly destination: LocalId
       readonly effect: LocalId
       readonly outcome: LocalId
-      readonly target: DeclarationIndex.CanonicalId
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly effectType: Extract<Type, { readonly _tag: 'EffectValue' }>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
@@ -856,7 +857,7 @@ export type Operation =
       readonly destination: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly fields: ReadonlyArray<{
-        readonly field: DeclarationIndex.FieldId
+        readonly field: DeclarationFacts.FieldId
         readonly value: LocalId
         readonly stored?:
           | Extract<Type, { readonly _tag: 'CallableValue' }>['storage']
@@ -875,7 +876,7 @@ export type Operation =
       readonly _tag: 'Project'
       readonly destination: LocalId
       readonly source: LocalId
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -951,7 +952,7 @@ export interface EndLoanOperation {
 export interface MatchBinding {
   readonly id: Match.BindingId
   readonly destination: LocalId
-  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly path: ReadonlyArray<DeclarationFacts.FieldId>
   readonly type: Type
   readonly access: Match.Access
   readonly provenance: Provenance
@@ -973,7 +974,7 @@ export interface MatchArm {
     readonly operations: ReadonlyArray<Operation>
     readonly result: LocalId
     readonly cleanup: ReadonlyArray<{
-      readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+      readonly path: ReadonlyArray<DeclarationFacts.FieldId>
       readonly cleanup: CleanupPlan.CleanupPlan
     }>
     readonly endBorrow: boolean
@@ -1171,7 +1172,7 @@ export type RunSuspendableEffectRegion = Extract<
 
 export interface MirFunction {
   readonly _tag: 'MirFunction'
-  readonly id: DeclarationIndex.CanonicalId
+  readonly id: DeclarationFacts.CanonicalId
   readonly instance: Instances.InstanceKey
   readonly parameterCount: number
   readonly localTypes: ReadonlyArray<Type>
@@ -1181,13 +1182,13 @@ export interface MirFunction {
   /** Static origin of a generated Effect runner, including every selected provider witness. */
   readonly effectRunner?: {
     readonly base: {
-      readonly declaration: DeclarationIndex.CanonicalId
+      readonly declaration: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
     }
     readonly providers: ReadonlyArray<{
       readonly capability: SilkType.Nominal
       readonly providerType: SilkType.Nominal
-      readonly witness: DeclarationIndex.ConformanceWitness
+      readonly witness: DeclarationFacts.ConformanceWitness
       readonly role: string
       readonly requirementAccess: SilkType.Requirement['access']
       readonly access: 'Shared' | 'Exclusive' | 'Take'
@@ -1245,7 +1246,7 @@ export const machineEntry = (self: Module): Instances.InstanceKey => {
 /** Tests whether a MIR function realizes one concrete call target. */
 export const matchesInstance = (
   fn: MirFunction,
-  declaration: DeclarationIndex.CanonicalId,
+  declaration: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<SilkType.GenericArgument>,
 ): boolean =>
   fn.id.module === declaration.module &&
@@ -1264,8 +1265,8 @@ export const matchesInstanceKey = (fn: MirFunction, key: Instances.InstanceKey):
   instanceText(fn.instance) === instanceText(key)
 
 export const conformanceWitnessMatches = (
-  left: DeclarationIndex.ConformanceWitness,
-  right: DeclarationIndex.ConformanceWitness,
+  left: DeclarationFacts.ConformanceWitness,
+  right: DeclarationFacts.ConformanceWitness,
 ): boolean => {
   if (
     left._tag !== right._tag ||
@@ -1428,7 +1429,7 @@ export interface Violation {
     | 'InvalidSuspension'
     | 'InvalidCoroutineFrame'
     | 'OrphanSuspensionMachinery'
-  readonly function?: DeclarationIndex.CanonicalId
+  readonly function?: DeclarationFacts.CanonicalId
   readonly region?: RegionId
   readonly detail: string
 }
@@ -1464,11 +1465,3 @@ export const operationTree = (operation: Operation): ReadonlyArray<Operation> =>
   }
   return Object.freeze(walk(operation))
 }
-
-export { encode } from './MirEncoding.js'
-export {
-  operationLocals,
-  operations,
-  outcomes,
-  verify,
-} from './MirVerification.js'

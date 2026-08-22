@@ -4,7 +4,8 @@ import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -310,8 +311,8 @@ pub fn main() -> i32 {
     if (hir === undefined) return
     assert.deepEqual(Hir.verify(hir), [], Hir.encode(hir))
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
-    assert.include(Mir.encode(mir), ' retain-bindings ')
+    assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
+    assert.include(MirEncoding.encode(mir), ' retain-bindings ')
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag !== 'Completed') return
@@ -382,7 +383,7 @@ pub fn main() -> i32 {
       )
       assert.deepEqual(Analysis.diagnostics(self), [])
       const mir = Analysis.loweredMir(self)
-      assert.deepEqual(Mir.verify(mir), [], Mir.encode(mir))
+      assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
       const outcome = Analysis.evaluate(self)
       assert.strictEqual(outcome._tag, 'Completed')
       if (outcome._tag !== 'Completed') return

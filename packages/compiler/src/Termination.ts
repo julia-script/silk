@@ -1,9 +1,9 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as SourceSpan from './SourceSpan.js'
 
 /** One source-level invocation retained independently from physical backend and coroutine frames. */
 export interface LogicalFrame {
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly provenance: SourceSpan.SourceSpan
 }
 
@@ -17,7 +17,7 @@ export interface CausalFailure {
 }
 
 interface Common<Trace> {
-  readonly entry: DeclarationIndex.CanonicalId
+  readonly entry: DeclarationFacts.CanonicalId
   readonly status: number
   readonly provenance: SourceSpan.SourceSpan
   readonly logicalPath: ReadonlyArray<LogicalFrame>

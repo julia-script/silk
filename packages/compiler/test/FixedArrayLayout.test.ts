@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -57,7 +59,7 @@ pub fn main() -> i32 {
         ['element:1', 'field:1'],
       ],
     )
-    assert.deepEqual(Layout.verify(selected.value), [])
+    assert.deepEqual(LayoutVerify.verify(selected.value), [])
   }),
 )
 
@@ -99,6 +101,9 @@ pub fn main() -> i32 { return 0 }`)
       plan.value.entries.some((entry) => Type.equals(entry.type, Type.fixedArray('bool', 8))),
       false,
     )
-    assert.strictEqual(Layout.encodeCatalog(catalog.value), Layout.encodeCatalog(catalog.value))
+    assert.strictEqual(
+      LayoutEncode.encodeCatalog(catalog.value),
+      LayoutEncode.encodeCatalog(catalog.value),
+    )
   }),
 )

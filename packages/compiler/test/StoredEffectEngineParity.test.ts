@@ -13,10 +13,12 @@ import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as FieldRealization from '../src/FieldRealization.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
@@ -127,7 +129,7 @@ const lowerSource = Effect.fnUntraced(function* (
       snapshot.index,
     ),
   )
-  assert.deepEqual(Mir.verify(module), [], name)
+  assert.deepEqual(MirVerification.verify(module), [], name)
   return Object.freeze({ snapshot, module })
 })
 
@@ -232,7 +234,7 @@ const storedRealizations = (module: Mir.Module) =>
 const storedRunner = (module: Mir.Module, label: string) => {
   const realizations = storedRealizations(module)
   for (const realization of realizations) {
-    for (const operation of module.functions.flatMap(Mir.operations)) {
+    for (const operation of module.functions.flatMap(MirVerification.operations)) {
       if (operation._tag !== 'RunEffectValue') continue
       const runner = operation.runnerBase?.declaration ?? operation.runner
       if (runner.module === realization.runner.module && runner.name === realization.runner.name)
@@ -495,7 +497,7 @@ layer(NodeServices.layer)('stored Effect engine parity', (it) => {
             // Service provision resolves statically: the specialized runner reaches the backend, and
             // the provider travels in the environment rather than a runtime dictionary.
             const specialized = nativeLowering.module.functions
-              .flatMap(Mir.operations)
+              .flatMap(MirVerification.operations)
               .find(
                 (candidate) =>
                   candidate._tag === 'RunEffectValue' &&
@@ -775,7 +777,7 @@ pub fn main() -> i32 {
           current.environment.at(0) ?? unreachable('expected one stored Effect capture')
         assert.isAbove(current.cleanup.unrunLanes.length, 0, 'expected cleanup dependency')
         assert.strictEqual(current.suspendable, true, 'expected suspendability dependency')
-        assert.deepEqual(Mir.verify(lowered.module), [], 'baseline MIR')
+        assert.deepEqual(MirVerification.verify(lowered.module), [], 'baseline MIR')
 
         const mutations: ReadonlyArray<{
           readonly name: string
@@ -844,7 +846,9 @@ pub fn main() -> i32 {
             mutation.realization,
           )
           assert.include(
-            Layout.verifyAgainstCatalog(staleLayout, catalog).map((violation) => violation.rule),
+            LayoutVerify.verifyAgainstCatalog(staleLayout, catalog).map(
+              (violation) => violation.rule,
+            ),
             'CatalogMismatch',
             `${mutation.name} stale layout`,
           )

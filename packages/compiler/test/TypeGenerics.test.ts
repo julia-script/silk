@@ -3,13 +3,16 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
-import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Instances from '../src/Instances.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Layout from '../src/Layout.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
@@ -82,7 +85,7 @@ pub fn main() -> i32 { return 0 }`
       assert.strictEqual(provider.selected._tag, 'RowParameterExpression')
       assert.strictEqual(provider.source._tag, 'RowParameterExpression')
     }
-    const contract = DeclarationIndex.callableContract(operation)
+    const contract = DeclarationFacts.callableContract(operation)
     assert.strictEqual(contract.constraints.length, 2)
     assert.strictEqual(Type.isEffect(contract.result), true)
     assert.include(Type.encode(contract.result), 'Without<R, S>')
@@ -183,7 +186,7 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
   ])
   const inferred = new Map<string, Type.GenericArgument>()
 
-  assert.strictEqual(Type.infer(pattern, actual, inferred), true)
+  assert.strictEqual(TypeInference.infer(pattern, actual, inferred), true)
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(failureRemainder)) ?? 'never'),
     'generics/Rows.Other | generics/Rows.Problem',
@@ -243,7 +246,7 @@ it('infers failure and requirement row arguments nested in nominal applications'
   ])
   const inferred = new Map<string, Type.GenericArgument>()
 
-  assert.isTrue(Type.infer(pattern, actual, inferred))
+  assert.isTrue(TypeInference.infer(pattern, actual, inferred))
   assert.strictEqual(
     Type.encodeGenericArgument(inferred.get(Type.key(failures)) ?? 'never'),
     'generics/NominalRows.Other | generics/NominalRows.Problem',
@@ -255,7 +258,7 @@ it('infers failure and requirement row arguments nested in nominal applications'
 
   const repeated = Type.nominal('generics/NominalRows', 'Repeated', [failures, failures])
   assert.isFalse(
-    Type.infer(
+    TypeInference.infer(
       repeated,
       Type.nominal('generics/NominalRows', 'Repeated', [
         Type.failureValue([problem]),
@@ -270,7 +273,7 @@ it('infers failure and requirement row arguments nested in nominal applications'
     Type.requirementRowArgument([], [requirements]),
   ])
   assert.isFalse(
-    Type.infer(
+    TypeInference.infer(
       repeatedRequirements,
       Type.nominal('generics/NominalRows', 'Repeated', [
         Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
@@ -285,7 +288,7 @@ it('infers failure and requirement row arguments nested in nominal applications'
   const openFailures = Type.parameter(owner, 2, 'OpenE')
   const openRequirements = Type.parameter(owner, 3, 'OpenR', 'RequirementRow')
   assert.isFalse(
-    Type.infer(
+    TypeInference.infer(
       pattern,
       Type.nominal('generics/NominalRows', 'Carrier', [
         Type.failureValue([problem, openFailures]),
@@ -309,7 +312,7 @@ it('infers failure and requirement row arguments nested in nominal applications'
     Object.freeze({ capability, role: 'DefaultRole', access: 'Shared' })
   const ambiguousRequirements = new Map<string, Type.GenericArgument>()
   assert.isTrue(
-    Type.infer(
+    TypeInference.infer(
       Type.nominal('generics/NominalRows', 'Backtracking', [
         Type.requirementRowArgument([requirement(pair(a, y)), requirement(pair(x, b))]),
       ]),
@@ -339,7 +342,7 @@ it('uses an ordinary type parameter directly as an effect failure value', () => 
   if (concrete._tag !== 'Normalized') return
 
   const inferred = new Map<string, Type.GenericArgument>()
-  assert.strictEqual(Type.infer(failures, concrete.type, inferred), true)
+  assert.strictEqual(TypeInference.infer(failures, concrete.type, inferred), true)
   assert.strictEqual(
     Type.encode(Type.substitute(failures, inferred)),
     'generics/Rows.Other | generics/Rows.Problem',
@@ -370,7 +373,7 @@ it('distinguishes row inference failure causes deterministically', () => {
   const clock = Type.nominal('generics/Rows', 'Clock')
   const requirement = { capability: clock, role: 'Primary', access: 'Shared' as const }
   const closed = Type.effect('i32', [], 'Shared')
-  const absentFailure = Type.rowInferenceFailure(Type.effect('i32', [problem]), closed)
+  const absentFailure = TypeInference.rowInferenceFailure(Type.effect('i32', [problem]), closed)
 
   assert.strictEqual(absentFailure?._tag, 'AbsentFailureMember')
   if (absentFailure !== undefined)
@@ -388,32 +391,33 @@ it('distinguishes row inference failure causes deterministically', () => {
       { code: 'SEM0089', reason: 'ContractRowInference' },
     )
   assert.strictEqual(
-    Type.rowInferenceFailure(Type.effect('i32', [], 'Shared', [requirement]), closed)?._tag,
+    TypeInference.rowInferenceFailure(Type.effect('i32', [], 'Shared', [requirement]), closed)
+      ?._tag,
     'AbsentRequirementMember',
   )
   assert.strictEqual(
-    Type.rowInferenceFailure(
+    TypeInference.rowInferenceFailure(
       Type.effect('i32', [], 'Shared', [requirement]),
       Type.effect('i32', [], 'Shared', [{ ...requirement, role: 'Secondary' }]),
     )?._tag,
     'IncompatibleRequirementRole',
   )
   assert.strictEqual(
-    Type.rowInferenceFailure(
+    TypeInference.rowInferenceFailure(
       Type.effect('i32', [], 'Shared', [requirement]),
       Type.effect('i32', [], 'Shared', [{ ...requirement, access: 'Exclusive' }]),
     )?._tag,
     'IncompatibleRequirementAccess',
   )
   assert.strictEqual(
-    Type.rowInferenceFailure(
+    TypeInference.rowInferenceFailure(
       Type.effect('i32', [], 'Shared', [], [firstRequirement, secondRequirement]),
       closed,
     )?._tag,
     'AmbiguousRequirementRemainder',
   )
   assert.strictEqual(
-    Type.rowInferenceFailure(
+    TypeInference.rowInferenceFailure(
       Type.effect('i32', [], 'Shared', [], [firstRequirement]),
       Type.effect('i32', [], 'Shared', [], [secondRequirement]),
     )?._tag,
@@ -426,14 +430,14 @@ it('orders Effect access bounds from reusable through take-capable', () => {
   const exclusive = Type.effect('i32', [], 'Exclusive')
   const take = Type.effect('i32', [], 'Take')
 
-  assert.isTrue(Type.infer(take, shared, new Map()))
-  assert.isTrue(Type.infer(take, exclusive, new Map()))
-  assert.isTrue(Type.infer(take, take, new Map()))
-  assert.isTrue(Type.infer(exclusive, shared, new Map()))
-  assert.isTrue(Type.infer(exclusive, exclusive, new Map()))
-  assert.isFalse(Type.infer(exclusive, take, new Map()))
-  assert.isFalse(Type.infer(shared, exclusive, new Map()))
-  assert.isFalse(Type.infer(shared, take, new Map()))
+  assert.isTrue(TypeInference.infer(take, shared, new Map()))
+  assert.isTrue(TypeInference.infer(take, exclusive, new Map()))
+  assert.isTrue(TypeInference.infer(take, take, new Map()))
+  assert.isTrue(TypeInference.infer(exclusive, shared, new Map()))
+  assert.isTrue(TypeInference.infer(exclusive, exclusive, new Map()))
+  assert.isFalse(TypeInference.infer(exclusive, take, new Map()))
+  assert.isFalse(TypeInference.infer(shared, exclusive, new Map()))
+  assert.isFalse(TypeInference.infer(shared, take, new Map()))
 })
 
 it('keeps generic angles contextual and recovers damaged lists deterministically', () => {
@@ -562,7 +566,7 @@ it.effect('infers and explicitly selects finite concrete instances before MIR', 
     assert.strictEqual(snapshot.mir._tag, 'Available')
     if (snapshot.mir._tag !== 'Available') return
     assert.strictEqual(snapshot.mir.value.functions.length, 3)
-    assert.notInclude(Mir.encode(snapshot.mir.value), 'TypeParameter')
+    assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, snapshot.mir.value)
     assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer))
     if (outcome._tag === 'Completed') {
@@ -774,7 +778,7 @@ pub fn main() -> i32 { return discard<Payload>(Payload {}) }`),
     }
     assert.strictEqual(snapshot.mir._tag, 'Available')
     if (snapshot.mir._tag !== 'Available') return
-    assert.notInclude(Mir.encode(snapshot.mir.value), 'TypeParameter')
+    assert.notInclude(MirEncoding.encode(snapshot.mir.value), 'TypeParameter')
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
   }),
@@ -1135,7 +1139,7 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
       ]),
     })
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidInstance',
     )
 

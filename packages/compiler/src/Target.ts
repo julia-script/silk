@@ -119,7 +119,7 @@ export const resolve = Effect.fn('Target.resolve')(function* (
 })
 
 /** Resolves host facts supplied by the application edge. */
-export const fromHost = Effect.fn('Target.host')(function* (
+export const fromHost = Effect.fn('Target.fromHost')(function* (
   hostPlatform: string,
   hostArch: string,
 ): Effect.fn.Return<Target, TargetError> {

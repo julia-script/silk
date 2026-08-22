@@ -1,5 +1,7 @@
 import * as Option from 'effect/Option'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
+import * as DeclarationCompletion from './DeclarationCompletion.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ImportPath from './ImportPath.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -16,7 +18,7 @@ export type Binding =
   | {
       readonly _tag: 'LocalDeclaration'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.CanonicalId
+      readonly declaration: DeclarationFacts.CanonicalId
     }
   | { readonly _tag: 'IntrinsicActor'; readonly spelling: IntrinsicActor }
   | {
@@ -31,7 +33,7 @@ export type Binding =
       readonly spelling: string
       readonly sourceSpelling: string
       readonly module: string
-      readonly declaration: DeclarationIndex.CanonicalId
+      readonly declaration: DeclarationFacts.CanonicalId
       readonly syntax: SyntaxTree.Node
       readonly sourceToken: Token.Token
       readonly localToken: Token.Token
@@ -42,7 +44,7 @@ export type Binding =
       readonly syntax: SyntaxTree.Element
       readonly tokens: ReadonlyArray<Token.Token>
       readonly cause?: Diagnostic.Identity
-      readonly declaration?: DeclarationIndex.CanonicalId
+      readonly declaration?: DeclarationFacts.CanonicalId
     }
 
 export type ImportOutcome =
@@ -80,7 +82,7 @@ export type Lookup =
   | {
       readonly _tag: 'Resolved'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.MemberFact
+      readonly declaration: DeclarationFacts.MemberFact
     }
   | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: IntrinsicActor }
   | { readonly _tag: 'Namespace'; readonly spelling: string; readonly module: string }
@@ -88,7 +90,7 @@ export type Lookup =
   | {
       readonly _tag: 'Inaccessible'
       readonly spelling: string
-      readonly declaration: DeclarationIndex.MemberFact
+      readonly declaration: DeclarationFacts.MemberFact
       readonly cause: Diagnostic.Identity
     }
   | { readonly _tag: 'Conflict'; readonly spelling: string; readonly conflict: Conflict }
@@ -96,7 +98,7 @@ export type Lookup =
       readonly _tag: 'Unavailable'
       readonly spelling: string
       readonly cause?: Diagnostic.Identity
-      readonly declaration?: DeclarationIndex.MemberFact
+      readonly declaration?: DeclarationFacts.MemberFact
     }
 
 const text = (source: SourceFile.SourceFile, token: Token.Token): string =>
@@ -127,18 +129,18 @@ const aliasName = (
         token,
       })
 }
-type CanonicalMember = DeclarationIndex.MemberFact & {
-  readonly canonical: Extract<DeclarationIndex.CanonicalState, { readonly _tag: 'Canonical' }>
+type CanonicalMember = DeclarationFacts.MemberFact & {
+  readonly canonical: Extract<DeclarationFacts.CanonicalState, { readonly _tag: 'Canonical' }>
 }
 const isCanonicalMember = (
-  declaration: DeclarationIndex.MemberFact,
+  declaration: DeclarationFacts.MemberFact,
 ): declaration is CanonicalMember => declaration.canonical._tag === 'Canonical'
 const canonicalDeclaration = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   module: string,
   spelling: string,
 ): CanonicalMember | undefined => {
-  const result = DeclarationIndex.member(index, module, spelling)
+  const result = DeclarationFacts.member(index, module, spelling)
   return result._tag === 'Resolved' && isCanonicalMember(result.declaration)
     ? result.declaration
     : undefined
@@ -158,7 +160,7 @@ const bindingTarget = (binding: Exclude<Binding, { readonly _tag: 'Unavailable' 
 
 export const resolve = (
   closure: ModuleClosure.Facts,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): Resolution => {
   const scopes: Array<ModuleScope> = []
   for (const module of closure.modules) {
@@ -296,7 +298,7 @@ export const resolve = (
         const last = bindings.at(-1)
         let span = module.syntax.root.span
         if (last?._tag === 'LocalDeclaration') {
-          const declaration = DeclarationIndex.byCanonical(index, last.declaration)
+          const declaration = DeclarationFacts.byCanonical(index, last.declaration)
           if (declaration?.name._tag === 'Present') span = declaration.name.token.span
         } else if (
           last?._tag === 'ModuleNamespace' ||
@@ -338,7 +340,7 @@ export const scopeOf = (self: Resolution, module: string): ModuleScope | undefin
   self.modules.find((scope) => scope.module === module)
 export const lookup = (
   scope: ModuleScope,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   spelling: string,
 ): Lookup => {
   const conflict = scope.conflicts.find((value) => value.spelling === spelling)
@@ -351,7 +353,7 @@ export const lookup = (
     const declaration =
       binding.declaration === undefined
         ? undefined
-        : DeclarationIndex.byCanonical(index, binding.declaration)
+        : DeclarationFacts.byCanonical(index, binding.declaration)
     return Object.freeze({
       _tag: 'Unavailable',
       spelling,
@@ -361,14 +363,14 @@ export const lookup = (
   }
   if (binding._tag === 'ModuleNamespace')
     return Object.freeze({ _tag: 'Namespace', spelling, module: binding.module })
-  const declaration = DeclarationIndex.byCanonical(index, binding.declaration)
+  const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
   return declaration === undefined
     ? Object.freeze({ _tag: 'Unavailable', spelling })
     : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
 export const lookupQualified = (
   scope: ModuleScope,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   namespace: string,
   member: string,
   token: Token.Token,
@@ -404,10 +406,10 @@ export const lookupQualified = (
 }
 
 const unresolved = (
-  path: DeclarationIndex.TypePathFact,
+  path: DeclarationFacts.TypePathFact,
   diagnostic: Diagnostic.Diagnostic,
   candidate?: Type.Nominal,
-): DeclarationIndex.TypeResolution => {
+): DeclarationFacts.TypeResolution => {
   const token = path.segments.at(0)?.token
   if (token === undefined) {
     return Object.freeze({
@@ -430,10 +432,10 @@ const unresolved = (
 }
 
 const unavailable = (
-  path: DeclarationIndex.TypePathFact,
+  path: DeclarationFacts.TypePathFact,
   cause?: Diagnostic.Identity,
   candidate?: Type.Nominal,
-): DeclarationIndex.TypeResolution => {
+): DeclarationFacts.TypeResolution => {
   const token = path.segments.at(0)?.token
   if (token === undefined) {
     return Object.freeze({
@@ -456,9 +458,9 @@ const unavailable = (
 }
 
 const resolvedType = (
-  path: DeclarationIndex.TypePathFact,
-  type: DeclarationIndex.SemanticType,
-): DeclarationIndex.TypeResolution => {
+  path: DeclarationFacts.TypePathFact,
+  type: DeclarationFacts.SemanticType,
+): DeclarationFacts.TypeResolution => {
   const token = path.segments.at(0)?.token
   return token === undefined
     ? Object.freeze({
@@ -478,7 +480,7 @@ const resolvedType = (
       })
 }
 
-const nominalOf = (declaration: DeclarationIndex.MemberFact): Type.Nominal | undefined =>
+const nominalOf = (declaration: DeclarationFacts.MemberFact): Type.Nominal | undefined =>
   (declaration._tag === 'StructDeclaration' ||
     declaration._tag === 'ServiceDeclaration' ||
     declaration._tag === 'InterfaceDeclaration') &&
@@ -486,16 +488,16 @@ const nominalOf = (declaration: DeclarationIndex.MemberFact): Type.Nominal | und
     ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
     : undefined
 
-const typeUseSpan = (path: DeclarationIndex.TypePathFact): Token.Token['span'] =>
+const typeUseSpan = (path: DeclarationFacts.TypePathFact): Token.Token['span'] =>
   path.segments.at(-1)?.token.span ?? path.syntax.span
 
 /** Resolves one retained declaration type path through an immutable module scope. */
 export const resolveType = (
   resolution: Resolution,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   module: string,
-  path: DeclarationIndex.TypePathFact,
-): DeclarationIndex.TypeResolution => {
+  path: DeclarationFacts.TypePathFact,
+): DeclarationFacts.TypeResolution => {
   const scope = scopeOf(resolution, module)
   const first = path.segments.at(0)
   const second = path.segments.at(1)
@@ -545,17 +547,17 @@ export const resolveType = (
 /** Resolves one retained item path through the same import scope and visibility gate as values. */
 export const resolveItem = (
   resolution: Resolution,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   module: string,
-  path: DeclarationIndex.TypePathFact,
-): DeclarationIndex.ItemResolution => {
+  path: DeclarationFacts.TypePathFact,
+): DeclarationFacts.ItemResolution => {
   const scope = scopeOf(resolution, module)
   const first = path.segments.at(0)
   const second = path.segments.at(1)
   if (scope === undefined || first === undefined || path.segments.length > 2)
     return Object.freeze({ _tag: 'Missing' })
   if (second === undefined) {
-    const local = DeclarationIndex.lookupDeclaration(
+    const local = DeclarationFacts.lookupDeclaration(
       index.modules.find((candidate) => candidate.module === module)?.declarations ?? [],
       first.spelling,
     )
@@ -592,15 +594,15 @@ export const resolveItem = (
 /** Runs identity collection, scope construction, and declared-type completion in phase order. */
 export const analyze = (
   closure: ModuleClosure.Facts,
-): { readonly index: DeclarationIndex.Index; readonly resolution: Resolution } => {
-  const collected = DeclarationIndex.collect(closure)
+): { readonly index: DeclarationFacts.Index; readonly resolution: Resolution } => {
+  const collected = DeclarationCollection.collect(closure)
   const preliminary = resolve(closure, collected)
   const resolvers = ResolutionSeams.make(
-    (module: string, path: DeclarationIndex.TypePathFact) =>
+    (module: string, path: DeclarationFacts.TypePathFact) =>
       resolveType(preliminary, collected, module, path),
-    (module: string, path: DeclarationIndex.TypePathFact) =>
+    (module: string, path: DeclarationFacts.TypePathFact) =>
       resolveItem(preliminary, collected, module, path),
   )
-  const index = DeclarationIndex.complete(collected, resolvers)
+  const index = DeclarationCompletion.complete(collected, resolvers)
   return Object.freeze({ index, resolution: resolve(closure, index) })
 }

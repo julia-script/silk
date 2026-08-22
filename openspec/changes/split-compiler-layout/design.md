@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md. layout placement, verify, and encode are the stable entry points. The RepresentationField -> FieldRealization -> Layout hand-off (plan/resolve -> enrich -> place) is already layered and is preserved.
+See proposal.md. `Layout` owns placement, `LayoutVerify` owns verification and lane-path queries, and `LayoutEncode` owns rendering; callers import those final actors directly. The RepresentationField -> FieldRealization -> Layout hand-off (plan/resolve -> enrich -> place) is already layered and is preserved.
 
 ## Decisions
 

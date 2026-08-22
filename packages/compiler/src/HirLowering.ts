@@ -15,6 +15,7 @@ import type {
 import { contextualIntegerCompatible, returnedBorrowArgument } from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import { executableStatements } from './StatementAnalysis.js'
@@ -678,7 +679,7 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       })
     }
     const substitution =
-      Type.substitution(
+      TypeInference.substitution(
         fact.target.struct.typeParameters.map((parameter) => parameter.type),
         fact.target.type.arguments,
       ) ?? new Map()

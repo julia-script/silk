@@ -3,7 +3,9 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Layout from '../src/Layout.js'
-import * as Mir from '../src/Mir.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
@@ -85,12 +87,12 @@ pub fn main() -> i32 { let pair = make() return pair.left }`),
     const calls =
       make === undefined
         ? []
-        : Mir.operations(make).flatMap((operation) =>
+        : MirVerification.operations(make).flatMap((operation) =>
             operation._tag === 'Call' ? [operation.target.name] : [],
           )
 
     assert.deepEqual(calls, ['right', 'left'])
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
 
@@ -101,7 +103,7 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     assert.strictEqual(layout._tag, 'Available')
     if (layout._tag !== 'Available') return
     const pair = layout.value.entries.find(
-      (entry) => Layout.encode(layout.value).includes('Pair') && entry.type !== 'i32',
+      (entry) => LayoutEncode.encode(layout.value).includes('Pair') && entry.type !== 'i32',
     )
     assert.notStrictEqual(pair, undefined)
     const shape = pair === undefined ? undefined : Layout.callingShape(layout.value, pair.type)
@@ -125,9 +127,9 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     )
 
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
-    assert.include(Mir.encode(mir), 'construct struct-values/main.Pair')
-    assert.include(Mir.encode(mir), 'read-place')
+    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.include(MirEncoding.encode(mir), 'construct struct-values/main.Pair')
+    assert.include(MirEncoding.encode(mir), 'read-place')
 
     const outcome = Analysis.evaluate(self)
     assert.strictEqual(outcome._tag, 'Completed')
@@ -183,7 +185,7 @@ pub fn main() -> i32 { return consume(end()) }`
       empty === undefined ? undefined : Layout.callingShape(layout.value, empty.type)?.lanes.length,
       0,
     )
-    assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     assert.strictEqual(Analysis.evaluate(self)._tag, 'Completed')
 
     const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })

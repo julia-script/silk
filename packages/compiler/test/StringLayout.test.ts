@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
@@ -57,7 +59,7 @@ it.effect('selects canonical string storage and calling lanes on every current t
           provenance: typeof lane.type === 'string' ? undefined : Type.encode(lane.type.element),
           bits: typeof lane.type === 'string' ? undefined : lane.type.bits,
           selector: lane.path.at(0)?._tag,
-          offset: Layout.laneOffset(selected.value, Type.string, lane.path),
+          offset: LayoutVerify.laneOffset(selected.value, Type.string, lane.path),
         })),
         [
           {
@@ -76,9 +78,9 @@ it.effect('selects canonical string storage and calling lanes on every current t
           },
         ],
       )
-      assert.deepEqual(Layout.verify(selected.value), [])
-      assert.include(Layout.encode(selected.value), 'layout string')
-      assert.include(Layout.encode(selected.value), 'Address<string')
+      assert.deepEqual(LayoutVerify.verify(selected.value), [])
+      assert.include(LayoutEncode.encode(selected.value), 'layout string')
+      assert.include(LayoutEncode.encode(selected.value), 'Address<string')
     }
   }),
 )
@@ -126,11 +128,11 @@ it.effect('rejects slice representation and calling-shape facts forged for strin
     })
 
     assert.include(
-      Layout.verify(malformed).map((violation) => violation.rule),
+      LayoutVerify.verify(malformed).map((violation) => violation.rule),
       'InvalidAggregate',
     )
     assert.include(
-      Layout.verify(malformed).map((violation) => violation.rule),
+      LayoutVerify.verify(malformed).map((violation) => violation.rule),
       'InvalidCallingShape',
     )
   }),

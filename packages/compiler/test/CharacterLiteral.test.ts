@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value)
 
@@ -106,7 +106,7 @@ it.effect('lowers a character literal to one general MIR literal over char', () 
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const lowered = Analysis.loweredMir(snapshot)
     assert.deepEqual(lowered.functions.map((fn) => fn.id.name).sort(), ['below', 'main'])
-    const operations = lowered.functions.flatMap((fn) => Mir.operations(fn))
+    const operations = lowered.functions.flatMap((fn) => MirVerification.operations(fn))
     assert.deepEqual(
       operations.flatMap((operation) =>
         operation._tag === 'Literal' && operation.type._tag === 'char'
@@ -121,7 +121,7 @@ it.effect('lowers a character literal to one general MIR literal over char', () 
       ),
       ['LessThan'],
     )
-    assert.deepEqual(Mir.verify(lowered), [])
+    assert.deepEqual(MirVerification.verify(lowered), [])
   }),
 )
 

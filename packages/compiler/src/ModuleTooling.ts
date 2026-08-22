@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Elaboration from './Elaboration.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as NameResolution from './NameResolution.js'
@@ -57,7 +57,7 @@ export const anonymousExpressionIndex = (
 /** Builds one module's semantic-occurrence index. */
 export const semanticOccurrenceIndex = (
   semantics: ModuleSemantics.ModuleSemantics,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   resolution: NameResolution.Resolution,
 ): SemanticOccurrence.ModuleIndex =>
   SemanticOccurrence.makeModule(semantics.module, semantics.elaboration, index, resolution)

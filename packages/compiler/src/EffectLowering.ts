@@ -6,7 +6,8 @@ import {
   propagationLoanEnds,
   propagationReleases,
 } from './CleanupEmission.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import { effectRecipe, inlineForwardedRequirement } from './Forwarding.js'
@@ -312,12 +313,12 @@ export const lowerRunEffectComposite = (
 export interface ReifiedEffect {
   readonly result: Mir.LocalId
   readonly resultType: Extract<Mir.Type, { readonly _tag: 'Nominal' }>
-  readonly resultField: DeclarationIndex.FieldId
+  readonly resultField: DeclarationFacts.FieldId
   readonly resultUnion: Type.StructuralUnion
   readonly successType: Type.Nominal
-  readonly successField: DeclarationIndex.FieldId
+  readonly successField: DeclarationFacts.FieldId
   readonly failureType: Type.Nominal
-  readonly failureField: DeclarationIndex.FieldId
+  readonly failureField: DeclarationFacts.FieldId
   readonly failureValueType: Type.Type
 }
 
@@ -1075,7 +1076,7 @@ export const lowerServiceEffectValue = (
   )
   if (provided?.witness._tag !== 'SourceConformanceWitness' || provided.local === undefined)
     return undefined
-  const target = DeclarationIndex.witnessOperation(provided.witness, subject.operation)
+  const target = ConformanceProof.witnessOperation(provided.witness, subject.operation)
   if (target === undefined) return undefined
   const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
   if (loweredArguments.some((argument) => argument === undefined)) return undefined
@@ -1108,8 +1109,7 @@ interface LoweredProvidedEffect {
   readonly loan?: Hir.BorrowId
 }
 
-/** Lowers one provided requirement identically for reification and immediate execution. */
-export const lowerProvidedEffect = (
+const prepareProvidedEffect = (
   fn: FunctionLowering,
   providerFact: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): LoweredProvidedEffect | undefined => {
@@ -1190,6 +1190,31 @@ export const lowerProvidedEffect = (
   })
 }
 
+/**
+ * Brackets one provided requirement for reification or immediate execution. The actor that begins
+ * a provider loan also ends it, removes its tracking entry, and drops a taken provider after the
+ * protected lowering has finished.
+ */
+export const lowerProvidedEffect = <A>(
+  fn: FunctionLowering,
+  providerFact: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
+  use: (requirement: ProvidedRequirement) => A | undefined,
+): A | undefined => {
+  const provided = prepareProvidedEffect(fn, providerFact)
+  if (provided === undefined) return undefined
+  const result = use(provided.requirement)
+  if (result === undefined) return undefined
+  if (provided.loan !== undefined) endLoans(fn, [provided.loan], providerFact.span)
+  if (provided.ownedProvider !== undefined)
+    dropOwnedProvider(
+      fn,
+      provided.ownedProvider,
+      provided.requirement.providerType,
+      providerFact.span,
+    )
+  return result
+}
+
 export const lowerReifiedEffectRecipe = (
   fn: FunctionLowering,
   subject: Hir.Expression,
@@ -1261,26 +1286,18 @@ export const lowerReifiedEffectRecipe = (
   }
 
   if (recipe._tag === 'EffectBindRequirement') {
-    const provided = lowerProvidedEffect(fn, recipe.provider)
-    if (provided === undefined) return undefined
-    const reified = lowerReifiedEffectRecipe(
-      fn,
-      recipe.protected,
-      resultType,
-      span,
-      Object.freeze([...availableRequirements, provided.requirement]),
-    )
-    if (reified === undefined) return undefined
-    endRunLoans(fn, span)
-    if (provided.loan !== undefined) endLoan(fn, provided.loan, recipe.provider.span)
-    if (provided.ownedProvider !== undefined)
-      dropOwnedProvider(
+    return lowerProvidedEffect(fn, recipe.provider, (requirement) => {
+      const reified = lowerReifiedEffectRecipe(
         fn,
-        provided.ownedProvider,
-        provided.requirement.providerType,
-        recipe.provider.span,
+        recipe.protected,
+        resultType,
+        span,
+        Object.freeze([...availableRequirements, requirement]),
       )
-    return reified
+      if (reified === undefined) return undefined
+      endRunLoans(fn, span)
+      return reified
+    })
   }
   const lowered =
     recipe._tag === 'ServiceEffectConstruct'
@@ -1411,31 +1428,23 @@ export const lowerEffectExecution = (
   }
 
   if (subject._tag === 'EffectBindRequirement') {
-    const provided = lowerProvidedEffect(fn, subject.provider)
-    if (provided === undefined) return undefined
-    const result = lowerEffectExecution(
-      fn,
-      subject.protected,
-      success,
-      span,
-      Object.freeze([...availableRequirements, provided.requirement]),
-    )
-    if (result === undefined) return undefined
-    endRunLoans(fn, span)
-    if (
-      subject.protected._tag === 'EffectConstruct' ||
-      subject.protected._tag === 'ServiceEffectConstruct'
-    )
-      endLoans(fn, subject.protected.loanEnds, span)
-    if (provided.loan !== undefined) endLoan(fn, provided.loan, subject.provider.span)
-    if (provided.ownedProvider !== undefined)
-      dropOwnedProvider(
+    return lowerProvidedEffect(fn, subject.provider, (requirement) => {
+      const result = lowerEffectExecution(
         fn,
-        provided.ownedProvider,
-        provided.requirement.providerType,
-        subject.provider.span,
+        subject.protected,
+        success,
+        span,
+        Object.freeze([...availableRequirements, requirement]),
       )
-    return result
+      if (result === undefined) return undefined
+      endRunLoans(fn, span)
+      if (
+        subject.protected._tag === 'EffectConstruct' ||
+        subject.protected._tag === 'ServiceEffectConstruct'
+      )
+        endLoans(fn, subject.protected.loanEnds, span)
+      return result
+    })
   }
   if (subject._tag === 'ServiceEffectConstruct') {
     const lowered = lowerServiceEffectValue(fn, subject, availableRequirements)

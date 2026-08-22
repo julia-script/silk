@@ -1,5 +1,7 @@
 import * as Effect from 'effect/Effect'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
+import * as DeclarationCompletion from './DeclarationCompletion.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
@@ -22,7 +24,7 @@ export interface Options {
 }
 
 interface FrontendFacts {
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
@@ -45,7 +47,7 @@ export interface ProjectFrontend extends FrontendFacts {
 }
 
 interface HeaderFacts {
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
 }
@@ -59,7 +61,7 @@ const analyzeHeaders = Effect.fnUntraced(function* (
     report,
     'declaration-collection',
     closure.modules.length,
-    () => DeclarationIndex.collect(closure),
+    () => DeclarationCollection.collect(closure),
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),
     (value) => value.diagnostics.length,
     options,
@@ -72,12 +74,12 @@ const analyzeHeaders = Effect.fnUntraced(function* (
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
       const resolvers = ResolutionSeams.make(
-        (module: string, path: DeclarationIndex.TypePathFact) =>
+        (module: string, path: DeclarationFacts.TypePathFact) =>
           NameResolution.resolveType(preliminary, collected, module, path),
-        (module: string, path: DeclarationIndex.TypePathFact) =>
+        (module: string, path: DeclarationFacts.TypePathFact) =>
           NameResolution.resolveItem(preliminary, collected, module, path),
       )
-      return DeclarationIndex.complete(collected, resolvers)
+      return DeclarationCompletion.complete(collected, resolvers)
     },
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),
     (value) => value.diagnostics.length,

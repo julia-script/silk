@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as FiniteRow from '../src/FiniteRow.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceSpan from '../src/SourceSpan.js'
@@ -459,8 +460,11 @@ it('applies the Shared < Exclusive < Take order across compatibility and inferen
         TypeCompatibility.isCompatible(TypeCompatibility.check(requiredEffect, suppliedEffect)),
         accepted,
       )
-      assert.strictEqual(Type.infer(suppliedCallable, requiredCallable, new Map()), accepted)
-      assert.strictEqual(Type.infer(suppliedEffect, requiredEffect, new Map()), accepted)
+      assert.strictEqual(
+        TypeInference.infer(suppliedCallable, requiredCallable, new Map()),
+        accepted,
+      )
+      assert.strictEqual(TypeInference.infer(suppliedEffect, requiredEffect, new Map()), accepted)
     }
   }
 })

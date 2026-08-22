@@ -1,5 +1,5 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
-import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
+import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
 import * as Presentation from '@silk-effect/compiler/Presentation'
 import type * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
@@ -51,10 +51,10 @@ export interface Options {
   readonly includePrivate?: boolean
 }
 
-const nameOf = (name: DeclarationIndex.DeclaredName, fallback: string): string =>
+const nameOf = (name: DeclarationFacts.DeclaredName, fallback: string): string =>
   name._tag === 'Present' ? name.spelling : fallback
 
-const declarationId = (module: string, member: DeclarationIndex.MemberFact): string =>
+const declarationId = (module: string, member: DeclarationFacts.MemberFact): string =>
   member.canonical._tag === 'Canonical'
     ? `${member.canonical.id.module}::${member.canonical.id.name}`
     : `${module}::#${member.id.ordinal}`
@@ -121,7 +121,7 @@ const typeParameterItem = (
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
-  parameter: DeclarationIndex.TypeParameterFact,
+  parameter: DeclarationFacts.TypeParameterFact,
   ordinal: number,
 ): Item => {
   const presentation = Presentation.typeParameter(parameter)
@@ -147,7 +147,7 @@ const parameterItem = (
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
-  parameter: DeclarationIndex.ParameterFact,
+  parameter: DeclarationFacts.ParameterFact,
 ): Item => {
   const presentation = Presentation.parameter(parameter)
   const documentation = resolveDocumentation(
@@ -172,7 +172,7 @@ const fieldItem = (
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
-  field: DeclarationIndex.FieldFact,
+  field: DeclarationFacts.FieldFact,
 ): Item => {
   const presentation = Presentation.field(field)
   const documentation = resolveDocumentation(
@@ -197,7 +197,7 @@ const serviceOperationItem = (
   module: string,
   source: SourceFile.SourceFile,
   ownerId: string,
-  operation: DeclarationIndex.ServiceOperationFact,
+  operation: DeclarationFacts.ServiceOperationFact,
 ): Item => {
   const presentation = Presentation.serviceOperation(operation)
   const documentation = resolveDocumentation(
@@ -228,7 +228,7 @@ const memberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
-  member: DeclarationIndex.MemberFact,
+  member: DeclarationFacts.MemberFact,
   options: Options,
 ): Item => {
   const id = declarationId(module, member)
@@ -285,14 +285,14 @@ const memberItem = (
   })
 }
 
-const declaredType = (fact: DeclarationIndex.DeclaredTypeFact): string =>
+const declaredType = (fact: DeclarationFacts.DeclaredTypeFact): string =>
   fact._tag === 'Unavailable' ? '_' : fact.spelling
 
 const conformanceItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
   source: SourceFile.SourceFile,
-  conformance: DeclarationIndex.ConformanceFact,
+  conformance: DeclarationFacts.ConformanceFact,
 ): Item => {
   const id = `${module}::implementation:${conformance.ordinal}`
   const documentation = resolveDocumentation(
@@ -336,7 +336,7 @@ const conformanceItem = (
 
 const moduleModel = (
   snapshot: Analysis.FrontendSnapshot,
-  headers: DeclarationIndex.ModuleHeaders,
+  headers: DeclarationFacts.ModuleHeaders,
   options: Options,
 ): Module | undefined => {
   const syntax = Analysis.moduleAnalysis(snapshot, headers.module)?.syntax

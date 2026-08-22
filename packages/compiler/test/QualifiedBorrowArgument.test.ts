@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -73,8 +73,8 @@ it.effect('accepts a shared borrow through the qualified spelling', () =>
     assert.deepEqual(codes(imported), [])
     // One call, one lowering: the qualifier is a spelling, not a different operation.
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(qualified)),
-      Mir.encode(Analysis.loweredMir(imported)),
+      MirEncoding.encode(Analysis.loweredMir(qualified)),
+      MirEncoding.encode(Analysis.loweredMir(imported)),
     )
   }),
 )
@@ -86,8 +86,8 @@ it.effect('accepts an exclusive borrow through the qualified spelling', () =>
     assert.deepEqual(codes(qualified), [])
     assert.deepEqual(codes(imported), [])
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(qualified)),
-      Mir.encode(Analysis.loweredMir(imported)),
+      MirEncoding.encode(Analysis.loweredMir(qualified)),
+      MirEncoding.encode(Analysis.loweredMir(imported)),
     )
   }),
 )

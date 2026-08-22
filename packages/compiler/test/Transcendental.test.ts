@@ -6,7 +6,9 @@ import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Transcendental from '../src/Transcendental.js'
 import { transcendentalCanonicalBits } from './support/corpus.js'
 
@@ -68,16 +70,16 @@ it.effect(
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(native), [])
-      assert.deepEqual(Mir.verify(Analysis.loweredMir(native)), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(native)), [])
       const encodedHir = Hir.encode(Analysis.rootAnalysis(native).hir)
       assert.include(encodedHir, 'call silk/f32.sin : f32')
       assert.include(encodedHir, 'call silk/f64.cos : f64')
-      const encodedMir = Mir.encode(Analysis.loweredMir(native))
+      const encodedMir = MirEncoding.encode(Analysis.loweredMir(native))
       assert.include(encodedMir, 'float-sin')
       assert.include(encodedMir, ': f32')
       assert.include(encodedMir, 'float-cos')
       assert.include(encodedMir, ': f64')
-      const operations = Analysis.loweredMir(native).functions.flatMap(Mir.operations)
+      const operations = Analysis.loweredMir(native).functions.flatMap(MirVerification.operations)
       assert.strictEqual(
         operations.filter((operation) => operation._tag === 'FloatTranscendental').length,
         4,
@@ -120,7 +122,7 @@ it.effect('rejects a mismatched transcendental MIR result before execution', () 
     )
     const mir = Analysis.loweredMir(snapshot)
     const transcendental = mir.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find((operation) => operation._tag === 'FloatTranscendental')
     assert.strictEqual(transcendental?._tag, 'FloatTranscendental')
     if (transcendental?._tag !== 'FloatTranscendental') return
@@ -128,7 +130,7 @@ it.effect('rejects a mismatched transcendental MIR result before execution', () 
       ...mir,
       functions: mir.functions.map(
         (fn): Mir.MirFunction =>
-          Mir.operations(fn).includes(transcendental)
+          MirVerification.operations(fn).includes(transcendental)
             ? {
                 ...fn,
                 localTypes: fn.localTypes.map((type, ordinal) =>
@@ -139,7 +141,7 @@ it.effect('rejects a mismatched transcendental MIR result before execution', () 
       ),
     }
     assert.include(
-      Mir.verify(malformed).map((violation) => violation.rule),
+      MirVerification.verify(malformed).map((violation) => violation.rule),
       'InvalidIntegerOperation',
     )
   }),

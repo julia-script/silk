@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import type {
   CoroutineFramePathPlan,
@@ -170,7 +170,7 @@ const operationText = (operation: Operation): string => {
   }
 }
 
-const fieldPathText = (path: ReadonlyArray<DeclarationIndex.FieldId>): string =>
+const fieldPathText = (path: ReadonlyArray<DeclarationFacts.FieldId>): string =>
   path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
 
 const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {

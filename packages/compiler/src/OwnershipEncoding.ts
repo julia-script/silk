@@ -1,5 +1,5 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Hir from './Hir.js'
 import type { BindingSite, ModuleOwnership, Verdict } from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -7,7 +7,7 @@ import * as Type from './Type.js'
 
 const spanText = (span: SourceSpan.SourceSpan): string => `[${span.start}, ${span.end})`
 
-const identityLabel = (declaration: DeclarationIndex.DeclarationFact): string => {
+const identityLabel = (declaration: DeclarationFacts.DeclarationFact): string => {
   switch (declaration.canonical._tag) {
     case 'Canonical':
       return `${declaration.canonical.id.module}.${declaration.canonical.id.name}`

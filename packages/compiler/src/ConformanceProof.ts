@@ -6,9 +6,12 @@ import type {
   ConformanceWitness,
   ContractFact,
   Index,
-} from './DeclarationIndex.js'
-import { byCanonical, copyType, declaredRequirements, memberByNominal } from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
+import { byCanonical } from './DeclarationFacts.js'
+import { copyType } from './DeclarationIndex.js'
+import { declaredRequirements, memberByNominal } from './DeclarationResolution.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
@@ -54,8 +57,8 @@ export const conformanceCandidates = (
         )
           return []
         const inferred = new Map<string, Type.GenericArgument>()
-        if (!Type.infer(conformance.provider.type, goal.provider, inferred)) return []
-        if (!Type.infer(conformance.capability.type, goal.capability, inferred)) return []
+        if (!TypeInference.infer(conformance.provider.type, goal.provider, inferred)) return []
+        if (!TypeInference.infer(conformance.capability.type, goal.capability, inferred)) return []
         return Object.freeze([
           Object.freeze({ module: module.module, conformance, substitution: inferred }),
         ])
@@ -200,7 +203,7 @@ export const copyProof = (
       reason: `stored fields of ${Type.encode(type)} are unavailable`,
     })
   const substitution =
-    Type.substitution(
+    TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
@@ -514,7 +517,7 @@ const inferredTargetArguments = (
   const headerParameters = conformance.typeParameters
     .filter((parameter) => parameter.duplicateOf === undefined)
     .map((parameter) => parameter.type)
-  const headerSubstitution = Type.substitution(headerParameters, proof.typeArguments)
+  const headerSubstitution = TypeInference.substitution(headerParameters, proof.typeArguments)
   if (headerSubstitution === undefined) return undefined
   const arguments_ = Object.freeze(
     mapping.targetArguments.map((argument) =>

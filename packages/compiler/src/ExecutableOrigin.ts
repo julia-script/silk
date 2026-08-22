@@ -1,9 +1,12 @@
 import * as CleanupPlan from './CleanupPlan.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
 
 type Instance = Instances.Instance
@@ -17,7 +20,7 @@ export interface SuspensionGraph {
 }
 
 export interface CallTarget {
-  readonly declaration: DeclarationIndex.CanonicalId
+  readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly structuralProvider?: Type.Type
 }
@@ -36,7 +39,7 @@ const compareIntrinsicCalls = (left: IntrinsicCall, right: IntrinsicCall): numbe
 /** Collects the canonical intrinsic identities retained by reachable concrete instances. */
 export const reachableIntrinsics = (
   instances: ReadonlyArray<Instance>,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<IntrinsicCall> => {
   const retained = new Map<string, IntrinsicCall>()
   for (const instance of instances) {
@@ -48,7 +51,7 @@ export const reachableIntrinsics = (
               ? (() => {
                   const capability = Type.substitute(expression.capability, instance.substitution)
                   return Type.isNominal(capability)
-                    ? DeclarationIndex.interfaceOperationIntrinsic(
+                    ? ConformanceProof.interfaceOperationIntrinsic(
                         index,
                         Type.substitute(expression.provider, instance.substitution),
                         capability,
@@ -100,7 +103,7 @@ export interface Operations {
     substitutions: ReadonlyArray<Type.Substitution>,
   ) => Type.Type
   readonly keyOf: (
-    declaration: DeclarationIndex.CanonicalId,
+    declaration: DeclarationFacts.CanonicalId,
     contract: Hir.ContractFact,
     typeParameters?: ReadonlyArray<Type.Parameter>,
     typeArguments?: ReadonlyArray<Type.GenericArgument>,
@@ -116,8 +119,8 @@ export interface Operations {
   readonly requirementBindingWitness: (
     binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
     substitution: Type.Substitution,
-    index: DeclarationIndex.Index,
-  ) => DeclarationIndex.ConformanceWitness | undefined
+    index: DeclarationFacts.Index,
+  ) => DeclarationFacts.ConformanceWitness | undefined
   readonly forwardedRequirementBinding: (
     fn: Hir.HirFunction,
   ) => Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }> | undefined
@@ -173,11 +176,11 @@ export const make = (operations: Operations) => {
   type EffectInstance = Instances.EffectInstance
   /** Converts proved strict-subterm obligations into the only structurally descending call edges. */
   const witnessDependencyCallTargets = (
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     provider: Type.Type,
     capability: Type.Nominal,
   ): ReadonlyArray<CallTarget> =>
-    DeclarationIndex.witnessDependencyTargets(index, provider, capability).map((dependency) =>
+    ConformanceProof.witnessDependencyTargets(index, provider, capability).map((dependency) =>
       Object.freeze({
         declaration: dependency.implementation,
         typeArguments: dependency.typeArguments,
@@ -188,8 +191,8 @@ export const make = (operations: Operations) => {
     )
 
   const witnessCallTargets = (
-    witness: DeclarationIndex.ConformanceWitness | undefined,
-    index: DeclarationIndex.Index,
+    witness: DeclarationFacts.ConformanceWitness | undefined,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallTarget> =>
     witness?._tag === 'SourceConformanceWitness'
       ? [
@@ -206,7 +209,7 @@ export const make = (operations: Operations) => {
   /** Collects every Drop hook a cleanup plan will invoke, so cleanup reaches hook instances. */
   const hookCalls = (
     cleanup: CleanupPlan.CleanupPlan,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallTarget> => {
     switch (cleanup._tag) {
       case 'HookCleanup':
@@ -262,7 +265,7 @@ export const make = (operations: Operations) => {
 
   const callTargets = (
     expression: Hir.Expression,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     if (expression._tag === 'Run') return callTargets(expression.subject, index, substitution)
@@ -371,7 +374,7 @@ export const make = (operations: Operations) => {
 
   const bodyCallTargets = (
     fn: Hir.HirFunction,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> =>
     fn.statements.flatMap((statement) =>
@@ -383,7 +386,7 @@ export const make = (operations: Operations) => {
   const requirementBindingCallTargets = (
     fn: Hir.HirFunction,
     substitution: Type.Substitution,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallTarget> =>
     (forwardedRequirementBinding(fn) === undefined ? requirementBindings(fn) : []).flatMap(
       (binding) => {
@@ -395,7 +398,7 @@ export const make = (operations: Operations) => {
   const forwardedRequirementCallTargets = (
     calls: ReadonlyArray<CallInstance>,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallTarget> =>
     calls.flatMap((call) => {
       const target = functionByKey(results, call.target)
@@ -409,7 +412,7 @@ export const make = (operations: Operations) => {
 
   const slotDropHookTargets = (
     fn: Hir.HirFunction,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
@@ -449,7 +452,7 @@ export const make = (operations: Operations) => {
    */
   const interfaceWitnessTargets = (
     fn: Hir.HirFunction,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
@@ -469,7 +472,7 @@ export const make = (operations: Operations) => {
         capability === undefined ||
         !Type.isNominal(capability)
           ? undefined
-          : DeclarationIndex.interfaceWitnessTarget(index, provider, capability, bound.operation)
+          : ConformanceProof.interfaceWitnessTarget(index, provider, capability, bound.operation)
       const dependencies =
         provider === undefined || capability === undefined || !Type.isNominal(capability)
           ? []
@@ -714,7 +717,7 @@ export const make = (operations: Operations) => {
   ): Type.CallableIdentityArgument | undefined => {
     const callable = callableOriginOf(expression.callee, context)
     if (callable?.target._tag !== 'Declaration') return callable
-    const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+    const declaration: DeclarationFacts.CanonicalId = Object.freeze({
       _tag: 'CanonicalDeclarationId',
       module: callable.target.module,
       name: callable.target.name,
@@ -760,7 +763,7 @@ export const make = (operations: Operations) => {
   ): InstanceKey | undefined => {
     const callable = appliedCallableOriginOf(expression, context)
     if (callable?.target._tag !== 'Declaration') return undefined
-    const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+    const declaration: DeclarationFacts.CanonicalId = Object.freeze({
       _tag: 'CanonicalDeclarationId',
       module: callable.target.module,
       name: callable.target.name,
@@ -768,7 +771,7 @@ export const make = (operations: Operations) => {
     const target = targetFunction(context.results, declaration)
     if (target === undefined) return undefined
     const parameters = target.declaration.typeParameters.map((parameter) => parameter.type)
-    const targetSubstitution = Type.substitution(parameters, callable.typeArguments)
+    const targetSubstitution = TypeInference.substitution(parameters, callable.typeArguments)
     if (targetSubstitution === undefined) return undefined
     const hiddenArguments: Array<Type.EffectIdentityArgument | Type.CallableIdentityArgument> = []
     for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
@@ -803,7 +806,7 @@ export const make = (operations: Operations) => {
     readonly owner: InstanceKey
     readonly substitution: Type.Substitution
     readonly results: ReadonlyMap<string, Elaboration.Result>
-    readonly index: DeclarationIndex.Index
+    readonly index: DeclarationFacts.Index
     readonly resolving: ReadonlySet<string>
     readonly resolveEffectIdentity?: (identity: Type.EffectIdentityArgument) => string | undefined
   }
@@ -862,7 +865,7 @@ export const make = (operations: Operations) => {
     const typeArguments = expression.typeArguments.map((argument) =>
       Type.substituteGenericArgument(argument, context.substitution),
     )
-    const targetSubstitution = Type.substitution(
+    const targetSubstitution = TypeInference.substitution(
       target.declaration.typeParameters.map((parameter) => parameter.type),
       typeArguments,
     )
@@ -904,7 +907,7 @@ export const make = (operations: Operations) => {
     fn: Hir.HirFunction,
     owner: InstanceKey,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     resolving: ReadonlySet<string> = new Set(),
   ): string | undefined => {
     const substitution = instanceSubstitution(fn, owner)
@@ -946,7 +949,7 @@ export const make = (operations: Operations) => {
       if (identity !== undefined) return identity
     }
     if (expression._tag === 'Project') {
-      const declaration = DeclarationIndex.byCanonical(context.index, {
+      const declaration = DeclarationFacts.byCanonical(context.index, {
         _tag: 'CanonicalDeclarationId',
         module: expression.nominal.module,
         name: expression.nominal.name,
@@ -959,7 +962,7 @@ export const make = (operations: Operations) => {
           : undefined
       const substitution =
         declaration?._tag === 'StructDeclaration'
-          ? Type.substitution(
+          ? TypeInference.substitution(
               declaration.typeParameters.map((parameter) => parameter.type),
               expression.nominal.arguments,
             )
@@ -1028,7 +1031,7 @@ export const make = (operations: Operations) => {
           : requirementBindingWitness(selected, context.substitution, context.index)
       const operation =
         witness?._tag === 'SourceConformanceWitness'
-          ? DeclarationIndex.witnessOperation(witness, expression.operation)
+          ? ConformanceProof.witnessOperation(witness, expression.operation)
           : undefined
       const target =
         operation === undefined ? undefined : targetFunction(context.results, operation)
@@ -1079,7 +1082,7 @@ export const make = (operations: Operations) => {
     owner: InstanceKey,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): NonNullable<Instance['effectSuccesses']> => {
     const context: EffectOriginContext = {
       fn,
@@ -1110,7 +1113,7 @@ export const make = (operations: Operations) => {
     owner: InstanceKey,
     substitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallInstance> => {
     const context: EffectOriginContext = {
       fn,
@@ -1194,12 +1197,12 @@ export const make = (operations: Operations) => {
 
   const declarationTarget = (
     target: Hir.CallableTarget,
-  ): DeclarationIndex.CanonicalId | undefined =>
+  ): DeclarationFacts.CanonicalId | undefined =>
     target._tag === 'DeclarationCallableTarget' ? target.declaration : undefined
 
   function targetFunction(
     results: ReadonlyMap<string, Elaboration.Result>,
-    target: DeclarationIndex.CanonicalId,
+    target: DeclarationFacts.CanonicalId,
   ): Hir.HirFunction | undefined {
     return results
       .get(target.module)
@@ -1269,13 +1272,13 @@ export const make = (operations: Operations) => {
   const forwardedRequirementTargets = (
     targets: ReadonlyArray<CallTarget>,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): ReadonlyArray<CallTarget> =>
     targets.flatMap((target) => {
       const fn = targetFunction(results, target.declaration)
       const binding = fn === undefined ? undefined : forwardedRequirementBinding(fn)
       if (fn === undefined || binding === undefined) return []
-      const substitution = Type.substitution(
+      const substitution = TypeInference.substitution(
         fn.declaration.typeParameters.map((parameter) => parameter.type),
         target.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
       )
@@ -1383,7 +1386,7 @@ export const make = (operations: Operations) => {
     instances: ReadonlyArray<Instance>,
     suspendableEffects: ReadonlySet<string>,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
     callables: ReadonlyArray<CallableInstance>,
   ): ReadonlyArray<EffectInstance> => {
     const effects = new Map<string, EffectInstance>()
@@ -1655,7 +1658,7 @@ export const make = (operations: Operations) => {
   const suspensionGraph = (
     instances: ReadonlyArray<Instance>,
     results: ReadonlyMap<string, Elaboration.Result>,
-    index: DeclarationIndex.Index,
+    index: DeclarationFacts.Index,
   ): SuspensionGraph => {
     const roots = new Set<string>()
     const dependencies = new Map<string, Set<string>>()
@@ -1772,7 +1775,7 @@ export const make = (operations: Operations) => {
           const operation =
             witness?._tag !== 'SourceConformanceWitness'
               ? undefined
-              : DeclarationIndex.witnessOperation(witness, expression.operation)
+              : ConformanceProof.witnessOperation(witness, expression.operation)
           const target = operation === undefined ? undefined : targetFunction(results, operation)
           const typeArguments =
             witness?._tag === 'SourceConformanceWitness' ? witness.typeArguments : Object.freeze([])
@@ -1831,7 +1834,7 @@ export const make = (operations: Operations) => {
             addDependency(catchExecution, target)
           const handler = callableOriginOf(expression.handler, context)
           if (handler?.target._tag === 'Declaration') {
-            const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+            const declaration: DeclarationFacts.CanonicalId = Object.freeze({
               _tag: 'CanonicalDeclarationId',
               module: handler.target.module,
               name: handler.target.name,

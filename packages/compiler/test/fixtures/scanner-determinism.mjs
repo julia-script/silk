@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
 import * as Hir from '../../dist/Hir.js'
-import * as Layout from '../../dist/Layout.js'
-import * as Mir from '../../dist/Mir.js'
+import * as LayoutEncode from '../../dist/LayoutEncode.js'
+import * as MirEncoding from '../../dist/MirEncoding.js'
 import * as OwnershipEncoding from '../../dist/OwnershipEncoding.js'
 import * as ToolchainIntegrity from '../../dist/ToolchainIntegrity.js'
 
@@ -43,8 +43,8 @@ const encodeSnapshot = (self) => {
         .join('\n'),
     ),
     instances: hash(json(Analysis.instancesOf(self).instances.map((instance) => instance.key))),
-    layout: hash(Layout.encode(Analysis.layoutOf(self).value)),
-    mir: hash(Mir.encode(Analysis.loweredMir(self))),
+    layout: hash(LayoutEncode.encode(Analysis.layoutOf(self).value)),
+    mir: hash(MirEncoding.encode(Analysis.loweredMir(self))),
     evaluation: hash(json(evaluated.trace)),
     result: evaluated._tag === 'Completed' ? evaluated.result.value : evaluated._tag,
     allocations:

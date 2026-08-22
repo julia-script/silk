@@ -1,11 +1,16 @@
+import * as LlvmBlock from '@silk-effect/llvm/Block'
+import type * as Builder from '@silk-effect/llvm/Builder'
+import * as Constant from '@silk-effect/llvm/Constant'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
+import * as Intrinsic from '@silk-effect/llvm/Intrinsic'
 import type * as LlvmError from '@silk-effect/llvm/LlvmError'
-import type * as LlvmType from '@silk-effect/llvm/Type'
-import type * as Value from '@silk-effect/llvm/Value'
+import * as LlvmType from '@silk-effect/llvm/Type'
+import * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
 import type * as Layout from './Layout.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
+import type * as SourceSpan from './SourceSpan.js'
 
 export interface LaneContext {
   readonly body: FunctionBody.FunctionBody
@@ -102,3 +107,485 @@ export const comparisonPredicate = (
       return undefined
   }
 }
+
+export interface OperationContext {
+  readonly builder: Builder.Builder
+  readonly body: FunctionBody.FunctionBody
+  readonly program: Mir.Module
+  readonly i32: LlvmType.Type
+  readonly integerTypes: Map<number, LlvmType.Type>
+  readonly signedOverflowSignatures: Map<
+    number,
+    { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
+  >
+  readonly unsignedOverflowSignatures: Map<
+    number,
+    { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
+  >
+  readonly valueLanesFor: (type: Mir.Type) => ReadonlyArray<Layout.CallingLane>
+  readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
+  readonly locate: (
+    span: SourceSpan.SourceSpan,
+    instruction: FunctionBody.Instruction | undefined,
+  ) => Effect.Effect<void, LlvmError.LlvmError>
+  readonly state: { trapBlock: LlvmBlock.Block | undefined }
+}
+
+export const emitCallableBinary = Effect.fnUntraced(function* (
+  context: OperationContext,
+  operator: Mir.BinaryOperator,
+  left: Value.Input,
+  right: Value.Input,
+  operandMirType: Mir.Type,
+  span: SourceSpan.SourceSpan,
+  nameOrdinal: number,
+) {
+  const {
+    body,
+    builder,
+    i32,
+    laneType,
+    locate,
+    program,
+    signedOverflowSignatures,
+    state: operationState,
+    unsignedOverflowSignatures,
+    valueLanesFor,
+  } = context
+  const leftLane = valueLanesFor(operandMirType).at(0)
+  if (leftLane === undefined)
+    throw new RangeError('LLVM callable binary operation lost its operand type')
+  const semanticOperand = Mir.semanticType(operandMirType)
+  const scalar = typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
+  const unsigned = scalar?.signedness === 'Unsigned'
+  const operandType = laneType(leftLane)
+  if (scalar?.category === 'Floating') {
+    const predicate: FunctionBody.FloatingPredicate | undefined =
+      operator === 'Equals'
+        ? 'oeq'
+        : operator === 'NotEquals'
+          ? 'une'
+          : operator === 'LessThan'
+            ? 'olt'
+            : operator === 'LessOrEqual'
+              ? 'ole'
+              : operator === 'GreaterThan'
+                ? 'ogt'
+                : operator === 'GreaterOrEqual'
+                  ? 'oge'
+                  : undefined
+    if (predicate !== undefined) {
+      const flag = yield* FunctionBody.floatingCompare(
+        body,
+        predicate,
+        left,
+        right,
+        `callable_fcmp${nameOrdinal}_flag`,
+      )
+      return yield* FunctionBody.cast(body, 'zext', flag, i32, `callable_fcmp${nameOrdinal}`)
+    }
+    const mnemonic: FunctionBody.FloatingBinaryKind | undefined =
+      operator === 'Add'
+        ? 'fadd'
+        : operator === 'Subtract'
+          ? 'fsub'
+          : operator === 'Multiply'
+            ? 'fmul'
+            : operator === 'Divide'
+              ? 'fdiv'
+              : operator === 'Remainder'
+                ? 'frem'
+                : undefined
+    if (mnemonic === undefined)
+      throw new RangeError(`LLVM callable float ${operator} is unavailable`)
+    const result = yield* FunctionBody.binary(
+      body,
+      mnemonic,
+      left,
+      right,
+      `callable_float${nameOrdinal}`,
+    )
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  const predicate = comparisonPredicate(operator, unsigned)
+  if (predicate !== undefined) {
+    const flag = yield* FunctionBody.integerCompare(
+      body,
+      predicate,
+      left,
+      right,
+      `callable_cmp${nameOrdinal}_flag`,
+    )
+    const widened = yield* FunctionBody.cast(body, 'zext', flag, i32, `callable_cmp${nameOrdinal}`)
+    yield* locate(span, yield* Value.instruction(body, flag))
+    return widened
+  }
+  if (
+    operator === 'BitAnd' ||
+    operator === 'BitOr' ||
+    operator === 'BitXor' ||
+    operator === 'WrappingAdd' ||
+    operator === 'WrappingSubtract' ||
+    operator === 'WrappingMultiply'
+  ) {
+    const result = yield* FunctionBody.binary(
+      body,
+      operator === 'BitAnd'
+        ? 'and'
+        : operator === 'BitOr'
+          ? 'or'
+          : operator === 'BitXor'
+            ? 'xor'
+            : operator === 'WrappingAdd'
+              ? 'add'
+              : operator === 'WrappingSubtract'
+                ? 'sub'
+                : 'mul',
+      left,
+      right,
+      `callable_integer${nameOrdinal}`,
+    )
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
+    if (operationState.trapBlock === undefined)
+      operationState.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+    const width =
+      scalar === undefined
+        ? 32
+        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    const limit = yield* Constant.integerUnsigned(builder, operandType, BigInt(width))
+    const invalid = yield* FunctionBody.integerCompare(
+      body,
+      'uge',
+      right,
+      limit,
+      `callable_shift${nameOrdinal}_invalid`,
+    )
+    const continueBlock = yield* LlvmBlock.make(body, `callable_shift${nameOrdinal}_ok`)
+    yield* FunctionBody.conditionalBranch(body, invalid, operationState.trapBlock, continueBlock)
+    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+    const result = yield* FunctionBody.binary(
+      body,
+      operator === 'ShiftLeft' ? 'shl' : unsigned ? 'lshr' : 'ashr',
+      left,
+      right,
+      `callable_shift${nameOrdinal}`,
+    )
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  if (operator === 'RotateLeft' || operator === 'RotateRight') {
+    const signature = Object.freeze({
+      returnType: operandType,
+      parameters: Object.freeze([operandType, operandType, operandType]),
+    })
+    const result = yield* Intrinsic.call(
+      body,
+      operator === 'RotateLeft' ? 'fshl' : 'fshr',
+      [operandType],
+      [left, left, right],
+      `callable_rotate${nameOrdinal}`,
+      { signature },
+    )
+    if (result === undefined) throw new RangeError('LLVM callable rotate produced no value')
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  if (operator === 'SaturatingAdd' || operator === 'SaturatingSubtract') {
+    const signature = Object.freeze({
+      returnType: operandType,
+      parameters: Object.freeze([operandType, operandType]),
+    })
+    const intrinsic =
+      operator === 'SaturatingAdd'
+        ? unsigned
+          ? 'uadd.sat'
+          : 'sadd.sat'
+        : unsigned
+          ? 'usub.sat'
+          : 'ssub.sat'
+    const result = yield* Intrinsic.call(
+      body,
+      intrinsic,
+      [operandType],
+      [left, right],
+      `callable_saturating${nameOrdinal}`,
+      { signature },
+    )
+    if (result === undefined)
+      throw new RangeError('LLVM callable saturating arithmetic produced no value')
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  if (operator === 'SaturatingMultiply') {
+    const bits =
+      scalar === undefined
+        ? 32
+        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
+    let signature = signatures.get(bits)
+    if (signature === undefined) {
+      const i1 = yield* LlvmType.integer(builder, 1)
+      signature = Object.freeze({
+        returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+        parameters: Object.freeze([operandType, operandType]),
+      })
+      signatures.set(bits, signature)
+    }
+    const pair = yield* Intrinsic.call(
+      body,
+      unsigned ? 'umul.with.overflow' : 'smul.with.overflow',
+      [operandType],
+      [left, right],
+      `callable_saturating${nameOrdinal}_pair`,
+      { signature },
+    )
+    if (pair === undefined)
+      throw new RangeError('LLVM callable saturating multiply produced no value')
+    const wrapped = yield* FunctionBody.extractValue(
+      body,
+      pair,
+      [0],
+      `callable_saturating${nameOrdinal}_wrapped`,
+    )
+    const overflowed = yield* FunctionBody.extractValue(
+      body,
+      pair,
+      [1],
+      `callable_saturating${nameOrdinal}_overflow`,
+    )
+    const range =
+      scalar?.category === 'Integer'
+        ? Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+        : { minimum: -2147483648n, maximum: 2147483647n }
+    const maximum = unsigned
+      ? yield* Constant.integerUnsigned(builder, operandType, range.maximum)
+      : yield* Constant.integerSigned(builder, operandType, range.maximum)
+    let boundary: Value.Input = maximum
+    if (!unsigned) {
+      const zero = yield* Constant.integerSigned(builder, operandType, 0n)
+      const minimum = yield* Constant.integerSigned(builder, operandType, range.minimum)
+      const signs = yield* FunctionBody.binary(
+        body,
+        'xor',
+        left,
+        right,
+        `callable_saturating${nameOrdinal}_signs`,
+      )
+      const negative = yield* FunctionBody.integerCompare(
+        body,
+        'slt',
+        signs,
+        zero,
+        `callable_saturating${nameOrdinal}_negative`,
+      )
+      boundary = yield* FunctionBody.select(
+        body,
+        negative,
+        minimum,
+        maximum,
+        `callable_saturating${nameOrdinal}_boundary`,
+      )
+    }
+    const result = yield* FunctionBody.select(
+      body,
+      overflowed,
+      boundary,
+      wrapped,
+      `callable_saturating${nameOrdinal}`,
+    )
+    yield* locate(span, yield* Value.instruction(body, result))
+    return result
+  }
+  if (operationState.trapBlock === undefined)
+    operationState.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+  let result: Value.Value
+  if (operator === 'Add' || operator === 'Subtract' || operator === 'Multiply') {
+    const intrinsicId =
+      operator === 'Add'
+        ? unsigned
+          ? ('uadd.with.overflow' as const)
+          : ('sadd.with.overflow' as const)
+        : operator === 'Subtract'
+          ? unsigned
+            ? ('usub.with.overflow' as const)
+            : ('ssub.with.overflow' as const)
+          : unsigned
+            ? ('umul.with.overflow' as const)
+            : ('smul.with.overflow' as const)
+    const bits =
+      scalar === undefined
+        ? 32
+        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
+    let overflowSignature = signatures.get(bits)
+    if (overflowSignature === undefined) {
+      const i1 = yield* LlvmType.integer(builder, 1)
+      overflowSignature = Object.freeze({
+        returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+        parameters: Object.freeze([operandType, operandType]),
+      })
+      signatures.set(bits, overflowSignature)
+    }
+    const pair = yield* Intrinsic.call(
+      body,
+      intrinsicId,
+      [operandType],
+      [left, right],
+      `callable_arith${nameOrdinal}_pair`,
+      { signature: overflowSignature },
+    )
+    if (pair === undefined)
+      throw new RangeError('Backend callable overflow intrinsic produced no value')
+    result = yield* FunctionBody.extractValue(body, pair, [0], `callable_arith${nameOrdinal}`)
+    const overflowed = yield* FunctionBody.extractValue(
+      body,
+      pair,
+      [1],
+      `callable_arith${nameOrdinal}_flag`,
+    )
+    const continueBlock = yield* LlvmBlock.make(body, `callable_arith${nameOrdinal}_ok`)
+    yield* FunctionBody.conditionalBranch(body, overflowed, operationState.trapBlock, continueBlock)
+    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+  } else {
+    const zero = yield* Constant.integerUnsigned(builder, operandType, 0n)
+    const zeroDivisor = yield* FunctionBody.integerCompare(
+      body,
+      'eq',
+      right,
+      zero,
+      `callable_div${nameOrdinal}_zero`,
+    )
+    let trapping: Value.Value = zeroDivisor
+    if (!unsigned) {
+      const minimum = yield* Constant.integerSigned(
+        builder,
+        operandType,
+        scalar?.category === 'Integer'
+          ? Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64).minimum
+          : -2147483648n,
+      )
+      const negativeOne = yield* Constant.integerSigned(builder, operandType, -1n)
+      const minimumDividend = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        left,
+        minimum,
+        `callable_div${nameOrdinal}_min`,
+      )
+      const negativeOneDivisor = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        right,
+        negativeOne,
+        `callable_div${nameOrdinal}_negone`,
+      )
+      const overflowCase = yield* FunctionBody.binary(
+        body,
+        'and',
+        minimumDividend,
+        negativeOneDivisor,
+        `callable_div${nameOrdinal}_overflow`,
+      )
+      trapping = yield* FunctionBody.binary(
+        body,
+        'or',
+        zeroDivisor,
+        overflowCase,
+        `callable_div${nameOrdinal}_trapping`,
+      )
+    }
+    const continueBlock = yield* LlvmBlock.make(body, `callable_div${nameOrdinal}_ok`)
+    yield* FunctionBody.conditionalBranch(body, trapping, operationState.trapBlock, continueBlock)
+    yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+    result = yield* FunctionBody.binary(
+      body,
+      operator === 'Divide' ? (unsigned ? 'udiv' : 'sdiv') : unsigned ? 'urem' : 'srem',
+      left,
+      right,
+      `callable_arith${nameOrdinal}`,
+    )
+  }
+  yield* locate(span, yield* Value.instruction(body, result))
+  return result
+})
+
+export const emitIntegerConversion = Effect.fnUntraced(function* (
+  context: OperationContext,
+  input: Value.Input,
+  sourceType: Mir.ScalarType,
+  targetType: Mir.ScalarType,
+  name: string,
+) {
+  const { body, builder, i32, integerTypes, program, state: operationState } = context
+  const source = Scalar.find(sourceType._tag)
+  const target = Scalar.find(targetType._tag)
+  if (
+    source === undefined ||
+    source.category !== 'Integer' ||
+    target === undefined ||
+    target.category !== 'Integer'
+  )
+    throw new RangeError('LLVM integer conversion lost its scalar types')
+  const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+  const sourceBits = Scalar.bits(source, pointerBits)
+  const targetBits = Scalar.bits(target, pointerBits)
+  const sourceRange = Scalar.range(source, pointerBits)
+  const targetRange = Scalar.range(target, pointerBits)
+  const physicalSource = integerTypes.get(sourceBits) ?? i32
+  const physicalTarget = integerTypes.get(targetBits) ?? i32
+  const checks: Array<Value.Input> = []
+  if (targetRange.minimum > sourceRange.minimum) {
+    checks.push(
+      yield* FunctionBody.integerCompare(
+        body,
+        source.signedness === 'Signed' ? 'slt' : 'ult',
+        input,
+        source.signedness === 'Signed'
+          ? yield* Constant.integerSigned(builder, physicalSource, targetRange.minimum)
+          : yield* Constant.integerUnsigned(builder, physicalSource, targetRange.minimum),
+        `${name}_below`,
+      ),
+    )
+  }
+  if (targetRange.maximum < sourceRange.maximum) {
+    checks.push(
+      yield* FunctionBody.integerCompare(
+        body,
+        source.signedness === 'Signed' ? 'sgt' : 'ugt',
+        input,
+        source.signedness === 'Signed'
+          ? yield* Constant.integerSigned(builder, physicalSource, targetRange.maximum)
+          : yield* Constant.integerUnsigned(builder, physicalSource, targetRange.maximum),
+        `${name}_above`,
+      ),
+    )
+  }
+  let invalid = checks.at(0)
+  for (const [ordinal, check] of checks.slice(1).entries())
+    invalid = yield* FunctionBody.binary(
+      body,
+      'or',
+      invalid ?? check,
+      check,
+      `${name}_invalid${ordinal}`,
+    )
+  if (invalid !== undefined) {
+    if (operationState.trapBlock === undefined)
+      operationState.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+    const following = yield* LlvmBlock.make(body, `${name}_ok`)
+    yield* FunctionBody.conditionalBranch(body, invalid, operationState.trapBlock, following)
+    yield* LlvmBlock.setInsertionPoint(body, following)
+  }
+  if (sourceBits === targetBits) return input
+  return yield* FunctionBody.cast(
+    body,
+    sourceBits < targetBits ? (source.signedness === 'Signed' ? 'sext' : 'zext') : 'trunc',
+    input,
+    physicalTarget,
+    name,
+  )
+})

@@ -6,6 +6,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import * as SilkType from './Type.js'
 import { carriesBorrowAddress } from './WasmLanes.js'
 
@@ -32,7 +33,7 @@ export interface FramePlan {
 }
 
 export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan => {
-  const formations = Mir.operations(fn).filter(
+  const formations = MirVerification.operations(fn).filter(
     (operation): operation is Extract<Mir.Operation, { readonly _tag: 'BeginLoan' }> =>
       operation._tag === 'BeginLoan',
   )
@@ -43,7 +44,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
         ? []
         : [operation.root.ordinal],
     ),
-    ...Mir.operations(fn).flatMap((operation) =>
+    ...MirVerification.operations(fn).flatMap((operation) =>
       operation._tag === 'MakeEffect' || operation._tag === 'MakeCallable'
         ? operation.captures.flatMap((capture, ordinal) =>
             (operation._tag === 'MakeEffect'
@@ -59,7 +60,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   const rootOrdinals = new Set([
     ...escaping,
     // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
-    ...Mir.operations(fn).flatMap((operation) => {
+    ...MirVerification.operations(fn).flatMap((operation) => {
       const dropped =
         operation._tag === 'Drop'
           ? [operation]
@@ -132,7 +133,7 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
     if (selected.size > 0) localRoots.set(destination.ordinal, selected)
     return selected.size !== previous
   }
-  const operations = Mir.operations(fn)
+  const operations = MirVerification.operations(fn)
   let changed = true
   while (changed) {
     changed = false

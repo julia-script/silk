@@ -1,10 +1,10 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from '../src/Cli.js'
+import * as CompilerHost from './CompilerHost.js'
 import { denying } from './fileSystemFailures.js'
 
 const compact = 'pub fn main() -> i32 { return 42 }'
@@ -42,7 +42,7 @@ it.effect('writes canonical source and then passes check mode', () =>
     assert.strictEqual(status(written), 0)
     assert.strictEqual(status(checked), 0)
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), canonical)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('reports check drift without writing', () =>
@@ -55,7 +55,7 @@ it.effect('reports check drift without writing', () =>
 
     assert.strictEqual(status(checked), 1)
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), compact)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('continues writing complete files but exits one for damaged syntax', () =>
@@ -71,7 +71,7 @@ it.effect('continues writing complete files but exits one for damaged syntax', (
     assert.strictEqual(status(executed), 1)
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), canonical)
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Broken.silk`), broken)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('formats active documentation bodies and exits one for embedded syntax damage', () =>
@@ -100,7 +100,7 @@ pub fn main() -> i32 { return 42 }
     const refused = yield* execute(['format', '--manifest-path', `${root}/silk.toml`])
     assert.strictEqual(status(refused), 1)
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/src/Main.silk`), damaged)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('ignores semantic errors and rejects selections outside the source root', () =>
@@ -121,7 +121,7 @@ it.effect('ignores semantic errors and rejects selections outside the source roo
 
     assert.strictEqual(status(checked), 0)
     assert.strictEqual(status(invalid), 2)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
 it.effect('maps read and write failures to exit class two without corrupting source', () =>
@@ -155,5 +155,5 @@ it.effect('maps read and write failures to exit class two without corrupting sou
     assert.strictEqual(status(readFailure), 2)
     assert.strictEqual(status(writeFailure), 2)
     assert.strictEqual(yield* fileSystem.readFileString(`${writeRoot}/src/Main.silk`), compact)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )

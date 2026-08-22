@@ -1,5 +1,7 @@
 import * as CleanupPlan from './CleanupPlan.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -7,6 +9,7 @@ import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Ownership from './Ownership.js'
 import * as ProviderSelection from './ProviderSelection.js'
 import * as RepresentationField from './RepresentationField.js'
@@ -25,7 +28,7 @@ import * as Type from './Type.js'
 /** One normalized concrete instance key. */
 export interface InstanceKey {
   readonly _tag: 'InstanceKey'
-  readonly declaration: DeclarationIndex.CanonicalId
+  readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly contractRow: ReadonlyArray<string>
 }
@@ -107,7 +110,7 @@ export interface EffectInstance {
   readonly identity: string
   readonly owner: InstanceKey
   readonly site: Hir.EffectSiteId
-  readonly runner: DeclarationIndex.CanonicalId
+  readonly runner: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<{
     readonly ordinal: number
@@ -236,12 +239,12 @@ const selectedRequirement = (
 const requirementBindingWitness = (
   binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
   substitution: Type.Substitution,
-  index: DeclarationIndex.Index,
-): DeclarationIndex.ConformanceWitness | undefined => {
+  index: DeclarationFacts.Index,
+): DeclarationFacts.ConformanceWitness | undefined => {
   const capability = selectedRequirement(binding, substitution)?.capability
   const provider = Type.substitute(binding.provider.providerType, substitution)
   return capability !== undefined && Type.isNominal(capability) && Type.isNominal(provider)
-    ? (binding.provider.witness ?? DeclarationIndex.witness(index, provider, capability))
+    ? (binding.provider.witness ?? ConformanceProof.witness(index, provider, capability))
     : undefined
 }
 
@@ -299,7 +302,7 @@ export interface StoredRepresentation {
 
 /** Finds represented storage exclusively through the specialization field-resolution seam. */
 export const storedRepresentation = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   type: Type.Type,
   kind: 'Callable' | 'Effect',
   seen: ReadonlySet<string> = new Set(),
@@ -328,14 +331,14 @@ export const storedRepresentation = (
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return undefined
   const typeKey = Type.key(type)
   if (seen.has(typeKey)) return undefined
-  const declaration = DeclarationIndex.byCanonical(index, {
+  const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
   })
   if (declaration?._tag !== 'StructDeclaration') return undefined
   const substitution =
-    Type.substitution(
+    TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
@@ -395,7 +398,7 @@ interface StoredExecutable {
 }
 
 const storedExecutable = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   type: Type.Type,
   kind: 'Callable' | 'Effect',
 ): StoredExecutable | undefined => {
@@ -443,7 +446,7 @@ const sameStoredExecutableViolationKey = (
 /** Collects every reachable aggregate construction that retains executable storage. */
 export const storedExecutableViolations = (
   self: Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   kind: 'Callable' | 'Effect',
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const fieldRealizations = callableFieldRealizations(self, index)
@@ -521,7 +524,7 @@ export const storedExecutableViolations = (
 }
 
 const collectNominals = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   type: Type.Type,
   into: Map<string, Type.Nominal>,
   seen: Set<string>,
@@ -540,14 +543,14 @@ const collectNominals = (
   seen.add(typeKey)
   if (!into.has(typeKey) && RepresentationField.plansOf(index, type).length > 0)
     into.set(typeKey, type)
-  const declaration = DeclarationIndex.byCanonical(index, {
+  const declaration = DeclarationFacts.byCanonical(index, {
     _tag: 'CanonicalDeclarationId',
     module: type.module,
     name: type.name,
   })
   if (declaration?._tag !== 'StructDeclaration') return
   const substitution =
-    Type.substitution(
+    TypeInference.substitution(
       declaration.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     ) ?? new Map()
@@ -564,7 +567,7 @@ const collectNominals = (
  */
 export const representedNominals = (
   self: Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Type.Nominal> => {
   const found = new Map<string, Type.Nominal>()
   for (const instance of self.instances) {
@@ -595,7 +598,7 @@ export const representedNominals = (
  */
 export const callableFieldRealizations = (
   self: Discovery,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): FieldRealization.Index =>
   FieldRealization.realize(
     index,
@@ -658,14 +661,14 @@ const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArg
 }
 
 const keyOf = (
-  declaration: DeclarationIndex.CanonicalId,
+  declaration: DeclarationFacts.CanonicalId,
   contract: Hir.ContractFact,
   typeParameters: ReadonlyArray<Type.Parameter> = [],
   rawTypeArguments: ReadonlyArray<Type.GenericArgument> = [],
 ): InstanceKey =>
   (() => {
     const typeArguments = rawTypeArguments.map(carriedSectionArgument)
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       typeParameters,
       typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
     )
@@ -714,7 +717,7 @@ export const keyText = (key: InstanceKey): string =>
 const concreteConstraintEvidence = (
   wanted: Constraint.Constraint,
   origin: SourceSpan.SourceSpan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (wanted._tag !== 'ProviderSelectionConstraint') {
     const proof = Constraint.proveStructural(wanted)
@@ -738,7 +741,7 @@ const concreteConstraintEvidence = (
     responsible: origin,
     oracle: Object.freeze({
       match: (provider: Type.Type, capability: Type.Nominal) =>
-        DeclarationIndex.providerMatch(index, provider, capability),
+        ConformanceProof.providerMatch(index, provider, capability),
     }),
   })
   return solved._tag === 'Selected' ? solved.evidence : undefined
@@ -748,7 +751,7 @@ const specializeEvidence = (
   evidence: Constraint.ConstraintEvidence,
   substitution: Type.Substitution,
   origin: SourceSpan.SourceSpan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (evidence._tag === 'Assumed') {
     const assumed = Constraint.substitute(evidence.wanted, evidence.substitution)
@@ -808,7 +811,7 @@ const hirEvidence = (
 export const specialize = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ConcreteSpecialization | undefined => {
   if (fn.contract._tag !== 'Contract') return undefined
   const parameters = fn.contract.parameters.map((parameter) =>
@@ -986,7 +989,7 @@ const instanceSubstitution = (
   fn: Hir.HirFunction,
   key: InstanceKey,
 ): Type.Substitution | undefined =>
-  Type.substitution(
+  TypeInference.substitution(
     fn.declaration.typeParameters.map((parameter) => parameter.type),
     key.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
   )
@@ -1118,7 +1121,7 @@ export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): Discovery => {
   const root = results.get(rootModule)
   if (root === undefined) {
@@ -1196,7 +1199,7 @@ export const discover = (
     const fn = functionByKey(results, key)
     if (fn === undefined) continue
     const parameters = fn.declaration.typeParameters.map((parameter) => parameter.type)
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       parameters,
       key.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
     )

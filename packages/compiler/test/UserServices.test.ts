@@ -3,7 +3,8 @@ import * as WasmError from '@silk-effect/wasm/WasmError'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
 import * as Json from './support/Json.js'
@@ -125,7 +126,7 @@ pub fn main() -> i32 {
       const loweredTargets = mir.functions.filter(
         (fn) => fn.id.name === 'get' || fn.id.name === 'get$effect$-1',
       )
-      assert.strictEqual(loweredTargets.length, 2, Mir.encode(mir))
+      assert.strictEqual(loweredTargets.length, 2, MirEncoding.encode(mir))
       for (const target of loweredTargets)
         assert.deepEqual(target.instance.typeArguments.map(Type.encodeGenericArgument), [
           'user-services/main.Token',
@@ -136,7 +137,7 @@ pub fn main() -> i32 {
           1,
           `${name} did not reach MIR exactly once`,
         )
-      const encoded = Mir.encode(mir)
+      const encoded = MirEncoding.encode(mir)
       for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
         assert.isFalse(encoded.includes(spelling), `${spelling} reached MIR`)
 
@@ -320,7 +321,7 @@ pub fn main() -> i32 {
         const self = yield* snapshot(source, 'wasm32-unknown-unknown')
         const hir = Projections.hirOf(self, 'user-services/main')
         assert.deepEqual(Analysis.diagnostics(self), [], hir === undefined ? '' : Hir.encode(hir))
-        assert.deepEqual(Mir.verify(Analysis.loweredMir(self)), [])
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
 
         const outcome = Analysis.evaluate(self)
         assert.strictEqual(
@@ -466,7 +467,7 @@ pub fn main() -> i32 {
     const self = yield* snapshot(source, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const main = mir.functions.find(
       (fn) => fn.id.module === 'user-services/main' && fn.id.name === 'main',
     )

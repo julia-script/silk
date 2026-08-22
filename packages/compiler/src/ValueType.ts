@@ -1,4 +1,5 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type {} from './EntryAssembly.js'
 import * as FieldRealization from './FieldRealization.js'
 import type {} from './Forwarding.js'
@@ -16,7 +17,7 @@ import * as Type from './Type.js'
 
 export interface GeneratedBlockEffectRunner {
   readonly _tag: 'BlockEffectRunner'
-  readonly id: DeclarationIndex.CanonicalId
+  readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
   readonly block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
@@ -26,13 +27,13 @@ export interface GeneratedBlockEffectRunner {
 
 export interface GeneratedWitnessEffectRunner {
   readonly _tag: 'WitnessEffectRunner'
-  readonly id: DeclarationIndex.CanonicalId
+  readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
   readonly expression: Extract<
     Hir.Expression,
     { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }
   >
-  readonly target?: DeclarationIndex.InterfaceWitnessTarget
+  readonly target?: ConformanceProof.InterfaceWitnessTarget
   readonly intrinsic?: Intrinsic.Operation
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly specializationKey: string
@@ -41,7 +42,7 @@ export interface GeneratedWitnessEffectRunner {
 
 export interface GeneratedCatchEffectRunner {
   readonly _tag: 'CatchEffectRunner'
-  readonly id: DeclarationIndex.CanonicalId
+  readonly id: DeclarationFacts.CanonicalId
   readonly owner: Instances.Instance
   readonly expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
@@ -61,14 +62,14 @@ export const instanceText = (
   typeArguments: ReadonlyArray<Type.GenericArgument>,
 ): string => Specialization.key({ declaration, typeArguments })
 
-export const effectEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
+export const effectEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module,
     name: '$effect-entry',
   })
 
-export const unitEntryAdapterId = (module: string): DeclarationIndex.CanonicalId =>
+export const unitEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
   Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module,
@@ -78,7 +79,7 @@ export const unitEntryAdapterId = (module: string): DeclarationIndex.CanonicalId
 export const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
   `${instanceText(owner.declaration, owner.typeArguments)}\u0000${Hir.executableSiteKey(site)}`
 
-export const witnessKey = (witness: DeclarationIndex.ConformanceWitness): string =>
+export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
     ? `${witness._tag}:${witness.operations
         .map(
@@ -449,14 +450,14 @@ export const ensureProvidedRunner = (
   fn: FunctionLowering,
   type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
   requirements: ReadonlyArray<ProvidedRequirement>,
-): DeclarationIndex.CanonicalId | undefined => {
+): DeclarationFacts.CanonicalId | undefined => {
   const key = providedRunnerKey(type, requirements)
   const existing = fn.generatedRunners.find((candidate) => candidate.specializationKey === key)
   if (existing !== undefined) return existing.id
   const baseKey = baseRunnerKey(type.environment.instance, type.site)
   const base = fn.generatedRunners.find((candidate) => candidate.specializationKey === baseKey)
   if (base === undefined) return undefined
-  const id: DeclarationIndex.CanonicalId = Object.freeze({
+  const id: DeclarationFacts.CanonicalId = Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: base.id.module,
     name: `${base.id.name}$provided$${fn.generatedRunners.length}`,

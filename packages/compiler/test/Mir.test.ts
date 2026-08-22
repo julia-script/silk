@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as MirSamples from './support/mirSamples.js'
 
@@ -18,7 +20,7 @@ const operationRegion = (region: Mir.Region | undefined): Mir.OperationRegion =>
 
 it('verifies the hand-built samples clean', () => {
   for (const sample of MirSamples.samples()) {
-    assert.deepEqual(Mir.verify(sample), [])
+    assert.deepEqual(MirVerification.verify(sample), [])
   }
 })
 
@@ -41,7 +43,7 @@ it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
     ],
   }
   assert.include(
-    Mir.verify(unavailableLocal).map((violation) => violation.rule),
+    MirVerification.verify(unavailableLocal).map((violation) => violation.rule),
     'InvalidInstance',
   )
 
@@ -59,7 +61,7 @@ it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
     functions: [{ ...fn, instance: unavailableInstance }],
   }
   assert.include(
-    Mir.verify(unavailableIdentity).map((violation) => violation.rule),
+    MirVerification.verify(unavailableIdentity).map((violation) => violation.rule),
     'InvalidInstance',
   )
 })
@@ -74,7 +76,7 @@ it('retains invalid return types as a verifier invariant', () => {
   }
 
   assert.include(
-    Mir.verify(invalid).map((violation) => violation.rule),
+    MirVerification.verify(invalid).map((violation) => violation.rule),
     'InvalidReturn',
   )
 })
@@ -112,7 +114,7 @@ it('reports broken graphs deterministically as data', () => {
     ],
   }
 
-  const violations = Mir.verify(broken)
+  const violations = MirVerification.verify(broken)
   assert.deepEqual(
     violations.map((violation) => violation.rule),
     [
@@ -123,7 +125,7 @@ it('reports broken graphs deterministically as data', () => {
       'InvalidIntegerOperation',
     ],
   )
-  assert.deepEqual(Mir.verify(broken), violations)
+  assert.deepEqual(MirVerification.verify(broken), violations)
 })
 
 it('rejects structural cycles without treating lexical repetition as an edge', () => {
@@ -152,7 +154,7 @@ it('rejects structural cycles without treating lexical repetition as an edge', (
   }
 
   assert.include(
-    Mir.verify(cyclic).map((violation) => violation.rule),
+    MirVerification.verify(cyclic).map((violation) => violation.rule),
     'StructuralCycle',
   )
 })
@@ -182,7 +184,7 @@ it('rejects repeat and exit ports that name no lexical loop owner', () => {
   }
 
   assert.include(
-    Mir.verify(invalid).map((violation) => violation.rule),
+    MirVerification.verify(invalid).map((violation) => violation.rule),
     'InvalidLoopTarget',
   )
 })
@@ -226,7 +228,7 @@ it('requires every yield to be one uniquely owned loop condition', () => {
     functions: [{ ...fn, entry: owner.id, regions }],
   })
   const valid = withRegions([owner, condition, body, following])
-  assert.deepEqual(Mir.verify(valid), [])
+  assert.deepEqual(MirVerification.verify(valid), [])
 
   const unownedYield = withRegions([
     owner,
@@ -235,7 +237,7 @@ it('requires every yield to be one uniquely owned loop condition', () => {
     following,
   ])
   assert.include(
-    Mir.verify(unownedYield).map((violation) => violation.rule),
+    MirVerification.verify(unownedYield).map((violation) => violation.rule),
     'InvalidLoopTarget',
   )
 
@@ -246,7 +248,7 @@ it('requires every yield to be one uniquely owned loop condition', () => {
     following,
   ])
   assert.include(
-    Mir.verify(nonYieldCondition).map((violation) => violation.rule),
+    MirVerification.verify(nonYieldCondition).map((violation) => violation.rule),
     'InvalidLoopTarget',
   )
 
@@ -256,7 +258,7 @@ it('requires every yield to be one uniquely owned loop condition', () => {
     loop: loop(1),
   }
   assert.include(
-    Mir.verify(withRegions([owner, condition, body, following, sharedCondition])).map(
+    MirVerification.verify(withRegions([owner, condition, body, following, sharedCondition])).map(
       (violation) => violation.rule,
     ),
     'InvalidLoopTarget',
@@ -268,13 +270,13 @@ it('carries and encodes exactly one compiler-owned target layout plan', () => {
   const sample = straight ?? raise('expected sample')
 
   assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
-  assert.include(Mir.encode(sample), 'target aarch64-apple-darwin')
-  assert.include(Mir.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
+  assert.include(MirEncoding.encode(sample), 'target aarch64-apple-darwin')
+  assert.include(MirEncoding.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
 })
 
 it('marks generated outcomes and preserves programmer provenance', () => {
   const [, branching] = MirSamples.samples()
-  const encoded = Mir.encode(branching ?? raise('expected branching sample'))
+  const encoded = MirEncoding.encode(branching ?? raise('expected branching sample'))
 
   assert.include(encoded, 'conditional condition=%0')
   assert.include(encoded, 'trap "otherwise" [25, 34) generated')
@@ -283,8 +285,14 @@ it('marks generated outcomes and preserves programmer provenance', () => {
 it('matches the MIR golden encodings byte-for-byte', () => {
   const [straight, branching] = MirSamples.samples()
 
-  assert.strictEqual(Mir.encode(straight ?? raise('expected sample')), golden('straight.mir.txt'))
-  assert.strictEqual(Mir.encode(branching ?? raise('expected sample')), golden('branching.mir.txt'))
+  assert.strictEqual(
+    MirEncoding.encode(straight ?? raise('expected sample')),
+    golden('straight.mir.txt'),
+  )
+  assert.strictEqual(
+    MirEncoding.encode(branching ?? raise('expected sample')),
+    golden('branching.mir.txt'),
+  )
 })
 
 it('constructs and encodes byte-identically across repeated runs', () => {
@@ -292,5 +300,5 @@ it('constructs and encodes byte-identically across repeated runs', () => {
   const second = MirSamples.samples()
 
   assert.deepEqual(first, second)
-  assert.deepEqual(first.map(Mir.encode), second.map(Mir.encode))
+  assert.deepEqual(first.map(MirEncoding.encode), second.map(MirEncoding.encode))
 })

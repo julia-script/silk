@@ -4,7 +4,7 @@ Three front/middle-end modules mix several concerns and, in `Pipeline`'s case, d
 
 ## What Changes
 
-- **Extract `TypeInference.ts`** from `Type.ts` (lines 2806–3367); `Type` re-exports `infer`/`inferOpenGenericArguments`.
+- **Extract `TypeInference.ts`** from `Type.ts` (lines 2806–3367); inference callers import the owning actor directly and `Type` retains no forwarding exports.
 - **Split `Instances.ts`** into `Instances` (discovery worklist + `specialize`/`keyOf`), `InstanceDiagnostics` (the five `*Violations` + `storedRepresentation`/`representedNominals`), and `ExecutableOrigin` (`*OriginOf`, `concreteCallables`/`concreteEffects`, `suspensionGraph`, reachability/witness targets).
 - **Split `Pipeline.ts`** into `Frontend`, an incremental-reuse module, and `Realization`; extract one shared `discoverAndLower` so `realize`/`prepare` become thin gate/error mappers instead of duplicate pipelines.
 
@@ -20,4 +20,4 @@ Three front/middle-end modules mix several concerns and, in `Pipeline`'s case, d
 
 ## Impact
 
-No observable behavior change. Touches `Type.ts`, `Instances.ts`, `Pipeline.ts`; the split actors are internal imports. `realize`/`prepare` must keep their existing gate/error semantics byte-for-byte (only the shared skeleton is de-duplicated). `skip_specs: true`.
+No observable behavior change. Touches `Type.ts`, `Instances.ts`, `Pipeline.ts`, and their callers; the split actors are direct internal imports rather than compatibility facades. `realize`/`prepare` must keep their existing gate/error semantics byte-for-byte (only the shared skeleton is de-duplicated). `skip_specs: true`.

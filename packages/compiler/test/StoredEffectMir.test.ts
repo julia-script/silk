@@ -6,7 +6,9 @@ import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
@@ -137,11 +139,13 @@ pub fn main() -> i32 {
   return run deferred.operation
 }`,
     )
-    const operations = module.functions.flatMap(Mir.operations)
+    const operations = module.functions.flatMap(MirVerification.operations)
     const make = operations.find((operation) => operation._tag === 'MakeEffect')
     const construct = operations.find((operation) => operation._tag === 'Construct')
     const run = module.functions
-      .flatMap((fn) => Mir.operations(fn).map((operation) => Object.freeze({ fn, operation })))
+      .flatMap((fn) =>
+        MirVerification.operations(fn).map((operation) => Object.freeze({ fn, operation })),
+      )
       .find(({ fn, operation }) => {
         if (operation._tag !== 'RunEffectValue') return false
         const type = fn.localTypes.at(operation.effect.ordinal)
@@ -175,7 +179,7 @@ pub fn main() -> i32 {
       Type.requirementMembers(run.outcomeType.type),
       stored.realization.rows.requirements,
     )
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     const alternate = operations.find(
       (operation) => operation._tag === 'RunEffectValue' && operation !== run,
     )
@@ -188,7 +192,9 @@ pub fn main() -> i32 {
       arguments: Object.freeze([run.effect]),
     })
     assert.include(
-      Mir.verify(replaceOperation(module, run, forged)).map((violation) => violation.rule),
+      MirVerification.verify(replaceOperation(module, run, forged)).map(
+        (violation) => violation.rule,
+      ),
       'InvalidEffectOperation',
     )
   }),
@@ -216,7 +222,7 @@ pub fn main() -> i32 {
 }`,
     )
     const providedRuns = module.functions.flatMap((fn) =>
-      Mir.operations(fn).flatMap((operation) => {
+      MirVerification.operations(fn).flatMap((operation) => {
         if (operation._tag !== 'RunEffectValue' || operation.providers.length !== 1) return []
         return [operation]
       }),
@@ -230,7 +236,7 @@ pub fn main() -> i32 {
 
     assert.strictEqual(counter?._tag, 'RunEffectValue')
     assert.strictEqual(meter?._tag, 'RunEffectValue')
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     if (counter?._tag !== 'RunEffectValue' || meter?._tag !== 'RunEffectValue') return
     const wrongWrapper = Object.freeze({
       ...counter,
@@ -238,7 +244,7 @@ pub fn main() -> i32 {
       runnerTypeArguments: meter.runnerTypeArguments,
     })
     assert.include(
-      Mir.verify(replaceOperation(module, counter, wrongWrapper)).map(
+      MirVerification.verify(replaceOperation(module, counter, wrongWrapper)).map(
         (violation) => violation.rule,
       ),
       'InvalidEffectOperation',
@@ -253,7 +259,7 @@ pub fn main() -> i32 {
       ]),
     })
     assert.include(
-      Mir.verify(replaceOperation(module, counter, wrongWitness)).map(
+      MirVerification.verify(replaceOperation(module, counter, wrongWitness)).map(
         (violation) => violation.rule,
       ),
       'InvalidEffectOperation',
@@ -275,7 +281,7 @@ pub fn main() -> i32 {
 }`,
     )
     const cleanups = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .flatMap((operation) => (operation._tag === 'Drop' ? [operation.cleanup] : []))
 
     assert.notInclude(
@@ -290,10 +296,10 @@ pub fn main() -> i32 {
       ),
       'EffectCleanup',
     )
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
 
     const drop = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find(
         (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
           operation._tag === 'Drop' &&
@@ -345,7 +351,7 @@ pub fn main() -> i32 {
     ]
     for (const cleanup of malformed) {
       assert.include(
-        Mir.verify(replaceDrop(module, drop, withEffectCleanup(cleanup))).map(
+        MirVerification.verify(replaceDrop(module, drop, withEffectCleanup(cleanup))).map(
           (violation) => violation.rule,
         ),
         'InvalidAggregateOperation',
@@ -370,7 +376,7 @@ pub fn main() -> i32 {
     )
     const module = finalizeSuspension(lowered.snapshot, lowered.module, lowered.layout)
     const run = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .find((operation) => operation._tag === 'RunEffectValue')
     const suspension = module.functions.flatMap((fn) => fn.suspension?.regions ?? [])
 
@@ -405,8 +411,8 @@ pub fn main() -> i32 {
       ),
       'the reachable chain must terminate in an explicit suspension origin',
     )
-    assert.deepEqual(Mir.verify(module), [])
-    assert.include(Mir.encode(module), 'stored-effect-mir/suspending.main$effect$0')
+    assert.deepEqual(MirVerification.verify(module), [])
+    assert.include(MirEncoding.encode(module), 'stored-effect-mir/suspending.main$effect$0')
   }),
 )
 
@@ -433,7 +439,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
     const propagating = module.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .flatMap((operation) =>
         (operation._tag === 'RunEffect' || operation._tag === 'RunEffectValue') &&
         operation.releases !== undefined
@@ -449,7 +455,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     )
 
     assert.include(cleanupTags, 'EffectCleanup')
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     assert.isFalse(
       module.layout.entries.some(
         (entry) => Type.isEffect(entry.type) && entry.representation._tag !== 'Aggregate',

@@ -174,6 +174,10 @@
       "types": "./dist/DeclarationIndex.d.ts",
       "import": "./dist/DeclarationIndex.js"
     },
+    "./DeclarationFacts": {
+      "types": "./dist/DeclarationFacts.d.ts",
+      "import": "./dist/DeclarationFacts.js"
+    },
     "./Driver": {
       "types": "./dist/Driver.d.ts",
       "import": "./dist/Driver.js"
@@ -222,6 +226,14 @@
       "types": "./dist/Layout.d.ts",
       "import": "./dist/Layout.js"
     },
+    "./LayoutEncode": {
+      "types": "./dist/LayoutEncode.d.ts",
+      "import": "./dist/LayoutEncode.js"
+    },
+    "./LayoutVerify": {
+      "types": "./dist/LayoutVerify.d.ts",
+      "import": "./dist/LayoutVerify.js"
+    },
     "./Lexer": {
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
@@ -237,6 +249,14 @@
     "./Mir": {
       "types": "./dist/Mir.d.ts",
       "import": "./dist/Mir.js"
+    },
+    "./MirEncoding": {
+      "types": "./dist/MirEncoding.d.ts",
+      "import": "./dist/MirEncoding.js"
+    },
+    "./MirVerification": {
+      "types": "./dist/MirVerification.d.ts",
+      "import": "./dist/MirVerification.js"
     },
     "./ModuleClosure": {
       "types": "./dist/ModuleClosure.d.ts",

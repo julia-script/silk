@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
@@ -22,7 +24,7 @@ pub fn main() -> i32 { return 42 }`),
       plan.entries.map((candidate) => candidate.type),
       ['i32'],
     )
-    assert.deepEqual(Layout.verify(plan), [])
+    assert.deepEqual(LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -47,7 +49,7 @@ pub fn main() -> i32 { consume(Token { value: 1 }) return 0 }`),
       plan.value.entries.map((entry) => Type.encode(entry.type)),
       'layout/evaluate.Token',
     )
-    assert.deepEqual(Layout.verify(plan.value), [])
+    assert.deepEqual(LayoutVerify.verify(plan.value), [])
   }),
 )
 
@@ -75,7 +77,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
       assert.strictEqual(environment.fields.at(0)?.representation, 'Borrow')
       assert.strictEqual(environment.size, target.pointerSize)
       assert.strictEqual(environment.alignment, target.pointerAlignment)
-      assert.deepEqual(Layout.verify(plan.value), [])
+      assert.deepEqual(LayoutVerify.verify(plan.value), [])
     }
   }),
 )
@@ -123,7 +125,7 @@ pub fn main() -> i32 {
         alignment: target.pointerAlignment,
         pointerBits: target.pointerSize === 4 ? 32 : 64,
       })
-      assert.deepEqual(Layout.verify(plan.value), [])
+      assert.deepEqual(LayoutVerify.verify(plan.value), [])
     }
   }),
 )
@@ -136,8 +138,8 @@ it('orders and encodes canonical scalar entries identically on every target', ()
       first.entries.map((candidate) => candidate.type),
       ['bool', 'i32'],
     )
-    assert.strictEqual(Layout.encode(first), Layout.encode(second))
-    assert.deepEqual(Layout.verify(first), [])
+    assert.strictEqual(LayoutEncode.encode(first), LayoutEncode.encode(second))
+    assert.deepEqual(LayoutVerify.verify(first), [])
   }
 })
 
@@ -166,7 +168,7 @@ it('plans canonical IEEE storage and lanes on every target', () => {
         },
       ],
     )
-    assert.deepEqual(Layout.verify(plan), [])
+    assert.deepEqual(LayoutVerify.verify(plan), [])
   }
 })
 
@@ -203,7 +205,7 @@ pub fn main() -> i32 {
           assert.strictEqual(outcome.lanes.at(0)?.type, 'i32')
           assert.strictEqual(outcome.lanes.at(1)?.type, 'usize')
         }
-        assert.deepEqual(Layout.verify(planned.value), [])
+        assert.deepEqual(LayoutVerify.verify(planned.value), [])
       }
     }),
 )
@@ -309,7 +311,7 @@ it('reports malformed target, order, duplicates, and scalar facts as data', () =
   }
 
   assert.deepEqual(
-    Layout.verify(malformed).map((violation) => violation.rule),
+    LayoutVerify.verify(malformed).map((violation) => violation.rule),
     [
       'NonCanonicalTarget',
       'NonCanonicalOrder',
@@ -379,8 +381,8 @@ pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
           ['pair', 0, 8],
         ],
       )
-      assert.deepEqual(Layout.verifyCatalog(catalog.value), [])
-      assert.deepEqual(Layout.verifyAgainstCatalog(plan.value, catalog.value), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+      assert.deepEqual(LayoutVerify.verifyAgainstCatalog(plan.value, catalog.value), [])
       assert.strictEqual(Layout.entry(plan.value, Type.nominal('layout/catalog', 'Outer')), outer)
       assert.strictEqual(
         Layout.entry(plan.value, Type.nominal('layout/catalog', 'Unused')),
@@ -431,7 +433,7 @@ pub fn main() -> i32 { return 42 }`),
       assert.strictEqual(outer.cause?.code, 'SEM0001')
       assert.strictEqual(left.cause?.code, 'SEM0020')
       assert.strictEqual(right.cause?.code, 'SEM0020')
-      assert.deepEqual(Layout.verifyCatalog(selected.value), [])
+      assert.deepEqual(LayoutVerify.verifyCatalog(selected.value), [])
     }),
 )
 
@@ -470,12 +472,12 @@ it.effect(
       )
         return
       assert.strictEqual(
-        Layout.encodeCatalog(firstCatalog.value),
-        Layout.encodeCatalog(secondCatalog.value),
+        LayoutEncode.encodeCatalog(firstCatalog.value),
+        LayoutEncode.encodeCatalog(secondCatalog.value),
       )
       assert.notStrictEqual(
-        Layout.encodeCatalog(firstCatalog.value),
-        Layout.encodeCatalog(wasmCatalog.value),
+        LayoutEncode.encodeCatalog(firstCatalog.value),
+        LayoutEncode.encodeCatalog(wasmCatalog.value),
       )
     }),
 )
@@ -520,11 +522,11 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
     }
 
     assert.include(
-      Layout.verifyCatalog(catalog).map((violation) => violation.rule),
+      LayoutVerify.verifyCatalog(catalog).map((violation) => violation.rule),
       'InvalidAggregate',
     )
     assert.deepEqual(
-      Layout.verifyAgainstCatalog(plan, selected.value).map((violation) => violation.rule),
+      LayoutVerify.verifyAgainstCatalog(plan, selected.value).map((violation) => violation.rule),
       ['CatalogMismatch'],
     )
   }),

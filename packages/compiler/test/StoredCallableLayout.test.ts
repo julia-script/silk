@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
@@ -49,7 +51,7 @@ pub fn main() -> i32 {
     assert.strictEqual(parser.representation._tag, 'Aggregate')
     if (parser.representation._tag !== 'Aggregate') return
     assert.strictEqual(parser.representation.fields.at(0)?.size, 0)
-    assert.deepEqual(Layout.verify(plan), [])
+    assert.deepEqual(LayoutVerify.verify(plan), [])
   }),
 )
 
@@ -80,7 +82,7 @@ pub fn main() -> i32 {
       )
       assert.strictEqual(represented.size, 4)
       assert.strictEqual(represented.alignment, 4)
-      assert.deepEqual(Layout.verify(plan), [])
+      assert.deepEqual(LayoutVerify.verify(plan), [])
     }
   }),
 )
@@ -113,8 +115,8 @@ pub fn main() -> i32 {
     assert.strictEqual(represented.representation._tag, 'CallableEnvironment')
     if (represented.representation._tag !== 'CallableEnvironment') return
     assert.deepEqual(represented.representation.fields, [])
-    assert.strictEqual(Layout.encode(first), Layout.encode(second))
-    assert.deepEqual(Layout.verify(first), [])
+    assert.strictEqual(LayoutEncode.encode(first), LayoutEncode.encode(second))
+    assert.deepEqual(LayoutVerify.verify(first), [])
   }),
 )
 
@@ -135,7 +137,7 @@ pub fn main() -> i32 {
       assert.strictEqual(represented.representation.fields.at(0)?.representation, 'Borrow')
       assert.strictEqual(represented.size, target.pointerSize)
       assert.strictEqual(represented.alignment, target.pointerAlignment)
-      assert.deepEqual(Layout.verify(plan), [])
+      assert.deepEqual(LayoutVerify.verify(plan), [])
     }
   }),
 )

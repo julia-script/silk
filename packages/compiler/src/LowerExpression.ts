@@ -9,7 +9,7 @@ import {
   specializedCleanup,
 } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import {
   borrowedWriteRoot,
@@ -951,20 +951,7 @@ export function lowerExpressionInner(
             }),
           )
           // The effect held its argument borrows for exactly this run; end them here.
-          for (const authored of recipe.loanEnds) {
-            const borrow = fn.recipeBorrow(authored)
-            const held = fn.loanLocals.get(borrowKey(borrow))
-            if (held === undefined) continue
-            fn.emit(
-              Object.freeze({
-                _tag: 'EndLoan',
-                borrow,
-                slice: held,
-                provenance: generated(expression.span),
-              }),
-            )
-            fn.loanLocals.delete(borrowKey(borrow))
-          }
+          endLoans(fn, recipe.loanEnds, expression.span)
           return Object.freeze({ result: destination })
         }
         fn.emit(
@@ -980,20 +967,7 @@ export function lowerExpressionInner(
             provenance: authored(expression.span),
           }),
         )
-        for (const authored of recipe.loanEnds) {
-          const borrow = fn.recipeBorrow(authored)
-          const held = fn.loanLocals.get(borrowKey(borrow))
-          if (held === undefined) continue
-          fn.emit(
-            Object.freeze({
-              _tag: 'EndLoan',
-              borrow,
-              slice: held,
-              provenance: generated(expression.span),
-            }),
-          )
-          fn.loanLocals.delete(borrowKey(borrow))
-        }
+        endLoans(fn, recipe.loanEnds, expression.span)
         fn.emit(
           Object.freeze({
             _tag: 'UnpackEffectSuccess',
@@ -1531,7 +1505,7 @@ export function lowerExpressionInner(
       const capability = fn.semantic(expression.capability)
       const provider = fn.semantic(expression.provider)
       if (!Type.isNominal(capability)) return undefined
-      const selected = DeclarationIndex.interfaceOperationIntrinsic(
+      const selected = ConformanceProof.interfaceOperationIntrinsic(
         fn.index,
         provider,
         capability,

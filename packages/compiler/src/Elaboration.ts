@@ -2,6 +2,7 @@ import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import type * as CallableContract from './CallableContract.js'
 import type * as Constraint from './Constraint.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Hir from './Hir.js'
@@ -21,28 +22,28 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
 /** The only semantic type recognized by the first analysis slice. */
-export type SemanticType = DeclarationIndex.SemanticType
+export type SemanticType = DeclarationFacts.SemanticType
 
 /** A deterministic declaration identity local to one analyzed source snapshot. */
-export type DeclarationId = DeclarationIndex.DeclarationId
+export type DeclarationId = DeclarationFacts.DeclarationId
 
 /** A deterministic parameter identity nested under its owning function declaration. */
-export type ParameterId = DeclarationIndex.ParameterId
+export type ParameterId = DeclarationFacts.ParameterId
 
 /** A declaration name supplied by syntax or explicitly unavailable after recovery. */
-export type DeclaredName = DeclarationIndex.DeclaredName
+export type DeclaredName = DeclarationFacts.DeclaredName
 
 /** The resolved, unresolved, or syntax-unavailable declared return type. */
-export type DeclaredTypeFact = DeclarationIndex.DeclaredTypeFact
+export type DeclaredTypeFact = DeclarationFacts.DeclaredTypeFact
 
 /** The declared type fact attached to a function return. */
-export type ReturnTypeFact = DeclarationIndex.ReturnTypeFact
+export type ReturnTypeFact = DeclarationFacts.ReturnTypeFact
 
 /** One ordered parameter declaration with exact concrete provenance. */
-export type ParameterFact = DeclarationIndex.ParameterFact
+export type ParameterFact = DeclarationFacts.ParameterFact
 
 /** The closed result of looking up a parameter spelling within one function. */
-export type ParameterLookup = DeclarationIndex.ParameterLookup
+export type ParameterLookup = DeclarationFacts.ParameterLookup
 
 /** One `let` binding declaration with its inferred type and initializer facts. */
 export interface BindingDeclarationFact {
@@ -170,8 +171,8 @@ export type CallReferenceFact =
       readonly _tag: 'ResolvedServiceOperation'
       readonly spelling: string
       readonly token: Token.Token
-      readonly service: DeclarationIndex.ServiceFact
-      readonly operation: DeclarationIndex.ServiceOperationFact
+      readonly service: DeclarationFacts.ServiceFact
+      readonly operation: DeclarationFacts.ServiceOperationFact
     }
   /**
    * One operation of a type parameter's bound, reached through the bound's own name. The contract
@@ -186,8 +187,8 @@ export type CallReferenceFact =
       readonly capability: Type.Nominal
       readonly provider: Type.Type
       readonly operation: string
-      readonly declaration: DeclarationIndex.ServiceOperationFact
-      readonly interfaceContract: DeclarationIndex.InterfaceOperationApplicationFact
+      readonly declaration: DeclarationFacts.ServiceOperationFact
+      readonly interfaceContract: DeclarationFacts.InterfaceOperationApplicationFact
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
     }
@@ -229,7 +230,7 @@ export type IntrinsicReferenceFact =
     }
   | {
       readonly _tag: 'ResolvedCapabilityOperationReference'
-      readonly actor: DeclarationIndex.StructFact | Intrinsic.Actor
+      readonly actor: DeclarationFacts.StructFact | Intrinsic.Actor
       readonly operation: Intrinsic.Operation
       readonly actorToken: Token.Token
       readonly operationToken: Token.Token
@@ -260,7 +261,7 @@ export interface MoveExpressionFact {
 export type BorrowSelectorFact =
   | {
       readonly _tag: 'Field'
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -335,19 +336,19 @@ export interface PatternBindingFact {
   readonly id: Match.BindingId
   readonly name: DeclaredName
   /** Absent for a whole-member binding, which owns the entire matched payload. */
-  readonly field?: DeclarationIndex.FieldFact
-  readonly path: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly field?: DeclarationFacts.FieldFact
+  readonly path: ReadonlyArray<DeclarationFacts.FieldId>
   readonly type: ExpressionTypeFact
   readonly access: Match.Access
   readonly syntax: SyntaxTree.Node
 }
 
 export type PatternFieldState =
-  | { readonly _tag: 'Resolved'; readonly field: DeclarationIndex.FieldFact }
+  | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
   | {
       readonly _tag: 'Duplicate'
-      readonly field: DeclarationIndex.FieldFact
+      readonly field: DeclarationFacts.FieldFact
       readonly cause: Diagnostic.Identity
     }
   | { readonly _tag: 'Unavailable' }
@@ -368,7 +369,7 @@ export type PatternFact =
       readonly id: Match.PatternId
       readonly member?: undefined
       readonly bindings: ReadonlyArray<PatternBindingFact>
-      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: false
       readonly syntax: SyntaxTree.Node
     }
@@ -376,9 +377,9 @@ export type PatternFact =
       readonly _tag: 'TypePattern'
       readonly id: Match.PatternId
       readonly member?: Type.Type
-      readonly declared: DeclarationIndex.DeclaredTypeFact
+      readonly declared: DeclarationFacts.DeclaredTypeFact
       readonly bindings: ReadonlyArray<PatternBindingFact>
-      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly complete: boolean
       readonly syntax: SyntaxTree.Node
     }
@@ -389,7 +390,7 @@ export type PatternFact =
       readonly member?: Type.Nominal
       readonly fields: ReadonlyArray<PatternFieldFact>
       readonly bindings: ReadonlyArray<PatternBindingFact>
-      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly rest: boolean
       readonly complete: boolean
       readonly syntax: SyntaxTree.Node
@@ -398,7 +399,7 @@ export type PatternFact =
       readonly _tag: 'UniversalPattern'
       readonly id: Match.PatternId
       readonly bindings: ReadonlyArray<PatternBindingFact>
-      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationIndex.FieldId>>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
       readonly syntax: SyntaxTree.Node
     }
 
@@ -447,28 +448,28 @@ export interface PatternSelectionFact {
 export type StructTargetFact =
   | {
       readonly _tag: 'Resolved'
-      readonly struct: DeclarationIndex.StructFact
+      readonly struct: DeclarationFacts.StructFact
       readonly type: Type.Nominal
       readonly token: Token.Token
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
 export type StructInitializerState =
-  | { readonly _tag: 'Resolved'; readonly field: DeclarationIndex.FieldFact }
+  | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'Unknown'; readonly cause: Diagnostic.Identity }
   | {
       readonly _tag: 'Duplicate'
-      readonly field: DeclarationIndex.FieldFact
+      readonly field: DeclarationFacts.FieldFact
       readonly cause: Diagnostic.Identity
     }
   | {
       readonly _tag: 'TypeMismatch'
-      readonly field: DeclarationIndex.FieldFact
+      readonly field: DeclarationFacts.FieldFact
       readonly cause: Diagnostic.Identity
     }
   | {
       readonly _tag: 'Inaccessible'
-      readonly field: DeclarationIndex.FieldFact
+      readonly field: DeclarationFacts.FieldFact
       readonly cause: Diagnostic.Identity
     }
   | { readonly _tag: 'Unavailable' }
@@ -496,7 +497,7 @@ export interface StructLiteralExpressionFact {
   readonly typeArguments: ReadonlyArray<StructTypeArgumentFact>
   readonly initializers: ReadonlyArray<StructInitializerFact>
   readonly fields: ReadonlyArray<{
-    readonly field: DeclarationIndex.FieldFact
+    readonly field: DeclarationFacts.FieldFact
     readonly initializer: StructInitializerFact
   }>
   readonly type: ExpressionTypeFact
@@ -504,7 +505,7 @@ export interface StructLiteralExpressionFact {
 }
 
 export type ProjectionState =
-  | { readonly _tag: 'Resolved'; readonly field: DeclarationIndex.FieldFact }
+  | { readonly _tag: 'Resolved'; readonly field: DeclarationFacts.FieldFact }
   | { readonly _tag: 'SliceLength' }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
@@ -594,7 +595,7 @@ export interface BooleanExpressionFact {
 /** One reference to a typed compile-time scalar declaration. */
 export interface ConstantExpressionFact {
   readonly _tag: 'Constant'
-  readonly declaration: DeclarationIndex.ConstantFact
+  readonly declaration: DeclarationFacts.ConstantFact
   readonly token: Token.Token
   readonly value?:
     | { readonly _tag: 'Boolean'; readonly value: boolean }
@@ -674,7 +675,7 @@ export interface InterfaceOperationFact {
   readonly capability: Type.Nominal
   readonly provider: Type.Type
   readonly operation: string
-  readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
+  readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
 }
 
 /** One declaration or builtin named as a callable value without invocation. */
@@ -749,7 +750,7 @@ export interface EffectRequirementBindingFact {
   readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
   readonly capability?: Type.Nominal | Type.Parameter
   readonly providerType: Type.Nominal | Type.Parameter
-  readonly witness?: DeclarationIndex.ConformanceWitness
+  readonly witness?: DeclarationFacts.ConformanceWitness
   readonly role?: string
   /** Fixed provider mode used by requirement selection and runtime service dispatch. */
   readonly selectionAccess: 'Shared' | 'Exclusive' | 'Take'
@@ -881,7 +882,7 @@ export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | und
     return ordinal === undefined ? undefined : self.arguments.at(ordinal)
   }
   if (self.reference._tag !== 'Resolved') return undefined
-  const declared = DeclarationIndex.returnedBorrow(self.reference.declaration)
+  const declared = DeclarationFacts.returnedBorrow(self.reference.declaration)
   if (declared !== undefined) {
     return self.mappings.find(
       (mapping) => mapping.parameter.id.ordinal === declared.parameter.id.ordinal,
@@ -984,7 +985,7 @@ export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undef
 }
 
 /** One public function declaration and its syntax-owned semantic facts. */
-export type DeclarationFact = DeclarationIndex.DeclarationFact
+export type DeclarationFact = DeclarationFacts.DeclarationFact
 
 /** One analyzed body statement in source order, nesting through conditionals. */
 export type StatementFact =
@@ -1087,7 +1088,7 @@ export interface FunctionFact {
   readonly regionOrder: ReadonlyArray<Hir.RegionId>
   readonly returnedExpression: ExpressionFact
   readonly returnCompatibility: ReturnCompatibility
-  readonly returnedBorrow?: DeclarationIndex.ReturnedBorrowFact
+  readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
 }
 
 /** Stable identity of one parent-linked lexical scope in an elaborated function. */
@@ -1109,7 +1110,7 @@ export interface LexicalScopeFact {
 }
 
 /** The closed result of looking up one declaration spelling. */
-export type DeclarationLookup = DeclarationIndex.DeclarationLookup
+export type DeclarationLookup = DeclarationFacts.DeclarationLookup
 
 /** The complete deterministic elaboration result for all direct bootstrap declarations. */
 export interface Result {
@@ -1347,9 +1348,9 @@ export const isAvailableSyntax = SyntaxTree.isAvailableSyntax
 
 export const unavailableElement = SyntaxTree.unavailableElement
 
-export const lookupParameter = DeclarationIndex.lookupParameter
+export const lookupParameter = DeclarationFacts.lookupParameter
 
-export const lookupDeclaration = DeclarationIndex.lookupDeclaration
+export const lookupDeclaration = DeclarationFacts.lookupDeclaration
 
 export const spelling = (source: SourceFile.SourceFile, token: Token.Token): string =>
   Option.getOrThrowWith(
@@ -1398,8 +1399,6 @@ export const argumentFact = (
     type: expression.type,
     syntax: expression.syntax,
   })
-
-export { analyzeExpression, representationOfExpression } from './ExpressionAnalysis.js'
 
 import { copyAssumptionsOf } from './CallResolution.js'
 import {
@@ -1737,9 +1736,9 @@ const lexicalScopesOf = (
 /** Elaborates every declaration body into immutable facts and the module's HIR. */
 export interface Input {
   readonly syntax: SyntaxFile.SyntaxFile
-  readonly headers: DeclarationIndex.ModuleHeaders
+  readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
 }
 
 export const elaborateModule = (input: Input): Result => {

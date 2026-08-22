@@ -1,3 +1,4 @@
+import * as TypeInference from './internal/TypeInference.js'
 import * as Type from './Type.js'
 
 /** One ordered piece of the mapped target contract used to infer its declaration binders. */
@@ -56,7 +57,11 @@ export const infer = (
   const sources = new Map<string, string>()
   for (const constraint of constraints) {
     const trial = new Map(inferred)
-    const result = Type.inferOpenGenericArguments(constraint.pattern, constraint.actual, trial)
+    const result = TypeInference.inferOpenGenericArguments(
+      constraint.pattern,
+      constraint.actual,
+      trial,
+    )
     if (result.matches) {
       for (const binder of binders) {
         const identity = Type.key(binder)
@@ -100,11 +105,13 @@ export const infer = (
       return argument === undefined ? [] : [argument]
     }),
   )
-  const substitution = Type.substitution(binders, arguments_)
+  const substitution = TypeInference.substitution(binders, arguments_)
   if (substitution === undefined) {
     const incompatible = binders.find((binder, ordinal) => {
       const argument = arguments_.at(ordinal)
-      return argument !== undefined && Type.substitution([binder], [argument]) === undefined
+      return (
+        argument !== undefined && TypeInference.substitution([binder], [argument]) === undefined
+      )
     })
     const ordinal = incompatible === undefined ? -1 : binders.indexOf(incompatible)
     const argument = ordinal < 0 ? undefined : arguments_.at(ordinal)

@@ -5,7 +5,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
-import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
@@ -137,7 +137,7 @@ impl<S: Decoder> Decoder for Wrapper<S> {
       const provider = Type.nominal('conditional-conformance/damaged', 'Wrapper', [
         Type.nominal('conditional-conformance/damaged', 'Schema'),
       ])
-      const proof = DeclarationIndex.prove(
+      const proof = ConformanceProof.prove(
         Analysis.declarationIndex(snapshot),
         provider,
         Type.nominal('conditional-conformance/damaged', 'Decoder'),

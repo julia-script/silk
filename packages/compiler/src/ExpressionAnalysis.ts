@@ -1,7 +1,11 @@
 import * as Option from 'effect/Option'
 import * as CallableContract from './CallableContract.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
   ArgumentFact,
@@ -79,6 +83,7 @@ import * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as LiteralForm from './LiteralForm.js'
 import * as Match from './Match.js'
 import * as NameResolution from './NameResolution.js'
@@ -205,7 +210,7 @@ export const analyzeFloating = (
 }
 
 export const analyzeConstant = (
-  declaration: DeclarationIndex.ConstantFact,
+  declaration: DeclarationFacts.ConstantFact,
   token: Token.Token,
   syntax: SyntaxTree.Node,
   reportDiagnostic: boolean,
@@ -694,7 +699,7 @@ export const analyzeBorrow = (
     })
   }
   if (expected !== undefined && Type.isReference(expected)) {
-    if (!Type.infer(expected.target, sourceType, new Map())) {
+    if (!TypeInference.infer(expected.target, sourceType, new Map())) {
       return unavailableBorrow(
         node,
         access,
@@ -814,9 +819,9 @@ export const intrinsicStruct = (
   type: Type.Nominal,
   syntax: SyntaxTree.Node,
   token: Token.Token,
-): DeclarationIndex.StructFact => {
+): DeclarationFacts.StructFact => {
   const ordinal = Type.intrinsicNominalOrdinal(type)
-  const id: DeclarationIndex.DeclarationId = Object.freeze({
+  const id: DeclarationFacts.DeclarationId = Object.freeze({
     _tag: 'DeclarationId',
     sourceId: type.module,
     ordinal,
@@ -882,7 +887,7 @@ export const resolveStructTarget = (
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const analyzed = DeclarationIndex.analyzeDeclaredType(source, syntax, environment)
+  const analyzed = DeclarationCollection.analyzeDeclaredType(source, syntax, environment)
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
@@ -911,7 +916,7 @@ export const resolveStructTarget = (
     const candidate =
       base === undefined
         ? undefined
-        : DeclarationIndex.byCanonical(resolution.index, {
+        : DeclarationFacts.byCanonical(resolution.index, {
             _tag: 'CanonicalDeclarationId',
             module: base.module,
             name: base.name,
@@ -925,7 +930,7 @@ export const resolveStructTarget = (
       )
       if (supplied.length <= sourceParameters.length) {
         const resolvedArguments = supplied.map((argument) =>
-          DeclarationIndex.resolveTypeFact(
+          DeclarationResolution.resolveTypeFact(
             resolution.index,
             source.id,
             argument,
@@ -958,7 +963,7 @@ export const resolveStructTarget = (
         )
         if (arguments_.length === candidate.typeParameters.length) {
           const parameters = candidate.typeParameters.map((parameter) => parameter.type)
-          if (Type.prefixSubstitution(parameters, arguments_) !== undefined) {
+          if (TypeInference.prefixSubstitution(parameters, arguments_) !== undefined) {
             const token = SyntaxTree.tokens(syntax).find(
               (candidateToken) => candidateToken.kind === 'Identifier',
             )
@@ -980,7 +985,7 @@ export const resolveStructTarget = (
       }
     }
   }
-  const resolved = DeclarationIndex.resolveTypeFact(
+  const resolved = DeclarationResolution.resolveTypeFact(
     resolution.index,
     source.id,
     analyzed.fact,
@@ -1000,7 +1005,7 @@ export const resolveStructTarget = (
           diagnostics: Diagnostic.merge(analyzed.diagnostics, resolved.diagnostics),
         })
     }
-    const declaration = DeclarationIndex.byCanonical(resolution.index, {
+    const declaration = DeclarationFacts.byCanonical(resolution.index, {
       _tag: 'CanonicalDeclarationId',
       module: resolved.fact.type.module,
       name: resolved.fact.type.name,
@@ -1047,7 +1052,7 @@ export interface PatternResult {
 
 export interface PatternTypeResult {
   readonly type?: Type.Type
-  readonly declared: DeclarationIndex.DeclaredTypeFact
+  readonly declared: DeclarationFacts.DeclaredTypeFact
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -1062,13 +1067,13 @@ export const resolvePatternType = (
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const analyzed = DeclarationIndex.analyzeDeclaredType(source, syntax, environment)
+  const analyzed = DeclarationCollection.analyzeDeclaredType(source, syntax, environment)
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
     diagnostics: Object.freeze([]),
   })
-  const resolved = DeclarationIndex.resolveTypeFact(
+  const resolved = DeclarationResolution.resolveTypeFact(
     resolution.index,
     source.id,
     analyzed.fact,
@@ -1099,7 +1104,7 @@ export const analyzePattern = (
   resolution: ResolutionContext,
   declaration: DeclarationFact,
   counters: PatternCounters,
-  prefix: ReadonlyArray<DeclarationIndex.FieldId> = Object.freeze([]),
+  prefix: ReadonlyArray<DeclarationFacts.FieldId> = Object.freeze([]),
   localNames = new Map<string, SourceSpan.SourceSpan>(),
 ): PatternResult => {
   const id: Match.PatternId = Object.freeze({
@@ -1201,7 +1206,7 @@ export const analyzePattern = (
   const structSubstitution =
     struct === undefined || nominal === undefined
       ? new Map<string, SemanticType>()
-      : (Type.substitution(
+      : (TypeInference.substitution(
           struct.typeParameters.map((parameter) => parameter.type),
           nominal.arguments,
         ) ?? new Map())
@@ -1218,9 +1223,9 @@ export const analyzePattern = (
     const lookup =
       struct === undefined || name === undefined
         ? undefined
-        : DeclarationIndex.lookupField(struct.fields, name)
+        : DeclarationFacts.lookupField(struct.fields, name)
     let state: PatternFieldState = Object.freeze({ _tag: 'Unavailable' })
-    let resolvedField: DeclarationIndex.FieldFact | undefined
+    let resolvedField: DeclarationFacts.FieldFact | undefined
     if (lookup?._tag === 'Resolved') {
       const original = seen.get(name ?? '')
       if (original === undefined) {
@@ -1344,7 +1349,7 @@ export const analyzePattern = (
   })
 
   const rest = SyntaxTree.directNode(node, 'RestPattern') !== undefined
-  const omitted: Array<ReadonlyArray<DeclarationIndex.FieldId>> = fields.flatMap(
+  const omitted: Array<ReadonlyArray<DeclarationFacts.FieldId>> = fields.flatMap(
     (field) => field.nested?.omitted ?? [],
   )
   if (struct !== undefined && !rest) {
@@ -1966,7 +1971,7 @@ export const analyzeStructLiteral = (
       const fieldLookup =
         struct === undefined || name === undefined
           ? undefined
-          : DeclarationIndex.lookupField(struct.fields, name)
+          : DeclarationFacts.lookupField(struct.fields, name)
       const expected =
         fieldLookup?._tag === 'Resolved' && fieldLookup.field.declaredType._tag === 'Resolved'
           ? Type.substitute(fieldLookup.field.declaredType.type, structSubstitution)
@@ -2040,9 +2045,9 @@ export const analyzeStructLiteral = (
             for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
-            if (Type.infer(expectedType.contract, actualValue, candidateSubstitution)) {
+            if (TypeInference.infer(expectedType.contract, actualValue, candidateSubstitution)) {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
-              Type.infer(expectedType.contract, actualValue, siteSubstitution)
+              TypeInference.infer(expectedType.contract, actualValue, siteSubstitution)
               for (const parameter of struct.typeParameters) {
                 if (
                   parameter.type.kind === 'CallableRepresentation' ||
@@ -2167,9 +2172,9 @@ export const analyzeStructLiteral = (
             for (const [parameterKey, inferred] of inferredArguments)
               currentSubstitution.set(parameterKey, inferred.argument)
             const candidateSubstitution = new Map(currentSubstitution)
-            if (!Type.infer(expectedType, expression.type, candidateSubstitution)) {
+            if (!TypeInference.infer(expectedType, expression.type, candidateSubstitution)) {
               const impliedSubstitution = new Map<string, Type.GenericArgument>()
-              if (Type.infer(expectedType, expression.type, impliedSubstitution)) {
+              if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
                 for (const parameter of struct.typeParameters) {
                   if (parameter.type.kind !== 'Value') continue
                   const parameterKey = Type.key(parameter.type)
@@ -2220,7 +2225,7 @@ export const analyzeStructLiteral = (
               }
             } else {
               const siteSubstitution = new Map<string, Type.GenericArgument>()
-              Type.infer(expectedType, expression.type, siteSubstitution)
+              TypeInference.infer(expectedType, expression.type, siteSubstitution)
               for (const parameter of struct.typeParameters) {
                 const parameterKey = Type.key(parameter.type)
                 const inferred = siteSubstitution.get(parameterKey)
@@ -2319,7 +2324,7 @@ export const analyzeStructLiteral = (
     completedArguments === undefined ||
     unresolvedParameters.length > 0 ||
     (struct !== undefined &&
-      Type.substitution(
+      TypeInference.substitution(
         struct.typeParameters.map((parameter) => parameter.type),
         completedArguments,
       ) === undefined)
@@ -2673,14 +2678,14 @@ export const analyzeProjection = (
     diagnostics.push(diagnostic)
     state = Object.freeze({ _tag: 'Unavailable', cause: Diagnostic.identity(diagnostic) })
   } else if (nominal !== undefined && fieldName !== undefined && fieldToken !== undefined) {
-    const member = DeclarationIndex.byCanonical(resolution.index, {
+    const member = DeclarationFacts.byCanonical(resolution.index, {
       _tag: 'CanonicalDeclarationId',
       module: nominal.module,
       name: nominal.name,
     })
     const struct = member?._tag === 'StructDeclaration' ? member : undefined
     const lookup =
-      struct === undefined ? undefined : DeclarationIndex.lookupField(struct.fields, fieldName)
+      struct === undefined ? undefined : DeclarationFacts.lookupField(struct.fields, fieldName)
     if (lookup?._tag !== 'Resolved') {
       const diagnostic = Diagnostic.unknownProjectedField(
         Type.encode(nominal),
@@ -2702,7 +2707,7 @@ export const analyzeProjection = (
       const substitution =
         struct === undefined
           ? new Map<string, SemanticType>()
-          : (Type.substitution(
+          : (TypeInference.substitution(
               struct.typeParameters.map((parameter) => parameter.type),
               nominal.arguments,
             ) ?? new Map())
@@ -2944,7 +2949,7 @@ export const effectBindingProvider = (
   evidence: ReadonlyArray<Constraint.ConstraintEvidence>,
   provider: ExpressionFact,
   span: SourceSpan.SourceSpan,
-  index?: DeclarationIndex.Index,
+  index?: DeclarationFacts.Index,
 ): EffectRequirementBindingFact | undefined => {
   if (
     operation.rule._tag !== 'ContractRule' ||
@@ -3247,7 +3252,7 @@ export function analyzeBuiltinCall(
     for (const [ordinal, parameter] of signature.parameters.entries()) {
       const argument = argumentsResult.facts.at(ordinal)
       if (argument?.type._tag === 'Available')
-        Type.infer(parameter, argument.type.type, substitution)
+        TypeInference.infer(parameter, argument.type.type, substitution)
     }
   }
   const missingInference = declaredTypeParameters.find(
@@ -3484,7 +3489,7 @@ export const analyzeShortCircuitExpression = (
 }
 
 export interface OperatorContractSelection extends InterfaceOperationFact {
-  readonly declaration: DeclarationIndex.ServiceOperationFact
+  readonly declaration: DeclarationFacts.ServiceOperationFact
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
   readonly label: string
@@ -3493,7 +3498,7 @@ export interface OperatorContractSelection extends InterfaceOperationFact {
 export const operatorContractSelection = (
   capability: Type.Nominal,
   provider: Type.Type,
-  operation: DeclarationIndex.InterfaceOperationApplicationFact,
+  operation: DeclarationFacts.InterfaceOperationApplicationFact,
 ): OperatorContractSelection | undefined => {
   const contract = interfaceOperationContract(operation)
   const name = operation.declaration.name
@@ -3533,7 +3538,7 @@ export const boundOperatorSelections = (
   )
 
 export const concreteOperatorSelections = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   module: string,
   operator: Operator.Eligible,
 ): ReadonlyArray<OperatorContractSelection> => {
@@ -3559,7 +3564,7 @@ export const concreteOperatorSelections = (
           (candidate.visibility === 'Public' || candidate.canonical.id.module === module),
       )
       if (interface_ === undefined) return []
-      const proof = DeclarationIndex.prove(index, provider, capability)
+      const proof = ConformanceProof.prove(index, provider, capability)
       if (
         proof._tag !== 'Proved' ||
         proof.selection._tag !== 'SourceSelection' ||
@@ -3567,7 +3572,7 @@ export const concreteOperatorSelections = (
         proof.selection.ordinal !== conformance.ordinal
       )
         return []
-      const application = DeclarationIndex.interfaceApplication(interface_, capability, provider)
+      const application = DeclarationFacts.interfaceApplication(interface_, capability, provider)
       if (application?.available !== true) return []
       return application.operations.flatMap((operation) => {
         if (operation.declaration.operator?.operator !== operator) return []
@@ -3951,7 +3956,7 @@ export const analyzePipelineExpression = (
 
 export const effectExpressionAccess = (
   expression: ExpressionFact,
-  index: DeclarationIndex.Index | undefined,
+  index: DeclarationFacts.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   if (expression._tag === 'Move') {
@@ -3984,7 +3989,7 @@ export const effectExpressionAccess = (
 
 export const effectCaptureAccess = (
   arguments_: ReadonlyArray<ArgumentFact>,
-  index: DeclarationIndex.Index | undefined,
+  index: DeclarationFacts.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   const accesses = arguments_.map((argument) =>
@@ -3996,7 +4001,7 @@ export const effectCaptureAccess = (
 export const intrinsicEffectCaptureAccess = (
   operation: Intrinsic.Operation,
   arguments_: ReadonlyArray<ArgumentFact>,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): Type.Effect['access'] => {
   if (
@@ -4130,7 +4135,7 @@ export const analyzeEffectResult = (
 export const effectCaptureFacts = (
   statements: ReadonlyArray<StatementFact>,
   firstLocalBinding: number,
-  index?: DeclarationIndex.Index,
+  index?: DeclarationFacts.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
@@ -4947,7 +4952,7 @@ export function analyzeExpression(
       qualifierLookup.declaration.canonical._tag === 'Canonical'
     ) {
       const actorModule = qualifierLookup.declaration.canonical.id.module
-      const memberLookup = DeclarationIndex.lookup(resolution.index, actorModule, member)
+      const memberLookup = DeclarationFacts.lookup(resolution.index, actorModule, member)
       const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
       const diagnostic =
         candidate === undefined
@@ -4980,7 +4985,7 @@ export function analyzeExpression(
       )
     }
     if (qualifierLookup._tag === 'Namespace') {
-      const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
+      const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
       const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
       const diagnostic =
         candidate === undefined
@@ -5078,7 +5083,7 @@ export function analyzeExpression(
   const tokenSpelling = spelling(source, token)
   const resolvedLookup = NameResolution.lookup(resolution.scope, resolution.index, tokenSpelling)
   const localLookup = lookupDeclaration(declarations, tokenSpelling)
-  const lookup: DeclarationIndex.DeclarationLookup =
+  const lookup: DeclarationFacts.DeclarationLookup =
     resolvedLookup._tag === 'Conflict'
       ? Object.freeze({
           _tag: 'Ambiguous',
@@ -5087,7 +5092,7 @@ export function analyzeExpression(
             resolvedLookup.conflict.bindings.flatMap((binding) => {
               if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
                 return []
-              const declaration = DeclarationIndex.byCanonical(
+              const declaration = DeclarationFacts.byCanonical(
                 resolution.index,
                 binding.declaration,
               )
@@ -5445,7 +5450,7 @@ export interface FunctionAnalysis {
 export const bindingName = (
   source: SourceFile.SourceFile,
   statement: SyntaxTree.Node,
-): DeclarationIndex.DeclaredName => {
+): DeclarationFacts.DeclaredName => {
   const token = directToken(statement, 'Identifier')
   return token === undefined
     ? Object.freeze({
@@ -5489,13 +5494,13 @@ export interface BodyContext {
 
 export interface ResolutionContext {
   readonly scope: NameResolution.ModuleScope
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly unsafeSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   /** Exact direct-call spans acknowledged by the expression form `unsafe call(...)`. */
   readonly unsafeCallSpans?: ReadonlyArray<SourceSpan.SourceSpan>
   readonly nextBindingOrdinal?: { value: number }
   readonly executableFunction?: DeclarationId
-  readonly executableOwner?: DeclarationIndex.CanonicalId
+  readonly executableOwner?: DeclarationFacts.CanonicalId
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
 }
 

@@ -2765,15 +2765,3 @@ export const specializeExecutableOwner = (
   }
   return specializeType(self)
 }
-
-export type {
-  GenericArgumentConflict,
-  OpenGenericInference,
-} from './internal/TypeInference.js'
-export {
-  infer,
-  inferOpenGenericArguments,
-  prefixSubstitution,
-  rowInferenceFailure,
-  substitution,
-} from './internal/TypeInference.js'

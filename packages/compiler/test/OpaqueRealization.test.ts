@@ -1,7 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -280,7 +281,7 @@ pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
     )
     assert.strictEqual(realized.mir._tag, 'Available')
     if (realized.mir._tag === 'Available')
-      assert.notInclude(Mir.encode(realized.mir.value), 'unavailable contract type')
+      assert.notInclude(MirEncoding.encode(realized.mir.value), 'unavailable contract type')
   }),
 )
 
@@ -445,21 +446,21 @@ pub fn main() -> i32 { let parser = make(40) return parser(2) }`
     )
     assert.strictEqual(self.mir._tag, 'Available')
     if (self.mir._tag !== 'Available') return
-    const encoded = Mir.encode(self.mir.value)
+    const encoded = MirEncoding.encode(self.mir.value)
     assert.notInclude(encoded, 'OpaqueFamilyKey')
     assert.notInclude(encoded, 'OpaqueRepresentationArgument')
     assert.notInclude(encoded, 'Existential')
     assert.notInclude(encoded, 'CallIndirect')
     assert.notInclude(encoded, 'unavailable body')
     assert.notInclude(encoded, 'unavailable contract type')
-    const operations = self.mir.value.functions.flatMap(Mir.operations)
+    const operations = self.mir.value.functions.flatMap(MirVerification.operations)
     assert.strictEqual(
       operations.some((operation) => operation._tag === 'Allocate'),
       false,
     )
     assert.strictEqual(
       self.mir.value.functions.every((fn) =>
-        Mir.operations(fn).every((operation) => {
+        MirVerification.operations(fn).every((operation) => {
           if (operation._tag !== 'ApplyCallable') return true
           if (operation.target !== undefined) return true
           if (operation.callable === undefined) return false
@@ -487,13 +488,13 @@ pub fn main() -> i32 { return run make(42) }`),
     )
     assert.strictEqual(self.mir._tag, 'Available')
     if (self.mir._tag !== 'Available') return
-    const encoded = Mir.encode(self.mir.value)
+    const encoded = MirEncoding.encode(self.mir.value)
     assert.notInclude(encoded, 'unavailable body')
     assert.notInclude(encoded, 'unavailable contract type')
     assert.notInclude(encoded, 'OpaqueRepresentationArgument')
     assert.strictEqual(
       self.mir.value.functions
-        .flatMap(Mir.operations)
+        .flatMap(MirVerification.operations)
         .some((operation) => operation._tag === 'Allocate'),
       false,
     )

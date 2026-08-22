@@ -1,3 +1,4 @@
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
@@ -230,7 +231,7 @@ const loansOf = (captures: ReadonlyArray<CaptureSlot>): ReadonlyArray<LoanDepend
   )
 
 const livenessOf = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   captures: ReadonlyArray<CaptureSlot>,
 ): Liveness => {
   const ownedLanes = captures.filter((capture) => capture.owned).length
@@ -248,7 +249,7 @@ const livenessOf = (
 }
 
 const cleanupOf = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   captures: ReadonlyArray<CaptureSlot>,
   invocation: ReceiverAccess,
 ): Cleanup =>
@@ -424,7 +425,7 @@ type ResolvedField = Extract<
 >
 
 const realizeCallableField = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   resolution: ResolvedField,
   identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
@@ -585,7 +586,7 @@ const realizeEffectField = (
  * This function never inspects initializer syntax and never invents a second field identity.
  */
 export const realizeField = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   resolution: RepresentationField.Resolution,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,
@@ -604,7 +605,7 @@ export const realizeField = (
 
 /** Realizes every executable field of one resolved field index in deterministic key order. */
 export const realize = (
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   fields: RepresentationField.Index,
   callables: ReadonlyArray<Instances.CallableInstance>,
   effects: ReadonlyArray<Instances.EffectInstance>,

@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Type from '../src/Type.js'
 
 const owner = Object.freeze({ module: 'representation/type', name: 'Pair' })
@@ -105,7 +106,7 @@ it('keeps one ordered kinded argument vector on nominal applications', () => {
   const parameters = [value, failure, requirements, representation]
   const applied = Type.nominal('representation/type', 'Container', arguments_)
 
-  assert.notStrictEqual(Type.substitution(parameters, arguments_), undefined)
+  assert.notStrictEqual(TypeInference.substitution(parameters, arguments_), undefined)
   assert.strictEqual(applied.arguments.length, 4)
   assert.strictEqual(Type.isTypeArgument(applied.arguments.at(0) ?? exact), true)
   assert.strictEqual(Type.isTypeArgument(applied.arguments.at(1) ?? exact), true)
@@ -144,7 +145,7 @@ it('implements deterministic equality, ordering, hashing, encoding, and unavaila
     '<unavailable CallableRepresentation: damaged bound>',
   )
   assert.strictEqual(Type.isRuntimeConcreteGenericArgument(unavailable), false)
-  assert.strictEqual(Type.prefixSubstitution([representation], [unavailable]), undefined)
+  assert.strictEqual(TypeInference.prefixSubstitution([representation], [unavailable]), undefined)
 })
 
 it('keys exact generic callable specializations by their complete normalized instance', () => {
@@ -266,12 +267,12 @@ it('unifies repeated open representation references and rejects the first mismat
   const accepted = new Map<string, Type.GenericArgument>()
   const rejected = new Map<string, Type.GenericArgument>()
 
-  assert.strictEqual(Type.infer(pattern, same, accepted), true)
+  assert.strictEqual(TypeInference.infer(pattern, same, accepted), true)
   assert.strictEqual(
     Type.equalsGenericArgument(accepted.get(Type.key(representation)) ?? open, first),
     true,
   )
-  assert.strictEqual(Type.infer(pattern, conflict, rejected), false)
+  assert.strictEqual(TypeInference.infer(pattern, conflict, rejected), false)
   assert.strictEqual(
     Type.equalsGenericArgument(rejected.get(Type.key(representation)) ?? open, first),
     true,

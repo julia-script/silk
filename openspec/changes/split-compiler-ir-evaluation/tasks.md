@@ -3,6 +3,7 @@
 - [x] 1.1 Extract Suspension.ts (suspension data types)
 - [x] 1.2 Extract MirVerification.ts (verify + validators)
 - [x] 1.3 Extract MirEncoding.ts and verify encoding goldens
+- [x] 1.4 Migrate verification/encoding callers to their owning actors and remove `Mir` forwarding exports
 
 ## 2. Unify suspension vocabulary
 

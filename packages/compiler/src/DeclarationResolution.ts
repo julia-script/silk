@@ -26,17 +26,14 @@ import type {
   TypePathFact,
   TypeResolution,
   TypeResolver,
-} from './DeclarationIndex.js'
-import {
-  copyApplication,
-  interfaceApplication,
-  lookupDeclaration,
-  requirementRoleIdentity,
-} from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
+import { copyApplication, interfaceApplication, lookupDeclaration } from './DeclarationFacts.js'
+import { requirementRoleIdentity } from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'
 import * as Graph from './internal/Graph.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -112,7 +109,7 @@ const resolveExactRepresentation = (
   const concreteCount = concrete.filter(Type.isRuntimeConcreteGenericArgument).length
   if (concreteCount !== concrete.length)
     return reject(open(declaration.typeParameters.length, concreteCount), declaration)
-  const substitution = Type.substitution(
+  const substitution = TypeInference.substitution(
     declaration.typeParameters.map((parameter) => parameter.type),
     concrete,
   )
@@ -475,7 +472,7 @@ export const resolveDeclaredType = (
             ? concrete.every(Type.isTypeArgument)
               ? new Map<string, Type.GenericArgument>()
               : undefined
-            : Type.substitution(declaredParameters, concrete)
+            : TypeInference.substitution(declaredParameters, concrete)
         if (substitution === undefined) {
           const incompatibleBound = concrete.findIndex((argument, ordinal) => {
             const parameter = declaredParameters?.at(ordinal)
@@ -488,7 +485,7 @@ export const resolveDeclaredType = (
               parameter.representationBound === undefined
             )
               return false
-            const prior = Type.prefixSubstitution(
+            const prior = TypeInference.prefixSubstitution(
               declaredParameters?.slice(0, ordinal) ?? [],
               concrete.slice(0, ordinal),
             )
@@ -517,7 +514,7 @@ export const resolveDeclaredType = (
             Type.isRepresentationArgument(incompatibleArgument) &&
             incompatibleSupplied !== undefined
           ) {
-            const prior = Type.prefixSubstitution(
+            const prior = TypeInference.prefixSubstitution(
               declaredParameters?.slice(0, incompatibleBound) ?? [],
               concrete.slice(0, incompatibleBound),
             )
@@ -1082,7 +1079,7 @@ export const witnessBinding = (
     substitution:
       parameters.length === 0
         ? new Map<string, Type.GenericArgument>()
-        : Type.substitution(parameters, declaredParameters.map(Type.parameterArgument)),
+        : TypeInference.substitution(parameters, declaredParameters.map(Type.parameterArgument)),
   })
 }
 
@@ -1783,7 +1780,7 @@ export const inlineParametersOf = (structs: ReadonlyArray<StructFact>): InlinePa
     for (const [key, struct] of declarations) {
       const reached = inline.get(key)
       if (reached === undefined || struct.typeParameters.length === 0) continue
-      // Keyed by position, matching how `Type.substitution` binds arguments to parameters.
+      // Keyed by position, matching how `TypeInference.substitution` binds arguments to parameters.
       const own = new Map(
         struct.typeParameters.map(
           (parameter, position) => [Type.key(parameter.type), position] as const,

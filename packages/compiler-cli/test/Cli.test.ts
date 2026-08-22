@@ -1,10 +1,10 @@
-import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Result from 'effect/Result'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from '../src/Cli.js'
+import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
 it('exposes the project-first command surface without a compile alias', () => {
@@ -65,7 +65,7 @@ it.effect(
       )
       const ran = yield* execute(['run', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(ran), true)
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -97,7 +97,7 @@ it.effect(
         assert.strictEqual(executed.failure._tag, 'CommandExit')
         if (executed.failure._tag === 'CommandExit') assert.strictEqual(executed.failure.status, 42)
       }
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
 
@@ -117,5 +117,5 @@ it.effect('rejects the removed compile subcommand', () =>
     )
     assert.strictEqual(Result.isFailure(executed), true)
     if (Result.isFailure(executed)) assert.notStrictEqual(executed.failure._tag, 'CommandExit')
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(CompilerHost.layer)),
 )

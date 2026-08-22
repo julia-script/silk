@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
@@ -12,7 +12,7 @@ export interface Capture {
   readonly source: 'Binding' | 'Parameter'
   readonly sourceOrdinal: number
   readonly access: Type.CaptureAccess
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
 }
 
 export interface Provider {
@@ -21,7 +21,7 @@ export interface Provider {
   readonly role: string
   readonly requirementAccess: Type.Requirement['access']
   readonly access: Type.CallableMode
-  readonly witness?: DeclarationIndex.ConformanceWitness
+  readonly witness?: DeclarationFacts.ConformanceWitness
 }
 
 export interface RunnerBase<
@@ -29,7 +29,7 @@ export interface RunnerBase<
   Provider_ extends Provider = Provider,
 > {
   readonly classification: SuspensionClassification
-  readonly declaration?: DeclarationIndex.CanonicalId
+  readonly declaration?: DeclarationFacts.CanonicalId
   readonly instance?: Instances.InstanceKey
   readonly effectIdentity?: string
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
@@ -55,7 +55,7 @@ export type SuspensionBorrowIdentity =
 export interface SuspensionProviderArgument extends Provider {
   readonly argument?: Mir.LocalId
   readonly argumentLane?: number
-  readonly witness?: DeclarationIndex.ConformanceWitness
+  readonly witness?: DeclarationFacts.ConformanceWitness
   readonly purposes: readonly ['ChildRequirement']
 }
 
@@ -71,13 +71,13 @@ export type SuspensionCompletion =
       readonly _tag: 'Reify'
       readonly outcome: Type.Effect
       readonly resultType: Type.Nominal
-      readonly resultField: DeclarationIndex.FieldId
+      readonly resultField: DeclarationFacts.FieldId
       readonly resultUnion: Type.StructuralUnion
       readonly successType: Type.Nominal
-      readonly successField: DeclarationIndex.FieldId
+      readonly successField: DeclarationFacts.FieldId
       readonly successTag: number
       readonly failureType: Type.Nominal
-      readonly failureField: DeclarationIndex.FieldId
+      readonly failureField: DeclarationFacts.FieldId
       readonly failureTag: number
       readonly failureValueType: Type.Type
       readonly resultShape: Layout.CallingShape

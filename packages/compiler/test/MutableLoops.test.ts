@@ -1,7 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -29,7 +30,7 @@ it.effect('mutates a scalar through a structured loop DAG', () =>
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const mir = Analysis.loweredMir(self)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     assert.strictEqual(
       mir.functions.at(0)?.regions.some((region) => region._tag === 'LoopRegion'),
       true,
@@ -326,8 +327,8 @@ it.effect('repeats loop DAG encodings, facade facts, traces, and wasm bytes exac
     const first = yield* snapshot(source)
     const second = yield* snapshot(source)
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(first)),
-      Mir.encode(Analysis.loweredMir(second)),
+      MirEncoding.encode(Analysis.loweredMir(first)),
+      MirEncoding.encode(Analysis.loweredMir(second)),
     )
     assert.deepEqual(Projections.controlEdgesOf(first), Projections.controlEdgesOf(second))
     assert.deepEqual(

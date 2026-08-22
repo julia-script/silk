@@ -1,4 +1,4 @@
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import type {} from './EntryAssembly.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
@@ -484,7 +484,7 @@ export const inlineForwardedRequirement = (
     !Type.isEffect(type)
   )
     return undefined
-  const witness = DeclarationIndex.witness(fn.index, providerType, capability)
+  const witness = ConformanceProof.witness(fn.index, providerType, capability)
   if (witness === undefined) return undefined
   return Object.freeze({
     binding: Object.freeze({

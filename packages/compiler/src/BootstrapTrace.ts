@@ -1,5 +1,5 @@
 import type { IntegerValue, StringStorage, Value } from './BootstrapValue.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
@@ -14,7 +14,7 @@ import type * as Type from './Type.js'
 export interface ActiveFrame {
   readonly frame: number
   readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly instance: Instances.InstanceKey
 }
 
@@ -22,7 +22,7 @@ export interface EntryTraceEvent {
   readonly _tag: 'Entry'
   readonly frame: number
   readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly instance: Instances.InstanceKey
   readonly span: SourceSpan.SourceSpan
 }
@@ -32,8 +32,8 @@ export interface CallTraceEvent {
   readonly _tag: 'Call'
   readonly frame: number
   readonly depth: number
-  readonly caller: DeclarationIndex.CanonicalId
-  readonly target: DeclarationIndex.CanonicalId
+  readonly caller: DeclarationFacts.CanonicalId
+  readonly target: DeclarationFacts.CanonicalId
   readonly callerInstance: Instances.InstanceKey
   readonly targetInstance: Instances.InstanceKey
   readonly span: SourceSpan.SourceSpan
@@ -44,7 +44,7 @@ export interface BindingTraceEvent {
   readonly _tag: 'Binding'
   readonly frame: number
   readonly depth: number
-  readonly target: DeclarationIndex.CanonicalId
+  readonly target: DeclarationFacts.CanonicalId
   readonly targetInstance: Instances.InstanceKey
   readonly callSpan: SourceSpan.SourceSpan
   readonly argumentOrdinal: number
@@ -59,7 +59,7 @@ export interface ReturnTraceEvent {
   readonly _tag: 'Return'
   readonly frame: number
   readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly instance: Instances.InstanceKey
   readonly value: Value
   readonly span: SourceSpan.SourceSpan
@@ -68,7 +68,7 @@ export interface ReturnTraceEvent {
 /** One deterministic event emitted while replaying lowered operations. */
 export interface ConstructTraceEvent {
   readonly _tag: 'Construct'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly type: Type.Nominal
   readonly fieldCount: number
   readonly span: SourceSpan.SourceSpan
@@ -76,15 +76,15 @@ export interface ConstructTraceEvent {
 
 export interface ProjectTraceEvent {
   readonly _tag: 'Project'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly type: Type.Nominal
-  readonly field: DeclarationIndex.FieldId
+  readonly field: DeclarationFacts.FieldId
   readonly span: SourceSpan.SourceSpan
 }
 
 export interface ArrayConstructTraceEvent {
   readonly _tag: 'ArrayConstruct'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly type: Type.FixedArray
   readonly elementCount: number
   readonly span: SourceSpan.SourceSpan
@@ -92,7 +92,7 @@ export interface ArrayConstructTraceEvent {
 
 export interface UnionConversionTraceEvent {
   readonly _tag: 'UnionConversion'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly conversion: 'Inject' | 'Widen'
   readonly source: Type.Type
   readonly target: Type.StructuralUnion
@@ -102,9 +102,9 @@ export interface UnionConversionTraceEvent {
 
 export interface PlaceReadTraceEvent {
   readonly _tag: 'PlaceRead'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly selectors: ReadonlyArray<
-    | { readonly _tag: 'Field'; readonly field: DeclarationIndex.FieldId }
+    | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
     | {
         readonly _tag: 'Element'
         readonly array: Type.FixedArray
@@ -135,7 +135,7 @@ export interface CleanupTraceEvent {
   readonly _tag: 'Cleanup'
   readonly frame: number
   readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly local: number
   readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
@@ -148,13 +148,13 @@ export interface MatchTraceEvent {
     | 'MatchSelected'
     | 'MatchCleanup'
     | 'MatchBorrowEnd'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly match: number
   readonly arm?: number
   readonly member: Type.Type
   readonly access: Match.Access
   readonly binding?: number
-  readonly path?: ReadonlyArray<DeclarationIndex.FieldId>
+  readonly path?: ReadonlyArray<DeclarationFacts.FieldId>
   readonly value?: Value
   readonly members?: ReadonlyArray<Type.Type>
   readonly span: SourceSpan.SourceSpan
@@ -171,7 +171,7 @@ export interface ControlTraceEvent {
     | 'Repeat'
     | 'Exit'
     | 'Transfer'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly region: number
   readonly loop?: number
   readonly members?: ReadonlyArray<Type.Type>
@@ -184,14 +184,14 @@ export interface EffectTraceEvent {
   readonly identity?: string
   readonly frame: number
   readonly depth: number
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly tag: number
   readonly span: SourceSpan.SourceSpan
 }
 
 export interface CallableTraceEvent {
   readonly _tag: 'CallableConstruct' | 'CallableApply' | 'CallableCleanup' | 'CallableRejected'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly ticket: number
   readonly mode: Type.CallableMode
   readonly span: SourceSpan.SourceSpan
@@ -210,7 +210,7 @@ export interface AllocationTraceEvent {
     | 'RawBufferFill'
     | 'SlotDrop'
     | 'AllocationRelease'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly ticket: number
   readonly index?: bigint
   readonly count?: bigint
@@ -227,7 +227,7 @@ export interface CoroutineFrameTraceEvent {
     | 'CoroutineFrameComplete'
     | 'SuspensionChildStart'
     | 'SuspensionChildComplete'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly point: Mir.SuspensionPointId
   readonly ordinal?: number
   readonly ticket?: number
@@ -240,7 +240,7 @@ export interface CoroutineFrameTraceEvent {
 /** One complete attempted host write, including its deterministic typed outcome. */
 export interface StandardStreamTraceEvent {
   readonly _tag: 'HostWrite'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly destination: StandardStreams.Destination
   readonly bytes: ReadonlyArray<number>
   readonly outcome: 'Written' | 'WriteFailure'
@@ -251,7 +251,7 @@ export interface StandardStreamTraceEvent {
 /** One observable native OS boundary result, including an arbitrary thrown provider cause. */
 export interface OsCallTraceEvent {
   readonly _tag: 'OsCall'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly operation: Intrinsic.OperationId
   readonly outcome: 'Completed' | 'Failure'
   readonly reason?: OsFileSystemHost.Reason
@@ -268,7 +268,7 @@ export interface StringTraceEvent {
     | 'StringByteLength'
     | 'StringEqualsExact'
     | 'StringLoanEnd'
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly storage?: StringStorage['_tag']
   readonly byteLength?: number
   readonly result?: boolean
@@ -309,13 +309,13 @@ export type BlockedReason =
     }
   | {
       readonly _tag: 'Trap'
-      readonly function: DeclarationIndex.CanonicalId
+      readonly function: DeclarationFacts.CanonicalId
       readonly reason: string
       readonly span: SourceSpan.SourceSpan
     }
   | {
       readonly _tag: 'MissingFunction'
-      readonly target: DeclarationIndex.CanonicalId
+      readonly target: DeclarationFacts.CanonicalId
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -323,13 +323,13 @@ export type BlockedReason =
       readonly kind: 'Steps' | 'CallDepth'
       readonly limit: number
       readonly count: number
-      readonly function: DeclarationIndex.CanonicalId
+      readonly function: DeclarationFacts.CanonicalId
       readonly span: SourceSpan.SourceSpan
       readonly activeFrames: ReadonlyArray<ActiveFrame>
     }
   | {
       readonly _tag: 'InvalidCallableReuse'
-      readonly function: DeclarationIndex.CanonicalId
+      readonly function: DeclarationFacts.CanonicalId
       readonly ticket: number
       readonly state: 'Running' | 'Consumed' | 'Released'
       readonly span: SourceSpan.SourceSpan
@@ -356,7 +356,7 @@ export type Trap = Termination.Trap<TraceEvent>
 /** A normal, inspectable reason bootstrap evaluation could not complete. */
 export interface Blocked {
   readonly _tag: 'Blocked'
-  readonly entry: DeclarationIndex.CanonicalId | undefined
+  readonly entry: DeclarationFacts.CanonicalId | undefined
   readonly reason: BlockedReason
   readonly trace: ReadonlyArray<TraceEvent>
 }

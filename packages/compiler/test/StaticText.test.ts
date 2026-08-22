@@ -3,7 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
 import * as LiteralForm from '../src/LiteralForm.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as StaticText from '../src/StaticText.js'
@@ -189,7 +189,7 @@ it.effect('keeps static bytes, reuse, lengths, and backend placement in parity',
     )
     assert.isFalse(
       mir.functions.some((fn) =>
-        Mir.operations(fn).some((operation) => operation._tag === 'Allocate'),
+        MirVerification.operations(fn).some((operation) => operation._tag === 'Allocate'),
       ),
     )
     assert.strictEqual(native.layout._tag, 'Available')

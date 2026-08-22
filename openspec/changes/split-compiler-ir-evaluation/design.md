@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md. Mir.verify/Mir.encode and the evaluator Outcome union are the stable surface. The ProvisionalMir -> Mir staging is deliberate (per-monomorphic control that backends must never consume); only its shared vocabulary needs a single owner.
+See proposal.md. `MirVerification.verify` and `MirEncoding.encode` are the final actor surfaces; `Mir` retains the IR vocabulary without forwarding those operations. The ProvisionalMir -> Mir staging is deliberate (per-monomorphic control that backends must never consume); only its shared vocabulary needs a single owner.
 
 ## Decisions
 

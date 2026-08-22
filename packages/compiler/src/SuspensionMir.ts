@@ -1,4 +1,5 @@
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
@@ -36,7 +37,7 @@ const resumeOf = (
 
 const runnerOf = (
   runner: ProvisionalMir.Runner,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   operation?: Extract<
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
@@ -88,7 +89,7 @@ const runnerOf = (
       if (hasRuntimeArgument) runtimeOrdinal += 1
       const witness =
         provider.witness ??
-        DeclarationIndex.witness(index, provider.providerType, provider.capability)
+        ConformanceProof.witness(index, provider.providerType, provider.capability)
       return Object.freeze({
         ...provider,
         ...(witness === undefined ? {} : { witness }),
@@ -202,7 +203,7 @@ const regionsOf = (
   fn: Mir.MirFunction,
   execution: ProvisionalMir.Execution | undefined,
   ownership: SuspensionOwnership.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): ReadonlyArray<Mir.SuspensionRegion> => {
   if (execution === undefined) return Object.freeze([])
   const located = operationsOf(fn)
@@ -277,7 +278,7 @@ export const finalize = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   ownership: SuspensionOwnership.Module,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): Mir.Module => {
   const functions = Object.freeze(
     program.functions.map((fn) =>

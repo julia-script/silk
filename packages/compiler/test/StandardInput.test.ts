@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as IntrinsicAvailability from '../src/IntrinsicAvailability.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as StandardInput from '../src/StandardInput.js'
 
 const encoder = new TextEncoder()
@@ -252,7 +252,7 @@ it.effect('lowers the native read to one reachable native-only runtime symbol', 
   Effect.gen(function* () {
     const self = yield* snapshot(nativeSource)
     const operations = Analysis.loweredMir(self)
-      .functions.flatMap(Mir.operations)
+      .functions.flatMap(MirVerification.operations)
       .filter((operation) => operation._tag === 'OsCall')
     assert.deepEqual(
       operations.map((operation) => operation.operation.name),

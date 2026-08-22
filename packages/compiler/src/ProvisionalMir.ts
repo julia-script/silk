@@ -1,4 +1,5 @@
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -26,7 +27,7 @@ export type ExecutionKey =
       readonly owner: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly identity: string
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
     }
   | {
       readonly _tag: 'ProvidedEffectRunnerExecution'
@@ -34,7 +35,7 @@ export type ExecutionKey =
       readonly site: Hir.EffectSiteId
       readonly identity: string
       readonly effectIdentity: string
-      readonly runner: DeclarationIndex.CanonicalId
+      readonly runner: DeclarationFacts.CanonicalId
       readonly providers: ReadonlyArray<Provider>
     }
 
@@ -277,8 +278,8 @@ const classificationOfEffect = (
       : 'Synchronous'
 
 const sameDeclaration = (
-  left: DeclarationIndex.CanonicalId,
-  right: DeclarationIndex.CanonicalId,
+  left: DeclarationFacts.CanonicalId,
+  right: DeclarationFacts.CanonicalId,
 ): boolean => left.module === right.module && left.name === right.name
 
 const providerKey = (provider: Provider): string =>
@@ -309,7 +310,7 @@ const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> =>
 interface BuildContext {
   readonly discovery: Instances.Discovery
   readonly layout: Layout.Plan
-  readonly index: DeclarationIndex.Index
+  readonly index: DeclarationFacts.Index
   readonly instance: Instances.Instance
   readonly bindings: ReadonlyMap<number, Hir.Expression>
   readonly effectClassifications: ReadonlyMap<string, Classification>
@@ -354,7 +355,7 @@ const serviceResultEffectOf = (
   )
   const implementation =
     provider?.witness?._tag === 'SourceConformanceWitness'
-      ? DeclarationIndex.witnessOperation(provider.witness, expression.operation)
+      ? ConformanceProof.witnessOperation(provider.witness, expression.operation)
       : undefined
   if (implementation === undefined || provider?.witness?._tag !== 'SourceConformanceWitness')
     return undefined
@@ -447,7 +448,7 @@ const providersOf = (
   if (capability === undefined || !Type.isNominal(capability) || !Type.isNominal(providerType))
     return providersOf(expression.protected, context)
   const witness =
-    expression.provider.witness ?? DeclarationIndex.witness(context.index, providerType, capability)
+    expression.provider.witness ?? ConformanceProof.witness(context.index, providerType, capability)
   return Object.freeze([
     ...providersOf(expression.protected, context),
     Object.freeze({
@@ -609,7 +610,7 @@ const runnerOf = (
           Type.equals(provider.capability, capability) && provider.role === service.role,
       )
       if (selected?.witness?._tag !== 'SourceConformanceWitness') return 'Unknown'
-      const implementation = DeclarationIndex.witnessOperation(selected.witness, service.operation)
+      const implementation = ConformanceProof.witnessOperation(selected.witness, service.operation)
       if (implementation === undefined) return 'Unknown'
       const candidates = Instances.matchingSpecialization(context.discovery, {
         declaration: implementation,
@@ -764,7 +765,7 @@ const catchHandlerRunner = (
     !Type.isEffect(handlerType.result)
   )
     return undefined
-  const declaration: DeclarationIndex.CanonicalId = Object.freeze({
+  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: callableIdentity.target.module,
     name: callableIdentity.target.name,
@@ -1028,7 +1029,7 @@ const classificationWithRegions = (
 export const build = (
   discovery: Instances.Discovery,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
 ): Module => {
   const buildPass = (effectClassifications: ReadonlyMap<string, Classification>): Module => {
     const executions: Array<Execution> = []
@@ -1350,7 +1351,7 @@ export const controlOfRun = (
 /** Returns the classification of an exact generated runner identity, if provisional facts name it. */
 export const classificationOfRunner = (
   self: Module,
-  runner: DeclarationIndex.CanonicalId,
+  runner: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
 ): Classification => {
   const argumentKey = typeArguments.map(Type.genericArgumentKey).join('\u0000')

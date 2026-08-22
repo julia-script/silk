@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Hir from './Hir.js'
 import type * as Mir from './Mir.js'
 import type * as Scalar from './Scalar.js'
@@ -32,7 +32,7 @@ export interface AggregateValue {
   readonly _tag: 'AggregateValue'
   readonly type: Type.Nominal
   readonly fields: ReadonlyArray<{
-    readonly field: DeclarationIndex.FieldId
+    readonly field: DeclarationFacts.FieldId
     readonly value: Value
   }>
 }
@@ -117,7 +117,7 @@ export interface EffectOutcomeValue {
 
 export const repackFailurePayload = (
   payload: Value,
-  sourceType: DeclarationIndex.SemanticType,
+  sourceType: DeclarationFacts.SemanticType,
   sourceTag: number,
   targetType: Type.Effect,
   targetTag: number,
@@ -171,7 +171,7 @@ export interface EffectValue {
   readonly _tag: 'EffectValue'
   readonly type: Type.Effect
   readonly site: Hir.EffectSiteId
-  readonly runner: DeclarationIndex.CanonicalId
+  readonly runner: DeclarationFacts.CanonicalId
   readonly runnerTypeArguments: ReadonlyArray<Type.GenericArgument>
   readonly captures: ReadonlyArray<Value>
 }

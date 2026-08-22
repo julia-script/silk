@@ -15,13 +15,15 @@ import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
+import * as LayoutVerify from './LayoutVerify.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import * as Scalar from './Scalar.js'
 import * as StandardStreams from './StandardStreams.js'
 import * as Target from './Target.js'
@@ -922,12 +924,13 @@ const layoutOf = (
           typeof lane.type === 'string' &&
           Scalar.bits(Scalar.find(lane.type) ?? Scalar.defaultInteger, 32) === 64,
       ),
-    ) || Mir.operations(fn).some((operation) => operation._tag === 'FloatTranscendental')
+    ) ||
+    MirVerification.operations(fn).some((operation) => operation._tag === 'FloatTranscendental')
   let nextInternal = physical + 1
   const scratch64 = needsScratch64 ? nextInternal : scratch
   if (needsScratch64) declared.push(named(i64, 'scratch64'))
   if (needsScratch64) nextInternal += 1
-  const needsScratchF32 = Mir.operations(fn).some(
+  const needsScratchF32 = MirVerification.operations(fn).some(
     (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f32',
   )
   const scratchF32 = needsScratchF32 ? ([nextInternal, nextInternal + 1] as const) : undefined
@@ -935,7 +938,7 @@ const layoutOf = (
     declared.push(named(f32, 'scratch_f32_a'), named(f32, 'scratch_f32_b'))
     nextInternal += 2
   }
-  const needsScratchF64 = Mir.operations(fn).some(
+  const needsScratchF64 = MirVerification.operations(fn).some(
     (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f64',
   )
   const scratchF64 = needsScratchF64 ? ([nextInternal, nextInternal + 1] as const) : undefined
@@ -1080,7 +1083,7 @@ const makeOperationContext = (
   }
   const failurePayload = (
     source: ReadonlyArray<number>,
-    sourceType: DeclarationIndex.SemanticType,
+    sourceType: DeclarationFacts.SemanticType,
     sourceTag: number | undefined,
     targetType: SilkType.Effect,
     mappings: ReadonlyArray<{ readonly source: number; readonly target: number }>,
@@ -1139,7 +1142,7 @@ const makeOperationContext = (
   }
   const outcomePayload = (
     source: ReadonlyArray<number>,
-    sourceType: DeclarationIndex.SemanticType,
+    sourceType: DeclarationFacts.SemanticType,
     targetType: SilkType.Effect,
   ): ReadonlyArray<ReadonlyArray<Instr.Instr>> => {
     const sourceShape = LayoutPlan.callingShape(plan, sourceType)
@@ -1235,7 +1238,7 @@ const makeOperationContext = (
     const rootSlots = slots(root)
     const rootLanes = layout.lanes.at(root.ordinal) ?? []
     return rootLanes.flatMap((lane, ordinal) => {
-      const offset = LayoutPlan.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
+      const offset = LayoutVerify.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
       const source = rootSlots.at(ordinal)
       if (offset === undefined || source === undefined) {
         throw new RangeError(`Wasm frame lost lane ${ordinal} of %${root.ordinal}`)
@@ -1254,7 +1257,7 @@ const makeOperationContext = (
     const rootSlots = layout.slots.at(root) ?? []
     if (planned === undefined) return []
     return rootLanes.flatMap((lane, ordinal) => {
-      const offset = LayoutPlan.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
+      const offset = LayoutVerify.laneOffset(memory.plan, Mir.semanticType(planned.type), lane.path)
       const destination = rootSlots.at(ordinal)
       if (offset === undefined || destination === undefined) {
         throw new RangeError(`Wasm frame lost reload lane ${ordinal} of %${root}`)
@@ -1419,7 +1422,7 @@ const makeOperationContext = (
         const shape = LayoutPlan.callingShape(memory.plan, field.type)
         return (
           shape?.lanes.flatMap((lane) => {
-            const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+            const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
             return offset === undefined ? [] : [base + field.offset + offset]
           }) ?? []
         )
@@ -1843,7 +1846,7 @@ const makeOperationContext = (
     const rootLanes = layout.lanes.at(root.ordinal) ?? []
     const rootSlots = slots(root)
     return rootLanes.flatMap((lane, ordinal) => {
-      const offset = LayoutPlan.laneOffset(memory.plan, type.type, lane.path)
+      const offset = LayoutVerify.laneOffset(memory.plan, type.type, lane.path)
       const source = rootSlots.at(ordinal)
       if (offset === undefined || source === undefined)
         throw new RangeError(`Wasm Effect borrow lost lane ${ordinal}`)
@@ -2376,7 +2379,7 @@ const emitRawBufferReadOperation = (
     Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
     ...shape.lanes.flatMap((lane, ordinal) => {
       const destination = slots(operation.destination).at(ordinal)
-      const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+      const offset = LayoutVerify.laneOffset(plan, operation.element, lane.path)
       if (destination === undefined || offset === undefined) {
         throw new RangeError('Wasm RawBuffer.read lost an element lane')
       }
@@ -2529,7 +2532,7 @@ const emitSlotWriteOperation = (
   if (shape === undefined) throw new RangeError('Wasm Slot.write lost its element shape')
   return shape.lanes.flatMap((lane, ordinal) => {
     const value = slots(operation.value).at(ordinal)
-    const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+    const offset = LayoutVerify.laneOffset(plan, operation.element, lane.path)
     if (value === undefined || offset === undefined) {
       throw new RangeError('Wasm Slot.write lost an element lane')
     }
@@ -2548,7 +2551,7 @@ const emitSlotTakeOrSlotCopyOperation = (
   if (shape === undefined) throw new RangeError('Wasm Slot.take lost its element shape')
   return shape.lanes.flatMap((lane, ordinal) => {
     const destination = slots(operation.destination).at(ordinal)
-    const offset = LayoutPlan.laneOffset(plan, operation.element, lane.path)
+    const offset = LayoutVerify.laneOffset(plan, operation.element, lane.path)
     if (destination === undefined || offset === undefined) {
       throw new RangeError('Wasm Slot.take lost an element lane')
     }
@@ -2744,7 +2747,7 @@ const emitBeginLoanOperation = (
           throw new RangeError('Wasm nested runtime slice borrow is not canonical')
         }
       }
-      const staticOffset = LayoutPlan.laneOffset(plan, rootSemantic.element, staticSelectors)
+      const staticOffset = LayoutVerify.laneOffset(plan, rootSemantic.element, staticSelectors)
       if (staticOffset === undefined) {
         throw new RangeError('Wasm slice borrow lost its selected layout')
       }
@@ -2992,7 +2995,7 @@ const emitReadPlaceOperation = (
     const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
     return destinationLanes.flatMap((lane, ordinal) => {
       const destination = destinationSlots.at(ordinal)
-      const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      const offset = LayoutVerify.laneOffset(plan, target, [...staticSelectors, ...lane.path])
       if (destination === undefined || offset === undefined)
         throw new RangeError('Wasm reference read lost a lane offset')
       return [...loadAt(address, offset, lane), Instr.localSet(destination)]
@@ -3030,7 +3033,7 @@ const emitReadPlaceOperation = (
     const destinationLanes = layout.lanes.at(operation.destination.ordinal) ?? []
     const destinationSlots = slots(operation.destination)
     for (const [ordinal, lane] of destinationLanes.entries()) {
-      const staticOffset = LayoutPlan.laneOffset(
+      const staticOffset = LayoutVerify.laneOffset(
         memory.plan,
         rootSemantic.element,
         Object.freeze([...staticSelectors, ...lane.path]),
@@ -3097,7 +3100,7 @@ const emitReadPlaceOperation = (
       const suffix = sourceLane.path.slice(operation.selectors.length)
       const sameSuffix = suffix.every((physical, ordinal) => {
         const expected = destinationLane.path.at(ordinal)
-        return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
+        return expected !== undefined && LayoutVerify.selectorEquals(physical, expected)
       })
       const source = sourceSlots.at(sourceOrdinal)
       return sameSuffix && source !== undefined ? [Object.freeze({ source, conditions })] : []
@@ -3185,7 +3188,7 @@ const emitWritePlaceOperation = (
     const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
     return sourceLanes.flatMap((lane, ordinal) => {
       const value = sourceSlots.at(ordinal)
-      const offset = LayoutPlan.laneOffset(plan, target, [...staticSelectors, ...lane.path])
+      const offset = LayoutVerify.laneOffset(plan, target, [...staticSelectors, ...lane.path])
       if (value === undefined || offset === undefined)
         throw new RangeError('Wasm reference write lost a lane offset')
       return storeAt(address, value, offset, lane)
@@ -3219,7 +3222,7 @@ const emitWritePlaceOperation = (
     const sourceLanes = layout.lanes.at(operation.source.ordinal) ?? []
     const sourceSlots = slots(operation.source)
     return sourceLanes.flatMap((lane, ordinal) => {
-      const staticOffset = LayoutPlan.laneOffset(
+      const staticOffset = LayoutVerify.laneOffset(
         memory.plan,
         sliceType.element,
         Object.freeze([...staticSelectors, ...lane.path]),
@@ -3292,7 +3295,7 @@ const emitWritePlaceOperation = (
         lane.path.length === suffix.length &&
         lane.path.every((physical, ordinal) => {
           const expected = suffix.at(ordinal)
-          return expected !== undefined && LayoutPlan.selectorEquals(physical, expected)
+          return expected !== undefined && LayoutVerify.selectorEquals(physical, expected)
         }),
     )
     const source = sourceSlots.at(sourceOrdinal)
@@ -4049,7 +4052,7 @@ const emitApplyCallableOperation = (
       cursor += 1
       const operands: Array<Instr.Instr> = []
       for (const lane of shape.lanes) {
-        const offset = LayoutPlan.laneOffset(memory.plan, field.type, lane.path)
+        const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
         if (offset === undefined)
           throw new RangeError('Wasm borrowed callable capture lost its lane offset')
         operands.push(
@@ -5332,7 +5335,7 @@ const emitBody = (
       const lanes = layout.lanes.at(ordinal) ?? []
       const slots = layout.slots.at(ordinal) ?? []
       return lanes.flatMap((lane, laneOrdinal) => {
-        const offset = LayoutPlan.laneOffset(memory.plan, type.type, lane.path)
+        const offset = LayoutVerify.laneOffset(memory.plan, type.type, lane.path)
         const destination = slots.at(laneOrdinal)
         if (offset === undefined || destination === undefined)
           throw new RangeError(`Wasm Effect borrow %${ordinal} lost lane ${laneOrdinal}`)
@@ -5844,7 +5847,7 @@ const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenReques
         operation: 'Backend.emit',
         backend: 'WebAssembly',
         message: 'WebAssembly requires the planned i32 representation',
-        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+        reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
       })
     }
     // Boolean retains the canonical i32 lane; integer entries keep their logical width while
@@ -5858,7 +5861,7 @@ const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenReques
         operation: 'Backend.emit',
         backend: 'WebAssembly',
         message: 'WebAssembly requires the canonical 32-bit i32 representation',
-        reason: { _tag: 'InvalidMir', violations: Mir.verify(program) },
+        reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
       })
     }
     // WebAssembly's debug-information equivalent of the LLVM backend's native debug metadata is
@@ -5933,7 +5936,7 @@ const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenReques
     // dropped here — so the release helper is needed wherever a reclaim ticket is consumed too.
     const releasesBlocks = (plan: CleanupPlan.CleanupPlan): boolean => CleanupPlan.reclaims(plan)
     const needsHeap = program.functions.some((fn) =>
-      Mir.operations(fn).some(
+      MirVerification.operations(fn).some(
         (operation) =>
           operation._tag === 'Allocate' ||
           operation._tag === 'RawBufferFrom' ||
@@ -5957,7 +5960,7 @@ const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenReques
       ),
     )
     const needsHostWrite = program.functions.some((fn) =>
-      Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
+      MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
     )
     const needsMemory =
       staticOffsets.size > 0 ||
@@ -6215,7 +6218,7 @@ const emitProgramUnmapped = (program: Mir.Module, request: Backend.CodegenReques
           })
 
     const resolve = (
-      targetId: DeclarationIndex.CanonicalId,
+      targetId: DeclarationFacts.CanonicalId,
       typeArguments: ReadonlyArray<SilkType.GenericArgument>,
     ): FuncActor.Func => {
       const target = declared.find((candidate) =>
@@ -6762,7 +6765,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       bytes: output.bitcode,
       wat: output.ir,
       hostImports: program.functions.some((fn) =>
-        Mir.operations(fn).some((operation) => operation._tag === 'HostWrite'),
+        MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
       )
         ? Object.freeze([
             Object.freeze({

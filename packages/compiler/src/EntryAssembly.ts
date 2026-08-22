@@ -1,11 +1,12 @@
 import { generated, indexExits } from './CleanupEmission.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import { lowerEffectCatch, lowerRunEffectComposite, lowerRunEffectValue } from './EffectLowering.js'
 import type {} from './Forwarding.js'
 import { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as TypeInference from './internal/TypeInference.js'
 import type * as Layout from './Layout.js'
 import type { ExecutableEffectType } from './Lower.js'
 import { i32, local, mirType } from './Lower.js'
@@ -100,7 +101,7 @@ export const lowerInstance = (
   instance: Instances.Instance,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -248,7 +249,7 @@ export const lowerEffectRunner = (
   spec: GeneratedBlockEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -381,7 +382,7 @@ export const lowerCatchEffectRunner = (
   spec: GeneratedCatchEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -507,7 +508,7 @@ export const lowerWitnessEffectRunner = (
   spec: GeneratedWitnessEffectRunner,
   ownership: Ownership.ModuleOwnership | undefined,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   instances: ReadonlyArray<Instances.Instance>,
   calls: ReadonlyArray<Instances.CallInstance>,
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
@@ -570,7 +571,7 @@ export const lowerWitnessEffectRunner = (
     let success: LoweredExpression | undefined
     let reborrows: WitnessArguments['reborrows'] = Object.freeze([])
     if (spec.target !== undefined) {
-      const declaration = DeclarationIndex.byCanonical(index, spec.target.implementation)
+      const declaration = DeclarationFacts.byCanonical(index, spec.target.implementation)
       if (declaration?._tag !== 'FunctionDeclaration') return undefined
       const arguments_ = sourceWitnessArguments(
         lowering,
@@ -584,7 +585,7 @@ export const lowerWitnessEffectRunner = (
         const binders = declaration.typeParameters
           .filter((parameter) => parameter.duplicateOf === undefined)
           .map((parameter) => parameter.type)
-        const substitution = Type.substitution(binders, spec.target.typeArguments)
+        const substitution = TypeInference.substitution(binders, spec.target.typeArguments)
         const result =
           substitution === undefined || declaration.returnType._tag !== 'Resolved'
             ? undefined

@@ -1,18 +1,27 @@
 import * as BootstrapArithmetic from './BootstrapArithmetic.js'
 import * as BootstrapEffect from './BootstrapEffect.js'
+import type {
+  CallRequest,
+  LocalState,
+  MachineRequest,
+  OriginTransferRequest,
+  RelayTransferRequest,
+  Step,
+  TransferStep,
+} from './BootstrapMachine.js'
 import * as BootstrapOsIntrinsics from './BootstrapOsIntrinsics.js'
 import * as BootstrapPlace from './BootstrapPlace.js'
 import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Mir from './Mir.js'
-import * as OsFileSystemHost from './OsFileSystemHost.js'
+import * as MirVerification from './MirVerification.js'
+import type * as OsFileSystemHost from './OsFileSystemHost.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardInput from './StandardInput.js'
@@ -32,7 +41,6 @@ import type {
   AggregateValue,
   ArrayValue,
   CharacterValue,
-  EffectOutcomeValue,
   FloatValue,
   IntegerValue,
   SliceValue,
@@ -106,19 +114,6 @@ export type {
   UnhandledFailure,
   UnionConversionTraceEvent,
 } from './BootstrapTrace.js'
-
-import { repackFailurePayload } from './BootstrapValue.js'
-
-type Step =
-  | { readonly _tag: 'Value'; readonly value: Value }
-  | { readonly _tag: 'Blocked'; readonly reason: BlockedReason }
-  | TransferStep
-
-interface TransferStep {
-  readonly _tag: 'Transfer'
-  readonly origin: Mir.SuspendEffectRegion
-  readonly child: CallRequest
-}
 
 const integerValue = (type: Scalar.IntegerSpelling, input: bigint | number): IntegerValue =>
   Object.freeze({ _tag: 'IntegerValue', type, value: BigInt(input) })
@@ -211,18 +206,6 @@ const floatingBinary = (
 const blockedStep = (reason: BlockedReason): Step =>
   Object.freeze({ _tag: 'Blocked', reason: Object.freeze(reason) })
 
-const functionFor = (
-  program: Mir.Module,
-  id: DeclarationIndex.CanonicalId,
-  typeArguments: ReadonlyArray<Type.GenericArgument>,
-): Mir.MirFunction | undefined =>
-  program.functions.find((fn) => Mir.matchesInstance(fn, id, typeArguments))
-
-interface LocalState {
-  readonly value: Value
-  readonly fromCall: boolean
-}
-
 interface EvaluationState {
   nextFrame: number
   nextAllocation: number
@@ -248,25 +231,6 @@ interface EvaluationState {
   readonly osFileSystem?: OsFileSystemHost.Provider
 }
 
-interface CallRequest {
-  readonly _tag: 'CallRequest'
-  readonly target: Mir.MirFunction
-  readonly arguments: ReadonlyArray<Value>
-  readonly span: SourceSpan.SourceSpan
-}
-
-interface OriginTransferRequest {
-  readonly _tag: 'OriginTransferRequest'
-  readonly origin: Mir.SuspendEffectRegion
-  readonly child: CallRequest
-}
-
-interface RelayTransferRequest {
-  readonly _tag: 'RelayTransferRequest'
-  readonly transfer: TransferStep
-  readonly state?: Mir.CoroutineFrameState
-}
-
 interface TransferContext {
   readonly step: TransferStep
   readonly pending: Array<{
@@ -275,8 +239,6 @@ interface TransferContext {
   }>
   readonly parent?: TransferContext
 }
-
-type MachineRequest = CallRequest | OriginTransferRequest | RelayTransferRequest
 
 interface ActivationRecord extends ActiveFrame {
   readonly locals: Map<number, LocalState>
@@ -645,7 +607,7 @@ function* executeFunction(
         return yield* releaseThroughPlan(selected, owner.effect, provenance, localOrdinal)
       }
       case 'HookCleanup': {
-        const target = functionFor(program, cleanup.hook, cleanup.typeArguments)
+        const target = BootstrapEffect.functionFor(program, cleanup.hook, cleanup.typeArguments)
         if (target === undefined) {
           return blockedStep({
             _tag: 'MissingFunction',
@@ -747,7 +709,7 @@ function* executeFunction(
     span: SourceSpan.SourceSpan,
   ): FunctionExecution {
     if (target._tag === 'DeclarationCallableTarget') {
-      const callee = functionFor(program, target.declaration, typeArguments)
+      const callee = BootstrapEffect.functionFor(program, target.declaration, typeArguments)
       if (callee === undefined) {
         return blockedStep({ _tag: 'MissingFunction', target: target.declaration, span })
       }
@@ -1944,502 +1906,27 @@ function* executeFunction(
             )
             break
           }
-          case 'HostWrite': {
-            const stream = readInteger(operation.stream, 'i32')
-            const viewed = read(operation.bytes).value
-            const bytes = (() => {
-              if (viewed._tag === 'StaticViewValue') return viewed.bytes
-              if (viewed._tag !== 'SliceValue') return undefined
-              const root = cell(viewed).value
-              if (root._tag !== 'ArrayValue') return undefined
-              const selected = root.elements.slice(viewed.base, viewed.base + viewed.length)
-              if (
-                selected.some((element) => element._tag !== 'IntegerValue' || element.type !== 'u8')
-              )
-                return undefined
-              return Object.freeze(
-                selected.flatMap((element) =>
-                  element._tag === 'IntegerValue' ? [Number(element.value)] : [],
-                ),
-              )
-            })()
-            if (bytes === undefined) {
-              throw new RangeError('MIR verifier allowed a non-byte slice standard-stream write')
-            }
-            const destination: StandardStreams.Destination =
-              stream.value === 0n ? 'Stdout' : 'Stderr'
-            const result =
-              state.standardStreams === undefined
-                ? undefined
-                : BootstrapOsIntrinsics.writeAll(state.standardStreams, destination, bytes)
-            if (result === undefined) return blockedStep({ _tag: 'MissingStandardStreams' })
-            trace.push(
-              Object.freeze({
-                _tag: 'HostWrite',
-                function: fn.id,
-                destination,
-                bytes: Object.freeze(Array.from(bytes)),
-                outcome: result._tag,
-                ...(result._tag === 'WriteFailure' && result.cause !== undefined
-                  ? { cause: result.cause }
-                  : {}),
-                span: operation.provenance.span,
-              }),
-            )
-            if (result._tag === 'WriteFailure') {
-              return {
-                _tag: 'Value',
-                value: Object.freeze({
-                  _tag: 'EffectOutcomeValue',
-                  type: operation.propagationType.type,
-                  tag: operation.failureTag,
-                  payload: Object.freeze({
-                    _tag: 'AggregateValue',
-                    type: operation.failure,
-                    fields: Object.freeze([]),
-                  }),
-                }),
-              }
-            }
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'AggregateValue',
-                type: Type.unit,
-                fields: Object.freeze([]),
-              }),
-              fromCall: false,
-            })
-            break
-          }
+          case 'HostWrite':
           case 'OsCall': {
-            const arguments_ = operation.arguments
-            const reasonOutput = arguments_.at(-2)
-            const codeOutput = arguments_.at(-1)
-            if (reasonOutput === undefined || codeOutput === undefined)
-              throw new RangeError('OS intrinsic omitted status outputs')
-            const status = (failure?: OsFileSystemHost.Failure): void => {
-              replaceReferenced(
-                reasonOutput,
-                integerValue(
-                  'i32',
-                  failure === undefined ? 0 : OsFileSystemHost.reasonCode(failure.reason),
-                ),
-              )
-              replaceReferenced(codeOutput, integerValue('u32', BigInt(failure?.nativeCode ?? 0)))
-              trace.push(
-                Object.freeze({
-                  _tag: 'OsCall',
-                  function: fn.id,
-                  operation: operation.operation,
-                  outcome: failure === undefined ? 'Completed' : 'Failure',
-                  ...(failure === undefined ? {} : { reason: failure.reason }),
-                  ...(failure?.nativeCode === undefined ? {} : { nativeCode: failure.nativeCode }),
-                  ...(failure?.cause === undefined ? {} : { cause: failure.cause }),
-                  span: operation.provenance.span,
-                }),
-              )
-            }
-            const commit = (result: Value): void =>
-              write(operation.destination, { value: result, fromCall: false })
-            const name = operation.operation.name
-            if (name === 'osStandardInputRead') {
-              const input = state.standardInput
-              if (input === undefined) return blockedStep({ _tag: 'MissingStandardInput' })
-              const output = arguments_.at(0)
-              if (output === undefined) throw new RangeError('OS read omitted its output buffer')
-              const capacity = byteView(output).length
-              const result = input.read(capacity)
-              if (result._tag === 'ReadFailure') {
-                status({ _tag: 'Failure', reason: 'Other' })
-                commit(optionValue('usize'))
-                break
-              }
-              if (result.bytes.length > capacity)
-                throw new RangeError('standard-input provider overran the caller buffer')
-              writeByteView(output, result.bytes)
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-              break
-            }
-            if (name === 'osProcessExecute') {
-              const child = state.childProcess
-              if (child === undefined) return blockedStep({ _tag: 'MissingChildProcess' })
-              const program = arguments_.at(0)
-              const argumentBlock = arguments_.at(1)
-              const environmentBlock = arguments_.at(2)
-              const workingDirectory = arguments_.at(3)
-              const processStatus = arguments_.at(4)
-              const processCode = arguments_.at(5)
-              const outputLength = arguments_.at(6)
-              const errorLength = arguments_.at(7)
-              if (
-                program === undefined ||
-                argumentBlock === undefined ||
-                environmentBlock === undefined ||
-                workingDirectory === undefined ||
-                processStatus === undefined ||
-                processCode === undefined ||
-                outputLength === undefined ||
-                errorLength === undefined
-              )
-                throw new RangeError('OS execute omitted arguments')
-              const directory = byteView(workingDirectory)
-              const entries = (
-                block: ReadonlyArray<number>,
-              ): ReadonlyArray<ReadonlyArray<number>> | null => {
-                if (block.length === 0) return Object.freeze([])
-                if (block.at(-1) !== 0) return null
-                const collected: Array<ReadonlyArray<number>> = []
-                let start = 0
-                for (const [index, byte] of block.entries()) {
-                  if (byte !== 0) continue
-                  collected.push(Object.freeze(block.slice(start, index)))
-                  start = index + 1
-                }
-                return Object.freeze(collected)
-              }
-              const requestArguments = entries(byteView(argumentBlock))
-              const requestEnvironment = entries(byteView(environmentBlock))
-              const programBytes = byteView(program)
-              // The block protocol is the intrinsic's precondition, so a malformed request is a
-              // typed start failure rather than an execution the host never saw.
-              if (
-                requestArguments === null ||
-                requestEnvironment === null ||
-                programBytes.length === 0 ||
-                programBytes.includes(0) ||
-                directory.includes(0)
-              ) {
-                state.processCaptures[0] = Object.freeze([])
-                state.processCaptures[1] = Object.freeze([])
-                status({ _tag: 'Failure', reason: 'InvalidPath' })
-                commit(integerValue('i32', 0))
-                break
-              }
-              const result = child.execute(
-                Object.freeze({
-                  program: programBytes,
-                  arguments: requestArguments,
-                  environment: requestEnvironment,
-                  ...(directory.length === 0 ? {} : { workingDirectory: directory }),
-                }),
-              )
-              if (result._tag === 'ExecuteFailure') {
-                state.processCaptures[0] = Object.freeze([])
-                state.processCaptures[1] = Object.freeze([])
-                status({
-                  _tag: 'Failure',
-                  reason: result.reason,
-                  ...(result.nativeCode === undefined ? {} : { nativeCode: result.nativeCode }),
-                })
-                commit(integerValue('i32', 0))
-                break
-              }
-              state.processCaptures[0] = result.output
-              state.processCaptures[1] = result.errors
-              replaceReferenced(
-                processStatus,
-                integerValue('i32', result._tag === 'Exited' ? 0 : 1),
-              )
-              replaceReferenced(
-                processCode,
-                integerValue('i32', result._tag === 'Exited' ? result.code : result.signal),
-              )
-              replaceReferenced(outputLength, integerValue('usize', BigInt(result.output.length)))
-              replaceReferenced(errorLength, integerValue('usize', BigInt(result.errors.length)))
-              status()
-              commit(integerValue('i32', 1))
-              break
-            }
-            if (name === 'osProcessCapture') {
-              const stream = arguments_.at(0)
-              const offset = arguments_.at(1)
-              const output = arguments_.at(2)
-              if (stream === undefined || offset === undefined || output === undefined)
-                throw new RangeError('OS capture omitted arguments')
-              const selector = readInteger(stream, 'i32').value
-              const captured = state.processCaptures.at(Number(selector))
-              const start = Number(readInteger(offset, 'usize').value)
-              if (selector !== 0n && selector !== 1n) {
-                status({ _tag: 'Failure', reason: 'WrongType' })
-                commit(optionValue('usize'))
-                break
-              }
-              if (captured === undefined || start > captured.length) {
-                status({ _tag: 'Failure', reason: 'InvalidPath' })
-                commit(optionValue('usize'))
-                break
-              }
-              const transferred = captured.slice(start, start + byteView(output).length)
-              writeByteView(output, transferred)
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(transferred.length))))
-              break
-            }
-            if (name.startsWith('osHost')) {
-              const input = state.hostInput
-              if (input === undefined) return blockedStep({ _tag: 'MissingHostInput' })
-              if (name === 'osHostArgumentCount') {
-                const count = arguments_.at(0)
-                if (count === undefined) throw new RangeError('OS count omitted its output')
-                const result = input.argumentCount()
-                if (result._tag === 'LookupFailure') {
-                  status({ _tag: 'Failure', reason: 'Other' })
-                  commit(integerValue('i32', 0))
-                  break
-                }
-                replaceReferenced(count, integerValue('usize', BigInt(result.count)))
-                status()
-                commit(integerValue('i32', 1))
-                break
-              }
-              const output = arguments_.at(name === 'osHostWorkingDirectory' ? 0 : 1)
-              if (output === undefined) throw new RangeError('OS lookup omitted its output buffer')
-              const selector = arguments_.at(0)
-              if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
-              const result =
-                name === 'osHostArgument'
-                  ? input.argument(Number(readInteger(selector, 'usize').value))
-                  : name === 'osHostVariable'
-                    ? input.variable(byteView(selector))
-                    : input.workingDirectory()
-              if (result._tag !== 'Present') {
-                // Absence is the not-found reason, which the provider reads as an ordinary answer;
-                // any other reason is a host that could not answer at all.
-                status({
-                  _tag: 'Failure',
-                  reason: result._tag === 'Absent' ? 'NotFound' : 'Other',
-                })
-                commit(optionValue('usize'))
-                break
-              }
-              // The complete byte length is the result even when only a prefix fit, so the caller
-              // can size an exact buffer and ask again.
-              const capacity = byteView(output).length
-              writeByteView(output, result.bytes.slice(0, capacity))
-              status()
-              commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-              break
-            }
-            const host = state.osFileSystem
-            if (host === undefined) return blockedStep({ _tag: 'MissingOsFileSystemHost' })
-            try {
-              if (name === 'osFileOpen' || name === 'osDirectoryOpen') {
-                const root = arguments_.at(0)
-                const path = arguments_.at(1)
-                if (root === undefined || path === undefined)
-                  throw new RangeError('OS open omitted paths')
-                const result =
-                  name === 'osFileOpen'
-                    ? BootstrapOsIntrinsics.invoke(() =>
-                        host.fileOpen(
-                          byteView(root),
-                          byteView(path),
-                          Number(readInteger(arguments_.at(2) ?? root, 'i32').value),
-                        ),
-                      )
-                    : BootstrapOsIntrinsics.invoke(() =>
-                        host.directoryOpen(byteView(root), byteView(path)),
-                      )
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue(Type.osHandle))
-                } else {
-                  status()
-                  commit(optionValue(Type.osHandle, handleValue(result.handle)))
-                }
-                break
-              }
-              if (name === 'osFileRead') {
-                const handle = arguments_.at(0)
-                const output = arguments_.at(1)
-                if (handle === undefined || output === undefined)
-                  throw new RangeError('OS read omitted arguments')
-                const capacity = byteView(output).length
-                const result = BootstrapOsIntrinsics.invoke(() =>
-                  host.fileRead(hostHandle(handle), capacity),
-                )
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue('usize'))
-                } else {
-                  writeByteView(output, result.bytes)
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.bytes.length))))
-                }
-                break
-              }
-              if (name === 'osFileWrite') {
-                const handle = arguments_.at(0)
-                const input = arguments_.at(1)
-                const offset = arguments_.at(2)
-                if (handle === undefined || input === undefined || offset === undefined)
-                  throw new RangeError('OS write omitted arguments')
-                const result = BootstrapOsIntrinsics.invoke(() =>
-                  host.fileWrite(
-                    hostHandle(handle),
-                    byteView(input).slice(Number(readInteger(offset, 'usize').value)),
-                  ),
-                )
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(optionValue('usize'))
-                } else {
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.count))))
-                }
-                break
-              }
-              if (name === 'osDirectoryNext') {
-                const handle = arguments_.at(0)
-                const output = arguments_.at(1)
-                const kind = arguments_.at(2)
-                const required = arguments_.at(3)
-                if (
-                  handle === undefined ||
-                  output === undefined ||
-                  kind === undefined ||
-                  required === undefined
-                )
-                  throw new RangeError('OS directory next omitted arguments')
-                const result = BootstrapOsIntrinsics.invoke(() =>
-                  host.directoryNext(hostHandle(handle), byteView(output).length),
-                )
-                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
-                  const failure: OsFileSystemHost.Failure =
-                    result._tag === 'Failure'
-                      ? result
-                      : { _tag: 'Failure', reason: 'BufferTooSmall' }
-                  status(failure)
-                  if (result._tag === 'BufferTooSmall')
-                    replaceReferenced(
-                      required,
-                      integerValue('usize', BigInt(result.requiredCapacity)),
-                    )
-                  commit(optionValue('usize'))
-                } else if (result._tag === 'End') {
-                  status()
-                  commit(optionValue('usize', integerValue('usize', 0n)))
-                } else {
-                  writeByteView(output, result.name)
-                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
-                }
-                break
-              }
-              if (name === 'osDirectoryCreateUnique') {
-                const root = arguments_.at(0)
-                const parent = arguments_.at(1)
-                const prefix = arguments_.at(2)
-                const output = arguments_.at(3)
-                const required = arguments_.at(4)
-                if (
-                  root === undefined ||
-                  parent === undefined ||
-                  prefix === undefined ||
-                  output === undefined ||
-                  required === undefined
-                )
-                  throw new RangeError('OS unique directory create omitted arguments')
-                const result = BootstrapOsIntrinsics.invoke(() =>
-                  host.directoryCreateUnique(
-                    byteView(root),
-                    byteView(parent),
-                    byteView(prefix),
-                    byteView(output).length,
-                  ),
-                )
-                if (result._tag === 'Failure' || result._tag === 'BufferTooSmall') {
-                  status(
-                    result._tag === 'Failure'
-                      ? result
-                      : { _tag: 'Failure', reason: 'BufferTooSmall' },
-                  )
-                  if (result._tag === 'BufferTooSmall')
-                    replaceReferenced(
-                      required,
-                      integerValue('usize', BigInt(result.requiredCapacity)),
-                    )
-                  commit(optionValue('usize'))
-                } else {
-                  writeByteView(output, result.name)
-                  status()
-                  commit(optionValue('usize', integerValue('usize', BigInt(result.name.length))))
-                }
-                break
-              }
-              if (name === 'osPathInspect') {
-                const root = arguments_.at(0)
-                const path = arguments_.at(1)
-                const kind = arguments_.at(2)
-                const length = arguments_.at(3)
-                if (
-                  root === undefined ||
-                  path === undefined ||
-                  kind === undefined ||
-                  length === undefined
-                )
-                  throw new RangeError('OS inspect omitted arguments')
-                const result = BootstrapOsIntrinsics.invoke(() =>
-                  host.pathInspect(byteView(root), byteView(path)),
-                )
-                if (result._tag === 'Failure') {
-                  status(result)
-                  commit(integerValue('i32', 0))
-                } else {
-                  replaceReferenced(kind, integerValue('i32', result.kind === 'File' ? 0 : 1))
-                  replaceReferenced(length, integerValue('usize', BigInt(result.byteLength)))
-                  status()
-                  commit(integerValue('i32', 1))
-                }
-                break
-              }
-              const command =
-                name === 'osDirectoryCreate' ||
-                name === 'osFileRemove' ||
-                name === 'osDirectoryRemove'
-                  ? (() => {
-                      const root = arguments_.at(0)
-                      const path = arguments_.at(1)
-                      if (root === undefined || path === undefined)
-                        throw new RangeError('OS command omitted paths')
-                      return BootstrapOsIntrinsics.invoke(() =>
-                        name === 'osDirectoryCreate'
-                          ? host.directoryCreate(byteView(root), byteView(path))
-                          : name === 'osFileRemove'
-                            ? host.fileRemove(byteView(root), byteView(path))
-                            : host.directoryRemove(byteView(root), byteView(path)),
-                      )
-                    })()
-                  : name === 'osHandleClose'
-                    ? BootstrapOsIntrinsics.invoke(() =>
-                        host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput)),
-                      )
-                    : undefined
-              if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
-              if (command._tag === 'Failure') {
-                status(command)
-                commit(integerValue('i32', 0))
-              } else {
-                status()
-                commit(integerValue('i32', 1))
-              }
-            } catch (cause) {
-              const failure = BootstrapOsIntrinsics.osFailure(cause)
-              status(failure)
-              commit(
-                operation.type._tag === 'Union'
-                  ? optionValue(
-                      operation.type.type.members.some((member) =>
-                        Type.equals(member, Type.some(Type.osHandle)),
-                      )
-                        ? Type.osHandle
-                        : 'usize',
-                    )
-                  : integerValue('i32', 0),
-              )
-            }
+            const boundary = BootstrapOsIntrinsics.execute(
+              {
+                state,
+                fn,
+                trace,
+                read,
+                write,
+                cell,
+                readInteger,
+                replaceReferenced,
+                byteView,
+                writeByteView,
+                optionValue,
+                handleValue,
+                hostHandle,
+              },
+              operation,
+            )
+            if (boundary !== undefined) return boundary
             break
           }
           case 'RawBufferFrom': {
@@ -3641,417 +3128,47 @@ function* executeFunction(
             write(operation.destination, { value: result.value, fromCall: true })
             break
           }
-          case 'MakeEffect': {
-            write(operation.destination, {
-              value: BootstrapEffect.makeValue(
-                Object.freeze({ frame, cells: state.cells, read, cellKey }),
-                operation,
-              ),
-              fromCall: false,
-            })
-            break
-          }
-          case 'PackEffectComposite': {
-            const effect = read(operation.source).value
-            if (effect._tag !== 'EffectValue')
-              throw new RangeError('MIR attempted to pack a non-Effect alternative')
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectCompositeValue',
-                alternative: operation.alternative,
-                effect,
-              }),
-              fromCall: false,
-            })
-            break
-          }
-          case 'PackEffectOutcome': {
-            const payload = read(operation.source).value
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.type.type,
-                tag: operation.tag,
-                payload,
-              }),
-              fromCall: false,
-            })
-            trace.push(
-              Object.freeze({
-                _tag: operation.tag === 0 ? 'EffectSuccess' : 'EffectFailure',
-                phase: 'Produced',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: operation.tag,
-                ...(operation.tag === 0
-                  ? {}
-                  : {
-                      identity: BootstrapEffect.failureIdentity(operation.type.type, operation.tag),
-                    }),
-                span: operation.provenance.span,
-              }),
-            )
-            break
-          }
-          case 'PackEffectFailureUnion': {
-            const source = read(operation.source).value
-            if (source._tag !== 'UnionValue')
-              throw new RangeError('MIR attempted to fail with a non-union value')
-            const mapping = operation.mappings.find((candidate) =>
-              Type.equals(
-                Type.failureCarrierMember(
-                  operation.sourceType.type,
-                  candidate.source,
-                  'ZeroBased',
-                ) ?? Type.unit,
-                source.member,
-              ),
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR failure union has no canonical E-channel mapping')
-            write(operation.destination, {
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.type.type,
-                tag: mapping.target,
-                payload: repackFailurePayload(
-                  source.payload,
-                  operation.sourceType.type,
-                  mapping.source,
-                  operation.type.type,
-                  mapping.target,
-                ),
-              }),
-              fromCall: false,
-            })
-            trace.push(
-              Object.freeze({
-                _tag: 'EffectFailure',
-                phase: 'Produced',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: mapping.target,
-                identity: BootstrapEffect.failureIdentity(operation.type.type, mapping.target),
-                span: operation.provenance.span,
-              }),
-            )
-            break
-          }
-          case 'UnpackEffectSuccess': {
-            const outcome = read(operation.source)
-            if (outcome.value._tag !== 'EffectOutcomeValue' || outcome.value.tag !== 0) {
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: 'attempted to unpack a failed effect outcome as success',
-                span: operation.provenance.span,
-              })
-            }
-            write(operation.destination, { value: outcome.value.payload, fromCall: true })
-            break
-          }
-          case 'PropagateEffectFailure': {
-            const source = read(operation.source).value
-            const sourceTag =
-              source._tag === 'UnionValue'
-                ? operation.sourceType._tag === 'Union'
-                  ? operation.sourceType.type.members.findIndex((member) =>
-                      Type.equals(member, source.member),
-                    )
-                  : -1
-                : source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal'
-                  ? 0
-                  : -1
-            const payload =
-              source._tag === 'UnionValue'
-                ? source.payload
-                : source._tag === 'AggregateValue'
-                  ? source
-                  : undefined
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === sourceTag,
-            )
-            if (payload === undefined || mapping === undefined)
-              throw new RangeError('MIR propagated failure has no canonical tag mapping')
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            return Object.freeze({
-              _tag: 'Value',
-              value: Object.freeze({
-                _tag: 'EffectOutcomeValue',
-                type: operation.propagationType.type,
-                tag: mapping.target,
-                payload: repackFailurePayload(
-                  payload,
-                  Mir.semanticType(operation.sourceType),
-                  mapping.source,
-                  operation.propagationType.type,
-                  mapping.target,
-                ),
-              }),
-            })
-          }
-          case 'RunEffect': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.target,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: operation.target,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const arguments_ = operation.arguments.map((argument) => read(argument))
-            arguments_.forEach((argument, ordinal) => {
-              trace.push(
-                Object.freeze({
-                  _tag: 'Binding',
-                  frame: state.nextFrame,
-                  depth: activation.depth + 1,
-                  target: operation.target,
-                  targetInstance: target.instance,
-                  callSpan: operation.provenance.span,
-                  argumentOrdinal: ordinal,
-                  parameterOrdinal: ordinal,
-                  value: argument.value,
-                  fromCall: argument.fromCall,
-                  span: operation.provenance.span,
-                }),
-              )
-            })
-            const result = yield* callEffectRunner(
-              target,
-              arguments_.map((argument) => argument.value),
-              operation,
-            )
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR propagated effect returned a non-outcome value')
-            const effectOutcome = result.value
-            write(operation.outcome, { value: effectOutcome, fromCall: true })
-            if (effectOutcome.tag === 0) {
-              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
-              break
-            }
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === effectOutcome.tag,
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR propagated effect has no canonical failure-tag mapping')
-            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-            if (ended !== undefined) return ended
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            const propagated: EffectOutcomeValue = Object.freeze({
-              _tag: 'EffectOutcomeValue',
-              type: operation.propagationType.type,
-              tag: mapping.target,
-              payload: repackFailurePayload(
-                effectOutcome.payload,
-                operation.outcomeType.type,
-                effectOutcome.tag,
-                operation.propagationType.type,
-                mapping.target,
-              ),
-            })
-            trace.push(
-              Object.freeze({
-                _tag: 'EffectFailure',
-                phase: 'Propagated',
-                frame,
-                depth: activation.depth,
-                function: fn.id,
-                tag: mapping.target,
-                span: operation.provenance.span,
-              }),
-              Object.freeze({
-                _tag: 'Return',
-                frame: activation.frame,
-                depth: activation.depth,
-                function: fn.id,
-                instance: fn.instance,
-                value: propagated,
-                span: operation.provenance.span,
-              }),
-            )
-            return Object.freeze({ _tag: 'Value', value: propagated })
-          }
+          case 'MakeEffect':
+          case 'PackEffectComposite':
+          case 'PackEffectOutcome':
+          case 'PackEffectFailureUnion':
+          case 'UnpackEffectSuccess':
+          case 'PropagateEffectFailure':
+          case 'RunEffect':
           case 'RunEffectComposite':
           case 'RunEffectValue':
-          case 'RunStaticEffect': {
-            const execution = BootstrapEffect.prepareExecution(operation, read)
-            const target = functionFor(program, execution.runner, execution.runnerTypeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: execution.runner,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: execution.runner,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const result =
-              operation._tag === 'RunEffectValue'
-                ? yield* callEffectRunner(target, execution.arguments, operation)
-                : yield* callFunction(target, execution.arguments, operation.provenance.span)
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR Effect runner returned a non-outcome value')
-            const effectOutcome = BootstrapEffect.normalizeOutcome(
-              operation,
-              result.value,
-              execution,
-            )
-            write(operation.outcome, { value: effectOutcome, fromCall: true })
-            if (effectOutcome.tag === 0) {
-              write(operation.destination, { value: effectOutcome.payload, fromCall: true })
-              break
-            }
-            if (operation.propagationType === undefined) {
-              const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-              if (ended !== undefined) return ended
-              return blockedStep({
-                _tag: 'Trap',
-                function: fn.id,
-                reason: 'unhandled Effect failure escaped an infallible context',
-                span: operation.provenance.span,
-              })
-            }
-            const mapping = operation.tagMappings.find(
-              (candidate) => candidate.source === effectOutcome.tag,
-            )
-            if (mapping === undefined)
-              throw new RangeError('MIR Effect runner has no failure-tag mapping')
-            const ended = yield* executeOperations(operation.failureLoanEnds ?? [])
-            if (ended !== undefined) return ended
-            const released = yield* executeOperations(operation.releases ?? [])
-            if (released !== undefined) return released
-            const propagated: EffectOutcomeValue = Object.freeze({
-              _tag: 'EffectOutcomeValue',
-              type: operation.propagationType.type,
-              tag: mapping.target,
-              payload: repackFailurePayload(
-                effectOutcome.payload,
-                operation.outcomeType.type,
-                effectOutcome.tag,
-                operation.propagationType.type,
-                mapping.target,
-              ),
-            })
-            return Object.freeze({ _tag: 'Value', value: propagated })
-          }
+          case 'RunStaticEffect':
           case 'ReifyEffect': {
-            const effect = read(operation.effect).value
-            if (effect._tag !== 'EffectValue')
-              throw new RangeError('MIR attempted to reify a non-Effect value')
-            const target = functionFor(program, operation.runner, operation.runnerTypeArguments)
-            if (target === undefined)
-              return blockedStep({
-                _tag: 'MissingFunction',
-                target: operation.runner,
-                span: operation.provenance.span,
-              })
-            trace.push(
-              Object.freeze({
-                _tag: 'Call',
-                frame: activation.frame,
-                depth: activation.depth,
-                caller: fn.id,
-                target: operation.runner,
-                callerInstance: fn.instance,
-                targetInstance: target.instance,
-                span: operation.provenance.span,
-              }),
-            )
-            const result = yield* callEffectRunner(
-              target,
-              Object.freeze([
-                ...effect.captures,
-                ...operation.arguments.map((argument) => read(argument).value),
-              ]),
+            const effectStep = yield* BootstrapEffect.execute(
+              {
+                program,
+                fn,
+                activation,
+                frame,
+                state,
+                trace,
+                read,
+                write,
+                callEffectRunner,
+                callFunction,
+                executeOperations,
+              },
               operation,
             )
-            if (result._tag === 'Blocked') return result
-            if (result._tag === 'Transfer') return result
-            if (result.value._tag !== 'EffectOutcomeValue')
-              throw new RangeError('MIR Effect result runner returned a non-outcome value')
-            const outcome = result.value
-            write(operation.outcome, { value: outcome, fromCall: true })
-            const branch: AggregateValue =
-              outcome.tag === 0
-                ? Object.freeze({
-                    _tag: 'AggregateValue',
-                    type: operation.successType,
-                    fields: Object.freeze([
-                      Object.freeze({ field: operation.successField, value: outcome.payload }),
-                    ]),
-                  })
-                : (() => {
-                    const failure = Type.failureCarrierMember(
-                      operation.outcomeType.type,
-                      outcome.tag,
-                      'OneBased',
-                    )
-                    if (failure === undefined)
-                      throw new RangeError('MIR Effect result has an invalid failure tag')
-                    const failureValue: Value = Type.isUnion(operation.failureValueType)
-                      ? Object.freeze({
-                          _tag: 'UnionValue',
-                          type: operation.failureValueType,
-                          member: failure,
-                          payload: outcome.payload,
-                        })
-                      : outcome.payload
-                    return Object.freeze({
-                      _tag: 'AggregateValue' as const,
-                      type: operation.failureType,
-                      fields: Object.freeze([
-                        Object.freeze({ field: operation.failureField, value: failureValue }),
-                      ]),
-                    })
-                  })()
-            const outer: UnionValue = Object.freeze({
-              _tag: 'UnionValue',
-              type: operation.resultUnion,
-              member: outcome.tag === 0 ? operation.successType : operation.failureType,
-              payload: branch,
-            })
-            const completed: AggregateValue = Object.freeze({
-              _tag: 'AggregateValue',
-              type: operation.resultType.type,
-              fields: Object.freeze([
-                Object.freeze({ field: operation.resultField, value: outer }),
-              ]),
-            })
-            write(operation.destination, { value: completed, fromCall: true })
+            if (effectStep !== undefined) return effectStep
             break
           }
           case 'CloseEffectEntry': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
-            const runner = functionFor(program, operation.runner, operation.typeArguments)
+            const target = BootstrapEffect.functionFor(
+              program,
+              operation.target,
+              operation.typeArguments,
+            )
+            const runner = BootstrapEffect.functionFor(
+              program,
+              operation.runner,
+              operation.typeArguments,
+            )
             if (target === undefined || runner === undefined)
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -4139,7 +3256,11 @@ function* executeFunction(
             break
           }
           case 'Call': {
-            const target = functionFor(program, operation.target, operation.typeArguments)
+            const target = BootstrapEffect.functionFor(
+              program,
+              operation.target,
+              operation.typeArguments,
+            )
             if (target === undefined) {
               return blockedStep({
                 _tag: 'MissingFunction',
@@ -4666,7 +3787,7 @@ export const evaluate = (
       trace: Object.freeze([]),
     })
   }
-  const violations = Mir.verify(program)
+  const violations = MirVerification.verify(program)
   if (violations.length > 0) {
     return Object.freeze({
       _tag: 'Blocked',
@@ -4677,7 +3798,7 @@ export const evaluate = (
   }
   const machine = Mir.machineEntry(program)
   const entry = machine.declaration
-  const fn = functionFor(program, entry, machine.typeArguments)
+  const fn = BootstrapEffect.functionFor(program, entry, machine.typeArguments)
   if (fn === undefined) {
     return Object.freeze({
       _tag: 'Blocked',

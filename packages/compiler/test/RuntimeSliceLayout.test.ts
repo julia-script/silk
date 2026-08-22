@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
+import * as LayoutEncode from '../src/LayoutEncode.js'
+import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -89,8 +91,8 @@ it.effect('plans target-width address plus usize slice layouts and heterogeneous
         { type: 'usize', bits: undefined, selector: 'SliceLengthSelector' },
       ],
     )
-    assert.deepEqual(Layout.verify(wasmPlan.value), [])
-    assert.deepEqual(Layout.verify(nativePlan.value), [])
+    assert.deepEqual(LayoutVerify.verify(wasmPlan.value), [])
+    assert.deepEqual(LayoutVerify.verify(nativePlan.value), [])
   }),
 )
 
@@ -113,7 +115,7 @@ it.effect('retains aggregate and zero-sized element stride independently of logi
       emptySlice?.representation._tag === 'Slice' ? emptySlice.representation.stride : undefined,
       0,
     )
-    assert.include(Layout.encode(selected.value), 'Address<i32,i32>')
+    assert.include(LayoutEncode.encode(selected.value), 'Address<i32,i32>')
   }),
 )
 
@@ -147,7 +149,7 @@ it.effect('rejects a malformed address lane width', () =>
     })
 
     assert.include(
-      Layout.verify(malformed).map((violation) => violation.rule),
+      LayoutVerify.verify(malformed).map((violation) => violation.rule),
       'InvalidCallingShape',
     )
   }),

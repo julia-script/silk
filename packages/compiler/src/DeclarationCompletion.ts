@@ -10,14 +10,13 @@ import type {
   ModuleHeaders,
   ServiceFact,
   StructFact,
-} from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
 import {
   closeConformanceSelf,
   interfaceApplication,
   interfaceOperationContracts,
-  memberByNominal,
   returnedBorrow,
-} from './DeclarationIndex.js'
+} from './DeclarationFacts.js'
 import {
   attachExposure,
   canonicalKey,
@@ -27,6 +26,7 @@ import {
   inlineNeighbors,
   inlineParametersOf,
   interfaceWitnessCompatibility,
+  memberByNominal,
   refreshInterfaceApplications,
   resolveBounds,
   resolveConstraintFacts,
@@ -43,6 +43,7 @@ import {
 import * as Diagnostic from './Diagnostic.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -754,7 +755,7 @@ export const complete = (self: Index, resolvers: ResolutionSeams.ResolutionSeams
           )
           invalid = true
         }
-        const substitution = Type.substitution(
+        const substitution = TypeInference.substitution(
           sourceContract.typeParameters.map((parameter) => parameter.type),
           capability.arguments,
         )

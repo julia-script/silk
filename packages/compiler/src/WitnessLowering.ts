@@ -1,11 +1,13 @@
 import { generated } from './CleanupEmission.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import { borrowKey } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpression } from './LowerExpression.js'
@@ -16,7 +18,7 @@ import { baseRunnerKey, witnessEffectValueType } from './ValueType.js'
 
 export const emitWitnessDispatch = (
   fn: FunctionLowering,
-  target: DeclarationIndex.InterfaceWitnessTarget,
+  target: ConformanceProof.InterfaceWitnessTarget,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
   operandTypes: ReadonlyArray<Mir.Type>,
   resultType: Mir.Type,
@@ -99,7 +101,7 @@ export const lowerInterfaceWitnessCall = (
   const provider = fn.semantic(bound.provider)
   const capability = fn.semantic(bound.capability)
   if (!Type.isNominal(capability)) return undefined
-  const target = DeclarationIndex.interfaceWitnessTarget(
+  const target = ConformanceProof.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,
@@ -133,7 +135,7 @@ export interface InterfaceOperands {
 export const lowerInterfaceOperands = (
   fn: FunctionLowering,
   arguments_: ReadonlyArray<Hir.Expression>,
-  operands: ReadonlyArray<DeclarationIndex.InterfaceOperandFact>,
+  operands: ReadonlyArray<DeclarationFacts.InterfaceOperandFact>,
   span: SourceSpan.SourceSpan,
 ): InterfaceOperands | undefined => {
   if (arguments_.length !== operands.length) return undefined
@@ -188,14 +190,14 @@ export const lowerInterfaceOperands = (
 
 export const sourceWitnessParameterTypes = (
   fn: FunctionLowering,
-  target: DeclarationIndex.InterfaceWitnessTarget,
+  target: ConformanceProof.InterfaceWitnessTarget,
 ): ReadonlyArray<Mir.Type> | undefined => {
-  const declaration = DeclarationIndex.byCanonical(fn.index, target.implementation)
+  const declaration = DeclarationFacts.byCanonical(fn.index, target.implementation)
   if (declaration?._tag !== 'FunctionDeclaration') return undefined
   const binders = declaration.typeParameters
     .filter((parameter) => parameter.duplicateOf === undefined)
     .map((parameter) => parameter.type)
-  const substitution = Type.substitution(binders, target.typeArguments)
+  const substitution = TypeInference.substitution(binders, target.typeArguments)
   if (substitution === undefined) return undefined
   const parameters = declaration.parameters.flatMap((parameter) => {
     if (parameter.declaredType._tag !== 'Resolved') return []
@@ -208,7 +210,7 @@ export const sourceWitnessParameterTypes = (
 /** Realizes only access weakening already admitted by the compatibility actor. */
 export const sourceWitnessArguments = (
   fn: FunctionLowering,
-  target: DeclarationIndex.InterfaceWitnessTarget,
+  target: ConformanceProof.InterfaceWitnessTarget,
   arguments_: ReadonlyArray<Mir.LocalId>,
   span: SourceSpan.SourceSpan,
 ): WitnessArguments | undefined => {
@@ -290,7 +292,7 @@ export const endWitnessReborrows = (
 
 export const witnessEffectContract = (
   expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' | 'BoundOperationCall' }>,
-): DeclarationIndex.InterfaceOperationApplicationFact | undefined =>
+): DeclarationFacts.InterfaceOperationApplicationFact | undefined =>
   expression._tag === 'BoundOperationCall'
     ? expression.contract
     : expression.interfaceOperation?.contract
@@ -313,7 +315,7 @@ export const lowerWitnessEffect = (
       : (expression.interfaceOperation?.provider ?? 'never'),
   )
   if (!Type.isNominal(capability)) return undefined
-  const target = DeclarationIndex.interfaceWitnessTarget(
+  const target = ConformanceProof.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,
@@ -321,7 +323,7 @@ export const lowerWitnessEffect = (
       ? expression.operation
       : (expression.interfaceOperation?.operation ?? ''),
   )
-  const intrinsic = DeclarationIndex.interfaceOperationIntrinsic(
+  const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
     fn.index,
     provider,
     capability,
@@ -392,7 +394,7 @@ export const lowerBoundWitnessCall = (
   capability: Type.Nominal,
   argumentLocals: ReadonlyArray<Mir.LocalId>,
 ): Mir.LocalId | undefined => {
-  const target = DeclarationIndex.interfaceWitnessTarget(
+  const target = ConformanceProof.interfaceWitnessTarget(
     fn.index,
     provider,
     capability,

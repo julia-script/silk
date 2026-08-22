@@ -1,10 +1,12 @@
 import * as CleanupPlan from './CleanupPlan.js'
-import * as DeclarationIndex from './DeclarationIndex.js'
+import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as MirVerification from './MirVerification.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -66,7 +68,7 @@ export const borrowKey = (borrow: Hir.BorrowId): string =>
 export interface ProvidedRequirement {
   readonly capability: Type.Nominal
   readonly providerType: Type.Nominal
-  readonly witness: DeclarationIndex.ConformanceWitness
+  readonly witness: DeclarationFacts.ConformanceWitness
   readonly role: string
   readonly requirementAccess: Type.Requirement['access']
   readonly access: Type.CallableMode
@@ -89,7 +91,7 @@ export const specializeProvider = (
   const providerType = proof.provider
   if (capability === undefined || !Type.isNominal(capability) || !Type.isNominal(providerType))
     return undefined
-  const witness = provider.witness ?? DeclarationIndex.witness(fn.index, providerType, capability)
+  const witness = provider.witness ?? ConformanceProof.witness(fn.index, providerType, capability)
   if (witness === undefined) return undefined
   return Object.freeze({
     capability,
@@ -130,7 +132,7 @@ export const lowerProgram = (
   discovery: Instances.Discovery,
   ownership: ReadonlyMap<string, Ownership.ModuleOwnership>,
   layout: Layout.Plan,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.Module => {
   const staticDataById = new Map<
@@ -258,7 +260,7 @@ export const lowerProgram = (
     )
   }
   const runnerKey = (
-    declaration: DeclarationIndex.CanonicalId,
+    declaration: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<Type.GenericArgument>,
   ): string => instanceText(declaration, typeArguments)
   const retainedRunners = new Set(
@@ -268,7 +270,7 @@ export const lowerProgram = (
   )
   const retainReferencedRunners = (fn: Mir.MirFunction): boolean => {
     let changed = false
-    for (const operation of Mir.operations(fn)) {
+    for (const operation of MirVerification.operations(fn)) {
       if (
         operation._tag !== 'RunEffectValue' &&
         operation._tag !== 'RunStaticEffect' &&

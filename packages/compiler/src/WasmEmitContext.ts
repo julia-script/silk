@@ -1,5 +1,5 @@
 import type * as FuncActor from '@silk-effect/wasm/Func'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as LayoutPlan from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as SilkType from './Type.js'
@@ -11,7 +11,7 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
   readonly layout: FunctionLayout
   readonly plan: LayoutPlan.Plan
   readonly resolve: (
-    target: DeclarationIndex.CanonicalId,
+    target: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
   ) => FuncActor.Func
   readonly memory: WasmMemory.MemoryContext | undefined

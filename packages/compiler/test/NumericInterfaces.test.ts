@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
@@ -22,7 +22,7 @@ pub fn main() -> i32 {
       if (outcome.result._tag === 'IntegerValue') assert.strictEqual(outcome.result.value, 42n)
     }
 
-    const operations = Analysis.loweredMir(self).functions.flatMap(Mir.operations)
+    const operations = Analysis.loweredMir(self).functions.flatMap(MirVerification.operations)
     const binary = operations.filter(
       (operation) => operation._tag === 'Binary' && operation.operator === 'Add',
     )

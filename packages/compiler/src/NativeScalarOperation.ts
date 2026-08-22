@@ -1,0 +1,998 @@
+import * as LlvmBlock from '@silk-effect/llvm/Block'
+import * as Constant from '@silk-effect/llvm/Constant'
+import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
+import * as Intrinsic from '@silk-effect/llvm/Intrinsic'
+import * as LlvmType from '@silk-effect/llvm/Type'
+import * as Value from '@silk-effect/llvm/Value'
+import * as Effect from 'effect/Effect'
+import * as CleanupPlan from './CleanupPlan.js'
+import * as Mir from './Mir.js'
+import type { LinearOperation } from './MirLinearization.js'
+import * as NativeArith from './NativeArith.js'
+import * as NativeTranscendental from './NativeTranscendental.js'
+import * as Scalar from './Scalar.js'
+import * as SilkType from './Type.js'
+
+/** Whether one MIR operation requires the native allocation ABI. */
+export const needsAllocation = (operation: Mir.Operation): boolean =>
+  operation._tag === 'Allocate' ||
+  operation._tag === 'RawBufferFrom' ||
+  operation._tag === 'RawBufferCount' ||
+  operation._tag === 'RawBufferSlot' ||
+  operation._tag === 'RawBufferRead' ||
+  operation._tag === 'RawBufferView' ||
+  operation._tag === 'RawBufferCopy' ||
+  operation._tag === 'RawBufferFill' ||
+  operation._tag === 'SlotWrite' ||
+  operation._tag === 'SlotTake' ||
+  operation._tag === 'SlotCopy' ||
+  operation._tag === 'SlotDrop' ||
+  (operation._tag === 'CloseEffectEntry' &&
+    operation.failures.some((failure) => CleanupPlan.reclaims(failure.cleanup))) ||
+  (operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup))
+
+import * as NativeFunction from './NativeFunction.js'
+import type { LoweringContext } from './NativeOperation.js'
+
+type Operation = Extract<
+  LinearOperation,
+  {
+    readonly _tag:
+      | 'ConvertInteger'
+      | 'ConvertScalar'
+      | 'ReinterpretScalar'
+      | 'FloatUnary'
+      | 'FloatTranscendental'
+      | 'CheckedScalar'
+      | 'Binary'
+  }
+>
+
+export const emit = Effect.fnUntraced(function* (context: LoweringContext, operation: Operation) {
+  const {
+    body,
+    builder,
+    coerceLane,
+    arith,
+    entry,
+    f32,
+    f64,
+    i32,
+    integerTypes,
+    laneType,
+    lanesFor,
+    locals,
+    locate,
+    program,
+    signedOverflowSignatures,
+    unsignedOverflowSignatures,
+    valueLanesFor,
+  } = context
+  const initialTrapBlock = context.state.trapBlock
+  let trapBlock = initialTrapBlock
+  let checkOrdinal = context.state.checkOrdinal
+  switch (operation._tag) {
+    case 'ConvertInteger': {
+      const result = yield* NativeArith.emitIntegerConversion(
+        arith,
+        NativeFunction.readScalar(locals, operation.source),
+        operation.sourceType,
+        operation.type,
+        `convert${operation.destination.ordinal}`,
+      )
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+    case 'ConvertScalar': {
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.type._tag)
+      if (
+        source === undefined ||
+        target === undefined ||
+        source.category === 'Boolean' ||
+        target.category === 'Boolean'
+      )
+        throw new RangeError('LLVM scalar conversion lost its types')
+      const sourceValue = NativeFunction.readScalar(locals, operation.source)
+      if (source.category === 'Character' && target.spelling === 'u32') {
+        locals.set(operation.destination.ordinal, Object.freeze([sourceValue]))
+        break
+      }
+      const destinationType =
+        target.category === 'Floating'
+          ? target.spelling === 'f32'
+            ? f32
+            : f64
+          : (integerTypes.get(
+              Scalar.bits(target, program.layout.target.pointerSize === 4 ? 32 : 64),
+            ) ?? i32)
+      const kind: FunctionBody.CastKind =
+        source.category === 'Floating' && target.category === 'Floating'
+          ? source.spelling === 'f64'
+            ? 'fptrunc'
+            : 'fpext'
+          : source.category === 'Floating' && target.category === 'Integer'
+            ? target.signedness === 'Signed'
+              ? 'fptosi'
+              : 'fptoui'
+            : source.category === 'Integer' && target.category === 'Floating'
+              ? source.signedness === 'Signed'
+                ? 'sitofp'
+                : 'uitofp'
+              : (() => {
+                  throw new RangeError('LLVM scalar conversion was not numeric')
+                })()
+      const result = yield* FunctionBody.cast(
+        body,
+        kind,
+        sourceValue,
+        destinationType,
+        `convert${operation.destination.ordinal}`,
+      )
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+    case 'ReinterpretScalar': {
+      const targetLane = lanesFor(operation.type).at(0)
+      if (targetLane === undefined) throw new RangeError('LLVM reinterpretation lost its lane')
+      const result = yield* FunctionBody.cast(
+        body,
+        'bitcast',
+        NativeFunction.readScalar(locals, operation.source),
+        laneType(targetLane),
+        `reinterpret${operation.destination.ordinal}`,
+      )
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+    case 'FloatUnary': {
+      const source = Scalar.find(operation.sourceType._tag)
+      if (source?.category !== 'Floating')
+        throw new RangeError('LLVM float unary lost its source type')
+      const subject = NativeFunction.readScalar(locals, operation.source)
+      if (operation.operation === 'Negate') {
+        const result = yield* FunctionBody.unary(
+          body,
+          'fneg',
+          subject,
+          `fneg${operation.destination.ordinal}`,
+        )
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      if (operation.operation === 'Sqrt') {
+        // IEEE-754 mandates a correctly rounded square root, so `llvm.sqrt` is
+        // bit-exact on every conforming target and matches the evaluator exactly.
+        const floatType = source.spelling === 'f32' ? f32 : f64
+        const signature = Object.freeze({
+          returnType: floatType,
+          parameters: Object.freeze([floatType]),
+        })
+        const result = yield* Intrinsic.call(
+          body,
+          'sqrt',
+          [floatType],
+          [subject],
+          `sqrt${operation.destination.ordinal}`,
+          { signature },
+        )
+        if (result === undefined) throw new RangeError('LLVM square root produced no value')
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      const width = source.spelling === 'f32' ? 32 : 64
+      const integerType = integerTypes.get(width) ?? i32
+      const raw = yield* FunctionBody.cast(
+        body,
+        'bitcast',
+        subject,
+        integerType,
+        `floatbits${operation.destination.ordinal}`,
+      )
+      const fractionBits = source.spelling === 'f32' ? 23 : 52
+      const exponentBits = source.spelling === 'f32' ? 8 : 11
+      const exponentMask = ((1n << BigInt(exponentBits)) - 1n) << BigInt(fractionBits)
+      const fractionMask = (1n << BigInt(fractionBits)) - 1n
+      const zero = yield* Constant.integerUnsigned(builder, integerType, 0n)
+      const exponentMaskValue = yield* Constant.integerUnsigned(builder, integerType, exponentMask)
+      const fractionMaskValue = yield* Constant.integerUnsigned(builder, integerType, fractionMask)
+      const exponent = yield* FunctionBody.binary(
+        body,
+        'and',
+        raw,
+        exponentMaskValue,
+        `fclass_exp${operation.destination.ordinal}`,
+      )
+      const fraction = yield* FunctionBody.binary(
+        body,
+        'and',
+        raw,
+        fractionMaskValue,
+        `fclass_frac${operation.destination.ordinal}`,
+      )
+      const exponentZero = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        exponent,
+        zero,
+        `fclass_exp_zero${operation.destination.ordinal}`,
+      )
+      const exponentAll = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        exponent,
+        exponentMaskValue,
+        `fclass_exp_all${operation.destination.ordinal}`,
+      )
+      const fractionZero = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        fraction,
+        zero,
+        `fclass_frac_zero${operation.destination.ordinal}`,
+      )
+      let flag: Value.Input
+      if (operation.operation === 'IsSignNegative') {
+        flag = yield* FunctionBody.integerCompare(
+          body,
+          'slt',
+          raw,
+          zero,
+          `fclass_sign${operation.destination.ordinal}`,
+        )
+      } else if (operation.operation === 'IsNaN') {
+        const fractionNonzero = yield* FunctionBody.integerCompare(
+          body,
+          'ne',
+          fraction,
+          zero,
+          `fclass_frac_nonzero${operation.destination.ordinal}`,
+        )
+        flag = yield* FunctionBody.binary(
+          body,
+          'and',
+          exponentAll,
+          fractionNonzero,
+          `fclass_nan${operation.destination.ordinal}`,
+        )
+      } else if (operation.operation === 'IsInfinite') {
+        flag = yield* FunctionBody.binary(
+          body,
+          'and',
+          exponentAll,
+          fractionZero,
+          `fclass_inf${operation.destination.ordinal}`,
+        )
+      } else if (operation.operation === 'IsFinite') {
+        flag = yield* FunctionBody.integerCompare(
+          body,
+          'ne',
+          exponent,
+          exponentMaskValue,
+          `fclass_finite${operation.destination.ordinal}`,
+        )
+      } else if (operation.operation === 'IsNormal') {
+        const nonzero = yield* FunctionBody.integerCompare(
+          body,
+          'ne',
+          exponent,
+          zero,
+          `fclass_nonzero${operation.destination.ordinal}`,
+        )
+        const finite = yield* FunctionBody.integerCompare(
+          body,
+          'ne',
+          exponent,
+          exponentMaskValue,
+          `fclass_notall${operation.destination.ordinal}`,
+        )
+        flag = yield* FunctionBody.binary(
+          body,
+          'and',
+          nonzero,
+          finite,
+          `fclass_normal${operation.destination.ordinal}`,
+        )
+      } else {
+        const fractionNonzero = yield* FunctionBody.integerCompare(
+          body,
+          'ne',
+          fraction,
+          zero,
+          `fclass_sub_frac${operation.destination.ordinal}`,
+        )
+        flag = yield* FunctionBody.binary(
+          body,
+          'and',
+          exponentZero,
+          fractionNonzero,
+          `fclass_sub${operation.destination.ordinal}`,
+        )
+      }
+      const result = yield* FunctionBody.cast(
+        body,
+        'zext',
+        flag,
+        i32,
+        `fclass${operation.destination.ordinal}`,
+      )
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+    case 'FloatTranscendental': {
+      const i64Type = integerTypes.get(64)
+      const result = yield* NativeTranscendental.emit(
+        { builder, i32, ...(i64Type === undefined ? {} : { i64: i64Type }), f32, f64 },
+        body,
+        operation,
+        NativeFunction.readScalar(locals, operation.source),
+      )
+      yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+    case 'CheckedScalar': {
+      const leftLocal = operation.operands.at(0)
+      const rightLocal = operation.operands.at(1)
+      const source = Scalar.find(operation.sourceType._tag)
+      const target = Scalar.find(operation.valueType._tag)
+      const characterConversion =
+        operation.operation === 'CheckedConvertToChar' &&
+        source?.spelling === 'u32' &&
+        target?.category === 'Character'
+      if (
+        leftLocal === undefined ||
+        source?.category !== 'Integer' ||
+        (target?.category !== 'Integer' && !characterConversion)
+      )
+        throw new RangeError('LLVM checked scalar operation lost its scalar types')
+      const left = NativeFunction.readScalar(locals, leftLocal)
+      const right =
+        rightLocal === undefined ? undefined : NativeFunction.readScalar(locals, rightLocal)
+      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+      const sourceBits = Scalar.bits(source, pointerBits)
+      const targetBits = Scalar.bits(target, pointerBits)
+      const sourcePhysical = integerTypes.get(sourceBits) ?? i32
+      const targetPhysical = integerTypes.get(targetBits) ?? i32
+      const name = `checked${operation.destination.ordinal}`
+      let result: Value.Input
+      let invalid: Value.Input
+      if (characterConversion) {
+        const maximum = yield* Constant.integerUnsigned(builder, sourcePhysical, 0x10ffffn)
+        const surrogateMinimum = yield* Constant.integerUnsigned(builder, sourcePhysical, 0xd800n)
+        const surrogateMaximum = yield* Constant.integerUnsigned(builder, sourcePhysical, 0xdfffn)
+        const aboveMaximum = yield* FunctionBody.integerCompare(
+          body,
+          'ugt',
+          left,
+          maximum,
+          `${name}_above`,
+        )
+        const atLeastSurrogate = yield* FunctionBody.integerCompare(
+          body,
+          'uge',
+          left,
+          surrogateMinimum,
+          `${name}_surrogate_minimum`,
+        )
+        const atMostSurrogate = yield* FunctionBody.integerCompare(
+          body,
+          'ule',
+          left,
+          surrogateMaximum,
+          `${name}_surrogate_maximum`,
+        )
+        const surrogate = yield* FunctionBody.binary(
+          body,
+          'and',
+          atLeastSurrogate,
+          atMostSurrogate,
+          `${name}_surrogate`,
+        )
+        invalid = yield* FunctionBody.binary(body, 'or', aboveMaximum, surrogate, `${name}_invalid`)
+        result = left
+      } else if (operation.operation.startsWith('CheckedConvertTo')) {
+        if (target.category !== 'Integer')
+          throw new RangeError('LLVM checked conversion lost its integer target')
+        const sourceRange = Scalar.range(source, pointerBits)
+        const targetRange = Scalar.range(target, pointerBits)
+        const checks: Array<Value.Input> = []
+        if (targetRange.minimum > sourceRange.minimum)
+          checks.push(
+            yield* FunctionBody.integerCompare(
+              body,
+              source.signedness === 'Signed' ? 'slt' : 'ult',
+              left,
+              source.signedness === 'Signed'
+                ? yield* Constant.integerSigned(builder, sourcePhysical, targetRange.minimum)
+                : yield* Constant.integerUnsigned(builder, sourcePhysical, targetRange.minimum),
+              `${name}_below`,
+            ),
+          )
+        if (targetRange.maximum < sourceRange.maximum)
+          checks.push(
+            yield* FunctionBody.integerCompare(
+              body,
+              source.signedness === 'Signed' ? 'sgt' : 'ugt',
+              left,
+              source.signedness === 'Signed'
+                ? yield* Constant.integerSigned(builder, sourcePhysical, targetRange.maximum)
+                : yield* Constant.integerUnsigned(builder, sourcePhysical, targetRange.maximum),
+              `${name}_above`,
+            ),
+          )
+        invalid =
+          checks.at(0) ??
+          (yield* Constant.integerUnsigned(builder, yield* LlvmType.integer(builder, 1), 0n))
+        for (const [ordinal, check] of checks.slice(1).entries())
+          invalid = yield* FunctionBody.binary(
+            body,
+            'or',
+            invalid,
+            check,
+            `${name}_invalid${ordinal}`,
+          )
+        result =
+          sourceBits === targetBits
+            ? left
+            : yield* FunctionBody.cast(
+                body,
+                sourceBits < targetBits
+                  ? source.signedness === 'Signed'
+                    ? 'sext'
+                    : 'zext'
+                  : 'trunc',
+                left,
+                targetPhysical,
+                `${name}_value`,
+              )
+      } else if (
+        operation.operation === 'CheckedAdd' ||
+        operation.operation === 'CheckedSubtract' ||
+        operation.operation === 'CheckedMultiply'
+      ) {
+        if (target.category !== 'Integer')
+          throw new RangeError('LLVM checked arithmetic lost its integer target')
+        if (right === undefined)
+          throw new RangeError('LLVM checked arithmetic lost its right operand')
+        const signatures =
+          target.signedness === 'Unsigned' ? unsignedOverflowSignatures : signedOverflowSignatures
+        let signature = signatures.get(targetBits)
+        if (signature === undefined) {
+          const i1 = yield* LlvmType.integer(builder, 1)
+          signature = Object.freeze({
+            returnType: yield* LlvmType.structure(builder, [targetPhysical, i1]),
+            parameters: Object.freeze([targetPhysical, targetPhysical]),
+          })
+          signatures.set(targetBits, signature)
+        }
+        const stem =
+          operation.operation === 'CheckedAdd'
+            ? 'add'
+            : operation.operation === 'CheckedSubtract'
+              ? 'sub'
+              : 'mul'
+        const pair = yield* Intrinsic.call(
+          body,
+          `${target.signedness === 'Unsigned' ? 'u' : 's'}${stem}.with.overflow`,
+          [targetPhysical],
+          [left, right],
+          `${name}_pair`,
+          { signature },
+        )
+        if (pair === undefined) throw new RangeError('LLVM checked arithmetic produced no outcome')
+        result = yield* FunctionBody.extractValue(body, pair, [0], `${name}_value`)
+        invalid = yield* FunctionBody.extractValue(body, pair, [1], `${name}_invalid`)
+      } else {
+        if (target.category !== 'Integer')
+          throw new RangeError('LLVM checked division lost its integer target')
+        if (right === undefined)
+          throw new RangeError('LLVM checked division lost its right operand')
+        const zero = yield* Constant.integerUnsigned(builder, targetPhysical, 0n)
+        invalid = yield* FunctionBody.integerCompare(body, 'eq', right, zero, `${name}_zero`)
+        if (target.signedness === 'Signed' && operation.operation === 'CheckedDivide') {
+          const range = Scalar.range(target, pointerBits)
+          const minimum = yield* Constant.integerSigned(builder, targetPhysical, range.minimum)
+          const negativeOne = yield* Constant.integerSigned(builder, targetPhysical, -1n)
+          const minimumDividend = yield* FunctionBody.integerCompare(
+            body,
+            'eq',
+            left,
+            minimum,
+            `${name}_minimum`,
+          )
+          const negativeDivisor = yield* FunctionBody.integerCompare(
+            body,
+            'eq',
+            right,
+            negativeOne,
+            `${name}_negative_one`,
+          )
+          const overflow = yield* FunctionBody.binary(
+            body,
+            'and',
+            minimumDividend,
+            negativeDivisor,
+            `${name}_overflow`,
+          )
+          invalid = yield* FunctionBody.binary(body, 'or', invalid, overflow, `${name}_invalid`)
+        }
+        const one = yield* Constant.integerUnsigned(builder, targetPhysical, 1n)
+        const safeRight = yield* FunctionBody.select(body, invalid, one, right, `${name}_divisor`)
+        result = yield* FunctionBody.binary(
+          body,
+          operation.operation === 'CheckedDivide'
+            ? target.signedness === 'Unsigned'
+              ? 'udiv'
+              : 'sdiv'
+            : target.signedness === 'Unsigned'
+              ? 'urem'
+              : 'srem',
+          left,
+          safeRight,
+          `${name}_value`,
+        )
+      }
+      const successOrdinal = operation.type.type.members.findIndex((member) =>
+        SilkType.equals(member, operation.success),
+      )
+      const failureOrdinal = operation.type.type.members.findIndex((member) =>
+        SilkType.equals(member, operation.failure),
+      )
+      if (successOrdinal < 0 || failureOrdinal < 0)
+        throw new RangeError('LLVM checked scalar operation lost its Option members')
+      const successTag = yield* Constant.integerSigned(builder, i32, BigInt(successOrdinal))
+      const failureTag = yield* Constant.integerSigned(builder, i32, BigInt(failureOrdinal))
+      const tag = yield* FunctionBody.select(body, invalid, failureTag, successTag, `${name}_tag`)
+      const valueLane = lanesFor(operation.valueType).at(0)
+      const payloadLane = lanesFor(operation.type).at(1)
+      if (valueLane === undefined || payloadLane === undefined)
+        throw new RangeError('LLVM checked scalar operation lost its payload lane')
+      const payload = yield* coerceLane(result, valueLane, payloadLane, `${name}_payload`)
+      locals.set(operation.destination.ordinal, Object.freeze([tag, payload]))
+      break
+    }
+    case 'Binary': {
+      const left = NativeFunction.readScalar(locals, operation.left)
+      const right = NativeFunction.readScalar(locals, operation.right)
+      const leftType = entry.fn.localTypes.at(operation.left.ordinal)
+      const leftLane = leftType === undefined ? undefined : valueLanesFor(leftType).at(0)
+      if (leftType === undefined || leftLane === undefined) {
+        throw new RangeError('LLVM binary operation lost its operand type')
+      }
+      const semanticOperand = Mir.semanticType(leftType)
+      const scalar = typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
+      const unsigned = scalar?.signedness === 'Unsigned'
+      const operandType = laneType(leftLane)
+      const ordinal = checkOrdinal
+      checkOrdinal += 1
+      if (scalar?.category === 'Floating') {
+        if (operation.operator === 'TotalOrder') {
+          const width = scalar.spelling === 'f32' ? 32 : 64
+          const integerType = integerTypes.get(width) ?? i32
+          const leftBits = yield* FunctionBody.cast(
+            body,
+            'bitcast',
+            left,
+            integerType,
+            `total${ordinal}_left_bits`,
+          )
+          const rightBits = yield* FunctionBody.cast(
+            body,
+            'bitcast',
+            right,
+            integerType,
+            `total${ordinal}_right_bits`,
+          )
+          const zero = yield* Constant.integerUnsigned(builder, integerType, 0n)
+          const all = yield* Constant.integerUnsigned(
+            builder,
+            integerType,
+            (1n << BigInt(width)) - 1n,
+          )
+          const sign = yield* Constant.integerUnsigned(
+            builder,
+            integerType,
+            1n << BigInt(width - 1),
+          )
+          const key = Effect.fnUntraced(function* (bits: Value.Input, side: string) {
+            const negative = yield* FunctionBody.integerCompare(
+              body,
+              'slt',
+              bits,
+              zero,
+              `total${ordinal}_${side}_negative`,
+            )
+            const mask = yield* FunctionBody.select(
+              body,
+              negative,
+              all,
+              sign,
+              `total${ordinal}_${side}_mask`,
+            )
+            return yield* FunctionBody.binary(
+              body,
+              'xor',
+              bits,
+              mask,
+              `total${ordinal}_${side}_key`,
+            )
+          })
+          const leftKey = yield* key(leftBits, 'left')
+          const rightKey = yield* key(rightBits, 'right')
+          const flag = yield* FunctionBody.integerCompare(
+            body,
+            'ule',
+            leftKey,
+            rightKey,
+            `total${ordinal}_flag`,
+          )
+          const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `total${ordinal}`)
+          locals.set(operation.destination.ordinal, Object.freeze([result]))
+          break
+        }
+        const predicate: FunctionBody.FloatingPredicate | undefined =
+          operation.operator === 'Equals'
+            ? 'oeq'
+            : operation.operator === 'NotEquals'
+              ? 'une'
+              : operation.operator === 'LessThan'
+                ? 'olt'
+                : operation.operator === 'LessOrEqual'
+                  ? 'ole'
+                  : operation.operator === 'GreaterThan'
+                    ? 'ogt'
+                    : operation.operator === 'GreaterOrEqual'
+                      ? 'oge'
+                      : undefined
+        if (predicate !== undefined) {
+          const flag = yield* FunctionBody.floatingCompare(
+            body,
+            predicate,
+            left,
+            right,
+            `fcmp${ordinal}_flag`,
+          )
+          const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `fcmp${ordinal}`)
+          locals.set(operation.destination.ordinal, Object.freeze([result]))
+          break
+        }
+        const mnemonic: FunctionBody.FloatingBinaryKind | undefined =
+          operation.operator === 'Add'
+            ? 'fadd'
+            : operation.operator === 'Subtract'
+              ? 'fsub'
+              : operation.operator === 'Multiply'
+                ? 'fmul'
+                : operation.operator === 'Divide'
+                  ? 'fdiv'
+                  : operation.operator === 'Remainder'
+                    ? 'frem'
+                    : undefined
+        if (mnemonic === undefined)
+          throw new RangeError(`LLVM float operation ${operation.operator} is unavailable`)
+        const result = yield* FunctionBody.binary(body, mnemonic, left, right, `float${ordinal}`)
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      const predicate = NativeArith.comparisonPredicate(operation.operator, unsigned)
+      if (predicate !== undefined) {
+        const flag = yield* FunctionBody.integerCompare(
+          body,
+          predicate,
+          left,
+          right,
+          `cmp${ordinal}_flag`,
+        )
+        const widened = yield* FunctionBody.cast(body, 'zext', flag, i32, `cmp${ordinal}`)
+        const instruction = yield* Value.instruction(body, flag)
+        yield* locate(operation.provenance.span, instruction)
+        locals.set(operation.destination.ordinal, Object.freeze([widened]))
+        break
+      }
+      if (
+        operation.operator === 'BitAnd' ||
+        operation.operator === 'BitOr' ||
+        operation.operator === 'BitXor' ||
+        operation.operator === 'WrappingAdd' ||
+        operation.operator === 'WrappingSubtract' ||
+        operation.operator === 'WrappingMultiply'
+      ) {
+        const mnemonic =
+          operation.operator === 'BitAnd'
+            ? 'and'
+            : operation.operator === 'BitOr'
+              ? 'or'
+              : operation.operator === 'BitXor'
+                ? 'xor'
+                : operation.operator === 'WrappingAdd'
+                  ? 'add'
+                  : operation.operator === 'WrappingSubtract'
+                    ? 'sub'
+                    : 'mul'
+        const result = yield* FunctionBody.binary(body, mnemonic, left, right, `integer${ordinal}`)
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      if (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') {
+        if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+        const width =
+          scalar === undefined
+            ? 32
+            : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+        const limit = yield* Constant.integerUnsigned(builder, operandType, BigInt(width))
+        const invalid = yield* FunctionBody.integerCompare(
+          body,
+          'uge',
+          right,
+          limit,
+          `shift${ordinal}_invalid`,
+        )
+        const continueBlock = yield* LlvmBlock.make(body, `shift${ordinal}_ok`)
+        yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, continueBlock)
+        yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+        const result = yield* FunctionBody.binary(
+          body,
+          operation.operator === 'ShiftLeft' ? 'shl' : unsigned ? 'lshr' : 'ashr',
+          left,
+          right,
+          `shift${ordinal}`,
+        )
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      if (operation.operator === 'RotateLeft' || operation.operator === 'RotateRight') {
+        const signature = Object.freeze({
+          returnType: operandType,
+          parameters: Object.freeze([operandType, operandType, operandType]),
+        })
+        const result = yield* Intrinsic.call(
+          body,
+          operation.operator === 'RotateLeft' ? 'fshl' : 'fshr',
+          [operandType],
+          [left, left, right],
+          `rotate${ordinal}`,
+          { signature },
+        )
+        if (result === undefined) throw new RangeError('LLVM rotate produced no value')
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      if (operation.operator === 'SaturatingAdd' || operation.operator === 'SaturatingSubtract') {
+        const signature = Object.freeze({
+          returnType: operandType,
+          parameters: Object.freeze([operandType, operandType]),
+        })
+        const intrinsic =
+          operation.operator === 'SaturatingAdd'
+            ? unsigned
+              ? 'uadd.sat'
+              : 'sadd.sat'
+            : unsigned
+              ? 'usub.sat'
+              : 'ssub.sat'
+        const result = yield* Intrinsic.call(
+          body,
+          intrinsic,
+          [operandType],
+          [left, right],
+          `saturating${ordinal}`,
+          { signature },
+        )
+        if (result === undefined)
+          throw new RangeError('LLVM saturating arithmetic produced no value')
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      if (operation.operator === 'SaturatingMultiply') {
+        const bits =
+          scalar === undefined
+            ? 32
+            : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+        const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
+        let signature = signatures.get(bits)
+        if (signature === undefined) {
+          const i1 = yield* LlvmType.integer(builder, 1)
+          signature = Object.freeze({
+            returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+            parameters: Object.freeze([operandType, operandType]),
+          })
+          signatures.set(bits, signature)
+        }
+        const pair = yield* Intrinsic.call(
+          body,
+          unsigned ? 'umul.with.overflow' : 'smul.with.overflow',
+          [operandType],
+          [left, right],
+          `saturating${ordinal}_pair`,
+          { signature },
+        )
+        if (pair === undefined) throw new RangeError('LLVM saturating multiply produced no value')
+        const wrapped = yield* FunctionBody.extractValue(
+          body,
+          pair,
+          [0],
+          `saturating${ordinal}_wrapped`,
+        )
+        const overflowed = yield* FunctionBody.extractValue(
+          body,
+          pair,
+          [1],
+          `saturating${ordinal}_overflow`,
+        )
+        const range =
+          scalar?.category === 'Integer'
+            ? Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+            : { minimum: -2147483648n, maximum: 2147483647n }
+        const maximum = unsigned
+          ? yield* Constant.integerUnsigned(builder, operandType, range.maximum)
+          : yield* Constant.integerSigned(builder, operandType, range.maximum)
+        let boundary: Value.Input = maximum
+        if (!unsigned) {
+          const zero = yield* Constant.integerSigned(builder, operandType, 0n)
+          const minimum = yield* Constant.integerSigned(builder, operandType, range.minimum)
+          const signs = yield* FunctionBody.binary(
+            body,
+            'xor',
+            left,
+            right,
+            `saturating${ordinal}_signs`,
+          )
+          const negative = yield* FunctionBody.integerCompare(
+            body,
+            'slt',
+            signs,
+            zero,
+            `saturating${ordinal}_negative`,
+          )
+          boundary = yield* FunctionBody.select(
+            body,
+            negative,
+            minimum,
+            maximum,
+            `saturating${ordinal}_boundary`,
+          )
+        }
+        const result = yield* FunctionBody.select(
+          body,
+          overflowed,
+          boundary,
+          wrapped,
+          `saturating${ordinal}`,
+        )
+        yield* locate(operation.provenance.span, yield* Value.instruction(body, result))
+        locals.set(operation.destination.ordinal, Object.freeze([result]))
+        break
+      }
+      let result: Value.Value
+      if (trapBlock === undefined) {
+        trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+      }
+      if (
+        operation.operator === 'Add' ||
+        operation.operator === 'Subtract' ||
+        operation.operator === 'Multiply'
+      ) {
+        const intrinsicId =
+          operation.operator === 'Add'
+            ? unsigned
+              ? ('uadd.with.overflow' as const)
+              : ('sadd.with.overflow' as const)
+            : operation.operator === 'Subtract'
+              ? unsigned
+                ? ('usub.with.overflow' as const)
+                : ('ssub.with.overflow' as const)
+              : unsigned
+                ? ('umul.with.overflow' as const)
+                : ('smul.with.overflow' as const)
+        const bits =
+          scalar === undefined
+            ? 32
+            : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+        const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
+        let overflowSignature = signatures.get(bits)
+        if (overflowSignature === undefined) {
+          const i1 = yield* LlvmType.integer(builder, 1)
+          overflowSignature = Object.freeze({
+            returnType: yield* LlvmType.structure(builder, [operandType, i1]),
+            parameters: Object.freeze([operandType, operandType]),
+          })
+          signatures.set(bits, overflowSignature)
+        }
+        const pair = yield* Intrinsic.call(
+          body,
+          intrinsicId,
+          [operandType],
+          [left, right],
+          `arith${ordinal}_pair`,
+          { signature: overflowSignature },
+        )
+        if (pair === undefined) {
+          throw new RangeError('Backend overflow intrinsic produced no value')
+        }
+        const valuePart = yield* FunctionBody.extractValue(body, pair, [0], `arith${ordinal}`)
+        const overflowed = yield* FunctionBody.extractValue(body, pair, [1], `arith${ordinal}_flag`)
+        const continueBlock = yield* LlvmBlock.make(body, `arith${ordinal}_ok`)
+        yield* FunctionBody.conditionalBranch(body, overflowed, trapBlock, continueBlock)
+        yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+        result = valuePart
+      } else {
+        const zero = yield* Constant.integerUnsigned(builder, operandType, 0n)
+        const zeroDivisor = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          right,
+          zero,
+          `div${ordinal}_zero`,
+        )
+        let trapping: Value.Value = zeroDivisor
+        if (!unsigned) {
+          const minimum = yield* Constant.integerSigned(
+            builder,
+            operandType,
+            scalar?.category === 'Integer'
+              ? Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64).minimum
+              : -2147483648n,
+          )
+          const negativeOne = yield* Constant.integerSigned(builder, operandType, -1n)
+          const minimumDividend = yield* FunctionBody.integerCompare(
+            body,
+            'eq',
+            left,
+            minimum,
+            `div${ordinal}_min`,
+          )
+          const negativeOneDivisor = yield* FunctionBody.integerCompare(
+            body,
+            'eq',
+            right,
+            negativeOne,
+            `div${ordinal}_negone`,
+          )
+          const overflowCase = yield* FunctionBody.binary(
+            body,
+            'and',
+            minimumDividend,
+            negativeOneDivisor,
+            `div${ordinal}_overflow`,
+          )
+          trapping = yield* FunctionBody.binary(
+            body,
+            'or',
+            zeroDivisor,
+            overflowCase,
+            `div${ordinal}_trapping`,
+          )
+        }
+        const continueBlock = yield* LlvmBlock.make(body, `div${ordinal}_ok`)
+        yield* FunctionBody.conditionalBranch(body, trapping, trapBlock, continueBlock)
+        yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+        result = yield* FunctionBody.binary(
+          body,
+          operation.operator === 'Divide'
+            ? unsigned
+              ? 'udiv'
+              : 'sdiv'
+            : unsigned
+              ? 'urem'
+              : 'srem',
+          left,
+          right,
+          `arith${ordinal}`,
+        )
+      }
+      const instruction = yield* Value.instruction(body, result)
+      yield* locate(operation.provenance.span, instruction)
+      locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
+  }
+  if (trapBlock !== initialTrapBlock) context.state.trapBlock = trapBlock
+  context.state.checkOrdinal = checkOrdinal
+})

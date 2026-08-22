@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -135,7 +135,7 @@ pub fn main() -> i32 {
 
 const mirLiterals = (snapshot: Analysis.Snapshot): ReadonlyArray<bigint> =>
   Analysis.loweredMir(snapshot)
-    .functions.flatMap((fn) => Mir.operations(fn))
+    .functions.flatMap((fn) => MirVerification.operations(fn))
     .flatMap((operation) => (operation._tag === 'Literal' ? [BigInt(operation.value)] : []))
 
 /**

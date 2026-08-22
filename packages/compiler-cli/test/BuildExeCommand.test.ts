@@ -2,10 +2,10 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { NodeServices } from '@effect/platform-node'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as BuildExeCommand from '../src/BuildExeCommand.js'
+import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
 const clang = '/usr/bin/clang'
@@ -33,7 +33,7 @@ const run = (source: string, overrides: Partial<BuildExeCommand.Options> = {}) =
     saveTemps: false,
     timings: false,
     ...overrides,
-  }).pipe(Effect.provide(NodeServices.layer))
+  }).pipe(Effect.provide(CompilerHost.layer))
 
 it.effect(
   'compiles a single file to a runnable executable and exits zero',

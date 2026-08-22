@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -9,7 +9,7 @@ export type Access = 'Copy' | 'Move' | 'Shared' | 'Exclusive'
 /** Stable source identity for one match expression. */
 export interface MatchId {
   readonly _tag: 'MatchId'
-  readonly function: DeclarationIndex.DeclarationId
+  readonly function: DeclarationFacts.DeclarationId
   readonly span: SourceSpan.SourceSpan
 }
 

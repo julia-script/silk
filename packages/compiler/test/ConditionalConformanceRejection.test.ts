@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
@@ -171,9 +171,9 @@ pub fn main() -> i32 { return 0 }`,
       'i32',
     ])
     const capability = Type.nominal('conditional-conformance-rejection/service-bound', 'Mark')
-    assert.strictEqual(DeclarationIndex.prove(index, provider, capability)._tag, 'Unproved')
-    assert.isUndefined(DeclarationIndex.witness(index, provider, capability))
-    assert.isFalse(DeclarationIndex.conforms(index, provider, capability))
+    assert.strictEqual(ConformanceProof.prove(index, provider, capability)._tag, 'Unproved')
+    assert.isUndefined(ConformanceProof.witness(index, provider, capability))
+    assert.isFalse(ConformanceProof.conforms(index, provider, capability))
   }),
 )
 

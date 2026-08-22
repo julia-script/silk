@@ -1,11 +1,12 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /** Stable identity of one represented use rooted in a nominal field. */
 export interface Id {
   readonly _tag: 'RepresentedFieldId'
-  readonly nominal: DeclarationIndex.CanonicalId
+  readonly nominal: DeclarationFacts.CanonicalId
   readonly ordinal: number
   readonly useOrdinal: number
 }
@@ -73,7 +74,7 @@ export interface Index {
 
 /** Constructs a stable represented-use identity without using field spelling or source position. */
 export const makeId = (
-  nominal: DeclarationIndex.CanonicalId,
+  nominal: DeclarationFacts.CanonicalId,
   ordinal: number,
   useOrdinal: number,
 ): Id =>
@@ -92,8 +93,8 @@ export const idKey = (self: Id): string =>
 export const key = (instance: Type.Nominal, id: Id): string => `${Type.key(instance)}:${idKey(id)}`
 
 const canonicalOf = (
-  nominal: DeclarationIndex.CanonicalId | Type.Nominal,
-): DeclarationIndex.CanonicalId =>
+  nominal: DeclarationFacts.CanonicalId | Type.Nominal,
+): DeclarationFacts.CanonicalId =>
   nominal._tag === 'CanonicalDeclarationId'
     ? nominal
     : Object.freeze({
@@ -108,8 +109,8 @@ interface SymbolicUse {
 }
 
 const plansOfInternal = (
-  declarations: DeclarationIndex.Index,
-  nominal: DeclarationIndex.CanonicalId | Type.Nominal,
+  declarations: DeclarationFacts.Index,
+  nominal: DeclarationFacts.CanonicalId | Type.Nominal,
   seen: ReadonlySet<string>,
 ): ReadonlyArray<Plan> => {
   const canonical = canonicalOf(nominal)
@@ -149,7 +150,7 @@ const plansOfInternal = (
           candidate.canonical.id.name === type.name,
       )
     if (nested === undefined) return Object.freeze([])
-    const substitution = Type.substitution(
+    const substitution = TypeInference.substitution(
       nested.typeParameters.map((parameter) => parameter.type),
       type.arguments,
     )
@@ -183,11 +184,11 @@ const plansOfInternal = (
 
 /** Collects source-ordered represented-field plans, including forwarded nested representations. */
 export const plansOf = (
-  declarations: DeclarationIndex.Index,
-  nominal: DeclarationIndex.CanonicalId | Type.Nominal,
+  declarations: DeclarationFacts.Index,
+  nominal: DeclarationFacts.CanonicalId | Type.Nominal,
 ): ReadonlyArray<Plan> => plansOfInternal(declarations, nominal, new Set())
 
-const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provenance | undefined => {
+const provenanceOf = (declarations: DeclarationFacts.Index, plan: Plan): Provenance | undefined => {
   const declaration = declarations.modules
     .flatMap((module) => module.structs)
     .find(
@@ -206,7 +207,7 @@ const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provena
 }
 
 const resolvePlan = (
-  declaration: DeclarationIndex.StructFact,
+  declaration: DeclarationFacts.StructFact,
   instance: Type.Nominal,
   plan: Plan,
   provenance: Provenance,
@@ -261,7 +262,7 @@ const resolvePlan = (
 
 /** Resolves represented fields for complete nominal instances, deduplicated by structural key. */
 export const resolveFields = (
-  declarations: DeclarationIndex.Index,
+  declarations: DeclarationFacts.Index,
   instances: ReadonlyArray<Type.Nominal>,
 ): Index => {
   const resolutions = new Map<string, Resolution>()

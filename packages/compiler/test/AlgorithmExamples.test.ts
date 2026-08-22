@@ -5,7 +5,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const Blocker = Schema.Struct({
   phase: Schema.String,
@@ -305,7 +305,7 @@ it.effect(
             `${manifest.id} allocation evidence: ${JSON.stringify(verification)}`,
           )
         }
-        const operations = Analysis.loweredMir(native).functions.flatMap(Mir.operations)
+        const operations = Analysis.loweredMir(native).functions.flatMap(MirVerification.operations)
         assert.isFalse(
           operations.some((operation) => {
             const tag = operation._tag.toLowerCase()

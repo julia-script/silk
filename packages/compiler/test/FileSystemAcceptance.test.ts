@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 const exampleSource = readFileSync(
@@ -295,7 +295,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(mir), [])
+    assert.deepEqual(MirVerification.verify(mir), [])
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(
       evaluated._tag,
@@ -498,7 +498,7 @@ it.effect(
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
-      assert.deepEqual(Mir.verify(mir), [])
+      assert.deepEqual(MirVerification.verify(mir), [])
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(
         evaluated._tag,

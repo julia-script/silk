@@ -2,7 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
@@ -137,8 +137,8 @@ it.effect('keeps HIR, MIR, diagnostics, and instances deterministic across fresh
       [...reverse.results.values()].map((result) => Hir.encode(result.hir)),
     )
     assert.strictEqual(
-      Mir.encode(Analysis.loweredMir(forward)),
-      Mir.encode(Analysis.loweredMir(reverse)),
+      MirEncoding.encode(Analysis.loweredMir(forward)),
+      MirEncoding.encode(Analysis.loweredMir(reverse)),
     )
     assert.deepEqual(forward.instances, reverse.instances)
     assert.deepEqual(forward.diagnostics, reverse.diagnostics)

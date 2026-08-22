@@ -1,5 +1,5 @@
 import { authored, concreteCleanup, generated } from './CleanupEmission.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -74,7 +74,7 @@ export const lowerBuiltinExpression = (
     )
       return undefined
     const fields: Array<{
-      readonly field: DeclarationIndex.FieldId
+      readonly field: DeclarationFacts.FieldId
       readonly value: Mir.LocalId
     }> = []
     for (const field of layoutEntry.representation.fields) {

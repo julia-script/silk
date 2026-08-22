@@ -1,8 +1,10 @@
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as ExpressionAnalysis from './ExpressionAnalysis.js'
 import * as Canonical from './internal/Canonical.js'
 import * as Graph from './internal/Graph.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
@@ -129,7 +131,7 @@ const evidenceOf = (
     Type.equalsOpaqueFamily(argument.family, family),
   )
   if (nestedFamily) {
-    const argument = Elaboration.representationOfExpression(expression)
+    const argument = ExpressionAnalysis.representationOfExpression(expression)
     if (argument !== undefined) return Object.freeze([Object.freeze({ argument, expression })])
   }
   const expectedArgument = Type.isRepresented(expected)
@@ -141,7 +143,7 @@ const evidenceOf = (
     !Type.equalsOpaqueFamily(expectedArgument.family, family)
   )
     return Object.freeze([])
-  const argument = Elaboration.representationOfExpression(expression)
+  const argument = ExpressionAnalysis.representationOfExpression(expression)
   return argument === undefined
     ? Object.freeze([])
     : Object.freeze([Object.freeze({ argument, expression })])
@@ -149,7 +151,7 @@ const evidenceOf = (
 
 const sourceBodyFingerprint = (
   result: Elaboration.Result,
-  declaration: DeclarationIndex.DeclarationFact,
+  declaration: DeclarationFacts.DeclarationFact,
 ): string => {
   const body = SyntaxTree.directNode(declaration.syntax, 'Block')
   const span = body?.span ?? declaration.syntax.span
@@ -197,7 +199,7 @@ const constructionExpression = (
 }
 
 const captureType = (
-  reference: Elaboration.BindingDeclarationFact | DeclarationIndex.ParameterFact,
+  reference: Elaboration.BindingDeclarationFact | DeclarationFacts.ParameterFact,
 ): Type.Type | undefined => {
   if (reference._tag === 'BindingFact')
     return reference.inferredType._tag === 'Available' ? reference.inferredType.type : undefined
@@ -362,7 +364,7 @@ const specializeRealization = (
   instance: Type.OpaqueRepresentationArgument,
   realization: Type.RepresentationArgument,
 ): Type.RepresentationArgument | undefined => {
-  const substitution = Type.substitution(
+  const substitution = TypeInference.substitution(
     producer.function.declaration.typeParameters.map((parameter) => parameter.type),
     instance.arguments,
   )
@@ -375,7 +377,7 @@ const specializeDefinition = (
   found: Definition,
   instance: Type.OpaqueRepresentationArgument,
 ): Definition | undefined => {
-  const substitution = Type.substitution(found.parameters, instance.arguments)
+  const substitution = TypeInference.substitution(found.parameters, instance.arguments)
   if (substitution === undefined) return undefined
   const realization = Type.substituteGenericArgument(found.realization, substitution)
   if (!Type.isRepresentationArgument(realization)) return undefined

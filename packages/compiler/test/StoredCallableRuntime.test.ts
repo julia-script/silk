@@ -5,7 +5,7 @@ import * as Backend from '../src/Backend.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as WasmBackend from '../src/WasmBackend.js'
@@ -360,7 +360,7 @@ it.effect('ends a borrowed callable loan on every terminal and loop-exit path', 
       Target.wasm32UnknownUnknown,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     assert.strictEqual(
       completedValue(BootstrapEvaluation.evaluate(snapshot.instances, module)),
       210,
@@ -502,7 +502,7 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(hookOnlyNative), [], `${exit} hook-only native`)
         const hookOnlyMir = Analysis.loweredMir(hookOnlyNative)
-        const hookOnlyOperations = hookOnlyMir.functions.flatMap(Mir.operations)
+        const hookOnlyOperations = hookOnlyMir.functions.flatMap(MirVerification.operations)
         assert.isFalse(
           hookOnlyOperations.some(
             (operation) => operation._tag === 'Allocate' || operation._tag.startsWith('RawBuffer'),

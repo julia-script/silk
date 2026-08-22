@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -203,8 +203,8 @@ it.effect('moves one allocation through RawBuffer and lexical Slot operations', 
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(mir), [])
-    const operations = mir.functions.flatMap(Mir.operations)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const operations = mir.functions.flatMap(MirVerification.operations)
     assert.include(
       operations.map((operation) => operation._tag),
       'RawBufferFrom',
@@ -261,8 +261,8 @@ it.effect('reads initialized Copy storage repeatedly through shared RawBuffer bo
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(Mir.verify(mir), [])
-    const operations = mir.functions.flatMap(Mir.operations)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const operations = mir.functions.flatMap(MirVerification.operations)
     assert.strictEqual(
       operations.filter((operation) => operation._tag === 'RawBufferRead').length,
       1,

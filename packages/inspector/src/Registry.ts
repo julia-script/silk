@@ -11,7 +11,8 @@
  */
 
 import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
-import { Analysis, Hir, Mir, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, Hir, ToolchainPlan } from '@silk-effect/compiler'
+import * as MirVerification from '@silk-effect/compiler/MirVerification'
 import { projectDataFlow } from './FlowModel.js'
 import { backendEmission, execute, toolchainCommands } from './Panels.js'
 import {
@@ -406,7 +407,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
       }
       const regions = mir.value.functions.reduce((total, fn) => total + fn.regions.length, 0)
       const conversions = mir.value.functions
-        .flatMap(Mir.operations)
+        .flatMap(MirVerification.operations)
         .filter((operation) => operation._tag === 'ConvertUnion')
       const matches = Analysis.mirMatchesOf(snapshot)
       const normalization = Analysis.effectNormalizationOf(snapshot)

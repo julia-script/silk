@@ -1,5 +1,5 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -794,7 +794,7 @@ const placeType = (
   root: LocalId,
   selectors: ReadonlyArray<PlaceSelector>,
   dereferenceReference = false,
-): DeclarationIndex.SemanticType | undefined => {
+): DeclarationFacts.SemanticType | undefined => {
   const rootType = fn.localTypes.at(root.ordinal)
   let current = rootType === undefined ? undefined : semanticType(rootType)
   // A reference root reads and writes through the borrow, so the place is on its target.
@@ -852,10 +852,10 @@ const placeType = (
 
 const fieldPathType = (
   layout: Layout.Plan,
-  root: DeclarationIndex.SemanticType,
-  path: ReadonlyArray<DeclarationIndex.FieldId>,
-): DeclarationIndex.SemanticType | undefined => {
-  let current: DeclarationIndex.SemanticType | undefined = root
+  root: DeclarationFacts.SemanticType,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+): DeclarationFacts.SemanticType | undefined => {
+  let current: DeclarationFacts.SemanticType | undefined = root
   for (const selector of path) {
     const entry: Layout.Entry | undefined = SilkType.isNominal(current)
       ? Layout.entry(layout, current)
@@ -885,7 +885,7 @@ const sameMembers = (
     return candidate !== undefined && SilkType.equals(member, candidate)
   })
 
-export const targetText = (target: DeclarationIndex.CanonicalId): string =>
+export const targetText = (target: DeclarationFacts.CanonicalId): string =>
   `${target.module}.${target.name}`
 
 export const callableTargetText = (target: Hir.CallableTarget): string =>
@@ -1117,7 +1117,7 @@ const effectEnvironmentCleanupValid = (
 const cleanupMatchesSemanticType = (
   layout: Layout.Plan,
   cleanup: CleanupPlan.CleanupPlan,
-  type: DeclarationIndex.SemanticType,
+  type: DeclarationFacts.SemanticType,
   seen: ReadonlySet<string> = new Set(),
 ): boolean => {
   if (SilkType.isRepresented(type)) {
@@ -1312,7 +1312,7 @@ const storedEffectCleanupValid = (
   )
 }
 
-const operationTypes = (operation: Operation): ReadonlyArray<DeclarationIndex.SemanticType> => {
+const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.SemanticType> => {
   switch (operation._tag) {
     case 'Literal':
     case 'StaticView':
@@ -1799,7 +1799,7 @@ const loanViolations = (
 }
 
 interface SuspensionCallTarget {
-  readonly declaration: DeclarationIndex.CanonicalId
+  readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
 }
 

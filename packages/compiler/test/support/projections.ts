@@ -1,7 +1,7 @@
 import type * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
 import type * as BootstrapEvaluation from '../../src/BootstrapEvaluation.js'
-import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
+import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Elaboration from '../../src/Elaboration.js'
 import * as Hir from '../../src/Hir.js'
 import * as Layout from '../../src/Layout.js'
@@ -105,7 +105,7 @@ export const cleanupExitsOf = (self: Analysis.FrontendSnapshot, module: string) 
 
 export const genericDeclarationsOf = (
   self: Analysis.FrontendSnapshot,
-): ReadonlyArray<DeclarationIndex.MemberFact> =>
+): ReadonlyArray<DeclarationFacts.MemberFact> =>
   Object.freeze(
     self.index.modules.flatMap((module) =>
       module.members.filter((member) => member.typeParameters.length > 0),
@@ -205,7 +205,7 @@ export const callingShapeOf = (self: Analysis.Snapshot, type: Type.Type) =>
   self.layout._tag === 'Available' ? Layout.callingShape(self.layout.value, type) : undefined
 
 export interface ControlRegionFact {
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly region: Mir.Region
 }
 
@@ -219,7 +219,7 @@ export const controlRegionsOf = (self: Analysis.Snapshot): ReadonlyArray<Control
       )
 
 export interface ControlEdgeFact {
-  readonly function: DeclarationIndex.CanonicalId
+  readonly function: DeclarationFacts.CanonicalId
   readonly edge: Mir.ControlEdge
 }
 

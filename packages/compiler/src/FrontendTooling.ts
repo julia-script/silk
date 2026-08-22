@@ -1,5 +1,5 @@
 import * as Effect from 'effect/Effect'
-import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleTooling from './ModuleTooling.js'
 import type * as NameResolution from './NameResolution.js'
@@ -21,7 +21,7 @@ export interface FrontendTooling {
 export const make = Effect.fn('FrontendTooling.make')(function* (
   frontend: {
     readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
-    readonly index: DeclarationIndex.Index
+    readonly index: DeclarationFacts.Index
     readonly resolution: NameResolution.Resolution
     readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   },

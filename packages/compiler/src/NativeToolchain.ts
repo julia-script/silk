@@ -14,6 +14,8 @@ import { arch, platform, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Result from 'effect/Result'
 import type * as Backend from './Backend.js'
 import * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
@@ -67,12 +69,14 @@ export type Stage =
   | 'cache-read'
   | 'cache-write'
   | 'scope-acquire'
+  | 'scope-cleanup'
   | 'scope-write'
   | 'object'
   | 'shim'
   | 'link'
   | 'wasm-finalize'
   | 'artifact-commit'
+  | 'artifact-cleanup'
 
 export type ToolchainErrorReason =
   | {
@@ -162,6 +166,43 @@ export interface ArtifactCache {
   readonly set: (key: string, bytes: Uint8Array) => Effect.Effect<void, ToolchainError>
 }
 
+/** Reads a caller-supplied artifact cache without allowing callback throws past the boundary. */
+export const readArtifactCache = Effect.fnUntraced(function* (
+  cache: ArtifactCache,
+  key: string,
+): Effect.fn.Return<Uint8Array | undefined, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.get(key),
+    catch: (cause) => storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ToolchainError
+        ? cause
+        : storageError('NativeToolchain.ArtifactCache.get', 'cache-read', key, cause),
+    ),
+  )
+})
+
+/** Writes a caller-supplied artifact cache without allowing callback throws past the boundary. */
+export const writeArtifactCache = Effect.fnUntraced(function* (
+  cache: ArtifactCache,
+  key: string,
+  bytes: Uint8Array,
+): Effect.fn.Return<void, ToolchainError> {
+  const operation = yield* Effect.try({
+    try: () => cache.set(key, bytes),
+    catch: (cause) => storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
+  })
+  return yield* operation.pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ToolchainError
+        ? cause
+        : storageError('NativeToolchain.ArtifactCache.set', 'cache-write', key, cause),
+    ),
+  )
+})
+
 let atomicNonce = 0
 
 export interface CleanupOperation {
@@ -176,36 +217,54 @@ const nodeCleanup: CleanupOperation = Object.freeze({
     rmSync(path, options),
 })
 
-/**
- * Cleanup is deliberately infallible at the Effect level so a release failure cannot replace the
- * protected success/failure/interruption. A second owner-provided attempt handles transient races;
- * the Node boundary then performs the required final removal even when an injected cleanup keeps
- * failing.
- */
-const cleanupPath = (
+/** Removes one scoped path, retrying once while retaining both arbitrary failure causes. */
+const cleanupPath = Effect.fnUntraced(function* (
   path: string,
   options: { readonly force: true; readonly recursive?: boolean },
   cleanup: CleanupOperation,
-): Effect.Effect<void> => {
-  const attempt = (operation: CleanupOperation): Effect.Effect<void, unknown> =>
+  stage: 'scope-cleanup' | 'artifact-cleanup',
+): Effect.fn.Return<void, ToolchainError> {
+  const first = yield* Effect.result(
     Effect.try({
-      try: () => operation.remove(path, options),
+      try: () => cleanup.remove(path, options),
       catch: (cause) => cause,
-    })
-  const retry = attempt(cleanup).pipe(
-    Effect.matchEffect({
-      onFailure: () => attempt(nodeCleanup),
-      onSuccess: () => Effect.succeed(undefined),
     }),
   )
-  return attempt(cleanup).pipe(
-    Effect.matchEffect({
-      onFailure: () => retry,
-      onSuccess: () => Effect.succeed(undefined),
+  if (Result.isSuccess(first)) return
+  const retry = yield* Effect.result(
+    Effect.try({
+      try: () => cleanup.remove(path, options),
+      catch: (cause) => cause,
     }),
-    Effect.orElseSucceed(() => undefined),
   )
-}
+  if (Result.isSuccess(retry)) return
+  const fallback = yield* Effect.result(
+    Effect.try({
+      try: () => nodeCleanup.remove(path, options),
+      catch: (cause) => cause,
+    }),
+  )
+  return yield* storageError('NativeToolchain.cleanupPath', stage, path, {
+    first: first.failure,
+    retry: retry.failure,
+    ...(Result.isFailure(fallback) ? { fallback: fallback.failure } : {}),
+  })
+})
+
+const releaseCleanup = <A, E>(
+  exit: Exit.Exit<A, E>,
+  cleanup: Effect.Effect<void, ToolchainError>,
+): Effect.Effect<void, ToolchainError> =>
+  Exit.isSuccess(exit)
+    ? cleanup
+    : cleanup.pipe(
+        Effect.catch((error) =>
+          Effect.logError(error).pipe(
+            Effect.annotateLogs('cleanupOperation', error.operation),
+            Effect.annotateLogs('cleanupStage', error.stage),
+          ),
+        ),
+      )
 
 /** Atomically writes bytes through a unique same-directory temporary sibling. */
 export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* (
@@ -242,7 +301,11 @@ export const atomicCommit = Effect.fn('NativeToolchain.atomicCommit')(function* 
         },
         catch: (cause) => storageError('NativeToolchain.atomicCommit', stage, path, cause),
       }),
-    (staged) => cleanupPath(staged, { force: true }, options.cleanup ?? nodeCleanup),
+    (staged, exit) =>
+      releaseCleanup(
+        exit,
+        cleanupPath(staged, { force: true }, options.cleanup ?? nodeCleanup, 'artifact-cleanup'),
+      ),
   )
 })
 
@@ -383,12 +446,12 @@ export const hostTarget = Effect.fn('NativeToolchain.hostTarget')(function* (): 
 /** Selects the current Node process host without pulling Node detection into the pure target actor. */
 export const hostSelection = (): Target.Selection => Target.select(undefined, platform(), arch())
 
-export const withBuildScope = <A, E, R>(
+export const withBuildScope = Effect.fn('NativeToolchain.withBuildScope')(function* <A, E, R>(
   name: string,
   run: (scope: BuildScope) => Effect.Effect<A, E, R>,
   options: { readonly saveTemps?: boolean; readonly cleanup?: CleanupOperation } = {},
-): Effect.Effect<A, E | ToolchainError, R> =>
-  Effect.acquireUseRelease(
+): Effect.fn.Return<A, E | ToolchainError, R> {
+  return yield* Effect.acquireUseRelease(
     Effect.try({
       try: () => {
         const root = mkdtempSync(join(tmpdir(), `silk-${name.replace(/[^A-Za-z0-9_-]/g, '_')}-`))
@@ -398,11 +461,20 @@ export const withBuildScope = <A, E, R>(
         storageError('NativeToolchain.withBuildScope', 'scope-acquire', tmpdir(), cause),
     }),
     run,
-    (scope) =>
+    (scope, exit) =>
       options.saveTemps === true
         ? Effect.succeed(undefined)
-        : cleanupPath(scope.root, { recursive: true, force: true }, options.cleanup ?? nodeCleanup),
+        : releaseCleanup(
+            exit,
+            cleanupPath(
+              scope.root,
+              { recursive: true, force: true },
+              options.cleanup ?? nodeCleanup,
+              'scope-cleanup',
+            ),
+          ),
   )
+})
 
 const readShimCache = Effect.fnUntraced(function* (
   cache: ShimCache,

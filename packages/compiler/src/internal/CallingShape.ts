@@ -1,4 +1,4 @@
-import type * as DeclarationIndex from '../DeclarationIndex.js'
+import type * as DeclarationFacts from '../DeclarationFacts.js'
 import type * as Type from '../Type.js'
 
 export interface CallingLane {
@@ -9,14 +9,14 @@ export interface CallingLane {
 
 export interface AddressScalar {
   readonly _tag: 'Address'
-  readonly element: DeclarationIndex.SemanticType
+  readonly element: DeclarationFacts.SemanticType
   readonly bits: 32 | 64
 }
 
 export type CallingScalar = Type.Builtin | AddressScalar
 
 export type Selector =
-  | DeclarationIndex.FieldId
+  | DeclarationFacts.FieldId
   | { readonly _tag: 'ElementSelector'; readonly index: number }
   | { readonly _tag: 'CallableCaptureSelector'; readonly ordinal: number }
   | { readonly _tag: 'EffectCaptureSelector'; readonly ordinal: number }
@@ -35,7 +35,7 @@ export type CallingShapeNode =
       readonly _tag: 'ProductShape'
       readonly type: Type.Nominal
       readonly fields: ReadonlyArray<{
-        readonly field: DeclarationIndex.FieldId
+        readonly field: DeclarationFacts.FieldId
         readonly shape: CallingShapeNode
       }>
       readonly laneCount: number
@@ -69,19 +69,19 @@ export type CallingShapeNode =
     }
   | {
       readonly _tag: 'AddressShape'
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly address: { readonly type: AddressScalar; readonly lane: 0 }
       readonly laneCount: 1
     }
   | {
       readonly _tag: 'CallableEnvironmentShape'
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly fields: ReadonlyArray<{ readonly capture: number; readonly shape: CallingShapeNode }>
       readonly laneCount: number
     }
   | {
       readonly _tag: 'EffectEnvironmentShape'
-      readonly type: DeclarationIndex.SemanticType
+      readonly type: DeclarationFacts.SemanticType
       readonly fields: ReadonlyArray<{ readonly capture: number; readonly shape: CallingShapeNode }>
       readonly laneCount: number
     }
@@ -123,7 +123,7 @@ export type CallingShapeNode =
 
 export interface CallingShape {
   readonly _tag: 'CallingShape'
-  readonly type: DeclarationIndex.SemanticType
+  readonly type: DeclarationFacts.SemanticType
   readonly tree: CallingShapeNode
   readonly laneCount: number
   readonly lanes: ReadonlyArray<CallingLane>

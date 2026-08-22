@@ -1,7 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 const module = 'opaque/engine-parity'
@@ -40,13 +41,13 @@ const snapshot = Effect.fnUntraced(function* (source: string, target: string) {
 const assertStaticMir = (self: Analysis.Snapshot, name: string): void => {
   assert.strictEqual(self.mir._tag, 'Available', name)
   if (self.mir._tag !== 'Available') return
-  const encoded = Mir.encode(self.mir.value)
+  const encoded = MirEncoding.encode(self.mir.value)
   assert.notInclude(encoded, 'OpaqueRepresentationArgument', name)
   assert.notInclude(encoded, 'unavailable body', name)
   assert.notInclude(encoded, 'unavailable contract type', name)
   assert.strictEqual(
     self.mir.value.functions
-      .flatMap(Mir.operations)
+      .flatMap(MirVerification.operations)
       .some((operation) => operation._tag === 'Allocate'),
     false,
     name,

@@ -1,7 +1,11 @@
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceGoal from './ConformanceGoal.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
+import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {
   ArgumentFact,
@@ -47,6 +51,7 @@ import {
 } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
 import * as ProviderSelection from './ProviderSelection.js'
 import * as RequirementRow from './RequirementRow.js'
@@ -126,7 +131,7 @@ export function analyzeArguments(
     if (qualifier._tag === 'Intrinsic') {
       const library =
         qualifierSpelling === 'Effect'
-          ? DeclarationIndex.lookup(resolution.index, 'silk/effect', memberSpelling)
+          ? DeclarationFacts.lookup(resolution.index, 'silk/effect', memberSpelling)
           : undefined
       if (
         library?._tag === 'Resolved' &&
@@ -144,7 +149,7 @@ export function analyzeArguments(
         builtinTypeParameters = builtin?.typeParameters ?? contract?.binders ?? []
       }
     } else if (qualifier._tag === 'Namespace') {
-      const member = DeclarationIndex.lookup(resolution.index, qualifier.module, memberSpelling)
+      const member = DeclarationFacts.lookup(resolution.index, qualifier.module, memberSpelling)
       target =
         member._tag === 'Resolved' && member.declaration._tag === 'FunctionDeclaration'
           ? member.declaration
@@ -168,7 +173,7 @@ export function analyzeArguments(
       )
       if (bound?._tag === 'BoundOperation') boundParameters = bound.reference.parameters
       else if (qualifier.declaration.canonical._tag === 'Canonical') {
-        const member = DeclarationIndex.lookup(
+        const member = DeclarationFacts.lookup(
           resolution.index,
           qualifier.declaration.canonical.id.module,
           memberSpelling,
@@ -190,7 +195,7 @@ export function analyzeArguments(
       // module that declares `Vector`. The call itself already resolves that way, but arguments are
       // analyzed first, and without the same lookup they get no expected types — which reads to a
       // borrow argument as "no borrow is wanted here" and rejects it as an invalid borrow position.
-      const member = DeclarationIndex.lookup(
+      const member = DeclarationFacts.lookup(
         resolution.index,
         qualifier.declaration.canonical.id.module,
         memberSpelling,
@@ -210,14 +215,14 @@ export function analyzeArguments(
     callTypeArguments?.explicit === true &&
     explicitTypes !== undefined &&
     explicitTypes.length <= builtinTypeParameters.length
-      ? Type.prefixSubstitution(builtinTypeParameters, explicitTypes)
+      ? TypeInference.prefixSubstitution(builtinTypeParameters, explicitTypes)
       : undefined
   // An explicit prefix is context for the value arguments just as a complete list is: the
   // parameters it binds become concrete expected types, and the ones it leaves open stay symbolic
   // exactly as they are when nothing was written.
   const substitution =
     callTypeArguments?.explicit === true && explicitTypes !== undefined
-      ? Type.prefixSubstitution(declaredTypeParameters, explicitTypes)
+      ? TypeInference.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
   const expectedTypes = Object.freeze(
     boundParameters.length > 0
@@ -374,8 +379,8 @@ export const analyzeCallTypeArguments = (
         : Object.freeze([
             Diagnostic.invalidRequirementType(`role ${rolePath.spelling}`, rolePath.syntax.span),
           ])
-    const raw = DeclarationIndex.analyzeDeclaredType(source, argumentNode, environment)
-    const resolved = DeclarationIndex.resolveTypeFact(
+    const raw = DeclarationCollection.analyzeDeclaredType(source, argumentNode, environment)
+    const resolved = DeclarationResolution.resolveTypeFact(
       resolution.index,
       source.id,
       raw.fact,
@@ -440,7 +445,7 @@ export const hasAvailableCallSyntax = (call: SyntaxTree.Node): boolean => {
 export const isSectionArity = (expectedCount: number, actualCount: number): boolean =>
   actualCount > 0 && actualCount < expectedCount
 
-export type SourceCallable = DeclarationFact | DeclarationIndex.ServiceOperationFact
+export type SourceCallable = DeclarationFact | DeclarationFacts.ServiceOperationFact
 
 export const sourceCallable = (reference: CallReferenceFact): SourceCallable | undefined =>
   reference._tag === 'Resolved'
@@ -456,7 +461,7 @@ export const resolvedCallableContract = (
   const callable = sourceCallable(reference)
   return callable === undefined
     ? undefined
-    : DeclarationIndex.callableContract(
+    : DeclarationFacts.callableContract(
         callable,
         reference._tag === 'ResolvedServiceOperation'
           ? reference.service.typeParameters
@@ -612,7 +617,7 @@ export const seededSpecialization = (
   let rowFailure: Type.RowInferenceFailure | undefined
   for (const site of sites) {
     const attempt = new Map(inferred)
-    if (Type.infer(site.pattern, site.actual, attempt)) {
+    if (TypeInference.infer(site.pattern, site.actual, attempt)) {
       commitSpecialization(inferred, attempt)
       continue
     }
@@ -625,11 +630,11 @@ export const seededSpecialization = (
       contextualIntegerCompatible(site.expression, expected)
     )
       continue
-    rowFailure ??= Type.rowInferenceFailure(site.pattern, site.actual)
+    rowFailure ??= TypeInference.rowInferenceFailure(site.pattern, site.actual)
     const implied = new Map<string, Type.GenericArgument>()
     // Only what this argument alone implies can contradict the prefix; an argument that does not
     // unify at all is an ordinary argument mismatch and belongs to the argument pass.
-    if (!Type.infer(site.pattern, site.actual, implied)) continue
+    if (!TypeInference.infer(site.pattern, site.actual, implied)) continue
     for (const [identity, fact] of written) {
       const suppliedArgument = implied.get(identity)
       const explicitArgument = seeded.get(identity)
@@ -802,7 +807,7 @@ export const solveCallableConstraints = (
       responsible: span,
       oracle: Object.freeze({
         match: (provider: Type.Type, capability: Type.Nominal) =>
-          DeclarationIndex.providerMatch(resolution.index, provider, capability),
+          ConformanceProof.providerMatch(resolution.index, provider, capability),
       }),
     })
     if (solved._tag === 'Rejected') {
@@ -1119,11 +1124,11 @@ export const analyzeCallContract = (
             : supplied
         if (representedSupplied === undefined) {
           compatible = false
-          rowFailure = Type.rowInferenceFailure(pattern, supplied)
+          rowFailure = TypeInference.rowInferenceFailure(pattern, supplied)
           break
         }
         const attempt = new Map(inferred)
-        if (Type.infer(pattern, representedSupplied, attempt)) {
+        if (TypeInference.infer(pattern, representedSupplied, attempt)) {
           commitSpecialization(inferred, attempt)
           progressed = true
         } else {
@@ -1135,7 +1140,9 @@ export const analyzeCallContract = (
       if (!progressed) {
         const failed = deferred.at(0)
         rowFailure =
-          failed === undefined ? undefined : Type.rowInferenceFailure(failed.pattern, failed.actual)
+          failed === undefined
+            ? undefined
+            : TypeInference.rowInferenceFailure(failed.pattern, failed.actual)
         compatible = false
         break
       }
@@ -1290,7 +1297,7 @@ export const analyzeCallContract = (
 export const interfaceConstraintDiagnostics = (
   reference: CallReferenceFact,
   contract: CallContractResult,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   caller: DeclarationFact,
   span: SourceSpan.SourceSpan,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
@@ -1331,7 +1338,7 @@ export const interfaceConstraintDiagnostics = (
         // Selection excludes rejected declarations, but a partial declaration still carries the most
         // useful source error: name the exact operation it failed to map before reporting the broader
         // missing-witness result.
-        const unmapped = DeclarationIndex.unmappedInterfaceOperations(index, provider, capability)
+        const unmapped = ConformanceProof.unmappedInterfaceOperations(index, provider, capability)
         if (unmapped.length > 0)
           return unmapped.map((operation) =>
             Diagnostic.invalidConformance(
@@ -1339,11 +1346,11 @@ export const interfaceConstraintDiagnostics = (
               span,
             ),
           )
-        if (!assumedByCaller && !DeclarationIndex.conforms(index, provider, capability)) {
+        if (!assumedByCaller && !ConformanceProof.conforms(index, provider, capability)) {
           // A conditional header that covers this provider but whose own requirements failed has a
           // more useful answer than "does not implement": the chain says which requirement is
           // missing and which wrapper asked for it.
-          const proof = DeclarationIndex.prove(index, provider, capability)
+          const proof = ConformanceProof.prove(index, provider, capability)
           if (
             proof._tag === 'Unproved' &&
             ConformanceGoal.key(proof.goal) !==
@@ -1465,9 +1472,9 @@ export const callableTypeOfReference = (
 }
 
 export const serviceOperation = (
-  service: DeclarationIndex.ServiceFact,
+  service: DeclarationFacts.ServiceFact,
   spelling_: string,
-): DeclarationIndex.ServiceOperationFact | undefined =>
+): DeclarationFacts.ServiceOperationFact | undefined =>
   service.operations.find(
     (operation) =>
       operation.state._tag === 'Unique' &&
@@ -1485,11 +1492,11 @@ export const serviceOperation = (
  * canonical parameter, before any concrete argument exists.
  */
 export const interfaceOperationContract = (
-  operation: DeclarationIndex.InterfaceOperationApplicationFact,
+  operation: DeclarationFacts.InterfaceOperationApplicationFact,
 ):
   | {
-      readonly declaration: DeclarationIndex.ServiceOperationFact
-      readonly contract: DeclarationIndex.InterfaceOperationApplicationFact
+      readonly declaration: DeclarationFacts.ServiceOperationFact
+      readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
     }
@@ -1532,7 +1539,7 @@ export const interfaceOperationContract = (
  */
 export const boundOperationReference = (
   declaration: DeclarationFact,
-  interface_: DeclarationIndex.InterfaceFact,
+  interface_: DeclarationFacts.InterfaceFact,
   qualifier: string,
   member: string,
   memberToken: Token.Token,
@@ -1631,7 +1638,7 @@ export const resolvedFunctionReference = (
   const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
   if (qualifierLookup._tag === 'Intrinsic') {
     if (qualifier === 'Effect') {
-      const library = DeclarationIndex.lookup(resolution.index, 'silk/effect', member)
+      const library = DeclarationFacts.lookup(resolution.index, 'silk/effect', member)
       if (
         library._tag === 'Resolved' &&
         library.declaration._tag === 'FunctionDeclaration' &&
@@ -1663,7 +1670,7 @@ export const resolvedFunctionReference = (
         })
   }
   if (qualifierLookup._tag !== 'Namespace') return undefined
-  const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
+  const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
   if (
     memberLookup._tag !== 'Resolved' ||
     memberLookup.declaration._tag !== 'FunctionDeclaration' ||
@@ -1694,7 +1701,7 @@ export const analyzeFunctionItem = (
     const member = spelling(source, memberToken)
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag !== 'Namespace') return undefined
-    const memberLookup = DeclarationIndex.lookup(resolution.index, qualifierLookup.module, member)
+    const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
     const diagnostic =
       memberLookup._tag !== 'Resolved'
         ? Diagnostic.unknownImportedMember(qualifierLookup.module, member, memberToken.span)
@@ -1863,9 +1870,9 @@ export const analyzeSectionContract = (
       if (
         argument.type._tag === 'Available' &&
         parameter !== undefined &&
-        !Type.infer(parameter.type, argument.type.type, substitution)
+        !TypeInference.infer(parameter.type, argument.type.type, substitution)
       ) {
-        const rowFailure = Type.rowInferenceFailure(parameter.type, argument.type.type)
+        const rowFailure = TypeInference.rowInferenceFailure(parameter.type, argument.type.type)
         diagnostics.push(
           rowFailure === undefined
             ? Diagnostic.typeArgumentInference(reference.spelling, call.span)
@@ -1928,7 +1935,7 @@ export const analyzeSectionContract = (
 
 export const captureAccess = (
   expression: ExpressionFact,
-  index: DeclarationIndex.Index | undefined,
+  index: DeclarationFacts.Index | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] => {
   if (expression._tag === 'Move')
@@ -1949,7 +1956,7 @@ export const captureAccess = (
 
 export const ownedProviderCaptureAccess = (
   expression: ExpressionFact,
-  index: DeclarationIndex.Index,
+  index: DeclarationFacts.Index,
   assumptions: ReadonlySet<string> = new Set(),
 ): CallableCaptureFact['access'] =>
   expression._tag === 'Move' &&
@@ -2071,7 +2078,7 @@ export const executableSpecializationOwner = (
 ): Type.ExecutableSpecializationOwner | undefined => {
   const owner = resolution.executableOwner
   if (owner === undefined) return undefined
-  const declaration = DeclarationIndex.byCanonical(resolution.index, owner)
+  const declaration = DeclarationFacts.byCanonical(resolution.index, owner)
   return declaration === undefined
     ? undefined
     : Object.freeze({
@@ -2266,8 +2273,8 @@ export const finishCallableApplication = (
         valid = false
         continue
       }
-      if (!Type.infer(expected, argument.type.type, inferred)) {
-        const rowFailure = Type.rowInferenceFailure(expected, argument.type.type)
+      if (!TypeInference.infer(expected, argument.type.type, inferred)) {
+        const rowFailure = TypeInference.rowInferenceFailure(expected, argument.type.type)
         diagnostics.push(
           rowFailure !== undefined
             ? Diagnostic.contractRowInference(rowFailure, argument.syntax.span)

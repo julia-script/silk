@@ -5,8 +5,9 @@ import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
 import * as Lower from '../src/Lower.js'
-import * as Mir from '../src/Mir.js'
+import type * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
@@ -78,7 +79,7 @@ const storedRealization = (module: Mir.Module, label = 'stored Effect') => {
 const storedRun = (module: Mir.Module, label = 'stored Effect') => {
   const realizations = storedRealizations(module)
   for (const realization of realizations) {
-    for (const operation of module.functions.flatMap(Mir.operations)) {
+    for (const operation of module.functions.flatMap(MirVerification.operations)) {
       if (operation._tag !== 'RunEffectValue') continue
       const runner = operation.runnerBase?.declaration ?? operation.runner
       if (runner.module === realization.runner.module && runner.name === realization.runner.name)
@@ -87,7 +88,7 @@ const storedRun = (module: Mir.Module, label = 'stored Effect') => {
   }
   const expected = realizations.map((realization) => realization.runner.name).join(', ')
   const actual = module.functions
-    .flatMap(Mir.operations)
+    .flatMap(MirVerification.operations)
     .flatMap((operation) =>
       operation._tag === 'RunEffectValue'
         ? [operation.runnerBase?.declaration.name ?? operation.runner.name]
@@ -126,7 +127,7 @@ const assertProvidedSpecialization = (
   outcome: BootstrapEvaluation.Outcome,
 ): void => {
   const operation = module.functions
-    .flatMap(Mir.operations)
+    .flatMap(MirVerification.operations)
     .find(
       (candidate) =>
         candidate._tag === 'RunEffectValue' &&
@@ -275,7 +276,7 @@ it.effect('executes stored Effects with exact runner, rows, access, and ownershi
         `stored-effect-runtime/${testCase.name}`,
         testCase.source,
       )
-      assert.deepEqual(Mir.verify(module), [], testCase.name)
+      assert.deepEqual(MirVerification.verify(module), [], testCase.name)
       const { realization } = storedRun(module, testCase.name)
       assert.strictEqual(realization.access, testCase.access, testCase.name)
       assertOwnershipFacts(realization, testCase.name)
@@ -341,7 +342,7 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
         `stored-effect-runtime/cleanup-${exit}`,
         cleanupProgram(exit),
       )
-      assert.deepEqual(Mir.verify(module), [], exit)
+      assert.deepEqual(MirVerification.verify(module), [], exit)
       const realization = storedRealization(module, exit)
       const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
       assert.strictEqual(completedValue(outcome), 42, exit)
@@ -420,7 +421,7 @@ pub fn main() -> i32 {
 it.effect('resumes a suspending stored Effect and cleans its environment exactly once', () =>
   Effect.gen(function* () {
     const { snapshot, module } = yield* lowerStored('stored-effect-runtime/suspending', suspending)
-    assert.deepEqual(Mir.verify(module), [])
+    assert.deepEqual(MirVerification.verify(module), [])
     const outcome = BootstrapEvaluation.evaluate(snapshot.instances, module)
     assert.strictEqual(completedValue(outcome), 42)
     assertRunnerAndRows(module, outcome)

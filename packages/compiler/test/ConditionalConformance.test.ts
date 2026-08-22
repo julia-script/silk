@@ -1,9 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as Hir from '../src/Hir.js'
-import * as Mir from '../src/Mir.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
@@ -91,7 +91,7 @@ pub fn main() -> i32 { return 0 }`,
     const index = Analysis.declarationIndex(snapshot)
     const schema = Type.nominal('conditional-conformance/proof', 'Schema')
     const wrapped = Type.nominal('conditional-conformance/proof', 'MappedSchema', [schema])
-    const proof = DeclarationIndex.prove(
+    const proof = ConformanceProof.prove(
       index,
       wrapped,
       Type.nominal('conditional-conformance/proof', 'Decoder'),
@@ -183,8 +183,8 @@ pub fn main() -> i32 {
       schema,
       Type.requirementRowArgument([{ capability: clock, role: 'DefaultRole', access: 'Shared' }]),
     ])
-    const failureProof = DeclarationIndex.prove(index, failureBox, Type.nominal(module, 'Decoder'))
-    const requirementProof = DeclarationIndex.prove(
+    const failureProof = ConformanceProof.prove(index, failureBox, Type.nominal(module, 'Decoder'))
+    const requirementProof = ConformanceProof.prove(
       index,
       requirementBox,
       Type.nominal(module, 'Decoder'),
@@ -445,7 +445,7 @@ pub fn main() -> i32 { return 0 }`,
     const schema = Type.nominal('conditional-conformance/root-edge', 'Schema')
     const wrapper = Type.nominal('conditional-conformance/root-edge', 'MappedSchema', [schema])
     const capability = Type.nominal('conditional-conformance/root-edge', 'Decoder')
-    const target = DeclarationIndex.interfaceWitnessTarget(
+    const target = ConformanceProof.interfaceWitnessTarget(
       Analysis.declarationIndex(snapshot),
       wrapper,
       capability,
@@ -527,7 +527,7 @@ pub fn main() -> i32 {
 }`,
     )
     const mir = Analysis.loweredMir(snapshot)
-    const encoded = Mir.encode(mir)
+    const encoded = MirEncoding.encode(mir)
     // Every call names a declaration and its concrete arguments. Nothing selects a witness at run
     // time, so no dictionary, interface tag, or actor-name lookup can appear.
     for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
@@ -651,7 +651,7 @@ pub fn main() -> i32 {
       ),
     )
     assert.strictEqual(witnessCalls.length, 2)
-    const encodedMir = Mir.encode(mir)
+    const encodedMir = MirEncoding.encode(mir)
     for (const spelling of ['dictionary', 'vtable', 'witnessTable', 'interfaceTag', 'typeTag'])
       assert.isFalse(encodedMir.includes(spelling), `${spelling} reached MIR`)
     const outcome = Analysis.evaluate(snapshot)
@@ -833,7 +833,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const provider = Type.nominal(module, 'Box', ['i32'])
     const capability = Type.nominal(module, 'Decoder')
-    const target = DeclarationIndex.interfaceWitnessTarget(
+    const target = ConformanceProof.interfaceWitnessTarget(
       Analysis.declarationIndex(snapshot),
       provider,
       capability,
