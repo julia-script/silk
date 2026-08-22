@@ -1,6 +1,6 @@
 ownership-module golden://damaged.silk
 fn golden://damaged.silk.puzzle unavailable
-  binding p0 value copyable live [14, 28)..[0, 53)
+  binding p0 value unavailable affinity=Unavailable<semantic:SEM0001@golden://damaged.silk:21-28#0> obligations=unavailable(SEM0001@golden://damaged.silk:21:0) live [14, 28)..[0, 53)
   exit return [45, 51) loan-ends none releases none
 fn golden://damaged.silk.main unavailable
   exit return [83, 93) loan-ends none releases none

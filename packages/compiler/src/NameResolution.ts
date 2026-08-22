@@ -513,6 +513,14 @@ export const resolveType = (
       ? lookup(scope, index, first.spelling)
       : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
   if (result._tag === 'Intrinsic') {
+    if (
+      result.actor === 'Intrinsic' &&
+      second?.spelling === 'SharedCore' &&
+      path.segments.length === 2
+    ) {
+      const sharedCore = Type.intrinsicNominals.get('Intrinsic.SharedCore')
+      if (sharedCore !== undefined) return resolvedType(path, sharedCore)
+    }
     if (Type.isBuiltin(result.actor)) return resolvedType(path, result.actor)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }

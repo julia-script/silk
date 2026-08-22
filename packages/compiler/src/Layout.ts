@@ -808,6 +808,14 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
+    if (Type.isSharedCore(type)) {
+      const result = unavailable(type, Object.freeze([]), {
+        _tag: 'InvalidDeclaration',
+        detail: 'sealed local shared ownership has no target representation in this layer',
+      })
+      completed.set(key, result)
+      return result
+    }
     if (Type.isIntrinsicNominal(type) || Type.equals(type, Type.unit)) {
       const ordinal = Type.equals(type, Type.unit)
         ? Type.intrinsicNominals.size

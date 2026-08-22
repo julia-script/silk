@@ -242,6 +242,10 @@
       "types": "./dist/LiteralForm.d.ts",
       "import": "./dist/LiteralForm.js"
     },
+    "./LocalSharedOwnership": {
+      "types": "./dist/LocalSharedOwnership.d.ts",
+      "import": "./dist/LocalSharedOwnership.js"
+    },
     "./Lower": {
       "types": "./dist/Lower.d.ts",
       "import": "./dist/Lower.js"
@@ -325,6 +329,10 @@
     "./Elaboration": {
       "types": "./dist/Elaboration.d.ts",
       "import": "./dist/Elaboration.js"
+    },
+    "./ExecutionAffinity": {
+      "types": "./dist/ExecutionAffinity.d.ts",
+      "import": "./dist/ExecutionAffinity.js"
     },
     "./FormattedDocument": {
       "types": "./dist/FormattedDocument.d.ts",

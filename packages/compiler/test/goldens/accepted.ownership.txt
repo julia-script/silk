@@ -1,7 +1,7 @@
 ownership-module golden://accepted.silk
 fn golden://accepted.silk.choose satisfied
-  binding p0 left copyable live [14, 23)..[0, 59)
-  binding p1 right copyable live [24, 35)..[0, 59)
+  binding p0 left copyable affinity=Unrestricted obligations=none live [14, 23)..[0, 59)
+  binding p1 right copyable affinity=Unrestricted obligations=none live [24, 35)..[0, 59)
   exit return [52, 57) loan-ends none releases none
 fn golden://accepted.silk.main satisfied
   exit return [89, 102) loan-ends none releases none

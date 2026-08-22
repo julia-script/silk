@@ -15,6 +15,10 @@ const acceptedSource = `pub fn choose(left: i32, right: i32) -> i32 { return lef
 pub fn main() -> i32 { return choose(1, 2) }`
 const damagedSource = `pub fn puzzle(value: Mystery) -> i32 { return value }
 pub fn main() -> i32 { return missing() }`
+const localSharedSource = `fn retain<T>(value: Intrinsic.SharedCore<T>) -> Intrinsic.SharedCore<T> {
+  return move value
+}
+pub fn main() -> i32 { return 0 }`
 
 const check = (id: string, text: string): Ownership.ModuleOwnership =>
   ownership(elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))))
@@ -73,6 +77,14 @@ it('matches the ownership golden encodings byte-for-byte', () => {
     OwnershipEncoding.encode(check('golden://damaged.silk', damagedSource)),
     golden('damaged.ownership.txt'),
   )
+})
+
+it('matches the local-shared ownership golden and repeats byte-for-byte in process', () => {
+  const first = OwnershipEncoding.encode(check('golden://local-shared.silk', localSharedSource))
+  const second = OwnershipEncoding.encode(check('golden://local-shared.silk', localSharedSource))
+
+  assert.strictEqual(first, golden('local-shared.ownership.txt'))
+  assert.strictEqual(second, first)
 })
 
 it('checks and encodes identically across repeated fresh runs', () => {

@@ -972,7 +972,7 @@ export const resolveStructTarget = (
                 fact: Object.freeze({
                   _tag: 'Resolved',
                   struct: candidate,
-                  type: Type.nominal(base.module, base.name, arguments_),
+                  type: Type.specializeNominal(base, arguments_),
                   token,
                 }),
                 diagnostics: Diagnostic.merge(
@@ -992,7 +992,7 @@ export const resolveStructTarget = (
     (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
   )
   if (resolved.fact._tag === 'Resolved' && Type.isNominal(resolved.fact.type)) {
-    if (Type.isIntrinsicNominal(resolved.fact.type)) {
+    if (Type.isIntrinsicNominal(resolved.fact.type) && !Type.isSharedCore(resolved.fact.type)) {
       const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
       if (token !== undefined)
         return Object.freeze({
