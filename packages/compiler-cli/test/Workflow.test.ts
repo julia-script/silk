@@ -5,6 +5,8 @@ import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Stream from 'effect/Stream'
 import * as Project from '../src/Project.js'
 import * as SourceSettlement from '../src/SourceSettlement.js'
 import * as Workflow from '../src/Workflow.js'
@@ -41,6 +43,12 @@ const options = (workingDirectory: string): Workflow.ProjectSelection => ({
   profile: 'debug',
 })
 
+const silentWatchLayer = (fileSystem: FileSystem.FileSystem) =>
+  Layer.succeed(FileSystem.FileSystem, {
+    ...fileSystem,
+    watch: () => Stream.never,
+  })
+
 /** Polls a watch-mode side effect, which lands on a filesystem event rather than a returned value. */
 const waitUntil = Effect.fnUntraced(function* (condition: () => boolean) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -51,8 +59,8 @@ const waitUntil = Effect.fnUntraced(function* (condition: () => boolean) {
 })
 
 /**
- * Rewrites a source file until the watch reacts. The watcher registers after the first
- * compilation finishes, so a single early write can land before anything is listening.
+ * Rewrites a source file until the watch reacts. Filesystem backends may coalesce a save with an
+ * adjacent event, so watch behavior tests retry the same finished edit until it is observed.
  */
 const editUntilRecompiled = Effect.fnUntraced(function* (
   file: string,
@@ -94,10 +102,8 @@ interface Pass {
 }
 
 /**
- * Starts a watch whose passes are recorded, and returns once the watcher is demonstrably
- * subscribed: the first compilation has run, an edit has been seen, and the passes it caused have
- * finished. A test that counts passes needs that, because `Workflow.watch` registers the watcher
- * only after its first compilation, so an early edit can land before anything is listening.
+ * Starts a watch whose passes are recorded, then makes one edit and waits for its compilation to
+ * finish. Tests that count later passes begin from this known idle, subscribed state.
  */
 const watchRecording = Effect.fnUntraced(function* (root: string) {
   const passes: Array<Pass> = []
@@ -122,25 +128,42 @@ const watchRecording = Effect.fnUntraced(function* (root: string) {
 })
 
 it('waits through a writer paused after truncating a source file', () => {
-  const afterTruncate = SourceSettlement.observe(SourceSettlement.make('complete:old'), 'empty')
-  assert.strictEqual(afterTruncate._tag, 'Pending')
-  if (afterTruncate._tag !== 'Pending') return
-
-  const whileWriterPaused = SourceSettlement.observe(afterTruncate.settlement, 'empty')
+  // The event debounce expires while the writer is paused after O_TRUNC, so the settle loop's
+  // first sample is already empty. The prior compiled snapshot is what makes that transition
+  // suspicious; a later observation of the same empty fingerprint must not settle it normally.
+  const afterTruncate = SourceSettlement.fromEntryTransition('empty', source.length, 0)
+  const whileWriterPaused = SourceSettlement.observe(afterTruncate, 'empty')
   assert.strictEqual(whileWriterPaused._tag, 'Pending')
   if (whileWriterPaused._tag !== 'Pending') return
 
-  const writerFinished = SourceSettlement.observe(whileWriterPaused.settlement, 'complete:new')
-  assert.strictEqual(writerFinished._tag, 'Pending')
-  if (writerFinished._tag !== 'Pending') return
+  const stillPaused = SourceSettlement.observe(whileWriterPaused.settlement, 'empty')
+  assert.strictEqual(stillPaused._tag, 'Pending')
+  if (stillPaused._tag !== 'Pending') return
+  assert.strictEqual(stillPaused.settlement.fingerprint, 'empty')
+
+  const writerFinished = SourceSettlement.observe(stillPaused.settlement, 'complete:new')
+  assert.deepStrictEqual(writerFinished, { _tag: 'Changed', fingerprint: 'complete:new' })
+  if (writerFinished._tag !== 'Changed') return
   const firstFinishedConfirmation = SourceSettlement.observe(
-    writerFinished.settlement,
+    SourceSettlement.fromEntryTransition(writerFinished.fingerprint, source.length, source.length),
     'complete:new',
   )
   assert.strictEqual(firstFinishedConfirmation._tag, 'Pending')
   if (firstFinishedConfirmation._tag !== 'Pending') return
   const settled = SourceSettlement.observe(firstFinishedConfirmation.settlement, 'complete:new')
   assert.deepStrictEqual(settled, { _tag: 'Settled', fingerprint: 'complete:new' })
+})
+
+it('accepts an intentional empty entry at the suspicious-transition budget', () => {
+  let observed: SourceSettlement.Observation = {
+    _tag: 'Pending',
+    settlement: SourceSettlement.fromEntryTransition('empty', source.length, 0),
+  }
+  for (let sample = 0; sample < SourceSettlement.maximumObservations; sample += 1) {
+    if (observed._tag !== 'Pending') break
+    observed = SourceSettlement.observe(observed.settlement, 'empty')
+  }
+  assert.deepStrictEqual(observed, { _tag: 'Settled', fingerprint: 'empty' })
 })
 
 it.effect('checks a whole project without creating build artifacts', () =>
@@ -402,6 +425,81 @@ it.live(
       yield* Fiber.interrupt(watching)
 
       assert.deepStrictEqual(passes.slice(0, 2), [0, 0])
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.live(
+  'compiles the exact source snapshot fingerprinted during watch startup',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const entry = `${root}/src/Main.silk`
+      const replacement = 'pub fn main() -> i32 { return 7 }'
+      let injected = false
+      const startupEditLayer = Layer.succeed(FileSystem.FileSystem, {
+        ...fileSystem,
+        readFile: (path: string) =>
+          fileSystem.readFile(path).pipe(
+            Effect.tap(() => {
+              if (path !== entry || injected) return Effect.void
+              injected = true
+              return fileSystem.writeFileString(entry, replacement)
+            }),
+          ),
+        watch: () => Stream.never,
+      })
+      const observed: Array<string> = []
+      const record = Effect.fnUntraced(function* (
+        project: Project.Project,
+        _selection: Workflow.ProjectSelection,
+      ) {
+        observed.push(new TextDecoder().decode(project.entry.bytes))
+        const status: Workflow.ExitStatus = 0
+        return status
+      })
+
+      const watching = yield* Effect.forkChild(
+        Workflow.watch(record, options(root)).pipe(Effect.provide(startupEditLayer)),
+      )
+      yield* waitUntil(() => observed.length >= 1)
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(observed, [replacement])
+    }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+  Timeouts.nativeBuild,
+)
+
+it.live(
+  'does not lose an edit made during the initial watch pass',
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped()
+      yield* makeProject(root)
+      const replacement = 'pub fn main() -> i32 { return 7 }'
+      const observed: Array<string> = []
+      const record = Effect.fnUntraced(function* (
+        project: Project.Project,
+        _selection: Workflow.ProjectSelection,
+      ) {
+        observed.push(new TextDecoder().decode(project.entry.bytes))
+        if (observed.length === 1) {
+          yield* fileSystem.writeFileString(`${root}/src/Main.silk`, replacement).pipe(Effect.orDie)
+        }
+        const status: Workflow.ExitStatus = 0
+        return status
+      })
+
+      const watching = yield* Effect.forkChild(
+        Workflow.watch(record, options(root)).pipe(Effect.provide(silentWatchLayer(fileSystem))),
+      )
+      yield* waitUntil(() => observed.length >= 2)
+      yield* Fiber.interrupt(watching)
+
+      assert.deepStrictEqual(observed.slice(0, 2), [source, replacement])
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,
 )
