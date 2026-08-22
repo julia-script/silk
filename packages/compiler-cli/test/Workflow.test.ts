@@ -5,8 +5,8 @@ import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
-import * as Result from 'effect/Result'
 import * as Project from '../src/Project.js'
+import * as SourceSettlement from '../src/SourceSettlement.js'
 import * as Workflow from '../src/Workflow.js'
 import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
@@ -93,8 +93,6 @@ interface Pass {
   readonly source: string
 }
 
-const unreadable = '<unreadable>'
-
 /**
  * Starts a watch whose passes are recorded, and returns once the watcher is demonstrably
  * subscribed: the first compilation has run, an edit has been seen, and the passes it caused have
@@ -103,17 +101,15 @@ const unreadable = '<unreadable>'
  */
 const watchRecording = Effect.fnUntraced(function* (root: string) {
   const passes: Array<Pass> = []
-  const record = (selection: Workflow.ProjectSelection) =>
-    Effect.gen(function* () {
-      // The same read `check` is about to perform, taken at the moment the pass begins.
-      const loaded = yield* Effect.result(Project.load({ workingDirectory: root }))
-      const status = yield* Workflow.check(selection)
-      const source = Result.isSuccess(loaded)
-        ? new TextDecoder().decode(loaded.success.entry.bytes)
-        : unreadable
-      passes.push({ status, source })
-      return status
-    })
+  const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+    Workflow.checkProject(project, selection).pipe(
+      Effect.tap((status) =>
+        Effect.sync(() => {
+          const source = new TextDecoder().decode(project.entry.bytes)
+          passes.push({ status, source })
+        }),
+      ),
+    )
   const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
   yield* waitUntil(() => passes.length >= 1)
   yield* editUntilRecompiled(
@@ -123,6 +119,28 @@ const watchRecording = Effect.fnUntraced(function* (root: string) {
   )
   yield* passesSettled(passes)
   return { passes, watching } as const
+})
+
+it('waits through a writer paused after truncating a source file', () => {
+  const afterTruncate = SourceSettlement.observe(SourceSettlement.make('complete:old'), 'empty')
+  assert.strictEqual(afterTruncate._tag, 'Pending')
+  if (afterTruncate._tag !== 'Pending') return
+
+  const whileWriterPaused = SourceSettlement.observe(afterTruncate.settlement, 'empty')
+  assert.strictEqual(whileWriterPaused._tag, 'Pending')
+  if (whileWriterPaused._tag !== 'Pending') return
+
+  const writerFinished = SourceSettlement.observe(whileWriterPaused.settlement, 'complete:new')
+  assert.strictEqual(writerFinished._tag, 'Pending')
+  if (writerFinished._tag !== 'Pending') return
+  const firstFinishedConfirmation = SourceSettlement.observe(
+    writerFinished.settlement,
+    'complete:new',
+  )
+  assert.strictEqual(firstFinishedConfirmation._tag, 'Pending')
+  if (firstFinishedConfirmation._tag !== 'Pending') return
+  const settled = SourceSettlement.observe(firstFinishedConfirmation.settlement, 'complete:new')
+  assert.deepStrictEqual(settled, { _tag: 'Settled', fingerprint: 'complete:new' })
 })
 
 it.effect('checks a whole project without creating build artifacts', () =>
@@ -369,8 +387,8 @@ it.live(
       const root = yield* fileSystem.makeTempDirectoryScoped()
       yield* makeProject(root)
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 
@@ -400,8 +418,8 @@ it.live(
       )
       yield* writeFile(`${root}/src/library/Answer.silk`, 'pub fn answer() -> i32 { return 42 }')
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 
@@ -556,8 +574,8 @@ it.live(
       const root = yield* fileSystem.makeTempDirectoryScoped()
       yield* makeProject(root, 'pub fn main() -> Mystery { return 42 }')
       const passes: Array<Workflow.ExitStatus> = []
-      const record = (selection: Workflow.ProjectSelection) =>
-        Workflow.check(selection).pipe(
+      const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
+        Workflow.checkProject(project, selection).pipe(
           Effect.tap((status) => Effect.sync(() => passes.push(status))),
         )
 

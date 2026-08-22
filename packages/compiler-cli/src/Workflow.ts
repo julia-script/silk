@@ -24,6 +24,7 @@ import * as Project from './Project.js'
 import type * as ProjectOptions from './ProjectOptions.js'
 import * as Report from './Report.js'
 import type * as SourceEntry from './SourceEntry.js'
+import * as SourceSettlement from './SourceSettlement.js'
 import * as TargetSelector from './TargetSelector.js'
 
 export type ExitStatus = 0 | 1 | 2
@@ -210,18 +211,17 @@ const checkTarget = Effect.fnUntraced(function* (
 const aggregateStatus = (statuses: ReadonlyArray<number>): ExitStatus =>
   statuses.some((status) => status === 2) ? 2 : statuses.some((status) => status === 1) ? 1 : 0
 
-/** Loads a project and performs target-qualified analysis once per resolved selected target. */
-export const check = Effect.fn('Workflow.check')(function* (
+/** Performs target-qualified analysis once per resolved selected target. */
+export const checkProject = Effect.fn('Workflow.checkProject')(function* (
+  project: Project.Project,
   options: ProjectSelection,
 ): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
-  const loaded = yield* Effect.result(loadProject(options))
-  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
-  const selectors = options.targets ?? loaded.success.build.targets
+  const selectors = options.targets ?? project.build.targets
   const resolved = TargetSelector.resolveAll(selectors)
   if (Result.isFailure(resolved)) return yield* reportPreparationFailure(resolved.failure)
   const attempts = yield* Effect.forEach(
     resolved.success,
-    (target) => checkTarget(loaded.success, target),
+    (target) => checkTarget(project, target),
     { concurrency: 1 },
   )
   for (const attempt of attempts) {
@@ -234,17 +234,25 @@ export const check = Effect.fn('Workflow.check')(function* (
   return aggregateStatus(attempts.map((attempt) => attempt.status))
 })
 
-/** Preflights and builds every selected project target sequentially. */
-export const build = Effect.fn('Workflow.build')(function* (
+/** Loads a project and performs target-qualified analysis once per resolved selected target. */
+export const check = Effect.fn('Workflow.check')(function* (
+  options: ProjectSelection,
+): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
+  const loaded = yield* Effect.result(loadProject(options))
+  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
+  return yield* checkProject(loaded.success, options)
+})
+
+/** Preflights and builds every selected target from one loaded project snapshot. */
+export const buildProject = Effect.fn('Workflow.buildProject')(function* (
+  project: Project.Project,
   options: ProjectSelection,
 ): Effect.fn.Return<
   ExitStatus,
   never,
   FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
 > {
-  const loaded = yield* Effect.result(loadProject(options))
-  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
-  const planned = planBatch(loaded.success, options)
+  const planned = planBatch(project, options)
   if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
   const attempts = yield* Effect.forEach(
     planned.success.plans,
@@ -272,6 +280,19 @@ export const build = Effect.fn('Workflow.build')(function* (
   const succeeded = attempts.filter((attempt) => attempt.status === 0).length
   yield* Console.log(`Build summary: ${succeeded} succeeded, ${attempts.length - succeeded} failed`)
   return aggregateStatus(attempts.map((attempt) => attempt.status))
+})
+
+/** Loads, preflights, and builds every selected project target sequentially. */
+export const build = Effect.fn('Workflow.build')(function* (
+  options: ProjectSelection,
+): Effect.fn.Return<
+  ExitStatus,
+  never,
+  FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
+> {
+  const loaded = yield* Effect.result(loadProject(options))
+  if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
+  return yield* buildProject(loaded.success, options)
 })
 
 /**
@@ -313,7 +334,7 @@ const sourceDirectories = Effect.fnUntraced(function* (
 const quietWindow = '50 millis'
 
 /**
- * Gap between the two source-tree samples that decide whether a writer is still mid-flight.
+ * Gap between consecutive source-tree samples that decide whether a writer is still mid-flight.
  *
  * Quiet is not the same as finished: one large `write` is a single event that arrives when the
  * write completes, so a slow writer can leave the stream silent while the file on disk is
@@ -328,10 +349,11 @@ const settleSamples = 40
 /**
  * Fingerprints every file under the source root by path, size, and modification time.
  *
- * Two equal fingerprints taken `settleInterval` apart mean no writer is mid-flight; a fingerprint
- * equal to the one already compiled means the burst left the tree byte-identical to what the last
- * pass read. Deliberately not a content hash: rewriting a file with its previous contents is a
- * real edit that must recompile, and a fingerprint records that the file was written at all.
+ * Three equal fingerprints across two `settleInterval` gaps mean no writer is mid-flight; a
+ * fingerprint equal to the one already compiled means the burst left the tree byte-identical to
+ * what the last pass read. Deliberately not a content hash: rewriting a file with its previous
+ * contents is a real edit that must recompile, and a fingerprint records that the file was written
+ * at all.
  */
 const sourceFingerprint = Effect.fnUntraced(function* (
   root: string,
@@ -363,18 +385,18 @@ const sourceFingerprint = Effect.fnUntraced(function* (
   return entries.sort().join('\n')
 })
 
-/** Samples the source tree until two consecutive samples agree, or the settle budget runs out. */
+/** Samples until two later observations confirm one fingerprint, or the settle budget runs out. */
 const settledFingerprint = Effect.fnUntraced(function* (
   root: string,
 ): Effect.fn.Return<string, never, FileSystem.FileSystem | Path.Path> {
-  let previous = yield* sourceFingerprint(root)
+  let settlement = SourceSettlement.make(yield* sourceFingerprint(root))
   for (let sample = 0; sample < settleSamples; sample += 1) {
     yield* Effect.sleep(settleInterval)
-    const current = yield* sourceFingerprint(root)
-    if (current === previous) return current
-    previous = current
+    const observed = SourceSettlement.observe(settlement, yield* sourceFingerprint(root))
+    if (observed._tag === 'Settled') return observed.fingerprint
+    settlement = observed.settlement
   }
-  return previous
+  return settlement.fingerprint
 })
 
 /**
@@ -387,7 +409,7 @@ const settledFingerprint = Effect.fnUntraced(function* (
  * one pass rather than one per raw event.
  */
 export const watch = Effect.fn('Workflow.watch')(function* <R>(
-  run: (options: ProjectSelection) => Effect.Effect<ExitStatus, never, R>,
+  run: (project: Project.Project, options: ProjectSelection) => Effect.Effect<ExitStatus, never, R>,
   options: ProjectSelection,
 ): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path | R> {
   const fileSystem = yield* FileSystem.FileSystem
@@ -397,7 +419,7 @@ export const watch = Effect.fn('Workflow.watch')(function* <R>(
   // Taken before the pass rather than after it: an edit that lands while the pass is running must
   // look like a change the pass did not read, so it recompiles instead of being skipped.
   const compiled = yield* Ref.make(yield* sourceFingerprint(sourceRoot))
-  yield* run(options)
+  yield* run(loaded.success, options)
   // ponytail: directories are enumerated once; a directory created later needs a restart.
   const directories = yield* sourceDirectories(sourceRoot)
   yield* Console.log(`Watching ${sourceRoot} for changes.`)
@@ -414,7 +436,12 @@ export const watch = Effect.fn('Workflow.watch')(function* <R>(
         // same time. Recompiling would only repeat the result already on screen.
         if (fingerprint === (yield* Ref.get(compiled))) return
         yield* Ref.set(compiled, fingerprint)
-        yield* run(options)
+        const project = yield* Effect.result(loadProject(options))
+        if (Result.isFailure(project)) {
+          yield* reportPreparationFailure(project.failure)
+        } else {
+          yield* run(project.success, options)
+        }
         yield* Console.log(`Watching ${sourceRoot} for changes.`)
       }),
     ),
