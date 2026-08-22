@@ -6,6 +6,7 @@ import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as LocalSharedAllocationProvenance from '../src/LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from '../src/LocalSharedControlBlock.js'
+import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
@@ -77,6 +78,58 @@ it('classifies every checked local-shared layout overflow before execution', () 
     ),
     'AlignmentRounding',
   )
+})
+
+it('compares a target-sized local-shared count before incrementing', () => {
+  assert.strictEqual(
+    LocalSharedControlBlock.strongMaximum(Target.wasm32UnknownUnknown),
+    0xffff_ffffn,
+  )
+  assert.strictEqual(
+    LocalSharedControlBlock.strongMaximum(Target.aarch64AppleDarwin),
+    0xffff_ffff_ffff_ffffn,
+  )
+  const before = Object.freeze({ count: 2n, maximum: 3n })
+  const cloned = LocalSharedLifecycle.clone(before)
+  assert.deepEqual(cloned, {
+    _tag: 'Cloned',
+    state: { count: 3n, maximum: 3n },
+  })
+  const rejected = LocalSharedLifecycle.clone(cloned._tag === 'Cloned' ? cloned.state : before)
+  assert.deepEqual(rejected, {
+    _tag: 'StrongOverflow',
+    state: { count: 3n, maximum: 3n },
+  })
+})
+
+it('selects exactly one local-shared access branch and preserves an active outer access', () => {
+  const outer = LocalSharedLifecycle.beginAccess('Available')
+  assert.deepEqual(outer, { _tag: 'Use', state: 'Active' })
+  const nested = LocalSharedLifecycle.beginAccess(outer.state)
+  assert.deepEqual(nested, { _tag: 'Conflict', state: 'Active' })
+  assert.strictEqual(LocalSharedLifecycle.endAccess(nested.state), 'Available')
+  assert.deepEqual(LocalSharedLifecycle.drop({ count: 2n, maximum: 3n }), {
+    _tag: 'Decremented',
+    state: { count: 1n, maximum: 3n },
+  })
+  assert.deepEqual(LocalSharedLifecycle.drop({ count: 1n, maximum: 3n }), {
+    _tag: 'LastHandle',
+  })
+})
+
+it('selects primitive conflict beneath every later public shared/exclusive nested shape', () => {
+  const publicAccesses = ['Shared', 'Exclusive'] as const
+  for (const outer of publicAccesses) {
+    for (const inner of publicAccesses) {
+      const entered = LocalSharedLifecycle.beginAccess('Available')
+      assert.deepEqual(entered, { _tag: 'Use', state: 'Active' }, `${outer}/${inner}: outer`)
+      assert.deepEqual(
+        LocalSharedLifecycle.beginAccess(entered.state),
+        { _tag: 'Conflict', state: 'Active' },
+        `${outer}/${inner}: inner`,
+      )
+    }
+  }
 })
 
 it.effect('rejects an unrepresentable local-shared block at its layout call before MIR', () =>

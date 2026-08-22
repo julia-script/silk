@@ -19,6 +19,8 @@ import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
+import * as LocalSharedLifecycle from './LocalSharedLifecycle.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
@@ -548,6 +550,83 @@ function* executeFunction(
             span: provenance.span,
           })
         }
+        trace.push(
+          Object.freeze({
+            _tag: 'AllocationRelease',
+            function: fn.id,
+            ticket: owner.ticket,
+            span: provenance.span,
+          }),
+        )
+        return undefined
+      }
+      case 'LocalSharedCoreCleanup': {
+        if (owner._tag !== 'SharedCoreValue')
+          throw new RangeError('Local-shared cleanup lost its opaque strong handle')
+        const shared = BootstrapStorage.shared(state.allocations, owner.ticket)
+        if (shared === undefined)
+          throw new RangeError('Local-shared cleanup referenced missing evaluator state')
+        const transition = LocalSharedLifecycle.drop({
+          count: shared.strong,
+          maximum: shared.strong,
+        })
+        if (transition._tag === 'Decremented') {
+          shared.strong = transition.state.count
+          trace.push(
+            Object.freeze({
+              _tag: 'SharedDecrement',
+              function: fn.id,
+              ticket: owner.ticket,
+              strong: shared.strong,
+              access: shared.access,
+              span: provenance.span,
+            }),
+          )
+          return undefined
+        }
+        const target = BootstrapEffect.functionFor(
+          program,
+          LocalSharedPayloadCleanup.declaration,
+          Object.freeze([cleanup.element]),
+        )
+        if (target === undefined)
+          return blockedStep({
+            _tag: 'MissingFunction',
+            target: LocalSharedPayloadCleanup.declaration,
+            span: provenance.span,
+          })
+        trace.push(
+          Object.freeze({
+            _tag: 'Call',
+            frame: activation.frame,
+            depth: activation.depth,
+            caller: fn.id,
+            target: LocalSharedPayloadCleanup.declaration,
+            callerInstance: fn.instance,
+            targetInstance: target.instance,
+            span: provenance.span,
+          }),
+        )
+        const cleaned = yield* callFunction(target, [shared.value], provenance.span)
+        if (cleaned._tag === 'Blocked' || cleaned._tag === 'Transfer') return cleaned
+        shared.strong = 0n
+        if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Local-shared reclaim authority was consumed more than once',
+            span: provenance.span,
+          })
+        trace.push(
+          Object.freeze({
+            _tag: 'SharedLastCleanup',
+            function: fn.id,
+            ticket: owner.ticket,
+            strong: 0n,
+            access: shared.access,
+            span: provenance.span,
+          }),
+        )
         trace.push(
           Object.freeze({
             _tag: 'AllocationRelease',
@@ -2012,6 +2091,155 @@ function* executeFunction(
                 span: operation.provenance.span,
               }),
             )
+            break
+          }
+          case 'SharedClone': {
+            const core = referenced(operation.self).value
+            if (core._tag !== 'SharedCoreValue')
+              throw new RangeError('MIR verifier allowed local-shared clone on another value')
+            if (
+              !BootstrapStorage.cloneShared(
+                state.allocations,
+                core.ticket,
+                operation.block.strongMaximum,
+              )
+            )
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Local-shared strong count overflow',
+                span: operation.provenance.span,
+              })
+            const shared = BootstrapStorage.shared(state.allocations, core.ticket)
+            if (shared === undefined)
+              throw new RangeError('Local-shared clone lost evaluator state after increment')
+            write(operation.destination, { value: core, fromCall: false })
+            trace.push(
+              Object.freeze({
+                _tag: 'SharedClone',
+                function: fn.id,
+                ticket: core.ticket,
+                strong: shared.strong,
+                access: shared.access,
+                span: operation.provenance.span,
+              }),
+            )
+            break
+          }
+          case 'SharedWithMut': {
+            const core = referenced(operation.self).value
+            const use = read(operation.use).value
+            const onConflict = read(operation.onConflict).value
+            if (
+              core._tag !== 'SharedCoreValue' ||
+              use._tag !== 'CallableValue' ||
+              onConflict._tag !== 'CallableValue'
+            )
+              throw new RangeError('MIR verifier allowed malformed local-shared access')
+            const shared = BootstrapStorage.shared(state.allocations, core.ticket)
+            if (shared === undefined)
+              throw new RangeError('Local-shared access referenced missing evaluator state')
+            const selection = LocalSharedLifecycle.beginAccess(shared.access)
+            const selected = selection._tag === 'Use' ? use : onConflict
+            const selectedLocal = selection._tag === 'Use' ? operation.use : operation.onConflict
+            const unselected = selection._tag === 'Use' ? onConflict : use
+            const unselectedCleanup =
+              selection._tag === 'Use' ? operation.conflictCleanup : operation.useCleanup
+            if (selection._tag === 'Use') shared.access = 'Active'
+            trace.push(
+              Object.freeze({
+                _tag: selection._tag === 'Use' ? 'SharedAccessBegin' : 'SharedAccessConflict',
+                function: fn.id,
+                ticket: core.ticket,
+                strong: shared.strong,
+                access: shared.access,
+                span: operation.provenance.span,
+              }),
+            )
+            const callableState = state.callables.get(selected.ticket)
+            if (callableState?.state !== 'Available')
+              return blockedStep({
+                _tag: 'InvalidCallableReuse',
+                function: fn.id,
+                ticket: selected.ticket,
+                state: callableState?.state ?? 'Released',
+                span: operation.provenance.span,
+              })
+            callableState.state = 'Consumed'
+            const captureValues = selected.captures.map((capture) => {
+              const captured = capture.value
+              const resolved =
+                captured._tag === 'CallableBorrowValue'
+                  ? state.cells.get(cellKey(captured.frame, captured.cell))?.value
+                  : captured
+              if (resolved === undefined)
+                throw new RangeError('Local-shared callback capture references a missing cell')
+              return Object.freeze({ parameterOrdinal: capture.parameterOrdinal, value: resolved })
+            })
+            const parameters = new Map<number, Value>()
+            if (selection._tag === 'Use') {
+              const payloadCell = operation.destination.ordinal
+              state.cells.set(cellKey(frame, payloadCell), { value: shared.value, fromCall: false })
+              parameters.set(
+                0,
+                Object.freeze({
+                  _tag: 'ReferenceValue' as const,
+                  frame,
+                  cell: payloadCell,
+                  selectors: Object.freeze([]),
+                  indexes: Object.freeze([]),
+                }),
+              )
+            }
+            for (const capture of captureValues)
+              parameters.set(capture.parameterOrdinal, capture.value)
+            const arguments_ = Object.freeze(
+              [...parameters.entries()]
+                .sort(([left], [right]) => left - right)
+                .map(([, argument]) => argument),
+            )
+            trace.push(
+              Object.freeze({
+                _tag: 'CallableApply',
+                function: fn.id,
+                ticket: selected.ticket,
+                mode: selected.type.mode,
+                span: operation.provenance.span,
+              }),
+            )
+            const result = yield* invokeCallableTarget(
+              selected.target,
+              selected.typeArguments,
+              arguments_,
+              operation.provenance.span,
+            )
+            if (result._tag === 'Blocked') return result
+            if (result._tag === 'Transfer') return result
+            if (selection._tag === 'Use') {
+              const updated = state.cells.get(cellKey(frame, operation.destination.ordinal))?.value
+              if (updated === undefined)
+                throw new RangeError('Local-shared callback lost its payload cell')
+              shared.value = updated
+              shared.access = LocalSharedLifecycle.endAccess('Active')
+              trace.push(
+                Object.freeze({
+                  _tag: 'SharedAccessEnd',
+                  function: fn.id,
+                  ticket: core.ticket,
+                  strong: shared.strong,
+                  access: shared.access,
+                  span: operation.provenance.span,
+                }),
+              )
+            }
+            const cleanup = yield* releaseThroughPlan(
+              unselectedCleanup,
+              unselected,
+              operation.provenance,
+              selectedLocal.ordinal,
+            )
+            if (cleanup !== undefined) return cleanup
+            write(operation.destination, { value: result.value, fromCall: true })
             break
           }
           case 'RawBufferCount': {

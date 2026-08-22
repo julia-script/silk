@@ -465,6 +465,33 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Allocation-free compare-before-increment of one local strong count. */
+      readonly _tag: 'SharedClone'
+      readonly destination: LocalId
+      readonly self: LocalId
+      readonly element: DeclarationFacts.SemanticType
+      readonly block: LocalSharedControlBlock.Plan
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** One closed access transition which invokes exactly one take-once callback. */
+      readonly _tag: 'SharedWithMut'
+      readonly destination: LocalId
+      readonly payload: LocalId
+      readonly self: LocalId
+      readonly use: LocalId
+      readonly onConflict: LocalId
+      readonly element: DeclarationFacts.SemanticType
+      readonly block: LocalSharedControlBlock.Plan
+      readonly useType: SilkType.Callable
+      readonly conflictType: SilkType.Callable
+      readonly useCleanup: CleanupPlan.CleanupPlan
+      readonly conflictCleanup: CleanupPlan.CleanupPlan
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'RawBufferCount'
       readonly destination: LocalId
       readonly buffer: LocalId

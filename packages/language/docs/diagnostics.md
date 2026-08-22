@@ -17,10 +17,10 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
 | `SEM` | Semantic | 130 |
-| `OWN` | Ownership | 14 |
+| `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 159 codes in total.
+There are 160 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -204,6 +204,7 @@ There are 159 codes in total.
 | `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
+| `OWN0016` | Stable code for an access-scoped local-shared borrow escaping or crossing suspension. | `Local-shared access cannot suspend while its exclusive borrow is live`<br>`Local-shared access callback cannot return a value that retains its exclusive borrow` |
 
 ## Layout (`LAY`)
 

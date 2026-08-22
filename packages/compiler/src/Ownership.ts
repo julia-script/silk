@@ -2282,6 +2282,7 @@ const checkFunction = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
+  localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
   const declaration = fn.declaration
   const copyAssumptions = new Set(
@@ -2309,6 +2310,106 @@ const checkFunction = (
     diagnostics: [...loanAnalysis.diagnostics],
     matches: [],
     callables: [],
+  }
+  if (localSharedBoundaries.length > 0) {
+    const parameter = fn.declaration.parameters.at(0)?.id
+    if (parameter !== undefined) {
+      const bindings = new Map<number, Hir.Expression>()
+      const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+        for (const statement of statements) {
+          if (statement._tag === 'Bind')
+            bindings.set(statement.binding.ordinal, statement.initializer)
+          if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+          if (statement._tag === 'If' || statement._tag === 'IfLet') {
+            collectBindings(statement.taken)
+            collectBindings(statement.otherwise)
+          }
+          if (statement._tag === 'While') collectBindings(statement.body)
+        }
+      }
+      collectBindings(fn.statements)
+      const referencesParameter = (
+        expression: Hir.Expression,
+        seen = new Set<number>(),
+      ): boolean => {
+        if (
+          expression._tag === 'ParameterReference' &&
+          expression.parameter.ordinal === parameter.ordinal
+        )
+          return true
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : referencesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
+        }
+        return Hir.expressionChildren(expression).some((child) => referencesParameter(child, seen))
+      }
+      const exits = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
+        statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
+          switch (statement._tag) {
+            case 'Return':
+            case 'Fail':
+              return [statement.expression]
+            case 'Unsafe':
+              return exits(statement.statements)
+            case 'If':
+            case 'IfLet':
+              return [...exits(statement.taken), ...exits(statement.otherwise)]
+            case 'While':
+              return exits(statement.body)
+            default:
+              return []
+          }
+        })
+      const activeRuns = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
+        if (expression._tag === 'EffectBlock') return Object.freeze([])
+        return Object.freeze([
+          ...(expression._tag === 'Run' ? [expression] : []),
+          ...Hir.expressionChildren(expression).flatMap(activeRuns),
+        ])
+      }
+      const suspensionSites = fn.statements.flatMap(Hir.statementExpressions).flatMap(activeRuns)
+      const capturesParameter = (expression: Hir.Expression, seen = new Set<number>()): boolean => {
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : capturesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
+        }
+        if (
+          (expression._tag === 'EffectBlock' || expression._tag === 'CallableSection') &&
+          referencesParameter(expression)
+        )
+          return true
+        return Hir.expressionChildren(expression).some((child) => capturesParameter(child, seen))
+      }
+      const escapeSites = exits(fn.statements).filter((returned) => {
+        const capturesRestrictedParameter = capturesParameter(returned)
+        if (
+          'type' in returned &&
+          localSharedResultEscapes({
+            resultType: returned.type,
+            capturesRestrictedParameter,
+            referencesRestrictedParameter: referencesParameter(returned),
+          })
+        )
+          return true
+        return false
+      })
+      for (const boundary of localSharedBoundaries) {
+        for (const suspension of suspensionSites)
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, boundary),
+          )
+        for (const escapeSite of escapeSites)
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Result', escapeSite.span, boundary),
+          )
+      }
+    }
   }
 
   const initialLive = new Set<string>()
@@ -3001,13 +3102,84 @@ const checkFunction = (
   })
 }
 
+/** Classifies the result-side ownership facts of one access-scoped callback invocation. */
+export const localSharedResultEscapes = (facts: {
+  readonly resultType: Type.Type
+  readonly capturesRestrictedParameter: boolean
+  readonly referencesRestrictedParameter: boolean
+}): boolean =>
+  Type.containsPositionRestrictedBorrow(facts.resultType) ||
+  facts.capturesRestrictedParameter ||
+  ((Type.isEffect(facts.resultType) ||
+    Type.isCallable(facts.resultType) ||
+    Type.containsExecutableRepresentation(facts.resultType)) &&
+    facts.referencesRestrictedParameter)
+
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
 ): ModuleOwnership => {
+  const targetKey = (target: Hir.CallableTarget): string | undefined =>
+    target._tag === 'DeclarationCallableTarget'
+      ? `${target.declaration.module}\u0000${target.declaration.name}`
+      : undefined
+  const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
+  for (const fn of result.hir.functions) {
+    const bindings = new Map<number, Hir.Expression>()
+    const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+      for (const statement of statements) {
+        if (statement._tag === 'Bind')
+          bindings.set(statement.binding.ordinal, statement.initializer)
+        if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+        if (statement._tag === 'If' || statement._tag === 'IfLet') {
+          collectBindings(statement.taken)
+          collectBindings(statement.otherwise)
+        }
+        if (statement._tag === 'While') collectBindings(statement.body)
+      }
+    }
+    collectBindings(fn.statements)
+    const callableTarget = (
+      expression: Hir.Expression,
+      seen = new Set<number>(),
+    ): Hir.CallableTarget | undefined => {
+      if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
+        return expression.target
+      if (expression._tag === 'Move') return callableTarget(expression.subject, seen)
+      if (expression._tag === 'UnionConvert') return callableTarget(expression.source, seen)
+      if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+        return undefined
+      const initializer = bindings.get(expression.binding.ordinal)
+      return initializer === undefined
+        ? undefined
+        : callableTarget(initializer, new Set(seen).add(expression.binding.ordinal))
+    }
+    for (const expression of fn.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedWithMut') continue
+      const use = expression.arguments.at(1)
+      const target = use === undefined ? undefined : callableTarget(use)
+      const key = target === undefined ? undefined : targetKey(target)
+      if (key !== undefined) {
+        const existing = boundaries.get(key)
+        if (existing === undefined) boundaries.set(key, [expression.span])
+        else existing.push(expression.span)
+      }
+    }
+  }
   const checked = result.hir.functions.map((fn, ordinal) =>
-    checkFunction(fn, index, result.functions.at(ordinal)),
+    checkFunction(
+      fn,
+      index,
+      result.functions.at(ordinal),
+      fn.declaration.canonical._tag === 'Canonical'
+        ? (boundaries.get(
+            `${fn.declaration.canonical.id.module}\u0000${fn.declaration.canonical.id.name}`,
+          ) ?? Object.freeze([]))
+        : Object.freeze([]),
+    ),
   )
   return Object.freeze({
     _tag: 'OwnershipFacts',

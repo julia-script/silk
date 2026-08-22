@@ -47,6 +47,8 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
     return `allocation:${Type.encode(cleanup.type)} ticket=${cleanup.ticket}`
   if (cleanup._tag === 'RawBufferCleanup')
     return `raw-buffer:${Type.encode(cleanup.type)} owner=(${cleanupText(cleanup.allocation)})`
+  if (cleanup._tag === 'LocalSharedCoreCleanup')
+    return `local-shared-core:${Type.encode(cleanup.type)} opaque-last(payload-helper=${Type.encode(cleanup.element)},allocation=${cleanupText(cleanup.allocation)})`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
   }

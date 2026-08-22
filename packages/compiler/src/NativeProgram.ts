@@ -92,6 +92,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           operation._tag === 'Allocate' ||
           operation._tag === 'RawBufferFrom' ||
           operation._tag === 'SharedFromAllocation' ||
+          operation._tag === 'SharedClone' ||
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||

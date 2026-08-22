@@ -202,6 +202,12 @@ export interface AllocationTraceEvent {
     | 'AllocationAcquire'
     | 'RawBufferForm'
     | 'SharedInitialize'
+    | 'SharedClone'
+    | 'SharedDecrement'
+    | 'SharedLastCleanup'
+    | 'SharedAccessBegin'
+    | 'SharedAccessConflict'
+    | 'SharedAccessEnd'
     | 'SlotProject'
     | 'SlotWrite'
     | 'SlotTake'
@@ -217,7 +223,7 @@ export interface AllocationTraceEvent {
   readonly count?: bigint
   readonly element?: Type.Type
   readonly strong?: bigint
-  readonly access?: 'Available'
+  readonly access?: 'Available' | 'Active'
   readonly span: SourceSpan.SourceSpan
 }
 

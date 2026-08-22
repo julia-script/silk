@@ -774,6 +774,7 @@ console.log(
       'Lexer',
       'LiteralForm',
       'LlvmBackend',
+      'LocalSharedLifecycle',
       'LocalSharedOwnership',
       'Lower',
       'Match',

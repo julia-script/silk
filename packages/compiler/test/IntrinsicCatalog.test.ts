@@ -98,6 +98,8 @@ import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
+fn useShared(value: &mut i32) -> i32 { return 42 }
+fn conflictShared() -> i32 { return 0 }
 effect fn storage() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
   let layout = Layout.of<[i32; 2]>()
@@ -112,7 +114,10 @@ effect fn storage() -> i32 ! OutOfMemoryError {
   let sharedAllocation = run sharedRecipe
   unsafe {
     let shared = Intrinsic.sharedFromAllocation<i32>(move sharedAllocation, 42)
+    let cloned = Intrinsic.sharedClone<i32>(&shared)
+    let selected = Intrinsic.sharedWithMut<i32, i32>(&cloned, useShared, conflictShared)
     drop shared
+    drop cloned
     let mut buffer = RawBuffer.from<i32>(move allocation, 2)
     let count = RawBuffer.count(&buffer)
     let firstSlot = RawBuffer.slot(&mut buffer, 0)
@@ -127,7 +132,7 @@ effect fn storage() -> i32 ! OutOfMemoryError {
     let dropSlot = RawBuffer.slot(&mut buffer, 1)
     let dropped = Slot.dropValue(move dropSlot)
     drop buffer
-    return read + copied + taken
+    return read + copied + taken + selected
   }
   return 0
 }
@@ -438,6 +443,17 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
   assert.isTrue(entries.filter((entry) => entry.unsafe).every((entry) => 'invariant' in entry))
   assert.deepEqual(
     Intrinsic.inventory()
+      .filter((entry) => entry.operation.startsWith('Intrinsic.shared'))
+      .map((entry) => entry.operation),
+    [
+      'Intrinsic.sharedLayout',
+      'Intrinsic.sharedFromAllocation',
+      'Intrinsic.sharedClone',
+      'Intrinsic.sharedWithMut',
+    ],
+  )
+  assert.deepEqual(
+    Intrinsic.inventory()
       .filter((entry) => entry.operation.toLowerCase().includes('suspend'))
       .map((entry) => ({
         operation: entry.operation,
@@ -480,8 +496,14 @@ it.effect(
 it.effect('keeps same-spelled local-shared operations entirely ordinary outside Intrinsic', () =>
   Effect.gen(function* () {
     const source = `fn sharedLayout() -> i32 { return 20 }
-fn sharedFromAllocation(value: i32) -> i32 { return value + 22 }
-pub fn main() -> i32 { return sharedFromAllocation(sharedLayout()) }`
+fn sharedFromAllocation(value: i32) -> i32 { return value + 21 }
+fn sharedClone(value: i32) -> i32 { return value + 1 }
+fn sharedWithMut(value: i32, use: i32, onConflict: i32) -> i32 {
+  return value + use + onConflict
+}
+pub fn main() -> i32 {
+  return sharedWithMut(sharedClone(sharedFromAllocation(sharedLayout())), 0, 0)
+}`
     const snapshot = yield* Analysis.ofSourceRealized(
       'intrinsic/local-shared-same-spelling',
       encoder.encode(source),

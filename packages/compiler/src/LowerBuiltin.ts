@@ -1,4 +1,4 @@
-import { authored, concreteCleanup, generated } from './CleanupEmission.js'
+import { authored, cleanupForLocal, concreteCleanup, generated } from './CleanupEmission.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
@@ -203,6 +203,98 @@ export const lowerBuiltinExpression = (
         element,
         block,
         allocationBlock,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'SharedClone') {
+    const [self] = argumentLocals
+    const type = fn.type(expression.type)
+    const raw = Type.isSharedCore(expression.type)
+      ? Type.typeArgumentAt(expression.type, 0)
+      : undefined
+    const element = raw === undefined ? undefined : fn.semantic(raw)
+    const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+    const block =
+      element === undefined || elementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
+    if (
+      self === undefined ||
+      type?._tag !== 'Nominal' ||
+      !Type.isSharedCore(type.type) ||
+      element === undefined ||
+      block?._tag !== 'LocalSharedControlBlockPlan'
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'SharedClone' as const,
+        destination,
+        self,
+        element,
+        block,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'SharedWithMut') {
+    const [self, use, onConflict] = argumentLocals
+    const selfType = self === undefined ? undefined : fn.localTypes.at(self.ordinal)
+    const useType = use === undefined ? undefined : fn.localTypes.at(use.ordinal)
+    const conflictType = onConflict === undefined ? undefined : fn.localTypes.at(onConflict.ordinal)
+    const type = fn.type(expression.type)
+    const core =
+      selfType?._tag === 'Reference' && Type.isSharedCore(selfType.type.target)
+        ? selfType.type.target
+        : undefined
+    const raw = core === undefined ? undefined : Type.typeArgumentAt(core, 0)
+    const element = raw === undefined ? undefined : fn.semantic(raw)
+    const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
+    const block =
+      element === undefined || elementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
+    if (
+      self === undefined ||
+      use === undefined ||
+      onConflict === undefined ||
+      useType?._tag !== 'CallableValue' ||
+      conflictType?._tag !== 'CallableValue' ||
+      type === undefined ||
+      element === undefined ||
+      block?._tag !== 'LocalSharedControlBlockPlan'
+    )
+      return undefined
+    const payloadType = fn.type(Type.reference('Exclusive', element))
+    if (payloadType?._tag !== 'Reference') return undefined
+    const payload = fn.alloc(payloadType)
+    const destination = fn.alloc(type)
+    const useContract = Type.callable(
+      Object.freeze([Type.reference('Exclusive', element)]),
+      Mir.semanticType(type),
+      'Take',
+    )
+    const conflictContract = Type.callable(Object.freeze([]), Mir.semanticType(type), 'Take')
+    fn.emit(
+      Object.freeze({
+        _tag: 'SharedWithMut' as const,
+        destination,
+        payload,
+        self,
+        use,
+        onConflict,
+        element,
+        block,
+        useType: useContract,
+        conflictType: conflictContract,
+        useCleanup: cleanupForLocal(fn, concreteCleanup(fn, useType.type), useType),
+        conflictCleanup: cleanupForLocal(fn, concreteCleanup(fn, conflictType.type), conflictType),
         type,
         provenance: authored(expression.span),
       }),

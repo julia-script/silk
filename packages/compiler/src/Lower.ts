@@ -5,12 +5,13 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import type * as Layout from './Layout.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
@@ -200,6 +201,66 @@ export const lowerProgram = (
       opaqueRealizations,
     ),
   )
+  const helperSpan = SourceSpan.fromOffsets(discovery.rootModule, 0, 0)
+  if (helperSpan === undefined) throw new RangeError('Generated local-shared cleanup lost its span')
+  const sharedElements = [
+    ...new Map(
+      layout.entries.flatMap((entry) => {
+        if (!Type.isSharedCore(entry.type)) return []
+        const element = Type.typeArgumentAt(entry.type, 0)
+        return element === undefined ? [] : [[Type.key(element), element] as const]
+      }),
+    ).values(),
+  ].sort((left, right) => Type.key(left).localeCompare(Type.key(right)))
+  for (const element of sharedElements) {
+    const parameterType = mirType(element)
+    if (parameterType === undefined)
+      throw new RangeError('Generated local-shared cleanup lost its concrete payload type')
+    const parameter = local(0)
+    const result = local(1)
+    const cleanup = CleanupPlan.cleanupPlan(index, element)
+    functions.push(
+      Object.freeze({
+        _tag: 'MirFunction' as const,
+        id: LocalSharedPayloadCleanup.declaration,
+        instance: LocalSharedPayloadCleanup.instance(element),
+        parameterCount: 1,
+        localTypes: Object.freeze([parameterType, i32]),
+        result: i32,
+        entry: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+        regions: Object.freeze([
+          Object.freeze({
+            _tag: 'OperationRegion' as const,
+            id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+            operations: Object.freeze([
+              ...(cleanup._tag === 'NoCleanup'
+                ? []
+                : [
+                    Object.freeze({
+                      _tag: 'Drop' as const,
+                      local: parameter,
+                      cleanup,
+                      provenance: generated(helperSpan),
+                    }),
+                  ]),
+              Object.freeze({
+                _tag: 'Literal' as const,
+                destination: result,
+                type: i32,
+                value: 0n,
+                provenance: generated(helperSpan),
+              }),
+            ]),
+            outcome: Object.freeze({
+              _tag: 'Return' as const,
+              value: result,
+              provenance: generated(helperSpan),
+            }),
+          }),
+        ]),
+      }),
+    )
+  }
   const loweredRunners: Array<{
     readonly spec: GeneratedEffectRunner
     readonly runner: Mir.MirFunction

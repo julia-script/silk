@@ -5,6 +5,7 @@ import type * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeCallOperation from './NativeCallOperation.js'
 import * as NativeEffectOperation from './NativeEffectOperation.js'
+import * as NativeLocalSharedOperation from './NativeLocalSharedOperation.js'
 import * as NativeMemoryOperation from './NativeMemoryOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativePlaceOperation from './NativePlaceOperation.js'
@@ -15,6 +16,8 @@ export const needsAllocation = (operation: Mir.Operation): boolean =>
   operation._tag === 'Allocate' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'SharedFromAllocation' ||
+  operation._tag === 'SharedClone' ||
+  operation._tag === 'SharedWithMut' ||
   operation._tag === 'RawBufferCount' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
@@ -63,6 +66,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'OsCall':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':
+    case 'SharedClone':
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':
@@ -76,6 +80,8 @@ export const emit = Effect.fnUntraced(function* (
     case 'SlotCopy':
     case 'SlotDrop':
       return yield* NativeMemoryOperation.emit(context.memory, operation)
+    case 'SharedWithMut':
+      return yield* NativeLocalSharedOperation.emit(context.call, operation)
     case 'Move':
     case 'BeginLoan':
     case 'EndLoan':
