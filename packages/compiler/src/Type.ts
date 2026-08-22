@@ -191,6 +191,8 @@ const nonScalarBuiltinOperations = Object.freeze([
   'LayoutOf',
   'SharedLayout',
   'SharedFromAllocation',
+  'SharedClone',
+  'SharedWithMut',
   'EffectSuspend',
   'StorageAcquire',
   'HostWrite',

@@ -28,6 +28,14 @@ export type CleanupPlan =
       readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
     }
   | {
+      /** One opaque dynamic decrement-or-last-cleanup action for a complete strong handle. */
+      readonly _tag: 'LocalSharedCoreCleanup'
+      readonly type: Type.Nominal
+      readonly element: Type.Type
+      readonly value: CleanupPlan
+      readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
+    }
+  | {
       readonly _tag: 'HookCleanup'
       readonly type: Type.Nominal
       readonly hook: DeclarationFacts.CanonicalId
@@ -99,11 +107,13 @@ export const hasHook = (self: CleanupPlan): boolean =>
     self.slots.some((slot) => hasHook(slot.cleanup))) ||
   (self._tag === 'EffectCompositeCleanup' &&
     self.alternatives.some((alternative) => hasHook(alternative))) ||
-  (self._tag === 'RawBufferCleanup' && hasHook(self.allocation))
+  (self._tag === 'RawBufferCleanup' && hasHook(self.allocation)) ||
+  (self._tag === 'LocalSharedCoreCleanup' && hasHook(self.value))
 
 export const reclaims = (self: CleanupPlan): boolean =>
   self._tag === 'AllocationCleanup' ||
   self._tag === 'RawBufferCleanup' ||
+  self._tag === 'LocalSharedCoreCleanup' ||
   (self._tag === 'HookCleanup' && reclaims(self.inner)) ||
   (self._tag === 'StructCleanup' && self.fields.some((field) => reclaims(field.cleanup))) ||
   (self._tag === 'ArrayCleanup' && reclaims(self.element)) ||
@@ -168,6 +178,22 @@ export const cleanupPlan = (
         ticket: 'ActiveReclaimTicket',
       }),
     })
+  if (Type.isSharedCore(type)) {
+    const element = Type.typeArgumentAt(type, 0)
+    return element === undefined
+      ? Object.freeze({ _tag: 'NoCleanup', type })
+      : Object.freeze({
+          _tag: 'LocalSharedCoreCleanup',
+          type,
+          element,
+          value: cleanupPlan(index, element, seen),
+          allocation: Object.freeze({
+            _tag: 'AllocationCleanup',
+            type: Type.allocation,
+            ticket: 'ActiveReclaimTicket',
+          }),
+        })
+  }
   if (Type.isFixedArray(type)) {
     if (type.length === 0) return Object.freeze({ _tag: 'NoCleanup', type })
     return Object.freeze({
@@ -320,6 +346,18 @@ export const specializeCleanup = (
             allocation: cleanup.allocation,
           })
         : Object.freeze({ _tag: 'NoCleanup', type })
+    case 'LocalSharedCoreCleanup': {
+      if (!Type.isSharedCore(type)) return Object.freeze({ _tag: 'NoCleanup', type })
+      const element = Type.typeArgumentAt(type, 0)
+      if (element === undefined) return Object.freeze({ _tag: 'NoCleanup', type })
+      return Object.freeze({
+        _tag: 'LocalSharedCoreCleanup',
+        type,
+        element,
+        value: specializeCleanup(cleanup.value, substitution, resolveConcrete),
+        allocation: cleanup.allocation,
+      })
+    }
     case 'HookCleanup':
       if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })
       return Object.freeze({

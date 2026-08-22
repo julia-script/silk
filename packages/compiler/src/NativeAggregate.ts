@@ -12,6 +12,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as Mir from './Mir.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
@@ -260,6 +261,96 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, otherwise)
       }
+      yield* FunctionBody.branch(body, following)
+      yield* LlvmBlock.setInsertionPoint(body, following)
+      return
+    }
+    case 'LocalSharedCoreCleanup': {
+      const baseAddress = values.at(0)
+      const elementLayout = Layout.entry(program.layout, plan.element)
+      const block =
+        elementLayout === undefined
+          ? undefined
+          : LocalSharedControlBlock.plan(program.layout.target, plan.element, elementLayout)
+      if (
+        baseAddress === undefined ||
+        block?._tag !== 'LocalSharedControlBlockPlan' ||
+        usizeType === undefined
+      )
+        throw new RangeError('LLVM local-shared cleanup lost its control-block plan')
+      const wordType = usizeType
+      const base = yield* FunctionBody.cast(body, 'inttoptr', baseAddress, pointer, `${tag}_base`)
+      const countPointer = yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        base,
+        block.strongOffset,
+        `${tag}_strong_ptr`,
+      )
+      const count = yield* FunctionBody.load(body, wordType, countPointer, `${tag}_strong`)
+      const nonLast = yield* FunctionBody.integerCompare(
+        body,
+        'ugt',
+        count,
+        yield* Constant.integerUnsigned(builder, wordType, 1n),
+        `${tag}_non_last`,
+      )
+      const decrement = yield* LlvmBlock.make(body, `${tag}_decrement`)
+      const last = yield* LlvmBlock.make(body, `${tag}_last`)
+      const following = yield* LlvmBlock.make(body, `${tag}_following`)
+      yield* FunctionBody.conditionalBranch(body, nonLast, decrement, last)
+      yield* LlvmBlock.setInsertionPoint(body, decrement)
+      yield* FunctionBody.store(
+        body,
+        yield* FunctionBody.binary(
+          body,
+          'sub',
+          count,
+          yield* Constant.integerUnsigned(builder, wordType, 1n),
+          `${tag}_decremented`,
+        ),
+        countPointer,
+      )
+      yield* FunctionBody.branch(body, following)
+      yield* LlvmBlock.setInsertionPoint(body, last)
+      const loadLanes = Effect.fnUntraced(function* (
+        type: SilkType.Type,
+        byteOffset: number,
+        laneTag: string,
+      ) {
+        const loaded: Array<Value.Input> = []
+        for (const [ordinal, lane] of semanticLanesOf(type).entries()) {
+          const offset = LayoutVerify.laneOffset(program.layout, type, lane.path)
+          if (offset === undefined) throw new RangeError('LLVM local-shared cleanup lost a lane')
+          loaded.push(
+            yield* FunctionBody.load(
+              body,
+              NativeType.laneType(types, lane),
+              yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                base,
+                byteOffset + offset,
+                `${laneTag}_${ordinal}_ptr`,
+              ),
+              `${laneTag}_${ordinal}`,
+            ),
+          )
+        }
+        return Object.freeze(loaded)
+      })
+      yield* dropThroughPlan(
+        context,
+        plan.value,
+        yield* loadLanes(plan.element, block.valueOffset, `${tag}_value`),
+        `${tag}_value`,
+      )
+      yield* dropThroughPlan(
+        context,
+        plan.allocation,
+        yield* loadLanes(SilkType.allocation, block.allocationOffset, `${tag}_allocation`),
+        `${tag}_allocation`,
+      )
       yield* FunctionBody.branch(body, following)
       yield* LlvmBlock.setInsertionPoint(body, following)
       return

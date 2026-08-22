@@ -287,6 +287,8 @@ export const storedCallableInvocationAccessCode = 'OWN0014' as const
 
 /** Stable code for running a stored Effect through too weak an aggregate receiver access. */
 export const storedEffectRunAccessCode = 'OWN0015' as const
+/** Stable code for an access-scoped local-shared borrow escaping or crossing suspension. */
+export const localSharedAccessEscapeCode = 'OWN0016' as const
 
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
@@ -451,6 +453,7 @@ export type Code =
   | typeof borrowedMoveCode
   | typeof storedCallableInvocationAccessCode
   | typeof storedEffectRunAccessCode
+  | typeof localSharedAccessEscapeCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -924,6 +927,10 @@ export type Reason =
       readonly loanSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'BorrowedMove' }
+  | {
+      readonly _tag: 'LocalSharedAccessEscape'
+      readonly kind: 'Result' | 'Suspension'
+    }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
 export interface RelatedSpan {
@@ -3680,6 +3687,28 @@ export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     message: 'A non-Copy value cannot be moved out through a borrowed slice place',
     reason: Object.freeze({ _tag: 'BorrowedMove' }),
     span,
+  })
+
+/** Relates one access-scoped escape to the sealed boundary that created the exclusive loan. */
+export const localSharedAccessEscape = (
+  kind: 'Result' | 'Suspension',
+  span: SourceSpan.SourceSpan,
+  boundary: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: localSharedAccessEscapeCode,
+    severity: 'error',
+    message:
+      kind === 'Suspension'
+        ? 'Local-shared access cannot suspend while its exclusive borrow is live'
+        : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
+    reason: Object.freeze({ _tag: 'LocalSharedAccessEscape', kind }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'local-shared access boundary', span: boundary }),
+    ]),
   })
 
 /** Creates the diagnostic for a uniquely resolved call with the wrong arity. */

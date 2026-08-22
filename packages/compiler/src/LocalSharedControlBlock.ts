@@ -10,6 +10,7 @@ export interface Plan {
   readonly size: number
   readonly alignment: number
   readonly strongOffset: number
+  readonly strongMaximum: bigint
   readonly accessOffset: number
   readonly allocationOffset: number
   readonly valueOffset: number
@@ -28,6 +29,10 @@ export type Selection = Plan | Unavailable
 
 const maximum = (target: Target.Target): number =>
   target.pointerSize === 4 ? 0xffff_ffff : Number.MAX_SAFE_INTEGER
+
+/** Largest strong count representable by the selected target's private word. */
+export const strongMaximum = (target: Target.Target): bigint =>
+  (1n << BigInt(target.pointerSize * 8)) - 1n
 
 const checkedAdd = (left: number, right: number, limit: number): number | undefined => {
   const sum = left + right
@@ -76,6 +81,7 @@ export const planWithin = (
     size,
     alignment,
     strongOffset,
+    strongMaximum: strongMaximum(target),
     accessOffset,
     allocationOffset,
     valueOffset,

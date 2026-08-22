@@ -26,6 +26,7 @@ type Operation = Extract<
       | 'OsCall'
       | 'RawBufferFrom'
       | 'SharedFromAllocation'
+      | 'SharedClone'
       | 'RawBufferCount'
       | 'RawBufferSlot'
       | 'RawBufferRead'
@@ -448,6 +449,61 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           throw new RangeError('LLVM local-shared initialization lost its payload')
         yield* storeWord(operation.block.valueOffset + offset, value)
       }
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([baseAddress]))
+      break
+    }
+    case 'SharedClone': {
+      const self = NativeStorage.readLocal(nativeStorage, operation.self).at(0)
+      if (self === undefined || usizeType === undefined)
+        throw new RangeError('LLVM local-shared clone lost its borrowed handle')
+      const baseAddress = yield* FunctionBody.load(
+        body,
+        usizeType,
+        self,
+        `shared${operation.destination.ordinal}_base_address`,
+      )
+      const base = yield* FunctionBody.cast(
+        body,
+        'inttoptr',
+        baseAddress,
+        pointer,
+        `shared${operation.destination.ordinal}_base`,
+      )
+      const countPointer = yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        base,
+        operation.block.strongOffset,
+        `shared${operation.destination.ordinal}_strong_ptr`,
+      )
+      const count = yield* FunctionBody.load(
+        body,
+        usizeType,
+        countPointer,
+        `shared${operation.destination.ordinal}_strong`,
+      )
+      const overflow = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        count,
+        yield* Constant.integerUnsigned(builder, usizeType, operation.block.strongMaximum),
+        `shared${operation.destination.ordinal}_overflow`,
+      )
+      if (trapBlock === undefined) trapBlock = yield* LlvmBlock.make(body, 'shared_clone_trap')
+      const accepted = yield* LlvmBlock.make(
+        body,
+        `shared${operation.destination.ordinal}_clone_accepted`,
+      )
+      yield* FunctionBody.conditionalBranch(body, overflow, trapBlock, accepted)
+      yield* LlvmBlock.setInsertionPoint(body, accepted)
+      const incremented = yield* FunctionBody.binary(
+        body,
+        'add',
+        count,
+        yield* Constant.integerUnsigned(builder, usizeType, 1n),
+        `shared${operation.destination.ordinal}_incremented`,
+      )
+      yield* FunctionBody.store(body, incremented, countPointer)
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([baseAddress]))
       break
     }

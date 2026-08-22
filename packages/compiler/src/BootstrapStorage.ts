@@ -9,9 +9,9 @@ export interface Allocation {
   shared?: {
     readonly element: Type.Type
     readonly provenance: string
-    readonly value: Value
+    value: Value
     strong: bigint
-    access: 'Available'
+    access: 'Available' | 'Active'
   }
 }
 
@@ -40,6 +40,14 @@ export const initializeShared = (
 /** Inspects evaluator-owned opaque state without publishing storage lanes to Silk source. */
 export const shared = (allocations: Allocations, ticket: number): Allocation['shared'] =>
   allocations.get(ticket)?.shared
+
+/** Applies a successful strong clone without exposing the count to source. */
+export const cloneShared = (allocations: Allocations, ticket: number, maximum: bigint): boolean => {
+  const state = shared(allocations, ticket)
+  if (state === undefined || state.strong >= maximum) return false
+  state.strong += 1n
+  return true
+}
 
 /** Releases one live allocation and optionally clears its initialized slots. */
 export const release = (allocations: Allocations, ticket: number, clear: boolean): boolean => {
@@ -155,6 +163,8 @@ export const cleanupMembers = (
     return selected === undefined ? Object.freeze([]) : cleanupMembers(selected, owner.effect)
   }
   if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
+  if (cleanup._tag === 'LocalSharedCoreCleanup')
+    return Object.freeze([cleanup.type, ...cleanupMembers(cleanup.value, owner)])
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])

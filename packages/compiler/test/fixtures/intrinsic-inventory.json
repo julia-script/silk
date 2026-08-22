@@ -5166,6 +5166,22 @@
       "invariant": "caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once"
     },
     {
+      "operation": "Intrinsic.sharedClone",
+      "signature": "fn Intrinsic.sharedClone<T>(self: &SharedCore<T>) -> SharedCore<T>",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/shared.clone",
+      "identity": "SharedClone"
+    },
+    {
+      "operation": "Intrinsic.sharedWithMut",
+      "signature": "fn Intrinsic.sharedWithMut<T, A>(self: &SharedCore<T>, use: once fn(&mut T) -> A, onConflict: once fn() -> A) -> A",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/shared.withMut",
+      "identity": "SharedWithMut"
+    },
+    {
       "operation": "Intrinsic.systemAllocationAcquire",
       "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemoryError>",
       "unsafe": false,

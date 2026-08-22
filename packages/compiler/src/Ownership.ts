@@ -2282,6 +2282,7 @@ const checkFunction = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
+  localSharedBoundary?: SourceSpan.SourceSpan,
 ): CheckedFunction => {
   const declaration = fn.declaration
   const copyAssumptions = new Set(
@@ -2309,6 +2310,63 @@ const checkFunction = (
     diagnostics: [...loanAnalysis.diagnostics],
     matches: [],
     callables: [],
+  }
+  if (localSharedBoundary !== undefined) {
+    const parameter = fn.declaration.parameters.at(0)?.id
+    if (parameter !== undefined) {
+      const referencesParameter = (expression: Hir.Expression): boolean =>
+        Hir.expressionTree(expression).some(
+          (candidate) =>
+            candidate._tag === 'ParameterReference' &&
+            candidate.parameter.ordinal === parameter.ordinal,
+        )
+      const returns = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
+        statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
+          switch (statement._tag) {
+            case 'Return':
+              return [statement.expression]
+            case 'Unsafe':
+              return returns(statement.statements)
+            case 'If':
+            case 'IfLet':
+              return [...returns(statement.taken), ...returns(statement.otherwise)]
+            case 'While':
+              return returns(statement.body)
+            default:
+              return []
+          }
+        })
+      for (const returned of returns(fn.statements)) {
+        const tree = Hir.expressionTree(returned)
+        const suspension = tree.find((candidate) => candidate._tag === 'Run')
+        if (suspension !== undefined) {
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, localSharedBoundary),
+          )
+          continue
+        }
+        const capturesRestrictedParameter = tree.some(
+          (candidate) =>
+            (candidate._tag === 'EffectBlock' &&
+              candidate.captures.some(
+                (capture) => capture.parameter?.ordinal === parameter.ordinal,
+              )) ||
+            (candidate._tag === 'CallableSection' &&
+              candidate.captures.some((capture) => referencesParameter(capture.value))),
+        )
+        if (
+          'type' in returned &&
+          localSharedResultEscapes({
+            resultType: returned.type,
+            capturesRestrictedParameter,
+            referencesRestrictedParameter: referencesParameter(returned),
+          })
+        )
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Result', returned.span, localSharedBoundary),
+          )
+      }
+    }
   }
 
   const initialLive = new Set<string>()
@@ -3001,13 +3059,52 @@ const checkFunction = (
   })
 }
 
+/** Classifies the result-side ownership facts of one access-scoped callback invocation. */
+export const localSharedResultEscapes = (facts: {
+  readonly resultType: Type.Type
+  readonly capturesRestrictedParameter: boolean
+  readonly referencesRestrictedParameter: boolean
+}): boolean =>
+  Type.containsPositionRestrictedBorrow(facts.resultType) ||
+  facts.capturesRestrictedParameter ||
+  ((Type.isEffect(facts.resultType) ||
+    Type.isCallable(facts.resultType) ||
+    Type.containsExecutableRepresentation(facts.resultType)) &&
+    facts.referencesRestrictedParameter)
+
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
 ): ModuleOwnership => {
+  const targetKey = (target: Hir.CallableTarget): string | undefined =>
+    target._tag === 'DeclarationCallableTarget'
+      ? `${target.declaration.module}\u0000${target.declaration.name}`
+      : undefined
+  const boundaries = new Map<string, SourceSpan.SourceSpan>()
+  for (const fn of result.hir.functions) {
+    for (const expression of fn.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedWithMut') continue
+      const use = expression.arguments.at(1)
+      const target =
+        use?._tag === 'FunctionItem' || use?._tag === 'CallableSection' ? use.target : undefined
+      const key = target === undefined ? undefined : targetKey(target)
+      if (key !== undefined && !boundaries.has(key)) boundaries.set(key, expression.span)
+    }
+  }
   const checked = result.hir.functions.map((fn, ordinal) =>
-    checkFunction(fn, index, result.functions.at(ordinal)),
+    checkFunction(
+      fn,
+      index,
+      result.functions.at(ordinal),
+      fn.declaration.canonical._tag === 'Canonical'
+        ? boundaries.get(
+            `${fn.declaration.canonical.id.module}\u0000${fn.declaration.canonical.id.name}`,
+          )
+        : undefined,
+    ),
   )
   return Object.freeze({
     _tag: 'OwnershipFacts',

@@ -293,7 +293,9 @@ const actor = (
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
 const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 0, 'T')
+const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
 const sharedTypeParameters = Object.freeze([sharedElement])
+const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
@@ -966,6 +968,40 @@ const intrinsicOperations = Object.freeze([
       result: 'SharedCore<T>',
       semanticResult: Type.sharedCore(sharedElement),
       unsafe: true,
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'clone',
+      operation: 'SharedClone',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([valueParameter('self', '&SharedCore<T>')]),
+      semanticParameters: Object.freeze([Type.reference('Shared', Type.sharedCore(sharedElement))]),
+      result: 'SharedCore<T>',
+      semanticResult: Type.sharedCore(sharedElement),
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'withMut',
+      operation: 'SharedWithMut',
+      typeParameters: Object.freeze(['T', 'A']),
+      semanticTypeParameters: sharedLifecycleTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('self', '&SharedCore<T>'),
+        valueParameter('use', 'once fn(&mut T) -> A'),
+        valueParameter('onConflict', 'once fn() -> A'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.sharedCore(sharedElement)),
+        Type.callable(
+          Object.freeze([Type.reference('Exclusive', sharedElement)]),
+          sharedResult,
+          'Take',
+        ),
+        Type.callable(Object.freeze([]), sharedResult, 'Take'),
+      ]),
+      result: 'A',
+      semanticResult: sharedResult,
     }),
   ]),
   ...Object.freeze([
