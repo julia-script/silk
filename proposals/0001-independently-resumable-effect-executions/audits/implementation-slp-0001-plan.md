@@ -33,8 +33,8 @@ merge, the integration branch runs the full repository gates before the next lay
 | Layer | Change | State | Gate attempts | Stop reason | Findings |
 | --- | --- | --- | ---: | --- | ---: |
 | 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
-| 2 | `add-independent-execution-packaging` | Running | 3 fixes in initial run | Fresh bounded run starts from `23e4550`; finite Effect-join regression first | 7 initial findings; conformance pending |
-| 3 | `add-external-wake-parking` | Pending | — | Waiting for layer 2 | — |
+| 2 | `add-independent-execution-packaging` | Done | 3 initial fixes; 3 resume attempts + 1 post-audit rerun | Integrated at `ff39ca0`; barrier passed | 1 High fixed; 1 High rejected as Layer 3 scope; Medium/Low recorded |
+| 3 | `add-external-wake-parking` | Running | — | — | — |
 | 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 | — |
 | 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
 
@@ -49,10 +49,17 @@ Layer 2 is preserved on branch `julia/slp0001-packaging` at `23e4550`. Its focus
 2,090 compiler tests passed. The bounded gate budget was exhausted, so the change was not merged,
 its conformance pass was not started, and downstream layers were parked.
 
-Exact next action: start a fresh bounded implementation run for
+Initial stop action was to start a fresh bounded implementation run for
 `add-independent-execution-packaging`; trace represented-executable layout selection in the finite
 Effect-join path, restore `Completed` outcomes without weakening execution-package planning, rerun
 all hard gates, and then run the single three-lens conformance pass.
 
 Resume 1 started after opening draft PR #248. The preserved Layer 2 commit is the implementation
 baseline; the fresh gate budget applies only to new root causes discovered in this resumed run.
+
+Resume 1 completed at `ff39ca0`. The finite-join regression was traced to missing composite-Effect
+verification for the newly valid standalone represented layouts. The conformance pass then found
+and fixed exact Wasm cleanup for represented body, callback, and endpoint environments. Final
+isolated gates passed: focused 59/59, typecheck 24/24, Biome 983 files, test 28/28 (compiler
+2,101/2,101 plus native corpus 1/1), check 42/42 plus scripts 16/16, and release candidate 9/9.
+The integrated full hard-gate command also exited successfully.
