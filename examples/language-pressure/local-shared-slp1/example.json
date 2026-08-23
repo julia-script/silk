@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "local-shared-slp1-pressure",
+  "title": "Allocation-backed local shared SLP-1 pressure program",
+  "status": "executable",
+  "sources": ["main.silk", "renamed-main.silk"],
+  "features": [
+    "fixed-capacity ready inbox",
+    "Deferred-style shared state",
+    "affine payload publication",
+    "stored callable cleanup",
+    "dormant Effect cleanup",
+    "allocation quota recovery",
+    "spelling-independent MIR",
+    "same-snapshot determinism"
+  ],
+  "targets": ["evaluation", "native", "wasm"],
+  "nonGoals": [
+    "canonical deferred-result API",
+    "execution transfer",
+    "parking or wake order",
+    "scheduler runtime"
+  ]
+}

@@ -1654,8 +1654,46 @@ pub fn main() -> i32 {
  * single compile/link loop without making the evaluator's pinned-outcome gate repeat large
  * feature fixtures that already have focused evaluator coverage.
  */
+const localSharedPressure = readFileSync(
+  new URL('../../../../examples/language-pressure/local-shared-slp1/main.silk', import.meta.url),
+  'utf8',
+)
+const renamedLocalSharedPressure = readFileSync(
+  new URL(
+    '../../../../examples/language-pressure/local-shared-slp1/renamed-main.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const localSharedPressureFailure = (ordinal: 0 | 1): string =>
+  localSharedPressure.replace(
+    ordinal === 0
+      ? 'let mut firstAllocator = SystemAllocator.make()'
+      : 'let mut secondAllocator = SystemAllocator.make()',
+    ordinal === 0
+      ? 'let mut firstAllocator = ExhaustedAllocator {}'
+      : 'let mut secondAllocator = ExhaustedAllocator {}',
+  )
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'local-shared-pressure-success',
+    source: localSharedPressure,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-pressure-renamed',
+    source: renamedLocalSharedPressure,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  ...([0, 1] as const).map(
+    (ordinal): CorpusProgram => ({
+      name: `local-shared-pressure-quota-${ordinal}`,
+      source: localSharedPressureFailure(ordinal),
+      expected: { _tag: 'Completes', result: 142 },
+    }),
+  ),
   ...(['with', 'withMut'] as const).flatMap(
     (outer): ReadonlyArray<CorpusProgram> =>
       (['with', 'withMut'] as const).map((inner): CorpusProgram => {

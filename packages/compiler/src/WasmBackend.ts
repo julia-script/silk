@@ -1463,6 +1463,40 @@ const makeOperationContext = (
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
+    const localType = layout.types.at(local.ordinal)
+    if (localType?._tag === 'EffectBorrow') {
+      const pointer = layout.borrowPointers.get(local.ordinal)
+      if (pointer === undefined) throw new RangeError('Wasm hook cleanup lost its borrow pointer')
+      const rootLanes = layout.lanes.at(local.ordinal) ?? []
+      const rootSlots = slots(local)
+      const laneInstructions = (instruction: 'load' | 'store'): ReadonlyArray<Instr.Instr> =>
+        rootLanes.flatMap((lane, ordinal) => {
+          const offset = LayoutVerify.laneOffset(memory.plan, localType.type, lane.path)
+          const slot = rootSlots.at(ordinal)
+          if (offset === undefined || slot === undefined)
+            throw new RangeError('Wasm hook cleanup lost a borrowed lane')
+          const address = [
+            Instr.localGet(pointer),
+            ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+          ]
+          return instruction === 'store'
+            ? [
+                ...address,
+                Instr.localGet(slot),
+                Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+              ]
+            : [
+                ...address,
+                Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+                Instr.localSet(slot),
+              ]
+        })
+      const hooks = hookReleaseWalk(cleanup, (nestedOffset) => [
+        Instr.localGet(pointer),
+        ...(nestedOffset === 0 ? [] : [Instr.i32Const(nestedOffset), Instr.op('i32.add')]),
+      ])
+      return [...laneInstructions('store'), ...hooks, ...laneInstructions('load')]
+    }
     const planned = memory.frame.roots.get(local.ordinal)
     if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
     const walk = (plan_: CleanupPlan.CleanupPlan, byteOffset: number) =>
@@ -1493,7 +1527,68 @@ const makeOperationContext = (
           }) ?? []
         )
       })
-    const localType = layout.types.at(local.ordinal)
+    const callableEnvironmentOffsets = (
+      environment: Extract<
+        LayoutPlan.CallableEnvironment,
+        { readonly _tag: 'CallableEnvironment' }
+      >,
+      base = 0,
+    ): ReadonlyArray<number> =>
+      environment.fields.flatMap((field) => {
+        if (field.representation === 'Borrow') return [base + field.offset]
+        if (field.callableIdentity?.environment !== undefined) {
+          const nested = LayoutPlan.callableEnvironmentByIdentity(
+            memory.plan,
+            field.callableIdentity.environment,
+          )
+          return nested?._tag === 'CallableEnvironment'
+            ? callableEnvironmentOffsets(nested, base + field.offset)
+            : []
+        }
+        const shape = LayoutPlan.callingShape(memory.plan, field.type)
+        return (
+          shape?.lanes.flatMap((lane) => {
+            const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
+            return offset === undefined ? [] : [base + field.offset + offset]
+          }) ?? []
+        )
+      })
+    if (
+      cleanup._tag === 'CallableCleanup' &&
+      localType?._tag === 'CallableValue' &&
+      localType.environment !== undefined
+    ) {
+      const offsets = callableEnvironmentOffsets(localType.environment)
+      const rootSlots = slots(local)
+      const rootLanes = layout.lanes.at(local.ordinal) ?? []
+      const stores = rootLanes.flatMap((lane, ordinal) => {
+        const offset = offsets.at(ordinal)
+        const source = rootSlots.at(ordinal)
+        if (offset === undefined || source === undefined)
+          throw new RangeError('Wasm callable cleanup lost an environment lane')
+        return [
+          ...frameAddress(planned.offset + offset),
+          Instr.localGet(source),
+          Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+        ]
+      })
+      const hooks = cleanup.slots.flatMap((slot) => {
+        const field = localType.environment?.fields.at(slot.ordinal)
+        return field === undefined ? [] : walk(slot.cleanup, field.offset)
+      })
+      const reloads = rootLanes.flatMap((lane, ordinal) => {
+        const offset = offsets.at(ordinal)
+        const destination = rootSlots.at(ordinal)
+        if (offset === undefined || destination === undefined)
+          throw new RangeError('Wasm callable cleanup lost an environment lane')
+        return [
+          ...frameAddress(planned.offset + offset),
+          Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+          Instr.localSet(destination),
+        ]
+      })
+      return [...stores, ...hooks, ...reloads]
+    }
     if (cleanup._tag === 'EffectCleanup' && localType?._tag === 'EffectValue') {
       const offsets = environmentOffsets(localType.environment)
       const rootSlots = slots(local)

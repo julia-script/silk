@@ -3328,11 +3328,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               local.environment?.fields
                 .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
                 .reverse() ?? []
-            if (fields.length === 0)
+            if (local.environment === undefined)
               return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, local.type)
             return (
               cleanup._tag === 'CallableCleanup' &&
-              local.environment !== undefined &&
+              SilkType.equals(cleanup.type, local.type) &&
               cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
               SilkType.equalsCallableEnvironmentIdentity(
                 cleanup.environment.identity,
