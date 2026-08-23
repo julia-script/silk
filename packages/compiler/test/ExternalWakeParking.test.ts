@@ -117,6 +117,20 @@ it.effect('seals Wake and lowers ordinary-source park and wake through verified 
       ) ?? false,
       SuspensionOwnership.encode(ownership),
     )
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length,
+      3,
+    )
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length,
+      3,
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 0)
   }),
 )
 

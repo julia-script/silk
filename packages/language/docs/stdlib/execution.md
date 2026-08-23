@@ -24,7 +24,7 @@ non-parking. `drive` returns unit; continued ownership is delivered only to `onS
 
 Import as `Execution` with `import silk.execution`.
 
-Public declarations: 2.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6d616b65"></a>
 
@@ -49,3 +49,18 @@ pub effect fn drive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: 
 ```
 
 Drives one legal activation and transfers `branchState` to exactly one outcome callback.
+
+<a id="declaration-73696c6b2f657865637574696f6e3a3a7061726b"></a>
+
+## `park`
+
+```silk
+pub effect fn park<G, F>(register: F) -> ()
+```
+
+Relinquishes the currently Running Execution until one external readiness signal arrives.
+
+### Details
+
+The registration callback receives the generation's sole affine Wake. Its returned guard is
+retained while dormant and dropped immediately before source continues after this call.
