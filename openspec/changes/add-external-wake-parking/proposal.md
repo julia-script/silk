@@ -30,6 +30,8 @@ realization slice 3 of 5. Depends on `add-independent-execution-packaging`.
 
 ### Modified Capabilities
 
+- `bootstrap-semantic-facts`: assign sealed Wake values to the canonical local-affinity lattice and
+  propagate that fact through source-owned state and suspended frames.
 - `bootstrap-intrinsic-boundary`: admit only opaque Wake, consuming wake, and callback-shaped park
   while keeping scheduling actors and payload policy outside the compiler.
 - `bootstrap-ownership`: retain and clean registration guard `G`, endpoint values, Wake authority,

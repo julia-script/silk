@@ -29,15 +29,18 @@
       trap for Dormant and Notifying; verify illegal paths make no progress and invoke no outcome
       callback.
 - [ ] 3.2 Lower completion and external-suspension branches so exactly one take-once callback receives
-      the sole affine branch state; verify the unused callback is cleaned once and completion returns
-      no Execution.
+      the sole affine branch state; use `once fn` callback types, accept affine callback captures,
+      and verify the unused callback is cleaned once, neither callback can be invoked twice, and
+      completion returns no Execution.
 - [ ] 3.3 Keep nested `Effect.suspend` transfers inside one drive activation; verify direct-child
       completion resumes its parent without invoking the owner suspension callback.
 - [ ] 3.4 Root one evaluator logical-stack context per first drive and persist it across later drives;
       verify alternating two execution owners preserves independent CallDepth and trace ancestry.
 - [ ] 3.5 Implement completion, never-driven drop, and dormant/eligible cleanup plans with loans ending
-      before referents; verify structured success and reified typed-failure cases clean and release
-      the combined Allocation once.
+      before referents by extending canonical `SuspensionOwnership` live slots, access modes,
+      affinity, restoration, cleanup order, and deterministic encoding rather than adding a second
+      frame-ownership model; migrate its consumers and goldens, and verify structured success and
+      reified typed-failure cases clean and release the combined Allocation once.
 - [ ] 3.6 Preserve fatal post-construction continuation growth and the no-unwind contract; verify
       exhaustion adds no Effect failure member and no source Allocator access.
 
@@ -47,5 +50,5 @@
       OutOfMemoryError, safe Execution wrappers, Scheduler, Fiber, Deferred, Timer, ready queues, and
       Coroutine; verify only sealed intrinsic identities select package or drive behavior.
 - [ ] 4.2 Run focused intrinsic, layout, allocation-provenance, ownership, cleanup, and logical-root
-      tests, then `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; record exact results
-      before the wake/parking slice begins.
+      tests, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
+      `pnpm release:candidate`; record exact results before the wake/parking slice begins.

@@ -22,10 +22,13 @@ concurrency APIs. See `proposal.md` and the three delta specs.
 
 ### Build one small local Scheduler-shaped witness
 
-Use SLP-0002 Shared state for distinct TaskStore and ReadyInbox actors. Reserve task and ready slots
-before publication. The Execution endpoint owns only a cloned inbox handle plus TaskId, avoiding the
-strong cycle that would result if it owned the TaskStore storing the Execution. Drive removes an
-Execution before activation and holds no Shared access across drive or endpoint invocation.
+Build a companion to the landed SLP-0002 `local-shared-slp1` pressure witness and extend its test
+harness patterns, renamed-actor comparison, allocation-event projections, and failure-quota
+machinery without replacing that independently runnable prerequisite witness. Use SLP-0002 Shared
+state for distinct TaskStore and ReadyInbox actors. Reserve task and ready slots before publication.
+The Execution endpoint owns only a cloned inbox handle plus TaskId, avoiding the strong cycle that
+would result if it owned the TaskStore storing the Execution. Drive removes an Execution before
+activation and holds no Shared access across drive or endpoint invocation.
 
 Alternatives rejected: a compiler-known scheduler violates privilege; capturing the owning task
 store leaks a strong cycle; a growable queue during wake hides allocation.
@@ -79,6 +82,9 @@ kept because the repository is green-field and the accepted SLP chose the richer
 
 - **Pressure actors accidentally look canonical** → keep them in pressure fixtures/findings and
   explicitly state their non-normative status in source and specs.
+- **The final witness duplicates or weakens the SLP-0002 prerequisite evidence** → keep the landed
+  local-shared witness independently runnable and reuse its harness/projection patterns from a
+  companion Execution/Wake fixture.
 - **Shared cycles invalidate cleanup evidence** → keep endpoint routing state separate from task
   ownership and add final-release/cancellation cases.
 - **Tier assertions overfit backend layout** → inspect logical runtime slice and MIR identities only,

@@ -2,19 +2,25 @@
 
 - [ ] 1.1 Add opaque affine local `Intrinsic.Wake`, consuming synchronous `wake`, and effectful unit-
       returning `park` with a take-once NonParking registration callback to the sealed catalog;
-      verify safety, ownership, reachability, and target metadata agree across every phase.
+      spell registration as `once fn`, accept its affine captures, assign Wake the canonical
+      `ExecutionAffinity.localExecution` seed, propagate it through aggregate/source environments
+      and suspended frames, and verify safety, ownership, reachability, affinity, and target metadata
+      agree across every phase.
 - [ ] 1.2 Extend external-park package plans with one stable wake-control cell and fixed endpoint only
       when statically reachable; verify park, wake, notification, and generation reuse contain no
       allocator access or failure edge.
 - [ ] 1.3 Add verified MIR state/authority transitions for Registering, Latched, Dormant, Notifying,
-      Eligible, Cancelled, DestroyPending, and generation reuse; verify malformed predecessors,
-      duplicate Wake authority, and premature reuse are rejected.
+      Eligible, Cancelled, DestroyPending, and generation reuse by extending canonical
+      `SuspensionOwnership` liveness, access, affinity, cleanup, restoration, and deterministic
+      encoding; verify malformed predecessors, duplicate Wake authority, and premature reuse are
+      rejected without a parallel frame-ownership model.
 
 ## 2. Registration and Ordering
 
 - [ ] 2.1 Implement park registration with the generation's sole Wake and retain returned `G` plus
       every live frame value before suspension ownership transfer; verify stored-wake dormancy and
-      `G` cleanup immediately before resumed source.
+      `G` cleanup immediately before resumed source, one invocation of an affine-capturing `once fn`,
+      and rejection of any second invocation.
 - [ ] 2.2 Implement wake-during-registration latching and gate notification on complete `onSuspend`
       return; verify the Execution relinquishes once and notification cannot observe Running state.
 - [ ] 2.3 Cover `onSuspend` destruction after a latched Wake; verify cancellation suppresses endpoint
@@ -37,15 +43,20 @@
 - [ ] 3.5 Reinitialize the stable cell only after the prior generation Wake and transients end; verify
       repeated park/wake/resume cycles reuse storage without aliasing generations.
 - [ ] 3.6 Preserve local affinity for Execution and Wake and add same-thread source extraction tests;
-      verify worker-thread transfer remains rejected and no mandatory atomic fact appears.
+      directly verify Shared-held Wake and parked Execution satisfy the canonical post-SLP-0002
+      scenarios and no transfer syntax, diagnostic, or mandatory atomic fact is invented before a
+      future transfer consumer exists.
 
 ## 4. Source Boundary and Verification
 
 - [ ] 4.1 Add ordinary Deferred-shaped and timer-shaped registration fixtures that extract Wake under
       short Shared access and signal only afterward; verify no unknown callback runs while source
-      access is active and payloads remain outside Wake.
+      access is active, direct and transitive park with an active `Shared.with`/`withMut` borrow is
+      rejected before suspension, an owned Shared handle survives park/resume unchanged, and
+      payloads remain outside Wake.
 - [ ] 4.2 Audit intrinsic and phase inventories for explicit cancel/destroy, Scheduler tokens, payload
       transport, actor-name privilege, hidden allocation, and root policy; verify none is introduced.
 - [ ] 4.3 Run focused wake-order, ownership, cleanup, reentrancy, generation, local-affinity, and
-      intrinsic-boundary tests, then `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`;
-      record exact results before engine parity work begins.
+      intrinsic-boundary tests, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`,
+      `pnpm check`, and `pnpm release:candidate`; record exact results before engine parity work
+      begins.

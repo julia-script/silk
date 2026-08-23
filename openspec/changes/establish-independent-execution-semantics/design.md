@@ -41,6 +41,18 @@ concrete diagnostics agree.
 Alternative rejected: a specialization-only hidden check makes safe generic wrappers impossible to
 state and hides provider-loan failures.
 
+### Keep detachment orthogonal to execution affinity
+
+Reuse the canonical environment components, borrow-root provenance, and `ExecutionAffinity` facts
+landed with SLP-0002, but do not reinterpret `Detached` as `Unrestricted`. A closed executable may
+own a local `Shared<T>` handle, satisfy `Detached` because it retains no external loan, and still
+remain `LocalExecution`. `Execution` and later `Wake` values likewise compose through the existing
+local-affinity lattice rather than introducing a second locality model or an execution-instance
+identity.
+
+Alternative rejected: equating Detached with unrestricted/thread-transferable state would reject
+the accepted Shared-backed sufficiency witness and silently broaden the initial local-only model.
+
 ### Derive NonParking from specialized transitive reachability
 
 NonParking consults only the external-park bit. Nested suspension remains legal, which keeps the

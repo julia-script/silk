@@ -6,7 +6,8 @@ The sealed intrinsic catalog SHALL admit `executionLayout`, unsafe `executionFro
 safe unit-returning `drive` with the exact generic and static-property contracts selected by
 SLP-0001. The first two SHALL expose only Layout, Allocation, exact executable values, and opaque
 Execution; drive SHALL expose only Execution, one affine branch state, and two NonParking outcome
-callbacks. The compiler MUST NOT recognize Allocator, OutOfMemoryError, Execution safe wrappers,
+callbacks whose callable types are `once fn`. The compiler MUST NOT recognize Allocator,
+OutOfMemoryError, Execution safe wrappers,
 Scheduler, Fiber, Deferred, timer, ready queue, or Coroutine declarations by spelling. The catalog
 MUST NOT add a compiler-owned step-result sum, explicit destroy, per-drive endpoint replacement,
 general callable erasure, or implicit program-entry owner.
@@ -15,6 +16,11 @@ general callable erasure, or implicit program-entry owner.
 
 - **WHEN** the intrinsic inventory is compared with semantic, HIR, MIR, evaluator, and backend dispatch
 - **THEN** all phases agree on exactly the layout, initializer, and drive powers and their safety and static-property metadata
+
+#### Scenario: Admit affine outcome callbacks
+
+- **WHEN** each drive outcome callback owns an affine capture
+- **THEN** the intrinsic inventory accepts both callbacks as NonParking `once fn` values and publishes no reusable-call contract
 
 #### Scenario: Build a safe wrapper in ordinary Silk
 

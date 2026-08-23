@@ -1,8 +1,10 @@
 ## 1. Connected Ordinary-Source Owners
 
-- [ ] 1.1 Build a test-local Scheduler-shaped owner with distinct Shared TaskStore and ReadyInbox,
-      pre-reserved task/ready slots, fixed endpoint state, and removal-before-drive; verify no Shared
-      access spans drive or external callback invocation and no strong ownership cycle exists.
+- [ ] 1.1 Build a companion test-local Scheduler-shaped owner from the landed SLP-0002 local-shared
+      pressure actors, with distinct Shared TaskStore and ReadyInbox, pre-reserved task/ready slots,
+      fixed endpoint state, and removal-before-drive; keep the prerequisite witness independently
+      runnable and verify no Shared access spans drive or external callback invocation and no strong
+      ownership cycle exists.
 - [ ] 1.2 Implement deferred first activation from two distinct exact Effect body representations
       erased into homogeneous `Execution<TaskOutput>` values in one owner store; verify owner-selected
       activation and never-started cleanup without callbacks.
@@ -27,10 +29,11 @@
 - [ ] 2.1 Implement task reservation rollback so all fallible Shared, result, queue, and exact
       package allocations finish before observational publication; verify success publishes one
       complete Initial task and failure publishes none.
-- [ ] 2.2 Sweep every exercised construction-failure ordinal in evaluation and Wasm and native
-      boundary ordinals through the designated corpus; verify each prior affine value and Allocation
-      is cleaned once and subsequent runs remain deterministic; separately fail post-publication
-      waiter allocation and verify no park begins and existing tasks remain valid.
+- [ ] 2.2 Extend the landed local-shared failure-quota harness to sweep every exercised
+      construction-failure ordinal in evaluation and Wasm and native boundary ordinals through the
+      designated corpus; verify each prior affine value and Allocation is cleaned once and
+      subsequent runs remain deterministic; separately fail post-publication waiter allocation and
+      verify no park begins and existing tasks remain valid.
 - [ ] 2.3 Inspect park, Wake consumption, endpoint notification, and ready-identity publication;
       verify no allocator access or failure edge exists and unknown callbacks run only after Shared
       access ends.
@@ -40,15 +43,19 @@
 ## 3. Pay-for-Use and Privilege Gates
 
 - [ ] 3.1 Add minimal ordinary-direct, ordinary-nested-only, explicit-direct, explicit-nested-only,
-      and explicit-external-park programs and inspect normalized MIR/runtime-slice inventories;
-      verify each configuration includes only its static suspension and ownership machinery, and
-      explicit nested-only execution completes through one drive with no Wake/notification state.
+      and explicit-external-park programs plus ordinary direct/nested variants that capture a local
+      Shared handle, and inspect normalized MIR/runtime-slice inventories; verify Shared capture
+      publishes `LocalExecution` without selecting independent Execution machinery, each
+      configuration includes only its static suspension and ownership machinery, and explicit
+      nested-only execution completes through one drive with no Wake/notification state.
 - [ ] 3.2 Verify a dynamically direct path inside a statically park-capable Execution retains the
       external tier while owner-side drive code remains NonParking; assert structural identities,
       not byte, timing, or instruction counts.
 - [ ] 3.3 Rename every Scheduler-shaped, Deferred-shaped, timer-shaped, Coroutine-shaped, allocator,
       ready-inbox, and safe-wrapper actor in an equivalent fixture; verify semantic facts, MIR,
-      engine outcomes, and intrinsic inventories remain equivalent apart from source identities.
+      engine outcomes, and intrinsic inventories remain equivalent apart from source identities,
+      reusing the landed local-shared normalization approach rather than adding a disconnected
+      spelling audit.
 - [ ] 3.4 Inventory semantic, HIR, MIR, evaluation, native, and Wasm branches for source-name checks;
       verify only sealed Intrinsic identities grant execution/wake privilege.
 - [ ] 3.5 Write a checked-in findings report mapping Initial ownership, task-specific push readiness,
@@ -64,9 +71,11 @@
 
 - [ ] 4.1 Add the unowned park-capable complete-entry boundary fixture and verify its stable diagnostic
       code/span is distinct from service requirements and no SLP-0003 implicit owner is synthesized.
-- [ ] 4.2 Add connected pressure programs to shared Analysis/evaluator/Wasm tests and the designated
-      native differential corpus; verify values, activation/readiness order, cleanup/release order,
-      diagnostics, and deterministic artifacts at the cheapest required tiers.
+- [ ] 4.2 Extend the existing local-shared pressure test harness with companion connected
+      Execution/Wake programs and add target-specific cases to the designated native differential
+      corpus; keep one realized Analysis snapshot per source and verify values,
+      activation/readiness order, cleanup/release order, diagnostics, and deterministic artifacts at
+      the cheapest required tiers.
 - [ ] 4.3 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
       `pnpm release:candidate`; record every exact result and identify pre-existing failures before
       implementation handoff.

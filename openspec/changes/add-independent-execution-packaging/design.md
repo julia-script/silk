@@ -58,6 +58,17 @@ a logical caller. Native/Wasm physical placement remains for the engine slice.
 Alternatives rejected: using one thread-global LIFO context makes non-LIFO owner scheduling change
 CallDepth and trace ancestry.
 
+### Extend the canonical suspension-ownership authority
+
+Extend the existing `SuspensionOwnership` semantic artifact instead of creating a parallel frame or
+cleanup model. Its post-normalization live slots, access modes, affinity, cleanup order, restoration
+facts, and deterministic encoding remain authoritative; add explicit execution-owned root,
+external-park, resume, completion, and destruction states to that same artifact and migrate every
+consumer and golden together.
+
+Alternative rejected: a second independently resumable frame-ownership structure would allow the
+nested and external suspension paths to disagree about liveness, loans, affinity, or cleanup.
+
 ### Keep package admission recoverable and later growth fatal
 
 The safe source wrapper procures one Allocation through ordinary policy before unsafe construction.
@@ -74,6 +85,7 @@ growth changes existing suspension semantics and complicates every Effect outcom
 - **Layout identity drifts from initializer specialization** → carry one canonical package-plan
   digest into semantic facts and verified MIR and reject mismatches before lowering.
 - **Erased cleanup misses a concrete capture** → derive invoke/drop metadata from the same exact
-  environment used by Detached and compare ownership/MIR goldens.
+  environment used by Detached, extend canonical `SuspensionOwnership`, and compare its existing
+  ownership/MIR goldens.
 - **Owner callbacks accidentally park** → require NonParking statically and keep drive callbacks
   nonescaping and take-once.

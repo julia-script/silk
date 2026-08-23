@@ -14,8 +14,8 @@ active Allocation plus `F`, `O`, and `R`, SHALL run no body code, and SHALL retu
 `Execution<A>`. The package SHALL own the owner record, erased body, exact invoke/drop metadata,
 fixed endpoint, stable wake-control storage only when external parking is reachable, and any initial
 continuation segment required by the static summary. A statically non-parking wrapper that supplies
-a zero-sized no-op `O` and function item `R` SHALL add no readiness storage. No intrinsic operation
-MUST allocate or mention Allocator or allocation failure.
+a zero-sized no-op `O` and function item `R` SHALL add no readiness storage. Intrinsic operations
+MUST NOT allocate and MUST NOT mention Allocator or allocation failure.
 
 #### Scenario: Construct one initial execution
 
@@ -40,8 +40,8 @@ MUST allocate or mention Allocator or allocation failure.
 ### Requirement: Drive transfers one affine branch to exactly one outcome
 
 `Intrinsic.drive` SHALL consume one Initial or Eligible `Execution<A>`, one affine branch state `D`,
-one take-once NonParking completion callback `C: fn(D,A) -> ()`, and one take-once NonParking
-suspension callback `S: fn(D,Execution<A>) -> ()`, and SHALL return unit. Completion SHALL invoke
+one NonParking completion callback `C: once fn(D,A) -> ()`, and one NonParking suspension callback
+`S: once fn(D,Execution<A>) -> ()`, and SHALL return unit. Completion SHALL invoke
 only `C`; external parking SHALL invoke only `S`; the unused callback SHALL be cleaned exactly once.
 Nested `Effect.suspend` SHALL remain internal to the same drive activation and MUST NOT invoke `S`.
 The first drive SHALL root one execution-local logical stack; later drives SHALL restore that root
@@ -56,6 +56,11 @@ without treating owner frames as logical ancestors.
 
 - **WHEN** an Initial or Eligible Execution reaches external parking
 - **THEN** exactly the suspension callback receives `D` and the Dormant Execution, the completion callback is cleaned once, and drive returns unit
+
+#### Scenario: Consume affine callback captures once
+
+- **WHEN** completion and suspension callbacks each own affine captures and drive selects one outcome
+- **THEN** the selected `once fn` is invoked exactly once and the unselected callback plus its captures are cleaned exactly once without a reusable-call requirement
 
 #### Scenario: Keep nested transfer inside one activation
 

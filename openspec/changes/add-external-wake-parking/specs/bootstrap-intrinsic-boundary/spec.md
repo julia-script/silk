@@ -3,8 +3,8 @@
 ### Requirement: External parking exposes only Wake, wake, and park
 
 The sealed intrinsic catalog SHALL add opaque affine `Wake`, synchronous consuming `wake(Wake) ->
-()`, and effectful unit-returning `park<G,F>(F) -> ()` where `F` is one take-once NonParking
-registration callback accepting Wake and returning `G`. The operations SHALL expose no callback
+()`, and effectful unit-returning `park<G,F>(F) -> ()` where `F` is one NonParking
+`once fn(Wake) -> G` registration callback. The operations SHALL expose no callback
 representation inside Wake, payload channel, scheduler token, explicit cancellation operation,
 destroy operation, allocator, timer, queue, Deferred, Fiber, Coroutine, or program-entry policy.
 Every phase and target SHALL agree on safety, affinity, local-transfer, reachability, and callback
@@ -14,6 +14,11 @@ metadata.
 
 - **WHEN** intrinsic declarations are compared with semantic, HIR, MIR, evaluator, and backend branches
 - **THEN** all phases expose exactly Wake, wake, and park with matching contracts and no actor-shaped primitive
+
+#### Scenario: Admit an affine registration callback
+
+- **WHEN** a park registration callback owns affine source state
+- **THEN** the intrinsic inventory accepts it as a NonParking `once fn`, invokes it at most once, and exposes no reusable-call requirement
 
 #### Scenario: Rename a source waiter actor
 

@@ -26,6 +26,16 @@ will clean.
 - **WHEN** an activated execution creates a loan into a value it owns, parks, and later resumes
 - **THEN** the loan keeps a stable logical referent and dormant cleanup ends it before cleaning the owned referent
 
+#### Scenario: Retain an owned Shared handle across parking
+
+- **WHEN** a Running Execution owns a `Shared<T>` handle and parks without an active Shared access borrow
+- **THEN** the Dormant Execution retains the same strong handle obligation and later resume preserves it without granting thread transfer
+
+#### Scenario: Reject parking with active Shared access
+
+- **WHEN** direct or transitively reached external park occurs while a `Shared.with` or `Shared.withMut` access borrow is live
+- **THEN** ownership reports the canonical local-shared-access diagnostic and creates no suspended frame or dormant execution state
+
 #### Scenario: Reject an external loan at construction
 
 - **WHEN** an Effect or endpoint passed toward Execution construction retains a caller lexical or provider loan

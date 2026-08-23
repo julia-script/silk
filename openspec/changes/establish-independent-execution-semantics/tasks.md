@@ -7,9 +7,11 @@
       body selects external mode while the ordinary owner-side `drive` caller does not become
       park-capable.
 - [ ] 1.3 Derive `Intrinsic.Detached` from complete executable/value environment dependencies and
-      verify owned captures and an opaque producer result pass independently of payload spelling,
-      while lexical loans, borrowed providers, nested nominal loans, and empty-row borrowed bindings
-      fail with stable codes, spans, and causal paths.
+      the canonical environment-component and borrow-root provenance already used by
+      `ExecutionAffinity`; verify owned unrestricted and local-Shared captures plus an opaque
+      producer result pass independently of payload spelling, local captures remain
+      `LocalExecution`, and lexical loans, borrowed providers, nested nominal loans, and empty-row
+      borrowed bindings fail with stable codes, spans, and causal paths.
 - [ ] 1.4 Derive `Intrinsic.NonParking` from specialized transitive external-park reachability and
       verify direct and nested-only callbacks pass while ordinary-helper and selected-provider paths
       to park fail with stable codes, primary obligation spans, and deterministic causal paths.
@@ -24,12 +26,16 @@
       byte-identical facts for success and failure cases.
 - [ ] 2.3 Add opaque affine local `Intrinsic.Execution<A>` semantic and ownership identity with
       Initial, Running, Dormant, Notifying, Eligible, Completed, and Destroyed logical states; verify
-      actor-name lookalikes receive no privilege.
+      every available instance composes through the existing `ExecutionAffinity` lattice as
+      `LocalExecution` independent of available `A`, malformed or unavailable `A` stays unavailable,
+      no execution-instance identity is published, and actor-name lookalikes receive no privilege.
 - [ ] 2.4 Track one non-Copy Execution obligation through move, drive ownership, completion, and drop;
       verify duplicate use is rejected and no thread-transfer permission is published.
 - [ ] 2.5 Preserve execution-internal stable loans across parking and cleanup order while rejecting
       external construction loans and completion results borrowing package/body/frame/endpoint
-      storage; verify focused ownership cases cover every provenance boundary.
+      storage; verify an owned Shared handle crosses park/resume with one unchanged strong obligation
+      while direct and transitive park under active `Shared.with`/`withMut` access receives the
+      canonical diagnostic and creates no suspended frame.
 
 ## 3. Boundary Diagnostics and Gates
 
@@ -43,5 +49,6 @@
       lifecycle, affinity, and causes; verify repeated in-process analysis is byte-identical without
       adding a redundant fresh-process determinism test.
 - [ ] 3.4 Run focused semantic, generic, ownership, diagnostic, and inspection tests, then
-      `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; record every exact result before
-      handing the semantic prerequisite to the packaging slice.
+      `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
+      `pnpm release:candidate`; record every exact result before handing the semantic prerequisite
+      to the packaging slice.

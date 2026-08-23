@@ -24,11 +24,12 @@
 
 ## 3. Native and Wasm Realization
 
-- [ ] 3.1 Extend native lowering to reuse continuation liveness, frames, resume labels, outcome
-      restoration, and cleanup under execution-owned roots; verify reverse-order resumption and
-      target-private package state agree with evaluation.
-- [ ] 3.2 Extend direct-Wasm lowering with the same verified behavior and execution-owned storage;
-      verify reverse-order resumption, cleanup, and reclaim agree with evaluation and native.
+- [ ] 3.1 Extend native lowering from canonical `SuspensionOwnership` liveness, frame, access-mode,
+      affinity, resume-label, outcome-restoration, and cleanup facts under execution-owned roots;
+      verify reverse-order resumption and target-private package state agree with evaluation.
+- [ ] 3.2 Extend direct-Wasm lowering from that same `SuspensionOwnership` authority and
+      execution-owned storage; verify reverse-order resumption, cleanup, reclaim, and deterministic
+      ownership encoding agree with evaluation and native.
 - [ ] 3.3 Lower local Wake coordination without mandatory atomics or thread-transfer support and
       implement same-thread reactor delivery; verify native and Wasm artifacts contain no worker,
       work-stealing, or compiler-known timer/scheduler policy.
@@ -50,4 +51,5 @@
 - [ ] 4.3 Cover same-thread timer/reactor delivery and explicit target unavailability; verify no
       fallback blocks, transfers Wake across threads, or adds hidden host scheduling.
 - [ ] 4.4 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; record every
-      exact result and identify pre-existing failures before the separation-evidence slice.
+      exact result, then run `pnpm release:candidate`; identify pre-existing failures before the
+      separation-evidence slice.

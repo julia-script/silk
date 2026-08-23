@@ -8,7 +8,7 @@ whole-package reclamation for independently resumable executions.
 ### Requirement: Park registers readiness before relinquishment
 
 `Intrinsic.park<G,F>` SHALL be callable only while an explicit Execution is Running and SHALL invoke
-one take-once NonParking `F: fn(Wake) -> G` with the generation's sole opaque affine Wake. The
+one NonParking `F: once fn(Wake) -> G` with the generation's sole opaque affine Wake. The
 registration callback SHALL either store or consume that Wake and return one ordinary guard `G`.
 The runtime SHALL retain `G` and every live frame value before relinquishing the Execution through
 the drive suspension callback. `park` SHALL return unit only after a later legal resume, and SHALL
@@ -41,7 +41,8 @@ Each park generation SHALL share one stable wake-control cell between the Execut
 Wake. Consuming Wake during registration SHALL latch readiness but MUST NOT invoke the fixed endpoint
 until the complete drive suspension callback returns. The Execution SHALL relinquish exactly once
 even when readiness is latched. After suspension ownership is established, a live latched or later
-Wake SHALL begin exactly one notification. Affinity MUST prevent a second signal for the generation.
+Wake SHALL begin exactly one notification. Affine ownership MUST prevent a second signal for the
+generation.
 
 #### Scenario: Signal inside registration
 
@@ -142,7 +143,7 @@ rejected until a parallel-memory proposal defines transfer and atomic ordering.
 - **WHEN** source shared state contains Wake and a producer becomes ready
 - **THEN** source extracts Wake under short access, ends access, and then consumes it without invoking an external callback inside the access region
 
-#### Scenario: Reject worker-thread delivery
+#### Scenario: Publish affinity without inventing a transfer consumer
 
-- **WHEN** source attempts to move Wake to a worker-thread callback in the local model
-- **THEN** transfer is rejected and no atomic or cross-thread guarantee is inferred
+- **WHEN** inspection observes Wake directly or through source-owned aggregate state in the local model
+- **THEN** it reports canonical `LocalExecution` affinity and lowering contains no cross-thread transfer or atomic guarantee; a concrete transfer diagnostic remains deferred until a transfer consumer exists

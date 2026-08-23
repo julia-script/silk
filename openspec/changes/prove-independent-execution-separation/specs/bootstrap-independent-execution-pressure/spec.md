@@ -127,6 +127,16 @@ reachable. Importing or naming source policy actors MUST select no tier.
 - **WHEN** a program uses `Effect.suspend` but no explicit Execution or external park
 - **THEN** artifacts retain bounded-stack nested transfer and contain no independent execution owner, Wake, ready queue, or atomic support
 
+#### Scenario: Keep local Shared affinity separate from direct execution machinery
+
+- **WHEN** an ordinary direct program captures a local Shared handle and reaches no suspension
+- **THEN** semantic inspection reports `LocalExecution` while evaluator/native/Wasm artifacts omit the independent Execution owner, package, Wake, and external-parking runtime and retain only any separately required local-Shared slice
+
+#### Scenario: Keep local Shared affinity separate from nested execution machinery
+
+- **WHEN** an ordinary nested-only program captures a local Shared handle and uses `Effect.suspend` without explicit Execution or external park
+- **THEN** semantic inspection reports `LocalExecution` while artifacts retain only local-Shared and bounded-stack nested-transfer machinery and omit the independent owner, package, Wake, notification, and dormant-owner state
+
 #### Scenario: Inspect an explicit non-parking execution
 
 - **WHEN** a closed direct body is explicitly packaged with the zero-sized endpoint
