@@ -111,13 +111,19 @@ the ordered rerun passed completely. No Critical/High finding remained.
 ## Final verification
 
 Every change is strict-valid and complete: 14/14, 8/8, 12/12, 11/11, 12/12, and 10/10 tasks.
-The final integrated barrier at merge `8462754` passed, in repository order:
+The layer-six integrated barrier at merge `8462754` passed. After current `origin/main` introduced
+the seeded-random standard-library slice, the generated-integrity conflict was resolved by
+regenerating the digest from both merged source sets. Merge `ae863ee` then passed the full barrier,
+in repository order:
 
 1. `pnpm typecheck`
 2. `pnpm exec biome check .`
 3. `pnpm test`
 4. `pnpm check`
 5. `pnpm release:candidate`
+
+The synchronized run passed 216 compiler files and 2,077 compiler tests, native differential
+acceptance, all 28 repository test tasks, and release-candidate validation 9/9.
 
 The completed implementation is ready for the separately invoked `$slp-6-audit-implementation`
 step. Archival remains out of scope until that audit passes.
