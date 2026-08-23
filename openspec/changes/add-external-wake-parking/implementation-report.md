@@ -1,6 +1,6 @@
 # Implementation report: add-external-wake-parking
 
-Status: **parked after the single post-conformance gate rerun**
+Status: **resumed; fresh hard-gate sequence in progress**
 
 ## Scope and layer boundary
 
@@ -32,7 +32,7 @@ executing the stored body.
 | 3.1–3.5 | `WakeCell` models notification/invocation retains, non-mutating fatal drive admission, DestroyPending, cancelled late-Wake no-op, final-authority release, eligible drop, and generation reuse. `BootstrapEvaluation.ts` transfers final allocation reclaim to an outstanding Wake after Execution cleanup. |
 | 3.6 | Wake and every tested containing aggregate/union/array/Shared shape are `LocalExecution`. `SuspensionOwnership` records the owned Shared handle as a local-affine suspended-frame slot. No transfer or atomic operation was added. |
 | 4.1 | Deferred-shaped lowering fixture stores/extracts Wake through `Shared.withMut`, signals after access, retains an owned Shared handle across park, and uses an affine-capturing registration. A separate timer-shaped fixture proves the same source boundary. Wake, direct park, parameter-forwarding transitive park, and no-argument transitive park during active `Shared.with`/`withMut` access produce `OWN0016`. |
-| 4.2 | `IntrinsicCatalog.test.ts` fixes the allowed inventory to exactly `wake` and `park`, all three targets, safe operations, no explicit cancel/destroy, Scheduler/timer/payload/allocator surface, or privileged source actor. |
+| 4.2 | `IntrinsicCatalog.test.ts` fixes the allowed inventory to exactly `wake` and `park`, all three targets, safe operations, and no explicit cancel/destroy, Scheduler/timer/payload/allocator surface, or privileged source actor. `ExternalWakeParking.test.ts` exercises semantic analysis, MIR inspection, evaluator availability, and Wasm emission for the sealed operations, while the implementation branches in `Intrinsic.ts`, `LowerBuiltin.ts`, `LowerExpression.ts`, `BootstrapEvaluation.ts`, and `WasmBackend.ts` remain operation-shaped rather than actor-policy-shaped. |
 
 ## Implementation localization and fixes
 
@@ -115,6 +115,27 @@ The stale generated diagnostic documentation follows the new `OWN0016` external-
 it was not regenerated after this bounded rerun failed. No second rerun is permitted, so the change
 is parked with the focused 58-test repair evidence green and the exact remaining mechanical blocker
 recorded.
+
+### Fresh bounded resume
+
+The fresh resume began from merge commit `3fa2d28`, which contains the parked implementation and
+the single consolidated conformance fix pass through `91a622b`. It does not repeat that conformance
+pass because the resume has introduced no semantic implementation change.
+
+- The first documentation-generation attempt could not load
+  `packages/documentation/dist/Project.js` in the new worktree. Relocalization showed that the
+  documentation package in turn consumes built compiler subpaths and the compiler consumes built
+  LLVM/Wasm subpaths. One root topological `pnpm build` supplied the missing workspace outputs; this
+  is resume root-cause repair 1/3 and did not change tracked source.
+- `pnpm --filter @silk-effect/compiler documentation:generate` — **PASS** after the prerequisite
+  build; regenerated `packages/language/docs/diagnostics.md` with the `OWN0016` external-readiness-
+  callback form.
+- `pnpm --filter @silk-effect/compiler documentation:check` — **PASS**.
+- Focused post-conformance regression sequence over `ExternalWakeParking.test.ts`,
+  `SharedStdlib.test.ts`, `OwnedAllocationAcceptance.test.ts`, `WakeCell.test.ts`, and `Mir.test.ts`
+  — **PASS**, 5 files / 58 tests.
+- `openspec validate add-external-wake-parking --strict --json --no-interactive` — **PASS**, 1/1.
+- Fresh full hard gates — **PENDING**.
 
 ## Conformance findings
 
