@@ -38,6 +38,7 @@ export interface Instance {
   readonly function: Hir.HirFunction
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
+  readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
   readonly effectSuccesses?: ReadonlyArray<{
     readonly site: Hir.EffectSiteId
@@ -724,6 +725,7 @@ const {
   directCallInstances,
   callableCallTargets,
   forwardedRequirementTargets,
+  resultCallableIdentity,
   resultEffectIdentity,
   effectSuccesses,
   concreteCallables,
@@ -921,6 +923,7 @@ export const discover = (
       continue
     }
     if (!recorded.has(keyText(key))) {
+      const resultCallable = resultCallableIdentity(fn, key, results, index)
       const resultEffect = resultEffectIdentity(fn, key, results, index)
       recorded.set(
         keyText(key),
@@ -931,6 +934,7 @@ export const discover = (
           substitution,
           specialization,
           effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
+          ...(resultCallable === undefined ? {} : { resultCallable }),
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )

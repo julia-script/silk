@@ -673,9 +673,34 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Move') return callableOriginOf(expression.subject, context)
     if (expression._tag === 'Call') {
       const forwarded = staticallyForwardedCallable(expression, context.fn, context.results)
-      return forwarded === undefined || forwarded === expression
+      if (forwarded !== undefined && forwarded !== expression)
+        return callableOriginOf(forwarded, context)
+      const targetKey = targetKeyOfCall(expression, context)
+      const target =
+        targetKey === undefined ? undefined : targetFunction(context.results, expression.target)
+      return targetKey === undefined || target === undefined
         ? undefined
-        : callableOriginOf(forwarded, context)
+        : resultCallableIdentity(
+            target,
+            targetKey,
+            context.results,
+            context.index,
+            context.resolving,
+          )
+    }
+    if (expression._tag === 'CallableApply') {
+      const targetKey = targetKeyOfCallableApply(expression, context)
+      if (targetKey === undefined) return undefined
+      const target = targetFunction(context.results, targetKey.declaration)
+      return target === undefined
+        ? undefined
+        : resultCallableIdentity(
+            target,
+            targetKey,
+            context.results,
+            context.index,
+            context.resolving,
+          )
     }
     return undefined
   }
@@ -808,6 +833,32 @@ export const make = (operations: Operations) => {
   function returnedExpression(fn: Hir.HirFunction): Hir.Expression | undefined {
     const terminal = fn.statements.at(-1)
     return terminal?._tag === 'Return' ? terminal.expression : undefined
+  }
+
+  function resultCallableIdentity(
+    fn: Hir.HirFunction,
+    owner: InstanceKey,
+    results: ReadonlyMap<string, Elaboration.Result>,
+    index: DeclarationIndex.Index,
+    resolving: ReadonlySet<string> = new Set(),
+  ): Type.CallableIdentityArgument | undefined {
+    const substitution = instanceSubstitution(fn, owner)
+    const expression = returnedExpression(fn)
+    if (substitution === undefined || expression === undefined || fn.contract._tag !== 'Contract')
+      return undefined
+    const result = Type.substitute(fn.contract.result, substitution)
+    const contract = Type.isRepresented(result) ? result.contract : result
+    if (!Type.isCallable(contract)) return undefined
+    const identity = keyText(owner)
+    if (resolving.has(identity)) return undefined
+    return callableOriginOf(expression, {
+      fn,
+      owner,
+      substitution,
+      results,
+      index,
+      resolving: new Set(resolving).add(identity),
+    })
   }
 
   const forwardedEffectResultParameter = (target: Hir.HirFunction): number | undefined => {
@@ -2160,6 +2211,7 @@ export const make = (operations: Operations) => {
     directCallInstances,
     callableCallTargets,
     forwardedRequirementTargets,
+    resultCallableIdentity,
     resultEffectIdentity,
     effectSuccesses,
     concreteCallables,

@@ -49,6 +49,7 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import {
   baseRunnerKey,
+  callableValueByIdentity,
   callableValueType,
   directCallableSectionValueType,
   effectCompositeShape,
@@ -886,10 +887,66 @@ export function lowerExpressionInner(
           const guardArgument = recipe.typeArguments.at(0)
           const semanticGuard =
             guardArgument === undefined ? undefined : fn.semanticArgument(guardArgument)
-          const guard =
-            semanticGuard !== undefined && Type.isTypeArgument(semanticGuard)
-              ? fn.type(semanticGuard)
+          const representation = recipe.typeArguments.at(1)
+          const semanticRepresentation =
+            representation === undefined ? undefined : fn.semanticArgument(representation)
+          const guardType =
+            semanticGuard !== undefined &&
+            (Type.isTypeArgument(semanticGuard) ||
+              (typeof semanticGuard !== 'string' && semanticGuard._tag === 'RepresentedType'))
+              ? semanticGuard
               : undefined
+          const registrationIdentity =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity
+              : undefined
+          const registrationTarget = registrationIdentity?.target
+          const registrationArguments = registrationIdentity?.typeArguments ?? Object.freeze([])
+          const resultCallableCandidates =
+            registrationTarget?._tag === 'Declaration'
+              ? fn.instances.flatMap((candidate) => {
+                  if (
+                    candidate.key.declaration.module !== registrationTarget.module ||
+                    candidate.key.declaration.name !== registrationTarget.name ||
+                    !registrationArguments.every((argument, ordinal) => {
+                      const candidateArgument = candidate.key.typeArguments.at(ordinal)
+                      return (
+                        candidateArgument !== undefined &&
+                        Type.equalsGenericArgument(argument, candidateArgument)
+                      )
+                    }) ||
+                    candidate.resultCallable === undefined
+                  )
+                    return []
+                  return [candidate.resultCallable]
+                })
+              : Object.freeze([])
+          const resultCallable = resultCallableCandidates.at(0)
+          const unambiguousResultCallable =
+            resultCallable !== undefined &&
+            resultCallableCandidates.every((candidate) =>
+              Type.equalsGenericArgument(resultCallable, candidate),
+            )
+              ? resultCallable
+              : undefined
+          const guard =
+            guardType === undefined
+              ? undefined
+              : (fn.type(guardType) ??
+                (Type.isCallable(guardType) && unambiguousResultCallable !== undefined
+                  ? (() => {
+                      const realized = callableValueByIdentity(
+                        fn.layout,
+                        unambiguousResultCallable,
+                        guardType,
+                      )
+                      return realized === undefined
+                        ? undefined
+                        : Object.freeze({ ...realized, type: guardType })
+                    })()
+                  : undefined))
           const registerType =
             register === undefined ? undefined : fn.localTypes.at(register.result.ordinal)
           if (
@@ -903,9 +960,6 @@ export function lowerExpressionInner(
             return undefined
           const destination = fn.alloc(type)
           const guardLocal = fn.alloc(guard)
-          const representation = recipe.typeArguments.at(1)
-          const semanticRepresentation =
-            representation === undefined ? undefined : fn.semanticArgument(representation)
           const registrationTypeArguments =
             semanticRepresentation !== undefined &&
             Type.isExactRepresentationArgument(semanticRepresentation) &&
@@ -919,7 +973,10 @@ export function lowerExpressionInner(
               guard: guardLocal,
               register: register.result,
               registerAccess: 'Take' as const,
-              guardCleanup: concreteCleanup(fn, Mir.semanticType(guard)),
+              guardCleanup:
+                guard._tag === 'CallableValue'
+                  ? callableLocalCleanup(fn, guard)
+                  : concreteCleanup(fn, Mir.semanticType(guard)),
               registerCleanup: callableLocalCleanup(fn, registerType),
               registrationTypeArguments,
               type,

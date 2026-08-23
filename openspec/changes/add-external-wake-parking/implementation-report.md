@@ -1,6 +1,6 @@
 # Implementation report: add-external-wake-parking
 
-Status: **implementation and hard gates complete; conformance pending**
+Status: **parked after the single post-conformance gate rerun**
 
 ## Scope and layer boundary
 
@@ -28,10 +28,10 @@ executing the stored body.
 | 1.1 | `Type.ts`, `Intrinsic.ts`, `NameResolution.ts`, `Layout.ts`, `LayoutVerify.ts`, `ExecutionAffinity.ts`, generated stdlib/toolchain; `ExternalWakeParking.test.ts` checks sealed identity, fixed non-copy layout, aggregate affinity, callable cleanup, target inventory, and ordinary lowering. |
 | 1.2 | `Instances.representedEffectSuspensionOf` preserves owner-scoped represented body identity; `Layout.ts` and `ExecutionPackage.ts` select WakeControl only for `ExternalPark`; package ownership encodes `StableGenerationCell` and `IndivisibleUntilFinalAuthority`. Existing direct/nested package regression tests remain green. |
 | 1.3 | `WakeCell.ts`, `Mir.ts`, `MirEncoding.ts`, `MirLinearization.ts`, `MirVerification.ts`, `ProvisionalMir.ts`, `SuspensionOwnership.ts`, and `OwnershipEncoding.ts`; malformed authority and deterministic encoding tests are in `WakeCell.test.ts`. |
-| 2.1–2.4 | `ExecutionPark` retains affine registration captures and guard cleanup; `WakeCell` proves sole generation authority, latch-before-handoff, destruction after latch, dormant notification, no inline eligibility, and duplicate consumption rejection. Source double signal produces `OWN0001`. |
+| 2.1–2.4 | `ExecutionPark` retains affine registration captures and every ordinary guard shape, including represented callable guards, with exact cleanup; `WakeCell` proves sole generation authority, latch-before-handoff, destruction after latch, dormant notification, no inline eligibility, and duplicate consumption rejection. Source double signal produces `OWN0001`. |
 | 3.1–3.5 | `WakeCell` models notification/invocation retains, non-mutating fatal drive admission, DestroyPending, cancelled late-Wake no-op, final-authority release, eligible drop, and generation reuse. `BootstrapEvaluation.ts` transfers final allocation reclaim to an outstanding Wake after Execution cleanup. |
 | 3.6 | Wake and every tested containing aggregate/union/array/Shared shape are `LocalExecution`. `SuspensionOwnership` records the owned Shared handle as a local-affine suspended-frame slot. No transfer or atomic operation was added. |
-| 4.1 | Deferred-shaped lowering fixture stores/extracts Wake through `Shared.withMut`, signals after access, retains an owned Shared handle across park, and uses an affine-capturing registration. A separate timer-shaped fixture proves the same source boundary. Direct and helper-transitive park during active `Shared.with`/`withMut` access produce `OWN0016`. |
+| 4.1 | Deferred-shaped lowering fixture stores/extracts Wake through `Shared.withMut`, signals after access, retains an owned Shared handle across park, and uses an affine-capturing registration. A separate timer-shaped fixture proves the same source boundary. Wake, direct park, parameter-forwarding transitive park, and no-argument transitive park during active `Shared.with`/`withMut` access produce `OWN0016`. |
 | 4.2 | `IntrinsicCatalog.test.ts` fixes the allowed inventory to exactly `wake` and `park`, all three targets, safe operations, no explicit cancel/destroy, Scheduler/timer/payload/allocator surface, or privileged source actor. |
 
 ## Implementation localization and fixes
@@ -48,9 +48,19 @@ executing the stored body.
 4. Execution cleanup initially released a readiness package unconditionally. It now applies
    `WakeCell.destroyExecution` and leaves the indivisible allocation retained when a Wake remains;
    Wake cleanup owns the final release.
+5. The access-boundary audit found that synchronous Wake could invoke its external readiness
+   endpoint while a local-Shared access loan remained live. Ownership now classifies `ExecutionWake`
+   as an external-callback boundary and reports `OWN0016` before lowering.
+6. Access-boundary propagation initially followed only helper edges that forwarded callback
+   parameter zero. Every synchronous helper still runs under the active loan, so the original
+   boundary now propagates through the complete ordinary call graph, including no-argument helpers.
+7. An unconstrained generic guard `G` specialized to a represented callable contract, but lowering
+   admitted only ordinary type arguments. Instance discovery now retains exact callable result
+   identity, `ExecutionPark` realizes that guard with its source contract and environment, and MIR
+   verifies its exact callable cleanup.
 
-No compatibility shim, actor-name recognition, Scheduler policy, hidden allocation, payload lane,
-failure channel, cross-thread transfer, or mandatory atomic fact was introduced.
+No compatibility shim, standard-library actor-name recognition, Scheduler policy, hidden allocation,
+payload lane, failure channel, cross-thread transfer, or mandatory atomic fact was introduced.
 
 ## Verification history
 
@@ -61,6 +71,9 @@ failure channel, cross-thread transfer, or mandatory atomic fact was introduced.
 - `pnpm --filter @silk-effect/compiler typecheck` — **PASS**. One pre-gate run correctly reported stale generated toolchain identity after source edits; `pnpm --filter @silk-effect/compiler toolchain:generate` repaired the generated identity, and the next run passed.
 - Targeted Biome check over changed implementation/tests — **PASS** after formatter applied one mechanical wrap.
 - `openspec validate add-external-wake-parking --strict --json --no-interactive` — **PASS**, 1/1.
+- Post-conformance focused sequence: compiler typecheck plus
+  `ExternalWakeParking.test.ts`, `SharedStdlib.test.ts`, `OwnedAllocationAcceptance.test.ts`,
+  `WakeCell.test.ts`, and `Mir.test.ts` — **PASS**, 5 files / 58 tests.
 
 ### Required hard gates
 
@@ -86,6 +99,36 @@ change:
 - `pnpm check` — **PASS**, 42/42 Turbo tasks plus 16/16 repository script tests.
 - `pnpm release:candidate` — **PASS**, 14/14 builds and 9/9 release-candidate validations.
 
+### Post-conformance hard-gate rerun
+
+The contract permits one hard-gate rerun after the consolidated conformance fix pass. Its exact
+result was:
+
+- `pnpm typecheck` — **PASS**.
+- `pnpm exec biome check .` — **PASS**.
+- `pnpm test` — **FAIL** in the compiler documentation check before compiler tests:
+  `diagnostics.md is stale. Run pnpm --filter @silk-effect/compiler documentation:generate`.
+- `pnpm check` — **NOT RUN** because the chained gate stopped at `pnpm test`.
+- `pnpm release:candidate` — **NOT RUN** because the chained gate stopped at `pnpm test`.
+
+The stale generated diagnostic documentation follows the new `OWN0016` external-callback wording;
+it was not regenerated after this bounded rerun failed. No second rerun is permitted, so the change
+is parked with the focused 58-test repair evidence green and the exact remaining mechanical blocker
+recorded.
+
 ## Conformance findings
 
-Pending the required single three-lens pass after the hard gates.
+The required single pass used separate language/SLP behavior, OpenSpec/task-evidence, and
+architecture/minimal-privilege lenses. Findings and verified dispositions:
+
+| Lens claim | Severity | Disposition |
+| --- | --- | --- |
+| Wake may consume under active `Shared.withMut` access. | High | **Verified and fixed.** `Ownership.ts` now classifies synchronous `ExecutionWake` as an external callback while the access boundary is active; the exact fixture produces `OWN0016`. |
+| Transitive park through a helper that does not forward the borrowed parameter bypasses the access boundary. | High | **Verified and fixed.** Boundary spans now traverse every ordinary synchronous helper edge; direct, forwarding, and no-argument helpers all produce `OWN0016`. |
+| A callable-valued registration guard produces no `ExecutionPark` operation or retained cleanup. | High | **Verified and fixed.** `ExecutableOrigin.ts`/`Instances.ts` retain exact callable result identity; `LowerExpression.ts` realizes the guard and `MirVerification.ts` verifies its environment cleanup. The regression has one valid `ExecutionPark` with `CallableCleanup`. |
+| Layer 3 must already execute park/wake in each engine because evaluator traps and Wasm emits `unreachable`. | High | **Rejected as the explicit DAG boundary.** `add-independent-execution-engine-parity/proposal.md` identifies itself as realization slice 4 and says it realizes the preceding target-neutral contracts across supported engines; its tasks 1.1–4.3 own complete transition MIR, evaluator, native/Wasm, and differential execution. Layer 3 keeps those not-yet-supported paths fail-closed. |
+| The report improperly defers Layer 3 requirements to a duplicative Layer 4. | High | **Rejected.** Layer 4's proposal depends on this change, describes this layer's output as established package/drive/park/Wake/cleanup contracts, and explicitly owns their engine realization. This report records rather than invents that handed-off boundary. |
+| Shared survival and timer fixtures must execute park/wake/resume in this layer. | High | **Rejected as Layer 4 differential scope.** This layer verifies source admission, exact suspension ownership/local-Shared obligations, access boundaries, and never-driven cleanup/emission. Layer 4 tasks 2.1–4.3 own runtime park/resume, same-thread reactor delivery, and differential cleanup cases. |
+| External-park reachability reads the sealed intrinsic actor/name metadata rather than the closed `ExecutionPark` HIR operation identity. | Medium | **Verified, recorded, no conformance fix.** The predicate predates this slice and consumes sealed Intrinsic metadata rather than an ordinary library declaration, so it does not add standard-library actor privilege. The complete Layer 4 MIR authority pass should canonicalize this identity check; the bounded fix pass is restricted to verified Critical/High findings. |
+
+One consolidated fix pass addressed the three verified High findings. No Critical finding remained.

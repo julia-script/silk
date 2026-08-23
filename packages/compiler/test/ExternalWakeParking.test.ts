@@ -241,7 +241,7 @@ pub fn main() -> () { return run Execution.park(invalid) }`),
   }),
 )
 
-it.effect('rejects direct and transitive park while Shared source access is active', () =>
+it.effect('rejects wake and direct or transitive park while Shared source access is active', () =>
   Effect.gen(function* () {
     const variants = [
       {
@@ -257,6 +257,14 @@ it.effect('rejects direct and transitive park while Shared source access is acti
   return value.value
 }
 fn selected(value: &mut Pair) -> i32 { return inner(move value) }`,
+        access: 'withMut',
+      },
+      {
+        callback: `fn parks() -> i32 {
+  let parked = run Execution.park(register)
+  return 1
+}
+fn selected(value: &mut Pair) -> i32 { return parks() }`,
         access: 'withMut',
       },
     ]
@@ -280,6 +288,69 @@ pub fn main() -> i32 { return 42 }`),
         `variant ${ordinal}`,
       )
     }
+
+    const wakeSnapshot = yield* Analysis.ofSourceRealized(
+      'external-wake-parking/shared-access-wake',
+      new TextEncoder().encode(`import silk.shared as Shared
+struct Empty {}
+struct Armed { wake: Intrinsic.Wake }
+struct State { slot: Empty | Armed }
+fn signalInside(state: &mut State) -> () {
+  let selected = Intrinsic.replace(state.slot, Empty {})
+  return match move selected {
+    Empty {} => ()
+    Armed { wake } => Intrinsic.wake(move wake)
+  }
+}
+fn access(self: &Shared.Shared<State>) -> () {
+  return Shared.withMut(self, signalInside)
+}
+pub fn main() -> i32 { return 42 }`),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(wakeSnapshot).map((diagnostic) => diagnostic.code),
+      ['OWN0016'],
+    )
+  }),
+)
+
+it.effect('retains represented callable registration guards in ExecutionPark cleanup facts', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'external-wake-parking/callable-guard',
+      new TextEncoder().encode(`import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+fn use(value: (), holder: &i32) -> () { return () }
+fn register(wake: Intrinsic.Wake, holder: &i32) -> once fn(()) -> () {
+  drop wake
+  return use(holder)
+}
+effect fn parked(holder: i32) -> () {
+  let registration = register(&holder)
+  let resumed = run Execution.park(move registration)
+  return ()
+}
+fn ready(state: &()) -> () { return () }
+effect fn program() -> () ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let execution = run Execution.make(parked(1), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  drop execution
+  return ()
+}
+effect fn recover(error: Core.OutOfMemoryError) -> () { return () }
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(snapshot.mir._tag, 'Available')
+    if (snapshot.mir._tag !== 'Available') return
+    const parks = snapshot.mir.value.functions
+      .flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'ExecutionPark')
+    assert.lengthOf(parks, 1)
+    assert.strictEqual(parks.at(0)?.guardCleanup._tag, 'CallableCleanup')
+    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
   }),
 )
 

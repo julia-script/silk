@@ -2312,6 +2312,33 @@ const checkFunction = (
     callables: [],
   }
   if (localSharedBoundaries.length > 0) {
+    const activeBoundaryOperations = (
+      expression: Hir.Expression,
+    ): ReadonlyArray<Hir.Expression> => {
+      if (expression._tag === 'EffectBlock') return Object.freeze([])
+      return Object.freeze([
+        ...(expression._tag === 'Run' ||
+        (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionWake')
+          ? [expression]
+          : []),
+        ...Hir.expressionChildren(expression).flatMap(activeBoundaryOperations),
+      ])
+    }
+    const boundaryOperations = fn.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(activeBoundaryOperations)
+    for (const boundary of localSharedBoundaries)
+      for (const operation of boundaryOperations)
+        state.diagnostics.push(
+          Diagnostic.localSharedAccessEscape(
+            operation._tag === 'BuiltinCall' && operation.operation === 'ExecutionWake'
+              ? 'Callback'
+              : 'Suspension',
+            operation.span,
+            boundary,
+          ),
+        )
+
     const parameter = fn.declaration.parameters.at(0)?.id
     if (parameter !== undefined) {
       const bindings = new Map<number, Hir.Expression>()
@@ -2363,14 +2390,6 @@ const checkFunction = (
               return []
           }
         })
-      const activeRuns = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
-        if (expression._tag === 'EffectBlock') return Object.freeze([])
-        return Object.freeze([
-          ...(expression._tag === 'Run' ? [expression] : []),
-          ...Hir.expressionChildren(expression).flatMap(activeRuns),
-        ])
-      }
-      const suspensionSites = fn.statements.flatMap(Hir.statementExpressions).flatMap(activeRuns)
       const capturesParameter = (expression: Hir.Expression, seen = new Set<number>()): boolean => {
         if (expression._tag === 'BindingReference') {
           if (seen.has(expression.binding.ordinal)) return false
@@ -2400,10 +2419,6 @@ const checkFunction = (
         return false
       })
       for (const boundary of localSharedBoundaries) {
-        for (const suspension of suspensionSites)
-          state.diagnostics.push(
-            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, boundary),
-          )
         for (const escapeSite of escapeSites)
           state.diagnostics.push(
             Diagnostic.localSharedAccessEscape('Result', escapeSite.span, boundary),
@@ -3256,9 +3271,10 @@ export const localSharedAccessBoundaryPlan = (
       }
     }
   }
-  // A restricted callback may forward its first access parameter through ordinary helper calls.
-  // Propagate the original sealed boundary span to those callees so transitive parking or result
-  // escape is judged exactly like direct callback code, independent of helper names.
+  // Every synchronous helper called by a restricted callback still runs while the original access
+  // loan is live, even when it does not receive the borrowed parameter. Propagate the sealed
+  // boundary through the complete ordinary call graph so transitive park, wake, or result escape is
+  // judged exactly like direct callback code, independent of helper names.
   changed = true
   while (changed) {
     changed = false
@@ -3266,15 +3282,10 @@ export const localSharedAccessBoundaryPlan = (
       if (fn.declaration.canonical._tag !== 'Canonical') continue
       const inherited = boundaries.get(localSharedTargetKey(fn.declaration.canonical.id))
       if (inherited === undefined || inherited.length === 0) continue
-      const bindings = bindingsOf(fn)
       for (const expression of fn.statements
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)) {
-        if (
-          expression._tag !== 'Call' ||
-          !expression.arguments.some((argument) => parameterOrdinals(argument, bindings).has(0))
-        )
-          continue
+        if (expression._tag !== 'Call') continue
         const key = localSharedTargetKey(expression.target)
         const existing = boundaries.get(key) ?? []
         const added = inherited.filter(

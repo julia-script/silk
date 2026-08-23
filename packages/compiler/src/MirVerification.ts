@@ -3541,27 +3541,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             guard === undefined
               ? undefined
               : SilkType.callable(Object.freeze([SilkType.wake]), semanticType(guard), 'Take')
-          const registerCleanupValid = (() => {
-            if (register?._tag !== 'CallableValue') return false
+          const callableCleanupValid = (
+            local: Extract<Type, { readonly _tag: 'CallableValue' }>,
+            cleanup: CleanupPlan.CleanupPlan,
+          ): boolean => {
             const fields =
-              register.environment?.fields
+              local.environment?.fields
                 .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
                 .reverse() ?? []
-            if (register.environment === undefined)
-              return (
-                operation.registerCleanup._tag === 'NoCleanup' &&
-                SilkType.equals(operation.registerCleanup.type, register.type)
-              )
+            if (local.environment === undefined)
+              return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, local.type)
             return (
-              operation.registerCleanup._tag === 'CallableCleanup' &&
-              SilkType.equals(operation.registerCleanup.type, register.type) &&
-              operation.registerCleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              cleanup._tag === 'CallableCleanup' &&
+              SilkType.equals(cleanup.type, local.type) &&
+              cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
               SilkType.equalsCallableEnvironmentIdentity(
-                operation.registerCleanup.environment.identity,
-                Instances.callableEnvironmentIdentity(register.environment.callable),
+                cleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(local.environment.callable),
               ) &&
-              operation.registerCleanup.slots.length === fields.length &&
-              operation.registerCleanup.slots.every((slot, ordinal) => {
+              cleanup.slots.length === fields.length &&
+              cleanup.slots.every((slot, ordinal) => {
                 const field = fields.at(ordinal)
                 return (
                   field !== undefined &&
@@ -3570,7 +3569,15 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 )
               })
             )
-          })()
+          }
+          const registerCleanupValid =
+            register?._tag === 'CallableValue' &&
+            callableCleanupValid(register, operation.registerCleanup)
+          const guardCleanupValid =
+            guard?._tag === 'CallableValue'
+              ? callableCleanupValid(guard, operation.guardCleanup)
+              : guard !== undefined &&
+                cleanupMatchesSemanticType(self.layout, operation.guardCleanup, semanticType(guard))
           if (
             register?._tag !== 'CallableValue' ||
             guard === undefined ||
@@ -3580,7 +3587,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             registerActual === undefined ||
             expected === undefined ||
             !TypeCompatibility.isCompatible(TypeCompatibility.check(registerActual, expected)) ||
-            !cleanupMatchesSemanticType(self.layout, operation.guardCleanup, semanticType(guard)) ||
+            !guardCleanupValid ||
             !registerCleanupValid ||
             operation.registerAccess !== 'Take' ||
             localUseCounts.get(operation.register.ordinal) !== 1
