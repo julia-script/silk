@@ -34,6 +34,13 @@ export interface IndependentCallRequest {
   readonly arguments: ReadonlyArray<Value>
   readonly span: SourceSpan.SourceSpan
   readonly logicalDepth: number
+  readonly execution: number
+}
+
+/** Relinquishes the current independently rooted machine without exposing its continuation. */
+export interface ExecutionParkRequest {
+  readonly _tag: 'ExecutionParkRequest'
+  readonly span: SourceSpan.SourceSpan
 }
 
 export interface OriginTransferRequest {
@@ -51,5 +58,6 @@ export interface RelayTransferRequest {
 export type MachineRequest =
   | CallRequest
   | IndependentCallRequest
+  | ExecutionParkRequest
   | OriginTransferRequest
   | RelayTransferRequest

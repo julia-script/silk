@@ -134,6 +134,87 @@ it.effect('seals Wake and lowers ordinary-source park and wake through verified 
   }),
 )
 
+it.effect('evaluates a latched park through an execution-owned root and later owner drive', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'external-wake-parking/evaluator-resume',
+      new TextEncoder().encode(`import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored result: i32 }
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn body() -> i32 {
+  run Execution.park(register)
+  return 42
+}
+fn complete(owner: &mut Owner, result: i32) -> () {
+  owner.result = result
+  return ()
+}
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn ready(state: &()) -> () { return () }
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution: next } => run finishStored(move next, move owner)
+  }
+}
+effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut owner = Owner { slot: Empty {}, result: 0 }
+  let execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  run driveOnce(move execution, &mut owner)
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  run finish(move selected, &mut owner)
+  return owner.result
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+    assert.deepEqual(
+      transitions.map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'Latch',
+        'Park',
+        'Notify',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Complete',
+      ],
+    )
+    assert.lengthOf(new Set(transitions.map((event) => event.root)), 1)
+  }),
+)
+
 it.effect('assigns only the sealed nominal Wake the local-execution affinity seed', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(

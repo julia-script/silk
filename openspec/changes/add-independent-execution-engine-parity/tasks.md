@@ -1,12 +1,12 @@
 ## 1. Verified MIR and Inspection
 
-- [ ] 1.1 Complete target-neutral MIR operations/edges for initialization, drive, nested transfer,
+- [x] 1.1 Complete target-neutral MIR operations/edges for initialization, drive, nested transfer,
       park, registration, suspension ownership, wake, notification, eligibility, resume, completion,
       cancellation, DestroyPending, and release; verify every legal state path validates.
 - [ ] 1.2 Add negative MIR tests for invalid predecessor states, duplicate authorities, mismatched
       package provenance, callback violations, escaping completion loans, premature generation reuse,
       and endpoint cleanup before invocation return; verify each is rejected before lowering.
-- [ ] 1.3 Encode logical execution identities, roots, generations, transitions, authorities, and cleanup
+- [x] 1.3 Encode logical execution identities, roots, generations, transitions, authorities, and cleanup
       edges in deterministic inspection without addresses, offsets, Scheduler identity, or ABI data;
       verify repeated analysis is byte-identical.
 
