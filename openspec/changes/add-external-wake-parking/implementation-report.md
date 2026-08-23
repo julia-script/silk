@@ -1,6 +1,6 @@
 # Implementation report: add-external-wake-parking
 
-Status: **resumed; fresh hard-gate sequence in progress**
+Status: **done**
 
 ## Scope and layer boundary
 
@@ -135,7 +135,18 @@ pass because the resume has introduced no semantic implementation change.
   `SharedStdlib.test.ts`, `OwnedAllocationAcceptance.test.ts`, `WakeCell.test.ts`, and `Mir.test.ts`
   — **PASS**, 5 files / 58 tests.
 - `openspec validate add-external-wake-parking --strict --json --no-interactive` — **PASS**, 1/1.
-- Fresh full hard gates — **PENDING**.
+- `pnpm typecheck` — **PASS**, 24/24 Turbo tasks.
+- `pnpm exec biome check .` — **PASS**, 986 files checked with no fixes.
+- `pnpm test` — **PASS**, 28/28 workspace tasks; compiler 219 files / 2,118 tests,
+  native differential corpus 1/1, and every remaining package suite passed.
+- `pnpm check` — **PASS**; Biome passed, builds passed 14/14, combined typecheck/test passed
+  42/42 Turbo tasks, and repository script tests passed 16/16.
+- `pnpm release:candidate` — **PASS**, 14/14 builds and 9/9 release-candidate validations.
+
+The resume used one of three permitted root-cause repairs for fresh-worktree build prerequisites and
+no source-level repair. No new conformance finding appeared. Because the only tracked implementation
+change was mechanical diagnostic documentation, the completed single three-lens pass was not
+repeated.
 
 ## Conformance findings
 
