@@ -8,6 +8,11 @@ the initialized value, and SHALL remain nonzero for zero-sized `T`. Ordinary sou
 that layout through its selected allocator before initialization; construction MUST NOT acquire an
 allocator implicitly or retain the provider borrow in the result.
 
+If the concrete header, padding, reclaim state, and `T` cannot be represented by the selected
+target, the `sharedLayout<T>` specialization SHALL be unavailable before MIR or execution and SHALL
+retain a stable diagnostic whose primary span is the intrinsic call. This compile-time target-layout
+rejection MUST NOT become runtime `LayoutOverflow` data, a trap, or `OutOfMemoryError`.
+
 An unsafe from-allocation transition SHALL consume exactly one active `Allocation` proven to match
 the layout and exactly one value of `T`, initialize count one and available access, retain the
 allocation's private reclaim authority, and publish exactly one affine local-shared core. A valid
@@ -22,7 +27,7 @@ remain unnameable and usable only by eventual last-handle cleanup.
 #### Scenario: Reject mismatched layout provenance
 
 - **WHEN** unsafe source supplies an allocation planned for another concrete type, target, size, or alignment
-- **THEN** semantic or MIR verification rejects the initializer and publishes no usable local-shared core
+- **THEN** semantic or MIR verification rejects the initializer with a stable diagnostic at the initializer call and related provenance at the mismatched allocation, and publishes no usable local-shared core
 
 #### Scenario: Preserve ordinary exhaustion cleanup
 

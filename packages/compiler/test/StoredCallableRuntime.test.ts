@@ -256,6 +256,38 @@ ${takeDeclarations}effect fn build() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
+const callableLaneMutationCleanup = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+struct Cell { value: i32 }
+struct Guard {
+  primary: Shared.Shared<Cell>
+  replacement: Shared.Shared<Cell>
+}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let next = Shared.clone<Cell>(&self.replacement)
+    let previous = Intrinsic.replace(self.primary, move next)
+    drop previous
+    return ()
+  }
+}
+struct Holder<F: once fn(i32) -> i32> { step: F }
+fn consume(value: i32, guard: Guard) -> i32 { return value }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let primary = run (Shared.make<Cell>(Cell { value: 1 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let replacement = run (Shared.make<Cell>(Cell { value: 2 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let guard = Guard { primary: move primary, replacement: move replacement }
+  let holder = Holder { step: consume(move guard) }
+  drop holder
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
 const runtimeMatrix = [
   { source: named, target: 'decode' },
   { source: copiedCapture, target: 'silk_i32_add' },
@@ -420,6 +452,25 @@ it.effect('cleans an uncalled stored callable exactly once on a typed-failure ex
     assert.strictEqual(llvm._tag, 'LlvmBitcodeArtifact')
     if (llvm._tag !== 'LlvmBitcodeArtifact') return
     assert.include(llvm.ir, 'consume')
+  }),
+)
+
+it.effect('reloads callable capture lanes after a nested Drop hook mutates them', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stored-callable-runtime/mutated-cleanup-lane',
+      ascii(callableLaneMutationCleanup),
+      Target.wasm32UnknownUnknown.id,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(completedValue(evaluated), 42)
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length,
+      2,
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(yield* runWasm(artifact.bytes), 42)
   }),
 )
 

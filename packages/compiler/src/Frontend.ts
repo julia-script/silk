@@ -191,12 +191,14 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     results.size - retained.size,
     Effect.gen(function* () {
       const ownership = new Map<string, Ownership.ModuleOwnership>()
+      const localSharedAccessBoundaries = Ownership.localSharedAccessBoundaryPlan(results)
       let ordinal = 0
       for (const [name, result] of results) {
         yield* IncrementalReuse.checkpointModuleBatch(ordinal)
         ownership.set(
           name,
-          retained.get(name)?.ownership ?? Ownership.checkModule(result, headers.index),
+          retained.get(name)?.ownership ??
+            Ownership.checkModule(result, headers.index, localSharedAccessBoundaries),
         )
         ordinal += 1
       }

@@ -609,7 +609,7 @@ export const resolveDeclaredType = (
           firstConcrete !== undefined &&
           Type.isTypeArgument(firstConcrete)
             ? Type.option(firstConcrete)
-            : Type.nominal(target.fact.type.module, target.fact.type.name, concrete)
+            : Type.specializeNominal(target.fact.type, concrete)
         return Object.freeze({
           fact: Object.freeze({
             _tag: 'Resolved',
@@ -1714,10 +1714,10 @@ type InlineParameters = ReadonlyMap<string, ReadonlySet<number>>
  * Walks the nominals and parameters whose layout one type's layout actually requires.
  *
  * A struct embeds its fields, so a field reaches everything its type names outside an indirecting
- * position. `RawBuffer<T>` and `Slot<T>` are the compiler-owned indirections: their
- * representations are `{$allocation, count}` and `{$address}` whatever `T` is, so the walk names
- * them and stops rather than descending into the element. Every other nominal is entered only
- * through the arguments its own declaration reaches inline, which `inlineParameters` supplies.
+ * position. `RawBuffer<T>`, `Slot<T>`, and `SharedCore<T>` are compiler-owned indirections: their
+ * representations do not embed `T`, so the walk names them and stops rather than descending into
+ * the element. Every other nominal is entered only through the arguments its own declaration
+ * reaches inline, which `inlineParameters` supplies.
  * Arrays, slices, references, callables, effects, and unions descend exactly as `Type.nominals`
  * does, so this graph is narrower than the reported dependency graph and never wider.
  */
@@ -1729,7 +1729,7 @@ const inlineReach = (
   const descend = (type: Type.Type): void => {
     if (Type.isNominal(type)) {
       visit(type)
-      if (Type.isRawBuffer(type) || Type.isSlot(type)) return
+      if (Type.isRawBuffer(type) || Type.isSlot(type) || Type.isSharedCore(type)) return
       const inline = inlineParameters.get(`${type.module}.${type.name}`)
       for (const [ordinal, argument] of type.arguments.entries())
         if ((inline === undefined || inline.has(ordinal)) && Type.isTypeArgument(argument))

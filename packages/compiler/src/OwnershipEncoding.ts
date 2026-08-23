@@ -1,6 +1,8 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as Hir from './Hir.js'
+import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import type { BindingSite, ModuleOwnership, Verdict } from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -45,6 +47,8 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
     return `allocation:${Type.encode(cleanup.type)} ticket=${cleanup.ticket}`
   if (cleanup._tag === 'RawBufferCleanup')
     return `raw-buffer:${Type.encode(cleanup.type)} owner=(${cleanupText(cleanup.allocation)})`
+  if (cleanup._tag === 'LocalSharedCoreCleanup')
+    return `local-shared-core:${Type.encode(cleanup.type)} opaque-last(payload-helper=${Type.encode(cleanup.element)},allocation=${cleanupText(cleanup.allocation)})`
   if (cleanup._tag === 'ArrayCleanup') {
     return `array:${Type.encode(cleanup.type)} length=${cleanup.length} element=(${cleanupText(cleanup.element)})`
   }
@@ -100,8 +104,10 @@ export const encode = (self: ModuleOwnership): string =>
         const category =
           binding.category._tag === 'Copyable'
             ? 'copyable'
-            : `move-only ${Type.encode(binding.category.type)}`
-        return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
+            : binding.category._tag === 'Unavailable'
+              ? 'unavailable'
+              : `move-only ${Type.encode(binding.category.type)}`
+        return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} affinity=${ExecutionAffinity.encode(binding.executionAffinity)} obligations=${LocalSharedOwnership.encode(binding.localSharedObligations)} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
       }),
       ...fn.loans.map(
         (loan) =>
@@ -113,7 +119,7 @@ export const encode = (self: ModuleOwnership): string =>
       ),
       ...fn.callables.map(
         (callable) =>
-          `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
+          `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} affinity=${ExecutionAffinity.encode(callable.executionAffinity)} obligations=${LocalSharedOwnership.encode(callable.localSharedObligations)} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${ExecutionAffinity.encode(slot.executionAffinity)}:${LocalSharedOwnership.encode(slot.localSharedObligations)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
       ),
       ...fn.exits.map((exit) => {
         const label = (() => {

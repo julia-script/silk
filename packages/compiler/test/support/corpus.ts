@@ -1112,6 +1112,121 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 7 },
   },
+  // folded from OwnedAllocationAcceptance.test.ts: caller-funded shared-core initialization.
+  {
+    name: 'local-shared-control-block-allocation',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-lifecycle-operations',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+
+fn selected(value: &mut i32) -> i32 { return 21 }
+fn conflict() -> i32 { return 0 }
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let layout = Intrinsic.sharedLayout<i32>()
+  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    let clone = Intrinsic.sharedClone<i32>(&core)
+    let first = Intrinsic.sharedWithMut<i32, i32>(&core, selected, conflict)
+    let second = Intrinsic.sharedWithMut<i32, i32>(&clone, selected, conflict)
+    drop clone
+    drop core
+    return first + second
+  }
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-standard-library-wrapper',
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+
+struct Counter { value: i32 }
+
+fn increment(value: &mut Counter) -> i32 {
+  value.value = value.value + 1
+  return value.value
+}
+
+fn read(value: &Counter) -> i32 { return value.value }
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let first = run (Shared.make<Counter>(Counter { value: 41 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let second = Shared.clone<Counter>(&first)
+  let updated = Shared.withMut<Counter, i32>(&second, increment)
+  let answer = Shared.with<Counter, i32>(&first, read)
+  drop second
+  drop first
+  return answer
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-recursive-cleanup',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+
+struct Empty {}
+struct Node { next: Intrinsic.SharedCore<Node> | Empty }
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let thirdAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  unsafe {
+    let third = Intrinsic.sharedFromAllocation<Node>(
+      move thirdAllocation,
+      Node { next: Empty {} },
+    )
+    let second = Intrinsic.sharedFromAllocation<Node>(
+      move secondAllocation,
+      Node { next: move third },
+    )
+    let first = Intrinsic.sharedFromAllocation<Node>(
+      move firstAllocation,
+      Node { next: move second },
+    )
+    drop first
+    return 42
+  }
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',
@@ -1577,8 +1692,229 @@ pub fn main() -> i32 {
  * single compile/link loop without making the evaluator's pinned-outcome gate repeat large
  * feature fixtures that already have focused evaluator coverage.
  */
+const localSharedPressure = readFileSync(
+  new URL('../../../../examples/language-pressure/local-shared-slp1/main.silk', import.meta.url),
+  'utf8',
+)
+const renamedLocalSharedPressure = readFileSync(
+  new URL(
+    '../../../../examples/language-pressure/local-shared-slp1/renamed-main.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const localSharedPressureFailure = (ordinal: 0 | 1): string =>
+  localSharedPressure.replace(
+    ordinal === 0
+      ? 'let mut firstAllocator = SystemAllocator.make()'
+      : 'let mut secondAllocator = SystemAllocator.make()',
+    ordinal === 0
+      ? 'let mut firstAllocator = ExhaustedAllocator {}'
+      : 'let mut secondAllocator = ExhaustedAllocator {}',
+  )
+
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'local-shared-pressure-success',
+    source: localSharedPressure,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-pressure-renamed',
+    source: renamedLocalSharedPressure,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  ...([0, 1] as const).map(
+    (ordinal): CorpusProgram => ({
+      name: `local-shared-pressure-quota-${ordinal}`,
+      source: localSharedPressureFailure(ordinal),
+      expected: { _tag: 'Completes', result: 142 },
+    }),
+  ),
+  ...(['with', 'withMut'] as const).flatMap(
+    (outer): ReadonlyArray<CorpusProgram> =>
+      (['with', 'withMut'] as const).map((inner): CorpusProgram => {
+        const outerReference = outer === 'with' ? '&Counter' : '&mut Counter'
+        const innerCallback = inner === 'with' ? 'read' : 'increment'
+        return {
+          name: `local-shared-conflict-${outer}-${inner}`,
+          source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+struct Counter { value: i32 }
+fn read(value: &Counter) -> i32 { return value.value }
+fn increment(value: &mut Counter) -> i32 {
+  value.value = value.value + 1
+  return value.value
+}
+fn nested(value: ${outerReference}, alias: Shared.Shared<Counter>) -> i32 {
+  return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
+}
+effect fn conflictCase() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let first = run (Shared.make<Counter>(Counter { value: 41 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let alias = Shared.clone<Counter>(&first)
+  return Shared.${outer}<Counter, i32>(&first, nested(move alias))
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`,
+          expected: { _tag: 'Trap' },
+        }
+      }),
+  ),
+  {
+    name: 'local-shared-affine-movement',
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.layout { Layout }
+import silk.shared as Shared
+struct Empty {}
+struct Token { storage: Allocation }
+struct Mailbox { state: Empty | Token }
+fn take(self: &mut Mailbox) -> Empty | Token {
+  return Intrinsic.replace(self.state, Empty {})
+}
+fn consume(value: Empty | Token) -> i32 {
+  return match move value {
+    Empty {} => 0
+    Token { storage } => release(move storage)
+  }
+}
+fn release(storage: Allocation) -> i32 { drop storage return 42 }
+effect fn useCell() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let storage = run (Allocator.allocate(Layout.of<i32>())
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let mailbox = run (Shared.make<Mailbox>(Mailbox {
+    state: Token { storage: move storage }
+  }) |> Effect.provideMut<Allocator>(&mut allocator))
+  let token = Shared.withMut<Mailbox, Empty | Token>(&mailbox, take)
+  drop mailbox
+  return consume(move token)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-two-frame-failure',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+struct Problem {}
+effect fn failInner(core: Intrinsic.SharedCore<i32>) -> i32 ! Problem {
+  let inner = Intrinsic.sharedClone<i32>(&core)
+  fail Problem {}
+}
+effect fn construct() -> i32 ! Problem | OutOfMemoryError {
+  let allocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<i32>())
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    let transferred = Intrinsic.sharedClone<i32>(&core)
+    return run failInner(move transferred)
+  }
+}
+effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-construction-exhaustion',
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.layout { Layout }
+import silk.shared as Shared
+struct Token { storage: Allocation }
+struct Exhausted {}
+effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemoryError {
+  fail OutOfMemoryError {}
+}
+impl Allocator for Exhausted { allocate: Exhausted.reject }
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let mut system = SystemAllocator.make()
+  let payload = run (Allocator.allocate(Layout.of<i32>())
+    |> Effect.provideMut<Allocator>(&mut system))
+  let token = Token { storage: move payload }
+  let mut exhausted = Exhausted {}
+  let shared = run (Shared.make<Token>(move token)
+    |> Effect.provideMut<Allocator>(&mut exhausted))
+  drop shared
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-clone-drop-during-access',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+fn selected(value: &mut i32) -> i32 { return 0 }
+fn conflict() -> i32 { return 21 }
+fn unused(value: &mut i32, captured: Intrinsic.SharedCore<i32>) -> i32 {
+  drop captured
+  return 0
+}
+fn nested(value: &mut i32, core: Intrinsic.SharedCore<i32>) -> i32 {
+  let cleanupCore = Intrinsic.sharedClone<i32>(&core)
+  return Intrinsic.sharedWithMut<i32, i32>(&core, unused(move cleanupCore), conflict) + 21
+}
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let allocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<i32>())
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    let nestedCore = Intrinsic.sharedClone<i32>(&core)
+    let result = Intrinsic.sharedWithMut<i32, i32>(&core, nested(move nestedCore), conflict)
+    drop core
+    return result
+  }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'local-shared-strong-cycle',
+    source: `import silk.core { OutOfMemoryError }
+import silk.effect as Effect
+struct Empty {}
+struct Bomb {}
+impl Drop for Bomb {
+  fn drop(self: &mut Bomb) -> () { let boom = 1 / 0 return () }
+}
+struct Node { bomb: Bomb next: Intrinsic.SharedCore<Node> | Empty }
+fn link(value: &mut Node, next: Intrinsic.SharedCore<Node>) -> i32 {
+  value.next = move next
+  return 0
+}
+fn conflict() -> i32 { return 0 }
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
+  unsafe {
+    let first = Intrinsic.sharedFromAllocation<Node>(
+      move firstAllocation,
+      Node { bomb: Bomb {}, next: Empty {} },
+    )
+    let second = Intrinsic.sharedFromAllocation<Node>(
+      move secondAllocation,
+      Node { bomb: Bomb {}, next: Empty {} },
+    )
+    let secondEdge = Intrinsic.sharedClone<Node>(&second)
+    let firstLink = Intrinsic.sharedWithMut<Node, i32>(&first, link(move secondEdge), conflict)
+    let firstEdge = Intrinsic.sharedClone<Node>(&first)
+    let secondLink = Intrinsic.sharedWithMut<Node, i32>(&second, link(move firstEdge), conflict)
+    if firstLink == 999 { let bomb = Bomb {} drop bomb }
+    drop first
+    drop second
+    return firstLink + secondLink + 42
+  }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // Static-composition runtime parity belongs in the shared native differential rather than a
   // feature-local compile/link loop. Trapping Drop variants causally prove the three cleanup exits.
   ...staticCompositionCorpus,

@@ -11,7 +11,10 @@ publish exactly one new affine handle without reading, moving, copying, or clean
 
 Access SHALL invoke exactly one callback. It SHALL invoke `use` under one exclusive callback-scoped
 borrow when access is available, or `onConflict` without changing the existing active access when it
-is not. No intrinsic MAY expose the access bit, count, address, last-drop authority, or a
+is not. Access SHALL allocate nothing. After the selected callback returns normally, the unselected
+take-once callback environment SHALL receive ordinary callable cleanup exactly once; on successful
+access, the borrow SHALL end and availability SHALL be restored before that cleanup and return. No
+intrinsic MAY expose the access bit, count, address, last-drop authority, or a
 compiler-known conflict value, and no ordinary declaration may gain these contracts by spelling.
 
 #### Scenario: Clone below the count limit
@@ -29,7 +32,17 @@ compiler-known conflict value, and no ordinary declaration may gain these contra
 - **WHEN** `sharedWithMut` is invoked once with available access and once reentrantly with active access
 - **THEN** the first call invokes only `use`, the nested call invokes only `onConflict`, and the nested observation does not release the outer access
 
+#### Scenario: Clean the unselected callback
+
+- **WHEN** each take-once callback owns one affine capture and access selects either success or conflict
+- **THEN** the selected callback is consumed by invocation, the unselected callback's capture is cleaned exactly once after normal callback return, and access allocates no storage
+
+#### Scenario: Share one target-selected count boundary
+
+- **WHEN** evaluation and one backend execute clone for the same selected target at and below its planned count maximum
+- **THEN** both consume the same maximum, agree on success below it, and trap before mutation at it
+
 #### Scenario: Audit the lifecycle inventory
 
 - **WHEN** the intrinsic catalog is inspected after lifecycle support is added
-- **THEN** clone and callback access are the only new lifecycle calls and no separate reader, weak, atomic, lock, or actor-specific operation exists
+- **THEN** clone and callback access are the only new lifecycle calls; no reader, weak, atomic, lock, count, address, access-state, cleanup-authority, conflict-value, or actor-specific operation exists, and same-spelled ordinary declarations receive no privilege

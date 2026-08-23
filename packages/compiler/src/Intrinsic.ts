@@ -138,7 +138,7 @@ const admission = (family: string): AdmissionCategory => {
   if (family === 'Effect') return 'Effect'
   if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
   if (family === 'Layout' || family === 'string') return 'Representation'
-  if (family === 'RawBuffer' || family === 'Slot') return 'Ownership'
+  if (family === 'RawBuffer' || family === 'Slot' || family === 'Shared') return 'Ownership'
   return 'Language'
 }
 
@@ -155,6 +155,10 @@ const osConsumer = (spelling: string): string => {
 const consumer = (family: string, operation: string): string => {
   if (Scalar.isSpelling(family)) return `silk/${family}.${operation}`
   if (family === 'Effect') return `silk/effect.${operation}`
+  if (family === 'Shared')
+    return operation === 'layout' || operation === 'fromAllocation'
+      ? 'silk/shared.make'
+      : `silk/shared.${operation}`
   if (family === 'Storage') return 'silk/core.allocate'
   if (family === 'Host') return 'silk/core.writeAll'
   if (family === 'Os') return osConsumer(operation)
@@ -190,12 +194,15 @@ const builtin = (options: {
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
-    ...(options.unsafe && (options.actor === 'RawBuffer' || options.actor === 'Slot')
+    ...(options.unsafe &&
+    (options.actor === 'RawBuffer' || options.actor === 'Slot' || options.actor === 'Shared')
       ? {
           invariant:
             options.actor === 'RawBuffer'
               ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
-              : 'caller proves the selected slot is in bounds and has the initializedness state required by the operation',
+              : options.actor === 'Slot'
+                ? 'caller proves the selected slot is in bounds and has the initializedness state required by the operation'
+                : 'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once',
         }
       : {}),
     ...(options.actor === 'Host' && options.name === 'write'
@@ -289,6 +296,10 @@ const actor = (
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
+const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 0, 'T')
+const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
+const sharedTypeParameters = Object.freeze([sharedElement])
+const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
@@ -933,6 +944,68 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([]),
       result: 'Layout',
       semanticResult: Type.layout,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Shared',
+      name: 'layout',
+      operation: 'SharedLayout',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: 'Layout',
+      semanticResult: Type.layout,
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'fromAllocation',
+      operation: 'SharedFromAllocation',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('allocation', 'Allocation'),
+        valueParameter('value', 'T'),
+      ]),
+      semanticParameters: Object.freeze([Type.allocation, sharedElement]),
+      result: 'SharedCore<T>',
+      semanticResult: Type.sharedCore(sharedElement),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'clone',
+      operation: 'SharedClone',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: sharedTypeParameters,
+      parameters: Object.freeze([valueParameter('self', '&SharedCore<T>')]),
+      semanticParameters: Object.freeze([Type.reference('Shared', Type.sharedCore(sharedElement))]),
+      result: 'SharedCore<T>',
+      semanticResult: Type.sharedCore(sharedElement),
+    }),
+    builtin({
+      actor: 'Shared',
+      name: 'withMut',
+      operation: 'SharedWithMut',
+      typeParameters: Object.freeze(['T', 'A']),
+      semanticTypeParameters: sharedLifecycleTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('self', '&SharedCore<T>'),
+        valueParameter('use', 'once fn(&mut T) -> A'),
+        valueParameter('onConflict', 'once fn() -> A'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.sharedCore(sharedElement)),
+        Type.callable(
+          Object.freeze([Type.reference('Exclusive', sharedElement)]),
+          sharedResult,
+          'Take',
+        ),
+        Type.callable(Object.freeze([]), sharedResult, 'Take'),
+      ]),
+      result: 'A',
+      semanticResult: sharedResult,
     }),
   ]),
   ...Object.freeze([

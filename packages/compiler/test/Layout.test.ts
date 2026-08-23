@@ -4,11 +4,156 @@ import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
+import * as LocalSharedAllocationProvenance from '../src/LocalSharedAllocationProvenance.js'
+import * as LocalSharedControlBlock from '../src/LocalSharedControlBlock.js'
+import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('plans opaque local-shared blocks without exposing field offsets to source layout data', () => {
+  const scalar: Layout.Entry = Object.freeze({
+    _tag: 'LayoutEntry',
+    type: 'i32',
+    copy: true,
+    size: 4,
+    alignment: 4,
+    representation: Object.freeze({ _tag: 'SignedInteger', bits: 32 }),
+  })
+  const zst: Layout.Entry = Object.freeze({
+    _tag: 'LayoutEntry',
+    type: Type.unit,
+    copy: true,
+    size: 0,
+    alignment: 1,
+    representation: Object.freeze({ _tag: 'Aggregate', fields: Object.freeze([]), tailPadding: 0 }),
+  })
+  const wasm = LocalSharedControlBlock.plan(Target.wasm32UnknownUnknown, 'i32', scalar)
+  const native = LocalSharedControlBlock.plan(Target.aarch64AppleDarwin, 'i32', scalar)
+  const zero = LocalSharedControlBlock.plan(Target.aarch64AppleDarwin, Type.unit, zst)
+  assert.strictEqual(wasm._tag, 'LocalSharedControlBlockPlan')
+  assert.strictEqual(native._tag, 'LocalSharedControlBlockPlan')
+  assert.strictEqual(zero._tag, 'LocalSharedControlBlockPlan')
+  if (
+    wasm._tag !== 'LocalSharedControlBlockPlan' ||
+    native._tag !== 'LocalSharedControlBlockPlan' ||
+    zero._tag !== 'LocalSharedControlBlockPlan'
+  )
+    return
+  assert.deepEqual({ size: wasm.size, alignment: wasm.alignment }, { size: 36, alignment: 4 })
+  assert.deepEqual({ size: native.size, alignment: native.alignment }, { size: 72, alignment: 8 })
+  assert.deepEqual({ size: zero.size, alignment: zero.alignment }, { size: 64, alignment: 8 })
+  assert.notStrictEqual(wasm.provenance, native.provenance)
+})
+
+it('classifies every checked local-shared layout overflow before execution', () => {
+  const payload = (size: number, alignment: number): Layout.Entry =>
+    Object.freeze({
+      _tag: 'LayoutEntry',
+      type: 'i32',
+      copy: true,
+      size,
+      alignment,
+      representation: Object.freeze({ _tag: 'SignedInteger', bits: 32 }),
+    })
+  const reason = (selection: LocalSharedControlBlock.Selection) =>
+    selection._tag === 'LocalSharedControlBlockUnavailable' ? selection.reason : undefined
+  assert.strictEqual(
+    reason(
+      LocalSharedControlBlock.planWithin(Target.wasm32UnknownUnknown, 'i32', payload(4, 4), 4),
+    ),
+    'HeaderAddition',
+  )
+  assert.strictEqual(
+    reason(
+      LocalSharedControlBlock.planWithin(Target.wasm32UnknownUnknown, 'i32', payload(1, 1), 32),
+    ),
+    'PayloadPlacement',
+  )
+  assert.strictEqual(
+    reason(
+      LocalSharedControlBlock.planWithin(Target.wasm32UnknownUnknown, 'i32', payload(1, 8), 35),
+    ),
+    'AlignmentRounding',
+  )
+})
+
+it('compares a target-sized local-shared count before incrementing', () => {
+  assert.strictEqual(
+    LocalSharedControlBlock.strongMaximum(Target.wasm32UnknownUnknown),
+    0xffff_ffffn,
+  )
+  assert.strictEqual(
+    LocalSharedControlBlock.strongMaximum(Target.aarch64AppleDarwin),
+    0xffff_ffff_ffff_ffffn,
+  )
+  const before = Object.freeze({ count: 2n, maximum: 3n })
+  const cloned = LocalSharedLifecycle.clone(before)
+  assert.deepEqual(cloned, {
+    _tag: 'Cloned',
+    state: { count: 3n, maximum: 3n },
+  })
+  const rejected = LocalSharedLifecycle.clone(cloned._tag === 'Cloned' ? cloned.state : before)
+  assert.deepEqual(rejected, {
+    _tag: 'StrongOverflow',
+    state: { count: 3n, maximum: 3n },
+  })
+})
+
+it('selects exactly one local-shared access branch and preserves an active outer access', () => {
+  const outer = LocalSharedLifecycle.beginAccess('Available')
+  assert.deepEqual(outer, { _tag: 'Use', state: 'Active' })
+  const nested = LocalSharedLifecycle.beginAccess(outer.state)
+  assert.deepEqual(nested, { _tag: 'Conflict', state: 'Active' })
+  assert.strictEqual(LocalSharedLifecycle.endAccess(nested.state), 'Available')
+  assert.deepEqual(LocalSharedLifecycle.drop({ count: 2n, maximum: 3n }), {
+    _tag: 'Decremented',
+    state: { count: 1n, maximum: 3n },
+  })
+  assert.deepEqual(LocalSharedLifecycle.drop({ count: 1n, maximum: 3n }), {
+    _tag: 'LastHandle',
+  })
+})
+
+it('selects primitive conflict beneath every later public shared/exclusive nested shape', () => {
+  const publicAccesses = ['Shared', 'Exclusive'] as const
+  for (const outer of publicAccesses) {
+    for (const inner of publicAccesses) {
+      const entered = LocalSharedLifecycle.beginAccess('Available')
+      assert.deepEqual(entered, { _tag: 'Use', state: 'Active' }, `${outer}/${inner}: outer`)
+      assert.deepEqual(
+        LocalSharedLifecycle.beginAccess(entered.state),
+        { _tag: 'Conflict', state: 'Active' },
+        `${outer}/${inner}: inner`,
+      )
+    }
+  }
+})
+
+it.effect('rejects an unrepresentable local-shared block at its layout call before MIR', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/local-shared-overflow',
+      ascii(`import silk.layout { Layout }
+pub fn main() -> i32 {
+  let layout = Intrinsic.sharedLayout<[[u8; 2147483647]; 2]>()
+  drop layout
+  return 42
+}`),
+      'wasm32-unknown-unknown',
+    )
+    const unavailable = Analysis.diagnostics(snapshot).find(
+      (diagnostic) => diagnostic.code === 'SEM0093',
+    )
+    assert.strictEqual(unavailable?.reason._tag, 'IntrinsicTargetUnavailable')
+    assert.strictEqual(unavailable?.span.sourceId, 'layout/local-shared-overflow')
+    assert.strictEqual(unavailable?.span.start, 67)
+    assert.strictEqual(unavailable?.span.end, 115)
+    assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
+  }),
+)
 
 it.effect('plans only concrete types reached through discovered instances', () =>
   Effect.gen(function* () {
@@ -18,7 +163,7 @@ it.effect('plans only concrete types reached through discovered instances', () =
 pub fn main() -> i32 { return 42 }`),
     )
     const catalog = Layout.catalog(Target.aarch64AppleDarwin, Analysis.declarationIndex(snapshot))
-    const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot))
+    const plan = Layout.plan(catalog, Analysis.instancesOf(snapshot), snapshot.index)
 
     assert.deepEqual(
       plan.entries.map((candidate) => candidate.type),
@@ -518,6 +663,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       callableEnvironments: [],
       callingShapes: [],
       literalVerdicts: [],
+      localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
       diagnostics: [],
     }
 

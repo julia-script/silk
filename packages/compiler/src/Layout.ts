@@ -18,6 +18,8 @@ import type {
 } from './internal/CallingShape.js'
 import * as Packing from './internal/Packing.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -208,6 +210,7 @@ export interface Plan {
   readonly callingShapes: ReadonlyArray<CallingShape>
   readonly staticData?: ReadonlyArray<StaticDataPlacement>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
+  readonly localSharedAllocationProvenance: LocalSharedAllocationProvenance.Plan
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -282,7 +285,8 @@ export interface CallableEnvironmentField extends PlacedField {
   readonly parameterOrdinal: number
   readonly access: Type.CaptureAccess
   readonly type: DeclarationFacts.SemanticType
-  readonly representation: 'Value' | 'Borrow'
+  readonly representation: 'Value' | 'Borrow' | 'Callable'
+  readonly callableIdentity?: Type.CallableIdentityArgument
 }
 
 /** The ephemeral target-local pair passed at indirect callable application. */
@@ -808,6 +812,27 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
+    if (Type.isSharedCore(type)) {
+      const result: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: false,
+        size: target.pointerSize,
+        alignment: target.pointerAlignment,
+        representation: Object.freeze({
+          _tag: 'Reference',
+          target: type,
+          address: Object.freeze({
+            bits: target.pointerSize === 4 ? 32 : 64,
+            offset: 0,
+            size: target.pointerSize,
+            alignment: target.pointerAlignment,
+          }),
+        }),
+      })
+      completed.set(key, result)
+      return result
+    }
     if (Type.isIntrinsicNominal(type) || Type.equals(type, Type.unit)) {
       const ordinal = Type.equals(type, Type.unit)
         ? Type.intrinsicNominals.size
@@ -2168,53 +2193,104 @@ const callableEnvironments = (
 ): ReadonlyArray<CallableEnvironment> => {
   const layouts = new Map(entries.map((entry) => [Type.key(entry.type), entry] as const))
   const view = callableView(target)
-  return Object.freeze(
-    discovery.callables.map((callable): CallableEnvironment => {
-      const inputs: Array<
-        Packing.Input<Omit<CallableEnvironmentField, 'offset' | 'size' | 'alignment' | 'padding'>>
-      > = []
-      for (const capture of callable.captures) {
-        const borrowed = capture.access === 'Shared' || capture.access === 'Exclusive'
-        const valueLayout = borrowed ? undefined : layouts.get(Type.key(capture.type))
-        if (!borrowed && valueLayout === undefined) {
-          return Object.freeze({
-            _tag: 'UnavailableCallableEnvironment',
-            callable,
-            reason: `capture ${capture.ordinal} has no concrete value layout`,
-            view,
-          })
-        }
-        const size = borrowed ? target.pointerSize : (valueLayout?.size ?? 0)
-        const alignment = borrowed ? target.pointerAlignment : (valueLayout?.alignment ?? 1)
-        inputs.push(
-          Object.freeze({
-            value: Object.freeze({
-              ordinal: capture.ordinal,
-              parameterOrdinal: capture.parameterOrdinal,
-              access: capture.access,
-              type: capture.type,
-              representation: borrowed ? 'Borrow' : 'Value',
-            }),
-            size,
-            alignment,
-          }),
-        )
-      }
-      const packed = Packing.pack(inputs)
-      const fields: ReadonlyArray<CallableEnvironmentField> = Object.freeze(
-        packed.fields.map((field) => Object.freeze({ ...field.value, ...field })),
-      )
+  const planned = new Map<Instances.CallableInstance, CallableEnvironment>()
+  const planning = new Set<Instances.CallableInstance>()
+  const plan = (callable: Instances.CallableInstance): CallableEnvironment => {
+    const cached = planned.get(callable)
+    if (cached !== undefined) return cached
+    if (planning.has(callable)) {
       return Object.freeze({
-        _tag: 'CallableEnvironment',
+        _tag: 'UnavailableCallableEnvironment',
         callable,
-        fields,
-        size: packed.size,
-        alignment: packed.alignment,
-        tailPadding: packed.tailPadding,
+        reason: 'recursive callable capture environment has no finite value layout',
         view,
       })
-    }),
-  )
+    }
+    planning.add(callable)
+    const unavailable = (reason: string): CallableEnvironment => {
+      const result = Object.freeze({
+        _tag: 'UnavailableCallableEnvironment' as const,
+        callable,
+        reason,
+        view,
+      })
+      planning.delete(callable)
+      planned.set(callable, result)
+      return result
+    }
+    const inputs: Array<
+      Packing.Input<Omit<CallableEnvironmentField, 'offset' | 'size' | 'alignment' | 'padding'>>
+    > = []
+    for (const capture of callable.captures) {
+      const callableCapture = capture.callableIdentity !== undefined
+      const borrowed =
+        !callableCapture && (capture.access === 'Shared' || capture.access === 'Exclusive')
+      const callableIdentity = capture.callableIdentity
+      const nestedCallable =
+        callableIdentity?.environment === undefined
+          ? undefined
+          : discovery.callables.find((candidate) =>
+              FieldRealization.matchesIdentity(callableIdentity, candidate),
+            )
+      const nestedEnvironment = nestedCallable === undefined ? undefined : plan(nestedCallable)
+      if (
+        callableIdentity?.environment !== undefined &&
+        nestedEnvironment?._tag !== 'CallableEnvironment'
+      ) {
+        return unavailable(`capture ${capture.ordinal} has no concrete callable environment`)
+      }
+      const valueLayout =
+        borrowed || callableCapture ? undefined : layouts.get(Type.key(capture.type))
+      if (!borrowed && !callableCapture && valueLayout === undefined) {
+        return unavailable(`capture ${capture.ordinal} has no concrete value layout`)
+      }
+      const size = borrowed
+        ? target.pointerSize
+        : callableCapture
+          ? nestedEnvironment?._tag === 'CallableEnvironment'
+            ? nestedEnvironment.size
+            : 0
+          : (valueLayout?.size ?? 0)
+      const alignment = borrowed
+        ? target.pointerAlignment
+        : callableCapture
+          ? nestedEnvironment?._tag === 'CallableEnvironment'
+            ? nestedEnvironment.alignment
+            : 1
+          : (valueLayout?.alignment ?? 1)
+      inputs.push(
+        Object.freeze({
+          value: Object.freeze({
+            ordinal: capture.ordinal,
+            parameterOrdinal: capture.parameterOrdinal,
+            access: capture.access,
+            type: capture.type,
+            representation: borrowed ? 'Borrow' : callableCapture ? 'Callable' : 'Value',
+            ...(callableIdentity === undefined ? {} : { callableIdentity }),
+          }),
+          size,
+          alignment,
+        }),
+      )
+    }
+    const packed = Packing.pack(inputs)
+    const fields: ReadonlyArray<CallableEnvironmentField> = Object.freeze(
+      packed.fields.map((field) => Object.freeze({ ...field.value, ...field })),
+    )
+    const result: CallableEnvironment = Object.freeze({
+      _tag: 'CallableEnvironment',
+      callable,
+      fields,
+      size: packed.size,
+      alignment: packed.alignment,
+      tailPadding: packed.tailPadding,
+      view,
+    })
+    planning.delete(callable)
+    planned.set(callable, result)
+    return result
+  }
+  return Object.freeze(discovery.callables.map(plan))
 }
 
 const usizeLiteralVerdicts = (
@@ -2280,8 +2356,33 @@ const usizeLiteralVerdicts = (
   })
 }
 
+const nestedStatements = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Statement> =>
+  Object.freeze(
+    statements.flatMap((statement): ReadonlyArray<Hir.Statement> => {
+      switch (statement._tag) {
+        case 'Unsafe':
+          return [statement, ...nestedStatements(statement.statements)]
+        case 'If':
+        case 'IfLet':
+          return [
+            statement,
+            ...nestedStatements(statement.taken),
+            ...nestedStatements(statement.otherwise),
+          ]
+        case 'While':
+          return [statement, ...nestedStatements(statement.body)]
+        default:
+          return [statement]
+      }
+    }),
+  )
+
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
-export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
+export const plan = (
+  self: Catalog,
+  discovery: Instances.Discovery,
+  index: DeclarationIndex.Index,
+): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
   if (
@@ -2347,6 +2448,34 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
   )
   const literals = usizeLiteralVerdicts(self.target, discovery, self.usizeConstants)
+  const localSharedAllocationProvenance = LocalSharedAllocationProvenance.plan(discovery, index)
+  const localSharedDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedLayout') continue
+      const raw = expression.typeArguments.at(0)
+      const element =
+        raw !== undefined && Type.isTypeArgument(raw)
+          ? Type.substitute(raw, instance.substitution)
+          : undefined
+      const elementLayout = element === undefined ? undefined : resolve(element)
+      if (
+        element !== undefined &&
+        elementLayout !== undefined &&
+        LocalSharedControlBlock.plan(self.target, element, elementLayout)._tag ===
+          'LocalSharedControlBlockUnavailable'
+      )
+        localSharedDiagnostics.push(
+          Diagnostic.intrinsicTargetUnavailable(
+            'Intrinsic.sharedLayout',
+            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            expression.span,
+          ),
+        )
+    }
+  }
   const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
   for (const type of reached.values()) {
     if (
@@ -2403,7 +2532,12 @@ export const plan = (self: Catalog, discovery: Instances.Discovery): Plan => {
     ),
     staticData,
     literalVerdicts: literals.verdicts,
-    diagnostics: literals.diagnostics,
+    localSharedAllocationProvenance,
+    diagnostics: Diagnostic.merge([
+      ...literals.diagnostics,
+      ...localSharedDiagnostics,
+      ...localSharedAllocationProvenance.diagnostics,
+    ]),
   })
 }
 
@@ -2422,6 +2556,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     callingShapes: callingShapes(target, orderedEntries),
     staticData: Object.freeze([]),
     literalVerdicts: Object.freeze([]),
+    localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
     diagnostics: Object.freeze([]),
   })
 }
@@ -2468,6 +2603,14 @@ const executableEnvironmentFieldShape = (
   if (field.representation === 'Borrow') return borrowedShape(context, field.type)
   if (field.callableIdentity !== undefined) {
     const identity = field.callableIdentity
+    if (identity.environment === undefined) {
+      return Object.freeze({
+        _tag: 'CallableEnvironmentShape',
+        type: field.type,
+        fields: Object.freeze([]),
+        laneCount: 0,
+      })
+    }
     const environment = context.callableEnvironments.find(
       (
         candidate,
@@ -2483,10 +2626,7 @@ const executableEnvironmentFieldShape = (
     const fields = environment.fields.map((capture) =>
       Object.freeze({
         capture: capture.ordinal,
-        shape:
-          capture.representation === 'Borrow'
-            ? borrowedShape(nested, capture.type)
-            : shapeNode(capture.type, nested),
+        shape: executableEnvironmentFieldShape(nested, capture),
       }),
     )
     return Object.freeze({
@@ -2587,6 +2727,21 @@ const shapeNode = (
       laneCount: 1,
     })
   }
+  if (Type.isSharedCore(type)) {
+    return Object.freeze({
+      _tag: 'AddressShape',
+      type,
+      address: Object.freeze({
+        type: Object.freeze({
+          _tag: 'Address',
+          element: type,
+          bits: target.pointerSize === 4 ? 32 : 64,
+        }),
+        lane: 0,
+      }),
+      laneCount: 1,
+    })
+  }
   if (Type.isCallable(type)) {
     throw new RangeError(
       `callable ${Type.encode(type)} needs a hidden concrete identity before calling-shape planning`,
@@ -2665,10 +2820,7 @@ const shapeNode = (
           ? storedCallable.fields.map((field) =>
               Object.freeze({
                 capture: field.ordinal,
-                shape:
-                  field.representation === 'Borrow'
-                    ? borrowedShape(context, field.type)
-                    : shapeNode(field.type, context),
+                shape: executableEnvironmentFieldShape(context, field),
               }),
             )
           : (storedEffect?.fields ?? []).map((field) =>
@@ -3115,24 +3267,55 @@ export const callableEnvironmentLanes = (
   self: Plan,
   environment: Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
 ): ReadonlyArray<CallingLane> =>
-  Object.freeze(
-    environment.fields.flatMap((field): ReadonlyArray<CallingLane> => {
-      if (field.representation === 'Borrow') {
-        return [
-          Object.freeze({
-            _tag: 'CallingLane',
-            path: Object.freeze([]),
-            type: Object.freeze({
-              _tag: 'Address',
-              element: field.type,
-              bits: self.target.pointerSize === 4 ? 32 : 64,
-            }),
-          }),
-        ]
-      }
-      return callingShape(self, field.type)?.lanes ?? Object.freeze([])
-    }),
-  )
+  Object.freeze(environment.fields.flatMap((field) => callableFieldLanes(self, field)))
+
+/** Reconstructs the complete specialized target key of one callable environment. */
+export const callableTargetArguments = (
+  environment: Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
+): ReadonlyArray<Type.GenericArgument> =>
+  Object.freeze([
+    ...environment.callable.typeArguments,
+    ...environment.callable.captures
+      .filter(
+        (
+          capture,
+        ): capture is typeof capture & {
+          readonly callableIdentity: Type.CallableIdentityArgument
+        } => capture.callableIdentity !== undefined,
+      )
+      .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+      .map((capture) => capture.callableIdentity),
+  ])
+
+/** Materializes the ABI lanes stored for one hidden callable capture field. */
+export const callableFieldLanes = (
+  self: Plan,
+  field: CallableEnvironmentField,
+): ReadonlyArray<CallingLane> => {
+  if (field.representation === 'Borrow') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([]),
+        type: Object.freeze({
+          _tag: 'Address' as const,
+          element: field.type,
+          bits: self.target.pointerSize === 4 ? 32 : 64,
+        }),
+      }),
+    ])
+  }
+  if (field.callableIdentity !== undefined) {
+    const environment =
+      field.callableIdentity.environment === undefined
+        ? undefined
+        : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
+    return environment === undefined
+      ? Object.freeze([])
+      : callableEnvironmentLanes(self, environment)
+  }
+  return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+}
 
 /** The logical lane and byte range occupied by one capture in a specialized environment. */
 export interface CallableCaptureRange {
@@ -3151,8 +3334,7 @@ export const callableCaptureRange = (
   if (environment === undefined) return undefined
   let laneOffset = 0
   for (const field of environment.fields) {
-    const laneCount =
-      field.representation === 'Borrow' ? 1 : (callingShape(self, field.type)?.laneCount ?? 0)
+    const laneCount = callableFieldLanes(self, field).length
     if (field.ordinal === capture)
       return Object.freeze({ laneOffset, laneCount, byteOffset: field.offset })
     laneOffset += laneCount

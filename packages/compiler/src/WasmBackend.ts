@@ -21,6 +21,8 @@ import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
@@ -588,6 +590,8 @@ interface Layout {
   readonly scratch: number
   /** The corresponding scratch lane for 64-bit integer operations. */
   readonly scratch64: number
+  /** One preserved control-block address per statically nested local-shared cleanup. */
+  readonly localSharedCleanupScratch: ReadonlyArray<number>
   readonly scratchF32?: readonly [number, number]
   readonly scratchF64?: readonly [number, number]
   readonly frameBase?: number
@@ -609,6 +613,56 @@ interface Layout {
   /** Incoming address parameter for each capture represented internally by its loaded value lanes. */
   readonly borrowPointers: ReadonlyMap<number, number>
   readonly types: ReadonlyArray<Mir.Type>
+}
+
+const localSharedCleanupDepth = (cleanup: CleanupPlan.CleanupPlan): number => {
+  switch (cleanup._tag) {
+    case 'LocalSharedCoreCleanup':
+      return 1
+    case 'RawBufferCleanup':
+      return localSharedCleanupDepth(cleanup.allocation)
+    case 'HookCleanup':
+      return localSharedCleanupDepth(cleanup.inner)
+    case 'StructCleanup':
+      return Math.max(0, ...cleanup.fields.map((field) => localSharedCleanupDepth(field.cleanup)))
+    case 'ArrayCleanup':
+      return localSharedCleanupDepth(cleanup.element)
+    case 'UnionCleanup':
+      return Math.max(0, ...cleanup.cases.map((entry) => localSharedCleanupDepth(entry.cleanup)))
+    case 'CallableCleanup':
+    case 'EffectCleanup':
+      return Math.max(0, ...cleanup.slots.map((slot) => localSharedCleanupDepth(slot.cleanup)))
+    case 'EffectCompositeCleanup':
+      return Math.max(0, ...cleanup.alternatives.map(localSharedCleanupDepth))
+    default:
+      return 0
+  }
+}
+
+const operationCleanupPlans = (
+  operation: Mir.Operation,
+): ReadonlyArray<CleanupPlan.CleanupPlan> => {
+  switch (operation._tag) {
+    case 'SlotDrop':
+    case 'Drop':
+      return Object.freeze([operation.cleanup])
+    case 'SharedWithMut':
+      return Object.freeze([operation.useCleanup, operation.conflictCleanup])
+    case 'PropagateEffectFailure':
+    case 'RunEffect':
+    case 'RunEffectValue':
+    case 'RunEffectComposite':
+    case 'RunStaticEffect':
+      return Object.freeze((operation.releases ?? []).map((release) => release.cleanup))
+    case 'CloseEffectEntry':
+      return Object.freeze(operation.failures.map((failure) => failure.cleanup))
+    case 'Match':
+      return Object.freeze(
+        operation.arms.flatMap((arm) => arm.selected.cleanup.map((entry) => entry.cleanup)),
+      )
+    default:
+      return Object.freeze([])
+  }
 }
 
 const saturatingWideArithmetic = (
@@ -930,6 +984,17 @@ const layoutOf = (
   const scratch64 = needsScratch64 ? nextInternal : scratch
   if (needsScratch64) declared.push(named(i64, 'scratch64'))
   if (needsScratch64) nextInternal += 1
+  const localSharedCleanupDepthMaximum = Math.max(
+    0,
+    ...MirVerification.operations(fn).flatMap(operationCleanupPlans).map(localSharedCleanupDepth),
+  )
+  const localSharedCleanupScratch = Object.freeze(
+    Array.from({ length: localSharedCleanupDepthMaximum }, (_, depth) => nextInternal + depth),
+  )
+  for (const [depth] of localSharedCleanupScratch.entries()) {
+    declared.push(named(i32, `local_shared_cleanup_${depth}`))
+  }
+  nextInternal += localSharedCleanupScratch.length
   const needsScratchF32 = MirVerification.operations(fn).some(
     (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f32',
   )
@@ -972,6 +1037,7 @@ const layoutOf = (
   return {
     scratch,
     scratch64,
+    localSharedCleanupScratch,
     ...(scratchF32 === undefined ? {} : { scratchF32 }),
     ...(scratchF64 === undefined ? {} : { scratchF64 }),
     declared: Object.freeze(declared),
@@ -1397,6 +1463,40 @@ const makeOperationContext = (
   ): ReadonlyArray<Instr.Instr> => {
     if (!CleanupPlan.hasHook(cleanup)) return []
     if (memory === undefined) throw new RangeError('Wasm hook cleanup has no private memory')
+    const localType = layout.types.at(local.ordinal)
+    if (localType?._tag === 'EffectBorrow') {
+      const pointer = layout.borrowPointers.get(local.ordinal)
+      if (pointer === undefined) throw new RangeError('Wasm hook cleanup lost its borrow pointer')
+      const rootLanes = layout.lanes.at(local.ordinal) ?? []
+      const rootSlots = slots(local)
+      const laneInstructions = (instruction: 'load' | 'store'): ReadonlyArray<Instr.Instr> =>
+        rootLanes.flatMap((lane, ordinal) => {
+          const offset = LayoutVerify.laneOffset(memory.plan, localType.type, lane.path)
+          const slot = rootSlots.at(ordinal)
+          if (offset === undefined || slot === undefined)
+            throw new RangeError('Wasm hook cleanup lost a borrowed lane')
+          const address = [
+            Instr.localGet(pointer),
+            ...(offset === 0 ? [] : [Instr.i32Const(offset), Instr.op('i32.add')]),
+          ]
+          return instruction === 'store'
+            ? [
+                ...address,
+                Instr.localGet(slot),
+                Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+              ]
+            : [
+                ...address,
+                Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+                Instr.localSet(slot),
+              ]
+        })
+      const hooks = hookReleaseWalk(cleanup, (nestedOffset) => [
+        Instr.localGet(pointer),
+        ...(nestedOffset === 0 ? [] : [Instr.i32Const(nestedOffset), Instr.op('i32.add')]),
+      ])
+      return [...laneInstructions('store'), ...hooks, ...laneInstructions('load')]
+    }
     const planned = memory.frame.roots.get(local.ordinal)
     if (planned === undefined) throw new RangeError('Wasm hook cleanup lost its frame root')
     const walk = (plan_: CleanupPlan.CleanupPlan, byteOffset: number) =>
@@ -1427,7 +1527,68 @@ const makeOperationContext = (
           }) ?? []
         )
       })
-    const localType = layout.types.at(local.ordinal)
+    const callableEnvironmentOffsets = (
+      environment: Extract<
+        LayoutPlan.CallableEnvironment,
+        { readonly _tag: 'CallableEnvironment' }
+      >,
+      base = 0,
+    ): ReadonlyArray<number> =>
+      environment.fields.flatMap((field) => {
+        if (field.representation === 'Borrow') return [base + field.offset]
+        if (field.callableIdentity?.environment !== undefined) {
+          const nested = LayoutPlan.callableEnvironmentByIdentity(
+            memory.plan,
+            field.callableIdentity.environment,
+          )
+          return nested?._tag === 'CallableEnvironment'
+            ? callableEnvironmentOffsets(nested, base + field.offset)
+            : []
+        }
+        const shape = LayoutPlan.callingShape(memory.plan, field.type)
+        return (
+          shape?.lanes.flatMap((lane) => {
+            const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
+            return offset === undefined ? [] : [base + field.offset + offset]
+          }) ?? []
+        )
+      })
+    if (
+      cleanup._tag === 'CallableCleanup' &&
+      localType?._tag === 'CallableValue' &&
+      localType.environment !== undefined
+    ) {
+      const offsets = callableEnvironmentOffsets(localType.environment)
+      const rootSlots = slots(local)
+      const rootLanes = layout.lanes.at(local.ordinal) ?? []
+      const stores = rootLanes.flatMap((lane, ordinal) => {
+        const offset = offsets.at(ordinal)
+        const source = rootSlots.at(ordinal)
+        if (offset === undefined || source === undefined)
+          throw new RangeError('Wasm callable cleanup lost an environment lane')
+        return [
+          ...frameAddress(planned.offset + offset),
+          Instr.localGet(source),
+          Instr.memoryAccess(laneStoreMnemonic(memory.plan, lane), memory.memory),
+        ]
+      })
+      const hooks = cleanup.slots.flatMap((slot) => {
+        const field = localType.environment?.fields.at(slot.ordinal)
+        return field === undefined ? [] : walk(slot.cleanup, field.offset)
+      })
+      const reloads = rootLanes.flatMap((lane, ordinal) => {
+        const offset = offsets.at(ordinal)
+        const destination = rootSlots.at(ordinal)
+        if (offset === undefined || destination === undefined)
+          throw new RangeError('Wasm callable cleanup lost an environment lane')
+        return [
+          ...frameAddress(planned.offset + offset),
+          Instr.memoryAccess(laneLoadMnemonic(memory.plan, lane), memory.memory),
+          Instr.localSet(destination),
+        ]
+      })
+      return [...stores, ...hooks, ...reloads]
+    }
     if (cleanup._tag === 'EffectCleanup' && localType?._tag === 'EffectValue') {
       const offsets = environmentOffsets(localType.environment)
       const rootSlots = slots(local)
@@ -1509,10 +1670,13 @@ const makeOperationContext = (
   const hookReleaseAtAddress = (
     cleanup: CleanupPlan.CleanupPlan,
     address: number,
+    rootOffset = 0,
   ): ReadonlyArray<Instr.Instr> => {
     const addressAt = (byteOffset: number): ReadonlyArray<Instr.Instr> => [
       Instr.localGet(address),
-      ...(byteOffset === 0 ? [] : [Instr.i32Const(byteOffset), Instr.op('i32.add')]),
+      ...(rootOffset + byteOffset === 0
+        ? []
+        : [Instr.i32Const(rootOffset + byteOffset), Instr.op('i32.add')]),
     ]
     return hookReleaseWalk(cleanup, addressAt)
   }
@@ -1542,6 +1706,55 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'LocalSharedCoreCleanup': {
+          const base = currentValues.at(0)
+          const elementLayout = LayoutPlan.entry(plan, plan_.element)
+          const block =
+            elementLayout === undefined
+              ? undefined
+              : LocalSharedControlBlock.plan(plan.target, plan_.element, elementLayout)
+          if (base === undefined || block?._tag !== 'LocalSharedControlBlockPlan')
+            throw new RangeError('Wasm local-shared cleanup lost its control-block lanes')
+          const context = requireMemory()
+          const decrement = [
+            ...base,
+            ...base,
+            Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+            Instr.i32Const(1),
+            Instr.op('i32.sub'),
+            Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
+          ]
+          const last = [
+            ...semanticLanesOf(plan_.element).flatMap((lane) => {
+              const offset = LayoutVerify.laneOffset(plan, plan_.element, lane.path)
+              if (offset === undefined)
+                throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+              return [
+                ...base,
+                Instr.memoryAccess(laneLoadMnemonic(plan, lane), context.memory, {
+                  offset: block.valueOffset + offset,
+                }),
+              ]
+            }),
+            Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [plan_.element])),
+            Instr.op('drop'),
+            ...base,
+            Instr.memoryAccess('i32.load', context.memory, {
+              offset:
+                block.allocationOffset + aggregateFieldOffset(SilkType.allocation, '$context'),
+            }),
+            Instr.call(requireRelease()),
+          ]
+          return Object.freeze({
+            before: Object.freeze([
+              ...base,
+              Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+              Instr.i32Const(1),
+              Instr.op('i32.gt_u'),
+              Instr.ifElse(Instr.emptyBlockType, decrement, last),
+            ]),
+          })
+        }
         case 'AllocationCleanup':
         case 'RawBufferCleanup': {
           const context = currentValues.at(4)
@@ -1829,14 +2042,57 @@ const makeOperationContext = (
         slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
       ),
     )
-  const releaseAtAddress = (
+  function releaseAtAddress(
     cleanup: CleanupPlan.CleanupPlan,
     address: number,
-  ): ReadonlyArray<Instr.Instr> =>
-    WasmCleanup.release(
-      hookReleaseAtAddress(cleanup, address),
-      reclaimReleaseAtAddress(cleanup, address),
+    byteOffset = 0,
+    localSharedDepth = 0,
+  ): ReadonlyArray<Instr.Instr> {
+    if (cleanup._tag === 'LocalSharedCoreCleanup') {
+      const base = layout.localSharedCleanupScratch.at(localSharedDepth)
+      const elementLayout = LayoutPlan.entry(plan, cleanup.element)
+      const block =
+        elementLayout === undefined
+          ? undefined
+          : LocalSharedControlBlock.plan(plan.target, cleanup.element, elementLayout)
+      if (base === undefined || block?._tag !== 'LocalSharedControlBlockPlan') {
+        throw new RangeError('Wasm nested local-shared cleanup lost its target cleanup scratch')
+      }
+      const context = requireMemory()
+      const decrement = [
+        Instr.localGet(base),
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.memoryAccess('i32.store', context.memory, { offset: block.strongOffset }),
+      ]
+      const last = [
+        ...semanticLanesOf(cleanup.element).flatMap((lane) => {
+          const offset = LayoutVerify.laneOffset(plan, cleanup.element, lane.path)
+          if (offset === undefined)
+            throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+          return loadAt(base, block.valueOffset + offset, lane)
+        }),
+        Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
+        Instr.op('drop'),
+        ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset, localSharedDepth),
+      ]
+      return [
+        ...loadAt(address, byteOffset),
+        Instr.localSet(base),
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', context.memory, { offset: block.strongOffset }),
+        Instr.i32Const(1),
+        Instr.op('i32.gt_u'),
+        Instr.ifElse(Instr.emptyBlockType, decrement, last),
+      ]
+    }
+    return WasmCleanup.release(
+      hookReleaseAtAddress(cleanup, address, byteOffset),
+      reclaimReleaseAtAddress(cleanup, address, byteOffset),
     )
+  }
   const flushBorrowRoot = (root: Mir.LocalId): ReadonlyArray<Instr.Instr> => {
     const pointer = layout.borrowPointers.get(root.ordinal)
     if (pointer === undefined) return []
@@ -2304,6 +2560,172 @@ const emitRawBufferFromOperation = (
     ...copy(allocation, destination.slice(0, allocation.length)),
     Instr.localGet(count),
     Instr.localSet(destinationCount),
+  ]
+}
+
+const emitSharedFromAllocationOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SharedFromAllocation' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, slots, storeAt } = state
+  const allocation = slots(operation.allocation)
+  const base = allocation.at(0)
+  const bytes = allocation.at(1)
+  const alignment = allocation.at(2)
+  const destination = slots(operation.destination).at(0)
+  const allocationShape = LayoutPlan.callingShape(plan, SilkType.allocation)
+  const valueShape = LayoutPlan.callingShape(plan, operation.element)
+  if (
+    base === undefined ||
+    bytes === undefined ||
+    alignment === undefined ||
+    destination === undefined ||
+    allocationShape === undefined ||
+    valueShape === undefined ||
+    allocationShape.lanes.length !== allocation.length
+  )
+    throw new RangeError('Wasm local-shared initialization lost its planned lanes')
+  const instructions: Array<Instr.Instr> = [
+    Instr.localGet(bytes),
+    Instr.i32Const(operation.block.size),
+    Instr.op('i32.ne'),
+    Instr.localGet(alignment),
+    Instr.i32Const(operation.block.alignment),
+    Instr.op('i32.ne'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(base),
+    Instr.localSet(destination),
+    Instr.localGet(base),
+    Instr.i32Const(1),
+    Instr.memoryAccess('i32.store', state.requireMemory().memory, {
+      offset: operation.block.strongOffset,
+    }),
+    Instr.localGet(base),
+    Instr.i32Const(0),
+    Instr.memoryAccess('i32.store', state.requireMemory().memory, {
+      offset: operation.block.accessOffset,
+    }),
+  ]
+  for (const [ordinal, lane] of allocationShape.lanes.entries()) {
+    const value = allocation.at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, SilkType.allocation, lane.path)
+    if (value === undefined || offset === undefined)
+      throw new RangeError('Wasm local-shared initialization lost reclaim provenance')
+    instructions.push(...storeAt(base, value, operation.block.allocationOffset + offset, lane))
+  }
+  const payload = slots(operation.value)
+  for (const [ordinal, lane] of valueShape.lanes.entries()) {
+    const value = payload.at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, operation.element, lane.path)
+    if (value === undefined || offset === undefined)
+      throw new RangeError('Wasm local-shared initialization lost its payload')
+    instructions.push(...storeAt(base, value, operation.block.valueOffset + offset, lane))
+  }
+  return instructions
+}
+
+const emitSharedCloneOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SharedClone' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar, loadAt, requireMemory } = state
+  const self = scalar(operation.self)
+  const destination = scalar(operation.destination)
+  const memory = requireMemory().memory
+  return [
+    ...loadAt(self, 0),
+    Instr.localSet(destination),
+    Instr.localGet(destination),
+    Instr.memoryAccess('i32.load', memory, { offset: operation.block.strongOffset }),
+    Instr.i32Const(-1),
+    Instr.op('i32.eq'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(destination),
+    Instr.localGet(destination),
+    Instr.memoryAccess('i32.load', memory, { offset: operation.block.strongOffset }),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+    Instr.memoryAccess('i32.store', memory, { offset: operation.block.strongOffset }),
+  ]
+}
+
+const emitSharedWithMutOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'SharedWithMut' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { layout, scalar, loadAt, requireMemory } = state
+  const memory = requireMemory().memory
+  const self = scalar(operation.self)
+  const payload = scalar(operation.payload)
+  const callableArguments = (local: Mir.LocalId): ReadonlyArray<SilkType.GenericArgument> => {
+    const type = layout.types.at(local.ordinal)
+    return type?._tag === 'CallableValue'
+      ? ((type.environment === undefined
+          ? undefined
+          : LayoutPlan.callableTargetArguments(type.environment)) ??
+          type.storage?.realization.targetArguments ??
+          Object.freeze([]))
+      : Object.freeze([])
+  }
+  const apply = (
+    callable: Mir.LocalId,
+    callableType: SilkType.Callable,
+    arguments_: ReadonlyArray<Mir.LocalId>,
+  ): ReadonlyArray<Instr.Instr> =>
+    emitApplyCallableOperation(
+      Object.freeze({
+        _tag: 'ApplyCallable',
+        destination: operation.destination,
+        callable,
+        typeArguments: callableArguments(callable),
+        captures: Object.freeze([]),
+        arguments: Object.freeze(arguments_),
+        callableType,
+        access: 'Take',
+        evaluation: 'CalleeThenArguments',
+        realization: 'Environment',
+        type: operation.type,
+        provenance: operation.provenance,
+      }),
+      state,
+    )
+  const drop = (
+    local: Mir.LocalId,
+    cleanup: CleanupPlan.CleanupPlan,
+  ): ReadonlyArray<Instr.Instr> =>
+    cleanup._tag === 'NoCleanup'
+      ? Object.freeze([])
+      : emitDropOperation(
+          Object.freeze({ _tag: 'Drop', local, cleanup, provenance: operation.provenance }),
+          state,
+        )
+  const base = (): ReadonlyArray<Instr.Instr> => loadAt(self, 0)
+  const setAccess = (active: boolean): ReadonlyArray<Instr.Instr> => [
+    ...base(),
+    Instr.i32Const(active ? 1 : 0),
+    Instr.memoryAccess('i32.store', memory, { offset: operation.block.accessOffset }),
+  ]
+  const use = [
+    ...setAccess(true),
+    ...base(),
+    ...(operation.block.valueOffset === 0
+      ? []
+      : [Instr.i32Const(operation.block.valueOffset), Instr.op('i32.add')]),
+    Instr.localSet(payload),
+    ...apply(operation.use, operation.useType, [operation.payload]),
+    ...setAccess(false),
+    ...drop(operation.onConflict, operation.conflictCleanup),
+  ]
+  const conflict = [
+    ...apply(operation.onConflict, operation.conflictType, []),
+    ...drop(operation.use, operation.useCleanup),
+  ]
+  return [
+    ...base(),
+    Instr.memoryAccess('i32.load', memory, { offset: operation.block.accessOffset }),
+    Instr.op('i32.eqz'),
+    Instr.ifElse(Instr.emptyBlockType, use, conflict),
   ]
 }
 
@@ -3323,7 +3745,50 @@ const emitDropOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { releaseInstructions } = state
+  const {
+    releaseInstructions,
+    releaseAtAddress,
+    semanticLanesOf,
+    loadAt,
+    resolve,
+    scalar,
+    requireMemory,
+    plan,
+  } = state
+  if (operation.cleanup._tag === 'LocalSharedCoreCleanup') {
+    const cleanup = operation.cleanup
+    const block = operation.localShared?.block
+    if (block?._tag !== 'LocalSharedControlBlockPlan')
+      throw new RangeError('Wasm local-shared cleanup lost its target control-block plan')
+    const base = scalar(operation.local)
+    const memory = requireMemory().memory
+    const decrement = [
+      Instr.localGet(base),
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory, { offset: block.strongOffset }),
+      Instr.i32Const(1),
+      Instr.op('i32.sub'),
+      Instr.memoryAccess('i32.store', memory, { offset: block.strongOffset }),
+    ]
+    const last = [
+      ...semanticLanesOf(cleanup.element).flatMap((lane) => {
+        const offset = LayoutVerify.laneOffset(plan, cleanup.element, lane.path)
+        if (offset === undefined)
+          throw new RangeError('Wasm local-shared cleanup lost a payload lane')
+        return loadAt(base, block.valueOffset + offset, lane)
+      }),
+      Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
+      Instr.op('drop'),
+      ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset),
+    ]
+    return [
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory, { offset: block.strongOffset }),
+      Instr.i32Const(1),
+      Instr.op('i32.gt_u'),
+      Instr.ifElse(Instr.emptyBlockType, decrement, last),
+    ]
+  }
   return releaseInstructions(operation.cleanup, operation.local)
 }
 
@@ -4030,22 +4495,24 @@ const emitApplyCallableOperation = (
     for (const field of sourceType.environment?.fields ?? []) {
       if (memory === undefined && field.representation === 'Borrow')
         throw new RangeError('Wasm borrowed callable capture requires private memory')
-      const shape = LayoutPlan.callingShape(plan, field.type)
-      if (shape === undefined) throw new RangeError('Wasm callable capture lost its calling shape')
-      if (field.representation === 'Value') {
+      const fieldLanes = LayoutPlan.callableFieldLanes(plan, field)
+      if (field.representation !== 'Borrow') {
         captureGroups.push(
           Object.freeze({
             parameterOrdinal: field.parameterOrdinal,
             operands: Object.freeze(
               environmentSlots
-                .slice(cursor, cursor + shape.laneCount)
+                .slice(cursor, cursor + fieldLanes.length)
                 .map((slot) => Instr.localGet(slot)),
             ),
           }),
         )
-        cursor += shape.laneCount
+        cursor += fieldLanes.length
         continue
       }
+      const shape = LayoutPlan.callingShape(plan, field.type)
+      if (shape === undefined)
+        throw new RangeError('Wasm borrowed callable capture lost its calling shape')
       const pointer = environmentSlots.at(cursor)
       if (pointer === undefined || memory === undefined)
         throw new RangeError('Wasm borrowed callable capture lost its pointer')
@@ -4330,18 +4797,23 @@ const emitApplyCallableOperation = (
       Instr.localSet(scalar(operation.destination)),
     ]
   }
+  const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
   return [
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
     ...captureOperands,
     Instr.call(resolve(target.declaration, operation.typeArguments)),
-    ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-    ...reloadReachableRoots([
-      ...(operation.callable === undefined ? [] : [operation.callable]),
-      ...operation.captures.map((capture) => capture.source),
-      ...operation.arguments,
-    ]),
+    ...(diverges
+      ? [Instr.op('unreachable')]
+      : [
+          ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+          ...reloadReachableRoots([
+            ...(operation.callable === undefined ? [] : [operation.callable]),
+            ...operation.captures.map((capture) => capture.source),
+            ...operation.arguments,
+          ]),
+        ]),
   ]
 }
 
@@ -5075,6 +5547,12 @@ const emitOperationWithContext = (
       return emitOsCallOperation(operation, context)
     case 'RawBufferFrom':
       return emitRawBufferFromOperation(operation, context)
+    case 'SharedFromAllocation':
+      return emitSharedFromAllocationOperation(operation, context)
+    case 'SharedClone':
+      return emitSharedCloneOperation(operation, context)
+    case 'SharedWithMut':
+      return emitSharedWithMutOperation(operation, context)
     case 'RawBufferCount':
       return emitRawBufferCountOperation(operation, context)
     case 'RawBufferSlot':
@@ -5940,6 +6418,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       (operation) =>
         operation._tag === 'Allocate' ||
         operation._tag === 'RawBufferFrom' ||
+        operation._tag === 'SharedFromAllocation' ||
         operation._tag === 'RawBufferCount' ||
         operation._tag === 'RawBufferSlot' ||
         operation._tag === 'RawBufferRead' ||

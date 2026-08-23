@@ -116,7 +116,10 @@ export const storeMutable = Effect.fnUntraced(function* (
   if (storage === undefined) return
   for (const [lane, pointer] of storage.entries()) {
     const stored = values.at(lane)
-    if (stored === undefined) throw new RangeError('Mutable root lost a physical lane')
+    if (stored === undefined)
+      throw new RangeError(
+        `Mutable root %${root.ordinal} lost physical lane ${lane} from ${values.length} values`,
+      )
     yield* FunctionBody.store(context.body, stored, pointer)
   }
 })

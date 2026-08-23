@@ -42,9 +42,9 @@ The callback may itself perform explicit ordinary allocation, but the wrapper in
 ### Derive shared inspection from the exclusive primitive
 
 `Shared.withMut` delegates to `sharedWithMut`; its `onConflict` callback invokes the existing general
-fatal-trap surface with source-owned policy. `Shared.with` also delegates to `sharedWithMut`, narrows
-`&mut T` to `&T` for the user's callback, and uses the same conflict callback. Therefore all four
-reentrant public combinations trap and no separate reader state exists.
+fatal-trap surface with source-owned policy. `Shared.with` delegates through `Shared.withMut`,
+narrows `&mut T` to `&T` for the user's callback, and therefore reuses the same source conflict
+policy. All four reentrant public combinations trap and no separate reader state exists.
 
 Both APIs accept take-once ordinary callbacks. Existing restricted-borrow checking prevents their
 parameters from escaping. A later source wrapper may translate `onConflict` to result data without

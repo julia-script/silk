@@ -238,6 +238,12 @@
     "namespace": "Result"
   },
   {
+    "module": "silk/shared",
+    "path": "silk/shared.silk",
+    "layer": "portable",
+    "namespace": "Shared"
+  },
+  {
     "module": "silk/slot",
     "path": "silk/slot.silk",
     "layer": "portable",

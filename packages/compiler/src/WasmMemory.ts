@@ -72,12 +72,27 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
             : []
       return [
         ...dropped.flatMap((release) =>
-          CleanupPlan.hasHook(release.cleanup) ? [release.local.ordinal] : [],
+          CleanupPlan.hasHook(release.cleanup) &&
+          fn.localTypes.at(release.local.ordinal)?._tag !== 'EffectBorrow'
+            ? [release.local.ordinal]
+            : [],
         ),
         ...(operation._tag === 'CloseEffectEntry'
           ? operation.failures.flatMap((failure) =>
               CleanupPlan.hasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
             )
+          : []),
+        ...(operation._tag === 'SharedWithMut'
+          ? [
+              ...(CleanupPlan.hasHook(operation.useCleanup) &&
+              fn.localTypes.at(operation.use.ordinal)?._tag !== 'EffectBorrow'
+                ? [operation.use.ordinal]
+                : []),
+              ...(CleanupPlan.hasHook(operation.conflictCleanup) &&
+              fn.localTypes.at(operation.onConflict.ordinal)?._tag !== 'EffectBorrow'
+                ? [operation.onConflict.ordinal]
+                : []),
+            ]
           : []),
       ]
     }),
@@ -88,22 +103,24 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
     const type = fn.localTypes.at(local)
     const storage =
-      type?._tag === 'EffectValue'
+      type?._tag === 'CallableValue' && type.environment !== undefined
         ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
-        : type?._tag === 'EffectComposite'
-          ? Object.freeze({
-              size: type.alternatives.reduce(
-                (maximum, alternative) => Math.max(maximum, alternative.environment.size),
-                0,
-              ),
-              alignment: type.alternatives.reduce(
-                (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
-                1,
-              ),
-            })
-          : type === undefined
-            ? undefined
-            : LayoutPlan.entry(plan, Mir.semanticType(type))
+        : type?._tag === 'EffectValue'
+          ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
+          : type?._tag === 'EffectComposite'
+            ? Object.freeze({
+                size: type.alternatives.reduce(
+                  (maximum, alternative) => Math.max(maximum, alternative.environment.size),
+                  0,
+                ),
+                alignment: type.alternatives.reduce(
+                  (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
+                  1,
+                ),
+              })
+            : type === undefined
+              ? undefined
+              : LayoutPlan.entry(plan, Mir.semanticType(type))
     if (
       type === undefined ||
       type._tag === 'EffectBorrow' ||

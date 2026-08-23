@@ -23,6 +23,7 @@ import {
   isCallable,
   isEffect,
   isFixedArray,
+  isNever,
   isNominal,
   isParameter,
   isReference,
@@ -457,6 +458,15 @@ const inferType = (
   inferred: Map<string, GenericArgument>,
   context: InferenceContext,
 ): boolean => {
+  // A diverging expression satisfies every expected result without replacing a generic already
+  // inferred from a value argument. When it is the only evidence (including an explicit `never`
+  // type argument), retain it so exact specialization keys remain complete.
+  if (isNever(actual)) {
+    if (!isParameter(pattern)) return true
+    return inferred.has(key(pattern))
+      ? true
+      : bindGenericArgument(pattern, actual, inferred, context)
+  }
   if (isParameter(pattern)) {
     return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred, context)
   }
@@ -486,7 +496,7 @@ const inferType = (
   }
   if (isReference(pattern) && isReference(actual)) {
     return (
-      pattern.access === actual.access &&
+      compareAccess(actual.access, pattern.access) &&
       inferType(pattern.target, actual.target, inferred, context)
     )
   }

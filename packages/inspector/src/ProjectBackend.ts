@@ -327,6 +327,8 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · active reclaim ticket`
     case 'RawBufferCleanup':
       return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
+    case 'LocalSharedCoreCleanup':
+      return `${typeText(cleanup.type)} · opaque decrement or last ${typeText(cleanup.element)} cleanup`
     case 'HookCleanup':
       return `${typeText(cleanup.type)} · drop hook ${cleanup.hook.module}.${cleanup.hook.name} · ${cleanupText(cleanup.inner)}`
     case 'StructCleanup':
@@ -800,6 +802,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
+    case 'SharedFromAllocation':
+      return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
+    case 'SharedClone':
+      return `${localText(operation.destination)} = clone shared core ${localText(operation.self)}`
+    case 'SharedWithMut':
+      return `${localText(operation.destination)} = access shared core ${localText(operation.self)} with ${localText(operation.use)} or ${localText(operation.onConflict)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw buffer from ${localText(operation.allocation)} × ${localText(operation.count)} · stride ${operation.stride}`
     case 'RawBufferCount':
@@ -1057,9 +1065,11 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                                   ? `${typeText(value.type)} ticket=${value.ticket} · ${value.count.toString()} × ${typeText(value.element)} · stride ${value.stride}`
                                   : value._tag === 'SlotValue'
                                     ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
-                                    : value._tag === 'ReferenceValue'
-                                      ? `borrow f${value.frame}.c${value.cell}`
-                                      : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                                    : value._tag === 'SharedCoreValue'
+                                      ? `${typeText(value.type)} ticket=${value.ticket} · ${typeText(value.element)}`
+                                      : value._tag === 'ReferenceValue'
+                                        ? `borrow f${value.frame}.c${value.cell}`
+                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -1141,6 +1151,20 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `reject callable #${event.ticket} · ${event.mode.toLowerCase()}`
     case 'AllocationAcquire':
       return `acquire allocation #${event.ticket}`
+    case 'SharedInitialize':
+      return `initialize shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'} · ${event.access?.toLowerCase() ?? '?'}`
+    case 'SharedClone':
+      return `clone shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'}`
+    case 'SharedAccessBegin':
+      return `begin shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
+    case 'SharedAccessConflict':
+      return `conflict shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
+    case 'SharedAccessEnd':
+      return `end shared access #${event.ticket} · ${event.access?.toLowerCase() ?? '?'}`
+    case 'SharedDecrement':
+      return `decrement shared core #${event.ticket} · strong ${event.strong?.toString() ?? '?'}`
+    case 'SharedLastCleanup':
+      return `clean last shared core #${event.ticket}`
     case 'RawBufferForm':
       return `form raw buffer #${event.ticket} × ${event.count?.toString() ?? '?'}`
     case 'SlotProject':
@@ -1232,6 +1256,13 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'CallableCleanup':
     case 'CallableRejected':
     case 'AllocationAcquire':
+    case 'SharedInitialize':
+    case 'SharedClone':
+    case 'SharedAccessBegin':
+    case 'SharedAccessConflict':
+    case 'SharedAccessEnd':
+    case 'SharedDecrement':
+    case 'SharedLastCleanup':
     case 'RawBufferForm':
     case 'SlotProject':
     case 'SlotWrite':

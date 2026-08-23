@@ -30,6 +30,10 @@ store or result. Otherwise it increments once and returns one new non-Copy handl
 `T`, allocates, or gains a failure channel. Dropping a non-last handle decrements once. Dropping the
 last transitions to terminal ownership, cleans `T`, then consumes the retained reclaim authority.
 
+The maximum is a compiler-planned fact of the selected target's count representation. Evaluation and
+the emitting backend for that same selected target consume the identical maximum and therefore agree
+on the success-or-trap boundary; different target representations need not share one numeric maximum.
+
 Alternatives rejected: saturating or wrapping counts manufacture untracked obligations; coupling
 count to access would prohibit harmless clone/non-last drop in callbacks; returning overflow data
 would change the accepted infallible clone API.
@@ -39,9 +43,11 @@ would change the accepted infallible clone API.
 `sharedWithMut(self, use, onConflict)` checks `access` once. If active, it invokes only
 `onConflict` while leaving the active state untouched. If available, it marks active, creates one
 position-restricted exclusive borrow of `T`, invokes only `use`, ends the borrow, restores available,
-and returns that callback's result. Both callbacks are take-once ordinary callables with a common
-result type. A normal callback return restores state before its result reaches the caller; a fatal
-trap retains Silk's general no-unwind semantics.
+and returns that callback's result. The operation allocates nothing. Both callbacks are take-once
+ordinary callables with a common result type. After the selected callback returns normally, the
+unselected callback environment is discharged exactly once through ordinary callable cleanup; on
+the successful path, the restricted borrow ends and access is restored before that cleanup and the
+result reach the caller. A fatal trap retains Silk's general no-unwind semantics.
 
 There is no reader count and no second read primitive. Public shared inspection can later narrow the
 exclusive borrow in ordinary source. The four nested public access combinations therefore select
@@ -64,7 +70,9 @@ access boundary that created the borrow.
 Ownership plans retain one whole-handle cleanup action rather than recursively planning `T` per
 handle. Runtime count selection decides whether it is a decrement or the unique last cleanup. The
 last action invokes `T`'s canonical cleanup exactly once before release. Strong cycles intentionally
-never reach that action and leak; acyclic graphs must balance acquisition and release.
+never reach that action and leak. An acyclic graph whose handles are all discharged by structured
+execution must balance acquisition and release; a fatal trap retains the repository's no-unwind
+contract and makes no cleanup promise.
 
 ## Risks / Trade-offs
 

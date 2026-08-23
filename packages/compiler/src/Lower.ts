@@ -4,13 +4,15 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
-import type * as Layout from './Layout.js'
+import * as Layout from './Layout.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /**
@@ -111,6 +113,108 @@ export interface DelayedEffectState {
   readonly loanLocals: ReadonlyMap<string, Mir.LocalId>
 }
 
+const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation): Mir.Operation => {
+  if (operation._tag === 'Drop' && operation.cleanup._tag === 'LocalSharedCoreCleanup') {
+    const elementLayout = Layout.entry(layout, operation.cleanup.element)
+    const block =
+      elementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(layout.target, operation.cleanup.element, elementLayout)
+    return block?._tag !== 'LocalSharedControlBlockPlan'
+      ? operation
+      : Object.freeze({
+          ...operation,
+          localShared: Object.freeze({ element: operation.cleanup.element, block }),
+        })
+  }
+  if (operation._tag === 'ShortCircuit')
+    return Object.freeze({
+      ...operation,
+      right: Object.freeze({
+        ...operation.right,
+        operations: Object.freeze(
+          operation.right.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+        ),
+      }),
+    })
+  if (operation._tag === 'Match')
+    return Object.freeze({
+      ...operation,
+      arms: Object.freeze(
+        operation.arms.map((arm) =>
+          Object.freeze({
+            ...arm,
+            ...(arm.guard === undefined
+              ? {}
+              : {
+                  guard: Object.freeze({
+                    ...arm.guard,
+                    operations: Object.freeze(
+                      arm.guard.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+                    ),
+                  }),
+                }),
+            selected: Object.freeze({
+              ...arm.selected,
+              operations: Object.freeze(
+                arm.selected.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+              ),
+            }),
+          }),
+        ),
+      ),
+    })
+  if ('releases' in operation && operation.releases !== undefined)
+    return Object.freeze({
+      ...operation,
+      releases: Object.freeze(
+        operation.releases.map((release) => {
+          const planned = withLocalSharedDropPlan(layout, release)
+          return planned._tag === 'Drop' ? planned : release
+        }),
+      ),
+    })
+  return operation
+}
+
+const withLocalSharedDropPlans = (
+  layout: Layout.Plan,
+  functions: ReadonlyArray<Mir.MirFunction>,
+): ReadonlyArray<Mir.MirFunction> =>
+  Object.freeze(
+    functions.map((fn) =>
+      Object.freeze({
+        ...fn,
+        regions: Object.freeze(
+          fn.regions.map((region) =>
+            region._tag === 'OperationRegion'
+              ? Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation) =>
+                      withLocalSharedDropPlan(layout, operation),
+                    ),
+                  ),
+                })
+              : region._tag === 'CleanupRegion'
+                ? Object.freeze({
+                    ...region,
+                    releases: Object.freeze(
+                      region.releases.map((release) => {
+                        const planned = withLocalSharedDropPlan(layout, release)
+                        return planned._tag === 'Drop' || planned._tag === 'EndLoan'
+                          ? planned
+                          : release
+                      }),
+                    ),
+                  })
+                : region,
+          ),
+        ),
+      }),
+    ),
+  )
+
 import { generated } from './CleanupEmission.js'
 import {
   lowerCatchEffectRunner,
@@ -200,6 +304,66 @@ export const lowerProgram = (
       opaqueRealizations,
     ),
   )
+  const helperSpan = SourceSpan.fromOffsets(discovery.rootModule, 0, 0)
+  if (helperSpan === undefined) throw new RangeError('Generated local-shared cleanup lost its span')
+  const sharedElements = [
+    ...new Map(
+      layout.entries.flatMap((entry) => {
+        if (!Type.isSharedCore(entry.type)) return []
+        const element = Type.typeArgumentAt(entry.type, 0)
+        return element === undefined ? [] : [[Type.key(element), element] as const]
+      }),
+    ).values(),
+  ].sort((left, right) => Type.key(left).localeCompare(Type.key(right)))
+  for (const element of sharedElements) {
+    const parameterType = mirType(element)
+    if (parameterType === undefined)
+      throw new RangeError('Generated local-shared cleanup lost its concrete payload type')
+    const parameter = local(0)
+    const result = local(1)
+    const cleanup = CleanupPlan.cleanupPlan(index, element)
+    functions.push(
+      Object.freeze({
+        _tag: 'MirFunction' as const,
+        id: LocalSharedPayloadCleanup.declaration,
+        instance: LocalSharedPayloadCleanup.instance(element),
+        parameterCount: 1,
+        localTypes: Object.freeze([parameterType, i32]),
+        result: i32,
+        entry: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+        regions: Object.freeze([
+          Object.freeze({
+            _tag: 'OperationRegion' as const,
+            id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+            operations: Object.freeze([
+              ...(cleanup._tag === 'NoCleanup'
+                ? []
+                : [
+                    Object.freeze({
+                      _tag: 'Drop' as const,
+                      local: parameter,
+                      cleanup,
+                      provenance: generated(helperSpan),
+                    }),
+                  ]),
+              Object.freeze({
+                _tag: 'Literal' as const,
+                destination: result,
+                type: i32,
+                value: 0n,
+                provenance: generated(helperSpan),
+              }),
+            ]),
+            outcome: Object.freeze({
+              _tag: 'Return' as const,
+              value: result,
+              provenance: generated(helperSpan),
+            }),
+          }),
+        ]),
+      }),
+    )
+  }
   const loweredRunners: Array<{
     readonly spec: GeneratedEffectRunner
     readonly runner: Mir.MirFunction
@@ -308,7 +472,7 @@ export const lowerProgram = (
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
-      functions: Object.freeze(functions),
+      functions: withLocalSharedDropPlans(layout, functions),
     })
   }
   const resolvedEntry = discovery.entry
@@ -500,6 +664,6 @@ export const lowerProgram = (
     entry,
     layout,
     staticData,
-    functions: Object.freeze(functions),
+    functions: withLocalSharedDropPlans(layout, functions),
   })
 }

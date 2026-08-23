@@ -13,7 +13,7 @@ import type {
   Region,
   RegionId,
 } from './Mir.js'
-import { topologicalRegions, typeText } from './Mir.js'
+import { semanticType as mirSemanticType, topologicalRegions, typeText } from './Mir.js'
 import {
   callableTargetText,
   coroutineFrameReleaseText,
@@ -87,6 +87,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SharedFromAllocation':
+      return `${localText(operation.destination)} = shared-from-allocation ${localText(operation.allocation)}:${operation.allocationAccess.toLowerCase()}, ${localText(operation.value)}:${operation.valueAccess.toLowerCase()} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} allocation-layout=${operation.allocationBlock.provenance} allocation-fact=${operation.allocationFact} allocation-origin=${spanText(operation.allocationProvenance)} count=1 access=available : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SharedClone':
+      return `${localText(operation.destination)} = shared-clone ${localText(operation.self)} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} maximum=${operation.block.strongMaximum} transition=compare-trap-store : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SharedWithMut':
+      return `${localText(operation.destination)} = shared-with-mut ${localText(operation.self)} payload=${localText(operation.payload)} loan=l${operation.loan.ordinal} use=${localText(operation.use)}:${operation.useType.mode.toLowerCase()} conflict=${localText(operation.onConflict)}:${operation.conflictType.mode.toLowerCase()} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} result=${SilkType.encode(mirSemanticType(operation.type))} retained-loans=${operation.retainedLoans.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} use-cleanup=${operation.useCleanup._tag} conflict-cleanup=${operation.conflictCleanup._tag} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCount':
       return `${localText(operation.destination)} = raw-buffer-count ${localText(operation.buffer)} : usize ${provenanceText(operation.provenance)}`
     case 'RawBufferSlot':
@@ -162,7 +168,7 @@ const operationText = (operation: Operation): string => {
     case 'WritePlace':
       return `write-place ${localText(operation.root)}${selectorText(operation.selectors)} <- ${localText(operation.source)} : ${typeText(operation.type)} replacement=${operation.replacement} commit=${operation.commit} ${provenanceText(operation.provenance)}`
     case 'Drop':
-      return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`} ${provenanceText(operation.provenance)}`
+      return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
       return `${localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':

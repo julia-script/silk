@@ -4,9 +4,11 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
+import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import { equal as setEqual } from './internal/SetOf.js'
+import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import type * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -22,6 +24,7 @@ import * as Type from './Type.js'
 export type OwnershipCategory =
   | { readonly _tag: 'Copyable' }
   | { readonly _tag: 'MoveOnly'; readonly type: DeclarationFacts.SemanticType }
+  | { readonly _tag: 'Unavailable' }
 
 /** Where one binding was introduced: a parameter or a `let` statement. */
 export type BindingSite =
@@ -37,6 +40,8 @@ export interface BindingFact {
   readonly name: string | undefined
   readonly mutability: 'Immutable' | 'Mutable'
   readonly category: OwnershipCategory
+  readonly executionAffinity: ExecutionAffinity.ExecutionAffinity
+  readonly localSharedObligations: LocalSharedOwnership.ObligationPlan
   readonly type?: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
   readonly liveFrom: SourceSpan.SourceSpan
@@ -92,6 +97,8 @@ export interface CallableEnvironmentSlot {
   readonly access: Type.CaptureAccess
   readonly type?: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly executionAffinity: ExecutionAffinity.ExecutionAffinity
+  readonly localSharedObligations: LocalSharedOwnership.ObligationPlan
 }
 
 /** Ownership facts for one hidden callable section environment. */
@@ -100,6 +107,8 @@ export interface CallableEnvironmentFact {
   readonly site: Hir.CallableSiteId
   readonly mode: Type.CallableMode
   readonly slots: ReadonlyArray<CallableEnvironmentSlot>
+  readonly executionAffinity: ExecutionAffinity.ExecutionAffinity
+  readonly localSharedObligations: LocalSharedOwnership.ObligationPlan
   readonly retainedDependencies: ReadonlyArray<number>
   readonly dropOrder: ReadonlyArray<number>
   readonly span: SourceSpan.SourceSpan
@@ -236,12 +245,13 @@ const categoryOf = (
   type: DeclarationFacts.SemanticType | undefined,
   assumptions: ReadonlySet<string> = new Set(),
 ): OwnershipCategory =>
-  type === undefined ||
-  (Type.isEffect(type) && type.access === 'Shared') ||
-  (Type.isCallable(type) && type.mode === 'Shared') ||
-  ConformanceProof.copyType(index, type, assumptions)
-    ? copyable
-    : Object.freeze({ _tag: 'MoveOnly', type })
+  type === undefined
+    ? Object.freeze({ _tag: 'Unavailable' })
+    : (Type.isEffect(type) && type.access === 'Shared') ||
+        (Type.isCallable(type) && type.mode === 'Shared') ||
+        ConformanceProof.copyType(index, type, assumptions)
+      ? copyable
+      : Object.freeze({ _tag: 'MoveOnly', type })
 
 const siteKey = (site: BindingSite): string =>
   site._tag === 'Parameter'
@@ -259,6 +269,9 @@ interface MutableBinding {
   readonly liveFrom: SourceSpan.SourceSpan
   readonly category: OwnershipCategory
   readonly type?: DeclarationFacts.SemanticType
+  readonly cause?: Diagnostic.Identity
+  readonly executionAffinity?: ExecutionAffinity.ExecutionAffinity
+  readonly localSharedObligations?: LocalSharedOwnership.ObligationPlan
   readonly cleanup?: CleanupPlan.CleanupPlan
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
@@ -293,6 +306,33 @@ const placeSite = (expression: Hir.Expression): BindingSite | undefined => {
     return placeSite(expression.subject)
   }
   return useSite(expression)
+}
+
+const retainedBinding = (
+  state: CheckState,
+  expression: Hir.Expression,
+): MutableBinding | undefined => {
+  const source =
+    expression._tag === 'Move'
+      ? expression.subject
+      : expression._tag === 'UnionConvert'
+        ? expression.source
+        : expression
+  const site = useSite(source)
+  return site === undefined ? undefined : state.bindings.get(siteKey(site))
+}
+
+const borrowRootType = (state: CheckState, expression: Hir.Expression): Type.Type | undefined => {
+  if (expression._tag !== 'SliceBorrow' && expression._tag !== 'ValueBorrow') return undefined
+  if (expression.root._tag === 'TemporarySliceRoot')
+    return expression.root.value._tag === 'Unavailable' ? undefined : expression.root.value.type
+  const site: BindingSite =
+    expression.root._tag === 'BindingSliceRoot'
+      ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+      : expression.root._tag === 'ParameterSliceRoot'
+        ? Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+        : Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
+  return state.bindings.get(siteKey(site))?.type
 }
 
 /**
@@ -426,11 +466,26 @@ const callableEnvironment = (
   const slots = Object.freeze(
     expression.captures.map((capture): CallableEnvironmentSlot => {
       const type = capture.value._tag === 'Unavailable' ? undefined : capture.value.type
+      const cause = capture.value._tag === 'Unavailable' ? capture.value.cause : undefined
+      const retained = retainedBinding(state, capture.value)
+      const root = borrowRootType(state, capture.value)
       return Object.freeze({
         ordinal: capture.ordinal,
         parameterOrdinal: capture.parameterOrdinal,
         access: capture.access,
         ...(type === undefined ? {} : { type }),
+        executionAffinity:
+          type === undefined
+            ? ExecutionAffinity.ofEnvironment(state.index, [
+                Object.freeze(cause === undefined ? {} : { cause }),
+              ])
+            : root !== undefined
+              ? ExecutionAffinity.ofBorrow(state.index, type, root)
+              : (retained?.executionAffinity ?? ExecutionAffinity.ofType(state.index, type)),
+        localSharedObligations:
+          capture.access === 'Take' && type !== undefined
+            ? (retained?.localSharedObligations ?? LocalSharedOwnership.ofType(state.index, type))
+            : LocalSharedOwnership.none,
         cleanup:
           capture.access === 'Take' && type !== undefined
             ? CleanupPlan.cleanupPlan(state.index, type)
@@ -446,6 +501,10 @@ const callableEnvironment = (
     site: expression.site,
     mode: expression.mode,
     slots,
+    executionAffinity: ExecutionAffinity.join(slots.map((slot) => slot.executionAffinity)),
+    localSharedObligations: LocalSharedOwnership.combine(
+      slots.map((slot) => slot.localSharedObligations),
+    ),
     retainedDependencies: expression.retainedDependencies,
     dropOrder: Object.freeze(
       [...slots]
@@ -454,6 +513,95 @@ const callableEnvironment = (
         .map((slot) => slot.ordinal),
     ),
     span: expression.span,
+  })
+}
+
+const executableEnvironment = (
+  state: CheckState,
+  expression: Hir.Expression,
+):
+  | {
+      readonly affinity: ExecutionAffinity.ExecutionAffinity
+      readonly obligations: LocalSharedOwnership.ObligationPlan
+    }
+  | undefined => {
+  if (expression._tag === 'CallableSection') {
+    const environment = callableEnvironment(state, expression)
+    return Object.freeze({
+      affinity: environment.executionAffinity,
+      obligations: environment.localSharedObligations,
+    })
+  }
+  const retained = retainedBinding(state, expression)
+  if (retained?.executionAffinity !== undefined && retained.localSharedObligations !== undefined)
+    return Object.freeze({
+      affinity: retained.executionAffinity,
+      obligations: retained.localSharedObligations,
+    })
+  if (expression._tag === 'EffectBlock') {
+    const captures = expression.captures.map((capture) => {
+      const site: BindingSite | undefined =
+        capture.binding !== undefined
+          ? Object.freeze({ _tag: 'Let', binding: capture.binding })
+          : capture.parameter !== undefined
+            ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+            : undefined
+      return Object.freeze({
+        access: capture.access,
+        binding: site === undefined ? undefined : state.bindings.get(siteKey(site)),
+      })
+    })
+    return Object.freeze({
+      affinity: ExecutionAffinity.join(
+        captures.map(
+          ({ binding }) =>
+            binding?.executionAffinity ??
+            (binding?.type === undefined
+              ? ExecutionAffinity.ofEnvironment(state.index, [
+                  Object.freeze(binding?.cause === undefined ? {} : { cause: binding.cause }),
+                ])
+              : ExecutionAffinity.ofType(state.index, binding.type)),
+        ),
+      ),
+      obligations: LocalSharedOwnership.combine(
+        captures.map(({ access, binding }) =>
+          access !== 'Take'
+            ? LocalSharedOwnership.none
+            : (binding?.localSharedObligations ??
+              (binding?.type === undefined
+                ? LocalSharedOwnership.ofEnvironment(state.index, [
+                    Object.freeze(
+                      binding?.cause === undefined
+                        ? { access: 'Take' as const }
+                        : { access: 'Take' as const, cause: binding.cause },
+                    ),
+                  ])
+                : LocalSharedOwnership.ofType(state.index, binding.type))),
+        ),
+      ),
+    })
+  }
+  const components: ReadonlyArray<{
+    readonly access: Type.CaptureAccess
+    readonly type?: Type.Type
+    readonly cause?: Diagnostic.Identity
+  }> =
+    expression._tag === 'EffectConstruct' || expression._tag === 'ServiceEffectConstruct'
+      ? expression.arguments.map((argument) =>
+          Object.freeze({
+            access: 'Take' as const,
+            ...(argument._tag === 'Unavailable'
+              ? argument.cause === undefined
+                ? {}
+                : { cause: argument.cause }
+              : { type: argument.type }),
+          }),
+        )
+      : Object.freeze([])
+  if (components.length === 0) return undefined
+  return Object.freeze({
+    affinity: ExecutionAffinity.ofEnvironment(state.index, components),
+    obligations: LocalSharedOwnership.ofEnvironment(state.index, components),
   })
 }
 
@@ -2134,6 +2282,7 @@ const checkFunction = (
   fn: Hir.HirFunction,
   index: DeclarationIndex.Index,
   semantic?: Elaboration.FunctionFact,
+  localSharedBoundaries: ReadonlyArray<SourceSpan.SourceSpan> = Object.freeze([]),
 ): CheckedFunction => {
   const declaration = fn.declaration
   const copyAssumptions = new Set(
@@ -2162,11 +2311,112 @@ const checkFunction = (
     matches: [],
     callables: [],
   }
+  if (localSharedBoundaries.length > 0) {
+    const parameter = fn.declaration.parameters.at(0)?.id
+    if (parameter !== undefined) {
+      const bindings = new Map<number, Hir.Expression>()
+      const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+        for (const statement of statements) {
+          if (statement._tag === 'Bind')
+            bindings.set(statement.binding.ordinal, statement.initializer)
+          if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+          if (statement._tag === 'If' || statement._tag === 'IfLet') {
+            collectBindings(statement.taken)
+            collectBindings(statement.otherwise)
+          }
+          if (statement._tag === 'While') collectBindings(statement.body)
+        }
+      }
+      collectBindings(fn.statements)
+      const referencesParameter = (
+        expression: Hir.Expression,
+        seen = new Set<number>(),
+      ): boolean => {
+        if (
+          expression._tag === 'ParameterReference' &&
+          expression.parameter.ordinal === parameter.ordinal
+        )
+          return true
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : referencesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
+        }
+        return Hir.expressionChildren(expression).some((child) => referencesParameter(child, seen))
+      }
+      const exits = (statements: ReadonlyArray<Hir.Statement>): ReadonlyArray<Hir.Expression> =>
+        statements.flatMap((statement): ReadonlyArray<Hir.Expression> => {
+          switch (statement._tag) {
+            case 'Return':
+            case 'Fail':
+              return [statement.expression]
+            case 'Unsafe':
+              return exits(statement.statements)
+            case 'If':
+            case 'IfLet':
+              return [...exits(statement.taken), ...exits(statement.otherwise)]
+            case 'While':
+              return exits(statement.body)
+            default:
+              return []
+          }
+        })
+      const activeRuns = (expression: Hir.Expression): ReadonlyArray<Hir.Expression> => {
+        if (expression._tag === 'EffectBlock') return Object.freeze([])
+        return Object.freeze([
+          ...(expression._tag === 'Run' ? [expression] : []),
+          ...Hir.expressionChildren(expression).flatMap(activeRuns),
+        ])
+      }
+      const suspensionSites = fn.statements.flatMap(Hir.statementExpressions).flatMap(activeRuns)
+      const capturesParameter = (expression: Hir.Expression, seen = new Set<number>()): boolean => {
+        if (expression._tag === 'BindingReference') {
+          if (seen.has(expression.binding.ordinal)) return false
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? false
+            : capturesParameter(initializer, new Set(seen).add(expression.binding.ordinal))
+        }
+        if (
+          (expression._tag === 'EffectBlock' || expression._tag === 'CallableSection') &&
+          referencesParameter(expression)
+        )
+          return true
+        return Hir.expressionChildren(expression).some((child) => capturesParameter(child, seen))
+      }
+      const escapeSites = exits(fn.statements).filter((returned) => {
+        const capturesRestrictedParameter = capturesParameter(returned)
+        if (
+          'type' in returned &&
+          localSharedResultEscapes({
+            resultType: returned.type,
+            capturesRestrictedParameter,
+            referencesRestrictedParameter: referencesParameter(returned),
+          })
+        )
+          return true
+        return false
+      })
+      for (const boundary of localSharedBoundaries) {
+        for (const suspension of suspensionSites)
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Suspension', suspension.span, boundary),
+          )
+        for (const escapeSite of escapeSites)
+          state.diagnostics.push(
+            Diagnostic.localSharedAccessEscape('Result', escapeSite.span, boundary),
+          )
+      }
+    }
+  }
 
   const initialLive = new Set<string>()
   for (const parameter of declaration.parameters) {
     const type =
       parameter.declaredType._tag === 'Resolved' ? parameter.declaredType.type : undefined
+    const cause = 'cause' in parameter.declaredType ? parameter.declaredType.cause : undefined
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
@@ -2179,7 +2429,10 @@ const checkFunction = (
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
       category: categoryOf(index, type, copyAssumptions),
+      executionAffinity: ExecutionAffinity.ofDeclaredType(index, parameter.declaredType),
+      localSharedObligations: LocalSharedOwnership.ofDeclaredType(index, parameter.declaredType),
       ...(type === undefined ? {} : { type }),
+      ...(cause === undefined ? {} : { cause }),
     }
     const key = siteKey(binding.site)
     state.bindings.set(key, binding)
@@ -2405,6 +2658,15 @@ const checkFunction = (
           statement.initializer._tag === 'CallableSection'
             ? callableEnvironment(state, statement.initializer)
             : undefined
+        const retained =
+          environment === undefined
+            ? executableEnvironment(state, statement.initializer)
+            : Object.freeze({
+                affinity: environment.executionAffinity,
+                obligations: environment.localSharedObligations,
+              })
+        const cause =
+          statement.initializer._tag === 'Unavailable' ? statement.initializer.cause : undefined
         const binding: MutableBinding = {
           site: Object.freeze({ _tag: 'Let', binding: statement.binding }),
           name: statement.name,
@@ -2412,7 +2674,14 @@ const checkFunction = (
           liveFrom: statement.span,
           liveTo: enclosingSpan,
           category: categoryOf(index, type, copyAssumptions),
+          ...(retained === undefined
+            ? {}
+            : {
+                executionAffinity: retained.affinity,
+                localSharedObligations: retained.obligations,
+              }),
           ...(type === undefined ? {} : { type }),
+          ...(cause === undefined ? {} : { cause }),
           ...(environment === undefined || type === undefined || !Type.isCallable(type)
             ? {}
             : { cleanup: callableCleanup(environment, type) }),
@@ -2705,6 +2974,24 @@ const checkFunction = (
       name: binding.name,
       mutability: binding.mutability,
       category: binding.category,
+      executionAffinity:
+        binding.executionAffinity ??
+        (binding.type === undefined
+          ? ExecutionAffinity.ofEnvironment(index, [
+              Object.freeze(binding.cause === undefined ? {} : { cause: binding.cause }),
+            ])
+          : ExecutionAffinity.ofType(index, binding.type)),
+      localSharedObligations:
+        binding.localSharedObligations ??
+        (binding.type === undefined
+          ? LocalSharedOwnership.ofEnvironment(index, [
+              Object.freeze(
+                binding.cause === undefined
+                  ? { access: 'Take' as const }
+                  : { access: 'Take' as const, cause: binding.cause },
+              ),
+            ])
+          : LocalSharedOwnership.ofType(index, binding.type)),
       ...(binding.type === undefined ? {} : { type: binding.type }),
       cleanup:
         binding.cleanup ??
@@ -2815,13 +3102,184 @@ const checkFunction = (
   })
 }
 
+/** Classifies the result-side ownership facts of one access-scoped callback invocation. */
+export const localSharedResultEscapes = (facts: {
+  readonly resultType: Type.Type
+  readonly capturesRestrictedParameter: boolean
+  readonly referencesRestrictedParameter: boolean
+}): boolean =>
+  Type.containsPositionRestrictedBorrow(facts.resultType) ||
+  facts.capturesRestrictedParameter ||
+  ((Type.isEffect(facts.resultType) ||
+    Type.isCallable(facts.resultType) ||
+    Type.containsExecutableRepresentation(facts.resultType)) &&
+    facts.referencesRestrictedParameter)
+
+/**
+ * Exact ordinary callback bodies reached from the sealed local-shared access operation.
+ *
+ * The callback parameter of an ordinary wrapper earns access-boundary behavior only by forwarding
+ * to `SharedWithMut`. Its declaration shape and the spelling of the wrapper are irrelevant.
+ */
+export interface LocalSharedAccessBoundaryPlan {
+  readonly _tag: 'LocalSharedAccessBoundaryPlan'
+  readonly boundaries: ReadonlyMap<string, ReadonlyArray<SourceSpan.SourceSpan>>
+}
+
+const localSharedTargetKey = (target: DeclarationFacts.CanonicalId): string =>
+  `${target.module}\u0000${target.name}`
+
+/** Propagates sealed callback edges through ordinary wrappers across the loaded module closure. */
+export const localSharedAccessBoundaryPlan = (
+  results: ReadonlyMap<string, Elaboration.Result>,
+): LocalSharedAccessBoundaryPlan => {
+  const callbackOrdinals = new Map<string, Set<number>>()
+  const bindingsByFunction = new Map<Hir.HirFunction, ReadonlyMap<number, Hir.Expression>>()
+  const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
+    const cached = bindingsByFunction.get(fn)
+    if (cached !== undefined) return cached
+    const bindings = new Map<number, Hir.Expression>()
+    const collect = (statements: ReadonlyArray<Hir.Statement>): void => {
+      for (const statement of statements) {
+        if (statement._tag === 'Bind')
+          bindings.set(statement.binding.ordinal, statement.initializer)
+        if (statement._tag === 'Unsafe') collect(statement.statements)
+        if (statement._tag === 'If' || statement._tag === 'IfLet') {
+          collect(statement.taken)
+          collect(statement.otherwise)
+        }
+        if (statement._tag === 'While') collect(statement.body)
+      }
+    }
+    collect(fn.statements)
+    bindingsByFunction.set(fn, bindings)
+    return bindings
+  }
+  const parameterOrdinals = (
+    expression: Hir.Expression,
+    bindings: ReadonlyMap<number, Hir.Expression>,
+    seen = new Set<number>(),
+  ): ReadonlySet<number> => {
+    if (expression._tag === 'ParameterReference') return new Set([expression.parameter.ordinal])
+    if (expression._tag === 'Move') return parameterOrdinals(expression.subject, bindings, seen)
+    if (expression._tag === 'UnionConvert')
+      return parameterOrdinals(expression.source, bindings, seen)
+    if (expression._tag === 'CallableSection')
+      return new Set(
+        expression.captures.flatMap((capture) => [
+          ...parameterOrdinals(capture.value, bindings, seen),
+        ]),
+      )
+    if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+      return new Set()
+    const initializer = bindings.get(expression.binding.ordinal)
+    return initializer === undefined
+      ? new Set()
+      : parameterOrdinals(initializer, bindings, new Set(seen).add(expression.binding.ordinal))
+  }
+  const functions = [...results.values()].flatMap((result) => result.hir.functions)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const fn of functions) {
+      if (fn.declaration.canonical._tag !== 'Canonical') continue
+      const owner = localSharedTargetKey(fn.declaration.canonical.id)
+      const ordinals = callbackOrdinals.get(owner) ?? new Set<number>()
+      const bindings = bindingsOf(fn)
+      for (const expression of fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        let boundaryOrdinals: ReadonlySet<number> | undefined
+        let arguments_: ReadonlyArray<Hir.Expression> | undefined
+        if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
+          boundaryOrdinals = new Set([1])
+          arguments_ = expression.arguments
+        } else if (expression._tag === 'Call') {
+          boundaryOrdinals = callbackOrdinals.get(localSharedTargetKey(expression.target))
+          arguments_ = expression.arguments
+        }
+        if (boundaryOrdinals === undefined) continue
+        for (const boundaryOrdinal of boundaryOrdinals) {
+          const argument = arguments_?.at(boundaryOrdinal)
+          if (argument === undefined) continue
+          for (const ordinal of parameterOrdinals(argument, bindings)) {
+            if (ordinals.has(ordinal)) continue
+            ordinals.add(ordinal)
+            changed = true
+          }
+        }
+      }
+      if (ordinals.size > 0) callbackOrdinals.set(owner, ordinals)
+    }
+  }
+
+  const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
+  const callableTarget = (
+    expression: Hir.Expression,
+    bindings: ReadonlyMap<number, Hir.Expression>,
+    seen = new Set<number>(),
+  ): Hir.CallableTarget | undefined => {
+    if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
+      return expression.target
+    if (expression._tag === 'Move') return callableTarget(expression.subject, bindings, seen)
+    if (expression._tag === 'UnionConvert') return callableTarget(expression.source, bindings, seen)
+    if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+      return undefined
+    const initializer = bindings.get(expression.binding.ordinal)
+    return initializer === undefined
+      ? undefined
+      : callableTarget(initializer, bindings, new Set(seen).add(expression.binding.ordinal))
+  }
+  for (const fn of functions) {
+    const bindings = bindingsOf(fn)
+    for (const expression of fn.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      let ordinals: ReadonlySet<number> | undefined
+      let arguments_: ReadonlyArray<Hir.Expression> | undefined
+      if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
+        ordinals = new Set([1])
+        arguments_ = expression.arguments
+      } else if (expression._tag === 'Call') {
+        ordinals = callbackOrdinals.get(localSharedTargetKey(expression.target))
+        arguments_ = expression.arguments
+      }
+      if (ordinals === undefined) continue
+      for (const ordinal of ordinals) {
+        const argument = arguments_?.at(ordinal)
+        const target = argument === undefined ? undefined : callableTarget(argument, bindings)
+        if (target?._tag !== 'DeclarationCallableTarget') continue
+        const key = localSharedTargetKey(target.declaration)
+        const existing = boundaries.get(key)
+        if (existing === undefined) boundaries.set(key, [expression.span])
+        else existing.push(expression.span)
+      }
+    }
+  }
+  return Object.freeze({
+    _tag: 'LocalSharedAccessBoundaryPlan',
+    boundaries: new Map(
+      [...boundaries].map(([key, spans]) => [key, Object.freeze(spans)] as const),
+    ),
+  })
+}
+
 /** Checks every declaration of one elaborated module once, producing its ownership facts. */
 export const checkModule = (
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
+  accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
 ): ModuleOwnership => {
   const checked = result.hir.functions.map((fn, ordinal) =>
-    checkFunction(fn, index, result.functions.at(ordinal)),
+    checkFunction(
+      fn,
+      index,
+      result.functions.at(ordinal),
+      fn.declaration.canonical._tag === 'Canonical'
+        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
+            Object.freeze([]))
+        : Object.freeze([]),
+    ),
   )
   return Object.freeze({
     _tag: 'OwnershipFacts',

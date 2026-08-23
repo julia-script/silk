@@ -11,6 +11,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import type * as Ownership from '../src/Ownership.js'
 import * as Target from '../src/Target.js'
+import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -23,7 +24,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     Target.wasm32UnknownUnknown.id,
   )
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances)
+  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
   const ownership = Analysis.ownershipOf(snapshot, name) ?? unreachable('expected module ownership')
   const module = Lower.lowerProgram(
     snapshot.instances,
@@ -242,6 +243,19 @@ pub fn main() -> i32 {
       ],
       [Object.freeze({ _tag: 'NoCleanup', type: callableSlot.cleanup.type }), callableSlot.cleanup],
       [Object.freeze({ ...callableSlot.cleanup, slots: Object.freeze([]) }), callableSlot.cleanup],
+      [
+        Object.freeze({
+          ...callableSlot.cleanup,
+          type: Type.callable(
+            callableSlot.cleanup.type.parameters,
+            'i64',
+            callableSlot.cleanup.type.mode,
+            callableSlot.cleanup.type.schema,
+            callableSlot.cleanup.type.unsafe,
+          ),
+        }),
+        callableSlot.cleanup,
+      ],
     ]
     for (const [cleanup, selected] of malformed) {
       assert.include(
