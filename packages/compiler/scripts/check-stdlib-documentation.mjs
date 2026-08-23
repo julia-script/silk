@@ -7,7 +7,9 @@ import { readFileSync } from 'node:fs'
 import * as Effect from 'effect/Effect'
 import * as DocumentationPolicy from '../../documentation/dist/Policy.js'
 import * as DocumentationProject from '../../documentation/dist/Project.js'
-import * as Analysis from '../dist/Analysis.js'
+import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
+import * as SourceFile from '../dist/SourceFile.js'
+import * as SourceResolver from '../dist/SourceResolver.js'
 import * as CompilerStdlib from '../dist/Stdlib.js'
 
 const lineAt = (bytes, offset) => {
@@ -25,19 +27,21 @@ const program = Effect.gen(function* () {
         Uint8Array.from(readFileSync(new URL(`../stdlib/${manifest.path}`, import.meta.url))),
       catch: (cause) => new Error(`Missing stdlib source: ${manifest.module}`, { cause }),
     })
-    const snapshot = yield* Analysis.ofSource(manifest.module, bytes)
-    const project = DocumentationProject.make(snapshot)
-    const documented = project.modules.find((module) => module.name === manifest.module)
-    if (documented === undefined)
-      return yield* Effect.fail(`Missing documentation model: ${manifest.module}`)
-    analyzed.push({ manifest, bytes, snapshot, documented })
+    analyzed.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
-  const project = Object.freeze({
-    schema: 'silk-documentation',
-    experimental: true,
-    modules: Object.freeze(analyzed.map((entry) => entry.documented)),
-  })
-  return analyzed.flatMap((entry) =>
+  const analysis = yield* ProjectAnalysis.make(analyzed.map((entry) => entry.root)).pipe(
+    Effect.provide(SourceResolver.empty),
+  )
+  const project = DocumentationProject.fromProjectAnalysis(analysis)
+  const checked = []
+  for (const entry of analyzed) {
+    const documented = project.modules.find((module) => module.name === entry.manifest.module)
+    const snapshot = ProjectAnalysis.view(analysis, entry.manifest.module)
+    if (documented === undefined || snapshot === undefined)
+      return yield* Effect.fail(`Missing documentation model: ${entry.manifest.module}`)
+    checked.push({ ...entry, documented, snapshot })
+  }
+  return checked.flatMap((entry) =>
     DocumentationPolicy.check(entry.documented, entry.snapshot, project).map((violation) => ({
       violation,
       path: entry.manifest.path,

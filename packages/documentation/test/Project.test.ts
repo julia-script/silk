@@ -1,5 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import * as Json from '../src/Json.js'
 import * as Project from '../src/Project.js'
@@ -69,5 +72,68 @@ pub struct Problem {
     assert.strictEqual(json, Json.encode(publicProject))
     assert.match(json, /"schema": "silk-documentation"/)
     assert.isTrue(json.endsWith('\n'))
+  }),
+)
+
+it.effect('builds one documentation model from a shared multi-root analysis', () =>
+  Effect.gen(function* () {
+    const roots = [
+      SourceFile.make(
+        'app/A',
+        encode(`import shared.Core
+
+/// Public A.
+pub fn a() -> i32 { return Core.answer() }
+
+/// Private A helper.
+fn helper() -> i32 { return 0 }
+`),
+      ),
+      SourceFile.make(
+        'app/B',
+        encode(`import shared.Core
+
+/// Public B.
+pub fn b() -> i32 { return Core.answer() }
+`),
+      ),
+    ]
+    const analysis = yield* ProjectAnalysis.make(roots).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'shared/Core',
+              encode(`/// Shared answer.
+pub fn answer() -> i32 { return 42 }
+`),
+            ],
+          ]),
+        ),
+      ),
+    )
+
+    const publicProject = Project.fromProjectAnalysis(analysis)
+    assert.deepStrictEqual(
+      publicProject.modules.map((module) => module.name),
+      ['app/A', 'app/B', 'shared/Core'],
+    )
+    assert.strictEqual(new Set(publicProject.modules.map((module) => module.name)).size, 3)
+    assert.isFalse(
+      publicProject.modules
+        .find((module) => module.name === 'app/A')
+        ?.items.some((item) => item.name === 'helper') ?? true,
+    )
+
+    const privateProject = Project.fromProjectAnalysis(analysis, { includePrivate: true })
+    assert.isTrue(
+      privateProject.modules
+        .find((module) => module.name === 'app/A')
+        ?.items.some((item) => item.name === 'helper') ?? false,
+    )
+    const closure = ProjectAnalysis.phases(analysis).find((phase) => phase.phase === 'closure')
+    assert.strictEqual(closure?.inputs, 2)
+    assert.strictEqual(closure?.outputs, 3)
+    assert.strictEqual(closure?.diagnostics, 0)
   }),
 )

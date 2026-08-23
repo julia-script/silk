@@ -1,4 +1,6 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as CompilerStdlib from '@silk-effect/compiler/Stdlib'
 import * as DocumentationProject from '@silk-effect/documentation/Project'
 import * as Effect from 'effect/Effect'
@@ -7,11 +9,9 @@ import type * as Sources from './Sources.js'
 /**
  * Documentation for the compiler-shipped standard library, and the source lookup that goes with it.
  *
- * `silk doc` documents a project rooted at one module, and the standard library is not a project —
- * it is 38 modules the compiler carries, with no root that reaches all of them. So the value is
- * built the same way the generated standard-library page is built: one analysis per manifest entry,
- * each contributing its own documented module. Coverage follows the manifest, so a module added to
- * the library is doctested without anything here being edited.
+ * Every manifest entry is a project root, so the compiler can analyze their union once while still
+ * covering modules that are not reachable from one distinguished root. Coverage follows the
+ * manifest, so a module added to the library is doctested without anything here being edited.
  */
 
 /** Answers with the compiler-shipped bytes of a standard-library module. */
@@ -28,18 +28,14 @@ export const documentation = Effect.fn('Stdlib.documentation')(function* (): Eff
   never,
   never
 > {
-  const modules: Array<DocumentationProject.Module> = []
+  const roots: Array<SourceFile.SourceFile> = []
   for (const entry of CompilerStdlib.manifest) {
     const bytes = CompilerStdlib.sources.get(entry.module)
-    if (bytes === undefined) continue
-    const snapshot = yield* Analysis.ofSource(entry.module, bytes)
-    const project = DocumentationProject.make(snapshot, { includePrivate: true })
-    const documented = project.modules.find((module) => module.name === entry.module)
-    if (documented !== undefined) modules.push(documented)
+    if (bytes === undefined)
+      return yield* Effect.die(`Missing compiler-shipped stdlib source: ${entry.module}`)
+    roots.push(SourceFile.make(entry.module, bytes))
   }
-  return Object.freeze({
-    schema: 'silk-documentation',
-    experimental: true,
-    modules: Object.freeze(modules),
-  })
+  if (roots.length === 0) return yield* Effect.die('The stdlib manifest is empty')
+  const analysis = yield* ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty))
+  return DocumentationProject.fromProjectAnalysis(analysis, { includePrivate: true })
 })

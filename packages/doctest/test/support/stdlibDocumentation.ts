@@ -5,9 +5,8 @@ import * as Stdlib from '../../src/Stdlib.js'
 /**
  * The standard library's documentation, built once for the whole test file.
  *
- * Building it analyzes every module of the shipped manifest and its import closure, which costs
- * around a minute. Three tests need the same value, and rebuilding it per test spent that minute
- * three times over — enough to blow a test timeout on a loaded runner while proving nothing.
+ * Three tests need the same immutable value, so they share one project analysis rather than proving
+ * the same input-to-documentation relationship repeatedly.
  *
  * The memo lives here rather than in `Stdlib.documentation` itself: a module-level cache in the
  * shipped workflow would hand a long-running process a stale answer after the sources changed

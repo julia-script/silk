@@ -1,6 +1,7 @@
 import * as Analysis from '@silk-effect/compiler/Analysis'
 import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
 import * as Presentation from '@silk-effect/compiler/Presentation'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
 import type * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
 import * as Document from './Document.js'
@@ -373,3 +374,16 @@ export const make = (snapshot: Analysis.FrontendSnapshot, options: Options = {})
       }),
     ),
   })
+
+/** Builds documentation from one multi-root compiler project without repeating shared analysis. */
+export const fromProjectAnalysis = (
+  self: ProjectAnalysis.ProjectAnalysis,
+  options: Options = {},
+): Project => {
+  const root = self.roots.at(0)
+  if (root === undefined) throw new RangeError('Documentation requires at least one project root')
+  const snapshot = ProjectAnalysis.view(self, root)
+  if (snapshot === undefined)
+    throw new RangeError(`Documentation could not find project root ${root}`)
+  return make(snapshot, options)
+}

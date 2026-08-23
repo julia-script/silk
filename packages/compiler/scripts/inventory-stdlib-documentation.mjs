@@ -8,7 +8,9 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
 import * as DocumentationProject from '../../documentation/dist/Project.js'
-import * as Analysis from '../dist/Analysis.js'
+import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
+import * as SourceFile from '../dist/SourceFile.js'
+import * as SourceResolver from '../dist/SourceResolver.js'
 import * as CompilerStdlib from '../dist/Stdlib.js'
 
 const outputPath = fileURLToPath(
@@ -79,7 +81,7 @@ const render = (modules) => {
 }
 
 const program = Effect.gen(function* () {
-  const modules = []
+  const sources = []
   for (const manifest of CompilerStdlib.manifest) {
     // Inventory the working source, even when the compiler's generated source map has not yet been
     // rebuilt. This keeps the rollout ledger honest while authors work module by module.
@@ -88,12 +90,18 @@ const program = Effect.gen(function* () {
         Uint8Array.from(readFileSync(new URL(`../stdlib/${manifest.path}`, import.meta.url))),
       catch: (cause) => new Error(`Missing stdlib source: ${manifest.module}`, { cause }),
     })
-    const snapshot = yield* Analysis.ofSource(manifest.module, bytes)
-    const project = DocumentationProject.make(snapshot)
-    const documented = project.modules.find((module) => module.name === manifest.module)
+    sources.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
+  }
+  const analysis = yield* ProjectAnalysis.make(sources.map((entry) => entry.root)).pipe(
+    Effect.provide(SourceResolver.empty),
+  )
+  const project = DocumentationProject.fromProjectAnalysis(analysis)
+  const modules = []
+  for (const source of sources) {
+    const documented = project.modules.find((module) => module.name === source.manifest.module)
     if (documented === undefined)
-      return yield* Effect.fail(`Missing documentation model: ${manifest.module}`)
-    modules.push({ manifest, documented, bytes })
+      return yield* Effect.fail(`Missing documentation model: ${source.manifest.module}`)
+    modules.push({ manifest: source.manifest, documented, bytes: source.bytes })
   }
   yield* Effect.try({
     try: () => {
