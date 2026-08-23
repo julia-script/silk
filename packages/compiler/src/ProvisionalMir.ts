@@ -275,9 +275,12 @@ const classificationOfEffect = (
 ): Classification =>
   identity === undefined
     ? 'Unknown'
-    : SuspensionMode.has(Instances.effectSuspensionOf(discovery, identity), 'NestedTransfer')
+    : suspendableSummary(Instances.effectSuspensionOf(discovery, identity))
       ? 'Suspendable'
       : 'Synchronous'
+
+const suspendableSummary = (summary: SuspensionMode.Summary): boolean =>
+  SuspensionMode.has(summary, 'NestedTransfer') || SuspensionMode.has(summary, 'ExternalPark')
 
 const sameDeclaration = (
   left: DeclarationFacts.CanonicalId,
@@ -603,10 +606,7 @@ const runnerOf = (
       if (
         resultEffect !== undefined &&
         (context.effectClassifications.get(resultEffect) === 'Suspendable' ||
-          SuspensionMode.has(
-            Instances.effectSuspensionOf(context.discovery, resultEffect),
-            'NestedTransfer',
-          ))
+          suspendableSummary(Instances.effectSuspensionOf(context.discovery, resultEffect)))
       )
         return 'Suspendable'
       const capability = Type.substitute(service.service, owner.substitution)
@@ -625,14 +625,10 @@ const runnerOf = (
       if (
         candidates.some(
           (candidate) =>
-            SuspensionMode.has(
-              Instances.suspensionOf(context.discovery, candidate.key),
-              'NestedTransfer',
-            ) ||
+            suspendableSummary(Instances.suspensionOf(context.discovery, candidate.key)) ||
             (candidate.resultEffect !== undefined &&
-              SuspensionMode.has(
+              suspendableSummary(
                 Instances.effectSuspensionOf(context.discovery, candidate.resultEffect),
-                'NestedTransfer',
               )),
         )
       )
@@ -1061,9 +1057,8 @@ export const build = (
         functionOrdinal: instance.function.declaration.id.ordinal,
         identity: Instances.keyText(instance.key),
       })
-      const instanceClassification: Classification = SuspensionMode.has(
+      const instanceClassification: Classification = suspendableSummary(
         Instances.executionSuspensionOf(discovery, instance.key),
-        'NestedTransfer',
       )
         ? 'Suspendable'
         : 'Synchronous'

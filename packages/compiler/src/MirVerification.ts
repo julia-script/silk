@@ -677,6 +677,10 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.onComplete,
         operation.onSuspend,
       ]
+    case 'ExecutionWake':
+      return [operation.destination, operation.wake]
+    case 'ExecutionPark':
+      return [operation.destination, operation.guard, operation.register]
     case 'SharedClone':
       return [operation.destination, operation.self]
     case 'SharedWithMut':
@@ -987,6 +991,8 @@ const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.
       return [cleanup.type, cleanup.element, ...cleanupTypes(cleanup.allocation)]
     case 'ExecutionCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
+    case 'WakeCleanup':
+      return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
     case 'HookCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
@@ -1260,6 +1266,8 @@ const cleanupMatchesSemanticType = (
   }
   if (SilkType.isExecution(type))
     return cleanup._tag === 'ExecutionCleanup' && cleanup.allocation._tag === 'AllocationCleanup'
+  if (SilkType.isWake(type))
+    return cleanup._tag === 'WakeCleanup' && cleanup.allocation._tag === 'AllocationCleanup'
   if (SilkType.isFixedArray(type))
     return (
       cleanup._tag === 'ArrayCleanup' &&
@@ -1427,6 +1435,15 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.type),
         ...cleanupTypes(operation.completionCleanup),
         ...cleanupTypes(operation.suspensionCleanup),
+      ]
+    case 'ExecutionWake':
+      return [semanticType(operation.type), SilkType.wake]
+    case 'ExecutionPark':
+      return [
+        semanticType(operation.type),
+        ...cleanupTypes(operation.guardCleanup),
+        ...cleanupTypes(operation.registerCleanup),
+        ...operation.registrationTypeArguments.filter(SilkType.isTypeArgument),
       ]
     case 'SharedClone':
       return [semanticType(operation.type), operation.element]
@@ -1624,6 +1641,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.allocation, operation.body, operation.endpoint, operation.callback]
     case 'ExecutionDrive':
       return [operation.execution, operation.branch, operation.onComplete, operation.onSuspend]
+    case 'ExecutionWake':
+      return [operation.wake]
+    case 'ExecutionPark':
+      return [operation.register]
     case 'SharedClone':
       return [operation.self]
     case 'SharedWithMut':
@@ -3482,6 +3503,104 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 provenance: operation.provenance,
                 detail:
                   'Execution drive lost its affine Execution, branch state, or exact take-once outcome contracts',
+              }),
+            )
+        }
+        if (operation._tag === 'ExecutionWake') {
+          const wake = fn.localTypes.at(operation.wake.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            wake?._tag !== 'Nominal' ||
+            !SilkType.isWake(wake.type) ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            operation.wakeAccess !== 'Take' ||
+            localUseCounts.get(operation.wake.ordinal) !== 1
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidExecutionOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail: 'Wake signal lost its sole affine generation authority or unit result',
+              }),
+            )
+        }
+        if (operation._tag === 'ExecutionPark') {
+          const register = fn.localTypes.at(operation.register.ordinal)
+          const guard = fn.localTypes.at(operation.guard.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const registerSemantic = register === undefined ? undefined : semanticType(register)
+          const registerActual =
+            registerSemantic !== undefined && SilkType.isRepresented(registerSemantic)
+              ? registerSemantic.contract
+              : registerSemantic
+          const expected =
+            guard === undefined
+              ? undefined
+              : SilkType.callable(Object.freeze([SilkType.wake]), semanticType(guard), 'Take')
+          const callableCleanupValid = (
+            local: Extract<Type, { readonly _tag: 'CallableValue' }>,
+            cleanup: CleanupPlan.CleanupPlan,
+          ): boolean => {
+            const fields =
+              local.environment?.fields
+                .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
+                .reverse() ?? []
+            if (local.environment === undefined)
+              return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, local.type)
+            return (
+              cleanup._tag === 'CallableCleanup' &&
+              SilkType.equals(cleanup.type, local.type) &&
+              cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              SilkType.equalsCallableEnvironmentIdentity(
+                cleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(local.environment.callable),
+              ) &&
+              cleanup.slots.length === fields.length &&
+              cleanup.slots.every((slot, ordinal) => {
+                const field = fields.at(ordinal)
+                return (
+                  field !== undefined &&
+                  slot.ordinal === field.ordinal &&
+                  cleanupMatchesSemanticType(self.layout, slot.cleanup, field.type)
+                )
+              })
+            )
+          }
+          const registerCleanupValid =
+            register?._tag === 'CallableValue' &&
+            callableCleanupValid(register, operation.registerCleanup)
+          const guardCleanupValid =
+            guard?._tag === 'CallableValue'
+              ? callableCleanupValid(guard, operation.guardCleanup)
+              : guard !== undefined &&
+                cleanupMatchesSemanticType(self.layout, operation.guardCleanup, semanticType(guard))
+          if (
+            register?._tag !== 'CallableValue' ||
+            guard === undefined ||
+            guard._tag === 'EffectOutcome' ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            registerActual === undefined ||
+            expected === undefined ||
+            !TypeCompatibility.isCompatible(TypeCompatibility.check(registerActual, expected)) ||
+            !guardCleanupValid ||
+            !registerCleanupValid ||
+            operation.registerAccess !== 'Take' ||
+            localUseCounts.get(operation.register.ordinal) !== 1
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidExecutionOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail:
+                  'Execution park lost its take-once Wake registration, retained guard, or unit result',
               }),
             )
         }

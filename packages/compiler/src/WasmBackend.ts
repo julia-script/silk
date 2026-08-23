@@ -650,6 +650,8 @@ const operationCleanupPlans = (
       return Object.freeze([operation.cleanup])
     case 'SharedWithMut':
       return Object.freeze([operation.useCleanup, operation.conflictCleanup])
+    case 'ExecutionPark':
+      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
     case 'PropagateEffectFailure':
     case 'RunEffect':
     case 'RunEffectValue':
@@ -5979,6 +5981,11 @@ const emitOperationWithContext = (
       return emitExecutionFromAllocationOperation(operation, context)
     case 'ExecutionDrive':
       return emitExecutionDriveOperation(operation, context)
+    case 'ExecutionWake':
+    case 'ExecutionPark':
+      // Layer 3 reserves and verifies the target-neutral protocol. Layer 4 replaces this
+      // fail-closed edge with the backend's non-LIFO continuation realization.
+      return [Instr.op('unreachable')]
     case 'SharedClone':
       return emitSharedCloneOperation(operation, context)
     case 'SharedWithMut':

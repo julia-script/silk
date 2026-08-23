@@ -516,6 +516,29 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Consumes the generation's sole affine Wake readiness authority. */
+      readonly _tag: 'ExecutionWake'
+      readonly destination: LocalId
+      readonly wake: LocalId
+      readonly wakeAccess: 'Take'
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Registers one Wake and retains the returned guard before relinquishing this execution. */
+      readonly _tag: 'ExecutionPark'
+      readonly destination: LocalId
+      /** Private guard slot retained by the execution-owned suspension state. */
+      readonly guard: LocalId
+      readonly register: LocalId
+      readonly registerAccess: 'Take'
+      readonly guardCleanup: CleanupPlan.CleanupPlan
+      readonly registerCleanup: CleanupPlan.CleanupPlan
+      readonly registrationTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
       /** Allocation-free compare-before-increment of one local strong count. */
       readonly _tag: 'SharedClone'
       readonly destination: LocalId

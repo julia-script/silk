@@ -748,7 +748,33 @@ export const lowerBuiltinExpression = (
     )
     return finishBuiltin(destination)
   }
-  if (expression.operation === 'ExecutionDrive') return undefined
+  if (expression.operation === 'ExecutionWake') {
+    const [wake] = argumentLocals
+    const wakeType = wake === undefined ? undefined : fn.localTypes.at(wake.ordinal)
+    const type = fn.type(expression.type)
+    if (
+      wake === undefined ||
+      wakeType?._tag !== 'Nominal' ||
+      !Type.isWake(wakeType.type) ||
+      type?._tag !== 'Nominal' ||
+      !Type.equals(type.type, Type.unit)
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'ExecutionWake' as const,
+        destination,
+        wake,
+        wakeAccess: 'Take' as const,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'ExecutionDrive' || expression.operation === 'ExecutionPark')
+    return undefined
   if (expression.operation === 'StringEqualsExact') return undefined
   const conversionTarget = Scalar.conversionTarget(expression.operation)
   if (Scalar.isCheckedOperation(expression.operation)) {

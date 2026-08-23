@@ -3,6 +3,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import * as Type from './Type.js'
+import * as WakeCell from './WakeCell.js'
 
 export interface Allocation {
   active: boolean
@@ -23,6 +24,7 @@ export interface Allocation {
     readonly bodyCleanup: CleanupPlan.CleanupPlan
     readonly endpointCleanup: CleanupPlan.CleanupPlan
     readonly callbackCleanup: CleanupPlan.CleanupPlan
+    wake?: WakeCell.State
     /** Stable root depth restored for every activation of this package. */
     logicalDepth?: number
   }
@@ -82,6 +84,7 @@ export const initializeExecution = (
     bodyCleanup: cleanup.body,
     endpointCleanup: cleanup.endpoint,
     callbackCleanup: cleanup.callback,
+    ...(plan.readinessStorage ? { wake: WakeCell.initial() } : {}),
   }
   return true
 }
@@ -218,6 +221,7 @@ export const cleanupMembers = (
   if (cleanup._tag === 'LocalSharedCoreCleanup')
     return Object.freeze([cleanup.type, cleanup.element])
   if (cleanup._tag === 'ExecutionCleanup') return Object.freeze([cleanup.type])
+  if (cleanup._tag === 'WakeCleanup') return Object.freeze([cleanup.type])
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])
