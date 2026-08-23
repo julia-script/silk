@@ -28,6 +28,8 @@ it('owns the current scalar vocabulary in stable presentation order', () => {
   assert.strictEqual(Scalar.isSpelling('char'), true)
   assert.strictEqual(Scalar.isCharacterSpelling('char'), true)
   assert.strictEqual(Scalar.isIntegerSpelling('char'), false)
+  for (const scalar of Scalar.all()) assert.strictEqual(Scalar.find(scalar.spelling), scalar)
+  assert.strictEqual(Scalar.find('String'), undefined)
   assert.notInclude(
     Scalar.integers().map((scalar): string => scalar.spelling),
     'char',
