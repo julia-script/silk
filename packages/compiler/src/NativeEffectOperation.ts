@@ -63,6 +63,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.cleanup,
           NativeStorage.readLocal(nativeStorage, operation.local),
           `drop${operation.local.ordinal}`,
+          operation.localShared?.block,
         )
       }
       break

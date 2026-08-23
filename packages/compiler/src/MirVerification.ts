@@ -44,6 +44,7 @@ import {
   typeText,
 } from './Mir.js'
 import * as Scalar from './Scalar.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type {
   SuspensionBorrowIdentity,
   SuspensionPointId,
@@ -2321,6 +2322,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         Object.freeze({
           _tag: 'Violation',
           rule: 'InvalidLocalSharedOperation',
+          localSharedReason: 'CleanupContract',
           ...(helper === undefined ? {} : { function: helper.id }),
           detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
         }),
@@ -2332,6 +2334,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       Object.freeze({
         _tag: 'Violation',
         rule: 'InvalidLocalSharedOperation',
+        localSharedReason: 'CleanupContract',
         detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
       }),
     )
@@ -2511,6 +2514,31 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     }
     const loanBeginnings = new Map<string, number>()
     const loanEndings = new Map<string, number>()
+    const localSharedLoans = new Map<
+      string,
+      {
+        readonly count: number
+        readonly operation: Extract<Operation, { readonly _tag: 'SharedWithMut' }>
+      }
+    >()
+    const localUseCounts = new Map<number, number>()
+    const successPathOperations = (operation: Operation): ReadonlyArray<Operation> =>
+      operation._tag === 'ShortCircuit'
+        ? [operation, ...operation.right.operations.flatMap(successPathOperations)]
+        : operation._tag === 'Match'
+          ? [
+              operation,
+              ...operation.arms.flatMap((arm) => [
+                ...(arm.guard?.operations.flatMap(successPathOperations) ?? []),
+                ...arm.selected.operations.flatMap(successPathOperations),
+              ]),
+            ]
+          : [operation]
+    for (const operation of fn.regions.flatMap(operationsOf).flatMap(successPathOperations))
+      for (const local of operation._tag === 'PropagateEffectFailure'
+        ? [operation.source]
+        : accessedOwnerLocals(operation))
+        localUseCounts.set(local.ordinal, (localUseCounts.get(local.ordinal) ?? 0) + 1)
     const globalBeginnings = new Map<string, Extract<Operation, { readonly _tag: 'BeginLoan' }>>()
     for (const region of fn.regions) {
       for (const operation of operationsOf(region).flatMap(operationTree)) {
@@ -2521,7 +2549,28 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
         } else if (operation._tag === 'EndLoan') {
           const key = borrowKey(operation.borrow)
           loanEndings.set(key, (loanEndings.get(key) ?? 0) + 1)
+        } else if (operation._tag === 'SharedWithMut') {
+          const key = borrowKey(operation.loan)
+          const current = localSharedLoans.get(key)
+          localSharedLoans.set(key, {
+            count: (current?.count ?? 0) + 1,
+            operation: current?.operation ?? operation,
+          })
         }
+      }
+    }
+    for (const [key, loan] of localSharedLoans) {
+      if (loan.count !== 1 || loanBeginnings.has(key) || loanEndings.has(key)) {
+        violations.push(
+          Object.freeze({
+            _tag: 'Violation',
+            rule: 'InvalidLocalSharedOperation',
+            localSharedReason: 'AccessContract',
+            function: fn.id,
+            provenance: loan.operation.provenance,
+            detail: `local-shared callback loan ${key} must identify exactly one closed access operation`,
+          }),
+        )
       }
     }
     const globalEndings = new Set(loanEndings.keys())
@@ -3149,6 +3198,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             elementLayout === undefined
               ? undefined
               : LocalSharedControlBlock.plan(self.layout.target, operation.element, elementLayout)
+          const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): boolean =>
+            left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
+          const allocationFact = self.layout.localSharedAllocationProvenance.facts.at(
+            operation.allocationFact,
+          )
           if (
             allocation?._tag !== 'Nominal' ||
             !SilkType.equals(allocation.type, SilkType.allocation) ||
@@ -3158,38 +3212,38 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.isSharedCore(destination.type) ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !SilkType.equals(destination.type.arguments[0], operation.element) ||
+            operation.allocationAccess !== 'Take' ||
+            operation.valueAccess !== 'Take' ||
+            localUseCounts.get(operation.allocation.ordinal) !== 1 ||
+            localUseCounts.get(operation.value.ordinal) !== 1 ||
+            !Number.isSafeInteger(operation.allocationFact) ||
+            operation.allocationFact < 0 ||
+            allocationFact === undefined ||
+            !sameSpan(allocationFact.expression.span, operation.provenance.span) ||
+            !SilkType.equals(allocationFact.element, operation.element) ||
+            !sameSpan(allocationFact.span, operation.allocationProvenance) ||
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
-            expected.provenance !== operation.block.provenance ||
-            operation.allocationBlock.provenance !== operation.block.provenance ||
-            operation.allocationBlock.target !== operation.block.target ||
-            !SilkType.equals(operation.allocationBlock.element, operation.block.element) ||
-            operation.allocationBlock.size !== operation.block.size ||
-            operation.allocationBlock.alignment !== operation.block.alignment ||
-            operation.allocationBlock.strongOffset !== operation.block.strongOffset ||
-            operation.allocationBlock.accessOffset !== operation.block.accessOffset ||
-            operation.allocationBlock.allocationOffset !== operation.block.allocationOffset ||
-            operation.allocationBlock.valueOffset !== operation.block.valueOffset ||
-            expected.size !== operation.block.size ||
-            expected.alignment !== operation.block.alignment ||
-            expected.strongOffset !== operation.block.strongOffset ||
-            expected.strongMaximum !== operation.block.strongMaximum ||
-            expected.accessOffset !== operation.block.accessOffset ||
-            expected.allocationOffset !== operation.block.allocationOffset ||
-            expected.valueOffset !== operation.block.valueOffset
+            !LocalSharedControlBlock.equals(expected, operation.block) ||
+            !LocalSharedControlBlock.equals(operation.allocationBlock, operation.block)
           )
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidLocalSharedOperation',
+                localSharedReason: 'InitializationContract',
                 function: fn.id,
                 region: region.id,
-                detail:
-                  'Local-shared initialization lost allocation, element, target-layout, or control-block provenance',
+                provenance: operation.provenance,
+                detail: `Local-shared initialization lost allocation, element, target-layout, or control-block provenance (uses=${localUseCounts.get(operation.allocation.ordinal) ?? 0}/${localUseCounts.get(operation.value.ordinal) ?? 0})`,
               }),
             )
         }
         if (operation._tag === 'SharedClone') {
           const selfType = fn.localTypes.at(operation.self.ordinal)
+          const selfElement =
+            selfType?._tag === 'Reference' && SilkType.isSharedCore(selfType.type.target)
+              ? SilkType.typeArgumentAt(selfType.type.target, 0)
+              : undefined
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const elementLayout = Layout.entry(self.layout, operation.element)
           const expected =
@@ -3200,20 +3254,23 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selfType?._tag !== 'Reference' ||
             selfType.type.access !== 'Shared' ||
             !SilkType.isSharedCore(selfType.type.target) ||
+            selfElement === undefined ||
+            !SilkType.equals(selfElement, operation.element) ||
             destination?._tag !== 'Nominal' ||
             !SilkType.isSharedCore(destination.type) ||
             !SilkType.equals(destination.type, operation.type.type) ||
             !SilkType.equals(destination.type.arguments[0], operation.element) ||
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
-            expected.provenance !== operation.block.provenance ||
-            expected.strongMaximum !== operation.block.strongMaximum
+            !LocalSharedControlBlock.equals(expected, operation.block)
           )
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidLocalSharedOperation',
+                localSharedReason: 'CloneContract',
                 function: fn.id,
                 region: region.id,
+                provenance: operation.provenance,
                 detail: 'Local-shared clone lost its borrowed core, element, or target count plan',
               }),
             )
@@ -3223,6 +3280,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const use = fn.localTypes.at(operation.use.ordinal)
           const conflict = fn.localTypes.at(operation.onConflict.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
+          const payload = fn.localTypes.at(operation.payload.ordinal)
+          const selfElement =
+            selfType?._tag === 'Reference' && SilkType.isSharedCore(selfType.type.target)
+              ? SilkType.typeArgumentAt(selfType.type.target, 0)
+              : undefined
           const elementLayout = Layout.entry(self.layout, operation.element)
           const expected =
             elementLayout === undefined
@@ -3246,6 +3308,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             conflict?._tag === 'CallableValue'
               ? Object.freeze({ ...conflict.type, mode: 'Take' as const })
               : undefined
+          const retainsRestrictedLoan = (local: Type): boolean => {
+            if (SilkType.containsPositionRestrictedBorrow(semanticType(local))) return true
+            if (local._tag === 'CallableValue' || local._tag === 'EffectValue')
+              return (
+                local.environment?.fields.some((field) =>
+                  SilkType.containsPositionRestrictedBorrow(field.type),
+                ) ?? false
+              )
+            if (local._tag === 'EffectComposite')
+              return local.alternatives.some(retainsRestrictedLoan)
+            return false
+          }
           const callableCleanupValid = (
             local: Extract<Type, { readonly _tag: 'CallableValue' }>,
             cleanup: CleanupPlan.CleanupPlan,
@@ -3279,9 +3353,17 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selfType?._tag !== 'Reference' ||
             selfType.type.access !== 'Shared' ||
             !SilkType.isSharedCore(selfType.type.target) ||
+            selfElement === undefined ||
+            !SilkType.equals(selfElement, operation.element) ||
             use?._tag !== 'CallableValue' ||
             conflict?._tag !== 'CallableValue' ||
             destination === undefined ||
+            payload?._tag !== 'Reference' ||
+            payload.type.access !== 'Exclusive' ||
+            !SilkType.equals(payload.type.target, operation.element) ||
+            operation.payload.ordinal === operation.destination.ordinal ||
+            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
+            retainsRestrictedLoan(destination) ||
             takeUse === undefined ||
             takeConflict === undefined ||
             !TypeCompatibility.isCompatible(TypeCompatibility.check(takeUse, operation.useType)) ||
@@ -3293,14 +3375,20 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !callableCleanupValid(use, operation.useCleanup) ||
             !callableCleanupValid(conflict, operation.conflictCleanup) ||
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
-            expected.provenance !== operation.block.provenance
+            !LocalSharedControlBlock.equals(expected, operation.block) ||
+            operation.loan.callSpan.sourceId !== operation.provenance.span.sourceId ||
+            operation.loan.callSpan.start !== operation.provenance.span.start ||
+            operation.loan.callSpan.end !== operation.provenance.span.end ||
+            operation.retainedLoans.length !== 0
           )
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidLocalSharedOperation',
+                localSharedReason: 'AccessContract',
                 function: fn.id,
                 region: region.id,
+                provenance: operation.provenance,
                 detail:
                   'Local-shared access lost its core, take-once callback, result, cleanup, or target-layout contract',
               }),
@@ -3848,6 +3936,30 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             droppedSemantic !== undefined &&
             (!SilkType.containsEffectRepresentation(droppedSemantic) ||
               cleanupMatchesSemanticType(self.layout, cleanup, droppedSemantic))
+          const localSharedElement =
+            droppedSemantic !== undefined && SilkType.isSharedCore(droppedSemantic)
+              ? SilkType.typeArgumentAt(droppedSemantic, 0)
+              : undefined
+          const localSharedLayout =
+            localSharedElement === undefined
+              ? undefined
+              : Layout.entry(self.layout, localSharedElement)
+          const expectedLocalSharedBlock =
+            localSharedElement === undefined || localSharedLayout === undefined
+              ? undefined
+              : LocalSharedControlBlock.plan(
+                  self.layout.target,
+                  localSharedElement,
+                  localSharedLayout,
+                )
+          const localSharedCleanupValid =
+            localSharedElement === undefined ||
+            (droppedSemantic !== undefined &&
+              cleanupMatchesSemanticType(self.layout, cleanup, droppedSemantic) &&
+              operation.localShared !== undefined &&
+              SilkType.equals(operation.localShared.element, localSharedElement) &&
+              expectedLocalSharedBlock?._tag === 'LocalSharedControlBlockPlan' &&
+              LocalSharedControlBlock.equals(operation.localShared.block, expectedLocalSharedBlock))
           if (
             dropped === undefined ||
             !cleanupTypeMatches ||
@@ -3855,12 +3967,22 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !callableCleanupValid ||
             !effectCleanupValid ||
             !compositeCleanupValid ||
-            !storedAggregateCleanupValid
+            !storedAggregateCleanupValid ||
+            !localSharedCleanupValid
           ) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
+                rule:
+                  localSharedElement === undefined
+                    ? 'InvalidAggregateOperation'
+                    : 'InvalidLocalSharedOperation',
+                ...(localSharedElement === undefined
+                  ? {}
+                  : {
+                      localSharedReason: 'CleanupContract' as const,
+                      provenance: operation.provenance,
+                    }),
                 function: fn.id,
                 region: region.id,
                 detail: 'drop cleanup disagrees with its local type or canonical union cases',

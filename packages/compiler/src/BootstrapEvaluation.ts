@@ -2178,7 +2178,7 @@ function* executeFunction(
             })
             const parameters = new Map<number, Value>()
             if (selection._tag === 'Use') {
-              const payloadCell = operation.destination.ordinal
+              const payloadCell = operation.payload.ordinal
               state.cells.set(cellKey(frame, payloadCell), { value: shared.value, fromCall: false })
               parameters.set(
                 0,
@@ -2216,7 +2216,7 @@ function* executeFunction(
             if (result._tag === 'Blocked') return result
             if (result._tag === 'Transfer') return result
             if (selection._tag === 'Use') {
-              const updated = state.cells.get(cellKey(frame, operation.destination.ordinal))?.value
+              const updated = state.cells.get(cellKey(frame, operation.payload.ordinal))?.value
               if (updated === undefined)
                 throw new RangeError('Local-shared callback lost its payload cell')
               shared.value = updated

@@ -172,6 +172,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
   plan: CleanupPlan.CleanupPlan,
   values: ReadonlyArray<Value.Input>,
   tag: string,
+  localSharedBlock?: LocalSharedControlBlock.Plan,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
   const {
     builder,
@@ -270,9 +271,10 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       const baseAddress = values.at(0)
       const elementLayout = Layout.entry(program.layout, plan.element)
       const block =
-        elementLayout === undefined
+        localSharedBlock ??
+        (elementLayout === undefined
           ? undefined
-          : LocalSharedControlBlock.plan(program.layout.target, plan.element, elementLayout)
+          : LocalSharedControlBlock.plan(program.layout.target, plan.element, elementLayout))
       if (
         baseAddress === undefined ||
         block?._tag !== 'LocalSharedControlBlockPlan' ||

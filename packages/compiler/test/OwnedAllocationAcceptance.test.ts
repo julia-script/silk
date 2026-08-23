@@ -16,6 +16,72 @@ const bytes = new Uint8Array(
   readFileSync(new URL('./fixtures/owned-allocation-guard.silk', import.meta.url)),
 )
 const moduleName = 'owned-allocation-acceptance/main'
+const golden = (name: string): string =>
+  readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
+
+const rewriteOperations = (
+  self: Mir.Module,
+  rewrite: (operation: Mir.Operation) => Mir.Operation,
+): Mir.Module =>
+  Object.freeze({
+    ...self,
+    functions: Object.freeze(
+      self.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map((region) =>
+              region._tag === 'OperationRegion'
+                ? Object.freeze({
+                    ...region,
+                    operations: Object.freeze(region.operations.map(rewrite)),
+                  })
+                : region._tag === 'CleanupRegion'
+                  ? Object.freeze({
+                      ...region,
+                      releases: Object.freeze(
+                        region.releases.map((release) => {
+                          const rewritten = rewrite(release)
+                          return rewritten._tag === 'Drop' || rewritten._tag === 'EndLoan'
+                            ? rewritten
+                            : release
+                        }),
+                      ),
+                    })
+                  : region,
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
+
+const appendAfterOperation = (
+  self: Mir.Module,
+  append: (operation: Mir.Operation) => ReadonlyArray<Mir.Operation>,
+): Mir.Module =>
+  Object.freeze({
+    ...self,
+    functions: Object.freeze(
+      self.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map((region) =>
+              region._tag !== 'OperationRegion'
+                ? region
+                : Object.freeze({
+                    ...region,
+                    operations: Object.freeze(
+                      region.operations.flatMap((operation) => [operation, ...append(operation)]),
+                    ),
+                  }),
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
 
 /**
  * The engines only agree by construction if they agree on the substrate, so the guard program
@@ -133,42 +199,46 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
         .filter((operation) => operation._tag === 'SharedFromAllocation').length,
       1,
     )
-    const malformed: Mir.Module = Object.freeze({
-      ...mir,
-      functions: Object.freeze(
-        mir.functions.map((fn) =>
-          Object.freeze({
-            ...fn,
-            regions: Object.freeze(
-              fn.regions.map((region) =>
-                region._tag !== 'OperationRegion'
-                  ? region
-                  : Object.freeze({
-                      ...region,
-                      operations: Object.freeze(
-                        region.operations.map((operation) =>
-                          operation._tag !== 'SharedFromAllocation'
-                            ? operation
-                            : Object.freeze({
-                                ...operation,
-                                allocationBlock: Object.freeze({
-                                  ...operation.allocationBlock,
-                                  size: operation.allocationBlock.size + 1,
-                                }),
-                              }),
-                        ),
-                      ),
-                    }),
-              ),
-            ),
+    const malformed = rewriteOperations(mir, (operation) =>
+      operation._tag !== 'SharedFromAllocation'
+        ? operation
+        : Object.freeze({
+            ...operation,
+            allocationBlock: Object.freeze({
+              ...operation.allocationBlock,
+              size: operation.allocationBlock.size + 1,
+            }),
           }),
-        ),
-      ),
-    })
-    assert.include(
-      MirVerification.verify(malformed).map((violation) => violation.rule),
-      'InvalidLocalSharedOperation',
     )
+    const invalidInitialization = MirVerification.verify(malformed).find(
+      (violation) => violation.localSharedReason === 'InitializationContract',
+    )
+    assert.strictEqual(invalidInitialization?.rule, 'InvalidLocalSharedOperation')
+    assert.strictEqual(
+      invalidInitialization?.provenance?.span.sourceId,
+      'local-shared-allocation/native',
+    )
+    const reusedInput = appendAfterOperation(mir, (operation) =>
+      operation._tag !== 'SharedFromAllocation'
+        ? Object.freeze([])
+        : Object.freeze([
+            Object.freeze({
+              _tag: 'Drop' as const,
+              local: operation.allocation,
+              cleanup: Object.freeze({
+                _tag: 'AllocationCleanup' as const,
+                type: Type.allocation,
+                ticket: 'ActiveReclaimTicket' as const,
+              }),
+              provenance: operation.provenance,
+            }),
+          ]),
+    )
+    const reusedViolation = MirVerification.verify(reusedInput).find(
+      (violation) => violation.localSharedReason === 'InitializationContract',
+    )
+    assert.strictEqual(reusedViolation?.rule, 'InvalidLocalSharedOperation')
+    assert.strictEqual(reusedViolation?.provenance?.span.sourceId, 'local-shared-allocation/native')
     const evaluated = Analysis.evaluate(native)
     assert.strictEqual(
       evaluated._tag,
@@ -244,8 +314,68 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
         .map((operation) => operation._tag),
       ['SharedClone', 'SharedWithMut', 'SharedWithMut'],
     )
+    const encodedShared = `${MirEncoding.encode(mir)
+      .split('\n')
+      .filter(
+        (line) =>
+          / = shared-(from-allocation|clone|with-mut) /.test(line) ||
+          line.includes('cleanup=LocalSharedCoreCleanup'),
+      )
+      .join('\n')}\n`
+    assert.strictEqual(encodedShared, golden('local-shared.mir.txt'))
+    assert.notMatch(encodedShared, /silk\/shared|Deferred|Scheduler|address|offset=/)
+    const repeated = yield* Analysis.ofSourceRealized(
+      'local-shared-lifecycle/native',
+      source,
+      'aarch64-apple-darwin',
+    )
+    assert.strictEqual(MirEncoding.encode(mir), MirEncoding.encode(Analysis.loweredMir(repeated)))
+
+    const tamperedClone = rewriteOperations(mir, (operation) =>
+      operation._tag !== 'SharedClone'
+        ? operation
+        : Object.freeze({
+            ...operation,
+            block: Object.freeze({
+              ...operation.block,
+              accessOffset: operation.block.accessOffset + 1,
+            }),
+          }),
+    )
+    const tamperedAccess = rewriteOperations(mir, (operation) =>
+      operation._tag !== 'SharedWithMut'
+        ? operation
+        : Object.freeze({ ...operation, retainedLoans: Object.freeze([operation.loan]) }),
+    )
+    const tamperedDrop = rewriteOperations(mir, (operation) =>
+      operation._tag !== 'Drop' || operation.cleanup._tag !== 'LocalSharedCoreCleanup'
+        ? operation
+        : Object.freeze({
+            _tag: 'Drop' as const,
+            local: operation.local,
+            cleanup: Object.freeze({ _tag: 'NoCleanup' as const, type: operation.cleanup.type }),
+            provenance: operation.provenance,
+          }),
+    )
+    for (const [module, reason] of [
+      [tamperedClone, 'CloneContract'],
+      [tamperedAccess, 'AccessContract'],
+      [tamperedDrop, 'CleanupContract'],
+    ] as const) {
+      const violation = MirVerification.verify(module).find(
+        (candidate) => candidate.localSharedReason === reason,
+      )
+      assert.strictEqual(violation?.rule, 'InvalidLocalSharedOperation')
+      assert.strictEqual(violation?.provenance?.span.sourceId, 'local-shared-lifecycle/native')
+    }
     const evaluated = Analysis.evaluate(native)
-    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
+        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+        : evaluated._tag,
+    )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
@@ -270,6 +400,49 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     const artifact = yield* Analysis.codegenWasm(wasm, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    const overflow = nativeArtifact.ir.indexOf('_overflow = icmp eq')
+    const accepted = nativeArtifact.ir.indexOf('_clone_accepted:', overflow)
+    const incremented = nativeArtifact.ir.indexOf('_incremented = add', accepted)
+    const countStore = nativeArtifact.ir.indexOf('store i64', incremented)
+    assert.isAtLeast(overflow, 0)
+    assert.isAbove(accepted, overflow)
+    assert.isAbove(incremented, accepted)
+    assert.isAbove(countStore, incremented)
+    assert.notMatch(nativeArtifact.ir, /atomicrmw|cmpxchg|\bfence\b/)
+    assert.notMatch(artifact.wat, /memory\.atomic|atomic\.|cmpxchg|\bfence\b/)
+    assert.match(
+      artifact.wat,
+      /i32\.load(?: offset=\d+)?\s+i32\.const -1\s+i32\.eq\s+if\s+unreachable\s+end[\s\S]*?i32\.add\s+i32\.store/,
+    )
+    const nativeMemorySource = readFileSync(
+      new URL('../src/NativeMemoryOperation.ts', import.meta.url),
+      'utf8',
+    )
+    const nativeAccessSource = readFileSync(
+      new URL('../src/NativeLocalSharedOperation.ts', import.meta.url),
+      'utf8',
+    )
+    const wasmSource = readFileSync(new URL('../src/WasmBackend.ts', import.meta.url), 'utf8')
+    const helperBody = (source: string, start: string, end: string): string => {
+      const from = source.indexOf(start)
+      const to = source.indexOf(end, from + start.length)
+      assert.isAtLeast(from, 0)
+      assert.isAbove(to, from)
+      return source.slice(from, to)
+    }
+    const helperBodies = [
+      helperBody(nativeMemorySource, "case 'SharedClone':", "case 'RawBufferCount':"),
+      helperBody(nativeAccessSource, 'export const emit', '\n})'),
+      helperBody(wasmSource, 'const emitSharedCloneOperation', 'const emitRawBufferCountOperation'),
+    ]
+    for (const body of helperBodies) {
+      assert.notMatch(
+        body,
+        /\b(?:allocate|allocation|reallocate|reallocation|atomic|lock|scheduler|collector|background|gc)\b|silk\/shared/i,
+      )
+    }
   }),
 )
 
@@ -563,7 +736,13 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
+        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+        : evaluated._tag,
+    )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
@@ -650,7 +829,11 @@ it.effect('leaks the specified strong cycle without manufacturing cleanup author
     const source = ascii(`import silk.core { OutOfMemoryError }
 import silk.effect as Effect
 struct Empty {}
-struct Node { next: Intrinsic.SharedCore<Node> | Empty }
+struct Bomb {}
+impl Drop for Bomb {
+  fn drop(self: &mut Bomb) -> () { let boom = 1 / 0 return () }
+}
+struct Node { bomb: Bomb next: Intrinsic.SharedCore<Node> | Empty }
 fn link(value: &mut Node, next: Intrinsic.SharedCore<Node>) -> i32 {
   value.next = move next
   return 0
@@ -662,16 +845,17 @@ effect fn construct() -> i32 ! OutOfMemoryError {
   unsafe {
     let first = Intrinsic.sharedFromAllocation<Node>(
       move firstAllocation,
-      Node { next: Empty {} },
+      Node { bomb: Bomb {}, next: Empty {} },
     )
     let second = Intrinsic.sharedFromAllocation<Node>(
       move secondAllocation,
-      Node { next: Empty {} },
+      Node { bomb: Bomb {}, next: Empty {} },
     )
     let secondEdge = Intrinsic.sharedClone<Node>(&second)
     let firstLink = Intrinsic.sharedWithMut<Node, i32>(&first, link(move secondEdge), conflict)
     let firstEdge = Intrinsic.sharedClone<Node>(&first)
     let secondLink = Intrinsic.sharedWithMut<Node, i32>(&second, link(move firstEdge), conflict)
+    if firstLink == 999 { let bomb = Bomb {} drop bomb }
     drop first
     drop second
     return firstLink + secondLink + 42
@@ -693,6 +877,9 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     assert.strictEqual(events.filter((event) => event._tag === 'SharedDecrement').length, 2)
     assert.strictEqual(events.filter((event) => event._tag === 'SharedLastCleanup').length, 0)
     assert.strictEqual(events.filter((event) => event._tag === 'AllocationRelease').length, 0)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 
@@ -780,7 +967,13 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(evaluated._tag, 'Completed')
+    assert.strictEqual(
+      evaluated._tag,
+      'Completed',
+      evaluated._tag === 'Blocked' && evaluated.reason._tag === 'InvalidMir'
+        ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+        : evaluated._tag,
+    )
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
