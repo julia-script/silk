@@ -278,6 +278,10 @@ export const lowerEffectRunner = (
       const callable = callableValueByIdentity(layout, field.callableIdentity, field.type)
       return callable === undefined ? [] : [callable]
     }
+    if (Type.isRepresented(field.type)) {
+      const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
+      return represented === undefined ? [] : [represented]
+    }
     const lowered = mirType(field.type)
     if (lowered === undefined) return []
     if (field.representation === 'Value') return [lowered]
@@ -340,9 +344,8 @@ export const lowerEffectRunner = (
     provenance: generated(block.span),
   })
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
-  if (entry === undefined || lowering.regions.some((region) => region === undefined)) {
+  if (entry === undefined || lowering.regions.some((region) => region === undefined))
     return undefined
-  }
   const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
     type: type.type,

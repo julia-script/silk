@@ -735,7 +735,7 @@ export type Expression =
         readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
       }
       readonly witnessEffectSite?: EffectSiteId
-      readonly typeArguments: ReadonlyArray<Type.Type>
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly heldLoans: ReadonlyArray<BorrowId>

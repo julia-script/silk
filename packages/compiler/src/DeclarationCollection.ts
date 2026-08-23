@@ -1202,7 +1202,18 @@ const collectTypeParameters = (
         ? `Intrinsic.${property}`
         : undefined
     }
-    const rawStaticProperties = boundNodes.slice(1).map(staticPropertyOf)
+    const representationKind: Type.ParameterKind | undefined =
+      boundNode?.kind === 'CallableType'
+        ? 'CallableRepresentation'
+        : effectBound
+          ? 'EffectRepresentation'
+          : undefined
+    const firstStaticProperty = boundNode === undefined ? undefined : staticPropertyOf(boundNode)
+    const rawStaticProperties = (
+      representationKind === undefined && firstStaticProperty !== undefined
+        ? boundNodes
+        : boundNodes.slice(1)
+    ).map(staticPropertyOf)
     const staticPropertySet = new Set(
       rawStaticProperties.filter(
         (property): property is Type.SealedStaticProperty => property !== undefined,
@@ -1213,12 +1224,6 @@ const collectTypeParameters = (
         staticPropertySet.has(property),
       ),
     )
-    const representationKind: Type.ParameterKind | undefined =
-      boundNode?.kind === 'CallableType'
-        ? 'CallableRepresentation'
-        : effectBound
-          ? 'EffectRepresentation'
-          : undefined
     const representationContract =
       boundResolution?.fact._tag === 'Resolved' &&
       (Type.isCallable(boundResolution.fact.type) || Type.isEffect(boundResolution.fact.type))
@@ -1239,12 +1244,25 @@ const collectTypeParameters = (
           )
       }
     }
+    if (representationKind === undefined && staticProperties.includes('Intrinsic.NonParking')) {
+      const propertyNode = boundNodes.find(
+        (candidate) => staticPropertyOf(candidate) === 'Intrinsic.NonParking',
+      )
+      const token = propertyNode
+        ? SyntaxTree.tokens(propertyNode).find((candidate) => candidate.kind === 'Identifier')
+        : undefined
+      if (propertyNode !== undefined && token !== undefined)
+        diagnostics.push(
+          Diagnostic.invalidExecutablePropertyConjunct(spelling(source, token), propertyNode.span),
+        )
+    }
     const bounds: ReadonlyArray<BoundFact> =
       representationKind !== undefined ||
       SyntaxTree.directToken(parameterNode, 'Colon') === undefined
         ? Object.freeze([])
         : Object.freeze(
             boundNodes.flatMap((candidate): ReadonlyArray<BoundFact> => {
+              if (staticPropertyOf(candidate) !== undefined) return []
               const token = SyntaxTree.tokens(candidate).find((part) => part.kind === 'Identifier')
               if (token === undefined) return []
               const resolution = analyzeDeclaredType(source, candidate, environment)
@@ -1276,7 +1294,9 @@ const collectTypeParameters = (
           ? 'RequirementRow'
           : (representationKind ?? 'Value'),
         representationContract,
-        representationKind === undefined ? Object.freeze([]) : staticProperties,
+        representationKind === undefined
+          ? Object.freeze(staticProperties.filter((property) => property === 'Intrinsic.Detached'))
+          : staticProperties,
       )
     if (name._tag === 'Present' && duplicateOf === undefined) {
       environment.set(name.spelling, type)
@@ -1295,7 +1315,10 @@ const collectTypeParameters = (
       name,
       syntax: parameterNode,
       bounds,
-      staticProperties: representationKind === undefined ? Object.freeze([]) : staticProperties,
+      staticProperties:
+        representationKind === undefined
+          ? Object.freeze(staticProperties.filter((property) => property === 'Intrinsic.Detached'))
+          : staticProperties,
       ...(duplicateOf === undefined ? {} : { duplicateOf }),
       ...(representationKind === undefined ||
       boundNode === undefined ||

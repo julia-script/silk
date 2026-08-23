@@ -3,6 +3,7 @@ import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as ExecutionPackage from './ExecutionPackage.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
@@ -26,6 +27,7 @@ import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
 import * as TargetConstant from './TargetConstant.js'
 import * as Type from './Type.js'
@@ -211,6 +213,7 @@ export interface Plan {
   readonly staticData?: ReadonlyArray<StaticDataPlacement>
   readonly literalVerdicts: ReadonlyArray<UsizeLiteralVerdict>
   readonly localSharedAllocationProvenance: LocalSharedAllocationProvenance.Plan
+  readonly executionPackages: ExecutionPackage.Module
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -812,7 +815,7 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
-    if (Type.isSharedCore(type)) {
+    if (Type.isSharedCore(type) || Type.isExecution(type)) {
       const result: Entry = Object.freeze({
         _tag: 'LayoutEntry',
         type,
@@ -1317,10 +1320,7 @@ export const catalog = (
     })
   }
 
-  const layoutType = (
-    type: DeclarationFacts.SemanticType,
-    executableUnionMember = false,
-  ): CatalogEntry => {
+  const layoutType = (type: DeclarationFacts.SemanticType): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
     if (Type.isString(type)) {
       const result = stringEntry(target)
@@ -1369,7 +1369,7 @@ export const catalog = (
     if (Type.isUnion(type)) {
       const members: Array<Entry> = []
       for (const member of type.members) {
-        const memberLayout = layoutType(member, true)
+        const memberLayout = layoutType(member)
         if (memberLayout._tag === 'UnavailableLayoutEntry') {
           const result = unavailable(
             type,
@@ -1403,13 +1403,7 @@ export const catalog = (
       return result
     }
     if (Type.isRepresented(type)) {
-      if (executableUnionMember) return layoutDirectRepresented(type)
-      const result = unavailable(type, Object.freeze(Type.nominals(type)), {
-        _tag: 'InvalidDeclaration',
-        detail: 'represented executable values require a containing storage plan',
-      })
-      completed.set(key, result)
-      return result
+      return layoutDirectRepresented(type)
     }
     const element = layoutType(type.element)
     const dependencies = Object.freeze(Type.nominals(type.element))
@@ -1502,8 +1496,14 @@ export const catalog = (
       }
       for (const child of Hir.expressionTree(expression)) {
         if (child._tag === 'BuiltinCall') {
-          for (const argument of child.typeArguments)
-            addReferenced(Type.substitute(argument, substitution))
+          for (const argument of child.typeArguments) {
+            const specialized = Type.substituteGenericArgument(argument, substitution)
+            if (Type.isTypeArgument(specialized)) addReferenced(specialized)
+            else {
+              const represented = Type.representedType(specialized)
+              if (represented !== undefined) addReferenced(represented)
+            }
+          }
         }
         if (child._tag === 'EffectCatch' && child.protected._tag !== 'Unavailable') {
           const protected_ = Type.substitute(child.protected.type, substitution)
@@ -1577,8 +1577,11 @@ const addExpressionTypes = (
   types.set(Type.key(specialized), specialized)
   if (expression._tag === 'BuiltinCall') {
     for (const argument of expression.typeArguments) {
-      const type = Type.substitute(argument, substitution)
-      types.set(Type.key(type), type)
+      const specialized = Type.substituteGenericArgument(argument, substitution)
+      const type = Type.isTypeArgument(specialized)
+        ? specialized
+        : Type.representedType(specialized)
+      if (type !== undefined) types.set(Type.key(type), type)
     }
   }
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
@@ -2385,6 +2388,28 @@ export const plan = (
 ): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (
+        expression._tag !== 'BuiltinCall' ||
+        (expression.operation !== 'ExecutionLayout' &&
+          expression.operation !== 'ExecutionFromAllocation')
+      )
+        continue
+      const arguments_ = expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, instance.substitution),
+      )
+      for (const argument of [arguments_.at(0), arguments_.at(2)])
+        if (argument !== undefined && Type.isTypeArgument(argument))
+          reached.set(Type.key(argument), argument)
+      for (const argument of [arguments_.at(1), arguments_.at(3)]) {
+        const represented = argument === undefined ? undefined : Type.representedType(argument)
+        if (represented !== undefined) reached.set(Type.key(represented), represented)
+      }
+    }
+  }
   if (
     discovery.entry._tag === 'Resolved' &&
     (discovery.entry.kind === 'Effect' || discovery.entry.result === 'Unit')
@@ -2514,6 +2539,177 @@ export const plan = (
   )
   const callablePlans = callableEnvironments(self.target, orderedEntries, discovery)
   const effectPlans = effectEnvironments(self.target, orderedEntries, discovery, callablePlans)
+  const executionPlanByKey = new Map<string, ExecutionPackage.Plan>()
+  const executionUnavailableByKey = new Map<string, ExecutionPackage.Unavailable>()
+  const executionDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const representedStorageLayout = (
+    argument: Type.GenericArgument,
+  ): { readonly size: number; readonly alignment: number } | undefined => {
+    if (Type.isExactRepresentationArgument(argument)) {
+      if (Type.isEffectIdentityArgument(argument.identity)) {
+        const owner = argument.identity.owner
+        const environment = effectPlans.find(
+          (
+            candidate,
+          ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+            candidate._tag === 'EffectEnvironment' &&
+            (Instances.effectIdentity(candidate.instance, candidate.site) ===
+              argument.identity.identity ||
+              candidate.successEffectIdentity === argument.identity.identity ||
+              (Hir.effectRepresentationIdentity(candidate.site) === argument.identity.identity &&
+                owner !== undefined &&
+                candidate.instance.declaration.module === owner.declaration.module &&
+                candidate.instance.declaration.name === owner.declaration.name &&
+                candidate.instance.typeArguments.length === owner.typeArguments.length &&
+                candidate.instance.typeArguments.every((typeArgument, ordinal) => {
+                  const ownerArgument = owner.typeArguments.at(ordinal)
+                  return (
+                    ownerArgument !== undefined &&
+                    Type.genericArgumentKey(typeArgument) === Type.genericArgumentKey(ownerArgument)
+                  )
+                }))),
+        )
+        return environment === undefined
+          ? undefined
+          : Object.freeze({ size: environment.size, alignment: environment.alignment })
+      }
+      if (!Type.isCallableIdentityArgument(argument.identity)) return undefined
+      const callableIdentity = argument.identity
+      const callableEnvironment = callableIdentity.environment
+      if (callableEnvironment === undefined) return Object.freeze({ size: 0, alignment: 1 })
+      const environment = callablePlans.find(
+        (
+          candidate,
+        ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
+          candidate._tag === 'CallableEnvironment' &&
+          Type.equalsCallableEnvironmentIdentity(
+            Instances.callableEnvironmentIdentity(candidate.callable),
+            callableEnvironment,
+          ),
+      )
+      return environment === undefined
+        ? undefined
+        : Object.freeze({ size: environment.size, alignment: environment.alignment })
+    }
+    if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      const alternatives = argument.alternatives.map(representedStorageLayout)
+      if (alternatives.some((alternative) => alternative === undefined)) return undefined
+      const available = alternatives.filter(
+        (alternative): alternative is { readonly size: number; readonly alignment: number } =>
+          alternative !== undefined,
+      )
+      const payloadAlignment = available.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative.alignment),
+        1,
+      )
+      const payloadSize = available.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative.size),
+        0,
+      )
+      const alignment = Math.max(4, payloadAlignment)
+      const payloadOffset = alignUp(4, payloadAlignment)
+      const size = alignUp(payloadOffset + payloadSize, alignment)
+      return Number.isSafeInteger(size) ? Object.freeze({ size, alignment }) : undefined
+    }
+    return undefined
+  }
+  const suspensionOf = (argument: Type.GenericArgument): SuspensionMode.Summary => {
+    if (Type.isExactRepresentationArgument(argument))
+      return Type.isEffectIdentityArgument(argument.identity)
+        ? Instances.effectSuspensionOf(discovery, argument.identity.identity)
+        : SuspensionMode.direct
+    if (Type.isCompositeEffectRepresentationArgument(argument))
+      return SuspensionMode.join(argument.alternatives.map(suspensionOf))
+    return SuspensionMode.openExecutable(Object.freeze([]))
+  }
+  for (const instance of discovery.instances) {
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (
+        expression._tag !== 'BuiltinCall' ||
+        (expression.operation !== 'ExecutionLayout' &&
+          expression.operation !== 'ExecutionFromAllocation')
+      )
+        continue
+      const arguments_ = expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, instance.substitution),
+      )
+      const result = arguments_.at(0)
+      const bodyArgument = arguments_.at(1)
+      const endpoint = arguments_.at(2)
+      const callbackArgument = arguments_.at(3)
+      const body = bodyArgument === undefined ? undefined : Type.representedType(bodyArgument)
+      const callback =
+        callbackArgument === undefined ? undefined : Type.representedType(callbackArgument)
+      if (
+        result === undefined ||
+        !Type.isTypeArgument(result) ||
+        bodyArgument === undefined ||
+        body === undefined ||
+        endpoint === undefined ||
+        !Type.isTypeArgument(endpoint) ||
+        callback === undefined ||
+        callbackArgument === undefined
+      )
+        continue
+      const bodyLayout = representedStorageLayout(bodyArgument)
+      const endpointLayout = resolve(endpoint)
+      const callbackLayout = representedStorageLayout(callbackArgument)
+      if (bodyLayout === undefined || endpointLayout === undefined || callbackLayout === undefined)
+        continue
+      const specialization: ExecutionPackage.Specialization = Object.freeze({
+        result,
+        body,
+        endpoint,
+        callback,
+        suspension: suspensionOf(bodyArgument),
+      })
+      const planned = ExecutionPackage.plan(self.target, specialization, {
+        body: bodyLayout,
+        endpoint: endpointLayout,
+        callback: callbackLayout,
+      })
+      const selected =
+        planned._tag === 'ExecutionPackagePlan'
+          ? Object.freeze({
+              ...planned,
+              cleanup: Object.freeze({
+                body: CleanupPlan.cleanupPlan(index, body),
+                endpoint: CleanupPlan.cleanupPlan(index, endpoint),
+                callback: CleanupPlan.cleanupPlan(index, callback),
+              }),
+            })
+          : planned
+      const key = ExecutionPackage.specializationKey(specialization)
+      if (selected._tag === 'ExecutionPackagePlan') executionPlanByKey.set(key, selected)
+      else {
+        executionUnavailableByKey.set(key, selected)
+        executionDiagnostics.push(
+          Diagnostic.intrinsicTargetUnavailable(
+            `Intrinsic.${expression.operation === 'ExecutionLayout' ? 'executionLayout' : 'executionFromAllocation'}`,
+            self.target.kind === 'WebAssembly' ? 'Wasm' : 'LLVM',
+            expression.span,
+          ),
+        )
+      }
+    }
+  }
+  const executionPackages: ExecutionPackage.Module = Object.freeze({
+    _tag: 'ExecutionPackageModule',
+    plans: Object.freeze(
+      [...executionPlanByKey.values()].sort((left, right) =>
+        left.provenance.localeCompare(right.provenance),
+      ),
+    ),
+    unavailable: Object.freeze(
+      [...executionUnavailableByKey.values()].sort((left, right) =>
+        ExecutionPackage.specializationKey(left.specialization).localeCompare(
+          ExecutionPackage.specializationKey(right.specialization),
+        ),
+      ),
+    ),
+  })
   const specializedShapeTypes = new Map(shapeTypes.map((type) => [Type.key(type), type] as const))
   for (const environment of effectPlans)
     specializedShapeTypes.set(Type.key(environment.effect), environment.effect)
@@ -2533,10 +2729,12 @@ export const plan = (
     staticData,
     literalVerdicts: literals.verdicts,
     localSharedAllocationProvenance,
+    executionPackages,
     diagnostics: Diagnostic.merge([
       ...literals.diagnostics,
       ...localSharedDiagnostics,
       ...localSharedAllocationProvenance.diagnostics,
+      ...executionDiagnostics,
     ]),
   })
 }
@@ -2557,6 +2755,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     staticData: Object.freeze([]),
     literalVerdicts: Object.freeze([]),
     localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
+    executionPackages: ExecutionPackage.empty(),
     diagnostics: Object.freeze([]),
   })
 }
@@ -2727,7 +2926,7 @@ const shapeNode = (
       laneCount: 1,
     })
   }
-  if (Type.isSharedCore(type)) {
+  if (Type.isSharedCore(type) || Type.isExecution(type)) {
     return Object.freeze({
       _tag: 'AddressShape',
       type,

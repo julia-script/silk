@@ -181,6 +181,8 @@ export const unsatisfiedExecutablePropertyCode = 'SEM0139' as const
 export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
 /** Stable code for an ordinary capability conjoined with one exact executable bound. */
 export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
+/** Stable code for a statically known execution-package allocation/layout mismatch. */
+export const executionLayoutMismatchCode = 'SEM0142' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -402,6 +404,7 @@ export type Code =
   | typeof unsatisfiedExecutablePropertyCode
   | typeof missingExplicitExecutionOwnerCode
   | typeof invalidExecutablePropertyConjunctCode
+  | typeof executionLayoutMismatchCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -530,6 +533,11 @@ export type Reason =
   | { readonly _tag: 'MisplacedUnsafeAcknowledgement' }
   | {
       readonly _tag: 'LocalSharedLayoutMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
+  | {
+      readonly _tag: 'ExecutionLayoutMismatch'
       readonly expected: string
       readonly actual: string
     }
@@ -3003,6 +3011,29 @@ export const localSharedLayoutMismatch = (
     severity: 'error',
     message: `Local-shared allocation was planned for ${actual}, not ${expected}`,
     reason: Object.freeze({ _tag: 'LocalSharedLayoutMismatch', expected, actual }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({
+        label: 'allocation layout provenance originates here',
+        span: allocationSpan,
+      }),
+    ]),
+  })
+
+/** Diagnoses a mismatched execution-package allocation before initializer publication. */
+export const executionLayoutMismatch = (
+  expected: string,
+  actual: string,
+  allocationSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: executionLayoutMismatchCode,
+    severity: 'error',
+    message: `Execution allocation was planned for ${actual}, not ${expected}`,
+    reason: Object.freeze({ _tag: 'ExecutionLayoutMismatch', expected, actual }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({

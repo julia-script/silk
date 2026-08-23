@@ -138,6 +138,16 @@ effect fn storage() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
+  `import silk.core { Allocator, OutOfMemoryError }
+import silk.execution as Execution
+fn ready(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () { drop execution return () }
+effect fn packaged() -> () ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(effect { return 42 }, (), ready)
+  return run Execution.drive(move execution, (), complete, suspend)
+}
+pub fn main() -> i32 { return 42 }`,
   `import silk.effect as Effect
 import silk.i32 as i32
 struct Problem {}

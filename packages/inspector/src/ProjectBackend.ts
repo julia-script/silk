@@ -329,6 +329,8 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
     case 'LocalSharedCoreCleanup':
       return `${typeText(cleanup.type)} · opaque decrement or last ${typeText(cleanup.element)} cleanup`
+    case 'ExecutionCleanup':
+      return `${typeText(cleanup.type)} · opaque package cleanup · ${cleanupText(cleanup.allocation)}`
     case 'HookCleanup':
       return `${typeText(cleanup.type)} · drop hook ${cleanup.hook.module}.${cleanup.hook.name} · ${cleanupText(cleanup.inner)}`
     case 'StructCleanup':
@@ -804,6 +806,10 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':
       return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
+    case 'ExecutionFromAllocation':
+      return `${localText(operation.destination)} = execution from ${localText(operation.allocation)} with ${localText(operation.body)}`
+    case 'ExecutionDrive':
+      return `${localText(operation.destination)} = drive ${localText(operation.execution)} with ${localText(operation.branch)}`
     case 'SharedClone':
       return `${localText(operation.destination)} = clone shared core ${localText(operation.self)}`
     case 'SharedWithMut':
@@ -1067,9 +1073,11 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                                     ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
                                     : value._tag === 'SharedCoreValue'
                                       ? `${typeText(value.type)} ticket=${value.ticket} · ${typeText(value.element)}`
-                                      : value._tag === 'ReferenceValue'
-                                        ? `borrow f${value.frame}.c${value.cell}`
-                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                                      : value._tag === 'ExecutionValue'
+                                        ? `${typeText(value.type)} package #${value.ticket}`
+                                        : value._tag === 'ReferenceValue'
+                                          ? `borrow f${value.frame}.c${value.cell}`
+                                          : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {

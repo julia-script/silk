@@ -551,7 +551,10 @@ const verifyEntry = (
     }
     return Object.freeze(violations)
   }
-  if (Type.isSharedCore(candidate.type) && candidate.representation._tag === 'Reference') {
+  if (
+    (Type.isSharedCore(candidate.type) || Type.isExecution(candidate.type)) &&
+    candidate.representation._tag === 'Reference'
+  ) {
     const address = candidate.representation.address
     return candidate.copy === false &&
       candidate.size === target.pointerSize &&
@@ -566,7 +569,7 @@ const verifyEntry = (
           invalid(
             'InvalidAggregate',
             candidate.type,
-            `${Type.encode(candidate.type)} has a non-canonical opaque local-shared handle`,
+            `${Type.encode(candidate.type)} has a non-canonical sealed owning handle`,
           ),
         ])
   }

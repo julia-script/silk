@@ -14,6 +14,10 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
     target: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<SilkType.GenericArgument>,
   ) => FuncActor.Func
+  readonly resolveIndependent: (
+    target: DeclarationFacts.CanonicalId,
+    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+  ) => FuncActor.Func
   readonly memory: WasmMemory.MemoryContext | undefined
   readonly suspensionRuntime?: SuspensionRuntime
 }

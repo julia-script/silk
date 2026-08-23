@@ -1,5 +1,7 @@
 import {
   authored,
+  callableLocalCleanup,
+  concreteCleanup,
   generated,
   lowerBorrowedWriteSelectors,
   lowerBorrowSelectors,
@@ -799,6 +801,82 @@ export function lowerExpressionInner(
           return deferred === undefined
             ? undefined
             : lowerEffectExecution(fn, deferred, expression.type, expression.span)
+        }
+        if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionDrive') {
+          const [executionExpression, branchExpression, completeExpression, suspendExpression] =
+            recipe.arguments
+          if (
+            executionExpression === undefined ||
+            branchExpression === undefined ||
+            completeExpression === undefined ||
+            suspendExpression === undefined
+          )
+            return undefined
+          const execution = lowerExpression(fn, executionExpression)
+          const branch = lowerExpression(fn, branchExpression)
+          const onComplete = lowerExpression(fn, completeExpression)
+          const onSuspend = lowerExpression(fn, suspendExpression)
+          const type = fn.type(expression.type)
+          const executionType =
+            execution === undefined ? undefined : fn.localTypes.at(execution.result.ordinal)
+          if (
+            execution === undefined ||
+            branch === undefined ||
+            onComplete === undefined ||
+            onSuspend === undefined ||
+            executionType?._tag !== 'Nominal' ||
+            !Type.isExecution(executionType.type) ||
+            type?._tag !== 'Nominal' ||
+            !Type.equals(type.type, Type.unit)
+          )
+            return undefined
+          const destination = fn.alloc(type)
+          const drivenResult = Type.typeArgumentAt(executionType.type, 0)
+          const result = drivenResult === undefined ? undefined : fn.type(drivenResult)
+          if (result === undefined || result._tag === 'EffectOutcome') return undefined
+          const resultLocal = fn.alloc(result)
+          const representedArguments = recipe.typeArguments.map((argument) =>
+            fn.semanticArgument(argument),
+          )
+          const callableTypeArguments = (ordinal: number): ReadonlyArray<Type.GenericArgument> => {
+            const argument = representedArguments.at(ordinal)
+            return argument !== undefined &&
+              Type.isExactRepresentationArgument(argument) &&
+              Type.isCallableIdentityArgument(argument.identity)
+              ? argument.identity.typeArguments
+              : Object.freeze([])
+          }
+          const callbackCleanup = (local: Mir.LocalId): CleanupPlan.CleanupPlan => {
+            const localType = fn.localTypes.at(local.ordinal)
+            return localType?._tag === 'CallableValue'
+              ? callableLocalCleanup(fn, localType)
+              : concreteCleanup(
+                  fn,
+                  localType === undefined ? Type.unit : Mir.semanticType(localType),
+                )
+          }
+          fn.emit(
+            Object.freeze({
+              _tag: 'ExecutionDrive' as const,
+              destination,
+              result: resultLocal,
+              execution: execution.result,
+              branch: branch.result,
+              onComplete: onComplete.result,
+              onSuspend: onSuspend.result,
+              executionAccess: 'Take' as const,
+              branchAccess: 'Take' as const,
+              completionAccess: 'Take' as const,
+              suspensionAccess: 'Take' as const,
+              completionCleanup: callbackCleanup(onComplete.result),
+              suspensionCleanup: callbackCleanup(onSuspend.result),
+              completionTypeArguments: callableTypeArguments(2),
+              suspensionTypeArguments: callableTypeArguments(3),
+              type,
+              provenance: authored(expression.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
         }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
           const [layoutExpression] = recipe.arguments

@@ -1,6 +1,7 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
+import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as SetOf from './internal/SetOf.js'
@@ -73,7 +74,79 @@ export interface Module {
   readonly _tag: 'SuspensionOwnershipModule'
   readonly module: string
   readonly plans: ReadonlyArray<Plan>
+  readonly executionPackages: ReadonlyArray<ExecutionPackageOwnershipPlan>
   readonly violations: ReadonlyArray<Violation>
+}
+
+/** One exact compiler-private package slot governed by the canonical ownership planner. */
+export interface ExecutionPackageSlot {
+  readonly ordinal: number
+  readonly role: 'Body' | 'Endpoint' | 'Callback' | 'AllocationAuthority'
+  readonly type: Type.Type
+  readonly access: Extract<Access, { readonly _tag: 'AffineTransfer' }>
+}
+
+/** One terminal package cleanup branch; loans always end before referent cleanup. */
+export interface ExecutionPackageCleanup {
+  readonly loanEnds: ReadonlyArray<BorrowIdentity>
+  readonly releases: ReadonlyArray<ExecutionPackageSlot>
+  readonly allocationReleases: 1
+}
+
+/** Lifecycle cleanup facts for one exact independently owned package specialization. */
+export interface ExecutionPackageOwnershipPlan {
+  readonly _tag: 'ExecutionPackageOwnershipPlan'
+  readonly package: ExecutionPackage.Plan
+  readonly slots: ReadonlyArray<ExecutionPackageSlot>
+  readonly logicalRoot: 'ExecutionOwnedPersistent'
+  readonly restoration: 'InitialOrEligibleDrive'
+  readonly completion: ExecutionPackageCleanup
+  readonly neverDriven: ExecutionPackageCleanup
+  readonly dormant: ExecutionPackageCleanup
+  readonly eligible: ExecutionPackageCleanup
+}
+
+const executionPackagePlan = (
+  index: DeclarationIndex.Index,
+  package_: ExecutionPackage.Plan,
+): ExecutionPackageOwnershipPlan => {
+  const typed = Object.freeze([
+    Object.freeze({ role: 'Body' as const, type: package_.specialization.body }),
+    Object.freeze({ role: 'Endpoint' as const, type: package_.specialization.endpoint }),
+    Object.freeze({ role: 'Callback' as const, type: package_.specialization.callback }),
+    Object.freeze({ role: 'AllocationAuthority' as const, type: Type.allocation }),
+  ])
+  const slots: ReadonlyArray<ExecutionPackageSlot> = Object.freeze(
+    typed.map((slot, ordinal) =>
+      Object.freeze({
+        ...slot,
+        ordinal,
+        access: Object.freeze({
+          _tag: 'AffineTransfer' as const,
+          cleanup: CleanupPlan.cleanupPlan(index, slot.type),
+        }),
+      }),
+    ),
+  )
+  const cleanup = (roles: ReadonlyArray<ExecutionPackageSlot['role']>): ExecutionPackageCleanup =>
+    Object.freeze({
+      loanEnds: Object.freeze([]),
+      releases: Object.freeze(roles.flatMap((role) => slots.filter((slot) => slot.role === role))),
+      allocationReleases: 1,
+    })
+  const completion = cleanup(['Callback', 'Endpoint', 'AllocationAuthority'])
+  const retained = cleanup(['Callback', 'Endpoint', 'Body', 'AllocationAuthority'])
+  return Object.freeze({
+    _tag: 'ExecutionPackageOwnershipPlan',
+    package: package_,
+    slots,
+    logicalRoot: 'ExecutionOwnedPersistent',
+    restoration: 'InitialOrEligibleDrive',
+    completion,
+    neverDriven: retained,
+    dormant: retained,
+    eligible: retained,
+  })
 }
 
 const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => {
@@ -500,6 +573,11 @@ export const plan = (
     _tag: 'SuspensionOwnershipModule',
     module: program.module,
     plans: Object.freeze(plans.sort(comparePlan)),
+    executionPackages: Object.freeze(
+      program.layout.executionPackages.plans.map((package_) =>
+        executionPackagePlan(index, package_),
+      ),
+    ),
     violations: Object.freeze(violations),
   })
 }
@@ -524,6 +602,14 @@ export const encode = (self: Module): string =>
             ? `  slot ${slot.ordinal} %${slot.local.ordinal} borrow:${slot.access.access.toLowerCase()} root=%${slot.access.root.ordinal} ${borrowText(slot.access.loan)} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
             : `  slot ${slot.ordinal} %${slot.local.ordinal} move:${slot.access.cleanup._tag} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`,
       ),
+    ]),
+    ...self.executionPackages.flatMap((plan_) => [
+      `execution-package ${plan_.package.provenance} slots=${plan_.slots.length} allocation-releases=1 root=${plan_.logicalRoot.toLowerCase()} restore=${plan_.restoration.toLowerCase()}`,
+      ...plan_.slots.map(
+        (slot) =>
+          `  package-slot ${slot.ordinal} ${slot.role.toLowerCase()} move:${slot.access.cleanup._tag} ${Type.encode(slot.type)}`,
+      ),
+      `  cleanup completion=${plan_.completion.releases.map((slot) => slot.role.toLowerCase()).join('>')} never-driven=${plan_.neverDriven.releases.map((slot) => slot.role.toLowerCase()).join('>')} dormant=${plan_.dormant.releases.map((slot) => slot.role.toLowerCase()).join('>')} eligible=${plan_.eligible.releases.map((slot) => slot.role.toLowerCase()).join('>')}`,
     ]),
     ...self.violations.map(
       (violation) =>

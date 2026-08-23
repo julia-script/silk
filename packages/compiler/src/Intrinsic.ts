@@ -138,7 +138,8 @@ const admission = (family: string): AdmissionCategory => {
   if (family === 'Effect') return 'Effect'
   if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
   if (family === 'Layout' || family === 'string') return 'Representation'
-  if (family === 'RawBuffer' || family === 'Slot' || family === 'Shared') return 'Ownership'
+  if (family === 'RawBuffer' || family === 'Slot' || family === 'Shared' || family === 'Execution')
+    return 'Ownership'
   return 'Language'
 }
 
@@ -159,6 +160,10 @@ const consumer = (family: string, operation: string): string => {
     return operation === 'layout' || operation === 'fromAllocation'
       ? 'silk/shared.make'
       : `silk/shared.${operation}`
+  if (family === 'Execution')
+    return operation === 'layout' || operation === 'fromAllocation'
+      ? 'silk/execution.make'
+      : 'silk/execution.drive'
   if (family === 'Storage') return 'silk/core.allocate'
   if (family === 'Host') return 'silk/core.writeAll'
   if (family === 'Os') return osConsumer(operation)
@@ -195,14 +200,19 @@ const builtin = (options: {
     consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
     ...(options.unsafe &&
-    (options.actor === 'RawBuffer' || options.actor === 'Slot' || options.actor === 'Shared')
+    (options.actor === 'RawBuffer' ||
+      options.actor === 'Slot' ||
+      options.actor === 'Shared' ||
+      options.actor === 'Execution')
       ? {
           invariant:
             options.actor === 'RawBuffer'
               ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
               : options.actor === 'Slot'
                 ? 'caller proves the selected slot is in bounds and has the initializedness state required by the operation'
-                : 'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once',
+                : options.actor === 'Shared'
+                  ? 'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once'
+                  : 'caller proves the allocation came from the exact execution package layout specialization and transfers it, the body, and the fixed endpoint exactly once',
         }
       : {}),
     ...(options.actor === 'Host' && options.name === 'write'
@@ -300,6 +310,95 @@ const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared'
 const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
 const sharedTypeParameters = Object.freeze([sharedElement])
 const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
+const executionPackageOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPackage' })
+const executionResult = Type.parameter(executionPackageOwner, 0, 'A')
+const executionBodyBound = Type.effect(executionResult, Object.freeze([]), 'Take')
+const executionBody = Type.parameter(
+  executionPackageOwner,
+  1,
+  'F',
+  'EffectRepresentation',
+  executionBodyBound,
+  Object.freeze(['Intrinsic.Detached']),
+)
+const executionEndpoint = Type.parameter(
+  executionPackageOwner,
+  2,
+  'O',
+  'Value',
+  undefined,
+  Object.freeze(['Intrinsic.Detached']),
+)
+const executionReadyBound = Type.callable(
+  Object.freeze([Type.reference('Shared', executionEndpoint)]),
+  Type.unit,
+  'Shared',
+)
+const executionReady = Type.parameter(
+  executionPackageOwner,
+  3,
+  'R',
+  'CallableRepresentation',
+  executionReadyBound,
+  Object.freeze(['Intrinsic.Detached', 'Intrinsic.NonParking']),
+)
+const executionPackageTypeParameters = Object.freeze([
+  executionResult,
+  executionBody,
+  executionEndpoint,
+  executionReady,
+])
+const representedExecutionBody = Type.represented(
+  executionBodyBound,
+  executionBodyBound,
+  Type.representationParameterArgument(executionBody),
+)
+const representedExecutionReady = Type.represented(
+  executionReadyBound,
+  executionReadyBound,
+  Type.representationParameterArgument(executionReady),
+)
+const executionDriveOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionDrive' })
+const drivenResult = Type.parameter(executionDriveOwner, 0, 'A')
+const driveBranch = Type.parameter(executionDriveOwner, 1, 'D')
+const completionBound = Type.callable(Object.freeze([driveBranch, drivenResult]), Type.unit, 'Take')
+const completionCallback = Type.parameter(
+  executionDriveOwner,
+  2,
+  'C',
+  'CallableRepresentation',
+  completionBound,
+  Object.freeze(['Intrinsic.NonParking']),
+)
+const suspensionBound = Type.callable(
+  Object.freeze([driveBranch, Type.execution(drivenResult)]),
+  Type.unit,
+  'Take',
+)
+const suspensionCallback = Type.parameter(
+  executionDriveOwner,
+  3,
+  'S',
+  'CallableRepresentation',
+  suspensionBound,
+  Object.freeze(['Intrinsic.NonParking']),
+)
+const executionDriveTypeParameters = Object.freeze([
+  drivenResult,
+  driveBranch,
+  completionCallback,
+  suspensionCallback,
+])
+const representedCompletion = Type.represented(
+  completionBound,
+  completionBound,
+  Type.representationParameterArgument(completionCallback),
+)
+const representedSuspension = Type.represented(
+  suspensionBound,
+  suspensionBound,
+  Type.representationParameterArgument(suspensionCallback),
+)
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
@@ -944,6 +1043,62 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([]),
       result: 'Layout',
       semanticResult: Type.layout,
+    }),
+  ]),
+  ...Object.freeze([
+    builtin({
+      actor: 'Execution',
+      name: 'layout',
+      operation: 'ExecutionLayout',
+      typeParameters: Object.freeze(['A', 'F', 'O', 'R']),
+      semanticTypeParameters: executionPackageTypeParameters,
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: 'Layout',
+      semanticResult: Type.layout,
+    }),
+    builtin({
+      actor: 'Execution',
+      name: 'fromAllocation',
+      operation: 'ExecutionFromAllocation',
+      typeParameters: Object.freeze(['A', 'F', 'O', 'R']),
+      semanticTypeParameters: executionPackageTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('allocation', 'Allocation'),
+        valueParameter('body', 'F'),
+        valueParameter('readyState', 'O'),
+        valueParameter('onReady', 'R'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.allocation,
+        representedExecutionBody,
+        executionEndpoint,
+        representedExecutionReady,
+      ]),
+      result: 'Execution<A>',
+      semanticResult: Type.execution(executionResult),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Execution',
+      name: 'drive',
+      operation: 'ExecutionDrive',
+      typeParameters: Object.freeze(['A', 'D', 'C', 'S']),
+      semanticTypeParameters: executionDriveTypeParameters,
+      parameters: Object.freeze([
+        valueParameter('execution', 'Execution<A>'),
+        valueParameter('branchState', 'D'),
+        valueParameter('onComplete', 'C'),
+        valueParameter('onSuspend', 'S'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.execution(drivenResult),
+        driveBranch,
+        representedCompletion,
+        representedSuspension,
+      ]),
+      result: 'Effect<()>',
+      semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
     }),
   ]),
   ...Object.freeze([

@@ -1,5 +1,6 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
@@ -467,6 +468,50 @@ export type Operation =
       readonly allocationProvenance: SourceSpan.SourceSpan
       readonly allocationAccess: 'Take'
       readonly valueAccess: 'Take'
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Consumes every input into one exact Initial execution package without running source. */
+      readonly _tag: 'ExecutionFromAllocation'
+      readonly destination: LocalId
+      readonly allocation: LocalId
+      readonly body: LocalId
+      readonly endpoint: LocalId
+      readonly callback: LocalId
+      readonly plan: ExecutionPackage.Plan
+      readonly bodyCleanup: CleanupPlan.CleanupPlan
+      readonly endpointCleanup: CleanupPlan.CleanupPlan
+      readonly callbackCleanup: CleanupPlan.CleanupPlan
+      /** Stable index into the canonical target-layout allocation-provenance plan. */
+      readonly allocationFact: number
+      /** Canonical execution-layout origin retained from target planning. */
+      readonly allocationProvenance: SourceSpan.SourceSpan
+      readonly allocationAccess: 'Take'
+      readonly bodyAccess: 'Take'
+      readonly endpointAccess: 'Take'
+      readonly callbackAccess: 'Take'
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Enters one verified execution activation and invokes exactly one take-once outcome. */
+      readonly _tag: 'ExecutionDrive'
+      readonly destination: LocalId
+      /** Private result slot populated before the completion callback consumes it. */
+      readonly result: LocalId
+      readonly execution: LocalId
+      readonly branch: LocalId
+      readonly onComplete: LocalId
+      readonly onSuspend: LocalId
+      readonly executionAccess: 'Take'
+      readonly branchAccess: 'Take'
+      readonly completionAccess: 'Take'
+      readonly suspensionAccess: 'Take'
+      readonly completionCleanup: CleanupPlan.CleanupPlan
+      readonly suspensionCleanup: CleanupPlan.CleanupPlan
+      readonly completionTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly suspensionTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
@@ -1466,6 +1511,7 @@ export interface Violation {
     | 'InvalidOsOperation'
     | 'InvalidRawStorageOperation'
     | 'InvalidLocalSharedOperation'
+    | 'InvalidExecutionOperation'
     | 'InvalidCallShape'
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'

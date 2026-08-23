@@ -130,6 +130,12 @@ export const detachedOfEnvironment = (
   captures: ReadonlyArray<EnvironmentCapture>,
 ): Verdict => verdict(captures.flatMap((capture) => detachedCapture(index, capture)))
 
+/** Proves that one ordinary value representation owns its complete retained environment. */
+export const detachedOfType = (index: DeclarationIndex.Index, type: Type.Type): Verdict =>
+  Type.isParameter(type) && type.staticProperties.includes('Intrinsic.Detached')
+    ? satisfied
+    : verdict(nestedLoanCauses(index, type, [Type.encode(type)]))
+
 /** Proves NonParking from external-park reachability only; nested transfer remains admissible. */
 export const nonParkingOfSummary = (summary: SuspensionMode.Summary): Verdict =>
   SuspensionMode.has(summary, 'ExternalPark')
@@ -517,18 +523,30 @@ export const violationDiagnostics = (
   ): ReadonlyArray<Diagnostic.Diagnostic> => {
     if (parameter.staticProperties.length === 0) return []
     const alternatives = exactAlternatives(argument)
-    if (alternatives.length === 0) return []
+    const ordinary = Type.isTypeArgument(argument) ? argument : undefined
+    if (alternatives.length === 0 && ordinary === undefined) return []
     const exactFacts = alternatives.map((alternative) => factOfExact(self, alternative, facts))
     return parameter.staticProperties.flatMap((property) => {
-      const failed = exactFacts.flatMap((fact, factOrdinal) => {
-        const propertyVerdict =
-          property === 'Intrinsic.Detached' ? fact?.detached : fact?.nonParking
-        return propertyVerdict === undefined
-          ? [cause('Unavailable', [`alternative#${factOrdinal}`])]
-          : propertyVerdict._tag === 'Unsatisfied'
-            ? propertyVerdict.causes
+      const ordinaryVerdict =
+        ordinary === undefined
+          ? undefined
+          : property === 'Intrinsic.Detached'
+            ? detachedOfType(index, ordinary)
+            : verdict([cause('Unavailable', [Type.encode(ordinary)])])
+      const failed =
+        ordinaryVerdict === undefined
+          ? exactFacts.flatMap((fact, factOrdinal) => {
+              const propertyVerdict =
+                property === 'Intrinsic.Detached' ? fact?.detached : fact?.nonParking
+              return propertyVerdict === undefined
+                ? [cause('Unavailable', [`alternative#${factOrdinal}`])]
+                : propertyVerdict._tag === 'Unsatisfied'
+                  ? propertyVerdict.causes
+                  : []
+            })
+          : ordinaryVerdict._tag === 'Unsatisfied'
+            ? ordinaryVerdict.causes
             : []
-      })
       return failed.length === 0
         ? []
         : [

@@ -13,6 +13,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
 | [`silk/core`](./core.md) | `Allocator` | 12 | Foundational allocation and standard-output services used by higher standard-library actors. |
 | [`silk/effect`](./effect.md) | `Effect` | 26 | Builds lazy computations by transforming success, recovering typed failure, supplying services, and controlling sequencing and cleanup. |
+| [`silk/execution`](./execution.md) | `Execution` | 2 | Independently owned, caller-funded lazy computations. |
 | [`silk/f32`](./f32.md) | `f32` | 50 | IEEE binary32 values with deterministic representation, classification, and math operations. |
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
 | [`silk/filesystem`](./filesystem.md) | `FileSystem` | 58 | Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes. |

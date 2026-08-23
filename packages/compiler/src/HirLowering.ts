@@ -1,4 +1,4 @@
-import { callableSectionOf } from './CallResolution.js'
+import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
 import type {
   ArgumentFact,
   AssignmentRootFact,
@@ -15,6 +15,7 @@ import type {
 import { contextualIntegerCompatible, returnedBorrowArgument } from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
+import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -1093,9 +1094,21 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
         : {}),
       typeArguments: Object.freeze(
         fact._tag === 'Call'
-          ? fact.typeArguments.flatMap((argument) =>
-              argument.type === undefined ? [] : [argument.type],
-            )
+          ? (() => {
+              const operation = Intrinsic.findOperationById(fact.reference.intrinsic)
+              const parameters =
+                operation !== undefined && Intrinsic.isBuiltinOperation(operation)
+                  ? (operation.rule.typeParameters ?? Object.freeze([]))
+                  : Object.freeze<ReadonlyArray<Type.Parameter>>([])
+              return fact.typeArguments.flatMap((argument, ordinal) => {
+                const parameter = parameters.at(ordinal)
+                const converted =
+                  parameter === undefined
+                    ? argument.type
+                    : genericArgumentOfTypeArgument(parameter, argument)
+                return converted === undefined ? [] : [converted]
+              })
+            })()
           : [],
       ),
       arguments: arguments_,

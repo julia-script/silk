@@ -1,6 +1,7 @@
 import type { AggregateValue, Value } from './BootstrapValue.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import type * as ExecutionPackage from './ExecutionPackage.js'
 import * as Type from './Type.js'
 
 export interface Allocation {
@@ -12,6 +13,18 @@ export interface Allocation {
     value: Value
     strong: bigint
     access: 'Available' | 'Active'
+  }
+  execution?: {
+    readonly provenance: string
+    state: 'Initial' | 'Running' | 'Dormant' | 'Eligible' | 'Completed' | 'Destroyed'
+    readonly body: Value
+    readonly endpoint: Value
+    readonly callback: Value
+    readonly bodyCleanup: CleanupPlan.CleanupPlan
+    readonly endpointCleanup: CleanupPlan.CleanupPlan
+    readonly callbackCleanup: CleanupPlan.CleanupPlan
+    /** Stable root depth restored for every activation of this package. */
+    logicalDepth?: number
   }
 }
 
@@ -36,6 +49,45 @@ export const initializeShared = (
   allocation.shared = { element, provenance, value, strong: 1n, access: 'Available' }
   return true
 }
+
+/** Atomically installs every exact package owner without running the body. */
+export const initializeExecution = (
+  allocations: Allocations,
+  ticket: number,
+  plan: ExecutionPackage.Plan,
+  body: Value,
+  endpoint: Value,
+  callback: Value,
+  cleanup: {
+    readonly body: CleanupPlan.CleanupPlan
+    readonly endpoint: CleanupPlan.CleanupPlan
+    readonly callback: CleanupPlan.CleanupPlan
+  },
+): boolean => {
+  const allocation = allocations.get(ticket)
+  if (
+    allocation === undefined ||
+    !allocation.active ||
+    allocation.execution !== undefined ||
+    allocation.shared !== undefined ||
+    allocation.values.size > 0
+  )
+    return false
+  allocation.execution = {
+    provenance: plan.provenance,
+    state: 'Initial',
+    body,
+    endpoint,
+    callback,
+    bodyCleanup: cleanup.body,
+    endpointCleanup: cleanup.endpoint,
+    callbackCleanup: cleanup.callback,
+  }
+  return true
+}
+
+export const execution = (allocations: Allocations, ticket: number): Allocation['execution'] =>
+  allocations.get(ticket)?.execution
 
 /** Inspects evaluator-owned opaque state without publishing storage lanes to Silk source. */
 export const shared = (allocations: Allocations, ticket: number): Allocation['shared'] =>
@@ -165,6 +217,7 @@ export const cleanupMembers = (
   if (cleanup._tag === 'RawBufferCleanup') return Object.freeze([cleanup.type])
   if (cleanup._tag === 'LocalSharedCoreCleanup')
     return Object.freeze([cleanup.type, cleanup.element])
+  if (cleanup._tag === 'ExecutionCleanup') return Object.freeze([cleanup.type])
   if (cleanup._tag === 'HookCleanup') return cleanupMembers(cleanup.inner, owner)
   if (cleanup._tag === 'RepresentedCallableCleanup' || cleanup._tag === 'RepresentedEffectCleanup')
     return Object.freeze([])

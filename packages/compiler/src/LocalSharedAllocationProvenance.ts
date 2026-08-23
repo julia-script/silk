@@ -7,10 +7,17 @@ import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 type SharedFromAllocation = Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
+type ExecutionFromAllocation = Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>
 
 interface ConcreteOrigin {
   readonly _tag: 'ConcreteOrigin'
   readonly element: Type.Type
+  readonly span: SourceSpan.SourceSpan
+}
+
+interface ExecutionOrigin {
+  readonly _tag: 'ExecutionOrigin'
+  readonly arguments: ReadonlyArray<Type.GenericArgument>
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -54,6 +61,7 @@ interface ProviderBoundOrigin {
 
 type Origin =
   | ConcreteOrigin
+  | ExecutionOrigin
   | ParameterOrigin
   | InvalidOrigin
   | ConflictOrigin
@@ -70,10 +78,20 @@ export interface Fact {
   readonly span: SourceSpan.SourceSpan
 }
 
+/** One exact HIR initializer whose allocation originated at the same execution layout. */
+export interface ExecutionFact {
+  readonly _tag: 'ExecutionAllocationProvenanceFact'
+  readonly owner: string
+  readonly expression: ExecutionFromAllocation
+  readonly arguments: ReadonlyArray<Type.GenericArgument>
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** Canonical interprocedural provenance facts retained by target layout planning and MIR lowering. */
 export interface Plan {
   readonly _tag: 'LocalSharedAllocationProvenancePlan'
   readonly facts: ReadonlyArray<Fact>
+  readonly executionFacts: ReadonlyArray<ExecutionFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -87,6 +105,18 @@ const sameOrigin = (left: Origin, right: Origin): boolean => {
   switch (left._tag) {
     case 'ConcreteOrigin':
       return right._tag === 'ConcreteOrigin' && Type.equals(left.element, right.element)
+    case 'ExecutionOrigin':
+      return (
+        right._tag === 'ExecutionOrigin' &&
+        left.arguments.length === right.arguments.length &&
+        left.arguments.every((argument, ordinal) => {
+          const other = right.arguments.at(ordinal)
+          return (
+            other !== undefined &&
+            Type.genericArgumentKey(argument) === Type.genericArgumentKey(other)
+          )
+        })
+      )
     case 'ParameterOrigin':
       return right._tag === 'ParameterOrigin' && left.ordinal === right.ordinal
     case 'InvalidOrigin':
@@ -115,6 +145,7 @@ const sameOrigin = (left: Origin, right: Origin): boolean => {
 
 const originSpan = (origin: Origin): SourceSpan.SourceSpan | undefined =>
   origin._tag === 'ConcreteOrigin' ||
+  origin._tag === 'ExecutionOrigin' ||
   origin._tag === 'InvalidOrigin' ||
   origin._tag === 'ConflictOrigin' ||
   origin._tag === 'ServiceOrigin' ||
@@ -366,6 +397,16 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
             span: expression.span,
           })
     }
+    if (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionLayout')
+      return Object.freeze({
+        _tag: 'ExecutionOrigin',
+        arguments: Object.freeze(
+          expression.typeArguments.map((argument) =>
+            Type.substituteGenericArgument(argument, instance.substitution),
+          ),
+        ),
+        span: expression.span,
+      })
     if (expression._tag === 'BuiltinCall' && expression.operation === 'StorageAcquire') {
       const argument = expression.arguments.at(0)
       return argument === undefined
@@ -517,6 +558,32 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         (candidate) =>
           candidate.role === origin.role && Type.equals(candidate.capability, origin.service),
       )
+    const sameProvidedOwner = (
+      candidate: Instances.InstanceKey['declaration'],
+      expected: Instances.InstanceKey['declaration'],
+    ): boolean =>
+      candidate.module === expected.module &&
+      (candidate.name === expected.name || candidate.name.startsWith(`${expected.name}$provided$`))
+    const reachesExecutionOwner = (
+      candidate: Instances.Instance,
+      expected: Instances.Instance,
+      seen = new Set<string>(),
+    ): boolean => {
+      const identity = ownerKey(candidate)
+      if (seen.has(identity)) return false
+      if (
+        identity === ownerKey(expected) ||
+        sameProvidedOwner(candidate.key.declaration, expected.key.declaration)
+      )
+        return true
+      const nextSeen = new Set(seen).add(identity)
+      return discovery.calls
+        .filter((call) => Instances.keyText(call.owner) === identity)
+        .some((call) => {
+          const target = instances.get(Instances.keyText(call.target))
+          return target !== undefined && reachesExecutionOwner(target, expected, nextSeen)
+        })
+    }
     // An ordinary effect helper executes with the provider bound around the helper construction at
     // its caller. The provider node therefore lives in the caller HIR, while the service operation
     // whose allocation provenance we must prove lives in the callee HIR. Follow that structural
@@ -543,7 +610,13 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                           : discovery.effects.find((item) => item.identity === identity)
                       return (
                         effect !== undefined &&
-                        Instances.keyText(effect.owner) === ownerKey(origin.owner)
+                        (() => {
+                          const effectOwner = instances.get(Instances.keyText(effect.owner))
+                          return (
+                            effectOwner !== undefined &&
+                            reachesExecutionOwner(effectOwner, origin.owner)
+                          )
+                        })()
                       )
                     }
                     if (
@@ -552,8 +625,18 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                       nested._tag !== 'CallableApply'
                     )
                       return false
+                    const resultEffect = callAt(caller, nested)?.resultEffect
+                    const effect =
+                      resultEffect === undefined
+                        ? undefined
+                        : discovery.effects.find((candidate) => candidate.identity === resultEffect)
+                    if (
+                      effect !== undefined &&
+                      sameProvidedOwner(effect.runner, origin.owner.key.declaration)
+                    )
+                      return true
                     const target = targetAt(caller, nested)
-                    return target !== undefined && ownerKey(target) === ownerKey(origin.owner)
+                    return target !== undefined && reachesExecutionOwner(target, origin.owner)
                   })
                   if (!reachesOwner) return []
                   const selected = selectedProvider(caller, candidate.provider)
@@ -691,6 +774,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   }
 
   const facts: Array<Fact> = []
+  const executionFacts: Array<ExecutionFact> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   for (const instance of discovery.instances) {
     const parameters = parameterOrigins.get(ownerKey(instance)) ?? []
@@ -758,9 +842,76 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       )
     }
   }
+  for (const instance of discovery.instances) {
+    const parameters = parameterOrigins.get(ownerKey(instance)) ?? []
+    const seen = new Set<Hir.Expression>()
+    for (const expression of instance.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (seen.has(expression)) continue
+      seen.add(expression)
+      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'ExecutionFromAllocation')
+        continue
+      const expected = Object.freeze(
+        expression.typeArguments.map((argument) =>
+          Type.substituteGenericArgument(argument, instance.substitution),
+        ),
+      )
+      const allocation = expression.arguments.at(0)
+      const unresolved =
+        allocation === undefined
+          ? Object.freeze({
+              _tag: 'InvalidOrigin' as const,
+              description: 'missing allocation provenance',
+              span: expression.span,
+            })
+          : originOf(allocation, instance, parameters, new Set([ownerKey(instance)]))
+      const actual = resolve(unresolved)
+      if (
+        actual._tag === 'ExecutionOrigin' &&
+        expected.length === actual.arguments.length &&
+        expected.every((argument, ordinal) => {
+          const other = actual.arguments.at(ordinal)
+          return (
+            other !== undefined &&
+            Type.genericArgumentKey(argument) === Type.genericArgumentKey(other)
+          )
+        })
+      ) {
+        executionFacts.push(
+          Object.freeze({
+            _tag: 'ExecutionAllocationProvenanceFact',
+            owner: ownerKey(instance),
+            expression,
+            arguments: actual.arguments,
+            span: actual.span,
+          }),
+        )
+        continue
+      }
+      const span = originSpan(actual) ?? allocation?.span ?? expression.span
+      const description =
+        actual._tag === 'ExecutionOrigin'
+          ? actual.arguments.map(Type.genericArgumentKey).join(',')
+          : actual._tag === 'InvalidOrigin'
+            ? actual.description
+            : actual._tag === 'ConflictOrigin'
+              ? 'conflicting allocation provenance'
+              : 'unknown allocation provenance'
+      diagnostics.push(
+        Diagnostic.executionLayoutMismatch(
+          expected.map(Type.genericArgumentKey).join(','),
+          description,
+          span,
+          expression.span,
+        ),
+      )
+    }
+  }
   return Object.freeze({
     _tag: 'LocalSharedAllocationProvenancePlan',
     facts: Object.freeze(facts),
+    executionFacts: Object.freeze(executionFacts),
     diagnostics: Diagnostic.merge(diagnostics),
   })
 }
@@ -775,10 +926,23 @@ export const find = (
   return self.facts.find((fact) => fact.owner === identity && fact.expression === expression)
 }
 
+/** Finds the exact source allocation fact for one specialized execution initializer. */
+export const findExecution = (
+  self: Plan,
+  owner: Instances.InstanceKey,
+  expression: ExecutionFromAllocation,
+): ExecutionFact | undefined => {
+  const identity = Instances.keyText(owner)
+  return self.executionFacts.find(
+    (fact) => fact.owner === identity && fact.expression === expression,
+  )
+}
+
 /** Empty provenance surface for hand-built layout plans. */
 export const empty = (): Plan =>
   Object.freeze({
     _tag: 'LocalSharedAllocationProvenancePlan',
     facts: Object.freeze([]),
+    executionFacts: Object.freeze([]),
     diagnostics: Object.freeze([]),
   })

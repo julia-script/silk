@@ -157,10 +157,11 @@ function decodeParameter(value: unknown): Type.Parameter {
   if (
     staticProperties.length > 0 &&
     kind !== 'CallableRepresentation' &&
-    kind !== 'EffectRepresentation'
+    kind !== 'EffectRepresentation' &&
+    (kind !== 'Value' || staticProperties.some((property) => property !== 'Intrinsic.Detached'))
   )
     throw new InvalidModuleSurfaceEncoding(
-      'only representation parameters may carry sealed static properties',
+      'value parameters may carry only the sealed Intrinsic.Detached property',
     )
   if (bound !== undefined && !Type.isCallable(bound) && !Type.isEffect(bound))
     throw new InvalidModuleSurfaceEncoding(

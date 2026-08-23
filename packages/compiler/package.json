@@ -350,6 +350,10 @@
       "types": "./dist/ExecutionLifecycle.d.ts",
       "import": "./dist/ExecutionLifecycle.js"
     },
+    "./ExecutionPackage": {
+      "types": "./dist/ExecutionPackage.d.ts",
+      "import": "./dist/ExecutionPackage.js"
+    },
     "./FormattedDocument": {
       "types": "./dist/FormattedDocument.d.ts",
       "import": "./dist/FormattedDocument.js"
