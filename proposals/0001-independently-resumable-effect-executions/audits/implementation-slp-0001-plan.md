@@ -32,12 +32,14 @@ merge, the integration branch runs the full repository gates before the next lay
 
 | Layer | Change | State | Gate attempts | Stop reason | Findings |
 | --- | --- | --- | ---: | --- | ---: |
-| 1 | `establish-independent-execution-semantics` | Running | — | — | — |
-| 2 | `add-independent-execution-packaging` | Pending | — | Waiting for layer 1 | — |
+| 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
+| 2 | `add-independent-execution-packaging` | Running | — | — | — |
 | 3 | `add-external-wake-parking` | Pending | — | Waiting for layer 2 | — |
 | 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 | — |
 | 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
 
 ## Integration gates
 
-No layer has reached the integration barrier yet.
+Layer 1 isolated gates passed: focused 77/77, typecheck 24/24, Biome 980 files, test 28/28
+(compiler 2,090/2,090 plus native differential 1/1), check 42/42 plus scripts 16/16, and
+release candidate 9/9. Its integrated full hard-gate command also exited successfully.
