@@ -63,3 +63,8 @@ and fixed exact Wasm cleanup for represented body, callback, and endpoint enviro
 isolated gates passed: focused 59/59, typecheck 24/24, Biome 983 files, test 28/28 (compiler
 2,101/2,101 plus native corpus 1/1), check 42/42 plus scripts 16/16, and release candidate 9/9.
 The integrated full hard-gate command also exited successfully.
+
+Layer 3 started from integration commit `47c7dad` on branch `julia/slp0001-wake-parking`.
+Its first checkpoint assigns the sealed Wake type, park/wake MIR contract, and canonical wake-cell
+authority/state machine to this layer; full execution-owned continuation realization remains the
+explicit Layer 4 boundary.
