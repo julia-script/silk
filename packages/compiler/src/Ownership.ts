@@ -3256,6 +3256,42 @@ export const localSharedAccessBoundaryPlan = (
       }
     }
   }
+  // A restricted callback may forward its first access parameter through ordinary helper calls.
+  // Propagate the original sealed boundary span to those callees so transitive parking or result
+  // escape is judged exactly like direct callback code, independent of helper names.
+  changed = true
+  while (changed) {
+    changed = false
+    for (const fn of functions) {
+      if (fn.declaration.canonical._tag !== 'Canonical') continue
+      const inherited = boundaries.get(localSharedTargetKey(fn.declaration.canonical.id))
+      if (inherited === undefined || inherited.length === 0) continue
+      const bindings = bindingsOf(fn)
+      for (const expression of fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        if (
+          expression._tag !== 'Call' ||
+          !expression.arguments.some((argument) => parameterOrdinals(argument, bindings).has(0))
+        )
+          continue
+        const key = localSharedTargetKey(expression.target)
+        const existing = boundaries.get(key) ?? []
+        const added = inherited.filter(
+          (span) =>
+            !existing.some(
+              (candidate) =>
+                candidate.sourceId === span.sourceId &&
+                candidate.start === span.start &&
+                candidate.end === span.end,
+            ),
+        )
+        if (added.length === 0) continue
+        boundaries.set(key, [...existing, ...added])
+        changed = true
+      }
+    }
+  }
   return Object.freeze({
     _tag: 'LocalSharedAccessBoundaryPlan',
     boundaries: new Map(

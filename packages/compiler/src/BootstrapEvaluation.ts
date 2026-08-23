@@ -678,6 +678,16 @@ function* executeFunction(
             reason: 'Execution cleanup entered an illegal lifecycle state',
             span: provenance.span,
           })
+        const wakeDestroyed =
+          package_.wake === undefined ? undefined : WakeCell.destroyExecution(package_.wake)
+        if (wakeDestroyed?._tag === 'WakeCellViolation')
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Execution cleanup violated wake-control ownership',
+            span: provenance.span,
+          })
+        if (wakeDestroyed !== undefined) package_.wake = wakeDestroyed.state
         package_.state = 'Destroyed'
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
@@ -692,6 +702,10 @@ function* executeFunction(
           )
           if (blocked !== undefined) return blocked
         }
+        // An outstanding Wake is the final reclaim authority after the Execution handle is gone.
+        // Its ordinary affine cleanup releases the allocation exactly once.
+        if (wakeDestroyed !== undefined && wakeDestroyed.state.allocation !== 'Released')
+          return undefined
         if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
           return blockedStep({
             _tag: 'Trap',

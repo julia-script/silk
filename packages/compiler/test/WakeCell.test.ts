@@ -58,6 +58,18 @@ it('notifies at most once after dormancy and traps every duplicate authority use
   assert.deepEqual(WakeCell.verify(resumed), [])
 })
 
+it('traps indirect drive throughout notification without mutating endpoint authority', () => {
+  const dormant = transition(WakeCell.suspensionReturned(registered()))
+  assert.strictEqual(WakeCell.admitDrive(dormant)._tag, 'FatalDriveTrap')
+  const notifying = transition(WakeCell.consumeWake(dormant))
+  const admission = WakeCell.admitDrive(notifying)
+  assert.strictEqual(admission._tag, 'FatalDriveTrap')
+  assert.strictEqual(admission.state, notifying)
+  assert.isTrue(admission.state.notificationAuthority)
+  assert.isTrue(admission.state.invocationAuthority)
+  assert.strictEqual(admission.state.phase, 'Notifying')
+})
+
 it('defers reentrant destruction until the endpoint invocation borrow ends', () => {
   const dormant = transition(WakeCell.suspensionReturned(registered()))
   const notifying = transition(WakeCell.consumeWake(dormant))
@@ -114,4 +126,16 @@ it('dropping an eligible execution cleans without repeating notification', () =>
   assert.strictEqual(destroyed.phase, 'Released')
   assert.strictEqual(destroyed.values, 'Cleaned')
   assert.deepEqual(WakeCell.verify(destroyed), [])
+})
+
+it('rejects malformed authority combinations and encodes equal states identically', () => {
+  const malformed: WakeCell.State = Object.freeze({
+    ...WakeCell.initial(),
+    phase: 'Notifying',
+    wakeAuthority: true,
+    notificationAuthority: true,
+    invocationAuthority: true,
+  })
+  assert.deepEqual(WakeCell.verify(malformed), ['DuplicateWakeAuthority'])
+  assert.strictEqual(WakeCell.encode(WakeCell.initial()), WakeCell.encode(WakeCell.initial()))
 })

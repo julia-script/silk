@@ -3541,6 +3541,36 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             guard === undefined
               ? undefined
               : SilkType.callable(Object.freeze([SilkType.wake]), semanticType(guard), 'Take')
+          const registerCleanupValid = (() => {
+            if (register?._tag !== 'CallableValue') return false
+            const fields =
+              register.environment?.fields
+                .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
+                .reverse() ?? []
+            if (register.environment === undefined)
+              return (
+                operation.registerCleanup._tag === 'NoCleanup' &&
+                SilkType.equals(operation.registerCleanup.type, register.type)
+              )
+            return (
+              operation.registerCleanup._tag === 'CallableCleanup' &&
+              SilkType.equals(operation.registerCleanup.type, register.type) &&
+              operation.registerCleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              SilkType.equalsCallableEnvironmentIdentity(
+                operation.registerCleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(register.environment.callable),
+              ) &&
+              operation.registerCleanup.slots.length === fields.length &&
+              operation.registerCleanup.slots.every((slot, ordinal) => {
+                const field = fields.at(ordinal)
+                return (
+                  field !== undefined &&
+                  slot.ordinal === field.ordinal &&
+                  cleanupMatchesSemanticType(self.layout, slot.cleanup, field.type)
+                )
+              })
+            )
+          })()
           if (
             register?._tag !== 'CallableValue' ||
             guard === undefined ||
@@ -3551,11 +3581,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             expected === undefined ||
             !TypeCompatibility.isCompatible(TypeCompatibility.check(registerActual, expected)) ||
             !cleanupMatchesSemanticType(self.layout, operation.guardCleanup, semanticType(guard)) ||
-            !cleanupMatchesSemanticType(
-              self.layout,
-              operation.registerCleanup,
-              semanticType(register),
-            ) ||
+            !registerCleanupValid ||
             operation.registerAccess !== 'Take' ||
             localUseCounts.get(operation.register.ordinal) !== 1
           )

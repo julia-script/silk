@@ -50,6 +50,15 @@ export type Transition =
     }
   | { readonly _tag: 'WakeCellViolation'; readonly reason: Violation; readonly state: State }
 
+/** Read-only admission result consumed by every eventual execution-engine drive boundary. */
+export type DriveAdmission =
+  | { readonly _tag: 'DriveAllowed'; readonly state: State }
+  | {
+      readonly _tag: 'FatalDriveTrap'
+      readonly reason: 'DormantOrNotifying'
+      readonly state: State
+    }
+
 const state = (value: Omit<State, '_tag'>): State =>
   Object.freeze({ _tag: 'WakeCellState', ...value })
 
@@ -60,6 +69,12 @@ const transitioned = (
 
 const violated = (self: State, reason: Violation): Transition =>
   Object.freeze({ _tag: 'WakeCellViolation', reason, state: self })
+
+/** Rejects owner drive without mutating readiness state while park or notification owns progress. */
+export const admitDrive = (self: State): DriveAdmission =>
+  self.phase === 'Dormant' || self.phase === 'Notifying' || self.phase === 'DestroyPending'
+    ? Object.freeze({ _tag: 'FatalDriveTrap', reason: 'DormantOrNotifying', state: self })
+    : Object.freeze({ _tag: 'DriveAllowed', state: self })
 
 /** Initializes one reusable cell before the Execution's first park generation. */
 export const initial = (): State =>
