@@ -1328,27 +1328,49 @@ const operations = Object.freeze([
   actor('Intrinsic', 'Namespace', intrinsicOperations),
 ])
 
+const actorsBySpelling: ReadonlyMap<string, Actor> = new Map(
+  operations.map((actor_): readonly [string, Actor] => [actor_.spelling, actor_]),
+)
+
+const operationsByActorSpelling: ReadonlyMap<string, ReadonlyMap<string, Operation>> = new Map(
+  operations.map((actor_): readonly [string, ReadonlyMap<string, Operation>] => [
+    actor_.spelling,
+    new Map(
+      actor_.operations.map((operation): readonly [string, Operation] => [
+        operation.spelling,
+        operation,
+      ]),
+    ),
+  ]),
+)
+
+const operationsById: ReadonlyMap<string, ReadonlyMap<string, Operation>> = (() => {
+  const actors = new Map<string, Map<string, Operation>>()
+  for (const operation of intrinsicOperations) {
+    const actor = actors.get(operation.id.actor)
+    if (actor === undefined)
+      actors.set(operation.id.actor, new Map([[operation.id.name, operation]]))
+    else actor.set(operation.id.name, operation)
+  }
+  return actors
+})()
+
 /** Every intrinsic actor in stable presentation and completion order. */
 export const all = (): ReadonlyArray<Actor> => operations
 
 /** Finds an intrinsic actor by its accepted source spelling. */
-export const findActor = (spelling: string): Actor | undefined =>
-  operations.find((candidate) => candidate.spelling === spelling)
+export const findActor = (spelling: string): Actor | undefined => actorsBySpelling.get(spelling)
 
 /** Finds an intrinsic operation by actor and member source spelling. */
 export const findOperation = (actor_: string, spelling: string): Operation | undefined =>
-  findActor(actor_)?.operations.find((candidate) => candidate.spelling === spelling) ??
+  operationsByActorSpelling.get(actor_)?.get(spelling) ??
   (Scalar.isSpelling(actor_)
-    ? findActor('Intrinsic')?.operations.find(
-        (candidate) => candidate.spelling === `${actor_}${upperInitial(spelling)}`,
-      )
+    ? operationsByActorSpelling.get('Intrinsic')?.get(`${actor_}${upperInitial(spelling)}`)
     : undefined)
 
 /** Finds one sealed operation by its canonical compiler identity. */
 export const findOperationById = (id: OperationId): Operation | undefined =>
-  intrinsicOperations.find(
-    (candidate) => candidate.id.actor === id.actor && candidate.id.name === id.name,
-  )
+  operationsById.get(id.actor)?.get(id.name)
 
 /** Stable textual form of one sealed operation identity. */
 export const operationText = (id: OperationId): string => `${id.actor}.${id.name}`

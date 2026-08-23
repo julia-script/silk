@@ -460,6 +460,10 @@ const catalog: ReadonlyArray<Scalar> = Object.freeze([
   character,
 ])
 
+const scalarsBySpelling: ReadonlyMap<string, Scalar> = new Map(
+  catalog.map((scalar): readonly [string, Scalar] => [scalar.spelling, scalar]),
+)
+
 /** Returns every scalar in stable source-presentation order. */
 export const all = (): ReadonlyArray<Scalar> => catalog
 
@@ -471,8 +475,7 @@ export const floats = (): ReadonlyArray<FloatScalar> =>
   catalog.filter((candidate): candidate is FloatScalar => candidate.category === 'Floating')
 
 /** Finds a scalar by its accepted source spelling. */
-export const find = (spelling: string): Scalar | undefined =>
-  catalog.find((candidate) => candidate.spelling === spelling)
+export const find = (spelling: string): Scalar | undefined => scalarsBySpelling.get(spelling)
 
 /** Tests whether an unknown value is an accepted scalar spelling. */
 export const isSpelling = (value: unknown): value is Spelling =>
