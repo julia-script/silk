@@ -65,7 +65,11 @@ not belong in a language rule unless a program can observe them.
   and nested Effects.
 - [Effect suspension and stack-safe recursion](effect-suspension.md) — the explicit suspension
   boundary, covered recursive cycles, exact channel preservation, ownership and cleanup, logical
-  depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
+  depth, cross-engine parity, pay-for-use, and the boundary with external parking.
+- [Independently resumable Effect executions](independent-effect-executions.md) — the accepted
+  SLP-0001 direction, currently being implemented: explicit affine execution ownership,
+  caller-funded packaging, owner-selected driving, external parking, one-shot Wake readiness,
+  exact dormant cleanup, and static pay-for-use tiers.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
   bounds; generic failure types and requirement rows; and finite compatible Effect joins.
 - [Requirements and services](requirements-and-services.md) — runtime-provided capabilities,
@@ -79,6 +83,9 @@ not belong in a language rule unless a program can observe them.
   standard sections, complete examples, symbol links, and ASD-STE100 writing rules.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
   mutation, captures, cleanup, allocation lifecycles, and returned views.
+- [Local shared ownership](local-shared-ownership.md) — completed SLP-0002 behavior: explicitly
+  allocated `Shared<T>` handles, allocation-free cloning and access, callback-scoped borrows,
+  reentrancy traps, exact last-handle cleanup, local affinity, and strong-cycle leaks.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
   contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
 - [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact

@@ -648,6 +648,114 @@ uniformly.
 [intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
 [standard-library source](../../packages/compiler/stdlib).
 
+### INTR-005 — Independent execution privilege stops at owner-neutral mechanics
+
+**Status:** Confirmed
+
+**Implementation:** In progress under SLP-0001.
+
+The independent-execution intrinsic surface contains only these powers:
+
+- opaque affine `Intrinsic.Execution<A>` and `Intrinsic.Wake` values;
+- sealed `Intrinsic.Detached` and `Intrinsic.NonParking` static properties;
+- exact `Intrinsic.executionLayout` and unsafe `Intrinsic.executionFromAllocation` packaging;
+- safe callback-shaped `Intrinsic.drive`;
+- consuming synchronous `Intrinsic.wake`; and
+- effectful `Intrinsic.park` with one NonParking registration callback.
+
+These operations expose continuation ownership, exact package construction, one activation,
+register-before-relinquish parking, readiness, and exact cleanup. They do not expose compiler
+scheduling or source payload policy.
+
+```silk,ignore
+let layout = Intrinsic.executionLayout<A, F, O, R>()
+let execution = unsafe Intrinsic.executionFromAllocation<A, F, O, R>(
+  move allocation,
+  move body,
+  move readyState,
+  move onReady
+)
+```
+
+`executionFromAllocation` is unsafe because the supplied Allocation must match the exact validated
+layout provenance. `drive`, `wake`, and `park` are safe under their affine, state, and static-property
+contracts. Illegal drive state remains a defined fatal trap rather than undefined behavior.
+
+**Boundary:** The catalog contains no compiler-owned Scheduler, Fiber, Deferred, timer, queue,
+Coroutine, step-result sum, explicit destroy or cancel operation, per-drive endpoint replacement,
+general callable erasure, allocator service, allocation failure, or implicit program-entry owner.
+An ordinary source declaration with one of those names receives no privilege.
+
+**Diagnostics and audit:** Contract mismatches use ordinary generic, ownership, unsafe, or Effect
+diagnostics. Failed Detached and NonParking properties use their dedicated static-obligation
+diagnostics. The deterministic intrinsic audit rejects an abstraction-shaped addition or a
+compiler phase that recognizes a source policy actor by spelling.
+
+**Evidence:** [SLP-0001 compiler boundary](../../proposals/0001-independently-resumable-effect-executions/proposal.md#compilerstandard-library-boundary),
+[packaging intrinsic requirements](../../openspec/changes/add-independent-execution-packaging/specs/bootstrap-intrinsic-boundary/spec.md),
+[parking intrinsic requirements](../../openspec/changes/add-external-wake-parking/specs/bootstrap-intrinsic-boundary/spec.md),
+[independent-execution reference](independent-effect-executions.md).
+
+### INTR-006 — Local shared privilege stops at control-block mechanics
+
+**Status:** Confirmed
+
+**Implementation:** Complete under SLP-0002.
+
+The local shared intrinsic surface contains one opaque affine `Intrinsic.SharedCore<T>` and four
+operations:
+
+```silk,ignore
+fn Intrinsic.sharedLayout<T>() -> Layout
+
+unsafe fn Intrinsic.sharedFromAllocation<T>(
+  allocation: Allocation,
+  value: T
+) -> Intrinsic.SharedCore<T>
+
+fn Intrinsic.sharedClone<T>(
+  self: &Intrinsic.SharedCore<T>
+) -> Intrinsic.SharedCore<T>
+
+fn Intrinsic.sharedWithMut<T, A>(
+  self: &Intrinsic.SharedCore<T>,
+  use: once fn(&mut T) -> A,
+  onConflict: once fn() -> A
+) -> A
+```
+
+These operations expose exact control-block layout, initialization from caller-owned storage,
+strong cloning, one callback-scoped exclusive access state, conflict selection, and dynamic
+last-handle cleanup. `sharedFromAllocation` is unsafe because its caller must provide a live
+allocation with the exact requested layout provenance and transfer `value` exactly once. The other
+three operations are safe under their ownership and callback contracts.
+
+`sharedWithMut` invokes exactly one callback. After the selected callback returns normally, the
+unselected take-once callback environment receives ordinary cleanup exactly once. Successful access
+ends its borrow and restores availability before that cleanup and return. A normally returning
+conflict callback does not change the existing active access.
+
+The canonical `Shared.with` operation requires no separate intrinsic. Ordinary source implements it
+through `sharedWithMut` and narrows `&mut T` to `&T` for one callback invocation.
+
+**Boundary:** The catalog contains no compiler-owned `Shared` wrapper, Allocator, allocation failure,
+Deferred, Scheduler, ready inbox, shared-reader state, recoverable conflict type, Weak handle,
+identity operation, atomic count, lock, collector, or thread-transfer operation. Ordinary source
+chooses those abstractions and policies when the language provides the required primitive.
+
+**Diagnostics and audit:** Calling `sharedFromAllocation` without unsafe acknowledgement reports
+`SEM0082`. An unrepresentable `sharedLayout<T>` reports `SEM0093` before MIR or allocation. A type,
+target, size, alignment, or ordinary-layout provenance mismatch reports `SEM0138` at the initializer
+call, retains related allocation-provenance information, and publishes no core. Generic, ownership,
+and callback-escape violations use their corresponding ordinary diagnostics. Deterministic
+inventory and compiler-phase audits reject source-spelling privilege or an additional
+abstraction-shaped operation.
+
+**Evidence:** [local shared intrinsic requirements](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md#requirement-two-sealed-primitives-fund-local-shared-construction),
+[lifecycle intrinsic requirements](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md#requirement-two-sealed-primitives-govern-local-shared-lifecycle),
+[ordinary Shared source](../../packages/compiler/stdlib/silk/shared.silk),
+[local shared ownership reference](local-shared-ownership.md).
+
 ## Target availability
 
 ### TARGET-001 — Intrinsic availability is checked only for the selected executable closure

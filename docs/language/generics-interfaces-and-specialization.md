@@ -684,6 +684,47 @@ suggests an opaque result when appropriate.
 **Evidence:** [exact representation result specification](../../openspec/specs/bootstrap-opaque-representation-results/spec.md),
 [exact representation syntax tests](../../packages/compiler/test/ExactRepresentationSyntax.test.ts).
 
+### REP-007 — Exact executable bounds may add sealed static properties
+
+**Status:** Confirmed
+
+**Implementation:** In progress under SLP-0001.
+
+One exact callable or Effect representation bound may retain its representation identity while
+adding compiler-owned static-property obligations with `+`:
+
+```silk,ignore
+fn prepare<
+  A,
+  F: once Effect<A> + Intrinsic.Detached,
+  O: Intrinsic.Detached,
+  R: fn(&O) -> () + Intrinsic.Detached + Intrinsic.NonParking
+>(body: F, readyState: O, onReady: R) -> () {
+  // `F` and `R` remain exact executable representation parameters.
+}
+```
+
+`Intrinsic.Detached` requires an owned environment with no external lexical or provider loan.
+`Intrinsic.NonParking` requires an exact callable whose specialized transitive graph cannot reach
+`Intrinsic.park`. Substitution selects one concrete executable representation and re-evaluates each
+property. Open generics preserve a property only when their declaration states the obligation.
+
+The property conjuncts do not reinterpret `F` or `R` as interface providers. They produce no
+runtime witness, representation join, callable erasure, or general intersection type.
+
+**Boundary:** Only compiler-owned static properties may follow one exact executable representation
+bound in this form. An ordinary interface or service conjunct is invalid in that position.
+Interface-only conjunctions retain the unordered conformance meaning defined by INTF-004.
+
+**Diagnostics:** An invalid ordinary-interface conjunct receives an exact-bound diagnostic at that
+conjunct. Failed Detached and NonParking obligations are reported at the bound or application and
+preserve their complete loan or transitive-parking cause. They remain distinct from conformance and
+Effect requirement-row diagnostics. Stable codes are not yet assigned.
+
+**Evidence:** [SLP-0001 exact-bound decision](../../proposals/0001-independently-resumable-effect-executions/proposal.md#smallest-target-neutral-primitive),
+[representation-parameter requirement](../../openspec/changes/establish-independent-execution-semantics/specs/bootstrap-representation-parameters/spec.md),
+[sealed property derivation](../../openspec/changes/establish-independent-execution-semantics/specs/bootstrap-semantic-facts/spec.md).
+
 ## Interface declarations and bounds
 
 ### INTF-001 — Every interface has one implicit compile-time provider named `Self`
@@ -883,10 +924,14 @@ Both conformances are available, but a bare `Convert.default()` remains ambiguou
 operands do not select one. Ordinary generic actor helpers establish a single bound at each call,
 as defined by INTF-006.
 
-**Boundary:** `+` has this meaning only between interface applications in a bound list. It does not
-construct a union or interface value, imply inheritance, add Effect requirements, or change the
-ownership of the bounded provider. A service declaration may participate as an ordinary
+**Boundary:** Between interface applications, `+` has only this unordered conformance meaning. It
+does not construct a union or interface value, imply inheritance, add Effect requirements, or
+change the ownership of the bounded provider. A service declaration may participate as an ordinary
 compile-time contract; merely naming it in a bound does not request that service at runtime.
+
+The separate [REP-007](#rep-007--exact-executable-bounds-may-add-sealed-static-properties) rule
+admits compiler-owned static properties after one exact executable representation bound. It does
+not admit ordinary interfaces or services in that executable-property position.
 
 The first stable model has no bound aliases, named bound sets, or `where` clause. Reusable behavior
 may be extracted into an ordinary generic actor function, while each public generic declaration

@@ -1685,6 +1685,11 @@ diagnostics; unsafe buffer misuse reports the relevant unsafe-contract or owners
 [allocation tests](../../packages/compiler/test/OwnedAllocation.test.ts),
 [allocation acceptance tests](../../packages/compiler/test/OwnedAllocationAcceptance.test.ts).
 
+An ordinary allocation has one affine owner. The completed
+[local shared ownership](local-shared-ownership.md) model is the explicit exception that turns one
+validated allocation into several affine strong handles while retaining one dynamic last-cleanup
+authority. It does not make `Allocation` itself copyable or weaken ordinary borrow rules.
+
 ### EFFECT-LIFE-001 — Effect execution cleans per-run state and preserves reusable captures
 
 **Status:** Confirmed
@@ -1703,6 +1708,12 @@ retaining only the captures that its reusable Effect contract permits. Suspensio
 live value into exactly one later-execution owner and applies the same cleanup rules when execution
 resumes and completes, as defined by the
 [suspension ownership rules](effect-suspension.md#ownership-and-lifecycle).
+
+The accepted SLP-0001 direction for explicit Execution construction transfers a detached Effect
+environment into one affine owner. Initial drop, completion, external parking, resumption, and
+dormant drop preserve exact cleanup as defined by
+[independently resumable Effect executions](independent-effect-executions.md); implementation is
+still in progress.
 
 An explicit finalization Effect such as `ensuring` is an ordinary composed operation. It runs on the
 structured success and typed-failure paths promised by its contract, not merely because a hidden
@@ -1731,8 +1742,10 @@ boundary. A trap does not become a hidden Effect failure and cannot be caught.
 
 **Boundary:** A condition that must be recoverable must be represented before it traps, as ordinary
 data or a typed failure from a checked operation. The runtime may report source and logical Effect
-context before terminating, but such reporting does not imply that cleanup ran. Cancellation,
-interruption, detached tasks, and concurrency remain outside the bootstrap lifecycle model.
+context before terminating, but such reporting does not imply that cleanup ran. Structured task
+cancellation, interruption policy, and parallel execution remain outside the current lifecycle
+model. Dropping an independently owned Execution is ordinary structured affine cleanup, not a trap
+or a general task-cancellation protocol.
 
 **Diagnostics:** A trap during required compile-time evaluation reports a compile-time diagnostic.
 A runtime trap terminates abnormally and must be distinguished from an unhandled typed failure.

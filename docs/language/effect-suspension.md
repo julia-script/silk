@@ -4,8 +4,10 @@
 deferred child through private execution machinery so a covered recursive Effect cycle can use
 bounded native and WebAssembly machine stack.
 
-Suspension is not async execution. It does not park a task, let another task run, wait for a wakeup,
-or introduce a scheduler. It also does not make ordinary recursion stack safe automatically.
+Nested suspension is not external parking. `Effect.suspend` does not park a task, let another task
+run, wait for a wakeup, or introduce a scheduler. Explicit independently owned executions provide
+the separate [external-parking boundary](independent-effect-executions.md#external-parking-and-readiness).
+Suspension also does not make ordinary recursion stack safe automatically.
 
 The intended public contract is:
 
@@ -33,8 +35,8 @@ instead of appearing as standalone language-reference rules.
   imply a thread, task, or scheduler.
 - **Execution stack** — finite compiler-owned storage for logically active suspended calls. It is
   distinct from the source-selected `Allocator` service and from the physical machine stack.
-- **Parking** — leave execution dormant until an external wakeup condition occurs. `Effect.suspend`
-  does not provide parking.
+- **Parking** — leave an explicitly owned execution dormant until an external readiness signal
+  occurs. `Effect.suspend` does not provide parking; `Intrinsic.park` provides the distinct boundary.
 
 ## Public contract and recursion
 
@@ -175,8 +177,9 @@ Exhausting the finite compiler-owned execution stack terminates with a fatal tra
 failure channel, like exhausting the ordinary machine stack.
 
 **Boundary:** `Effect.catch`, `catchAll`, `result`, or another typed-failure combinator cannot recover
-execution-stack exhaustion. A future explicit task or fiber constructor may define configurable or
-fallible storage without changing `Effect.suspend`.
+execution-stack exhaustion. Explicit Execution construction has separate caller-funded initial
+packaging, but later continuation growth retains this fatal policy. See
+[IEXEC-006](independent-effect-executions.md#iexec-006--pending-packaging-failure-and-stack-exhaustion-remain-distinct-outcomes).
 
 **Diagnostics:** No failure member or requirement is inferred. A reached exhaustion reports a fatal
 runtime trap according to the program-termination rules.
@@ -318,8 +321,8 @@ If this implementation satisfies the ordinary `Allocator` contract, its use of s
 extra conformance rule.
 
 **Boundary:** An allocator operation may independently be recursive or effectful and follows its
-own declared contract. A later task or fiber feature with fallible storage must define that storage
-contract separately.
+own declared contract. An explicit Execution wrapper procures its initial exact package through
+ordinary source allocation, but `Effect.suspend` itself retains no Allocator contract.
 
 **Diagnostics:** No allocator-specific conformance or recursion diagnostic applies merely because
 an allocator is reachable from suspendable code.
@@ -421,7 +424,7 @@ identify the uncovered cycle and the explicit nature of the suggested change.
 
 **Evidence:** [suspendability analysis](../../packages/compiler/test/Suspendability.test.ts).
 
-### SUSP-020 — Suspension promises no async or scheduler behavior
+### SUSP-020 — Nested suspension promises no external-parking or scheduler behavior
 
 **Status:** Confirmed
 
@@ -435,15 +438,18 @@ let value = run Effect.suspend(readNext())
 This transfers stack-safe execution of `readNext`; it does not wait for another task to publish a
 value unless `readNext` already has some separately defined synchronous way to complete.
 
-**Boundary:** Runtime parking, streams, queues, tasks, fibers, executors, and async I/O require a
-separate language direction covering registration, wakeup, ownership, cancellation, and cleanup.
+**Boundary:** The accepted SLP-0001 direction for independently resumable executions defines
+explicit ownership, registration, one-shot Wake readiness, and dormant cleanup; its implementation
+is still in progress. It does not change `Effect.suspend` and does not select canonical streams,
+queues, tasks, fibers, executors, timers, or async-I/O APIs.
 
 **Diagnostics:** Suspension alone adds no Scheduler, Executor, or concurrency service requirement.
 Using a future unavailable async construct receives that construct's own diagnostic rather than
 changing `Effect.suspend`.
 
 **Evidence:** [no ambient runtime facilities](runtime-and-standard-library.md#runtime-004--silk-has-no-ambient-runtime-facilities),
-[suspension implementation scope](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/proposal.md).
+[external parking](independent-effect-executions.md),
+[separate suspension operations](../../openspec/changes/add-external-wake-parking/specs/bootstrap-intrinsic-boundary/spec.md).
 
 ## Private lowering model
 

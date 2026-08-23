@@ -510,13 +510,12 @@ calls, ownership and cleanup, Effect construction and execution, typed failure, 
 entry boundary. A program gains additional facilities by importing ordinary APIs and explicitly
 constructing or providing their implementations.
 
-This rule describes the current synchronous execution model; it does not decide that future async
-execution can be implemented entirely as ordinary library code. The existing `Effect.suspend`
-operation transfers one deferred child through the explicit stack-safe execution boundary, but it
-does not park an unfinished execution or schedule another one. A future async and concurrency
-proposal may add a narrow compiler/runtime suspension seam for resumable frames, while defining
-schedulers, executors, queues, and user-facing policy as ordinary source over that seam. Programs
-that cannot reach runtime suspension or concurrency must still acquire no scheduler or fiber cost.
+The accepted SLP-0001 direction adds a narrow owner-neutral seam for explicitly owned,
+independently resumable Effect executions. Its implementation is still in progress. The seam can
+retain an unfinished execution, register external readiness, and make it eligible for a later
+source-selected drive. It creates no ambient scheduler, executor, queue, timer, Fiber, or host event
+loop. Those policies and facilities remain ordinary source. Programs that cannot reach the seam
+acquire none of its machinery under RUNTIME-006.
 
 This makes an allocation-free, host-independent program genuinely require no heap provider or host
 runtime:
@@ -530,10 +529,10 @@ pub fn main() -> i32 {
 **Boundary:** Compiler-planned storage for a value or callable representation is part of target
 lowering, not evidence of an ambient public allocator. A toolchain adapter may receive machine
 process state so an explicitly selected provider can expose it, but ordinary source cannot read that
-state without the provider contract. Any future runtime parking or async execution must specify
-wakeup, ownership while dormant, cancellation and cleanup, target support, and whether an executor
-is explicitly provided or selected; none of those contracts is inferred from `Effect.suspend`
-today.
+state without the provider contract. The accepted SLP-0001 direction defines explicit execution
+ownership, Wake readiness, and dormant cleanup; implementation is still in progress. It does not
+define an implicit root owner, canonical executor, timer policy, parallel transfer, or asynchronous
+host integration. None of those contracts is inferred from `Effect.suspend` or `Intrinsic.park`.
 
 **Diagnostics:** Using an unavailable language feature receives its language diagnostic; using an
 unprovided service receives a requirement diagnostic. The compiler must not silently initialize a
@@ -545,6 +544,7 @@ ambient source behavior or unavoidable artifact cost.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
 [Effect suspension](effect-suspension.md),
+[independently resumable executions](independent-effect-executions.md),
 [entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
 [minimum runtime exclusions](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md).
 
@@ -569,6 +569,8 @@ entry or freestanding build mode may define a different boundary.
 The adapter does not require a `Report` conformance, synthesize service providers, infer command-line
 parameters, or expose native ABI values to `main`. Process arguments, environment, current
 directory, and streams remain available only through explicitly selected ordinary services.
+It also does not implicitly own a park-capable root Execution; that separate boundary is defined by
+[ENTRY-006](program-entry.md#entry-006--external-parking-requires-an-explicit-root-owner).
 
 **Boundary:** Target implementations may use different private machine signatures—for example a
 native process entry versus an exported direct-Wasm function—while preserving the same applicable
@@ -587,6 +589,48 @@ a trivial closed entry links no stream, command-line, scheduler, allocator, or p
 **Evidence:** [program entry](program-entry.md),
 [entry termination specification](../../openspec/specs/bootstrap-entry-termination/spec.md),
 [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
+
+### RUNTIME-006 — Suspension and execution machinery is selected statically
+
+**Status:** Confirmed
+
+**Implementation:** In progress under SLP-0001.
+
+Every complete specialization has a deterministic suspension summary. The executable closure uses
+that summary and explicit ownership to select the minimum required tier:
+
+| Source behavior | Runtime machinery |
+| --- | --- |
+| ordinary `run` with no suspension | direct execution |
+| ordinary `run` with nested `Effect.suspend` only | nested/LIFO suspension |
+| explicit non-parking Execution | owned erased body and lifecycle package |
+| explicit Execution that can externally park | owned dormant continuation, endpoint, and Wake control |
+
+An explicit Execution is a static propagation delimiter. Parking reachable inside its body selects
+independent machinery for that Execution without making the ordinary source owner park-capable
+through `drive`.
+
+```silk
+pub fn main() -> i32 {
+  return 42
+}
+```
+
+This program selects none of the suspension or independent-execution tiers.
+
+**Boundary:** An explicit non-suspending Execution still owns a caller-funded package and an erased
+droppable body. It does not have the same semantic cost as ordinary direct `run`. A dynamically
+non-parking branch still uses the external-parking tier when parking remains statically reachable.
+Importing or naming ordinary Scheduler, Fiber, Deferred, timer, or Coroutine actors selects no
+runtime machinery.
+
+**Diagnostics and audit:** Static tier selection produces no source diagnostic. Artifact checks
+reject unreachable coroutine frames, Wake state, scheduler support, host imports, or atomics. A
+reachable intrinsic unavailable on the selected target receives TARGET-003's compatibility error.
+
+**Evidence:** [independent execution tiers](independent-effect-executions.md#iexec-007--static-reachability-selects-direct-nested-and-independent-execution-costs),
+[suspension mode semantics](../../openspec/changes/establish-independent-execution-semantics/specs/bootstrap-independent-execution-semantics/spec.md),
+[pay-for-use evidence](../../openspec/changes/prove-independent-execution-separation/specs/bootstrap-independent-execution-pressure/spec.md).
 
 ## Distribution compatibility and diagnostics
 
@@ -722,8 +766,8 @@ The following are deliberately outside the first stable model:
 - compiler-selected or overridable default service providers;
 - optional service requirements, including absence, selection, and entry-closure semantics;
 - public FFI, stable ABI, dynamic linking, and user-selected runtime implementations;
-- runtime suspension, concurrency, scheduler/executor selection, async I/O, streams, networking,
-  entropy, and wall-clock facilities;
+- canonical concurrency, scheduler/executor policy, structured cancellation, parallel execution,
+  async I/O, streams, networking, entropy, and wall-clock facilities;
 - alternative standard-library profiles or “no-stdlib” project configuration in the official
   toolchain; and
 - omitted struct fields, field defaults, and any deliberate integration with ordinary `Option`.

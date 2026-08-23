@@ -30,6 +30,9 @@ pub effect fn main() {
 
 An empty effect entry succeeds with `()`.
 
+An effect entry whose specialized graph can reach external parking must also satisfy ENTRY-006's
+explicit-root-ownership rule.
+
 **Boundary:** Removing `pub` makes the function private and leaves the executable without a usable
 entry.
 
@@ -219,6 +222,47 @@ missing-result diagnostic.
 
 **Evidence:** [confirmed stabilization decision](README.md),
 [TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
+
+## ENTRY-006 — External parking requires an explicit root owner
+
+**Status:** Confirmed
+
+**Implementation:** In progress under SLP-0001.
+
+SLP-0001 defines external parking only inside an explicitly constructed
+`Intrinsic.Execution<A>`. A complete entry whose specialized graph can reach `Intrinsic.park`
+without that delimiter is invalid even when its Effect requirement row is empty.
+
+```silk,ignore
+effect fn waitForEvent() -> () {
+  run Intrinsic.park(registerEvent)
+  return ()
+}
+
+pub effect fn main() {
+  return run waitForEvent()
+}
+```
+
+The generated entry adapter executes the entry Effect once, but SLP-0001 does not make that adapter
+an implicit Execution owner. The compiler does not create a global Scheduler, infer an owner from a
+library actor, select host waiting or polling, or define delivery of a later final outcome.
+
+Ordinary source can instead close a body, explicitly construct an Execution, and hand it to an
+explicit source driver. External-parking reachability is then owned by that Execution and stops at
+the construction delimiter.
+
+**Boundary:** This rule is separate from ENTRY-004. Providing every service closes the requirement
+row but does not provide ownership for a dormant root. SLP-0003 owns any future decision to adapt a
+complete entry into an implicit Execution.
+
+**Diagnostics:** Analysis rejects the unowned park-capable root before backend emission. The
+diagnostic identifies the missing explicit execution owner and remains distinct from unresolved
+requirements. No stable code is yet assigned.
+
+**Evidence:** [SLP-0001 implicit-root boundary](../../proposals/0001-independently-resumable-effect-executions/proposal.md#implicit-root-boundary),
+[explicit-entry ownership requirement](../../openspec/changes/establish-independent-execution-semantics/specs/bootstrap-independent-execution-semantics/spec.md),
+[parking boundary](independent-effect-executions.md#park-001--park-registers-readiness-before-relinquishment).
 
 Exact process-report behavior is defined in
 [program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass

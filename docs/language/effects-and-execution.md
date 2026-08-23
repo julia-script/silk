@@ -288,7 +288,8 @@ language-level Effect model is defined in focused pages:
 | Captures, run access, reuse, and cleanup | [Ownership and borrowing](ownership-and-borrowing.md) |
 | Typed propagation, recovery, and traps | [Typed failures](typed-failures.md) |
 | Stack-safe recursive transfer | [Effect suspension and stack-safe recursion](effect-suspension.md) |
-| Cancellation, interruption, concurrency, and async cleanup | Not part of the stabilized language |
+| Explicit ownership, external parking, and Wake readiness | [Accepted SLP-0001 direction; implementation in progress](independent-effect-executions.md) |
+| Canonical fibers, scheduling, structured cancellation, and parallel execution | Not yet selected |
 
 The standard-library operations built from these rules—including `of`, `result`, `mapBoth`, `map`,
 `mapError`, `flatMap`, `flatten`, `zip`, `zip3`, `tap`, `catch`, `catchAll`, `ensuring`,
