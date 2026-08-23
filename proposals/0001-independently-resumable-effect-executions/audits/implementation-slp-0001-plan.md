@@ -5,7 +5,7 @@ SLP revision: 31
 SLP digest: `963a7420f16bce3bd0ec50acd906b4a4ee43319d132c5452d3686cde643c5635`
 Integration branch: `julia/slp-0001-reaudit`
 Started: 2026-08-23
-State: Parked
+State: Running (resume 1)
 
 ## Dependency DAG
 
@@ -33,10 +33,10 @@ merge, the integration branch runs the full repository gates before the next lay
 | Layer | Change | State | Gate attempts | Stop reason | Findings |
 | --- | --- | --- | ---: | --- | ---: |
 | 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
-| 2 | `add-independent-execution-packaging` | Parked | 3 fixes; fourth root cause stopped | `pnpm test`: finite Effect joins become `Blocked` instead of `Completed` | 7 reviewed; 5 fixed, 1 parked, 1 accepted scope boundary |
-| 3 | `add-external-wake-parking` | Parked | — | Downstream of parked layer 2 | — |
-| 4 | `add-independent-execution-engine-parity` | Parked | — | Downstream of parked layer 2 | — |
-| 5 | `prove-independent-execution-separation` | Parked | — | Downstream of parked layer 2 | — |
+| 2 | `add-independent-execution-packaging` | Running | 3 fixes in initial run | Fresh bounded run starts from `23e4550`; finite Effect-join regression first | 7 initial findings; conformance pending |
+| 3 | `add-external-wake-parking` | Pending | — | Waiting for layer 2 | — |
+| 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 | — |
+| 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
 
 ## Integration gates
 
@@ -53,3 +53,6 @@ Exact next action: start a fresh bounded implementation run for
 `add-independent-execution-packaging`; trace represented-executable layout selection in the finite
 Effect-join path, restore `Completed` outcomes without weakening execution-package planning, rerun
 all hard gates, and then run the single three-lens conformance pass.
+
+Resume 1 started after opening draft PR #248. The preserved Layer 2 commit is the implementation
+baseline; the fresh gate budget applies only to new root causes discovered in this resumed run.
