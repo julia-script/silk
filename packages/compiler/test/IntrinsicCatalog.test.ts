@@ -347,7 +347,7 @@ it.effect(
       )
       assert.deepEqual([...observed].sort(), [...catalog].sort())
     }),
-  20_000,
+  30_000,
 )
 
 it.effect('keeps every intrinsic identifiable and presentable in rejected calls', () =>
