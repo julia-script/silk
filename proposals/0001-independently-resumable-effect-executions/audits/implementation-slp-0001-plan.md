@@ -1,0 +1,43 @@
+# SLP-0001 implementation plan
+
+SLP: `proposals/0001-independently-resumable-effect-executions/proposal.md`
+SLP revision: 31
+SLP digest: `963a7420f16bce3bd0ec50acd906b4a4ee43319d132c5452d3686cde643c5635`
+Integration branch: `julia/slp-0001-reaudit`
+Started: 2026-08-23
+State: Running
+
+## Dependency DAG
+
+```text
+establish-independent-execution-semantics
+  -> add-independent-execution-packaging
+    -> add-external-wake-parking
+      -> add-independent-execution-engine-parity
+        -> prove-independent-execution-separation
+```
+
+The SLP-0002 prerequisite for the final separation slice is archived and satisfied. Every layer has
+width one because each SLP-0001 change depends on the preceding change and the compiler work shares
+core semantic, MIR, ownership, evaluator, and backend files.
+
+## Execution policy
+
+Each change runs in its own worktree. A change must complete its OpenSpec tasks, hard gates, and one
+three-lens conformance pass before integration. Hard-gate fixes are capped at three distinct root
+causes; verified in-scope Critical/High conformance findings receive at most one fix pass. After each
+merge, the integration branch runs the full repository gates before the next layer starts.
+
+## Layer outcomes
+
+| Layer | Change | State | Gate attempts | Stop reason | Findings |
+| --- | --- | --- | ---: | --- | ---: |
+| 1 | `establish-independent-execution-semantics` | Running | — | — | — |
+| 2 | `add-independent-execution-packaging` | Pending | — | Waiting for layer 1 | — |
+| 3 | `add-external-wake-parking` | Pending | — | Waiting for layer 2 | — |
+| 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 | — |
+| 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
+
+## Integration gates
+
+No layer has reached the integration barrier yet.
