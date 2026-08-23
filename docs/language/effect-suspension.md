@@ -36,6 +36,39 @@ instead of appearing as standalone language-reference rules.
 - **Parking** — leave execution dormant until an external wakeup condition occurs. `Effect.suspend`
   does not provide parking.
 
+## Static execution facts
+
+Semantic inspection records one normalized suspension summary for every reachable exact executable.
+Direct execution has no mode bit. `NestedTransfer` means the selected call graph can reach
+`Effect.suspend`; `ExternalPark` is reserved for the sealed external-wake primitive. Complete
+specializations include ordinary helper calls and selected provider implementations. An unresolved
+generic executable conservatively retains the modes permitted by its declared exact bound, while an
+unavailable executable remains unavailable rather than being reported as direct.
+
+This is a target-neutral semantic substrate, not a new source operation. The current slice does not
+add public construction, drive, wake, or park functions. An explicit sealed `Execution` construction
+is the propagation delimiter: its erased body keeps its complete summary, while an ordinary
+owner-side drive caller does not inherit the body's `ExternalPark` mode.
+
+Two compiler-owned properties may refine one exact Effect or callable representation bound:
+
+- `Intrinsic.Detached` proves that the executable retains no external lexical or provider loan.
+  It is independent of the success and failure payload spellings and of execution affinity; an
+  owned local shared handle may be detached while remaining local.
+- `Intrinsic.NonParking` proves that the specialized transitive graph cannot reach external
+  parking. Nested transfer remains allowed.
+
+These properties are static, witness-free obligations rather than interfaces or services. A failed
+concrete application reports the property obligation at the application and retains its stable
+capture/provider or reachability path.
+
+`Intrinsic.Execution<A>` is an opaque affine, non-copyable, initially non-thread-transferable local
+identity. Its logical lifecycle is `Initial`, `Running`, `Dormant`, `Notifying`, `Eligible`,
+`Completed`, and `Destroyed`; these are semantic states, not a promised backend tag layout. The
+owner may drive only `Initial` or `Eligible`, and driving a dormant or notifying execution is a
+fatal intrinsic-state trap. Execution-internal stable loans may cross parking, but construction
+cannot retain caller loans and completion cannot return a loan into package-owned storage.
+
 ## Public contract and recursion
 
 ### SUSP-001 — Suspension is an explicit boundary

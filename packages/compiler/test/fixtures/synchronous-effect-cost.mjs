@@ -721,11 +721,18 @@ try {
             ).length,
           }),
           runners,
-          suspendability: Object.freeze({
-            instances: wasm.instances.suspendable.map(identity),
-            executions: wasm.instances.suspendableExecutions.map(identity),
-            effects: wasm.instances.suspendableEffects,
-          }),
+          suspension: Object.freeze(
+            wasm.instances.suspension.map((fact) =>
+              Object.freeze({
+                subject:
+                  fact.subject._tag === 'Effect'
+                    ? `Effect:${fact.subject.identity}`
+                    : `${fact.subject._tag}:${identity(fact.subject.key)}`,
+                availability: fact.summary.availability,
+                modes: fact.summary.modes,
+              }),
+            ),
+          ),
           coroutineFrameDescriptors,
           pipeTokens: Object.freeze({
             hir: occurrences(hir, /\|>/g),

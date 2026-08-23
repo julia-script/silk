@@ -7,6 +7,7 @@ import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
 type Instance = Instances.Instance
@@ -14,9 +15,11 @@ type InstanceKey = Instances.InstanceKey
 type IntrinsicCall = Instances.IntrinsicCall
 
 export interface SuspensionGraph {
-  readonly roots: ReadonlySet<string>
+  readonly roots: ReadonlyMap<SuspensionMode.Mode, ReadonlySet<string>>
   readonly dependencies: ReadonlyMap<string, ReadonlySet<string>>
   readonly effectIdentities: ReadonlySet<string>
+  readonly permitted: ReadonlyMap<string, ReadonlySet<SuspensionMode.Mode>>
+  readonly unavailable: ReadonlySet<string>
 }
 
 export interface CallTarget {
@@ -80,21 +83,10 @@ export const reachableIntrinsics = (
   return Object.freeze([...retained.values()].sort(compareIntrinsicCalls))
 }
 
-/** Computes the transitive set of executions that can reach a suspension root. */
-export const suspendableNodes = (graph: SuspensionGraph): ReadonlySet<string> => {
-  const suspendable = new Set(graph.roots)
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const [owner, targets] of graph.dependencies) {
-      if (suspendable.has(owner) || ![...targets].some((target) => suspendable.has(target)))
-        continue
-      suspendable.add(owner)
-      changed = true
-    }
-  }
-  return suspendable
-}
+/** Computes normalized direct/nested/external-park facts for every execution node. */
+export const suspensionSummaries = (
+  graph: SuspensionGraph,
+): ReadonlyMap<string, SuspensionMode.Summary> => SuspensionMode.summarize(graph)
 
 export interface Operations {
   readonly specializeInstanceType: (
@@ -1460,7 +1452,7 @@ export const make = (operations: Operations) => {
    */
   const concreteEffects = (
     instances: ReadonlyArray<Instance>,
-    suspendableEffects: ReadonlySet<string>,
+    suspension: ReadonlyMap<string, SuspensionMode.Summary>,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
     callables: ReadonlyArray<CallableInstance>,
@@ -1479,30 +1471,34 @@ export const make = (operations: Operations) => {
       const blocks = callableExpressions(instance.function).flatMap((expression) =>
         expression._tag === 'EffectBlock' ? [expression] : [],
       )
-      const forwardedProvider = forwardedRequirementBinding(instance.function)
-      const forwardedSelected =
-        forwardedProvider === undefined
-          ? undefined
-          : selectedRequirement(forwardedProvider, instance.substitution)
-      const forwardedCapability = forwardedSelected?.capability
-      const forwardedRequirement =
-        forwardedProvider !== undefined &&
-        forwardedSelected !== undefined &&
-        forwardedCapability !== undefined &&
-        Type.isNominal(forwardedCapability)
-          ? Object.freeze({
-              parameter: forwardedProvider.provider.parameter?.ordinal,
-              capability: forwardedCapability,
-              role: forwardedSelected.role,
-              requirementAccess: forwardedSelected.access,
-              providerAccess: forwardedProvider.provider.selectionAccess,
-            })
-          : undefined
       for (const block of blocks) {
         const specializedType = specializeInstanceType(block.type, instance.key, [
           instance.substitution,
         ])
         if (!Type.isEffect(specializedType) || !Type.isRuntimeConcrete(specializedType)) continue
+        const providedRequirements = block.statements
+          .flatMap(Hir.statementExpressions)
+          .flatMap(Hir.expressionTree)
+          .flatMap((expression) => {
+            if (expression._tag !== 'EffectBindRequirement') return []
+            const selected = selectedRequirement(expression, instance.substitution)
+            return selected !== undefined && Type.isNominal(selected.capability)
+              ? [
+                  Object.freeze({
+                    parameter: expression.provider.parameter?.ordinal,
+                    capability: selected.capability,
+                    role: selected.role,
+                    requirementAccess: selected.access,
+                    providerAccess: expression.provider.selectionAccess,
+                  }),
+                ]
+              : []
+          })
+          .sort((left, right) => {
+            const leftKey = `${left.parameter ?? -1}\0${Type.key(left.capability)}\0${left.role}`
+            const rightKey = `${right.parameter ?? -1}\0${Type.key(right.capability)}\0${right.role}`
+            return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+          })
         const captures = block.captures.flatMap((capture, ordinal) => {
           const source = capture.binding === undefined ? 'Parameter' : 'Binding'
           const sourceOrdinal = capture.binding?.ordinal ?? capture.parameter?.ordinal
@@ -1539,6 +1535,37 @@ export const make = (operations: Operations) => {
                 ? undefined
                 : callableOriginOf(initializer, context)
             : undefined
+          const providedRequirement =
+            source === 'Parameter'
+              ? (providedRequirements.find(
+                  (requirement) => requirement.parameter === sourceOrdinal,
+                ) ??
+                instance.specialization.evidence
+                  .flatMap((evidence) => {
+                    if (
+                      evidence._tag !== 'RequirementSelection' ||
+                      !Type.isNominal(evidence.selected.capability)
+                    )
+                      return []
+                    const providerMatches = Type.isReference(specialized)
+                      ? Type.equals(specialized.target, evidence.provider) &&
+                        specialized.access === evidence.providerMode
+                      : evidence.providerMode === 'Take' &&
+                        Type.equals(specialized, evidence.provider)
+                    return providerMatches
+                      ? [
+                          Object.freeze({
+                            parameter: sourceOrdinal,
+                            capability: evidence.selected.capability,
+                            role: evidence.selected.role,
+                            requirementAccess: evidence.selected.access,
+                            providerAccess: evidence.providerMode,
+                          }),
+                        ]
+                      : []
+                  })
+                  .at(0))
+              : undefined
           return [
             Object.freeze({
               ordinal,
@@ -1552,16 +1579,16 @@ export const make = (operations: Operations) => {
               ...(capturedCallableIdentity === undefined
                 ? {}
                 : { callableIdentity: capturedCallableIdentity }),
-              ...(forwardedRequirement?.parameter === sourceOrdinal && source === 'Parameter'
-                ? {
+              ...(providedRequirement === undefined
+                ? {}
+                : {
                     providedRequirement: Object.freeze({
-                      capability: forwardedRequirement.capability,
-                      role: forwardedRequirement.role,
-                      requirementAccess: forwardedRequirement.requirementAccess,
-                      providerAccess: forwardedRequirement.providerAccess,
+                      capability: providedRequirement.capability,
+                      role: providedRequirement.role,
+                      requirementAccess: providedRequirement.requirementAccess,
+                      providerAccess: providedRequirement.providerAccess,
                     }),
-                  }
-                : {}),
+                  }),
             }),
           ]
         })
@@ -1579,7 +1606,7 @@ export const make = (operations: Operations) => {
             typeArguments: Object.freeze([...instance.key.typeArguments]),
             captures: Object.freeze(captures),
             type: specializedType,
-            suspendable: suspendableEffects.has(identity),
+            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
           }),
         )
       }
@@ -1642,7 +1669,7 @@ export const make = (operations: Operations) => {
               }),
             ]),
             type,
-            suspendable: suspendableEffects.has(identity),
+            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
           }),
         )
       }
@@ -1736,9 +1763,27 @@ export const make = (operations: Operations) => {
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
   ): SuspensionGraph => {
-    const roots = new Set<string>()
+    const nestedRoots = new Set<string>()
+    const externalRoots = new Set<string>()
     const dependencies = new Map<string, Set<string>>()
     const effectIdentities = new Set<string>()
+    const permitted = new Map<string, Set<SuspensionMode.Mode>>()
+    const unavailable = new Set<string>()
+    const serviceCalls = new Map<
+      string,
+      {
+        readonly service: Type.Nominal
+        readonly role: string
+        readonly access: 'Shared' | 'Exclusive'
+        readonly operation: string
+      }
+    >()
+    const pendingProviderBindings: Array<{
+      readonly execution: string
+      readonly protectedTargets: ReadonlyArray<string>
+      readonly selected: Type.Requirement
+      readonly witness: DeclarationFacts.ConformanceWitness
+    }> = []
     const resolveEffectIdentity = (identity: Type.EffectIdentityArgument): string | undefined => {
       const candidates = instances.flatMap((instance) => {
         const owner = identity.owner
@@ -1767,7 +1812,32 @@ export const make = (operations: Operations) => {
       targets.add(target)
       dependencies.set(owner, targets)
     }
-
+    const discoveredTarget = (target: CallTarget): InstanceKey | undefined =>
+      instances.find(
+        (candidate) =>
+          candidate.key.declaration.module === target.declaration.module &&
+          candidate.key.declaration.name === target.declaration.name &&
+          candidate.key.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument))
+            .length === target.typeArguments.length &&
+          candidate.key.typeArguments
+            .filter((argument) => !Type.isHiddenIdentityArgument(argument))
+            .every((argument, ordinal) => {
+              const expected = target.typeArguments.at(ordinal)
+              return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+            }),
+      )?.key
+    const executionNodeForKey = (key: InstanceKey): string => {
+      const result = instances.find(
+        (candidate) => keyText(candidate.key) === keyText(key),
+      )?.resultEffect
+      return result === undefined ? instanceNode(key) : effectNode(result)
+    }
+    const serviceCallNode = (
+      service: Type.Nominal,
+      role: string,
+      access: 'Shared' | 'Exclusive',
+      operation: string,
+    ): string => `service\0${Type.key(service)}\0${role}\0${access}\0${operation}`
     for (const instance of instances) {
       const context: EffectOriginContext = {
         fn: instance.function,
@@ -1844,10 +1914,20 @@ export const make = (operations: Operations) => {
                 binding.provider.selectionAccess === 'Take')
             )
           })
+          const selectedEvidence = instance.specialization.evidence.find(
+            (evidence) =>
+              evidence._tag === 'RequirementSelection' &&
+              Type.isNominal(evidence.selected.capability) &&
+              Type.equals(evidence.selected.capability, service) &&
+              evidence.selected.role === expression.role &&
+              (expression.access === 'Shared' || evidence.selected.access === 'Exclusive'),
+          )
           const witness =
-            selected === undefined
-              ? undefined
-              : requirementBindingWitness(selected, instance.substitution, index)
+            selected !== undefined
+              ? requirementBindingWitness(selected, instance.substitution, index)
+              : selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)
+                ? ConformanceProof.witness(index, selectedEvidence.provider, service)
+                : undefined
           const operation =
             witness?._tag !== 'SourceConformanceWitness'
               ? undefined
@@ -1868,11 +1948,25 @@ export const make = (operations: Operations) => {
             targetKey === undefined || target === undefined
               ? undefined
               : resultEffectIdentity(target, targetKey, results, index)
-          return identity !== undefined
-            ? Object.freeze([effectNode(identity)])
-            : targetKey === undefined
-              ? []
-              : Object.freeze([instanceNode(targetKey)])
+          if (identity !== undefined) return Object.freeze([effectNode(identity)])
+          if (targetKey !== undefined) return Object.freeze([instanceNode(targetKey)])
+          if (!Type.isNominal(service)) return []
+          const node = serviceCallNode(
+            service,
+            expression.role,
+            expression.access,
+            expression.operation,
+          )
+          serviceCalls.set(
+            node,
+            Object.freeze({
+              service,
+              role: expression.role,
+              access: expression.access,
+              operation: expression.operation,
+            }),
+          )
+          return Object.freeze([node])
         }
         return Object.freeze(effectOrigins(expression).map(effectNode))
       }
@@ -1887,6 +1981,22 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'UnionConvert') return isSuspensionSubject(expression.source)
         if (expression._tag === 'EffectBindRequirement')
           return isSuspensionSubject(expression.protected)
+        return false
+      }
+
+      const isExternalParkSubject = (expression: Hir.Expression): boolean => {
+        if (
+          expression._tag === 'BuiltinCall' &&
+          expression.intrinsic.actor === 'Intrinsic' &&
+          expression.intrinsic.name === 'park'
+        )
+          return true
+        if (expression._tag === 'BindingReference') {
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer !== undefined && isExternalParkSubject(initializer)
+        }
+        if (expression._tag === 'Move') return isExternalParkSubject(expression.subject)
+        if (expression._tag === 'UnionConvert') return isExternalParkSubject(expression.source)
         return false
       }
 
@@ -1937,7 +2047,24 @@ export const make = (operations: Operations) => {
           scanExpression(expression.handler, catchExecution)
           return
         }
-        if (expression._tag === 'Call') {
+        if (expression._tag === 'EffectBindRequirement') {
+          const bindingExecution =
+            instance.resultEffect === undefined ? execution : effectNode(instance.resultEffect)
+          const protectedTargets = executionTargets(expression.protected)
+          for (const target of protectedTargets) addDependency(bindingExecution, target)
+          const selected = selectedRequirement(expression, instance.substitution)
+          const witness =
+            requirementBindingWitness(expression, instance.substitution, index) ??
+            expression.provider.witness
+          if (
+            selected !== undefined &&
+            Type.isNominal(selected.capability) &&
+            witness !== undefined
+          )
+            pendingProviderBindings.push(
+              Object.freeze({ execution: bindingExecution, protectedTargets, selected, witness }),
+            )
+        } else if (expression._tag === 'Call') {
           const target = targetKeyOfCall(expression, context)
           if (target !== undefined) addDependency(execution, instanceNode(target))
         } else if (expression._tag === 'EffectConstruct') {
@@ -1950,7 +2077,9 @@ export const make = (operations: Operations) => {
           if (target !== undefined) addDependency(execution, instanceNode(target))
         } else if (expression._tag === 'Run') {
           if (isSuspensionSubject(expression.subject)) {
-            roots.add(execution)
+            nestedRoots.add(execution)
+          } else if (isExternalParkSubject(expression.subject)) {
+            externalRoots.add(execution)
           } else {
             for (const target of executionTargets(expression.subject))
               addDependency(execution, target)
@@ -1970,7 +2099,50 @@ export const make = (operations: Operations) => {
       scanStatements(instance.function.statements, instanceNode(instance.key))
     }
 
-    return Object.freeze({ roots, dependencies, effectIdentities })
+    for (const binding of pendingProviderBindings) {
+      const pending = [...binding.protectedTargets]
+      const visited = new Set<string>()
+      while (pending.length > 0) {
+        const node = pending.shift()
+        if (node === undefined || visited.has(node)) continue
+        visited.add(node)
+        const serviceCall = serviceCalls.get(node)
+        if (
+          serviceCall !== undefined &&
+          Type.equals(serviceCall.service, binding.selected.capability) &&
+          serviceCall.role === binding.selected.role &&
+          (serviceCall.access === 'Shared' || binding.selected.access === 'Exclusive')
+        ) {
+          const operation =
+            binding.witness._tag === 'SourceConformanceWitness'
+              ? ConformanceProof.witnessOperation(binding.witness, serviceCall.operation)
+              : undefined
+          const target =
+            operation === undefined
+              ? undefined
+              : discoveredTarget({
+                  declaration: operation,
+                  typeArguments:
+                    binding.witness._tag === 'SourceConformanceWitness'
+                      ? binding.witness.typeArguments
+                      : Object.freeze([]),
+                })
+          if (target !== undefined) addDependency(binding.execution, executionNodeForKey(target))
+        }
+        for (const target of dependencies.get(node) ?? []) pending.push(target)
+      }
+    }
+
+    return Object.freeze({
+      roots: new Map<SuspensionMode.Mode, ReadonlySet<string>>([
+        ['NestedTransfer', nestedRoots],
+        ['ExternalPark', externalRoots],
+      ]),
+      dependencies,
+      effectIdentities,
+      permitted,
+      unavailable,
+    })
   }
 
   return Object.freeze({

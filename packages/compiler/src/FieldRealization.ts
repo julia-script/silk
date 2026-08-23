@@ -3,6 +3,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
 /**
@@ -487,7 +488,7 @@ const effectShape = (effect: Instances.EffectInstance): string =>
     `${effect.runner.module}.${effect.runner.name}`,
     effect.typeArguments.map(Type.genericArgumentKey).join(','),
     Type.key(effect.type),
-    effect.suspendable ? 'suspendable' : 'synchronous',
+    SuspensionMode.has(effect.suspension, 'NestedTransfer') ? 'suspendable' : 'synchronous',
     ...effect.captures.map(
       (capture) =>
         `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.key(capture.type)}:${capture.effectIdentity ?? ''}:${capture.callableIdentity === undefined ? '' : Type.genericArgumentKey(capture.callableIdentity)}`,
@@ -576,7 +577,7 @@ const realizeEffectField = (
       access: contract.access,
       environment,
       cleanup: effectCleanup(environment, contract.access),
-      suspendable: selected.suspendable,
+      suspendable: SuspensionMode.has(selected.suspension, 'NestedTransfer'),
     }),
   })
 }

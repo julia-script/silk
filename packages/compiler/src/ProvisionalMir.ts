@@ -7,6 +7,7 @@ import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Suspension from './Suspension.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
 /**
@@ -274,7 +275,7 @@ const classificationOfEffect = (
 ): Classification =>
   identity === undefined
     ? 'Unknown'
-    : Instances.isEffectSuspendable(discovery, identity)
+    : SuspensionMode.has(Instances.effectSuspensionOf(discovery, identity), 'NestedTransfer')
       ? 'Suspendable'
       : 'Synchronous'
 
@@ -602,7 +603,10 @@ const runnerOf = (
       if (
         resultEffect !== undefined &&
         (context.effectClassifications.get(resultEffect) === 'Suspendable' ||
-          Instances.isEffectSuspendable(context.discovery, resultEffect))
+          SuspensionMode.has(
+            Instances.effectSuspensionOf(context.discovery, resultEffect),
+            'NestedTransfer',
+          ))
       )
         return 'Suspendable'
       const capability = Type.substitute(service.service, owner.substitution)
@@ -621,9 +625,15 @@ const runnerOf = (
       if (
         candidates.some(
           (candidate) =>
-            Instances.isSuspendable(context.discovery, candidate.key) ||
+            SuspensionMode.has(
+              Instances.suspensionOf(context.discovery, candidate.key),
+              'NestedTransfer',
+            ) ||
             (candidate.resultEffect !== undefined &&
-              Instances.isEffectSuspendable(context.discovery, candidate.resultEffect)),
+              SuspensionMode.has(
+                Instances.effectSuspensionOf(context.discovery, candidate.resultEffect),
+                'NestedTransfer',
+              )),
         )
       )
         return 'Suspendable'
@@ -1051,9 +1061,9 @@ export const build = (
         functionOrdinal: instance.function.declaration.id.ordinal,
         identity: Instances.keyText(instance.key),
       })
-      const instanceClassification: Classification = Instances.isExecutionSuspendable(
-        discovery,
-        instance.key,
+      const instanceClassification: Classification = SuspensionMode.has(
+        Instances.executionSuspensionOf(discovery, instance.key),
+        'NestedTransfer',
       )
         ? 'Suspendable'
         : 'Synchronous'

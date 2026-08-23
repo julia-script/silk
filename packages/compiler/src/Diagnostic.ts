@@ -175,6 +175,12 @@ export const ambiguousOperatorCode = 'SEM0136' as const
 export const misplacedUnsafeAcknowledgementCode = 'SEM0137' as const
 /** Stable code for a statically known allocation/layout specialization mismatch. */
 export const localSharedLayoutMismatchCode = 'SEM0138' as const
+/** Stable code for a concrete executable that fails one sealed static-property obligation. */
+export const unsatisfiedExecutablePropertyCode = 'SEM0139' as const
+/** Stable code for an externally parking entry with no explicit Execution owner. */
+export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
+/** Stable code for an ordinary capability conjoined with one exact executable bound. */
+export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -393,6 +399,9 @@ export type Code =
   | typeof ambiguousOperatorCode
   | typeof misplacedUnsafeAcknowledgementCode
   | typeof localSharedLayoutMismatchCode
+  | typeof unsatisfiedExecutablePropertyCode
+  | typeof missingExplicitExecutionOwnerCode
+  | typeof invalidExecutablePropertyConjunctCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -524,6 +533,13 @@ export type Reason =
       readonly expected: string
       readonly actual: string
     }
+  | {
+      readonly _tag: 'UnsatisfiedExecutableProperty'
+      readonly property: 'Intrinsic.Detached' | 'Intrinsic.NonParking'
+      readonly causes: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'MissingExplicitExecutionOwner'; readonly summary: string }
+  | { readonly _tag: 'InvalidExecutablePropertyConjunct'; readonly conjunct: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
   | {
@@ -2994,6 +3010,56 @@ export const localSharedLayoutMismatch = (
         span: allocationSpan,
       }),
     ]),
+  })
+
+/** Diagnoses one failed sealed-property check at its concrete application obligation. */
+export const unsatisfiedExecutableProperty = (
+  property: 'Intrinsic.Detached' | 'Intrinsic.NonParking',
+  causes: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsatisfiedExecutablePropertyCode,
+    severity: 'error',
+    message: `${property} is unsatisfied: ${causes.join('; ')}`,
+    reason: Object.freeze({
+      _tag: 'UnsatisfiedExecutableProperty',
+      property,
+      causes: Object.freeze(Array.from(causes)),
+    }),
+    span,
+  })
+
+/** Diagnoses external parking whose complete entry has no explicit owner delimiter. */
+export const missingExplicitExecutionOwner = (
+  summary: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingExplicitExecutionOwnerCode,
+    severity: 'error',
+    message: 'External parking requires an explicit Intrinsic.Execution owner',
+    reason: Object.freeze({ _tag: 'MissingExplicitExecutionOwner', summary }),
+    span,
+  })
+
+/** Rejects ordinary interface/service bounds in the sealed exact-executable conjunction lane. */
+export const invalidExecutablePropertyConjunct = (
+  conjunct: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidExecutablePropertyConjunctCode,
+    severity: 'error',
+    message: `${conjunct} is not a sealed executable property`,
+    reason: Object.freeze({ _tag: 'InvalidExecutablePropertyConjunct', conjunct }),
+    span,
   })
 
 export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>

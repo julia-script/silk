@@ -2,7 +2,9 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
+import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
+import * as ExecutionLifecycle from '../src/ExecutionLifecycle.js'
 import * as Hir from '../src/Hir.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -815,6 +817,162 @@ it.effect('realizes immutable target snapshots from the same frontend facts', ()
         .slice(Analysis.phases(frontend).length)
         .map((entry) => entry.phase),
       ['instance-discovery', 'target-layout', 'mir-lowering'],
+    )
+  }),
+)
+
+it.effect('publishes sealed affine Execution identity, affinity, and logical lifecycle facts', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'execution-semantics',
+      ascii(
+        `struct Execution<T> { value: T }
+struct NestedLoan { value: &i32 }
+fn retain(value: Intrinsic.Execution<i32>) -> () { drop value }
+fn ordinary(value: Execution<i32>) -> () { drop value }
+pub fn main() -> i32 { return 42 }`,
+      ),
+    )
+    const intrinsic = self.index.modules
+      .at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'retain',
+      )
+      ?.parameters.at(0)?.declaredType
+    const ordinary = self.index.modules
+      .at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'ordinary',
+      )
+      ?.parameters.at(0)?.declaredType
+
+    assert.strictEqual(intrinsic?._tag, 'Resolved')
+    if (intrinsic?._tag !== 'Resolved') return
+    assert.isTrue(Type.isExecution(intrinsic.type))
+    assert.strictEqual(ExecutionAffinity.ofType(self.index, intrinsic.type)._tag, 'LocalExecution')
+    const fact = ExecutionLifecycle.ofType(self.index, intrinsic.type)
+    assert.strictEqual(fact._tag, 'Available')
+    if (fact._tag !== 'Available') return
+    assert.strictEqual(fact.fact.identity, 'Intrinsic.Execution')
+    assert.isTrue(fact.fact.affine)
+    assert.isFalse(fact.fact.copy)
+    assert.isFalse(fact.fact.threadTransfer)
+    assert.strictEqual(fact.fact.initial, 'Initial')
+    assert.strictEqual(
+      ExecutionLifecycle.encode(fact.fact),
+      'Intrinsic.Execution<i32> affine=yes copy=no transfer=no affinity=LocalExecution initial=Initial states=Initial,Running,Dormant,Notifying,Eligible,Completed,Destroyed loans=Rejected/MayCrossParking/LoanBeforeReferent/Rejected shared=PreservedAcrossParking/RejectParking',
+    )
+    assert.deepEqual(ExecutionLifecycle.transition('Initial', 'Drive'), {
+      _tag: 'Transition',
+      state: 'Running',
+    })
+    assert.deepEqual(ExecutionLifecycle.transition('Dormant', 'Drive'), {
+      _tag: 'FatalIntrinsicStateTrap',
+      state: 'Dormant',
+      event: 'Drive',
+    })
+    assert.deepEqual(ExecutionLifecycle.transition('Notifying', 'Drive'), {
+      _tag: 'FatalIntrinsicStateTrap',
+      state: 'Notifying',
+      event: 'Drive',
+    })
+    assert.strictEqual(ordinary?._tag === 'Resolved' && Type.isExecution(ordinary.type), false)
+    assert.strictEqual(
+      ExecutableProperty.detachedOfEnvironment(self.index, [
+        { ordinal: 0, access: 'Take', type: Type.sharedCore('i32') },
+      ])._tag,
+      'Satisfied',
+    )
+    assert.strictEqual(
+      ExecutionAffinity.ofEnvironment(self.index, [{ type: Type.sharedCore('i32') }])._tag,
+      'LocalExecution',
+    )
+    const lexical = ExecutableProperty.detachedOfEnvironment(self.index, [
+      { ordinal: 0, access: 'Take', type: Type.reference('Shared', 'i32') },
+    ])
+    assert.strictEqual(lexical._tag, 'Unsatisfied')
+    assert.strictEqual(
+      lexical._tag === 'Unsatisfied' ? lexical.causes.at(0)?.reason : undefined,
+      'LexicalLoan',
+    )
+    for (const borrowed of ['string' as const, Type.slot('i32')]) {
+      const verdict = ExecutableProperty.detachedOfEnvironment(self.index, [
+        { ordinal: 0, access: 'Take', type: borrowed },
+      ])
+      assert.strictEqual(verdict._tag, 'Unsatisfied')
+      assert.strictEqual(
+        verdict._tag === 'Unsatisfied' ? verdict.causes.at(0)?.reason : undefined,
+        'LexicalLoan',
+      )
+    }
+    const provider = ExecutableProperty.detachedOfEnvironment(self.index, [
+      {
+        ordinal: 0,
+        access: 'Take',
+        type: Type.nominal('execution-semantics', 'Execution'),
+        providedRequirement: { providerAccess: 'Shared' },
+      },
+    ])
+    assert.strictEqual(provider._tag, 'Unsatisfied')
+    assert.strictEqual(
+      provider._tag === 'Unsatisfied' ? provider.causes.at(0)?.reason : undefined,
+      'ProviderLoan',
+    )
+    const nested = ExecutableProperty.detachedOfEnvironment(self.index, [
+      {
+        ordinal: 0,
+        access: 'Take',
+        type: Type.nominal('execution-semantics', 'NestedLoan'),
+      },
+    ])
+    assert.strictEqual(nested._tag, 'Unsatisfied')
+    assert.strictEqual(
+      nested._tag === 'Unsatisfied' ? nested.causes.at(0)?.reason : undefined,
+      'NestedLoan',
+    )
+    assert.include(
+      nested._tag === 'Unsatisfied' ? nested.causes.at(0)?.path.join(' -> ') : '',
+      'NestedLoan.value',
+    )
+
+    const duplicate = yield* Analysis.ofSource(
+      'execution-move',
+      ascii(
+        `fn duplicate(value: Intrinsic.Execution<i32>) -> () {
+  let owned = move value
+  drop owned
+  drop value
+}
+pub fn main() -> i32 { return 42 }`,
+      ),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(duplicate).map((diagnostic) => diagnostic.code),
+      ['OWN0001'],
+    )
+
+    const malformed = yield* Analysis.ofSource(
+      'execution-malformed',
+      ascii(
+        'fn retain(value: Intrinsic.Execution<Missing>) -> () { drop value }\npub fn main() -> i32 { return 42 }',
+      ),
+    )
+    const malformedType = malformed.index.modules
+      .at(0)
+      ?.declarations.at(0)
+      ?.parameters.at(0)?.declaredType
+    assert.deepEqual(
+      Analysis.diagnostics(malformed).map((diagnostic) => diagnostic.code),
+      ['SEM0001'],
+    )
+    assert.strictEqual(malformedType?._tag, 'Applied')
+    assert.strictEqual(
+      malformedType === undefined
+        ? undefined
+        : ExecutionAffinity.ofDeclaredType(malformed.index, malformedType)._tag,
+      'Unavailable',
     )
   }),
 )

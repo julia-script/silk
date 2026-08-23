@@ -109,6 +109,7 @@ export interface TypeParameterFact {
   readonly syntax: SyntaxTree.Node
   readonly duplicateOf?: Type.Parameter
   readonly bounds: ReadonlyArray<BoundFact>
+  readonly staticProperties: ReadonlyArray<Type.SealedStaticProperty>
   readonly representationBound?: {
     readonly _tag: 'RepresentationBound'
     readonly kind: 'Callable' | 'Effect'

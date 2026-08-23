@@ -906,6 +906,7 @@ export const resolveBounds = (
                   parameter.type.name,
                   parameter.type.kind,
                   contract,
+                  parameter.staticProperties,
                 ),
           representationBound: Object.freeze({
             ...representation,
@@ -1729,7 +1730,13 @@ const inlineReach = (
   const descend = (type: Type.Type): void => {
     if (Type.isNominal(type)) {
       visit(type)
-      if (Type.isRawBuffer(type) || Type.isSlot(type) || Type.isSharedCore(type)) return
+      if (
+        Type.isRawBuffer(type) ||
+        Type.isSlot(type) ||
+        Type.isSharedCore(type) ||
+        Type.isExecution(type)
+      )
+        return
       const inline = inlineParameters.get(`${type.module}.${type.name}`)
       for (const [ordinal, argument] of type.arguments.entries())
         if ((inline === undefined || inline.has(ordinal)) && Type.isTypeArgument(argument))
