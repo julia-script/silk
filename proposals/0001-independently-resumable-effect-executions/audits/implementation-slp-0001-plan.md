@@ -85,3 +85,8 @@ repeated.
 
 Layer 3's integrated full hard-gate command also exited successfully. Layer 4 now owns complete
 transition integration and evaluator, Wasm, native, reactor, and differential parity.
+
+Layer 4 checkpoint `7373f5a` adds the composed target-neutral transition actor, canonicalizes
+ExternalPark reachability on the sealed `ExecutionPark` operation identity, and retains evaluator
+machine stacks across park, notification, eligibility, guard cleanup, resume, and completion.
+Focused verification is 33/33; OpenSpec progress is 2/15.
