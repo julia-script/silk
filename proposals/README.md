@@ -28,7 +28,8 @@ SLP (direction and coherence)
   — Draft; split from SLP-0001 to decide synchronous root execution ownership, storage, target
   validation, and final-outcome adaptation while preserving ordinary `run` as the desired API.
 - [SLP-0004: Silk-native testing](0004-silk-native-testing/proposal.md)
-  — Candidate; general testing for user projects and the standard library through marked
+  — Accepted direction; general testing for user projects and the standard library through marked
   declarations, opaque inventory and invocation, a replaceable Reporter service,
   `Test.assert(bool)`, non-generic `Test.equalBytes`, and reused evaluator logical failure paths,
-  with basic runner-owned substring filters on one ordinary host/evaluator execution path.
+  with basic runner-owned ASCII case-insensitive substring filters on one ordinary host/evaluator
+  execution path.
