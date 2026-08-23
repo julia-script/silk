@@ -1,5 +1,6 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as ExecutionPackage from './ExecutionPackage.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -659,6 +660,23 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.allocation, operation.count]
     case 'SharedFromAllocation':
       return [operation.destination, operation.allocation, operation.value]
+    case 'ExecutionFromAllocation':
+      return [
+        operation.destination,
+        operation.allocation,
+        operation.body,
+        operation.endpoint,
+        operation.callback,
+      ]
+    case 'ExecutionDrive':
+      return [
+        operation.destination,
+        operation.result,
+        operation.execution,
+        operation.branch,
+        operation.onComplete,
+        operation.onSuspend,
+      ]
     case 'SharedClone':
       return [operation.destination, operation.self]
     case 'SharedWithMut':
@@ -967,6 +985,8 @@ const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.
       return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
     case 'LocalSharedCoreCleanup':
       return [cleanup.type, cleanup.element, ...cleanupTypes(cleanup.allocation)]
+    case 'ExecutionCleanup':
+      return [cleanup.type, ...cleanupTypes(cleanup.allocation)]
     case 'HookCleanup':
       return [cleanup.type, ...cleanupTypes(cleanup.inner)]
     case 'StructCleanup':
@@ -1238,6 +1258,8 @@ const cleanupMatchesSemanticType = (
       cleanup.allocation._tag === 'AllocationCleanup'
     )
   }
+  if (SilkType.isExecution(type))
+    return cleanup._tag === 'ExecutionCleanup' && cleanup.allocation._tag === 'AllocationCleanup'
   if (SilkType.isFixedArray(type))
     return (
       cleanup._tag === 'ArrayCleanup' &&
@@ -1389,6 +1411,23 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [semanticType(operation.type), operation.element]
     case 'SharedFromAllocation':
       return [semanticType(operation.type), operation.element]
+    case 'ExecutionFromAllocation':
+      return [
+        semanticType(operation.type),
+        operation.plan.specialization.result,
+        operation.plan.specialization.body,
+        operation.plan.specialization.endpoint,
+        operation.plan.specialization.callback,
+        ...cleanupTypes(operation.bodyCleanup),
+        ...cleanupTypes(operation.endpointCleanup),
+        ...cleanupTypes(operation.callbackCleanup),
+      ]
+    case 'ExecutionDrive':
+      return [
+        semanticType(operation.type),
+        ...cleanupTypes(operation.completionCleanup),
+        ...cleanupTypes(operation.suspensionCleanup),
+      ]
     case 'SharedClone':
       return [semanticType(operation.type), operation.element]
     case 'SharedWithMut':
@@ -1581,6 +1620,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.allocation, operation.count]
     case 'SharedFromAllocation':
       return [operation.allocation, operation.value]
+    case 'ExecutionFromAllocation':
+      return [operation.allocation, operation.body, operation.endpoint, operation.callback]
+    case 'ExecutionDrive':
+      return [operation.execution, operation.branch, operation.onComplete, operation.onSuspend]
     case 'SharedClone':
       return [operation.self]
     case 'SharedWithMut':
@@ -3235,6 +3278,210 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 region: region.id,
                 provenance: operation.provenance,
                 detail: `Local-shared initialization lost allocation, element, target-layout, or control-block provenance (uses=${localUseCounts.get(operation.allocation.ordinal) ?? 0}/${localUseCounts.get(operation.value.ordinal) ?? 0})`,
+              }),
+            )
+        }
+        if (operation._tag === 'ExecutionFromAllocation') {
+          const matchesSpan = (
+            left: SourceSpan.SourceSpan,
+            right: SourceSpan.SourceSpan,
+          ): boolean =>
+            left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
+          const allocation = fn.localTypes.at(operation.allocation.ordinal)
+          const body = fn.localTypes.at(operation.body.ordinal)
+          const endpoint = fn.localTypes.at(operation.endpoint.ordinal)
+          const callback = fn.localTypes.at(operation.callback.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const result = SilkType.isExecution(operation.type.type)
+            ? SilkType.typeArgumentAt(operation.type.type, 0)
+            : undefined
+          const canonical = self.layout.executionPackages.plans.find(
+            (candidate) => candidate.provenance === operation.plan.provenance,
+          )
+          const allocationFact = self.layout.localSharedAllocationProvenance.executionFacts.at(
+            operation.allocationFact,
+          )
+          const factResult = allocationFact?.arguments.at(0)
+          const factBodyArgument = allocationFact?.arguments.at(1)
+          const factEndpoint = allocationFact?.arguments.at(2)
+          const factCallbackArgument = allocationFact?.arguments.at(3)
+          const factBody =
+            factBodyArgument === undefined ? undefined : SilkType.representedType(factBodyArgument)
+          const factCallback =
+            factCallbackArgument === undefined
+              ? undefined
+              : SilkType.representedType(factCallbackArgument)
+          if (
+            allocation?._tag !== 'Nominal' ||
+            !SilkType.equals(allocation.type, SilkType.allocation) ||
+            body === undefined ||
+            endpoint === undefined ||
+            callback === undefined ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.isExecution(destination.type) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            result === undefined ||
+            !SilkType.equals(result, operation.plan.specialization.result) ||
+            !SilkType.equals(
+              semanticType(body),
+              SilkType.isRepresented(operation.plan.specialization.body)
+                ? operation.plan.specialization.body.contract
+                : operation.plan.specialization.body,
+            ) ||
+            !SilkType.equals(semanticType(endpoint), operation.plan.specialization.endpoint) ||
+            !SilkType.equals(
+              semanticType(callback),
+              SilkType.isRepresented(operation.plan.specialization.callback)
+                ? operation.plan.specialization.callback.contract
+                : operation.plan.specialization.callback,
+            ) ||
+            canonical === undefined ||
+            !ExecutionPackage.equals(canonical, operation.plan) ||
+            operation.plan.target !== self.layout.target.id ||
+            !Number.isSafeInteger(operation.allocationFact) ||
+            operation.allocationFact < 0 ||
+            allocationFact === undefined ||
+            !matchesSpan(allocationFact.expression.span, operation.provenance.span) ||
+            !matchesSpan(allocationFact.span, operation.allocationProvenance) ||
+            factResult === undefined ||
+            !SilkType.isTypeArgument(factResult) ||
+            !SilkType.equals(factResult, operation.plan.specialization.result) ||
+            factBody === undefined ||
+            !SilkType.equals(factBody, operation.plan.specialization.body) ||
+            factEndpoint === undefined ||
+            !SilkType.isTypeArgument(factEndpoint) ||
+            !SilkType.equals(factEndpoint, operation.plan.specialization.endpoint) ||
+            factCallback === undefined ||
+            !SilkType.equals(factCallback, operation.plan.specialization.callback) ||
+            operation.allocationAccess !== 'Take' ||
+            operation.bodyAccess !== 'Take' ||
+            operation.endpointAccess !== 'Take' ||
+            operation.callbackAccess !== 'Take' ||
+            localUseCounts.get(operation.allocation.ordinal) !== 1 ||
+            localUseCounts.get(operation.body.ordinal) !== 1 ||
+            localUseCounts.get(operation.endpoint.ordinal) !== 1 ||
+            localUseCounts.get(operation.callback.ordinal) !== 1
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidExecutionOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail:
+                  'Execution initialization lost exact package, input type, target, or consuming ownership provenance',
+              }),
+            )
+        }
+        if (operation._tag === 'ExecutionDrive') {
+          const execution = fn.localTypes.at(operation.execution.ordinal)
+          const branch = fn.localTypes.at(operation.branch.ordinal)
+          const complete = fn.localTypes.at(operation.onComplete.ordinal)
+          const suspend = fn.localTypes.at(operation.onSuspend.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const resultLocal = fn.localTypes.at(operation.result.ordinal)
+          const result =
+            execution?._tag === 'Nominal' && SilkType.isExecution(execution.type)
+              ? SilkType.typeArgumentAt(execution.type, 0)
+              : undefined
+          const completeContract =
+            branch === undefined || result === undefined
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([semanticType(branch), result]),
+                  SilkType.unit,
+                  'Take',
+                )
+          const suspendContract =
+            branch === undefined || result === undefined
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([semanticType(branch), SilkType.execution(result)]),
+                  SilkType.unit,
+                  'Take',
+                )
+          const completeSemantic = complete === undefined ? undefined : semanticType(complete)
+          const completeActual =
+            completeSemantic !== undefined && SilkType.isRepresented(completeSemantic)
+              ? completeSemantic.contract
+              : completeSemantic
+          const suspendSemantic = suspend === undefined ? undefined : semanticType(suspend)
+          const suspendActual =
+            suspendSemantic !== undefined && SilkType.isRepresented(suspendSemantic)
+              ? suspendSemantic.contract
+              : suspendSemantic
+          const driveCallbackCleanupValid = (
+            local: Type | undefined,
+            cleanup: CleanupPlan.CleanupPlan,
+          ): boolean => {
+            if (local?._tag !== 'CallableValue') return false
+            const fields =
+              local.environment?.fields
+                .filter((field) => field.access === 'Take' && !isCopy(self.layout, field.type))
+                .reverse() ?? []
+            if (local.environment === undefined)
+              return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, local.type)
+            return (
+              cleanup._tag === 'CallableCleanup' &&
+              SilkType.equals(cleanup.type, local.type) &&
+              cleanup.environment._tag === 'CallableEnvironmentIdentity' &&
+              SilkType.equalsCallableEnvironmentIdentity(
+                cleanup.environment.identity,
+                Instances.callableEnvironmentIdentity(local.environment.callable),
+              ) &&
+              cleanup.slots.length === fields.length &&
+              cleanup.slots.every((slot, ordinal) => {
+                const field = fields.at(ordinal)
+                return (
+                  field !== undefined &&
+                  slot.ordinal === field.ordinal &&
+                  cleanupMatchesSemanticType(self.layout, slot.cleanup, field.type)
+                )
+              })
+            )
+          }
+          if (
+            execution?._tag !== 'Nominal' ||
+            !SilkType.isExecution(execution.type) ||
+            branch === undefined ||
+            complete === undefined ||
+            suspend === undefined ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            resultLocal === undefined ||
+            result === undefined ||
+            !SilkType.equals(semanticType(resultLocal), result) ||
+            completeContract === undefined ||
+            suspendContract === undefined ||
+            completeActual === undefined ||
+            suspendActual === undefined ||
+            !TypeCompatibility.isCompatible(
+              TypeCompatibility.check(completeActual, completeContract),
+            ) ||
+            !TypeCompatibility.isCompatible(
+              TypeCompatibility.check(suspendActual, suspendContract),
+            ) ||
+            !driveCallbackCleanupValid(complete, operation.completionCleanup) ||
+            !driveCallbackCleanupValid(suspend, operation.suspensionCleanup) ||
+            operation.executionAccess !== 'Take' ||
+            operation.branchAccess !== 'Take' ||
+            operation.completionAccess !== 'Take' ||
+            operation.suspensionAccess !== 'Take' ||
+            localUseCounts.get(operation.execution.ordinal) !== 1 ||
+            localUseCounts.get(operation.branch.ordinal) !== 1 ||
+            localUseCounts.get(operation.onComplete.ordinal) !== 1 ||
+            localUseCounts.get(operation.onSuspend.ordinal) !== 1
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidExecutionOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail:
+                  'Execution drive lost its affine Execution, branch state, or exact take-once outcome contracts',
               }),
             )
         }
@@ -4938,31 +5185,47 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             selectedFailure !== undefined &&
             SilkType.equals(selectedSuccess, expectedSuccess) &&
             SilkType.equals(selectedFailure, expectedFailure)
-          if (
-            runner?.result._tag !== 'EffectOutcome' ||
-            effect?._tag !== 'EffectValue' ||
-            outcome?._tag !== 'EffectOutcome' ||
-            destination?._tag !== 'Nominal' ||
-            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
-            !SilkType.equals(effect.type, operation.outcomeType.type) ||
-            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
-            !SilkType.equals(destination.type, expectedResult) ||
-            !SilkType.equals(operation.resultType.type, expectedResult) ||
-            !SilkType.equals(operation.failureValueType, expectedFailureValue) ||
-            !SilkType.equals(operation.successType, expectedSuccess) ||
-            !SilkType.equals(operation.failureType, expectedFailure) ||
-            !SilkType.equals(operation.resultShape.type, expectedResult) ||
-            !SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type) ||
-            !SilkType.equals(operation.failureValueShape.type, expectedFailureValue) ||
-            !tagsValid
-          ) {
+          const disagreements = [
+            runner?.result._tag === 'EffectOutcome' &&
+            SilkType.equals(runner.result.type, operation.outcomeType.type)
+              ? undefined
+              : `runner(${runner?.result._tag === 'EffectOutcome' ? SilkType.encode(runner.result.type) : (runner?.result._tag ?? 'missing')} != ${SilkType.encode(operation.outcomeType.type)})`,
+            effect?._tag === 'EffectValue' &&
+            SilkType.equals(effect.type, operation.outcomeType.type)
+              ? undefined
+              : 'effect',
+            outcome?._tag === 'EffectOutcome' &&
+            SilkType.equals(outcome.type, operation.outcomeType.type)
+              ? undefined
+              : 'outcome',
+            destination?._tag === 'Nominal' && SilkType.equals(destination.type, expectedResult)
+              ? undefined
+              : 'destination',
+            SilkType.equals(operation.resultType.type, expectedResult) ? undefined : 'result-type',
+            SilkType.equals(operation.failureValueType, expectedFailureValue)
+              ? undefined
+              : 'failure-value',
+            SilkType.equals(operation.successType, expectedSuccess) ? undefined : 'success',
+            SilkType.equals(operation.failureType, expectedFailure) ? undefined : 'failure',
+            SilkType.equals(operation.resultShape.type, expectedResult)
+              ? undefined
+              : 'result-shape',
+            SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type)
+              ? undefined
+              : 'outcome-shape',
+            SilkType.equals(operation.failureValueShape.type, expectedFailureValue)
+              ? undefined
+              : 'failure-shape',
+            tagsValid ? undefined : 'tags',
+          ].filter((disagreement): disagreement is string => disagreement !== undefined)
+          if (disagreements.length > 0) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
                 rule: 'InvalidEffectOperation',
                 function: fn.id,
                 region: region.id,
-                detail: 'effect result runner, channel data, tags, or calling shapes disagree',
+                detail: `effect result runner, channel data, tags, or calling shapes disagree: ${disagreements.join(', ')}`,
               }),
             )
           }

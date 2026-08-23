@@ -24,6 +24,16 @@ export interface CallRequest {
   readonly target: Mir.MirFunction
   readonly arguments: ReadonlyArray<Value>
   readonly span: SourceSpan.SourceSpan
+  /** Overrides caller-relative depth for an independently rooted logical execution. */
+  readonly logicalDepth?: number
+}
+
+export interface IndependentCallRequest {
+  readonly _tag: 'IndependentCallRequest'
+  readonly target: Mir.MirFunction
+  readonly arguments: ReadonlyArray<Value>
+  readonly span: SourceSpan.SourceSpan
+  readonly logicalDepth: number
 }
 
 export interface OriginTransferRequest {
@@ -38,4 +48,8 @@ export interface RelayTransferRequest {
   readonly state?: Mir.CoroutineFrameState
 }
 
-export type MachineRequest = CallRequest | OriginTransferRequest | RelayTransferRequest
+export type MachineRequest =
+  | CallRequest
+  | IndependentCallRequest
+  | OriginTransferRequest
+  | RelayTransferRequest

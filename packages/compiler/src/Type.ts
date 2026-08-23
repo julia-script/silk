@@ -203,6 +203,9 @@ const nonScalarBuiltinOperations = Object.freeze([
   'SharedFromAllocation',
   'SharedClone',
   'SharedWithMut',
+  'ExecutionLayout',
+  'ExecutionFromAllocation',
+  'ExecutionDrive',
   'EffectSuspend',
   'StorageAcquire',
   'HostWrite',
@@ -1252,6 +1255,13 @@ const representationArgumentContract = (
   self._tag === 'RepresentationParameterArgument'
     ? self.parameter.representationBound
     : self.contract
+
+/** Reifies one executable representation argument as its exact runtime value type. */
+export const representedType = (self: GenericArgument): Represented | undefined => {
+  if (!isRepresentationArgument(self)) return undefined
+  const contract = representationArgumentContract(self)
+  return contract === undefined ? undefined : represented(contract, contract, self)
+}
 
 export const isHiddenIdentityArgument = (
   self: GenericArgument,
@@ -2487,6 +2497,7 @@ export const containsPositionRestrictedBorrow = (self: Type): boolean =>
  */
 export const isParameterBorrowType = (self: Type): boolean => {
   if (!containsPositionRestrictedBorrow(self)) return true
+  if (isRepresented(self)) return isParameterBorrowType(self.contract)
   if (isSlice(self)) return !containsPositionRestrictedBorrow(self.element)
   if (isReference(self)) return !containsPositionRestrictedBorrow(self.target)
   if (isSlot(self)) return !containsPositionRestrictedBorrow(typeArgumentAt(self, 0) ?? 'never')

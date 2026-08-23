@@ -411,10 +411,12 @@ export const make = (operations: Operations) => {
       const own =
         expression._tag === 'BuiltinCall' && expression.operation === 'SlotDrop'
           ? expression.typeArguments.flatMap((argument) =>
-              hookCalls(
-                CleanupPlan.cleanupPlan(index, Type.substitute(argument, substitution)),
-                index,
-              ),
+              (() => {
+                const specialized = Type.substituteGenericArgument(argument, substitution)
+                return Type.isTypeArgument(specialized)
+                  ? hookCalls(CleanupPlan.cleanupPlan(index, specialized), index)
+                  : []
+              })(),
             )
           : []
       if (expression._tag === 'Match') {

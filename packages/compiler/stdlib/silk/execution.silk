@@ -1,0 +1,70 @@
+//! Independently owned, caller-funded lazy computations.
+//!
+//! # When to use
+//! Use [`make`] when a lazy Effect must outlive the caller which constructs it and be resumed by a
+//! later owner. Use [`drive`] to transfer one affine branch value to exactly one take-once outcome
+//! callback.
+//!
+//! # Details
+//! Construction obtains one combined package from the selected [`Allocator`](silk.core.Allocator)
+//! and never starts the Effect. The exact body representation and fixed readiness endpoint remain
+//! compiler-private inside the package. A drive may complete, relinquish a dormant Execution, or
+//! trap before either callback when the handle is in an illegal lifecycle state.
+//!
+//! # Gotchas
+//! `Execution` is affine. The readiness callback is fixed at construction and must be detached and
+//! non-parking. `drive` returns unit; continued ownership is delivered only to `onSuspend`.
+
+import silk.core { Allocator }
+import silk.core { OutOfMemoryError }
+
+fn absurd<T>() -> T {
+  let boom = 1 / 0
+  return absurd<T>()
+}
+
+/// Allocates one combined package and transfers the lazy body and fixed endpoint into it.
+///
+/// # Details
+///
+/// Allocation refusal produces no Execution and leaves every input under ordinary Effect cleanup.
+pub effect fn make<
+  A,
+  F: once Effect<A> + Intrinsic.Detached,
+  O: Intrinsic.Detached,
+  R: fn(&O) -> () + Intrinsic.Detached + Intrinsic.NonParking
+>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A>
+! OutOfMemoryError
+? &mut Allocator {
+  let layout = Intrinsic.executionLayout<A, F, O, R>()
+  let allocation = run Allocator.allocate(move layout)
+  unsafe {
+    return Intrinsic.executionFromAllocation<A, F, O, R>(
+      move allocation,
+      move body,
+      move readyState,
+      move onReady
+    )
+  }
+  return absurd<Intrinsic.Execution<A>>()
+}
+
+/// Drives one legal activation and transfers `branchState` to exactly one outcome callback.
+pub effect fn drive<
+  A,
+  D,
+  C: once fn(D, A) -> () + Intrinsic.NonParking,
+  S: once fn(D, Intrinsic.Execution<A>) -> () + Intrinsic.NonParking
+>(
+  execution: Intrinsic.Execution<A>,
+  branchState: D,
+  onComplete: C,
+  onSuspend: S
+) -> () {
+  return run Intrinsic.executionDrive<A, D, C, S>(
+    move execution,
+    move branchState,
+    move onComplete,
+    move onSuspend
+  )
+}

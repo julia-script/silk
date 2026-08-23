@@ -274,6 +274,8 @@ it.effect('preserves the selected alternative capture shape', () =>
   Effect.gen(function* () {
     const snapshot = yield* snapshotOf('effect-join/captures', captureSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [], MirEncoding.encode(program))
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(
       outcome._tag,

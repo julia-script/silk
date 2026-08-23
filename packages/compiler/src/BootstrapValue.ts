@@ -208,6 +208,13 @@ export interface SharedCoreValue {
   readonly element: Type.Type
 }
 
+/** One affine handle to evaluator-owned independent execution package state. */
+export interface ExecutionValue {
+  readonly _tag: 'ExecutionValue'
+  readonly type: Type.Nominal
+  readonly ticket: number
+}
+
 export interface SlotValue {
   readonly _tag: 'SlotValue'
   readonly type: Type.Nominal
@@ -237,6 +244,7 @@ export type Value =
   | AllocationValue
   | RawBufferValue
   | SharedCoreValue
+  | ExecutionValue
   | SlotValue
 
 /** Entered the resolved entry instance. */

@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as ExecutionPackage from '../src/ExecutionPackage.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
@@ -664,6 +665,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       callingShapes: [],
       literalVerdicts: [],
       localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
+      executionPackages: ExecutionPackage.empty(),
       diagnostics: [],
     }
 

@@ -1,3 +1,4 @@
+import * as ExecutionPackage from './ExecutionPackage.js'
 import * as Hir from './Hir.js'
 import type {
   CallingScalar,
@@ -99,6 +100,11 @@ export const encode = (self: Plan): string =>
   [
     `target ${Target.encode(self.target)}`,
     ...self.entries.flatMap(entryLines),
+    ...self.executionPackages.plans.map(ExecutionPackage.encode),
+    ...self.executionPackages.unavailable.map(
+      (candidate) =>
+        `execution-package unavailable target=${candidate.target} specialization=${ExecutionPackage.specializationKey(candidate.specialization)} reason=${candidate.reason}`,
+    ),
     ...self.effectEnvironments.map((environment) =>
       environment._tag === 'UnavailableEffectEnvironment'
         ? `effect-environment ${environment.instance.declaration.module}.${environment.instance.declaration.name}@${Hir.executableSiteLabel(environment.site)} unavailable=${environment.reason}`

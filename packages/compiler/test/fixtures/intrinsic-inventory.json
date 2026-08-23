@@ -5149,6 +5149,31 @@
       "identity": "LayoutOf"
     },
     {
+      "operation": "Intrinsic.executionLayout",
+      "signature": "fn Intrinsic.executionLayout<A, F, O, R>() -> Layout",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/execution.make",
+      "identity": "ExecutionLayout"
+    },
+    {
+      "operation": "Intrinsic.executionFromAllocation",
+      "signature": "unsafe fn Intrinsic.executionFromAllocation<A, F, O, R>(allocation: Allocation, body: F, readyState: O, onReady: R) -> Execution<A>",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/execution.make",
+      "identity": "ExecutionFromAllocation",
+      "invariant": "caller proves the allocation came from the exact execution package layout specialization and transfers it, the body, and the fixed endpoint exactly once"
+    },
+    {
+      "operation": "Intrinsic.executionDrive",
+      "signature": "fn Intrinsic.executionDrive<A, D, C, S>(execution: Execution<A>, branchState: D, onComplete: C, onSuspend: S) -> Effect<()>",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/execution.drive",
+      "identity": "ExecutionDrive"
+    },
+    {
       "operation": "Intrinsic.sharedLayout",
       "signature": "fn Intrinsic.sharedLayout<T>() -> Layout",
       "unsafe": false,

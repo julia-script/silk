@@ -2748,6 +2748,7 @@ import {
   executableSpecializationOwner,
   finishCallableApplication,
   finishCallableSection,
+  genericArgumentOfTypeArgument,
   hasAvailableCallSyntax,
   interfaceConstraintDiagnostics,
   interfaceOperationContract,
@@ -3245,7 +3246,9 @@ export function analyzeBuiltinCall(
     typeArguments.types.length === declaredTypeParameters.length
   ) {
     for (const [ordinal, parameter] of declaredTypeParameters.entries()) {
-      const argument = typeArguments.types.at(ordinal)
+      const fact = typeArguments.facts.at(ordinal)
+      const argument =
+        fact === undefined ? undefined : genericArgumentOfTypeArgument(parameter, fact)
       if (argument !== undefined) substitution.set(Type.key(parameter), argument)
     }
   } else if (!typeArguments.explicit && signature !== undefined) {

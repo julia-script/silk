@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 133 |
+| `SEM` | Semantic | 134 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 163 codes in total.
+There are 164 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -188,6 +188,7 @@ There are 163 codes in total.
 | `SEM0139` | Stable code for a concrete executable that fails one sealed static-property obligation. | `<property> is unsatisfied: <join>` |
 | `SEM0140` | Stable code for an externally parking entry with no explicit Execution owner. | `External parking requires an explicit Intrinsic.Execution owner` |
 | `SEM0141` | Stable code for an ordinary capability conjoined with one exact executable bound. | `<conjunct> is not a sealed executable property` |
+| `SEM0142` | Stable code for a statically known execution-package allocation/layout mismatch. | `Execution allocation was planned for <actual>, not <expected>` |
 
 ## Ownership (`OWN`)
 

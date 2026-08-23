@@ -594,7 +594,9 @@ export const prefixSubstitution = (
     const suppliedStaticProperties =
       isRepresentationArgument(argument) && argument._tag === 'RepresentationParameterArgument'
         ? argument.parameter.staticProperties
-        : undefined
+        : isTypeArgument(argument) && isParameter(argument)
+          ? argument.staticProperties
+          : undefined
     const preservesStaticProperties =
       suppliedStaticProperties === undefined ||
       parameter_.staticProperties.every((property) => suppliedStaticProperties.includes(property))
