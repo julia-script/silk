@@ -16,6 +16,51 @@ const specialization = (suspension: SuspensionMode.Summary): ExecutionPackage.Sp
     suspension,
   })
 
+const exactCleanupProgram = (owner: 'Body' | 'Endpoint'): string => `import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.layout { Layout }
+struct Guard { storage: Allocation }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { let observable = 1 / 0 return () }
+}
+struct Ready { guard: Guard }
+fn ready(state: &Ready) -> () { return () }
+fn readyUnit(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn body(guard: Guard) -> i32 { return 42 }
+effect fn packaged() -> () ! Core.OutOfMemoryError ? &mut Allocator {
+  let cleanupLayout = Layout.of<i32>()
+  let cleanupStorage = run Allocator.allocate(move cleanupLayout)
+  ${
+    owner === 'Body'
+      ? `let execution = run Execution.make(
+    body(Guard { storage: move cleanupStorage }),
+    (),
+    readyUnit
+  )
+  drop execution
+  return ()`
+      : `let execution = run Execution.make(
+    effect { return 42 },
+    Ready { guard: Guard { storage: move cleanupStorage } },
+    ready
+  )
+  return run Execution.drive(move execution, (), complete, suspend)`
+  }
+}
+effect fn program() -> () ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+effect fn recover(error: Core.OutOfMemoryError) -> () { return () }
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+
 it('plans exact direct, nested, and externally parkable combined packages', () => {
   const target = Target.wasm32UnknownUnknown
   const layouts = Object.freeze({
@@ -238,6 +283,23 @@ pub fn main() -> i32 { return run Effect.catchAll(package(), recover) }`),
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('executes exact stored body and endpoint cleanup on WebAssembly package exits', () =>
+  Effect.gen(function* () {
+    for (const owner of ['Body', 'Endpoint'] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        `execution-package/exact-${owner.toLowerCase()}-cleanup`,
+        new TextEncoder().encode(exactCleanupProgram(owner)),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], owner)
+      assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap', `${owner} evaluator cleanup`)
+      const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.throws(() => (instance.exports.silk_main as () => void)(), WebAssembly.RuntimeError)
+    }
   }),
 )
 

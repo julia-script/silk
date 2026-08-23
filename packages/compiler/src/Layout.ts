@@ -2447,6 +2447,13 @@ export const plan = (
     const candidate = resolve(type)
     if (candidate === undefined) return
     entries.set(key, candidate)
+    if (
+      Type.isRepresented(type) &&
+      Type.isCompositeEffectRepresentationArgument(type.representation.argument)
+    ) {
+      for (const alternative of type.representation.argument.alternatives)
+        add(Type.represented(type.contract, type.representation.requiredBound, alternative))
+    }
     for (const field of candidate.executable?.fields ?? []) add(field.type)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)

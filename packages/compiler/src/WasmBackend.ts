@@ -1095,7 +1095,7 @@ const makeOperationContext = (
   suspension?: WasmSuspensionFunctionContext,
   skipInvocation = false,
 ) => {
-  const { layout, plan, resolve, resolveIndependent, memory } = emitter
+  const { layout, plan, resolve, resolveIndependent, memory, executionPackageCleanups } = emitter
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
   const scalar = (local: Mir.LocalId): number => {
     const selected = slots(local)
@@ -1356,6 +1356,23 @@ const makeOperationContext = (
     if (range !== undefined) return range
     throw new RangeError('Wasm callable cleanup lost an owned capture lane')
   }
+  const effectEnvironmentForCleanup = (
+    cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+  ): Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> => {
+    const environment = plan.effectEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<
+        LayoutPlan.EffectEnvironment,
+        { readonly _tag: 'EffectEnvironment' }
+      > =>
+        candidate._tag === 'EffectEnvironment' &&
+        Hir.sameExecutableSite(candidate.site, cleanup.site) &&
+        SilkType.equals(candidate.effect, cleanup.type),
+    )
+    if (environment !== undefined) return environment
+    throw new RangeError('Wasm Effect cleanup lost its exact stored environment')
+  }
   const hookReleaseWalk = (
     cleanup: CleanupPlan.CleanupPlan,
     addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
@@ -1383,6 +1400,24 @@ const makeOperationContext = (
               ),
             ),
           })
+        case 'EffectCleanup': {
+          const environment = effectEnvironmentForCleanup(plan_)
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.flatMap((slot) => {
+                const field = environment.fields.at(slot.ordinal)
+                return field === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: slot.cleanup,
+                        state: byteOffset + field.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
         case 'StructCleanup': {
           const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
           if (representation?._tag !== 'Aggregate') return Object.freeze({})
@@ -1962,6 +1997,24 @@ const makeOperationContext = (
               ),
             ),
           })
+        case 'EffectCleanup': {
+          const environment = effectEnvironmentForCleanup(plan_)
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.flatMap((slot) => {
+                const field = environment.fields.at(slot.ordinal)
+                return field === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: slot.cleanup,
+                        state: currentOffset + field.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
         case 'StructCleanup': {
           const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
           if (representation?._tag !== 'Aggregate') return Object.freeze({})
@@ -2049,7 +2102,8 @@ const makeOperationContext = (
   function releaseExecutionBase(base: number): ReadonlyArray<Instr.Instr> {
     const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
       const package_ = plan.executionPackages.plans.at(ordinal)
-      const cleanup = package_?.cleanup
+      const cleanup =
+        package_ === undefined ? undefined : executionPackageCleanups.get(package_.provenance)
       const bodyOffset =
         package_ === undefined ? undefined : executionComponentOffset(package_, 'BodyEnvironment')
       const allocationOffset =
@@ -2906,8 +2960,16 @@ const emitExecutionDriveOperation = (
         : undefined
     const bodyOffset = executionComponentOffset(package_, 'BodyEnvironment')
     const allocationOffset = executionComponentOffset(package_, 'AllocationAuthority')
-    if (environment === undefined || bodyOffset === undefined || allocationOffset === undefined)
+    const packageCleanup = state.emitter.executionPackageCleanups.get(package_.provenance)
+    if (
+      environment === undefined ||
+      bodyOffset === undefined ||
+      allocationOffset === undefined ||
+      packageCleanup === undefined
+    )
       return [Instr.op('unreachable')]
+    const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
+    const endpointOffset = executionComponentOffset(package_, 'EndpointState')
     const bodyOperands = environment.fields.flatMap((field) =>
       LayoutPlan.effectFieldLanes(plan, field).flatMap((lane) => {
         const offset =
@@ -2953,6 +3015,12 @@ const emitExecutionDriveOperation = (
       Instr.localGet(base),
       Instr.i32Const(2),
       Instr.memoryAccess('i32.store', state.requireMemory().memory),
+      ...(callbackOffset === undefined
+        ? []
+        : releaseAtAddress(packageCleanup.callback, base, callbackOffset)),
+      ...(endpointOffset === undefined
+        ? []
+        : releaseAtAddress(packageCleanup.endpoint, base, endpointOffset)),
       ...releaseAtAddress(allocationCleanup, base, allocationOffset),
       ...completion,
     ]
@@ -6712,6 +6780,18 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   // what the LLVM backend's `strip` flag does with its own metadata.
   const debug = request.mode === 'debug'
   const builder = yield* Builder.make(debug ? { moduleName: program.module } : {})
+  const executionPackageCleanups = new Map<string, WasmEmitContext.ExecutionPackageCleanup>()
+  for (const operation of program.functions.flatMap(MirVerification.operations)) {
+    if (operation._tag !== 'ExecutionFromAllocation') continue
+    executionPackageCleanups.set(
+      operation.plan.provenance,
+      Object.freeze({
+        body: operation.bodyCleanup,
+        endpoint: operation.endpointCleanup,
+        callback: operation.callbackCleanup,
+      }),
+    )
+  }
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
   const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     if (type._tag === 'EffectBorrow')
@@ -7134,6 +7214,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
               resolve,
               resolveIndependent,
               memory,
+              executionPackageCleanups,
               ...(entry.suspendable && suspensionRuntime !== undefined
                 ? { suspensionRuntime }
                 : {}),

@@ -49,6 +49,6 @@
 - [x] 4.1 Audit semantic, HIR, MIR, evaluation, and backend code for names of Allocator,
       OutOfMemoryError, safe Execution wrappers, Scheduler, Fiber, Deferred, Timer, ready queues, and
       Coroutine; verify only sealed intrinsic identities select package or drive behavior.
-- [ ] 4.2 Run focused intrinsic, layout, allocation-provenance, ownership, cleanup, and logical-root
+- [x] 4.2 Run focused intrinsic, layout, allocation-provenance, ownership, cleanup, and logical-root
       tests, then `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
       `pnpm release:candidate`; record exact results before the wake/parking slice begins.
