@@ -219,6 +219,13 @@
     "namespace": "OsStandardInput"
   },
   {
+    "module": "silk/random",
+    "path": "silk/random.silk",
+    "layer": "portable",
+    "namespace": "Random",
+    "aliases": ["Xoshiro256StarStar"]
+  },
+  {
     "module": "silk/raw_buffer",
     "path": "silk/raw_buffer.silk",
     "layer": "portable",
