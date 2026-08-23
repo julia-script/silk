@@ -361,7 +361,7 @@ export function lowerExpressionInner(
           _tag: 'MakeCallable',
           destination,
           target: expression.target,
-          typeArguments: type.environment.callable.typeArguments,
+          typeArguments: Object.freeze([...Layout.callableTargetArguments(type.environment)]),
           captures: Object.freeze(captures),
           type,
           provenance: authored(expression.span),

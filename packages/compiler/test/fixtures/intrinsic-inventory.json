@@ -5153,7 +5153,7 @@
       "signature": "fn Intrinsic.sharedLayout<T>() -> Layout",
       "unsafe": false,
       "admission": "Ownership",
-      "consumer": "silk/shared.layout",
+      "consumer": "silk/shared.make",
       "identity": "SharedLayout"
     },
     {
@@ -5161,7 +5161,7 @@
       "signature": "unsafe fn Intrinsic.sharedFromAllocation<T>(allocation: Allocation, value: T) -> SharedCore<T>",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/shared.fromAllocation",
+      "consumer": "silk/shared.make",
       "identity": "SharedFromAllocation",
       "invariant": "caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once"
     },

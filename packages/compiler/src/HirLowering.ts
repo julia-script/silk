@@ -1252,7 +1252,12 @@ export const hirExpectedExpression = (
     return source
   const compatibility = TypeCompatibility.check(representedSource ?? source.type, target)
   if (compatibility._tag === 'Exact') return source
-  if (compatibility._tag === 'CallableMode' || compatibility._tag === 'EffectAccess') return source
+  if (
+    compatibility._tag === 'CallableMode' ||
+    compatibility._tag === 'EffectAccess' ||
+    compatibility._tag === 'ReferenceAccess'
+  )
+    return source
   if (compatibility._tag === 'Bottom') return source
   if (compatibility._tag === 'Incompatible') {
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })

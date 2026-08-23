@@ -1090,7 +1090,7 @@ export const make = (operations: Operations) => {
       substitution,
       results,
       index,
-      resolving: new Set(),
+      resolving: new Set<string>(),
     }
     return Object.freeze(
       fn.statements
@@ -1121,7 +1121,7 @@ export const make = (operations: Operations) => {
       substitution,
       results,
       index,
-      resolving: new Set(),
+      resolving: new Set<string>(),
     }
     return fn.statements
       .flatMap(Hir.statementExpressions)
@@ -1233,18 +1233,53 @@ export const make = (operations: Operations) => {
 
   const callableCallTargets = (
     fn: Hir.HirFunction,
+    owner: InstanceKey,
+    ownerSubstitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
+    index: DeclarationIndex.Index,
   ): ReadonlyArray<CallTarget> => {
     const bindings = callableBindings(fn)
     const targets: Array<CallTarget> = []
+    const context: EffectOriginContext = Object.freeze({
+      fn,
+      owner,
+      substitution: ownerSubstitution,
+      results,
+      index,
+      resolving: new Set<string>(),
+    })
     for (const expression of callableExpressions(fn)) {
+      if (expression._tag === 'CallableApply') {
+        const key = targetKeyOfCallableApply(expression, context)
+        if (key !== undefined) {
+          targets.push(
+            Object.freeze({ declaration: key.declaration, typeArguments: key.typeArguments }),
+          )
+          continue
+        }
+        // A finite Effect composite deliberately has no single hidden effect identity. Preserve
+        // the ordinary specialization edge for such applications so lowering can recover the
+        // result representation from the specialized declaration, while exact callable/effect
+        // identities above continue to select their fully specialized target.
+        const fallback =
+          callableValue(expression.callee, bindings) ??
+          staticallyForwardedCallable(expression.callee, fn, results)
+        if (fallback?._tag === 'FunctionItem' || fallback?._tag === 'CallableSection') {
+          const declaration = declarationTarget(fallback.target)
+          const substitution =
+            fallback._tag === 'CallableSection'
+              ? mergeSubstitution(fallback.substitution, expression.substitution)
+              : expression.substitution
+          const arguments_ = targetArguments(fallback.target, substitution, results)
+          if (declaration !== undefined && arguments_ !== undefined)
+            targets.push(Object.freeze({ declaration, typeArguments: arguments_ }))
+        }
+        continue
+      }
       const value =
-        expression._tag === 'CallableApply'
-          ? (callableValue(expression.callee, bindings) ??
-            staticallyForwardedCallable(expression.callee, fn, results))
-          : expression._tag === 'FunctionItem' || expression._tag === 'CallableSection'
-            ? expression
-            : undefined
+        expression._tag === 'FunctionItem' || expression._tag === 'CallableSection'
+          ? expression
+          : undefined
       if (
         value === undefined ||
         (value._tag !== 'FunctionItem' && value._tag !== 'CallableSection')
@@ -1252,19 +1287,47 @@ export const make = (operations: Operations) => {
         continue
       const declaration = declarationTarget(value.target)
       if (declaration === undefined) continue
-      const substitution =
-        value._tag === 'CallableSection'
-          ? mergeSubstitution(
-              value.substitution,
-              expression._tag === 'CallableApply' ? expression.substitution : new Map(),
-            )
-          : expression._tag === 'CallableApply'
-            ? expression.substitution
-            : new Map()
+      const substitution = value._tag === 'CallableSection' ? value.substitution : new Map()
       const arguments_ = targetArguments(value.target, substitution, results)
-      if (arguments_ !== undefined) {
-        targets.push(Object.freeze({ declaration, typeArguments: arguments_ }))
+      const target = targetFunction(results, declaration)
+      if (arguments_ === undefined || target === undefined) continue
+      const targetSubstitution = TypeInference.substitution(
+        target.declaration.typeParameters.map((parameter) => parameter.type),
+        arguments_,
+      )
+      if (targetSubstitution === undefined) continue
+      const hidden: Array<Type.EffectIdentityArgument | Type.CallableIdentityArgument> = []
+      let complete = true
+      for (const ordinal of effectParameterOrdinals(target, targetSubstitution)) {
+        const capture =
+          value._tag === 'CallableSection'
+            ? value.captures.find((candidate) => candidate.parameterOrdinal === ordinal)
+            : undefined
+        const identity = capture === undefined ? undefined : effectOriginOf(capture.value, context)
+        if (identity === undefined) {
+          complete = false
+          break
+        }
+        hidden.push(Type.effectIdentityArgument(identity))
       }
+      if (!complete) continue
+      for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
+        const capture =
+          value._tag === 'CallableSection'
+            ? value.captures.find((candidate) => candidate.parameterOrdinal === ordinal)
+            : undefined
+        const identity =
+          capture === undefined ? undefined : callableOriginOf(capture.value, context)
+        if (identity === undefined) {
+          complete = false
+          break
+        }
+        hidden.push(identity)
+      }
+      if (complete)
+        targets.push(
+          Object.freeze({ declaration, typeArguments: Object.freeze([...arguments_, ...hidden]) }),
+        )
     }
     return Object.freeze(targets)
   }
@@ -1292,6 +1355,7 @@ export const make = (operations: Operations) => {
     owner: InstanceKey,
     ownerSubstitution: Type.Substitution,
     results: ReadonlyMap<string, Elaboration.Result>,
+    index: DeclarationIndex.Index,
   ): ReadonlyArray<CallableInstance> => {
     const expressions = callableExpressions(fn)
     const bindings = callableBindings(fn)
@@ -1357,6 +1421,17 @@ export const make = (operations: Operations) => {
             captures: Object.freeze(
               section.captures.flatMap((capture, ordinal) => {
                 const type_ = captureTypes.at(ordinal)
+                const callableIdentity =
+                  type_ !== undefined && Type.isCallable(type_)
+                    ? callableOriginOf(capture.value, {
+                        fn,
+                        owner,
+                        substitution: ownerSubstitution,
+                        results,
+                        index,
+                        resolving: new Set<string>(),
+                      })
+                    : undefined
                 return type_ === undefined
                   ? []
                   : [
@@ -1365,6 +1440,7 @@ export const make = (operations: Operations) => {
                         parameterOrdinal: capture.parameterOrdinal,
                         access: capture.access,
                         type: type_,
+                        ...(callableIdentity === undefined ? {} : { callableIdentity }),
                       }),
                     ]
               }),
@@ -1699,7 +1775,7 @@ export const make = (operations: Operations) => {
         substitution: instance.substitution,
         results,
         index,
-        resolving: new Set(),
+        resolving: new Set<string>(),
         resolveEffectIdentity,
       }
       const bindings = callableBindings(instance.function)

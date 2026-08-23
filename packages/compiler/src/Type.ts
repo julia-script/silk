@@ -2429,6 +2429,26 @@ export const containsExecutableRepresentation = (self: Type): boolean =>
 export const containsPositionRestrictedBorrow = (self: Type): boolean =>
   someSubterm(self, (type) => isSlice(type) || isReference(type) || isSlot(type))
 
+/**
+ * Tests whether every restricted borrow in a function parameter type is introduced only when a
+ * callable is invoked.
+ *
+ * A callable parameter such as `once fn(&mut T) -> A` stores no `T` borrow in the callable value;
+ * it describes a borrow the caller supplies later. Borrowed callable results remain forbidden
+ * because they can carry a lexical loan out of an invocation.
+ */
+export const isParameterBorrowType = (self: Type): boolean => {
+  if (!containsPositionRestrictedBorrow(self)) return true
+  if (isSlice(self)) return !containsPositionRestrictedBorrow(self.element)
+  if (isReference(self)) return !containsPositionRestrictedBorrow(self.target)
+  if (isSlot(self)) return !containsPositionRestrictedBorrow(typeArgumentAt(self, 0) ?? 'never')
+  if (isCallable(self))
+    return (
+      self.parameters.every(isParameterBorrowType) && !containsPositionRestrictedBorrow(self.result)
+    )
+  return false
+}
+
 /** Applies one substitution while preserving invalid lifted-member specialization as data. */
 export const specializeFailureRow = (
   self: FailureRow,

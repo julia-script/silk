@@ -77,6 +77,8 @@ export interface CallableInstance {
     readonly parameterOrdinal: number
     readonly access: 'Copy' | 'Shared' | 'Exclusive' | 'Take'
     readonly type: Type.Type
+    /** Hidden identity of a callable value captured as environment payload rather than data. */
+    readonly callableIdentity?: Type.CallableIdentityArgument
   }>
   readonly type: Type.Callable
   readonly mode: Type.CallableMode
@@ -816,6 +818,24 @@ export const discover = (
         Type.genericArgumentKey(argument) === Type.genericArgumentKey(candidate)
       )
     })
+  const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
+    const leftVisible = left.typeArguments.filter(
+      (argument) => !Type.isHiddenIdentityArgument(argument),
+    )
+    const rightVisible = right.typeArguments.filter(
+      (argument) => !Type.isHiddenIdentityArgument(argument),
+    )
+    return (
+      leftVisible.length === rightVisible.length &&
+      leftVisible.every((argument, index) => {
+        const candidate = rightVisible.at(index)
+        return (
+          candidate !== undefined &&
+          Type.genericArgumentKey(argument) === Type.genericArgumentKey(candidate)
+        )
+      })
+    )
+  }
   const pending: Array<WorkItem> = [
     Object.freeze({
       key: entry.key,
@@ -824,6 +844,7 @@ export const discover = (
     }),
   ]
   const violations: Array<PolymorphicRecursion> = []
+  const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const contextText = (item: WorkItem): string =>
     `${item.cleanupReachable ? 'cleanup' : 'ordinary'}\u0001${keyText(item.key)}\u0001${[
@@ -877,7 +898,7 @@ export const discover = (
         }),
       )
     }
-    for (const callable of concreteCallables(fn, key, substitution, results)) {
+    for (const callable of concreteCallables(fn, key, substitution, results, index)) {
       recordedCallables.set(callableIdentity(callable), callable)
     }
     const functionOwnership = ownership
@@ -901,7 +922,7 @@ export const discover = (
       .flatMap((cleanup) => hookCalls(cleanup, index))
     const calls = new Map<string, CallTarget>()
     const directCalls = directCallInstances(fn, key, substitution, results, index)
-    const callableTargets = callableCallTargets(fn, results)
+    const callableTargets = callableCallTargets(fn, key, substitution, results, index)
     for (const call of directCalls) {
       recordedCalls.set(
         `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
@@ -986,18 +1007,33 @@ export const discover = (
         call.structuralProvider !== undefined &&
         ancestor?.structuralProvider !== undefined &&
         Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
+      const terminalCallableSpecialization =
+        ancestor !== undefined &&
+        sameVisibleArguments(ancestor.key, targetKey) &&
+        targetKey.typeArguments.some(Type.isCallableIdentityArgument) &&
+        targetKey.typeArguments
+          .filter(Type.isHiddenIdentityArgument)
+          .every(
+            (argument) =>
+              Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
+          )
       if (
         ancestor !== undefined &&
         !sameArguments(ancestor.key, targetKey) &&
         !structurallyDescending &&
+        !terminalCallableSpecialization &&
         !(
           recorded.has(keyText(targetKey)) &&
           (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
         )
       ) {
-        violations.push(
-          Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
-        )
+        const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
+        if (!violationKeys.has(violationKey)) {
+          violationKeys.add(violationKey)
+          violations.push(
+            Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
+          )
+        }
         continue
       }
       pending.push(

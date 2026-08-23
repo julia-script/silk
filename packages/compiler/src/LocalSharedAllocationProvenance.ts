@@ -36,6 +36,7 @@ interface UnreachedOrigin {
 
 interface ServiceOrigin {
   readonly _tag: 'ServiceOrigin'
+  readonly owner: Instances.Instance
   readonly service: Type.Nominal
   readonly operation: string
   readonly role: string
@@ -96,6 +97,7 @@ const sameOrigin = (left: Origin, right: Origin): boolean => {
     case 'ServiceOrigin':
       return (
         right._tag === 'ServiceOrigin' &&
+        ownerKey(left.owner) === ownerKey(right.owner) &&
         Type.equals(left.service, right.service) &&
         left.operation === right.operation &&
         left.role === right.role &&
@@ -396,6 +398,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           })
         : Object.freeze({
             _tag: 'ServiceOrigin',
+            owner: instance,
             service,
             operation: expression.operation,
             role: expression.role,
@@ -478,15 +481,17 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     readonly witness: NonNullable<ReturnType<typeof ConformanceProof.witness>>
   }
 
-  const selectedProvider = (origin: ProviderBoundOrigin): Provider | undefined => {
-    const proof = Instances.requirementSelection(origin.owner, origin.provider)
+  const selectedProvider = (
+    owner: Instances.Instance,
+    provider: ProviderBoundOrigin['provider'],
+  ): Provider | undefined => {
+    const proof = Instances.requirementSelection(owner, provider)
     if (proof === undefined) return undefined
     const capability = proof.selected.capability
     const providerType = proof.provider
     if (capability === undefined || !Type.isNominal(capability) || !Type.isNominal(providerType))
       return undefined
-    const witness =
-      origin.provider.witness ?? ConformanceProof.witness(index, providerType, capability)
+    const witness = provider.witness ?? ConformanceProof.witness(index, providerType, capability)
     return witness === undefined
       ? undefined
       : Object.freeze({
@@ -499,62 +504,126 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
 
   const resolve = (origin: Origin, providers: ReadonlyArray<Provider> = []): Origin => {
     if (origin._tag === 'ProviderBoundOrigin') {
-      const selected = selectedProvider(origin)
+      const selected = selectedProvider(origin.owner, origin.provider)
       return resolve(
         origin.protected,
         selected === undefined ? providers : Object.freeze([...providers, selected]),
       )
     }
     if (origin._tag !== 'ServiceOrigin') return origin
-    const provider = [...providers]
+    const explicitlyBound = [...providers]
       .reverse()
       .find(
         (candidate) =>
           candidate.role === origin.role && Type.equals(candidate.capability, origin.service),
       )
-    if (provider?.witness._tag !== 'SourceConformanceWitness')
+    // An ordinary effect helper executes with the provider bound around the helper construction at
+    // its caller. The provider node therefore lives in the caller HIR, while the service operation
+    // whose allocation provenance we must prove lives in the callee HIR. Follow that structural
+    // call edge instead of requiring the helper to inline or recognizing it by declaration name.
+    const forwarded =
+      explicitlyBound === undefined
+        ? discovery.instances.flatMap(
+            (caller): ReadonlyArray<Provider> =>
+              caller.function.statements
+                .flatMap(Hir.statementExpressions)
+                .flatMap(Hir.expressionTree)
+                .flatMap((candidate): ReadonlyArray<Provider> => {
+                  if (candidate._tag !== 'EffectBindRequirement') return []
+                  const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
+                    if (nested._tag === 'ParameterReference') {
+                      const identity = Instances.parameterEffectIdentity(
+                        caller.function,
+                        caller.key,
+                        nested.parameter.ordinal,
+                      )
+                      const effect =
+                        identity === undefined
+                          ? undefined
+                          : discovery.effects.find((item) => item.identity === identity)
+                      return (
+                        effect !== undefined &&
+                        Instances.keyText(effect.owner) === ownerKey(origin.owner)
+                      )
+                    }
+                    if (
+                      nested._tag !== 'Call' &&
+                      nested._tag !== 'EffectConstruct' &&
+                      nested._tag !== 'CallableApply'
+                    )
+                      return false
+                    const target = targetAt(caller, nested)
+                    return target !== undefined && ownerKey(target) === ownerKey(origin.owner)
+                  })
+                  if (!reachesOwner) return []
+                  const selected = selectedProvider(caller, candidate.provider)
+                  return selected === undefined ? [] : [selected]
+                }),
+          )
+        : []
+    const candidates =
+      explicitlyBound === undefined
+        ? forwarded.filter(
+            (candidate) =>
+              candidate.role === origin.role && Type.equals(candidate.capability, origin.service),
+          )
+        : [explicitlyBound]
+    if (candidates.length === 0)
       return Object.freeze({
         _tag: 'InvalidOrigin',
         description: 'unproved service allocation provenance',
         span: origin.span,
       })
-    const implementation = ConformanceProof.witnessOperation(provider.witness, origin.operation)
-    const targets =
-      implementation === undefined
-        ? []
-        : Instances.matchingSpecialization(discovery, {
-            declaration: implementation,
-            typeArguments: provider.witness.typeArguments,
+    // One generic ordinary helper may be reached through several lexical provider bindings. Its
+    // initializer is safe only when every reaching implementation preserves the requested layout;
+    // selecting the first provider would let a valid caller authorize a forged sibling call.
+    return candidates
+      .map((provider): Origin => {
+        if (provider.witness._tag !== 'SourceConformanceWitness')
+          return Object.freeze({
+            _tag: 'InvalidOrigin',
+            description: 'unproved service allocation provenance',
+            span: origin.span,
           })
-    const target = targets.length === 1 ? targets.at(0) : undefined
-    if (target === undefined)
-      return Object.freeze({
-        _tag: 'InvalidOrigin',
-        description: 'unresolved service implementation provenance',
-        span: origin.span,
+        const implementation = ConformanceProof.witnessOperation(provider.witness, origin.operation)
+        const targets =
+          implementation === undefined
+            ? []
+            : Instances.matchingSpecialization(discovery, {
+                declaration: implementation,
+                typeArguments: provider.witness.typeArguments,
+              })
+        const target = targets.length === 1 ? targets.at(0) : undefined
+        if (target === undefined)
+          return Object.freeze({
+            _tag: 'InvalidOrigin',
+            description: 'unresolved service implementation provenance',
+            span: origin.span,
+          })
+        const arguments_: Array<Origin> = target.specialization.parameters.map(() =>
+          Object.freeze({
+            _tag: 'InvalidOrigin' as const,
+            description: 'non-layout service parameter provenance',
+            span: origin.span,
+          }),
+        )
+        const layoutParameters = target.specialization.parameters.flatMap((parameter, ordinal) =>
+          Type.equals(parameter, Type.layout) ? [ordinal] : [],
+        )
+        const layoutParameter = layoutParameters.length === 1 ? layoutParameters.at(0) : undefined
+        if (layoutParameter === undefined)
+          return Object.freeze({
+            _tag: 'InvalidOrigin',
+            description: 'unresolved service layout parameter provenance',
+            span: origin.span,
+          })
+        arguments_[layoutParameter] = origin.layout
+        const implementationOrigin = resolve(substitute(summarize(target, new Set()), arguments_))
+        return implementationOrigin._tag === 'UnreachedOrigin'
+          ? resolve(origin.layout, providers)
+          : implementationOrigin
       })
-    const arguments_: Array<Origin> = target.specialization.parameters.map(() =>
-      Object.freeze({
-        _tag: 'InvalidOrigin' as const,
-        description: 'non-layout service parameter provenance',
-        span: origin.span,
-      }),
-    )
-    const layoutParameters = target.specialization.parameters.flatMap((parameter, ordinal) =>
-      Type.equals(parameter, Type.layout) ? [ordinal] : [],
-    )
-    const layoutParameter = layoutParameters.length === 1 ? layoutParameters.at(0) : undefined
-    if (layoutParameter === undefined)
-      return Object.freeze({
-        _tag: 'InvalidOrigin',
-        description: 'unresolved service layout parameter provenance',
-        span: origin.span,
-      })
-    arguments_[layoutParameter] = origin.layout
-    const implementationOrigin = resolve(substitute(summarize(target, new Set()), arguments_))
-    return implementationOrigin._tag === 'UnreachedOrigin'
-      ? resolve(origin.layout, providers)
-      : implementationOrigin
+      .reduce(mergeOrigin, unreached)
   }
 
   const parameterOrigins = new Map<string, Array<Origin>>()

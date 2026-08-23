@@ -1054,19 +1054,7 @@ export const complete = (
         for (const parameter of member.parameters) {
           if (
             parameter.declaredType._tag === 'Resolved' &&
-            containsPositionRestrictedBorrow(parameter.declaredType.type) &&
-            (!(
-              Type.isSlice(parameter.declaredType.type) ||
-              Type.isReference(parameter.declaredType.type) ||
-              Type.isSlot(parameter.declaredType.type)
-            ) ||
-              containsPositionRestrictedBorrow(
-                Type.isSlice(parameter.declaredType.type)
-                  ? parameter.declaredType.type.element
-                  : Type.isReference(parameter.declaredType.type)
-                    ? parameter.declaredType.type.target
-                    : (Type.typeArgumentAt(parameter.declaredType.type, 0) ?? 'never'),
-              ))
+            !Type.isParameterBorrowType(parameter.declaredType.type)
           ) {
             diagnostics.push(
               Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),
@@ -1095,19 +1083,7 @@ export const complete = (
           for (const parameter of operation.parameters) {
             if (
               parameter.declaredType._tag === 'Resolved' &&
-              containsPositionRestrictedBorrow(parameter.declaredType.type) &&
-              (!(
-                Type.isSlice(parameter.declaredType.type) ||
-                Type.isReference(parameter.declaredType.type) ||
-                Type.isSlot(parameter.declaredType.type)
-              ) ||
-                containsPositionRestrictedBorrow(
-                  Type.isSlice(parameter.declaredType.type)
-                    ? parameter.declaredType.type.element
-                    : Type.isReference(parameter.declaredType.type)
-                      ? parameter.declaredType.type.target
-                      : (Type.typeArgumentAt(parameter.declaredType.type, 0) ?? 'never'),
-                ))
+              !Type.isParameterBorrowType(parameter.declaredType.type)
             )
               diagnostics.push(
                 Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),

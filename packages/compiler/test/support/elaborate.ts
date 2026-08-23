@@ -45,5 +45,9 @@ export const ownership = (result: Elaboration.Result): Ownership.ModuleOwnership
     sources: new Map([[result.syntax.source.id, result.syntax.source]]),
     resolutionFailures: Object.freeze([]),
   })
-  return Ownership.checkModule(result, NameResolution.analyze(closure).index)
+  return Ownership.checkModule(
+    result,
+    NameResolution.analyze(closure).index,
+    Ownership.localSharedAccessBoundaryPlan(new Map([[result.syntax.source.id, result]])),
+  )
 }

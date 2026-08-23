@@ -927,11 +927,19 @@ export const instanceText = Instances.keyText
 const localText = (local: LocalId): string => `%${local.ordinal}`
 
 const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
-  if (
-    TypeCompatibility.isCompatible(
-      TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-    )
-  )
+  const actualSemantic = semanticType(actual)
+  const expectedSemantic = semanticType(expected)
+  const actualContract =
+    SilkType.isRepresented(actualSemantic) &&
+    (SilkType.isCallable(actualSemantic.contract) || SilkType.isEffect(actualSemantic.contract))
+      ? actualSemantic.contract
+      : actualSemantic
+  const expectedContract =
+    SilkType.isRepresented(expectedSemantic) &&
+    (SilkType.isCallable(expectedSemantic.contract) || SilkType.isEffect(expectedSemantic.contract))
+      ? expectedSemantic.contract
+      : expectedSemantic
+  if (TypeCompatibility.isCompatible(TypeCompatibility.check(actualContract, expectedContract)))
     return true
   if (
     actual._tag !== 'EffectValue' ||
@@ -3276,8 +3284,10 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination === undefined ||
             takeUse === undefined ||
             takeConflict === undefined ||
-            !SilkType.equals(takeUse, operation.useType) ||
-            !SilkType.equals(takeConflict, operation.conflictType) ||
+            !TypeCompatibility.isCompatible(TypeCompatibility.check(takeUse, operation.useType)) ||
+            !TypeCompatibility.isCompatible(
+              TypeCompatibility.check(takeConflict, operation.conflictType),
+            ) ||
             !SilkType.equals(operation.useType, useContract) ||
             !SilkType.equals(operation.conflictType, conflictContract) ||
             !callableCleanupValid(use, operation.useCleanup) ||
@@ -4158,7 +4168,9 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 capture.ordinal === field.ordinal &&
                 capture.parameterOrdinal === field.parameterOrdinal &&
                 capture.access === field.access &&
-                SilkType.equals(semanticType(source), field.type)
+                TypeCompatibility.isCompatible(
+                  TypeCompatibility.check(semanticType(source), field.type),
+                )
               )
             })
           const valid =
@@ -4902,11 +4914,17 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     }
   }
   for (const verdict of self.normalization ?? []) {
-    const fn = self.functions.find(
+    const candidates = self.functions.filter(
       (candidate) =>
         candidate.id.module === verdict.function.module &&
         candidate.id.name === verdict.function.name,
     )
+    const fn = candidates.find((candidate) => {
+      const region = candidate.regions.find(
+        (candidateRegion) => candidateRegion.id.ordinal === verdict.region.ordinal,
+      )
+      return region !== undefined && candidate.localTypes.at(verdict.local.ordinal) !== undefined
+    })
     const region = fn?.regions.find((candidate) => candidate.id.ordinal === verdict.region.ordinal)
     const local = fn?.localTypes.at(verdict.local.ordinal)
     const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
