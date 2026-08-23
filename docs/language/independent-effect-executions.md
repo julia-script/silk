@@ -18,7 +18,7 @@ public APIs for those actors.
 The selected sealed surface contains two opaque affine types, two compiler-owned static
 properties, and five operations:
 
-```silk,ignore
+```text
 Intrinsic.Execution<A>
 Intrinsic.Wake
 

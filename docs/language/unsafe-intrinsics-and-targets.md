@@ -705,7 +705,7 @@ compiler phase that recognizes a source policy actor by spelling.
 The local shared intrinsic surface contains one opaque affine `Intrinsic.SharedCore<T>` and four
 operations:
 
-```silk,ignore
+```text
 fn Intrinsic.sharedLayout<T>() -> Layout
 
 unsafe fn Intrinsic.sharedFromAllocation<T>(

@@ -36,7 +36,7 @@ garbage collector, weak handles, cycle collector, Scheduler, Deferred, or implic
 The canonical module `silk.shared` exports an affine `Shared<T>` handle and four operations with
 these exact contracts:
 
-```silk,ignore
+```text
 pub effect fn make<T>(value: T) -> Shared<T>
 ! OutOfMemoryError
 ? &mut Allocator
@@ -44,6 +44,43 @@ pub effect fn make<T>(value: T) -> Shared<T>
 pub fn clone<T>(self: &Shared<T>) -> Shared<T>
 pub fn with<T, A>(self: &Shared<T>, use: once fn(&T) -> A) -> A
 pub fn withMut<T, A>(self: &Shared<T>, use: once fn(&mut T) -> A) -> A
+```
+
+This complete program constructs one shared counter, clones its handle, mutates through one alias,
+and reads through the other:
+
+```silk
+import silk.core as Core
+import silk.effect as Effect
+import silk.shared { clone, make, with, withMut }
+
+struct Counter { value: i32 }
+
+fn increment(value: &mut Counter) -> i32 {
+  value.value = value.value + 22
+  return value.value
+}
+
+fn read(value: &Counter) -> i32 { return value.value }
+
+effect fn useCell() -> i32
+! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let creating = make<Counter>(Counter { value: 20 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let cell = run creating
+  let alias = clone<Counter>(&cell)
+  let updated = withMut<Counter, i32>(&alias, increment)
+  return with<Counter, i32>(&cell, read)
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+  return 0
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(useCell(), recover)
+}
 ```
 
 `Shared<T>` is an ordinary shipped-source actor over a sealed control-block primitive. The compiler
@@ -73,7 +110,7 @@ a nominal containing it reports `SEM0083`.
 
 `Shared.make` has this exact public contract:
 
-```silk,ignore
+```text
 effect fn Shared.make<T>(value: T) -> Shared<T>
 ! OutOfMemoryError
 ? &mut Allocator
@@ -370,7 +407,7 @@ defined by the preceding rules.
 
 The irreducible compiler surface is one opaque `Intrinsic.SharedCore<T>` and four operations:
 
-```silk,ignore
+```text
 fn Intrinsic.sharedLayout<T>() -> Layout
 
 unsafe fn Intrinsic.sharedFromAllocation<T>(
