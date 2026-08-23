@@ -1,4 +1,6 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
 import * as CompilerStdlib from '@silk-effect/compiler/Stdlib'
 import * as Json from '@silk-effect/documentation/Json'
 import * as DocumentationProject from '@silk-effect/documentation/Project'
@@ -17,31 +19,23 @@ const build = Effect.fn('stdlibDocumentation.build')(function* (): Effect.fn.Ret
   never,
   never
 > {
-  const modules: Array<DocumentationProject.Module> = []
+  const roots: Array<SourceFile.SourceFile> = []
   for (const entry of CompilerStdlib.manifest) {
     const bytes = CompilerStdlib.sources.get(entry.module)
-    if (bytes === undefined) continue
-    const snapshot = yield* Analysis.ofSource(entry.module, bytes)
-    const documented = DocumentationProject.make(snapshot, { includePrivate: false }).modules.find(
-      (module) => module.name === entry.module,
-    )
-    if (documented !== undefined) modules.push(documented)
+    if (bytes === undefined)
+      return yield* Effect.die(`Missing compiler-shipped stdlib source: ${entry.module}`)
+    roots.push(SourceFile.make(entry.module, bytes))
   }
-  return Json.encode(
-    Object.freeze({
-      schema: 'silk-documentation',
-      experimental: true,
-      modules: Object.freeze(modules),
-    }),
-  )
+  if (roots.length === 0) return yield* Effect.die('The stdlib manifest is empty')
+  const analysis = yield* ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty))
+  return Json.encode(DocumentationProject.fromProjectAnalysis(analysis, { includePrivate: false }))
 })
 
 /**
  * The same text for every test in the file, built once.
  *
- * Building it analyzes every module of the shipped manifest and its import closure, which costs
- * around a minute; three tests need the same bytes, and rebuilding per test spent that minute three
- * times over — enough to blow a test timeout on a loaded runner while proving nothing new.
+ * Three tests need the same immutable bytes, so they share one project analysis rather than proving
+ * the same input-to-documentation relationship repeatedly.
  */
 let pending: Promise<string> | undefined
 

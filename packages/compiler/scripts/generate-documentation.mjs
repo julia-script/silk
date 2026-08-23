@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
 import * as DocumentationProject from '../../documentation/dist/Project.js'
 import * as DocumentationReference from '../../documentation/dist/Reference.js'
-import * as Analysis from '../dist/Analysis.js'
+import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
+import * as SourceFile from '../dist/SourceFile.js'
+import * as SourceResolver from '../dist/SourceResolver.js'
 import * as Stdlib from '../dist/Stdlib.js'
 
 const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
@@ -19,7 +21,7 @@ const stdlibRoot = fileURLToPath(new URL('../../language/docs/stdlib/', import.m
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
 
 const stdlibTree = async () => {
-  const modules = []
+  const roots = []
   for (const module of Stdlib.manifest) {
     // Read the canonical source rather than the compiler's generated source map. Documentation is
     // commonly regenerated immediately after editing a .silk file, before compiler dist has been
@@ -27,17 +29,12 @@ const stdlibTree = async () => {
     const bytes = Uint8Array.from(
       readFileSync(new URL(`../stdlib/${module.path}`, import.meta.url)),
     )
-    const snapshot = await Effect.runPromise(Analysis.ofSource(module.module, bytes))
-    const project = DocumentationProject.make(snapshot)
-    const documented = project.modules.find((entry) => entry.name === module.module)
-    if (documented !== undefined) modules.push({ manifest: module, documented })
+    roots.push(SourceFile.make(module.module, bytes))
   }
-
-  const project = Object.freeze({
-    schema: 'silk-documentation',
-    experimental: true,
-    modules: Object.freeze(modules.map((entry) => entry.documented)),
-  })
+  const analysis = await Effect.runPromise(
+    ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty)),
+  )
+  const project = DocumentationProject.fromProjectAnalysis(analysis)
   const rendered = DocumentationReference.make(Stdlib.manifest, project)
   if (rendered._tag === 'Failure') {
     for (const error of rendered.errors) console.error('Stdlib reference generation failed:', error)
