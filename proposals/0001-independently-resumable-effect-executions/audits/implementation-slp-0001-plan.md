@@ -34,8 +34,8 @@ merge, the integration branch runs the full repository gates before the next lay
 | --- | --- | --- | ---: | --- | ---: |
 | 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
 | 2 | `add-independent-execution-packaging` | Done | 3 initial fixes; 3 resume attempts + 1 post-audit rerun | Integrated at `ff39ca0`; barrier passed | 1 High fixed; 1 High rejected as Layer 3 scope; Medium/Low recorded |
-| 3 | `add-external-wake-parking` | Done | 3 initial fixes + 1 conformance rerun + 1 resume bootstrap fix | Isolated branch passed; ready for integration | 7 reviewed; 3 High fixed, 3 High rejected as Layer 4 scope, 1 Medium recorded |
-| 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 integration | — |
+| 3 | `add-external-wake-parking` | Done | 3 initial fixes + 1 conformance rerun + 1 resume bootstrap fix | Integrated at `f2e82a8`; barrier passed | 7 reviewed; 3 High fixed, 3 High rejected as Layer 4 scope, 1 Medium recorded |
+| 4 | `add-independent-execution-engine-parity` | Running | — | — | — |
 | 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
 
 ## Integration gates
@@ -82,3 +82,6 @@ needed one prerequisite repair: a root topological build supplied missing compil
 documentation, LLVM, and Wasm package outputs before documentation generation. No semantic source
 change or new conformance finding was introduced, so the existing single three-lens pass was not
 repeated.
+
+Layer 3's integrated full hard-gate command also exited successfully. Layer 4 now owns complete
+transition integration and evaluator, Wasm, native, reactor, and differential parity.
