@@ -126,10 +126,83 @@ it('declares one discoverable namespace for every standard-library module', () =
   assert.strictEqual(Stdlib.findNamespace('Result')?.module, 'silk/result')
   assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')
   assert.strictEqual(Stdlib.findNamespace('Effect')?.module, 'silk/effect')
+  assert.strictEqual(Stdlib.findNamespace('Random')?.module, 'silk/random')
   assert.isDefined(Stdlib.find('silk/effect'))
   assert.isUndefined(Stdlib.find('silk/effects'))
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
+  assert.deepEqual(Stdlib.find('silk/random')?.aliases, ['Xoshiro256StarStar'])
 })
+
+const randomImporter = `import silk.random as Random
+
+pub fn main() -> i32 {
+  let provider = Random.seeded(0)
+  drop provider
+  return 42
+}`
+
+it.effect('resolves the complete Random surface to canonical portable Silk source', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stdlib/random-importer',
+      ascii(randomImporter),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+    const entry = Stdlib.find('silk/random')
+    assert.isDefined(entry)
+    assert.strictEqual(entry?.layer, 'portable')
+    assert.deepEqual(entry?.runtimeInventory, [])
+    assert.isUndefined(entry?.providerTargets)
+    assert.isTrue(entry?.sourceUrl.pathname.endsWith('/stdlib/silk/random.silk') ?? false)
+
+    const module = Analysis.declarationIndex(snapshot).modules.find(
+      (candidate) => candidate.module === 'silk/random',
+    )
+    assert.isDefined(module)
+    const canonicals = [
+      ...(module?.declarations ?? []),
+      ...(module?.services ?? []),
+      ...(module?.structs ?? []),
+    ].flatMap((declaration) =>
+      declaration.canonical._tag === 'Canonical' ? [declaration.canonical.id] : [],
+    )
+    assert.includeMembers(
+      canonicals.map((canonical) => canonical.name),
+      ['Random', 'Xoshiro256StarStar', 'seeded', 'nextU64', 'nextBool', 'below', 'fillBytes'],
+    )
+    assert.isTrue(canonicals.every((canonical) => canonical.module === 'silk/random'))
+  }),
+)
+
+it.effect('keeps a renamed copy of the Random implementation ordinary and executable', () =>
+  Effect.gen(function* () {
+    const source = Stdlib.sources.get('silk/random')
+    assert.isDefined(source)
+    if (source === undefined) return
+    const renamed = new TextDecoder()
+      .decode(source)
+      .replaceAll('Xoshiro256StarStar', 'Sequence256')
+      .replaceAll('Random', 'Entropy')
+    const root = `import app.entropy as Entropy
+import silk.effect as Effect
+
+pub fn main() -> i32 {
+  let mut provider = Entropy.seeded(0)
+  let word = run Entropy.nextU64()
+    |> Effect.provideMut<Entropy.Entropy>(&mut provider)
+  if word != 0x99ec5f36cb75f2b4 { return 1 }
+  return 42
+}`
+    const snapshot = yield* Analysis.makeRealized({
+      root: SourceFile.make('app/main', ascii(root)),
+    }).pipe(Effect.provide(SourceResolver.memory(new Map([['app/entropy', ascii(renamed)]]))))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
 
 /** A namespace named only in a comment is prose, not a qualified actor. */
 const commented = `// TODO: replace with Result.succeed once effect rows land
