@@ -741,3 +741,131 @@ value used after the expression SHALL be valid only when it remains live on ever
 
 - **WHEN** a right operand creates a lexical borrow and then completes
 - **THEN** the borrow ends before the branch joins and does not remain active on the skipped path
+
+### Requirement: Every local shared core handle is one affine obligation
+
+For every available `Intrinsic.SharedCore<T>` specialization, ownership SHALL classify the handle as
+affine regardless of whether `T` is Copy. A whole-handle move SHALL transfer exactly one live
+`LocalSharedStrong` obligation and end the source; ordinary reads or structural derivation MUST NOT
+duplicate the handle. The contained `T` SHALL keep its ordinary ownership category and MUST NOT be
+copied, moved, or cleaned merely because a handle moves. Ownership facts SHALL retain the
+`LocalExecution` affinity established by semantic analysis. An unavailable element specialization
+SHALL retain its causal diagnostic and unavailable ownership verdict rather than fabricate a Copy,
+unrestricted, or satisfied result. Aggregate ownership SHALL retain one distinct obligation for
+each structurally live core handle; a structural union SHALL retain only the obligations of its
+active member.
+
+#### Scenario: Move one core handle
+
+- **WHEN** a local shared core handle moves from one binding to another in the same local execution
+- **THEN** the source becomes dead, the destination owns the same single `LocalSharedStrong` obligation, and no operation on `T` is planned
+
+#### Scenario: Reject a non-consuming handle read in ownership
+
+- **WHEN** source attempts a non-consuming read that would duplicate a local shared core handle
+- **THEN** ownership publishes an `OWN0003` violation at the attempted read, retains the affine handle fact, and publishes no duplicated obligation
+
+#### Scenario: Reject Copy conformance before ownership
+
+- **WHEN** source declares `impl Copy` for a nominal containing a local shared core handle
+- **THEN** conformance validation publishes `SEM0083` at the implementation declaration, admits no Copy evidence, and ownership continues to classify available values of that nominal as affine
+
+#### Scenario: Keep a Copy element behind an affine handle
+
+- **WHEN** the core element type is `i32`
+- **THEN** the core retains one `LocalSharedStrong` obligation and moving it does not copy the stored integer
+
+#### Scenario: Specialize generic ownership independently of the element
+
+- **WHEN** one generic wrapper over `Intrinsic.SharedCore<T>` is specialized with a Copy `T` and with an affine `T`
+- **THEN** each available specialization owns exactly one affine `LocalSharedStrong` obligation and neither specialization owns or duplicates `T` through the handle
+
+#### Scenario: Retain a handle inside a local executable
+
+- **WHEN** a handle moves into an ordinary callable or Effect that remains within one local execution
+- **THEN** ownership transfers exactly one obligation into the environment, ends the source, and preserves `LocalExecution` affinity
+
+#### Scenario: Retain every handle obligation in aggregate storage
+
+- **WHEN** a nominal, fixed array, callable, or Effect stores two independently live local shared core handles
+- **THEN** ownership retains two distinct `LocalSharedStrong` obligations, while a structural union containing such values retains only the obligations of its active member
+
+#### Scenario: Retain a handle across local suspension and resumption
+
+- **WHEN** a handle moves through suspension, parking, resumption, or between independently resumable frames in one same-thread local execution domain
+- **THEN** the source frame ends when moved, the destination frame retains `LocalExecution` affinity and exactly one live `LocalSharedStrong` obligation, and no park or resume creates or discharges an obligation
+
+#### Scenario: Preserve unavailable element ownership
+
+- **WHEN** ownership receives `Intrinsic.SharedCore<Missing>` with causal element-resolution diagnostics
+- **THEN** it retains an unavailable verdict and those causes without publishing a Copy category, unrestricted affinity, satisfied verdict, or live handle obligation
+
+### Requirement: Strong-handle transitions preserve one dynamic cleanup authority
+
+Each successful clone SHALL add exactly one affine strong-handle obligation without copying, moving,
+or cleaning `T`. A non-last explicit or structured drop SHALL discharge one obligation and perform
+no payload cleanup. The drop that changes the count from one to zero SHALL exclusively clean `T`
+exactly once and then release the retained allocation exactly once. Strong-count state SHALL remain
+independent of access state, so clone and non-last drop MAY occur during active access without
+creating another reference or changing the active access owner. A strong cycle SHALL remain live and
+leak. Every acyclic graph whose handles are all discharged through structured execution SHALL reach
+exact last cleanup. A fatal trap SHALL retain the language's no-unwind rule and MUST NOT claim that
+live handles, payloads, or allocations were cleaned.
+
+#### Scenario: Drop two handles in order
+
+- **WHEN** one handle is cloned and the original is dropped before the clone
+- **THEN** the first drop changes count two to one without cleaning `T`, and the second cleans `T` once before one allocation release
+
+#### Scenario: Clean across typed-failure frames
+
+- **WHEN** a deeper typed-failure frame drops its clone and the propagating caller later drops the original
+- **THEN** the first cleanup only decrements and the caller's final cleanup destroys `T` and releases storage without replacing the failure payload
+
+#### Scenario: Clone during access
+
+- **WHEN** an active access callback clones its borrowed receiver through another live alias
+- **THEN** the count increments while access remains active and no additional reference to `T` is created
+
+#### Scenario: Leak a strong cycle
+
+- **WHEN** external handles to an otherwise unreachable cycle of local shared cores are dropped
+- **THEN** no count reaches zero and the cycle receives no payload cleanup or allocation release
+
+### Requirement: Local shared access borrows are callback-scoped and non-escaping
+
+Successful local shared access SHALL create one exclusive position-restricted borrow rooted in the
+control block for exactly the ordinary callback invocation. Every competing reentrant access,
+including shared-over-shared public wrappers derived from that exclusive operation, SHALL select the
+conflict path before another reference is formed. The borrow SHALL end before access is restored and
+before the result returns. It MUST NOT escape directly or through a generic result, aggregate,
+failure value, Effect capture, callable capture, or suspended computation. Diagnostics SHALL retain
+the access boundary and the attempted escape or suspension provenance.
+Every direct, narrowed, generic, aggregate, failure, Effect, callable, or suspension rejection SHALL
+use one stable local-shared-access diagnostic identity and retain the access-boundary span plus the
+specific escape or suspension span.
+
+#### Scenario: Return an ordinary value
+
+- **WHEN** the access callback reads or mutates `T` and returns an owned result containing no restricted borrow
+- **THEN** ownership ends the borrow, restores access, and permits later access through any live alias
+
+#### Scenario: Reject a direct returned borrow
+
+- **WHEN** the callback returns its `&mut T` parameter or a narrowed borrow derived from it
+- **THEN** ownership rejects the result and relates the escape to the local shared access boundary
+
+#### Scenario: Reject generic and executable escape
+
+- **WHEN** the callback hides the borrow in a generic result, Effect, stored callable, aggregate, or failure payload
+- **THEN** recursive ownership checking rejects the capture before executable lowering
+
+#### Scenario: Reject suspension with active access
+
+- **WHEN** a path attempts to suspend while the callback-scoped borrow remains live
+- **THEN** ownership rejects the suspension and no suspended state owns the access loan
+
+#### Scenario: Conflict every nested access combination
+
+- **WHEN** public shared or exclusive access is nested under public shared or exclusive access through any alias
+- **THEN** the nested call selects conflict and ownership never admits overlapping references
