@@ -38,6 +38,7 @@ export interface Instance {
   readonly function: Hir.HirFunction
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
+  readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
   readonly effectSuccesses?: ReadonlyArray<{
     readonly site: Hir.EffectSiteId
@@ -724,6 +725,7 @@ const {
   directCallInstances,
   callableCallTargets,
   forwardedRequirementTargets,
+  resultCallableIdentity,
   resultEffectIdentity,
   effectSuccesses,
   concreteCallables,
@@ -779,6 +781,26 @@ export const executionSuspensionOf = (self: Discovery, key: InstanceKey): Suspen
 /** Returns the summary of one exact hidden Effect runner. */
 export const effectSuspensionOf = (self: Discovery, identity: string): SuspensionMode.Summary =>
   suspensionFact(self, (subject) => subject._tag === 'Effect' && subject.identity === identity)
+
+/** Resolves an owner-scoped source representation identity to its concrete hidden Effect. */
+export const representedEffectSuspensionOf = (
+  self: Discovery,
+  identity: Type.EffectIdentityArgument,
+): SuspensionMode.Summary => {
+  const selected = self.effects.find(
+    (effect) =>
+      effect.representationIdentity === identity.identity &&
+      (identity.owner === undefined ||
+        (effect.owner.declaration.module === identity.owner.declaration.module &&
+          effect.owner.declaration.name === identity.owner.declaration.name &&
+          effect.owner.typeArguments.length === identity.owner.typeArguments.length &&
+          effect.owner.typeArguments.every((argument, ordinal) => {
+            const expected = identity.owner?.typeArguments.at(ordinal)
+            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+          }))),
+  )
+  return selected?.suspension ?? effectSuspensionOf(self, identity.identity)
+}
 
 /**
  * Discovers the reachable instances from the root module's entry. The worklist records an
@@ -901,6 +923,7 @@ export const discover = (
       continue
     }
     if (!recorded.has(keyText(key))) {
+      const resultCallable = resultCallableIdentity(fn, key, results, index)
       const resultEffect = resultEffectIdentity(fn, key, results, index)
       recorded.set(
         keyText(key),
@@ -911,6 +934,7 @@ export const discover = (
           substitution,
           specialization,
           effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
+          ...(resultCallable === undefined ? {} : { resultCallable }),
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )

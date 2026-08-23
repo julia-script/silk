@@ -49,6 +49,7 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import {
   baseRunnerKey,
+  callableValueByIdentity,
   callableValueType,
   directCallableSectionValueType,
   effectCompositeShape,
@@ -872,6 +873,112 @@ export function lowerExpressionInner(
               suspensionCleanup: callbackCleanup(onSuspend.result),
               completionTypeArguments: callableTypeArguments(2),
               suspensionTypeArguments: callableTypeArguments(3),
+              type,
+              provenance: authored(expression.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
+        }
+        if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionPark') {
+          const [registerExpression] = recipe.arguments
+          if (registerExpression === undefined) return undefined
+          const register = lowerExpression(fn, registerExpression)
+          const type = fn.type(expression.type)
+          const guardArgument = recipe.typeArguments.at(0)
+          const semanticGuard =
+            guardArgument === undefined ? undefined : fn.semanticArgument(guardArgument)
+          const representation = recipe.typeArguments.at(1)
+          const semanticRepresentation =
+            representation === undefined ? undefined : fn.semanticArgument(representation)
+          const guardType =
+            semanticGuard !== undefined &&
+            (Type.isTypeArgument(semanticGuard) ||
+              (typeof semanticGuard !== 'string' && semanticGuard._tag === 'RepresentedType'))
+              ? semanticGuard
+              : undefined
+          const registrationIdentity =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity
+              : undefined
+          const registrationTarget = registrationIdentity?.target
+          const registrationArguments = registrationIdentity?.typeArguments ?? Object.freeze([])
+          const resultCallableCandidates =
+            registrationTarget?._tag === 'Declaration'
+              ? fn.instances.flatMap((candidate) => {
+                  if (
+                    candidate.key.declaration.module !== registrationTarget.module ||
+                    candidate.key.declaration.name !== registrationTarget.name ||
+                    !registrationArguments.every((argument, ordinal) => {
+                      const candidateArgument = candidate.key.typeArguments.at(ordinal)
+                      return (
+                        candidateArgument !== undefined &&
+                        Type.equalsGenericArgument(argument, candidateArgument)
+                      )
+                    }) ||
+                    candidate.resultCallable === undefined
+                  )
+                    return []
+                  return [candidate.resultCallable]
+                })
+              : Object.freeze([])
+          const resultCallable = resultCallableCandidates.at(0)
+          const unambiguousResultCallable =
+            resultCallable !== undefined &&
+            resultCallableCandidates.every((candidate) =>
+              Type.equalsGenericArgument(resultCallable, candidate),
+            )
+              ? resultCallable
+              : undefined
+          const guard =
+            guardType === undefined
+              ? undefined
+              : (fn.type(guardType) ??
+                (Type.isCallable(guardType) && unambiguousResultCallable !== undefined
+                  ? (() => {
+                      const realized = callableValueByIdentity(
+                        fn.layout,
+                        unambiguousResultCallable,
+                        guardType,
+                      )
+                      return realized === undefined
+                        ? undefined
+                        : Object.freeze({ ...realized, type: guardType })
+                    })()
+                  : undefined))
+          const registerType =
+            register === undefined ? undefined : fn.localTypes.at(register.result.ordinal)
+          if (
+            register === undefined ||
+            registerType?._tag !== 'CallableValue' ||
+            guard === undefined ||
+            guard._tag === 'EffectOutcome' ||
+            type?._tag !== 'Nominal' ||
+            !Type.equals(type.type, Type.unit)
+          )
+            return undefined
+          const destination = fn.alloc(type)
+          const guardLocal = fn.alloc(guard)
+          const registrationTypeArguments =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity.typeArguments
+              : Object.freeze([])
+          fn.emit(
+            Object.freeze({
+              _tag: 'ExecutionPark' as const,
+              destination,
+              guard: guardLocal,
+              register: register.result,
+              registerAccess: 'Take' as const,
+              guardCleanup:
+                guard._tag === 'CallableValue'
+                  ? callableLocalCleanup(fn, guard)
+                  : concreteCleanup(fn, Mir.semanticType(guard)),
+              registerCleanup: callableLocalCleanup(fn, registerType),
+              registrationTypeArguments,
               type,
               provenance: authored(expression.span),
             }),

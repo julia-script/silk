@@ -953,7 +953,7 @@ export type Reason =
   | { readonly _tag: 'BorrowedMove' }
   | {
       readonly _tag: 'LocalSharedAccessEscape'
-      readonly kind: 'Result' | 'Suspension'
+      readonly kind: 'Callback' | 'Result' | 'Suspension'
     }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
@@ -3788,7 +3788,7 @@ export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
 
 /** Relates one access-scoped escape to the sealed boundary that created the exclusive loan. */
 export const localSharedAccessEscape = (
-  kind: 'Result' | 'Suspension',
+  kind: 'Callback' | 'Result' | 'Suspension',
   span: SourceSpan.SourceSpan,
   boundary: SourceSpan.SourceSpan,
 ): Diagnostic =>
@@ -3800,7 +3800,9 @@ export const localSharedAccessEscape = (
     message:
       kind === 'Suspension'
         ? 'Local-shared access cannot suspend while its exclusive borrow is live'
-        : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
+        : kind === 'Callback'
+          ? 'Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live'
+          : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
     reason: Object.freeze({ _tag: 'LocalSharedAccessEscape', kind }),
     span,
     relatedSpans: Object.freeze([

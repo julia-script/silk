@@ -34,8 +34,8 @@ merge, the integration branch runs the full repository gates before the next lay
 | --- | --- | --- | ---: | --- | ---: |
 | 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
 | 2 | `add-independent-execution-packaging` | Done | 3 initial fixes; 3 resume attempts + 1 post-audit rerun | Integrated at `ff39ca0`; barrier passed | 1 High fixed; 1 High rejected as Layer 3 scope; Medium/Low recorded |
-| 3 | `add-external-wake-parking` | Running | — | — | — |
-| 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 | — |
+| 3 | `add-external-wake-parking` | Done | 3 initial fixes + 1 conformance rerun + 1 resume bootstrap fix | Isolated branch passed; ready for integration | 7 reviewed; 3 High fixed, 3 High rejected as Layer 4 scope, 1 Medium recorded |
+| 4 | `add-independent-execution-engine-parity` | Pending | — | Waiting for layer 3 integration | — |
 | 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
 
 ## Integration gates
@@ -73,3 +73,12 @@ Layer 3 reached `91a622b` with 16/16 tasks and three verified High conformance f
 Its single post-conformance rerun passed typecheck and Biome, then parked on stale generated
 `diagnostics.md`. A fresh bounded resume will generate/check the documentation and rerun the full
 hard-gate sequence before integration.
+
+The bounded Layer 3 resume completed on `julia/slp0001-wake-parking-resume`. It regenerated and
+checked `diagnostics.md`, passed the focused 58-test conformance regression set and strict OpenSpec
+validation, then passed typecheck 24/24, Biome over 986 files, test 28/28 (compiler 2,118/2,118 plus
+native corpus 1/1), check 42/42 plus scripts 16/16, and release candidate 9/9. The fresh worktree
+needed one prerequisite repair: a root topological build supplied missing compiler,
+documentation, LLVM, and Wasm package outputs before documentation generation. No semantic source
+change or new conformance finding was introduced, so the existing single three-lens pass was not
+repeated.

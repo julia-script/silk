@@ -31,6 +31,7 @@ import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
+import * as WakeCell from './WakeCell.js'
 
 /**
  * The closed bootstrap interpreter, executing the lowered MIR program from the entry instance
@@ -80,6 +81,7 @@ export type {
   StringValue,
   UnionValue,
   Value,
+  WakeValue,
 } from './BootstrapValue.js'
 
 import type {
@@ -676,6 +678,16 @@ function* executeFunction(
             reason: 'Execution cleanup entered an illegal lifecycle state',
             span: provenance.span,
           })
+        const wakeDestroyed =
+          package_.wake === undefined ? undefined : WakeCell.destroyExecution(package_.wake)
+        if (wakeDestroyed?._tag === 'WakeCellViolation')
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Execution cleanup violated wake-control ownership',
+            span: provenance.span,
+          })
+        if (wakeDestroyed !== undefined) package_.wake = wakeDestroyed.state
         package_.state = 'Destroyed'
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
@@ -690,6 +702,10 @@ function* executeFunction(
           )
           if (blocked !== undefined) return blocked
         }
+        // An outstanding Wake is the final reclaim authority after the Execution handle is gone.
+        // Its ordinary affine cleanup releases the allocation exactly once.
+        if (wakeDestroyed !== undefined && wakeDestroyed.state.allocation !== 'Released')
+          return undefined
         if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
           return blockedStep({
             _tag: 'Trap',
@@ -705,6 +721,46 @@ function* executeFunction(
             span: provenance.span,
           }),
         )
+        return undefined
+      }
+      case 'WakeCleanup': {
+        if (owner._tag !== 'WakeValue')
+          throw new RangeError('Wake cleanup lost its generation-bound readiness authority')
+        const package_ = BootstrapStorage.execution(state.allocations, owner.ticket)
+        if (package_ === undefined)
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake cleanup referenced a missing execution package',
+            span: provenance.span,
+          })
+        const wake = package_.wake
+        if (wake === undefined || wake.generation !== owner.generation)
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake cleanup referenced a missing or stale generation',
+            span: provenance.span,
+          })
+        const dropped = WakeCell.dropWake(wake)
+        if (dropped._tag === 'WakeCellViolation')
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake readiness authority was consumed more than once',
+            span: provenance.span,
+          })
+        package_.wake = dropped.state
+        if (
+          dropped.state.allocation === 'Released' &&
+          !BootstrapStorage.release(state.allocations, owner.ticket, true)
+        )
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake final reclaim authority was consumed more than once',
+            span: provenance.span,
+          })
         return undefined
       }
       case 'CallableCleanup': {
@@ -2347,6 +2403,14 @@ function* executeFunction(
             })
             break
           }
+          case 'ExecutionWake':
+          case 'ExecutionPark':
+            return blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: 'External wake parking requires resumable engine realization',
+              span: operation.provenance.span,
+            })
           case 'SharedClone': {
             const core = referenced(operation.self).value
             if (core._tag !== 'SharedCoreValue')

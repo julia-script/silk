@@ -23,7 +23,7 @@ export interface Nominal {
   readonly name: string
   readonly arguments: ReadonlyArray<GenericArgument>
   /** Compiler-minted provenance for sealed nominal identities unavailable to source declarations. */
-  readonly sealed?: 'Intrinsic.SharedCore' | 'Intrinsic.Execution'
+  readonly sealed?: 'Intrinsic.SharedCore' | 'Intrinsic.Execution' | 'Intrinsic.Wake'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -206,6 +206,8 @@ const nonScalarBuiltinOperations = Object.freeze([
   'ExecutionLayout',
   'ExecutionFromAllocation',
   'ExecutionDrive',
+  'ExecutionWake',
+  'ExecutionPark',
   'EffectSuspend',
   'StorageAcquire',
   'HostWrite',
@@ -446,6 +448,15 @@ const sealedExecution = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
     sealed: 'Intrinsic.Execution',
   })
 
+const sealedWake = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Wake',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.Wake',
+  })
+
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
   self: Nominal,
@@ -455,7 +466,9 @@ export const specializeNominal = (
     ? sealedSharedCore(arguments_)
     : self.sealed === 'Intrinsic.Execution'
       ? sealedExecution(arguments_)
-      : nominal(self.module, self.name, arguments_)
+      : self.sealed === 'Intrinsic.Wake'
+        ? sealedWake()
+        : nominal(self.module, self.name, arguments_)
 
 /** Canonical allocation-free failure used by every allocator implementation. */
 export const outOfMemoryError: Nominal = nominal('silk/core', 'OutOfMemoryError')
@@ -488,6 +501,8 @@ export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [el
 export const sharedCore = (element: Type): Nominal => sealedSharedCore([element])
 /** Opaque affine owner-neutral execution identity. Runtime layout belongs to the packaging slice. */
 export const execution = (result: Type): Nominal => sealedExecution([result])
+/** Opaque affine readiness authority for one local Execution park generation. */
+export const wake: Nominal = sealedWake()
 /** Canonical recoverable success and failure members shipped by silk/option. */
 export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
 export const none: Nominal = nominal('silk/option', 'None')
@@ -574,6 +589,20 @@ export const isExecution = (
   return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
 }
 
+/** Tests the canonical sealed Wake identity without consulting source spelling. */
+export const isWake = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'Intrinsic'
+  readonly name: 'Wake'
+  readonly arguments: readonly []
+} =>
+  isNominal(self) &&
+  self.module === 'Intrinsic' &&
+  self.name === 'Wake' &&
+  self.sealed === 'Intrinsic.Wake' &&
+  self.arguments.length === 0
+
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
@@ -583,6 +612,7 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   ['Slot', nominal('silk/core', 'Slot')],
   ['Intrinsic.SharedCore', sealedSharedCore([])],
   ['Intrinsic.Execution', sealedExecution([])],
+  ['Intrinsic.Wake', sealedWake()],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */

@@ -815,7 +815,7 @@ export const catalog = (
     const key = Type.key(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
-    if (Type.isSharedCore(type) || Type.isExecution(type)) {
+    if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
       const result: Entry = Object.freeze({
         _tag: 'LayoutEntry',
         type,
@@ -2623,7 +2623,7 @@ export const plan = (
   const suspensionOf = (argument: Type.GenericArgument): SuspensionMode.Summary => {
     if (Type.isExactRepresentationArgument(argument))
       return Type.isEffectIdentityArgument(argument.identity)
-        ? Instances.effectSuspensionOf(discovery, argument.identity.identity)
+        ? Instances.representedEffectSuspensionOf(discovery, argument.identity)
         : SuspensionMode.direct
     if (Type.isCompositeEffectRepresentationArgument(argument))
       return SuspensionMode.join(argument.alternatives.map(suspensionOf))
@@ -2933,7 +2933,7 @@ const shapeNode = (
       laneCount: 1,
     })
   }
-  if (Type.isSharedCore(type) || Type.isExecution(type)) {
+  if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
     return Object.freeze({
       _tag: 'AddressShape',
       type,

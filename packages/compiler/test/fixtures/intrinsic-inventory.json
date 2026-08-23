@@ -5174,6 +5174,22 @@
       "identity": "ExecutionDrive"
     },
     {
+      "operation": "Intrinsic.wake",
+      "signature": "fn Intrinsic.wake(wake: Wake) -> ()",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "language:external-wake-parking",
+      "identity": "ExecutionWake"
+    },
+    {
+      "operation": "Intrinsic.park",
+      "signature": "fn Intrinsic.park<G, F>(register: F) -> Effect<()>",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "language:external-wake-parking",
+      "identity": "ExecutionPark"
+    },
+    {
       "operation": "Intrinsic.sharedLayout",
       "signature": "fn Intrinsic.sharedLayout<T>() -> Layout",
       "unsafe": false,
