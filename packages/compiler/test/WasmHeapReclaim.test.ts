@@ -196,3 +196,87 @@ it.effect('reports the folded release count on Wasm', () =>
     assert.strictEqual(wasmReleases, 3)
   }),
 )
+
+const interleavedShared = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let mut index = 0
+  while index < 10000 {
+    let first = run (Shared.make<i32>(1) |> Effect.provideMut<Allocator>(&mut allocator))
+    let second = run (Shared.make<i32>(2) |> Effect.provideMut<Allocator>(&mut allocator))
+    drop first
+    let third = run (Shared.make<i32>(3) |> Effect.provideMut<Allocator>(&mut allocator))
+    drop second
+    drop third
+    index = index + 1
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+it.effect(
+  'returns non-LIFO local-shared control blocks through the Wasm reclaim path',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'wasm-heap-reclaim/local-shared-interleaved',
+        ascii(interleavedShared),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+      assert.isAtMost(pagesOf(instance), 4)
+    }),
+  120_000,
+)
+
+const repeatedSharedAccess = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+struct Counter { value: i32 }
+fn increment(value: &mut Counter) -> i32 {
+  value.value = value.value + 1
+  return value.value
+}
+fn read(value: &Counter) -> i32 { return value.value }
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let shared = run (Shared.make<Counter>(Counter { value: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let mut index = 0
+  while index < 10000 {
+    let alias = Shared.clone<Counter>(&shared)
+    let updated = Shared.withMut<Counter, i32>(&alias, increment)
+    drop alias
+    index = index + 1
+  }
+  let result = Shared.with<Counter, i32>(&shared, read)
+  drop shared
+  if result == 10000 { return 42 }
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+it.effect(
+  'keeps repeated local-shared clone and access allocation-free on Wasm',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'wasm-heap-reclaim/local-shared-clone-access',
+        ascii(repeatedSharedAccess),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+      assert.isAtMost(pagesOf(instance), 4)
+    }),
+  120_000,
+)

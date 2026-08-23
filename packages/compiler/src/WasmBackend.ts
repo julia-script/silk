@@ -3662,11 +3662,7 @@ const emitDropOperation = (
   } = state
   if (operation.cleanup._tag === 'LocalSharedCoreCleanup') {
     const cleanup = operation.cleanup
-    const elementLayout = LayoutPlan.entry(plan, cleanup.element)
-    const block =
-      elementLayout === undefined
-        ? undefined
-        : LocalSharedControlBlock.plan(plan.target, cleanup.element, elementLayout)
+    const block = operation.localShared?.block
     if (block?._tag !== 'LocalSharedControlBlockPlan')
       throw new RangeError('Wasm local-shared cleanup lost its target control-block plan')
     const base = scalar(operation.local)
@@ -4706,18 +4702,23 @@ const emitApplyCallableOperation = (
       Instr.localSet(scalar(operation.destination)),
     ]
   }
+  const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
   return [
     ...operation.arguments.flatMap((argument) =>
       slots(argument).map((slot) => Instr.localGet(slot)),
     ),
     ...captureOperands,
     Instr.call(resolve(target.declaration, operation.typeArguments)),
-    ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
-    ...reloadReachableRoots([
-      ...(operation.callable === undefined ? [] : [operation.callable]),
-      ...operation.captures.map((capture) => capture.source),
-      ...operation.arguments,
-    ]),
+    ...(diverges
+      ? [Instr.op('unreachable')]
+      : [
+          ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
+          ...reloadReachableRoots([
+            ...(operation.callable === undefined ? [] : [operation.callable]),
+            ...operation.captures.map((capture) => capture.source),
+            ...operation.arguments,
+          ]),
+        ]),
   ]
 }
 

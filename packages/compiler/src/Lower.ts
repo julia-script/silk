@@ -4,7 +4,8 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
-import type * as Layout from './Layout.js'
+import * as Layout from './Layout.js'
+import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import type * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -111,6 +112,108 @@ export interface DelayedEffectState {
   readonly loanEnds: ReadonlyMap<number, ReadonlyArray<Hir.BorrowId>>
   readonly loanLocals: ReadonlyMap<string, Mir.LocalId>
 }
+
+const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation): Mir.Operation => {
+  if (operation._tag === 'Drop' && operation.cleanup._tag === 'LocalSharedCoreCleanup') {
+    const elementLayout = Layout.entry(layout, operation.cleanup.element)
+    const block =
+      elementLayout === undefined
+        ? undefined
+        : LocalSharedControlBlock.plan(layout.target, operation.cleanup.element, elementLayout)
+    return block?._tag !== 'LocalSharedControlBlockPlan'
+      ? operation
+      : Object.freeze({
+          ...operation,
+          localShared: Object.freeze({ element: operation.cleanup.element, block }),
+        })
+  }
+  if (operation._tag === 'ShortCircuit')
+    return Object.freeze({
+      ...operation,
+      right: Object.freeze({
+        ...operation.right,
+        operations: Object.freeze(
+          operation.right.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+        ),
+      }),
+    })
+  if (operation._tag === 'Match')
+    return Object.freeze({
+      ...operation,
+      arms: Object.freeze(
+        operation.arms.map((arm) =>
+          Object.freeze({
+            ...arm,
+            ...(arm.guard === undefined
+              ? {}
+              : {
+                  guard: Object.freeze({
+                    ...arm.guard,
+                    operations: Object.freeze(
+                      arm.guard.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+                    ),
+                  }),
+                }),
+            selected: Object.freeze({
+              ...arm.selected,
+              operations: Object.freeze(
+                arm.selected.operations.map((child) => withLocalSharedDropPlan(layout, child)),
+              ),
+            }),
+          }),
+        ),
+      ),
+    })
+  if ('releases' in operation && operation.releases !== undefined)
+    return Object.freeze({
+      ...operation,
+      releases: Object.freeze(
+        operation.releases.map((release) => {
+          const planned = withLocalSharedDropPlan(layout, release)
+          return planned._tag === 'Drop' ? planned : release
+        }),
+      ),
+    })
+  return operation
+}
+
+const withLocalSharedDropPlans = (
+  layout: Layout.Plan,
+  functions: ReadonlyArray<Mir.MirFunction>,
+): ReadonlyArray<Mir.MirFunction> =>
+  Object.freeze(
+    functions.map((fn) =>
+      Object.freeze({
+        ...fn,
+        regions: Object.freeze(
+          fn.regions.map((region) =>
+            region._tag === 'OperationRegion'
+              ? Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation) =>
+                      withLocalSharedDropPlan(layout, operation),
+                    ),
+                  ),
+                })
+              : region._tag === 'CleanupRegion'
+                ? Object.freeze({
+                    ...region,
+                    releases: Object.freeze(
+                      region.releases.map((release) => {
+                        const planned = withLocalSharedDropPlan(layout, release)
+                        return planned._tag === 'Drop' || planned._tag === 'EndLoan'
+                          ? planned
+                          : release
+                      }),
+                    ),
+                  })
+                : region,
+          ),
+        ),
+      }),
+    ),
+  )
 
 import { generated } from './CleanupEmission.js'
 import {
@@ -369,7 +472,7 @@ export const lowerProgram = (
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
-      functions: Object.freeze(functions),
+      functions: withLocalSharedDropPlans(layout, functions),
     })
   }
   const resolvedEntry = discovery.entry
@@ -561,6 +664,6 @@ export const lowerProgram = (
     entry,
     layout,
     staticData,
-    functions: Object.freeze(functions),
+    functions: withLocalSharedDropPlans(layout, functions),
   })
 }

@@ -175,6 +175,10 @@ export const lowerBuiltinExpression = (
       allocationProvenance === undefined
         ? undefined
         : Layout.entry(fn.layout, allocationProvenance.element)
+    const allocationFact =
+      allocationProvenance === undefined
+        ? -1
+        : fn.layout.localSharedAllocationProvenance.facts.indexOf(allocationProvenance)
     const allocationBlock =
       allocationProvenance === undefined || allocationElementLayout === undefined
         ? undefined
@@ -189,6 +193,8 @@ export const lowerBuiltinExpression = (
       type?._tag !== 'Nominal' ||
       !Type.isSharedCore(type.type) ||
       element === undefined ||
+      allocationProvenance === undefined ||
+      allocationFact < 0 ||
       block?._tag !== 'LocalSharedControlBlockPlan' ||
       allocationBlock?._tag !== 'LocalSharedControlBlockPlan'
     )
@@ -203,6 +209,10 @@ export const lowerBuiltinExpression = (
         element,
         block,
         allocationBlock,
+        allocationFact,
+        allocationProvenance: allocationProvenance.span,
+        allocationAccess: 'Take',
+        valueAccess: 'Take',
         type,
         provenance: authored(expression.span),
       }),
@@ -275,6 +285,7 @@ export const lowerBuiltinExpression = (
     if (payloadType?._tag !== 'Reference') return undefined
     const payload = fn.alloc(payloadType)
     const destination = fn.alloc(type)
+    const loan = fn.freshSyntheticBorrow(expression.span)
     const useContract = Type.callable(
       Object.freeze([Type.reference('Exclusive', element)]),
       Mir.semanticType(type),
@@ -295,6 +306,8 @@ export const lowerBuiltinExpression = (
         conflictType: conflictContract,
         useCleanup: cleanupForLocal(fn, concreteCleanup(fn, useType.type), useType),
         conflictCleanup: cleanupForLocal(fn, concreteCleanup(fn, conflictType.type), conflictType),
+        loan,
+        retainedLoans: Object.freeze([]),
         type,
         provenance: authored(expression.span),
       }),

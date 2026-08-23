@@ -31,6 +31,37 @@ effect fn useCell() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
 
+const affineMovement = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.layout { Layout }
+import silk.shared as Shared
+struct Empty {}
+struct Token { storage: Allocation }
+struct Mailbox { state: Empty | Token }
+fn take(self: &mut Mailbox) -> Empty | Token {
+  return Intrinsic.replace(self.state, Empty {})
+}
+fn consume(value: Empty | Token) -> i32 {
+  return match move value {
+    Empty {} => 0
+    Token { storage } => release(move storage)
+  }
+}
+fn release(storage: Allocation) -> i32 { drop storage return 42 }
+effect fn useCell() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let storage = run (Allocator.allocate(Layout.of<i32>())
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let mailbox = run (Shared.make<Mailbox>(Mailbox {
+    state: Token { storage: move storage }
+  }) |> Effect.provideMut<Allocator>(&mut allocator))
+  let token = Shared.withMut<Mailbox, Empty | Token>(&mailbox, take)
+  drop mailbox
+  return consume(move token)
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`
+
 const exhaustedConstruction = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
@@ -326,6 +357,31 @@ pub fn main() -> i32 { return 42 }`),
   }),
 )
 
+it.effect('moves an affine payload through public Shared access on evaluation and Wasm', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'shared-stdlib/affine-movement',
+      ascii(affineMovement),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const events = Projections.allocationTraceEventsOf(evaluated)
+    assert.strictEqual(events.filter((event) => event._tag === 'AllocationAcquire').length, 2)
+    assert.strictEqual(events.filter((event) => event._tag === 'AllocationRelease').length, 2)
+    assert.deepEqual(
+      events.filter((event) => event._tag.startsWith('SharedAccess')).map((event) => event._tag),
+      ['SharedAccessBegin', 'SharedAccessEnd'],
+    )
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 it.effect('cleans the source payload once when the selected allocator rejects make', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -342,6 +398,9 @@ it.effect('cleans the source payload once when the selected allocator rejects ma
       Projections.allocationTraceEventsOf(evaluated).map((event) => event._tag),
       ['AllocationAcquire', 'AllocationRelease'],
     )
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 
@@ -437,6 +496,9 @@ it.effect('traps all four nested public access combinations before the nested ca
           .filter((event) => event._tag.startsWith('SharedAccess'))
           .map((event) => event._tag)
         assert.deepEqual(access, ['SharedAccessBegin', 'SharedAccessConflict'])
+        const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+        const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+        assert.throws(() => (instance.exports.silk_main as () => number)())
       }
     }
   }),

@@ -461,6 +461,12 @@ export type Operation =
       readonly element: DeclarationFacts.SemanticType
       readonly block: LocalSharedControlBlock.Plan
       readonly allocationBlock: LocalSharedControlBlock.Plan
+      /** Stable index into the canonical target-layout allocation-provenance plan. */
+      readonly allocationFact: number
+      /** Canonical allocation-layout origin retained from target planning. */
+      readonly allocationProvenance: SourceSpan.SourceSpan
+      readonly allocationAccess: 'Take'
+      readonly valueAccess: 'Take'
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Provenance
     }
@@ -488,6 +494,10 @@ export type Operation =
       readonly conflictType: SilkType.Callable
       readonly useCleanup: CleanupPlan.CleanupPlan
       readonly conflictCleanup: CleanupPlan.CleanupPlan
+      /** Compiler-owned identity of the callback-scoped exclusive payload loan. */
+      readonly loan: Hir.BorrowId
+      /** Must remain empty: no result or executable state may retain `loan`. */
+      readonly retainedLoans: ReadonlyArray<Hir.BorrowId>
       readonly type: Type
       readonly provenance: Provenance
     }
@@ -978,6 +988,11 @@ export interface DropOperation {
   readonly _tag: 'Drop'
   readonly local: LocalId
   readonly cleanup: CleanupPlan.CleanupPlan
+  /** Exact target plan for an opaque local-shared core drop. Absent for every other cleanup. */
+  readonly localShared?: {
+    readonly element: SilkType.Type
+    readonly block: LocalSharedControlBlock.Plan
+  }
   readonly provenance: Provenance
 }
 
@@ -1472,6 +1487,13 @@ export interface Violation {
     | 'OrphanSuspensionMachinery'
   readonly function?: DeclarationFacts.CanonicalId
   readonly region?: RegionId
+  /** The exact authored/generated operation that caused a local-shared rejection. */
+  readonly provenance?: Provenance
+  readonly localSharedReason?:
+    | 'CleanupContract'
+    | 'InitializationContract'
+    | 'CloneContract'
+    | 'AccessContract'
   readonly detail: string
 }
 

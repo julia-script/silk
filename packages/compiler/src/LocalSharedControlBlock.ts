@@ -27,6 +27,19 @@ export interface Unavailable {
 
 export type Selection = Plan | Unavailable
 
+/** Exact equality for the compiler-private target plan carried by verified MIR. */
+export const equals = (left: Plan, right: Plan): boolean =>
+  left.target === right.target &&
+  Type.equals(left.element, right.element) &&
+  left.size === right.size &&
+  left.alignment === right.alignment &&
+  left.strongOffset === right.strongOffset &&
+  left.strongMaximum === right.strongMaximum &&
+  left.accessOffset === right.accessOffset &&
+  left.allocationOffset === right.allocationOffset &&
+  left.valueOffset === right.valueOffset &&
+  left.provenance === right.provenance
+
 const maximum = (target: Target.Target): number =>
   target.pointerSize === 4 ? 0xffff_ffff : Number.MAX_SAFE_INTEGER
 
