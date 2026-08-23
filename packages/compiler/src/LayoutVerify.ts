@@ -490,16 +490,22 @@ const verifyEntry = (
     const violations: Array<Violation> = []
     const expected = candidate.representation.fields.map((field, ordinal) => {
       const borrowed = field.representation === 'Borrow'
-      const fieldLayout = borrowed
-        ? undefined
-        : Type.isBuiltin(field.type)
-          ? scalarEntry(target, field.type)
-          : available.get(Type.key(field.type))
+      const executable = field.callableIdentity !== undefined
+      const fieldLayout =
+        borrowed || executable
+          ? undefined
+          : Type.isBuiltin(field.type)
+            ? scalarEntry(target, field.type)
+            : available.get(Type.key(field.type))
       return Object.freeze({
         value: ordinal,
-        size: borrowed ? target.pointerSize : (fieldLayout?.size ?? 0),
-        alignment: borrowed ? target.pointerAlignment : (fieldLayout?.alignment ?? 1),
-        available: borrowed || fieldLayout !== undefined,
+        size: borrowed ? target.pointerSize : executable ? field.size : (fieldLayout?.size ?? 0),
+        alignment: borrowed
+          ? target.pointerAlignment
+          : executable
+            ? field.alignment
+            : (fieldLayout?.alignment ?? 1),
+        available: borrowed || executable || fieldLayout !== undefined,
       })
     })
     const packed = Packing.pack(expected)

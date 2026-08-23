@@ -38,6 +38,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_standard_input`](./os-standard-input.md) | `OsStandardInput` | 2 | Native StandardInput provider backed by the process standard-input descriptor. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
+| [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |

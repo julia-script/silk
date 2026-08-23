@@ -3115,69 +3115,169 @@ export const localSharedResultEscapes = (facts: {
     Type.containsExecutableRepresentation(facts.resultType)) &&
     facts.referencesRestrictedParameter)
 
-/** Checks every declaration of one elaborated module once, producing its ownership facts. */
-export const checkModule = (
-  result: Elaboration.Result,
-  index: DeclarationIndex.Index,
-): ModuleOwnership => {
-  const targetKey = (target: Hir.CallableTarget): string | undefined =>
-    target._tag === 'DeclarationCallableTarget'
-      ? `${target.declaration.module}\u0000${target.declaration.name}`
-      : undefined
-  const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
-  for (const fn of result.hir.functions) {
+/**
+ * Exact ordinary callback bodies reached from the sealed local-shared access operation.
+ *
+ * The callback parameter of an ordinary wrapper earns access-boundary behavior only by forwarding
+ * to `SharedWithMut`. Its declaration shape and the spelling of the wrapper are irrelevant.
+ */
+export interface LocalSharedAccessBoundaryPlan {
+  readonly _tag: 'LocalSharedAccessBoundaryPlan'
+  readonly boundaries: ReadonlyMap<string, ReadonlyArray<SourceSpan.SourceSpan>>
+}
+
+const localSharedTargetKey = (target: DeclarationFacts.CanonicalId): string =>
+  `${target.module}\u0000${target.name}`
+
+/** Propagates sealed callback edges through ordinary wrappers across the loaded module closure. */
+export const localSharedAccessBoundaryPlan = (
+  results: ReadonlyMap<string, Elaboration.Result>,
+): LocalSharedAccessBoundaryPlan => {
+  const callbackOrdinals = new Map<string, Set<number>>()
+  const bindingsByFunction = new Map<Hir.HirFunction, ReadonlyMap<number, Hir.Expression>>()
+  const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> => {
+    const cached = bindingsByFunction.get(fn)
+    if (cached !== undefined) return cached
     const bindings = new Map<number, Hir.Expression>()
-    const collectBindings = (statements: ReadonlyArray<Hir.Statement>): void => {
+    const collect = (statements: ReadonlyArray<Hir.Statement>): void => {
       for (const statement of statements) {
         if (statement._tag === 'Bind')
           bindings.set(statement.binding.ordinal, statement.initializer)
-        if (statement._tag === 'Unsafe') collectBindings(statement.statements)
+        if (statement._tag === 'Unsafe') collect(statement.statements)
         if (statement._tag === 'If' || statement._tag === 'IfLet') {
-          collectBindings(statement.taken)
-          collectBindings(statement.otherwise)
+          collect(statement.taken)
+          collect(statement.otherwise)
         }
-        if (statement._tag === 'While') collectBindings(statement.body)
+        if (statement._tag === 'While') collect(statement.body)
       }
     }
-    collectBindings(fn.statements)
-    const callableTarget = (
-      expression: Hir.Expression,
-      seen = new Set<number>(),
-    ): Hir.CallableTarget | undefined => {
-      if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
-        return expression.target
-      if (expression._tag === 'Move') return callableTarget(expression.subject, seen)
-      if (expression._tag === 'UnionConvert') return callableTarget(expression.source, seen)
-      if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
-        return undefined
-      const initializer = bindings.get(expression.binding.ordinal)
-      return initializer === undefined
-        ? undefined
-        : callableTarget(initializer, new Set(seen).add(expression.binding.ordinal))
+    collect(fn.statements)
+    bindingsByFunction.set(fn, bindings)
+    return bindings
+  }
+  const parameterOrdinals = (
+    expression: Hir.Expression,
+    bindings: ReadonlyMap<number, Hir.Expression>,
+    seen = new Set<number>(),
+  ): ReadonlySet<number> => {
+    if (expression._tag === 'ParameterReference') return new Set([expression.parameter.ordinal])
+    if (expression._tag === 'Move') return parameterOrdinals(expression.subject, bindings, seen)
+    if (expression._tag === 'UnionConvert')
+      return parameterOrdinals(expression.source, bindings, seen)
+    if (expression._tag === 'CallableSection')
+      return new Set(
+        expression.captures.flatMap((capture) => [
+          ...parameterOrdinals(capture.value, bindings, seen),
+        ]),
+      )
+    if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+      return new Set()
+    const initializer = bindings.get(expression.binding.ordinal)
+    return initializer === undefined
+      ? new Set()
+      : parameterOrdinals(initializer, bindings, new Set(seen).add(expression.binding.ordinal))
+  }
+  const functions = [...results.values()].flatMap((result) => result.hir.functions)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const fn of functions) {
+      if (fn.declaration.canonical._tag !== 'Canonical') continue
+      const owner = localSharedTargetKey(fn.declaration.canonical.id)
+      const ordinals = callbackOrdinals.get(owner) ?? new Set<number>()
+      const bindings = bindingsOf(fn)
+      for (const expression of fn.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)) {
+        let boundaryOrdinals: ReadonlySet<number> | undefined
+        let arguments_: ReadonlyArray<Hir.Expression> | undefined
+        if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
+          boundaryOrdinals = new Set([1])
+          arguments_ = expression.arguments
+        } else if (expression._tag === 'Call') {
+          boundaryOrdinals = callbackOrdinals.get(localSharedTargetKey(expression.target))
+          arguments_ = expression.arguments
+        }
+        if (boundaryOrdinals === undefined) continue
+        for (const boundaryOrdinal of boundaryOrdinals) {
+          const argument = arguments_?.at(boundaryOrdinal)
+          if (argument === undefined) continue
+          for (const ordinal of parameterOrdinals(argument, bindings)) {
+            if (ordinals.has(ordinal)) continue
+            ordinals.add(ordinal)
+            changed = true
+          }
+        }
+      }
+      if (ordinals.size > 0) callbackOrdinals.set(owner, ordinals)
     }
+  }
+
+  const boundaries = new Map<string, Array<SourceSpan.SourceSpan>>()
+  const callableTarget = (
+    expression: Hir.Expression,
+    bindings: ReadonlyMap<number, Hir.Expression>,
+    seen = new Set<number>(),
+  ): Hir.CallableTarget | undefined => {
+    if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection')
+      return expression.target
+    if (expression._tag === 'Move') return callableTarget(expression.subject, bindings, seen)
+    if (expression._tag === 'UnionConvert') return callableTarget(expression.source, bindings, seen)
+    if (expression._tag !== 'BindingReference' || seen.has(expression.binding.ordinal))
+      return undefined
+    const initializer = bindings.get(expression.binding.ordinal)
+    return initializer === undefined
+      ? undefined
+      : callableTarget(initializer, bindings, new Set(seen).add(expression.binding.ordinal))
+  }
+  for (const fn of functions) {
+    const bindings = bindingsOf(fn)
     for (const expression of fn.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
-      if (expression._tag !== 'BuiltinCall' || expression.operation !== 'SharedWithMut') continue
-      const use = expression.arguments.at(1)
-      const target = use === undefined ? undefined : callableTarget(use)
-      const key = target === undefined ? undefined : targetKey(target)
-      if (key !== undefined) {
+      let ordinals: ReadonlySet<number> | undefined
+      let arguments_: ReadonlyArray<Hir.Expression> | undefined
+      if (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut') {
+        ordinals = new Set([1])
+        arguments_ = expression.arguments
+      } else if (expression._tag === 'Call') {
+        ordinals = callbackOrdinals.get(localSharedTargetKey(expression.target))
+        arguments_ = expression.arguments
+      }
+      if (ordinals === undefined) continue
+      for (const ordinal of ordinals) {
+        const argument = arguments_?.at(ordinal)
+        const target = argument === undefined ? undefined : callableTarget(argument, bindings)
+        if (target?._tag !== 'DeclarationCallableTarget') continue
+        const key = localSharedTargetKey(target.declaration)
         const existing = boundaries.get(key)
         if (existing === undefined) boundaries.set(key, [expression.span])
         else existing.push(expression.span)
       }
     }
   }
+  return Object.freeze({
+    _tag: 'LocalSharedAccessBoundaryPlan',
+    boundaries: new Map(
+      [...boundaries].map(([key, spans]) => [key, Object.freeze(spans)] as const),
+    ),
+  })
+}
+
+/** Checks every declaration of one elaborated module once, producing its ownership facts. */
+export const checkModule = (
+  result: Elaboration.Result,
+  index: DeclarationIndex.Index,
+  accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
+): ModuleOwnership => {
   const checked = result.hir.functions.map((fn, ordinal) =>
     checkFunction(
       fn,
       index,
       result.functions.at(ordinal),
       fn.declaration.canonical._tag === 'Canonical'
-        ? (boundaries.get(
-            `${fn.declaration.canonical.id.module}\u0000${fn.declaration.canonical.id.name}`,
-          ) ?? Object.freeze([]))
+        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
+            Object.freeze([]))
         : Object.freeze([]),
     ),
   )

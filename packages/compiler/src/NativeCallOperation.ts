@@ -14,6 +14,7 @@ import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
+import * as SilkType from './Type.js'
 
 type Operation = Extract<LinearOperation, { readonly _tag: 'ApplyCallable' | 'Call' }>
 
@@ -58,19 +59,20 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const environmentValues = NativeStorage.readLocal(nativeStorage, operation.callable)
         let cursor = 0
         for (const field of sourceType.environment?.fields ?? []) {
-          const shape = Layout.callingShape(program.layout, field.type)
-          if (shape === undefined)
-            throw new RangeError('Callable capture lost its semantic calling shape')
-          if (field.representation === 'Value') {
+          const fieldLanes = Layout.callableFieldLanes(program.layout, field)
+          if (field.representation !== 'Borrow') {
             captureGroups.push(
               Object.freeze({
                 parameterOrdinal: field.parameterOrdinal,
-                values: Object.freeze(environmentValues.slice(cursor, cursor + shape.laneCount)),
+                values: Object.freeze(environmentValues.slice(cursor, cursor + fieldLanes.length)),
               }),
             )
-            cursor += shape.laneCount
+            cursor += fieldLanes.length
             continue
           }
+          const shape = Layout.callingShape(program.layout, field.type)
+          if (shape === undefined)
+            throw new RangeError('Callable borrowed capture lost its semantic calling shape')
           const base = environmentValues.at(cursor)
           if (base === undefined)
             throw new RangeError('Callable borrowed environment lost its pointer')
@@ -282,7 +284,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
       )
       if (callableTarget === undefined)
-        throw new RangeError('Backend cannot resolve callable target')
+        throw new RangeError(
+          `Backend cannot resolve callable target ${target.declaration.module}.${target.declaration.name}<${operation.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`,
+        )
       const result = yield* NativeCall.callValues(
         call,
         callableTarget,

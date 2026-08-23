@@ -39,6 +39,11 @@ export type Compatibility =
       readonly target: Type.Effect
     }
   | {
+      readonly _tag: 'ReferenceAccess'
+      readonly source: Type.Reference
+      readonly target: Type.Reference
+    }
+  | {
       readonly _tag: 'Bottom'
       readonly source: Type.Bottom
       readonly target: Type.Type
@@ -62,6 +67,13 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
     return check(source.contract, target)
   if (Type.equals(source, target)) return Object.freeze({ _tag: 'Exact', source, target })
   if (Type.isNever(source)) return Object.freeze({ _tag: 'Bottom', source, target })
+  if (
+    Type.isReference(source) &&
+    Type.isReference(target) &&
+    Type.compareAccess(source.access, target.access) &&
+    Type.equals(source.target, target.target)
+  )
+    return Object.freeze({ _tag: 'ReferenceAccess', source, target })
   if (Type.isCallable(source) && Type.isCallable(target)) {
     if (
       (!source.unsafe || target.unsafe) &&
@@ -70,7 +82,7 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       source.parameters.every((parameter, index) =>
         Type.equals(parameter, target.parameters.at(index) ?? 'never'),
       ) &&
-      Type.equals(source.result, target.result)
+      isCompatible(check(source.result, target.result))
     ) {
       return Object.freeze({ _tag: 'CallableMode', source, target })
     }

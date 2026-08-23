@@ -2566,7 +2566,9 @@ const emitSharedWithMutOperation = (
   const callableArguments = (local: Mir.LocalId): ReadonlyArray<SilkType.GenericArgument> => {
     const type = layout.types.at(local.ordinal)
     return type?._tag === 'CallableValue'
-      ? (type.environment?.callable.typeArguments ??
+      ? ((type.environment === undefined
+          ? undefined
+          : LayoutPlan.callableTargetArguments(type.environment)) ??
           type.storage?.realization.targetArguments ??
           Object.freeze([]))
       : Object.freeze([])
@@ -4402,22 +4404,24 @@ const emitApplyCallableOperation = (
     for (const field of sourceType.environment?.fields ?? []) {
       if (memory === undefined && field.representation === 'Borrow')
         throw new RangeError('Wasm borrowed callable capture requires private memory')
-      const shape = LayoutPlan.callingShape(plan, field.type)
-      if (shape === undefined) throw new RangeError('Wasm callable capture lost its calling shape')
-      if (field.representation === 'Value') {
+      const fieldLanes = LayoutPlan.callableFieldLanes(plan, field)
+      if (field.representation !== 'Borrow') {
         captureGroups.push(
           Object.freeze({
             parameterOrdinal: field.parameterOrdinal,
             operands: Object.freeze(
               environmentSlots
-                .slice(cursor, cursor + shape.laneCount)
+                .slice(cursor, cursor + fieldLanes.length)
                 .map((slot) => Instr.localGet(slot)),
             ),
           }),
         )
-        cursor += shape.laneCount
+        cursor += fieldLanes.length
         continue
       }
+      const shape = LayoutPlan.callingShape(plan, field.type)
+      if (shape === undefined)
+        throw new RangeError('Wasm borrowed callable capture lost its calling shape')
       const pointer = environmentSlots.at(cursor)
       if (pointer === undefined || memory === undefined)
         throw new RangeError('Wasm borrowed callable capture lost its pointer')

@@ -1123,6 +1123,38 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'local-shared-standard-library-wrapper',
+    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.shared as Shared
+
+struct Counter { value: i32 }
+
+fn increment(value: &mut Counter) -> i32 {
+  value.value = value.value + 1
+  return value.value
+}
+
+fn read(value: &Counter) -> i32 { return value.value }
+
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let first = run (Shared.make<Counter>(Counter { value: 41 })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let second = Shared.clone<Counter>(&first)
+  let updated = Shared.withMut<Counter, i32>(&second, increment)
+  let answer = Shared.with<Counter, i32>(&first, read)
+  drop second
+  drop first
+  return answer
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'local-shared-recursive-cleanup',
     source: `import silk.core { OutOfMemoryError }
 import silk.effect as Effect

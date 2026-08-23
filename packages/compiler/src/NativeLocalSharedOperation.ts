@@ -2,13 +2,14 @@ import * as LlvmBlock from '@silk-effect/llvm/Block'
 import * as Constant from '@silk-effect/llvm/Constant'
 import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import * as Effect from 'effect/Effect'
+import * as Layout from './Layout.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeCallOperation from './NativeCallOperation.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
-import type * as SilkType from './Type.js'
+import * as SilkType from './Type.js'
 
 type Operation = Extract<LinearOperation, { readonly _tag: 'SharedWithMut' }>
 
@@ -18,7 +19,9 @@ const callableArguments = (
 ): ReadonlyArray<SilkType.GenericArgument> => {
   const type = context.entry.fn.localTypes.at(local.ordinal)
   return type?._tag === 'CallableValue'
-    ? (type.environment?.callable.typeArguments ??
+    ? ((type.environment === undefined
+        ? undefined
+        : Layout.callableTargetArguments(type.environment)) ??
         type.storage?.realization.targetArguments ??
         Object.freeze([]))
     : Object.freeze([])
@@ -102,11 +105,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         provenance: operation.provenance,
       }),
     )
-    yield* NativeStorage.storeMutable(
-      nativeStorage,
-      operation.destination,
-      NativeStorage.readLocal(nativeStorage, operation.destination),
-    )
+    const realizedCallable = context.entry.fn.localTypes.at(callable.ordinal)
+    const diverges =
+      realizedCallable?._tag === 'CallableValue' && SilkType.isNever(realizedCallable.type.result)
+    if (!diverges)
+      yield* NativeStorage.storeMutable(
+        nativeStorage,
+        operation.destination,
+        NativeStorage.readLocal(nativeStorage, operation.destination),
+      )
+    return diverges
   })
 
   yield* LlvmBlock.setInsertionPoint(body, useBlock)
@@ -129,31 +137,47 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       ),
     ]),
   )
-  yield* apply(operation.use, operation.useType, Object.freeze([operation.payload]))
-  yield* FunctionBody.store(
-    body,
-    yield* Constant.integerUnsigned(builder, usizeType, 0n),
-    accessPointer,
+  const useDiverges = yield* apply(
+    operation.use,
+    operation.useType,
+    Object.freeze([operation.payload]),
   )
-  yield* NativeAggregate.dropThroughPlan(
-    cleanup,
-    operation.conflictCleanup,
-    NativeStorage.readLocal(nativeStorage, operation.onConflict),
-    `shared${operation.destination.ordinal}_unused_conflict`,
-  )
-  yield* FunctionBody.branch(body, following)
+  if (useDiverges) {
+    yield* FunctionBody.unreachable(body)
+  } else {
+    yield* FunctionBody.store(
+      body,
+      yield* Constant.integerUnsigned(builder, usizeType, 0n),
+      accessPointer,
+    )
+    yield* NativeAggregate.dropThroughPlan(
+      cleanup,
+      operation.conflictCleanup,
+      NativeStorage.readLocal(nativeStorage, operation.onConflict),
+      `shared${operation.destination.ordinal}_unused_conflict`,
+    )
+    yield* FunctionBody.branch(body, following)
+  }
 
   yield* LlvmBlock.setInsertionPoint(body, conflictBlock)
   nativeStorage.locals.clear()
   for (const [ordinal, values] of initialLocals) nativeStorage.locals.set(ordinal, values)
-  yield* apply(operation.onConflict, operation.conflictType, Object.freeze([]))
-  yield* NativeAggregate.dropThroughPlan(
-    cleanup,
-    operation.useCleanup,
-    NativeStorage.readLocal(nativeStorage, operation.use),
-    `shared${operation.destination.ordinal}_unused_use`,
+  const conflictDiverges = yield* apply(
+    operation.onConflict,
+    operation.conflictType,
+    Object.freeze([]),
   )
-  yield* FunctionBody.branch(body, following)
+  if (conflictDiverges) {
+    yield* FunctionBody.unreachable(body)
+  } else {
+    yield* NativeAggregate.dropThroughPlan(
+      cleanup,
+      operation.useCleanup,
+      NativeStorage.readLocal(nativeStorage, operation.use),
+      `shared${operation.destination.ordinal}_unused_use`,
+    )
+    yield* FunctionBody.branch(body, following)
+  }
 
   yield* LlvmBlock.setInsertionPoint(body, following)
   yield* NativeStorage.reloadRoots(
