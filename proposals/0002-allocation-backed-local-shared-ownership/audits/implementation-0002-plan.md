@@ -5,65 +5,119 @@
 - Accepted-direction digest: `c97959718e551d9d4c4273e6503a18630696c6ac969087192bc3e5133c4ca069`
 - Integration branch: `julia/slp-0002-implement`
 - Audited handoff baseline: `987ce26`
-- Run date: 2026-08-22
-- Outcome: Parked at layer 2 hard gates
+- Run dates: 2026-08-22 through 2026-08-23
+- Outcome: Complete; all six DAG layers implemented and integrated
 
-## Dependency plan
+## Dependency plan and final state
 
-| Layer | OpenSpec change | Dependency | Outcome | Commit or range |
-| --- | --- | --- | --- | --- |
-| 1 | `establish-local-shared-ownership` | none | Done and merged | `987ce26..07a5977`; merge `3d5d745` |
-| 2 | `add-local-shared-control-block-allocation` | layer 1 | Parked/gates; not merged | `3d5d745..fd6b981` |
-| 3 | `add-local-shared-lifecycle-operations` | layers 1-2 | Parked/dependency; not started | none |
-| 4 | `add-local-shared-standard-library` | layers 2-3 | Parked/dependency; not started | none |
-| 5 | `add-local-shared-engine-parity` | layers 1-4 | Parked/dependency; not started | none |
-| 6 | `prove-local-shared-slp1-sufficiency` | layers 4-5 | Parked/dependency; not started | none |
+The handoff DAG had width one, so each change started only after its dependency crossed the root
+integration barrier.
 
-The DAG has width one. No dependent change was started after layer 2 parked.
+| Layer | OpenSpec change | Dependency | State | Attempts | Stop reason | Unresolved C/H findings | Commit or range |
+| --- | --- | --- | --- | --- | --- | ---: | --- |
+| 1 | `establish-local-shared-ownership` | none | Done | 3 hard-gate attempts; 1 conformance fix pass | none | 0 | `987ce26..07a5977`; merge `3d5d745` |
+| 2 | `add-local-shared-control-block-allocation` | layer 1 | Done after bounded resume | 3 attempts in the parked run; 0 resumed gate fixes; 1 conformance fix pass | none | 0 | `3d5d745..dcc3b3d`; merge `9d3d788` |
+| 3 | `add-local-shared-lifecycle-operations` | layers 1-2 | Done | 0 gate-fix attempts; 1 conformance fix pass | none | 0 | `9d3d788..e41e3bf`; merge `3cb428d` |
+| 4 | `add-local-shared-standard-library` | layers 2-3 | Done | 0 gate-fix attempts; no C/H fix required | none | 0 | `3cb428d..f18a984`; merge `7cb2dc3` |
+| 5 | `add-local-shared-engine-parity` | layers 1-4 | Done | 0 gate-fix attempts; 1 conformance fix pass | none | 0 | `7cb2dc3..1b1f4c1`; merge `4da4475` |
+| 6 | `prove-local-shared-slp1-sufficiency` | layers 4-5 | Done | 0 pre-conformance gate fixes; 1 conformance fix pass; 1 test-only rerun repair | none | 0 | `4da4475..de2a915`; merge `8462754` |
+
+Every implementation worktree was isolated from the integration branch. Done changes were merged in
+DAG order, and each merge crossed the full root barrier before its dependent worktree was created.
 
 ## Handoff audit
 
-All six OpenSpec changes passed strict validation and have `Result: Ready` audit records. Audit repairs were committed at `987ce26` before implementation worktrees were created.
+All six OpenSpec changes passed strict validation and had `Result: Ready` audit records before
+implementation. Audit repairs were committed at `987ce26` before the first implementation worktree
+was created.
 
-## Layer 1: ownership semantics
+## Layer outcomes
 
-OpenSpec state: 14/14 tasks complete. Implementation commit `07a5977` was merged as `3d5d745` after its worktree gates and conformance pass completed.
+### Layer 1: ownership semantics
 
-Pre-conformance gate attempts:
+OpenSpec state: 14/14 tasks complete.
 
-1. Typecheck and Biome passed. `pnpm test` found unbounded recursion while expanding a polymorphically recursive nominal in `ExecutionAffinity`; the traversal was re-localized and guarded by declaration identity.
-2. Typecheck, Biome, tests, and `pnpm check` passed. `pnpm release:candidate` found that the expected export manifest omitted the new public actors; the release-candidate fixture was updated.
-3. All required gates passed: typecheck 24/24, full tests 28/28, `pnpm check` 42/42 plus 16/16 script tests, and release-candidate build 14/14 plus validation 9/9.
+Three hard-gate attempts were used within the cap: the first repaired polymorphically recursive
+affinity traversal, the second repaired release-candidate export-manifest evidence, and the third
+passed completely. The single three-lens pass verified five High findings and eight Medium
+findings. The one permitted
+High fix pass repaired sealed `SharedCore` provenance, absence of ordinary construction/layout
+privilege, retained borrow-root affinity, concrete callable/Effect environment facts, logical
+zero-lane frame obligations, and ownership fabrication through slots and raw buffers. No Critical
+or High finding remained. The integrated root barrier passed all required commands.
 
-The single three-lens conformance pass verified five High findings. The one permitted High-only fix pass repaired:
+### Layer 2: control-block allocation
 
-- sealed `SharedCore` provenance and same-spelling non-forgeability;
-- the absence of ordinary construction and target-layout privilege;
-- retained borrow-root affinity in executable captures;
-- concrete callable/Effect environment facts across moves and suspension;
-- logical zero-lane frame obligations; and
-- ownership fabrication through `Slot<SharedCore>` and raw buffers.
+OpenSpec state: 8/8 tasks complete.
 
-The mandatory post-conformance rerun passed in full. Eight Medium findings were recorded without changes under the High-only fix rule: locale-dependent parameter ordering, unavailable-capture causal evidence, several focused-matrix/assertion gaps, a missing separate semantic golden, and the absence of a persistent gate-results artifact before this record. No Critical or unresolved High finding remained.
+The first bounded run parked after its third distinct gate failure, when generated diagnostics were
+stale. The later explicit resume regenerated the prescribed evidence, completed the ordered gates,
+and ran the required fresh conformance lenses. The consolidated fix preserved exact allocation
+provenance through semantic facts, HIR, MIR, ordinary providers, and backend initialization, closing
+the verified cross-provider authorization gap. Commits `fd6b981`, `ab9dc8a`, and `dcc3b3d` preserve
+the implementation, completed evidence, and conformance repair respectively. The resumed worktree
+and root integration barriers passed in full.
 
-The root integration barrier then passed `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate` (9/9 validation).
+### Layer 3: lifecycle operations
 
-## Layer 2: control-block allocation
+OpenSpec state: 12/12 tasks complete.
 
-The parked work is preserved on branch `julia/slp0002-add-local-shared-control-block-allocation` at `fd6b981`. OpenSpec tasks 1.1 through 3.2 are checked; gate task 3.3 remains unchecked. Focused validation passed 4 files and 41 tests.
+The implementation added sealed clone and access operations, checked bigint reference-count
+transitions, stable ownership diagnostics including `OWN0016`, opaque recursive cleanup plans,
+evaluator/native/direct-Wasm lifecycle behavior, and differential corpus coverage. The single
+conformance repair closed all verified Critical/High lifecycle and cleanup gaps. Worktree and root
+barriers passed in full.
 
-The implementation contains the sealed `sharedLayout<T>` contract, unsafe consuming `sharedFromAllocation<T>`, target-aware control-block planning and provenance diagnostics, consuming MIR and verification, evaluator/LLVM/direct-Wasm initialization parity, private reclaim lanes, inspector support, and focused negative, exhaustion, same-spelling, and native-corpus coverage.
+### Layer 4: standard library
 
-The three bounded hard-gate attempts ended as follows:
+OpenSpec state: 11/11 tasks complete.
 
-1. `pnpm typecheck` failed because the inspector was not exhaustive for the new shared value and operations. The implementation was re-localized through the graph and repaired.
-2. Typecheck passed; `pnpm exec biome check .` failed for an unused Wasm binding and formatting/import drift. The mechanical issues were repaired.
-3. Typecheck and Biome passed; `pnpm test` stopped because `packages/compiler/diagnostics.md` was stale and prescribed `pnpm --filter @silk-effect/compiler documentation:generate`.
+The canonical ordinary-Silk `silk/shared` actor now provides `make`, `clone`, `withMut`, and `with`,
+with generated manifest/documentation coverage and the public behavior matrix. Generic compiler
+defects exposed by the wrappers were repaired without recognizing the module or actor spelling.
+The three-lens pass left no Critical/High repair, and all worktree and root barriers passed.
 
-The third distinct failure exhausted the change's gate-fix budget. The change was not merged, `pnpm check` and `pnpm release:candidate` were not run, and the conformance lenses were not started because their gate prerequisite was not satisfied. There is therefore no layer-2 conformance findings ledger.
+### Layer 5: engine parity
 
-## Resume point
+OpenSpec state: 12/12 tasks complete.
 
-A later explicit SLP-5 implementation run can resume the parked layer-2 branch at `fd6b981`. It must regenerate the diagnostic documentation, complete task 3.3 only after the full ordered gates pass, perform the single required three-lens conformance pass, and cross the root integration barrier before layers 3-6 are unparked.
+Initial and post-conformance gates both passed on their first attempt. The fresh three-lens pass
+verified and the single consolidated pass repaired self-attested initialization provenance and
+consumption, retained-loan metadata, opaque-core `NoCleanup` acceptance, non-falsifiable cycle
+retention, missing clone/access cost probes, and duplicate-loan provenance. The final evidence
+includes deterministic MIR encoding/golden coverage, structural native/Wasm ordering and forbidden
+runtime-helper checks, cycle witnesses, expanded differential cases, and a 10,000-operation bounded
+Wasm heap probe. No Critical/High finding remained, and the root barrier passed.
 
-SLP-0002 is not ready for `slp-6-audit-implementation` or archive while layers 2-6 remain parked.
+### Layer 6: SLP-0001 pressure sufficiency
+
+OpenSpec state: 10/10 tasks complete.
+
+The ordinary-Silk pressure slice contains canonical and fully renamed fixtures, a fixed-capacity
+ready inbox, shared Deferred-style state, real once-callable storage/extraction/invocation after
+access restoration, shared-borrow payload observation, coexisting dormant Effects, affine cleanup
+fingerprints, deterministic quota recovery, native corpus cases, and a classified findings report
+with an acceptance-evidence matrix.
+
+The single three-lens pass found four deduplicated High proof/correctness categories: record dispatch
+instead of real callable extraction, backend-invisible lifecycle/failure evidence, masked quota
+recovery, and stale Wasm callable lanes after Drop hooks. The consolidated pass repaired all four
+plus directly related Medium evidence gaps: callable cleanup type identity, simultaneous dormant
+Effects, normalized rename/MIR evidence, findings citations, and duplicate snapshot work. Focused
+regressions also repaired generic Wasm cleanup of borrowed Effect payloads without inventing an owner
+frame root. One final-rerun typecheck failure was limited to two test typings; after that one repair,
+the ordered rerun passed completely. No Critical/High finding remained.
+
+## Final verification
+
+Every change is strict-valid and complete: 14/14, 8/8, 12/12, 11/11, 12/12, and 10/10 tasks.
+The final integrated barrier at merge `8462754` passed, in repository order:
+
+1. `pnpm typecheck`
+2. `pnpm exec biome check .`
+3. `pnpm test`
+4. `pnpm check`
+5. `pnpm release:candidate`
+
+The completed implementation is ready for the separately invoked `$slp-6-audit-implementation`
+step. Archival remains out of scope until that audit passes.
