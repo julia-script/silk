@@ -68,3 +68,8 @@ Layer 3 started from integration commit `47c7dad` on branch `julia/slp0001-wake-
 Its first checkpoint assigns the sealed Wake type, park/wake MIR contract, and canonical wake-cell
 authority/state machine to this layer; full execution-owned continuation realization remains the
 explicit Layer 4 boundary.
+
+Layer 3 reached `91a622b` with 16/16 tasks and three verified High conformance findings fixed.
+Its single post-conformance rerun passed typecheck and Biome, then parked on stale generated
+`diagnostics.md`. A fresh bounded resume will generate/check the documentation and rerun the full
+hard-gate sequence before integration.
