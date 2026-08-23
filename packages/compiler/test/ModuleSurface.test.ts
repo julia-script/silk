@@ -452,6 +452,65 @@ it.effect('validates canonical substitutions against their local parameter scope
   }),
 )
 
+it.effect('round-trips ordered sealed executable properties in semantic type encodings', () =>
+  Effect.gen(function* () {
+    const parameter = Type.parameter(
+      { module: 'surface/Executable', name: 'Deferred' },
+      0,
+      'F',
+      'EffectRepresentation',
+      Type.effect('i32', [], 'Shared'),
+      ['Intrinsic.Detached', 'Intrinsic.NonParking'],
+    )
+    const container = Type.nominal('surface/Executable', 'Deferred', [
+      Type.representationParameterArgument(parameter),
+    ])
+    const encoded = ModuleSurface.encodeSemanticType(container)
+    const decoded = yield* ModuleSurface.decodeSemanticType(encoded)
+    const argument = Type.isNominal(decoded) ? decoded.arguments.at(0) : undefined
+    const restored =
+      argument !== undefined && Type.isRepresentationParameterArgument(argument)
+        ? argument.parameter
+        : undefined
+
+    assert.isDefined(restored)
+    assert.deepEqual(restored?.staticProperties, ['Intrinsic.Detached', 'Intrinsic.NonParking'])
+    assert.strictEqual(ModuleSurface.encodeSemanticType(decoded), encoded)
+  }),
+)
+
+it.effect('rejects noncanonical sealed executable properties in semantic type encodings', () =>
+  Effect.gen(function* () {
+    const parameter = Type.parameter(
+      { module: 'surface/Executable', name: 'Deferred' },
+      0,
+      'F',
+      'EffectRepresentation',
+      Type.effect('i32', [], 'Shared'),
+      ['Intrinsic.Detached', 'Intrinsic.NonParking'],
+    )
+    const encoded = ModuleSurface.encodeSemanticType(
+      Type.nominal('surface/Executable', 'Deferred', [
+        Type.representationParameterArgument(parameter),
+      ]),
+    )
+    const reversed = encoded.replace(
+      '"staticProperties":["Intrinsic.Detached","Intrinsic.NonParking"]',
+      '"staticProperties":["Intrinsic.NonParking","Intrinsic.Detached"]',
+    )
+    const failure = yield* Effect.flip(ModuleSurface.decodeSemanticType(reversed))
+
+    assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
+    assert.include(failure.reason.detail, 'canonical order')
+    assert.notStrictEqual(
+      Type.key(parameter),
+      Type.key(
+        Type.parameter(parameter.owner, 0, 'F', parameter.kind, parameter.representationBound),
+      ),
+    )
+  }),
+)
+
 it.effect('round-trips substitutions independently through nested callable scopes', () =>
   Effect.gen(function* () {
     const innerParameter = Type.parameter({ module: 'surface/Nested', name: 'inner' }, 0, 'Inner')

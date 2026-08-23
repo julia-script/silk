@@ -163,10 +163,7 @@ export const instancesOfCall = (
     }),
   )
 
-export const suspendableInstancesOf = (self: Analysis.Snapshot) => self.instances.suspendable
-export const suspendableExecutionsOf = (self: Analysis.Snapshot) =>
-  self.instances.suspendableExecutions
-export const suspendableEffectsOf = (self: Analysis.Snapshot) => self.instances.suspendableEffects
+export const suspensionFactsOf = (self: Analysis.Snapshot) => self.instances.suspension
 
 export const provisionalMirOf = (
   self: Analysis.Snapshot,

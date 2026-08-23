@@ -15,6 +15,7 @@ const instanceViolationDiagnostics = (
     InstanceDiagnostics.unlowerableWitnessViolations(discovery, self.index),
     InstanceDiagnostics.storedCallableViolations(discovery, self.index),
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
+    ExecutableProperty.violationDiagnostics(discovery, self.index),
   )
 
 function discoverAndLower(
@@ -292,6 +293,7 @@ import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as ExecutableProperty from './ExecutableProperty.js'
 import type { Frontend, Options } from './Frontend.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
