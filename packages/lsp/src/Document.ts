@@ -678,7 +678,7 @@ export const hover = (
   const documentation =
     raw === undefined || source === undefined
       ? undefined
-      : Documentation.toMarkdown(Documentation.parse(source, raw))
+      : Documentation.toDocCommentMarkdown(Documentation.parse(source, raw))
   const signature = `\`\`\`silk\n${subject.presentation.text}\n\`\`\``
   return {
     contents: {

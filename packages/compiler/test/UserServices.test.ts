@@ -224,6 +224,190 @@ pub fn main() -> i32 {
   }),
 )
 
+const randomServiceSource = `import silk.effect as Effect
+import silk.option as Option
+import silk.random as Random
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
+struct Scripted {
+  first: u64
+  second: u64
+  third: u64
+  index: usize
+}
+
+fn scripted(first: u64, second: u64, third: u64) -> Scripted {
+  return Scripted { first: first, second: second, third: third, index: usize.ZERO }
+}
+
+effect fn scriptedNext(self: &mut Scripted) -> u64 {
+  let mut value = self.third
+  if self.index == usize.ZERO { value = self.first }
+  if self.index == usize.ONE { value = self.second }
+  self.index = self.index + usize.ONE
+  return value
+}
+
+impl Random.Random for Scripted { nextU64: Scripted.scriptedNext }
+
+fn next(provider: &mut Scripted) -> u64 {
+  return run Random.nextU64()
+    |> Effect.provideMut<Random.Random>(provider)
+}
+
+fn matches(seed: u64, expected: &[u64]) -> bool {
+  let mut provider = Random.seeded(seed)
+  let mut index = usize.ZERO
+  while index < expected.length {
+    let actual = run Random.nextU64()
+      |> Effect.provideMut<Random.Random>(&mut provider)
+    if actual != expected[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn knownAnswers() -> bool {
+  let zero = [
+    u64.toU64(0x99ec5f36cb75f2b4),
+    u64.toU64(0xbf6e1f784956452a),
+    u64.toU64(0x1a5f849d4933e6e0),
+    u64.toU64(0x6aa594f1262d2d2c)
+  ]
+  let fortyTwo = [
+    u64.toU64(0x15780b2e0c2ec716),
+    u64.toU64(0x6104d9866d113a7e),
+    u64.toU64(0xae17533239e499a1),
+    u64.toU64(0xecb8ad4703b360a1),
+    u64.toU64(0xfde6dc7fe2ec5e64),
+    u64.toU64(0xc50da53101795238),
+    u64.toU64(0xb82154855a65ddb2),
+    u64.toU64(0xd99a2743ebe60087)
+  ]
+  return matches(0, &zero) && matches(42, &fortyTwo)
+}
+
+fn reproducible() -> bool {
+  let mut left = Random.seeded(42)
+  let mut right = Random.seeded(42)
+  let mut index = usize.ZERO
+  while index < 16 {
+    let leftWord = run Random.nextU64()
+      |> Effect.provideMut<Random.Random>(&mut left)
+    let rightWord = run Random.nextU64()
+      |> Effect.provideMut<Random.Random>(&mut right)
+    if leftWord != rightWord { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn emptyBytes() -> [u8; 0] { return [] }
+
+fn zeroBytes8() -> [u8; 8] {
+  return [
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0),
+    u8.toU8(0)
+  ]
+}
+
+fn zeroBytes3() -> [u8; 3] {
+  return [u8.toU8(0), u8.toU8(0), u8.toU8(0)]
+}
+
+fn derivedOperations() -> bool {
+  let mut direct = scripted(20, 22, 99)
+  if next(&mut direct) + next(&mut direct) != 42 { return false }
+  if direct.index != 2 { return false }
+
+  let mut booleans = scripted(0, 0x8000000000000000, 99)
+  let low = run Random.nextBool()
+    |> Effect.provideMut<Random.Random>(&mut booleans)
+  let high = run Random.nextBool()
+    |> Effect.provideMut<Random.Random>(&mut booleans)
+  if low || !high || booleans.index != 2 { return false }
+
+  let mut zeroBound = scripted(41, 99, 99)
+  let absent = run Random.below(0)
+    |> Effect.provideMut<Random.Random>(&mut zeroBound)
+  if Option.unwrapOr<u64>(move absent, 42) != 42 { return false }
+  if next(&mut zeroBound) != 41 || zeroBound.index != 1 { return false }
+
+  let mut rejected = scripted(5, 17, 99)
+  let bounded = run Random.below(10)
+    |> Effect.provideMut<Random.Random>(&mut rejected)
+  if Option.unwrapOr<u64>(move bounded, 99) != 7 { return false }
+  if rejected.index != 2 { return false }
+
+  let mut bytesProvider = scripted(0x0807060504030201, 0x11100f0e0d0c0b0a, 99)
+  let mut empty = emptyBytes()
+  run Random.fillBytes(&mut empty)
+    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  if bytesProvider.index != usize.ZERO { return false }
+
+  let mut full = zeroBytes8()
+  run Random.fillBytes(&mut full)
+    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  if bytesProvider.index != usize.ONE { return false }
+  let expectedFull = [
+    u8.toU8(1),
+    u8.toU8(2),
+    u8.toU8(3),
+    u8.toU8(4),
+    u8.toU8(5),
+    u8.toU8(6),
+    u8.toU8(7),
+    u8.toU8(8)
+  ]
+  let mut index = usize.ZERO
+  while index < 8 {
+    if full[index] != expectedFull[index] { return false }
+    index = index + usize.ONE
+  }
+
+  let mut partial = zeroBytes3()
+  run Random.fillBytes(&mut partial)
+    |> Effect.provideMut<Random.Random>(&mut bytesProvider)
+  if bytesProvider.index != 2 { return false }
+  if partial[0] != u8.toU8(10) || partial[1] != u8.toU8(11) || partial[2] != u8.toU8(12) {
+    return false
+  }
+  return true
+}
+
+pub fn main() -> i32 {
+  if !knownAnswers() { return 1 }
+  if !reproducible() { return 2 }
+  if !derivedOperations() { return 3 }
+  return 42
+}`
+
+it.effect(
+  'runs seeded and scripted Random providers through ordinary exclusive service dispatch',
+  () =>
+    Effect.gen(function* () {
+      const { self, outcome } = yield* evaluate(randomServiceSource)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+      if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+
+      const randomHir = Projections.hirOf(self, 'silk/random')
+      assert.include(
+        randomHir === undefined ? '' : Hir.encode(randomHir),
+        'service-call silk/random.Random.nextU64',
+      )
+      assert.notInclude(randomServiceSource, 'Xoshiro256StarStar')
+    }),
+)
+
 for (const provider of [
   Object.freeze({
     label: 'direct shared intrinsic',

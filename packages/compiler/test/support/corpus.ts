@@ -97,6 +97,39 @@ pub fn main() -> i32 {
   return run bind(read())
 }`
 
+/** Fixed-seed xoshiro256** known answers shared by evaluator, Wasm, and native execution. */
+export const seededRandomFingerprint = `import silk.effect as Effect
+import silk.random as Random
+import silk.u64 as u64
+import silk.usize as usize
+
+fn matches(seed: u64, expected: &[u64]) -> bool {
+  let mut provider = Random.seeded(seed)
+  let mut index = usize.ZERO
+  while index < expected.length {
+    let actual = run Random.nextU64()
+      |> Effect.provideMut<Random.Random>(&mut provider)
+    if actual != expected[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+pub fn main() -> i32 {
+  let expected = [
+    u64.toU64(0x15780b2e0c2ec716),
+    u64.toU64(0x6104d9866d113a7e),
+    u64.toU64(0xae17533239e499a1),
+    u64.toU64(0xecb8ad4703b360a1),
+    u64.toU64(0xfde6dc7fe2ec5e64),
+    u64.toU64(0xc50da53101795238),
+    u64.toU64(0xb82154855a65ddb2),
+    u64.toU64(0xd99a2743ebe60087)
+  ]
+  if !matches(42, &expected) { return 1 }
+  return 42
+}`
+
 /** Failure payloads retain member bits while rows change their widest physical carrier lane. */
 export const heterogeneousFailurePayload = `import silk.effect as Effect
 struct Selected { code: i32 }
@@ -266,6 +299,11 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
     source: 'pub fn main() -> i32 { return 42 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'seeded-random-fingerprint',
+    source: seededRandomFingerprint,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

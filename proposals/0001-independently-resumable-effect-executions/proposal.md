@@ -16,7 +16,7 @@ Supersedes: —
 Superseded by: —
 Revisit when: —
 Resolution: Author accepted the revision 30 Scheduler-grade capability point after resolving SLP-0002 as Accepted direction. The selected model retains owner-controlled first activation, task-specific push readiness, one recoverable caller-funded package, and the fixed affine lifecycle and cleanup contracts; non-directional compiler, diagnostic, and cross-engine realization questions are delegated to OpenSpec.
-OpenSpec handoff: —
+OpenSpec handoff: [establish-independent-execution-semantics](../../openspec/changes/establish-independent-execution-semantics/proposal.md), [add-independent-execution-packaging](../../openspec/changes/add-independent-execution-packaging/proposal.md), [add-external-wake-parking](../../openspec/changes/add-external-wake-parking/proposal.md), [add-independent-execution-engine-parity](../../openspec/changes/add-independent-execution-engine-parity/proposal.md), [prove-independent-execution-separation](../../openspec/changes/prove-independent-execution-separation/proposal.md)
 
 ## Summary
 
@@ -2119,7 +2119,7 @@ Wake must still never drive an execution inline.
 
 ## OpenSpec realization map
 
-No OpenSpec handoff has been requested. The accepted direction has these likely capability slices:
+The accepted direction is handed off through these capability slices:
 
 1. target-neutral suspension-mode summaries and the owner-neutral execution lifecycle;
 2. caller-funded combined Execution packaging, later fatal stack growth, drive, resume, and exact destroy;

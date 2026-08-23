@@ -254,7 +254,9 @@ effect fn recover(problem: Problem) -> i32
 
 Recovers a problem.
 
-# Examples
+***
+Examples
+***
 
 \`\`\`silk
 recover(problem)

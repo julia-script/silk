@@ -36,6 +36,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_filesystem`](./os-filesystem.md) | `OsFileSystem` | 2 | Native FileSystem provider confined beneath one explicitly owned platform root. |
 | [`silk/os_host_input`](./os-host-input.md) | `OsHostInput` | 2 | Native HostInput provider for the process command line, environment, and working directory. |
 | [`silk/os_standard_input`](./os-standard-input.md) | `OsStandardInput` | 2 | Native StandardInput provider backed by the process standard-input descriptor. |
+| [`silk/random`](./random.md) | `Random` | 7 | Provider-replaceable pseudorandom words, booleans, bounded values, and byte filling. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
