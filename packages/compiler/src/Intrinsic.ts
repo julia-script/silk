@@ -126,6 +126,8 @@ const intrinsicSpelling = (family: string, operation: string): string => {
   if (family === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
   if (family === 'Effect' && operation.startsWith('bindRequirement')) return operation
   if (family === 'Effect' && operation === 'catchFailure') return operation
+  if (family === 'Wake' && operation === 'signal') return 'wake'
+  if (family === 'Parking' && operation === 'park') return 'park'
   if (family === 'Place' && operation === 'replace') return 'replace'
   if (family === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
   if (family === 'Host' && operation === 'write') return 'standardStreamWrite'
@@ -138,7 +140,14 @@ const admission = (family: string): AdmissionCategory => {
   if (family === 'Effect') return 'Effect'
   if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
   if (family === 'Layout' || family === 'string') return 'Representation'
-  if (family === 'RawBuffer' || family === 'Slot' || family === 'Shared' || family === 'Execution')
+  if (
+    family === 'RawBuffer' ||
+    family === 'Slot' ||
+    family === 'Shared' ||
+    family === 'Execution' ||
+    family === 'Wake' ||
+    family === 'Parking'
+  )
     return 'Ownership'
   return 'Language'
 }
@@ -164,6 +173,7 @@ const consumer = (family: string, operation: string): string => {
     return operation === 'layout' || operation === 'fromAllocation'
       ? 'silk/execution.make'
       : 'silk/execution.drive'
+  if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
   if (family === 'Storage') return 'silk/core.allocate'
   if (family === 'Host') return 'silk/core.writeAll'
   if (family === 'Os') return osConsumer(operation)
@@ -398,6 +408,23 @@ const representedSuspension = Type.represented(
   suspensionBound,
   suspensionBound,
   Type.representationParameterArgument(suspensionCallback),
+)
+const parkingOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPark' })
+const registrationGuard = Type.parameter(parkingOwner, 0, 'G')
+const registrationBound = Type.callable(Object.freeze([Type.wake]), registrationGuard, 'Take')
+const registrationCallback = Type.parameter(
+  parkingOwner,
+  1,
+  'F',
+  'CallableRepresentation',
+  registrationBound,
+  Object.freeze(['Intrinsic.NonParking']),
+)
+const parkingTypeParameters = Object.freeze([registrationGuard, registrationCallback])
+const representedRegistration = Type.represented(
+  registrationBound,
+  registrationBound,
+  Type.representationParameterArgument(registrationCallback),
 )
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
@@ -1097,6 +1124,26 @@ const intrinsicOperations = Object.freeze([
         representedCompletion,
         representedSuspension,
       ]),
+      result: 'Effect<()>',
+      semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
+    }),
+    builtin({
+      actor: 'Wake',
+      name: 'signal',
+      operation: 'ExecutionWake',
+      parameters: Object.freeze([valueParameter('wake', 'Wake')]),
+      semanticParameters: Object.freeze([Type.wake]),
+      result: '()',
+      semanticResult: Type.unit,
+    }),
+    builtin({
+      actor: 'Parking',
+      name: 'park',
+      operation: 'ExecutionPark',
+      typeParameters: Object.freeze(['G', 'F']),
+      semanticTypeParameters: parkingTypeParameters,
+      parameters: Object.freeze([valueParameter('register', 'F')]),
+      semanticParameters: Object.freeze([representedRegistration]),
       result: 'Effect<()>',
       semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
     }),

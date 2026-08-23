@@ -780,6 +780,26 @@ export const executionSuspensionOf = (self: Discovery, key: InstanceKey): Suspen
 export const effectSuspensionOf = (self: Discovery, identity: string): SuspensionMode.Summary =>
   suspensionFact(self, (subject) => subject._tag === 'Effect' && subject.identity === identity)
 
+/** Resolves an owner-scoped source representation identity to its concrete hidden Effect. */
+export const representedEffectSuspensionOf = (
+  self: Discovery,
+  identity: Type.EffectIdentityArgument,
+): SuspensionMode.Summary => {
+  const selected = self.effects.find(
+    (effect) =>
+      effect.representationIdentity === identity.identity &&
+      (identity.owner === undefined ||
+        (effect.owner.declaration.module === identity.owner.declaration.module &&
+          effect.owner.declaration.name === identity.owner.declaration.name &&
+          effect.owner.typeArguments.length === identity.owner.typeArguments.length &&
+          effect.owner.typeArguments.every((argument, ordinal) => {
+            const expected = identity.owner?.typeArguments.at(ordinal)
+            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+          }))),
+  )
+  return selected?.suspension ?? effectSuspensionOf(self, identity.identity)
+}
+
 /**
  * Discovers the reachable instances from the root module's entry. The worklist records an
  * instance before following its calls, so directly and mutually recursive programs terminate.

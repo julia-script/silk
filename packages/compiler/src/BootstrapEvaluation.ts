@@ -31,6 +31,7 @@ import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
 import * as Transcendental from './Transcendental.js'
 import * as Type from './Type.js'
+import * as WakeCell from './WakeCell.js'
 
 /**
  * The closed bootstrap interpreter, executing the lowered MIR program from the entry instance
@@ -80,6 +81,7 @@ export type {
   StringValue,
   UnionValue,
   Value,
+  WakeValue,
 } from './BootstrapValue.js'
 
 import type {
@@ -705,6 +707,46 @@ function* executeFunction(
             span: provenance.span,
           }),
         )
+        return undefined
+      }
+      case 'WakeCleanup': {
+        if (owner._tag !== 'WakeValue')
+          throw new RangeError('Wake cleanup lost its generation-bound readiness authority')
+        const package_ = BootstrapStorage.execution(state.allocations, owner.ticket)
+        if (package_ === undefined)
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake cleanup referenced a missing execution package',
+            span: provenance.span,
+          })
+        const wake = package_.wake
+        if (wake === undefined || wake.generation !== owner.generation)
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake cleanup referenced a missing or stale generation',
+            span: provenance.span,
+          })
+        const dropped = WakeCell.dropWake(wake)
+        if (dropped._tag === 'WakeCellViolation')
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake readiness authority was consumed more than once',
+            span: provenance.span,
+          })
+        package_.wake = dropped.state
+        if (
+          dropped.state.allocation === 'Released' &&
+          !BootstrapStorage.release(state.allocations, owner.ticket, true)
+        )
+          return blockedStep({
+            _tag: 'Trap',
+            function: fn.id,
+            reason: 'Wake final reclaim authority was consumed more than once',
+            span: provenance.span,
+          })
         return undefined
       }
       case 'CallableCleanup': {
@@ -2347,6 +2389,14 @@ function* executeFunction(
             })
             break
           }
+          case 'ExecutionWake':
+          case 'ExecutionPark':
+            return blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: 'External wake parking requires resumable engine realization',
+              span: operation.provenance.span,
+            })
           case 'SharedClone': {
             const core = referenced(operation.self).value
             if (core._tag !== 'SharedCoreValue')

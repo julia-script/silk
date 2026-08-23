@@ -68,3 +68,14 @@ pub effect fn drive<
     move onSuspend
   )
 }
+
+/// Relinquishes the currently Running Execution until one external readiness signal arrives.
+///
+/// The registration callback receives the generation's sole affine Wake. Its returned guard is
+/// retained while dormant and dropped immediately before source continues after this call.
+pub effect fn park<
+  G,
+  F: once fn(Intrinsic.Wake) -> G + Intrinsic.NonParking
+>(register: F) -> () {
+  return run Intrinsic.park<G, F>(move register)
+}

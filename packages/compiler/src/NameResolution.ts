@@ -515,7 +515,9 @@ export const resolveType = (
   if (result._tag === 'Intrinsic') {
     if (
       result.actor === 'Intrinsic' &&
-      (second?.spelling === 'SharedCore' || second?.spelling === 'Execution') &&
+      (second?.spelling === 'SharedCore' ||
+        second?.spelling === 'Execution' ||
+        second?.spelling === 'Wake') &&
       path.segments.length === 2
     ) {
       const intrinsicType = Type.intrinsicNominals.get(`Intrinsic.${second.spelling}`)

@@ -100,6 +100,8 @@ export interface ExecutionPackageOwnershipPlan {
   readonly slots: ReadonlyArray<ExecutionPackageSlot>
   readonly logicalRoot: 'ExecutionOwnedPersistent'
   readonly restoration: 'InitialOrEligibleDrive'
+  readonly wakeControl: 'Omitted' | 'StableGenerationCell'
+  readonly wakeAllocation: 'IndivisibleUntilFinalAuthority'
   readonly completion: ExecutionPackageCleanup
   readonly neverDriven: ExecutionPackageCleanup
   readonly dormant: ExecutionPackageCleanup
@@ -142,6 +144,8 @@ const executionPackagePlan = (
     slots,
     logicalRoot: 'ExecutionOwnedPersistent',
     restoration: 'InitialOrEligibleDrive',
+    wakeControl: package_.readinessStorage ? 'StableGenerationCell' : 'Omitted',
+    wakeAllocation: 'IndivisibleUntilFinalAuthority',
     completion,
     neverDriven: retained,
     dormant: retained,
@@ -153,6 +157,7 @@ const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => 
   const definitions = new Set<number>()
   for (const nested of Mir.operationTree(operation)) {
     if ('destination' in nested) definitions.add(nested.destination.ordinal)
+    if (nested._tag === 'ExecutionPark') definitions.add(nested.guard.ordinal)
     if (
       nested._tag === 'RunEffect' ||
       nested._tag === 'RunEffectValue' ||
@@ -433,9 +438,10 @@ const planFor = (
 ): Plan => {
   const definitions = definitionMap(fn)
   const operationDefined = operationDefinitions(operation)
+  const parkGuard = operation._tag === 'ExecutionPark' ? operation.guard.ordinal : undefined
   const slots = Object.freeze(
-    [...new Set(live)]
-      .filter((ordinal) => !operationDefined.has(ordinal))
+    [...new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])]
+      .filter((ordinal) => !operationDefined.has(ordinal) || ordinal === parkGuard)
       .sort((left, right) => left - right)
       .flatMap((ordinal) => {
         const type = fn.localTypes.at(ordinal)
@@ -507,9 +513,15 @@ const planFor = (
     frame: 'StatefulRelay',
     slots,
     success: Object.freeze({
-      restores: Object.freeze(slots.map((slot) => slot.ordinal)),
+      restores: Object.freeze(
+        slots.filter((slot) => slot.local.ordinal !== parkGuard).map((slot) => slot.ordinal),
+      ),
       loanEnds: Object.freeze([]),
-      releases: Object.freeze([]),
+      releases: Object.freeze(
+        parkGuard === undefined
+          ? []
+          : affineReleases.filter((release) => release.local.ordinal === parkGuard),
+      ),
     }),
     failure: Object.freeze({ restores: Object.freeze([]), loanEnds, releases: releaseOrder }),
   })
@@ -536,7 +548,8 @@ export const plan = (
         if (
           operation._tag !== 'RunEffect' &&
           operation._tag !== 'RunEffectValue' &&
-          operation._tag !== 'ReifyEffect'
+          operation._tag !== 'ReifyEffect' &&
+          operation._tag !== 'ExecutionPark'
         )
           continue
         if (
@@ -604,7 +617,7 @@ export const encode = (self: Module): string =>
       ),
     ]),
     ...self.executionPackages.flatMap((plan_) => [
-      `execution-package ${plan_.package.provenance} slots=${plan_.slots.length} allocation-releases=1 root=${plan_.logicalRoot.toLowerCase()} restore=${plan_.restoration.toLowerCase()}`,
+      `execution-package ${plan_.package.provenance} slots=${plan_.slots.length} allocation-releases=1 root=${plan_.logicalRoot.toLowerCase()} restore=${plan_.restoration.toLowerCase()} wake=${plan_.wakeControl.toLowerCase()} wake-allocation=${plan_.wakeAllocation.toLowerCase()}`,
       ...plan_.slots.map(
         (slot) =>
           `  package-slot ${slot.ordinal} ${slot.role.toLowerCase()} move:${slot.access.cleanup._tag} ${Type.encode(slot.type)}`,

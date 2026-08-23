@@ -878,6 +878,56 @@ export function lowerExpressionInner(
           )
           return Object.freeze({ result: destination })
         }
+        if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionPark') {
+          const [registerExpression] = recipe.arguments
+          if (registerExpression === undefined) return undefined
+          const register = lowerExpression(fn, registerExpression)
+          const type = fn.type(expression.type)
+          const guardArgument = recipe.typeArguments.at(0)
+          const semanticGuard =
+            guardArgument === undefined ? undefined : fn.semanticArgument(guardArgument)
+          const guard =
+            semanticGuard !== undefined && Type.isTypeArgument(semanticGuard)
+              ? fn.type(semanticGuard)
+              : undefined
+          const registerType =
+            register === undefined ? undefined : fn.localTypes.at(register.result.ordinal)
+          if (
+            register === undefined ||
+            registerType?._tag !== 'CallableValue' ||
+            guard === undefined ||
+            guard._tag === 'EffectOutcome' ||
+            type?._tag !== 'Nominal' ||
+            !Type.equals(type.type, Type.unit)
+          )
+            return undefined
+          const destination = fn.alloc(type)
+          const guardLocal = fn.alloc(guard)
+          const representation = recipe.typeArguments.at(1)
+          const semanticRepresentation =
+            representation === undefined ? undefined : fn.semanticArgument(representation)
+          const registrationTypeArguments =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity.typeArguments
+              : Object.freeze([])
+          fn.emit(
+            Object.freeze({
+              _tag: 'ExecutionPark' as const,
+              destination,
+              guard: guardLocal,
+              register: register.result,
+              registerAccess: 'Take' as const,
+              guardCleanup: concreteCleanup(fn, Mir.semanticType(guard)),
+              registerCleanup: callableLocalCleanup(fn, registerType),
+              registrationTypeArguments,
+              type,
+              provenance: authored(expression.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
+        }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
           const [layoutExpression] = recipe.arguments
           if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined

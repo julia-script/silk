@@ -41,6 +41,12 @@ export type CleanupPlan =
       readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
     }
   | {
+      /** Discharges one affine generation authority retained by an opaque Wake. */
+      readonly _tag: 'WakeCleanup'
+      readonly type: Type.Nominal
+      readonly allocation: Extract<CleanupPlan, { readonly _tag: 'AllocationCleanup' }>
+    }
+  | {
       readonly _tag: 'HookCleanup'
       readonly type: Type.Nominal
       readonly hook: DeclarationFacts.CanonicalId
@@ -119,6 +125,7 @@ export const reclaims = (self: CleanupPlan): boolean =>
   self._tag === 'RawBufferCleanup' ||
   self._tag === 'LocalSharedCoreCleanup' ||
   self._tag === 'ExecutionCleanup' ||
+  self._tag === 'WakeCleanup' ||
   (self._tag === 'HookCleanup' && reclaims(self.inner)) ||
   (self._tag === 'StructCleanup' && self.fields.some((field) => reclaims(field.cleanup))) ||
   (self._tag === 'ArrayCleanup' && reclaims(self.element)) ||
@@ -201,6 +208,16 @@ export const cleanupPlan = (
   if (Type.isExecution(type))
     return Object.freeze({
       _tag: 'ExecutionCleanup',
+      type,
+      allocation: Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: Type.allocation,
+        ticket: 'ActiveReclaimTicket',
+      }),
+    })
+  if (Type.isWake(type))
+    return Object.freeze({
+      _tag: 'WakeCleanup',
       type,
       allocation: Object.freeze({
         _tag: 'AllocationCleanup',
@@ -374,6 +391,10 @@ export const specializeCleanup = (
     case 'ExecutionCleanup':
       return Type.isExecution(type)
         ? Object.freeze({ _tag: 'ExecutionCleanup', type, allocation: cleanup.allocation })
+        : Object.freeze({ _tag: 'NoCleanup', type })
+    case 'WakeCleanup':
+      return Type.isWake(type)
+        ? Object.freeze({ _tag: 'WakeCleanup', type, allocation: cleanup.allocation })
         : Object.freeze({ _tag: 'NoCleanup', type })
     case 'HookCleanup':
       if (!Type.isNominal(type)) return Object.freeze({ _tag: 'NoCleanup', type })

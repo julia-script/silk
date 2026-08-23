@@ -587,7 +587,9 @@ const verifyEntry = (
     return Object.freeze(violations)
   }
   if (
-    (Type.isSharedCore(candidate.type) || Type.isExecution(candidate.type)) &&
+    (Type.isSharedCore(candidate.type) ||
+      Type.isExecution(candidate.type) ||
+      Type.isWake(candidate.type)) &&
     candidate.representation._tag === 'Reference'
   ) {
     const address = candidate.representation.address
