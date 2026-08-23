@@ -2,34 +2,35 @@
 
 SLP: 0004
 Status: Accepted direction
-Revision: 35
+Revision: 36
 Author: Julia Ortiz
 Created: 2026-08-22
 Updated: 2026-08-23
 Discussion: —
 Review record: [r001](reviews/r001.md), [r002](reviews/r002.md), [r003](reviews/r003.md)
-Review state: Cap — bounded review ended at r003; author resolution completed in revision 35; targeted [audit a001](audits/resolution-a001.md) passed
+Review state: Cap — bounded review ended at r003; author resolution completed in revision 35; targeted [audit a001](audits/resolution-a001.md) passed; revision 36 preserves the accepted direction while resolving the handoff naming conflict
 Depends on: —
 Split from: —
 Split into: SLP-0005, SLP-0006, SLP-0007, SLP-0008
 Supersedes: —
 Superseded by: —
 Revisit when: Owned logical StackPath capture cannot be realized target-neutrally without hidden unbounded allocation, unsound cleanup, or a change to the accepted source semantics.
-Resolution: Author accepted the minimal Silk-native testing direction after closing the two r003 blockers in revision 34 and its targeted audit. The selected model retains closed marked tests, explicit inventory roots plus a separate runner root, opaque per-test invocation, runner-facing structured Reporter events with public fields, silent boolean and byte-slice assertions, ASCII case-insensitive byte filters, deterministic evaluator execution, and statuses 0/1/2. Eligibility diagnostics and presentation filtering are delegated to OpenSpec; owned StackPath representation remains an explicit realization evidence gate.
-OpenSpec handoff: —
+Resolution: Author accepted the minimal Silk-native testing direction after closing the two r003 blockers in revision 34 and its targeted audit. Revision 36 clarifies the shipped assertion error name as `Test.AssertionError`, preserving the accepted behavior: assertion helpers emit that specific typed error, while `Outcome.Failed` remains the broader result for any unhandled typed failure. The selected model retains closed marked tests, explicit inventory roots plus a separate runner root, opaque per-test invocation, runner-facing structured Reporter events with public fields, silent boolean and byte-slice assertions, ASCII case-insensitive byte filters, deterministic evaluator execution, and statuses 0/1/2. Eligibility diagnostics and presentation filtering are delegated to OpenSpec; owned StackPath representation remains an explicit realization evidence gate.
+OpenSpec handoff: [establish-silk-test-inventory](../../openspec/changes/establish-silk-test-inventory/proposal.md), [add-silk-test-standard-library](../../openspec/changes/add-silk-test-standard-library/proposal.md), [add-silk-test-command](../../openspec/changes/add-silk-test-command/proposal.md), [prove-silk-native-testing-sufficiency](../../openspec/changes/prove-silk-native-testing-sufficiency/proposal.md)
 
 ## Summary
 
-This Candidate proposes a minimal Silk-native testing architecture for both user projects and the
-Silk standard library. A top-level “test” marker identifies a zero-parameter Effect function. Test
-compilations expose a deterministic inventory of opaque test-function handles. An
+This accepted direction proposes a minimal Silk-native testing architecture for both user projects
+and the Silk standard library. A top-level “test” marker identifies a zero-parameter Effect
+function. Test compilations expose a deterministic inventory of opaque test-function handles. An
 ordinary Silk runner inspects that inventory and invokes each handle through “Test.run”.
 
 The initial assertion surface is “Test.assert(condition: bool)” plus one pressure-driven helper,
-“Test.equalBytes(actual: &[u8], expected: &[u8])”. A failed assertion returns “Test.Failure”. When
-that or any other typed failure escapes the test, “Test.run” returns the same logical stack path
-already used by evaluator termination diagnostics. Ordinary runner source turns the closed outcome
-into a structured case event and sends it to a replaceable “Test.Reporter” service, so the standard
+“Test.equalBytes(actual: &[u8], expected: &[u8])”. A failed assertion returns
+“Test.AssertionError”. When that or any other typed failure escapes the test, “Test.run” returns the
+same logical stack path already used by evaluator termination diagnostics. Ordinary runner source
+turns the closed outcome into a structured case event and sends it to a replaceable
+“Test.Reporter” service, so the standard
 reporter can print a useful stack while another runner may display or store it differently. Tests
 themselves have no Reporter requirement and the compiler never selects a library service identity.
 
@@ -93,7 +94,7 @@ import silk.random as Random
 import silk.test as Test
 
 test effect fn seededZeroStartsWithPublishedWord() -> ()
-! Test.Failure {
+! Test.AssertionError {
   let mut provider = Random.seeded(0)
   let first = run Random.nextU64()
     |> Effect.provideMut<Random.Random>(&mut provider)
@@ -163,7 +164,7 @@ import silk.random as Random
 import silk.u8 as u8
 
 test effect fn seededFillBytesMatchesFirstWord() -> ()
-! Test.Failure {
+! Test.AssertionError {
   let mut actual = [
     u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0),
     u8.toU8(0), u8.toU8(0), u8.toU8(0), u8.toU8(0)
@@ -265,11 +266,11 @@ impl Test.Reporter for CountingReporter {
   report: CountingReporter.record
 }
 
-test effect fn alwaysFails() -> () ! Test.Failure {
+test effect fn alwaysFails() -> () ! Test.AssertionError {
   run Test.assert(false)
 }
 
-pub effect fn main() ! Test.Failure | Test.ReportError {
+pub effect fn main() ! Test.AssertionError | Test.ReportError {
   let functions = Test.functions()
   run Test.assert(functions.length == usize.ONE)
 
@@ -419,7 +420,7 @@ pub struct Failed { path: StackPath }
 pub struct Outcome { value: Passed | Failed }
 ~~~
 
-Normal return produces “Passed”. Any unhandled typed failure—including “Test.Failure” or an
+Normal return produces “Passed”. Any unhandled typed failure—including “Test.AssertionError” or an
 application failure—produces “Failed” with its logical stack path. The path
 uses the evaluator's existing ordered logical frames: canonical function identity plus source span.
 The initial outcome intentionally does not expose the erased failure value, so arbitrary
@@ -460,10 +461,10 @@ outcome that was already produced.
 
 ~~~silk
 pub effect fn assert(condition: bool) -> ()
-! Failure
+! AssertionError
 ~~~
 
-When “condition” is true, it returns normally. When false, it returns “Failure”. No original value
+When “condition” is true, it returns normally. When false, it returns “AssertionError”. No original value
 must survive the assertion call. A test may intentionally recover that ordinary typed failure; if
 it then returns normally, Test.run produces Passed because no assertion-side report has escaped the
 test's control flow.
@@ -476,7 +477,7 @@ program:
 
 ~~~silk
 pub effect fn equalBytes(actual: &[u8], expected: &[u8]) -> ()
-! Failure {
+! AssertionError {
   run assert(actual.length == expected.length)
 
   let mut index = usize.ZERO
@@ -595,7 +596,7 @@ import silk.random as Random
 import silk.test as Test
 
 test effect fn seededZeroStartsWithPublishedWord() -> ()
-! Test.Failure {
+! Test.AssertionError {
   let mut provider = Random.seeded(0)
   let first = run Random.nextU64()
     |> Effect.provideMut<Random.Random>(&mut provider)
@@ -642,7 +643,7 @@ and is excluded from inventory membership unless it is also named by R.
 - any escaping typed failure maps to “Failed” with the existing logical path at that boundary; and
 - a trap terminates execution.
 
-“Test.assert(true)” returns “()”. “Test.assert(false)” fails with “Test.Failure”.
+“Test.assert(true)” returns “()”. “Test.assert(false)” fails with “Test.AssertionError”.
 
 “Test.equalBytes(actual, expected)” first asserts equal lengths, then asserts element equality in
 ascending index order and returns after the first failure.
@@ -713,7 +714,7 @@ event construction, reporting, and presentation remain ordinary runner policy.
 | Ownership and resources | Affected | Inventory handles are Copy tokens borrowed from a process-lifetime inventory. A failed outcome owns its immutable stack path; consuming it into a case Event transfers that path to the Reporter. The standard runner creates fresh reporter state per case. |
 | Runtime and targets | Affected | The initial command executes once through the evaluator on the ordinary host target. Native/Wasm test execution, matrices, and trap isolation have no initial contract. |
 | Compiler | Affected | Grammar, semantic facts, closed-test validation, canonical metadata, uniform opaque invocation adapters, and failure-path capture are required. Existing multi-root closure machinery receives test roots from tooling. |
-| Standard library | Affected | “silk.test” owns Reporter, Event, Failure, Outcome, safe inventory wrappers, “assert”, “equalBytes”, filtering policy, standard runner, and presentation. |
+| Standard library | Affected | “silk.test” owns Reporter, Event, AssertionError, Outcome, safe inventory wrappers, “assert”, “equalBytes”, filtering policy, standard runner, and presentation. |
 | Tooling and diagnostics | Affected | “silk test” composes a distinct runner root with source-root-contained test roots, seeds raw host-input bytes, resolves logical frame paths with existing source metadata, and diagnoses invalid test declarations. |
 | Learning and use | Affected | Authors learn one marker, boolean assertion, explicit byte helper, stable filter IDs, reporter provision, and the distinction between recoverable typed failure and fatal traps. |
 
@@ -907,3 +908,4 @@ OpenSpec artifacts.
 | 33 | 2026-08-23 | Round 2 review removed Reporter from test eligibility and moved structured reporting to ordinary runner consumption of closed outcomes; distinguished runner and inventory roots, constrained test paths to the package source root, closed the standard runner through explicit OsHostInput/Allocator provision, defined bytewise filters and infrastructure status, and exposed slice-style inventory access plus uniform test adapters. |
 | 34 | 2026-08-23 | Author resolution made PassedCase, FailedCase, and Event fields public for external Reporter providers and changed standard filtering to ASCII case-insensitive byte-substring matching while leaving non-ASCII bytes exact. |
 | 35 | 2026-08-23 | Author accepted the direction after audit a001 passed, completed the custom Reporter example, delegated diagnostic and presentation mechanics to OpenSpec, and retained owned StackPath realization as an explicit revisit gate. |
+| 36 | 2026-08-23 | Author named the silent assertion failure `Test.AssertionError`; the accepted behavior is unchanged, and `Outcome.Failed` remains the broader result for any unhandled typed failure. |

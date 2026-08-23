@@ -20,7 +20,7 @@
 | S11 | C5 | High | FIXED | r002 | r002 | Revision 33 uses a closed ordinary entry whose source edge constructs/providers OsHostInput, Allocator, and output services and maps infrastructure failure to status 2. |
 | E8 | C6 | Medium | FIXED | r002 | r002 | Revision 33 exposes borrowed slice access and uses a current while/index loop. |
 | E10 | C6 | Medium | CLOSED | r002 | revision 34 | Revisions 33–34 define byte matching completely: ASCII letters fold case, all other bytes remain exact, invalid UTF-8 needs no decoding, and acquisition failure maps to infrastructure status 2. |
-| E11 | C4 | Medium | FIXED | r002 | r002 | Revision 33 removes assertion-side events; recovered Test.Failure and returned Outcome can no longer disagree with a prior report. |
+| E11 | C4 | Medium | FIXED | r002 | r002 | Revision 33 removes assertion-side events; a recovered assertion error and the returned Outcome can no longer disagree with a prior report. |
 | S13 | C3 | Medium | FIXED | r002 | r002 | Revision 33 removes the fresh Effect-scope promise and retains only fresh standard-reporter state. |
 | P6 | C2 | Medium | FIXED | r002 | r002 | Revision 33 assigns multi-root construction to existing project-closure tooling rather than the intrinsic privilege. |
 | P7 | C2 | Medium | FIXED | r002 | r002 | Revision 33 records uniform compiler-generated per-test adapters, ordinal dispatch, test-only rooting, and code-size scope. |
@@ -28,3 +28,4 @@
 | E13 | C4 | High | CLOSED | r003 | audit a001 | Revised by the author in revision 34 and passed targeted audit a001: public case/Event fields are externally inspectable without changing ownership. |
 | E14 | C6 | High | CLOSED | r003 | audit a001 | Revised by the author in revision 34 and passed targeted audit a001: ASCII folding fixes the focused examples while non-ASCII bytes remain exact. |
 | E15 | C4 | Medium | CLOSED | r003 | revision 35 | Revised in revision 35 with a complete single-file runner/test root, bound inventory handle, deliberate failing test, Reporter provision, owned path drop, and final count assertion. |
+| O1 | C4 | High | CLOSED | OpenSpec audit o001 | revision 36 | The canonical standard-library contract requires shipped error names ending in `Error`, while `Test.Failure` was both nonconforming and imprecise. The author selected `Test.AssertionError`; this revises the assertion API name without changing its typed-failure behavior or the broader `Outcome.Failed` contract. |
