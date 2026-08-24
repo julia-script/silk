@@ -93,7 +93,11 @@ import * as RowAlgebra from './RowAlgebra.js'
 import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceSpan from './SourceSpan.js'
-import { analyzeStatements, unsafeCallDiagnostic } from './StatementAnalysis.js'
+import {
+  analyzeStatements,
+  reachableCallableWrites,
+  unsafeCallDiagnostic,
+} from './StatementAnalysis.js'
 import * as StaticText from './StaticText.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import * as TargetConstant from './TargetConstant.js'
@@ -2869,6 +2873,13 @@ export function analyzePlaceReplace(
         ),
     )
   }
+  if (
+    root?._tag === 'BindingFact' &&
+    root.inferredType._tag === 'Available' &&
+    Type.isCallable(root.inferredType.type)
+  ) {
+    resolution.writtenCallableBindings?.add(root.id.ordinal)
+  }
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'PlaceReplace' as const,
@@ -4230,6 +4241,10 @@ export const effectCaptureFacts = (
         expression(fact.callee)
         for (const argument of fact.arguments) expression(argument.expression)
         return
+      case 'PlaceReplace':
+        expression(fact.destination, 'Exclusive')
+        expression(fact.value)
+        return
       case 'Run':
         expression(fact.subject)
         return
@@ -4400,6 +4415,8 @@ export function analyzeExpression(
         type: undefined,
       })
     const firstLocalBinding = resolution.nextBindingOrdinal?.value ?? 0
+    const inheritedCallableWrites = new Set(resolution.writtenCallableBindings)
+    const effectCallableWrites = new Set(inheritedCallableWrites)
     const nested: BodyContext = {
       source,
       declaration,
@@ -4408,7 +4425,10 @@ export function analyzeExpression(
       diagnostics: [],
       regions: [],
       loops: [],
-      resolution,
+      resolution: Object.freeze({
+        ...resolution,
+        writtenCallableBindings: effectCallableWrites,
+      }),
       nextBindingOrdinal: resolution.nextBindingOrdinal ?? { value: 0 },
       regionBase: 1_000_000 + node.span.start * 100,
       effectBlock: true,
@@ -4439,6 +4459,23 @@ export function analyzeExpression(
       resolution.index,
       copyAssumptionsOf(declaration),
     )
+    const reachableWrites = reachableCallableWrites(statements)
+    for (const capture of captures) {
+      if (
+        capture.reference._tag === 'BindingFact' &&
+        !inheritedCallableWrites.has(capture.reference.id.ordinal) &&
+        reachableWrites.has(capture.reference.id.ordinal) &&
+        capture.reference.inferredType._tag === 'Available' &&
+        Type.isCallable(capture.reference.inferredType.type)
+      ) {
+        nested.diagnostics.push(
+          Diagnostic.deferredCallableMutation(
+            capture.reference.name._tag === 'Present' ? capture.reference.name.spelling : '?',
+            capture.span,
+          ),
+        )
+      }
+    }
     const access = strongestEffectAccess(
       ...captures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
     )
@@ -5527,6 +5564,8 @@ export interface ResolutionContext {
   readonly executableFunction?: DeclarationId
   readonly executableOwner?: DeclarationFacts.CanonicalId
   readonly executableSites?: ReadonlyMap<SyntaxTree.Node, number>
+  /** Mutable callable bindings whose authored initializer is no longer their exact runtime value. */
+  readonly writtenCallableBindings?: Set<number>
 }
 
 export const unsafeCallAuthorized = (

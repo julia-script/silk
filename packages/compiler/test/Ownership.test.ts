@@ -467,6 +467,9 @@ pub fn main() -> i32 {
   const propagated = check(
     'ownership://evaluate-propagation.silk',
     `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
 struct Problem {}
 effect fn stop() -> () ! Problem { fail move Problem {} }
 effect fn outer() -> () ! Problem {
@@ -696,6 +699,77 @@ pub fn main() -> i32 { return 0 }`,
   assert.deepEqual(facts.diagnostics, [])
   assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.root._tag, 'Parameter')
   assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.access, 'Exclusive')
+})
+
+it('blocks mutable owned parameter access until its exclusive loan ends', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-active-loan.silk',
+    `struct Counter { value: i32 }
+fn invalid(mut counter: Counter) -> Counter {
+  let mut view = &mut counter
+  counter.value = 1
+  view.value = 2
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0011'],
+  )
+})
+
+it('releases a live mutable owned parameter on typed failure', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-failure.silk',
+    `struct Token { value: i32 }
+struct Problem {}
+effect fn stop(mut token: Token) -> never ! Problem {
+  fail Problem {}
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const failureExit = facts.functions
+    .at(0)
+    ?.exits.find((exit) => exit.releases.some((release) => release.binding.name === 'token'))
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(failureExit?.kind, 'Return')
+  assert.deepEqual(
+    failureExit?.releases.map((release) => release.binding.name),
+    ['token'],
+  )
+})
+
+it('keeps a mutable owned parameter live across loop transfer and releases it once on return', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-loop-transfer.silk',
+    `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+fn finish(mut token: Token) -> () {
+  while token.value > 0 {
+    break
+  }
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const finish = facts.functions.at(0)
+  const breakExit = finish?.exits.find((exit) => exit.kind === 'Break')
+  const returnExit = finish?.exits.find(
+    (exit) =>
+      exit.kind === 'Return' && exit.releases.some((release) => release.binding.name === 'token'),
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.notInclude(breakExit?.releases.map((release) => release.binding.name) ?? [], 'token')
+  assert.deepEqual(
+    returnExit?.releases.map((release) => release.binding.name),
+    ['token'],
+  )
 })
 
 it('requires explicit transfer at mutable owned parameter boundaries and rejects overlap', () => {

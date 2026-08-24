@@ -373,7 +373,7 @@ body with concrete-only behavior.
 
 ### Requirement: Mutable owned parameters provide local writable storage
 
-An ordinary function MAY declare `mut name: T` only when `T` is an owned parameter type. The
+An ordinary or Effect function MAY declare `mut name: T` only when `T` is an owned parameter type. The
 parameter SHALL remain the same callable-contract type and SHALL require the same explicit caller
 transfer as `name: T`, while its function-local root permits whole-value, field, and fixed-array
 element replacement. Whole replacement MUST clean the displaced value exactly once. An explicit
@@ -422,8 +422,8 @@ MUST NOT become runtime fields.
 
 An explicit borrow argument SHALL begin before its argument value is supplied and end only after the
 ordinary callee returns. A function borrowed-view parameter SHALL remain borrowed for the complete function
-body. A returned one-source view MAY extend its call loan through a lexical local's last use. Slice
-types MUST be rejected recursively from struct or union fields, fixed arrays, owned generic
+body. A returned one-source view MAY extend its call loan through a lexical local's last use.
+Reference and slice types MUST be rejected recursively from struct or union fields, fixed arrays, owned generic
 wrappers, and escaping captures. Direct shared and exclusive borrow bindings, lexically bounded
 callable or Effect captures, materialized temporary owners, and stable projected places SHALL use
 the same lexical loan and non-escape rules as call-scoped borrows.

@@ -185,6 +185,10 @@ export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 export const executionLayoutMismatchCode = 'SEM0142' as const
 /** Stable code for `mut` where no mutable owned parameter storage exists. */
 export const invalidMutableParameterCode = 'SEM0143' as const
+/** Stable code for applying a callable whose borrowed result has no exact source identity. */
+export const unknownCallableBorrowSourceCode = 'SEM0144' as const
+/** Stable code for mutating an outer callable from a deferred effect recipe. */
+export const deferredCallableMutationCode = 'SEM0145' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -408,6 +412,8 @@ export type Code =
   | typeof invalidExecutablePropertyConjunctCode
   | typeof executionLayoutMismatchCode
   | typeof invalidMutableParameterCode
+  | typeof unknownCallableBorrowSourceCode
+  | typeof deferredCallableMutationCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -580,6 +586,8 @@ export type Reason =
       readonly _tag: 'InvalidMutableParameter'
       readonly context: 'BorrowedView' | 'Contract'
     }
+  | { readonly _tag: 'UnknownCallableBorrowSource' }
+  | { readonly _tag: 'DeferredCallableMutation'; readonly spelling: string }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly operation: string
@@ -3459,6 +3467,34 @@ export const invalidMutableParameter = (
         ? '`mut` declares function-local owned parameter storage and is not valid in a service or interface contract'
         : '`mut` declares mutable owned parameter storage; use `&mut` for exclusive borrowed access',
     reason: Object.freeze({ _tag: 'InvalidMutableParameter', context }),
+    span,
+  })
+
+/** Rejects a borrowed callable result when no unchanged exact function or section identifies it. */
+export const unknownCallableBorrowSource = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownCallableBorrowSourceCode,
+    severity: 'error',
+    message:
+      'A callable returning a borrowed view requires one unchanged exact function or section identity',
+    reason: Object.freeze({ _tag: 'UnknownCallableBorrowSource' }),
+    span,
+  })
+
+/** Rejects mutation whose execution time cannot preserve the outer callable's exact recipe. */
+export const deferredCallableMutation = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: deferredCallableMutationCode,
+    severity: 'error',
+    message: `A deferred effect cannot mutate captured callable binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'DeferredCallableMutation', spelling }),
     span,
   })
 

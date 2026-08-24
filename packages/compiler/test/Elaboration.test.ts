@@ -272,6 +272,10 @@ fn main() -> i32 { return 0 }`,
     `struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value }
 fn make(token: Token) -> once fn(i32) -> i32 { return consume(move token) }
+fn relay(token: Token) -> once fn(i32) -> i32 {
+  let callback = make(move token)
+  return move callback
+}
 fn main() -> i32 { return 0 }`,
   )
 

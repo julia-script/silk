@@ -712,7 +712,7 @@ be an expression.
 
 ### Requirement: Owned parameter mutability parses losslessly
 
-An ordinary function parameter MAY contain one `mut` token immediately before its name. The
+An ordinary or Effect function parameter MAY contain one `mut` token immediately before its name. The
 concrete parameter node SHALL retain that token, its trivia, name, colon, and type in source order.
 Recovery for a missing name, colon, or type, or for a duplicate or misplaced `mut`, MUST remain
 inside the damaged parameter and preserve every following comma-separated parameter.

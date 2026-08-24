@@ -973,6 +973,7 @@ export const endRunLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): 
     if (
       loan.origin !== 'EffectCapture' &&
       loan.origin !== 'CallableCapture' &&
+      loan.origin !== 'ReturnedCallableCapture' &&
       loan.origin !== 'ValueBorrow' &&
       loan.origin !== 'InterfaceOperand'
     )
@@ -1004,7 +1005,7 @@ export const dropOwnedProvider = (
 
 export const endReturnedViewLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void => {
   for (const loan of fn.ownership?.loans ?? []) {
-    if (loan.origin !== 'ReturnedView') continue
+    if (loan.origin !== 'ReturnedView' && loan.origin !== 'ReturnedCallableCapture') continue
     if (
       loan.endSpan.sourceId !== span.sourceId ||
       loan.endSpan.start < span.start ||
@@ -1159,6 +1160,7 @@ const prepareProvidedEffect = (
     (candidate) =>
       (candidate.origin === 'EffectCapture' ||
         candidate.origin === 'CallableCapture' ||
+        candidate.origin === 'ReturnedCallableCapture' ||
         candidate.origin === 'ValueBorrow') &&
       candidate.access === access &&
       candidate.startSpan.start === providerFact.span.start &&

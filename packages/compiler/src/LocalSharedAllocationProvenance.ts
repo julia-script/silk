@@ -228,6 +228,10 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const contexts = new Map<string, FunctionContext>()
   for (const instance of discovery.instances) {
     const statements = nestedStatements(instance.function.statements)
+    const replacedRoots = statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .flatMap((expression) => (expression._tag === 'Replace' ? [expression.place.root] : []))
     contexts.set(
       ownerKey(instance),
       Object.freeze({
@@ -253,24 +257,30 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                 : [],
             ),
         ),
-        writtenBindings: new Set(
-          statements.flatMap((statement) =>
+        writtenBindings: new Set([
+          ...statements.flatMap((statement) =>
             statement._tag === 'Write' &&
             statement.place._tag === 'WritePlace' &&
             statement.place.root._tag === 'BindingWriteRoot'
               ? [statement.place.root.binding.ordinal]
               : [],
           ),
-        ),
-        writtenParameters: new Set(
-          statements.flatMap((statement) =>
+          ...replacedRoots.flatMap((root) =>
+            root._tag === 'BindingWriteRoot' ? [root.binding.ordinal] : [],
+          ),
+        ]),
+        writtenParameters: new Set([
+          ...statements.flatMap((statement) =>
             statement._tag === 'Write' &&
             statement.place._tag === 'WritePlace' &&
             statement.place.root._tag === 'ParameterWriteRoot'
               ? [statement.place.root.parameter.ordinal]
               : [],
           ),
-        ),
+          ...replacedRoots.flatMap((root) =>
+            root._tag === 'ParameterWriteRoot' ? [root.parameter.ordinal] : [],
+          ),
+        ]),
       }),
     )
   }

@@ -152,6 +152,37 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect(
+  'keeps mutable owned parameters out of sections and generic specialization identity',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'reference-projection/mutable-owned-callable-identity',
+        ascii(`struct Counter { value: i32 }
+fn adjust<T>(mut value: T, delta: i32) -> T { return move value }
+fn increment(mut counter: Counter, delta: i32) -> Counter {
+  counter.value = counter.value + delta
+  return move counter
+}
+pub fn main() -> i32 {
+  let callback = increment(2)
+  let first = Counter { value: 40 }
+  let updated = callback(move first)
+  let specialized = adjust<Counter>(move updated, 0)
+  return specialized.value
+}`),
+        'wasm32-unknown-unknown',
+      )
+
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+    }),
+)
+
 it.effect('cleans and replaces mutable owned parameter storage exactly once', () =>
   Effect.gen(function* () {
     const source = `struct Token { value: i32 }

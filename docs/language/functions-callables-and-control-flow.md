@@ -38,7 +38,7 @@ Every parameter declares its type. Omitting a result annotation declares `()`, n
 result. For an effect function, the declared success, failure, and requirement channels describe
 the Effect produced by calling it.
 
-An ordinary function may prefix an owned parameter name with `mut`. This creates mutable local
+An ordinary or Effect function may prefix an owned parameter name with `mut`. This creates mutable local
 storage for the transferred value without changing the callable's parameter type or identity.
 Borrowed parameters use `&` or `&mut` and do not accept the binding-level `mut` prefix. Service and
 interface operations describe contracts rather than local storage, so their parameters do not

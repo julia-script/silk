@@ -331,7 +331,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Hir.verify(Analysis.rootAnalysis(self).hir), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(2)
-    const capture = main?.loans.find((loan) => loan.origin === 'CallableCapture')
+    const capture = main?.loans.find((loan) => loan.origin === 'ReturnedCallableCapture')
     assert.strictEqual(capture?.access, 'Exclusive')
     assert.strictEqual(capture?.root._tag, 'Let')
     assert.strictEqual(
@@ -342,6 +342,284 @@ pub fn main() -> i32 {
     const evaluated = Analysis.evaluate(self)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const mir = Analysis.loweredMir(self)
+    const mainMir = mir.functions.find((fn) => fn.id.name === 'main')
+    const operations =
+      mainMir?.regions.flatMap((region) =>
+        region._tag === 'OperationRegion'
+          ? region.operations
+          : region._tag === 'CleanupRegion'
+            ? region.releases
+            : [],
+      ) ?? []
+    const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
+    const restoredRead = operations.findLastIndex((operation) => operation._tag === 'ReadPlace')
+    assert.isAtLeast(ending, 0)
+    assert.isAbove(restoredRead, ending)
+  }),
+)
+
+it.effect('tracks immutable callable aliases and rejects provenance after reassignment', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Counter { value: i32 }
+fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
+fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
+  counter.value = counter.value + delta
+  return move counter
+}
+fn aliased() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let callback = identity
+  let mut view = callback(&mut counter)
+  counter.value = 20
+  view.value = 42
+  return counter.value
+}
+fn reassigned() -> i32 {
+  let mut left = Counter { value: 1 }
+  let mut right = Counter { value: 2 }
+  let mut callback = select(&mut left)
+  callback = select(&mut right)
+  let mut view = callback(0)
+  right.value = 20
+  view.value = 42
+  return right.value
+}
+pub fn main() -> i32 { return 0 }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011', 'SEM0144'],
+    )
+  }),
+)
+
+it.effect('rejects every opaque callable route that returns a view', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Counter { value: i32 }
+struct Left {}
+struct Right {}
+fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
+fn alternate(counter: &mut Counter) -> &mut Counter { return move counter }
+fn ignore<T>(value: T) -> bool { drop value return false }
+fn diverge() -> never { return diverge() }
+fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
+  counter.value = counter.value + delta
+  return move counter
+}
+fn beforeWrite() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let view = callback(&mut counter)
+  callback = alternate
+  return view.value
+}
+fn snapshotAlias() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let alias = callback
+  callback = alternate
+  let view = alias(&mut counter)
+  return view.value
+}
+fn terminatingPaths(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  if flag {
+    let view = callback(&mut counter)
+    return view.value
+  } else {
+    callback = alternate
+    return 0
+  }
+}
+fn matched(choice: Left | Right) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let callback = match move choice {
+    Left {} => identity
+    Right {} => alternate
+  }
+  let view = callback(&mut counter)
+  return view.value
+}
+fn invalidatedAlias() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  callback = alternate
+  let alias = callback
+  let view = alias(&mut counter)
+  return view.value
+}
+fn grouped() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  callback = alternate
+  let view = (callback)(&mut counter)
+  return view.value
+}
+fn loopBackedge(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  while flag {
+    let value = callback(&mut counter).value
+    callback = alternate
+    drop value
+    continue
+  }
+  return 0
+}
+fn terminatingLoop(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  while flag {
+    let view = callback(&mut counter)
+    callback = alternate
+    return view.value
+  }
+  return 0
+}
+fn conditionWrite() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  while ignore(Intrinsic.replace(callback, alternate)) { return 0 }
+  let view = callback(&mut counter)
+  return view.value
+}
+fn unreachableLoopWrite(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  while flag {
+    let impossible = diverge()
+    callback = alternate
+    drop impossible
+  }
+  let view = callback(&mut counter)
+  return view.value
+}
+pub fn main() -> i32 { return 0 }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0144', 'SEM0144', 'SEM0144', 'SEM0144', 'SEM0144'],
+    )
+  }),
+)
+
+it.effect('isolates and rejects deferred mutation of a captured callable', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Counter { value: i32 }
+fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
+fn alternate(counter: &mut Counter) -> &mut Counter { return move counter }
+fn diverge() -> never { return diverge() }
+fn simple(value: i32) -> i32 { return value }
+fn alternateSimple(value: i32) -> i32 { return value + 1 }
+fn make(value: i32) -> fn(i32) -> i32 { drop value return alternateSimple }
+fn consume(value: i32, callback: fn(i32) -> i32) -> i32 {
+  drop callback
+  return value
+}
+fn assigned(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    if flag {
+      callback = alternate
+      return ()
+    } else {
+      return ()
+    }
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn replaced() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    let previous = Intrinsic.replace(callback, alternate)
+    drop previous
+    return ()
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn unreachable() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    let impossible = diverge()
+    callback = alternate
+    drop impossible
+    return ()
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn neverAssignment() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    callback = diverge()
+    return ()
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn neverReplace() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    let previous = Intrinsic.replace(callback, diverge())
+    drop previous
+    return ()
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn shortCircuit(flag: bool) -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = identity
+  let pending = effect {
+    let skipped = flag && diverge()
+    drop skipped
+    callback = alternate
+    return ()
+  }
+  drop move pending
+  let view = callback(&mut counter)
+  return view.value
+}
+fn eagerAssignment() -> i32 {
+  let mut callback = simple
+  let pending = effect {
+    callback = make(diverge())
+    return ()
+  }
+  drop move pending
+  return callback(1)
+}
+fn eagerReplace() -> i32 {
+  let mut callback = simple
+  let pending = effect {
+    let ignored = consume(diverge(), Intrinsic.replace(callback, alternateSimple))
+    drop ignored
+    return ()
+  }
+  drop move pending
+  return callback(1)
+}
+pub fn main() -> i32 { return 0 }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0145', 'SEM0145', 'SEM0012', 'SEM0145'],
+    )
   }),
 )
 

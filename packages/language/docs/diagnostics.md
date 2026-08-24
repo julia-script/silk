@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 135 |
+| `SEM` | Semantic | 137 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 165 codes in total.
+There are 167 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -190,6 +190,8 @@ There are 165 codes in total.
 | `SEM0141` | Stable code for an ordinary capability conjoined with one exact executable bound. | `<conjunct> is not a sealed executable property` |
 | `SEM0142` | Stable code for a statically known execution-package allocation/layout mismatch. | `Execution allocation was planned for <actual>, not <expected>` |
 | `SEM0143` | Stable code for `mut` where no mutable owned parameter storage exists. | `` `mut` declares function-local owned parameter storage and is not valid in a service or interface contract ``<br>`` `mut` declares mutable owned parameter storage; use `&mut` for exclusive borrowed access `` |
+| `SEM0144` | Stable code for applying a callable whose borrowed result has no exact source identity. | `A callable returning a borrowed view requires one unchanged exact function or section identity` |
+| `SEM0145` | Stable code for mutating an outer callable from a deferred effect recipe. | `A deferred effect cannot mutate captured callable binding <spelling>` |
 
 ## Ownership (`OWN`)
 

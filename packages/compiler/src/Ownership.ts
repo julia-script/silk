@@ -84,6 +84,7 @@ export interface LoanFact {
     | 'ValueBorrow'
     | 'EffectCapture'
     | 'CallableCapture'
+    | 'ReturnedCallableCapture'
     | 'InterfaceOperand'
     | 'ReturnedView'
   readonly parent?: BindingSite
@@ -1537,6 +1538,9 @@ const analyzeLoans = (
   scanStatementRunEnds(fn.statements)
 
   const executableAliases = new Map<number, Set<number>>()
+  const captureKey = (span: SourceSpan.SourceSpan, ordinal: number): string =>
+    `${span.sourceId}:${span.start}:${span.end}:${ordinal}`
+  const returnedCallableCaptures = new Set<string>()
   for (const binding of fn.bindings) {
     const directAlias = directSite(binding.initializer)?.site
     const callableAlias =
@@ -1628,6 +1632,8 @@ const analyzeLoans = (
       binding.initializer._tag === 'CallableApply' &&
       binding.initializer.returnedBorrowSource?._tag === 'Capture'
     ) {
+      const capture = binding.initializer.returnedBorrowSource.capture
+      returnedCallableCaptures.add(captureKey(capture.expression.syntax.span, capture.ordinal))
       const callable = directSite(binding.initializer.callee)?.site
       const ending = viewEnds.get(binding.id.ordinal)
       if (callable?._tag === 'Let' && ending !== undefined) {
@@ -1916,7 +1922,9 @@ const analyzeLoans = (
             }),
             root,
             access: capture.access,
-            origin: 'CallableCapture',
+            origin: returnedCallableCaptures.has(captureKey(candidate.syntax.span, capture.ordinal))
+              ? 'ReturnedCallableCapture'
+              : 'CallableCapture',
             suspendsParent: false,
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,

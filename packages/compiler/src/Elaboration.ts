@@ -54,6 +54,13 @@ export interface BindingDeclarationFact {
   readonly mutability: 'Immutable' | 'Mutable'
   readonly inferredType: ExpressionTypeFact
   readonly initializer: ExpressionFact
+  /** Exact callable value captured when this binding was initialized, before later source writes. */
+  readonly exactCallable?: Extract<
+    ExpressionFact,
+    { readonly _tag: 'FunctionItem' | 'CallableSection' }
+  >
+  /** Whether the initialized value has one compile-time concrete callable representation. */
+  readonly concreteCallableIdentity?: true
   readonly syntax: SyntaxTree.Node
 }
 
@@ -1467,7 +1474,12 @@ export interface FactVisitor {
   readonly statement?: (statement: StatementFact) => void
   readonly expression?: (expression: ExpressionFact) => void
   readonly descendExpressions?: boolean
+  readonly descendEffectBlocks?: boolean
 }
+
+/** Direct semantic children in source evaluation order. */
+export const expressionChildren = (self: ExpressionFact): ReadonlyArray<ExpressionFact> =>
+  directExpressionChildren(self)
 
 const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): void => {
   visitor.expression?.(expression)
@@ -1480,7 +1492,7 @@ const visitExpressionFact = (expression: ExpressionFact, visitor: FactVisitor): 
     return
   }
   if (expression._tag === 'EffectBlock') {
-    visitStatementFacts(expression.statements, visitor)
+    if (visitor.descendEffectBlocks !== false) visitStatementFacts(expression.statements, visitor)
     return
   }
   for (const child of directExpressionChildren(expression)) visitExpressionFact(child, visitor)
