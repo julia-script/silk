@@ -8,7 +8,8 @@ full compiler parallel context now passes without raising a timeout or reducing 
 attempts are recorded in `implementation-report.md`. The subsequent full repository gate sequence
 passed through release-candidate validation with no retry.
 
-The fixtures under `examples/language-pressure/independent-execution-separation` demonstrate that
+The compiler fixtures under
+`packages/compiler/test/fixtures/independent-execution-separation` demonstrate that
 ordinary Silk source can assemble owners around the sealed Execution/Wake substrate. Names such as
 Scheduler, Deferred, Timer, and Coroutine describe test pressure shapes only. They grant no
 compiler privilege and make no API-selection decision.

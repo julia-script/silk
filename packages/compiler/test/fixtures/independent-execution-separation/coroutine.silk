@@ -1,4 +1,4 @@
-// Test-local alternate owner. This is pressure evidence, not a canonical Coroutine API.
+// Compiler fixture: alternate owner pressure evidence, not a canonical Coroutine API.
 import silk.core as Core
 import silk.effect as Effect
 import silk.execution as Execution

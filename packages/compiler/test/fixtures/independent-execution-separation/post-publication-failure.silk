@@ -1,4 +1,4 @@
-// Test-local Deferred/Fiber proof that waiter insertion failure does not damage a published task.
+// Compiler fixture: waiter insertion failure does not damage a published task.
 import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.execution as Execution

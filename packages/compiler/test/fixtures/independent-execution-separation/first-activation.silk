@@ -1,4 +1,4 @@
-// Test-local proof that one owner may store distinct exact bodies homogeneously before first drive.
+// Compiler fixture: one owner stores distinct exact bodies homogeneously before first drive.
 import silk.core as Core
 import silk.effect as Effect
 import silk.execution as Execution

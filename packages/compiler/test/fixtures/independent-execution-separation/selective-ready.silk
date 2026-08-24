@@ -1,4 +1,4 @@
-// Test-local push-readiness witness. The owner never scans dormant Execution values.
+// Compiler fixture: push readiness without scanning dormant Execution values.
 import silk.core as Core
 import silk.effect as Effect
 import silk.execution as Execution

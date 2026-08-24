@@ -28,50 +28,32 @@ const renamed = readFileSync(
   'utf8',
 )
 const independentExecution = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/main.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/main.silk', import.meta.url),
   'utf8',
 )
 const deferredFirstActivation = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/first-activation.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/first-activation.silk', import.meta.url),
   'utf8',
 )
 const alternateOwner = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/coroutine.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/coroutine.silk', import.meta.url),
   'utf8',
 )
 const dormantCancellation = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/dormant-cancel.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/dormant-cancel.silk', import.meta.url),
   'utf8',
 )
 const timerOwner = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/timer.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/timer.silk', import.meta.url),
   'utf8',
 )
 const selectiveReady = readFileSync(
-  new URL(
-    '../../../examples/language-pressure/independent-execution-separation/selective-ready.silk',
-    import.meta.url,
-  ),
+  new URL('./fixtures/independent-execution-separation/selective-ready.silk', import.meta.url),
   'utf8',
 )
 const postPublicationFailure = readFileSync(
   new URL(
-    '../../../examples/language-pressure/independent-execution-separation/post-publication-failure.silk',
+    './fixtures/independent-execution-separation/post-publication-failure.silk',
     import.meta.url,
   ),
   'utf8',

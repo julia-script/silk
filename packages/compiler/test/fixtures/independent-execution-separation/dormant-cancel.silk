@@ -1,4 +1,4 @@
-// Minimal regression for cancellation after onSuspend has returned and before a retained Wake.
+// Compiler fixture: cancellation after onSuspend returns and before a retained Wake.
 import silk.core as Core
 import silk.effect as Effect
 import silk.execution as Execution

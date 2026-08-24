@@ -2352,10 +2352,7 @@ const renamedLocalSharedPressure = readFileSync(
 )
 const independentExecutionPressure = (name: string): string =>
   readFileSync(
-    new URL(
-      `../../../../examples/language-pressure/independent-execution-separation/${name}.silk`,
-      import.meta.url,
-    ),
+    new URL(`../fixtures/independent-execution-separation/${name}.silk`, import.meta.url),
     'utf8',
   )
 const independentExecutionConstructionFailure = (ordinal: 0 | 4): string => {

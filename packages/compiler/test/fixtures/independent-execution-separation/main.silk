@@ -1,4 +1,4 @@
-// Test-local SLP-0001 separation witness. The actor names in this file are pressure vocabulary,
+// Compiler fixture for SLP-0001 separation. The actor names are pressure vocabulary,
 // not canonical standard-library API.
 import silk.core as Core
 import silk.effect as Effect
