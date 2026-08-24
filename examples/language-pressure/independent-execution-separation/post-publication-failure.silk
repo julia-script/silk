@@ -1,0 +1,60 @@
+// Test-local proof that waiter allocation failure does not damage an already published Initial task.
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.layout { Layout }
+import silk.shared as Shared
+
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored result: i32 }
+struct WaiterNode { value: i32 }
+
+struct ExhaustedAllocator {}
+effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  drop layout
+  fail OutOfMemoryError {}
+}
+impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }
+
+effect fn body() -> i32 { return 42 }
+fn ready(state: &()) -> () { return () }
+fn complete(owner: &mut Owner, result: i32) -> () { owner.result = result return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move owner)
+  }
+}
+
+effect fn allocateWaiter() -> i32 ! OutOfMemoryError {
+  let mut exhausted = ExhaustedAllocator {}
+  let node = run Shared.make<WaiterNode>(WaiterNode { value: 1 })
+    |> Effect.provideMut<Allocator>(&mut exhausted)
+  drop node
+  return 0
+}
+effect fn waiterFailed(error: OutOfMemoryError) -> i32 { return 7 }
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let task = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  // Publication precedes the independent, ordinary waiter-node allocation.
+  let mut owner = Owner { slot: Stored { execution: move task }, result: 0 }
+  let waiterOutcome = run Effect.catchAll(allocateWaiter(), waiterFailed)
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  run driveStored(move selected, &mut owner)
+  if waiterOutcome != 7 { return -1 }
+  return owner.result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -100 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }
