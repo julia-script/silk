@@ -33,6 +33,11 @@ export type BindingSite =
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
   | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
 
+const ownedWriteSite = (root: Hir.OwnedWriteRoot): BindingSite =>
+  root._tag === 'ParameterWriteRoot'
+    ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter })
+    : Object.freeze({ _tag: 'Let', binding: root.binding })
+
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
   readonly _tag: 'Binding'
@@ -49,6 +54,14 @@ export interface BindingFact {
   readonly movedAt?: SourceSpan.SourceSpan
 }
 
+const supportsExclusiveAccess = (
+  binding: Pick<BindingFact, 'mutability' | 'type'> | undefined,
+): boolean =>
+  binding?.mutability === 'Mutable' ||
+  (binding?.type !== undefined &&
+    (Type.isReference(binding.type) || Type.isSlice(binding.type)) &&
+    binding.type.access === 'Exclusive')
+
 /** One ordered release of an owned binding at a structured exit. */
 export interface Release {
   readonly _tag: 'Release'
@@ -57,20 +70,21 @@ export interface Release {
   readonly cleanup: CleanupPlan.CleanupPlan
 }
 
-/** A deterministic compiler-only identity for one direct-call or delayed-effect slice loan. */
+/** A deterministic compiler-only identity for one lexical borrowed-view loan. */
 export type BorrowId = Hir.BorrowId
 
 export interface LoanFact {
   readonly _tag: 'Loan'
   readonly id: BorrowId
   readonly root: BindingSite
-  readonly access: Type.Slice['access']
+  readonly access: Type.BorrowAccess
   readonly origin:
     | 'FixedArrayBorrow'
     | 'SliceReborrow'
     | 'ValueBorrow'
     | 'EffectCapture'
     | 'CallableCapture'
+    | 'ReturnedCallableCapture'
     | 'InterfaceOperand'
     | 'ReturnedView'
   readonly parent?: BindingSite
@@ -1017,7 +1031,7 @@ const checkExpression = (
             state.diagnostics.push(
               Diagnostic.invalidMatchScrutineePlace('Exclusive', expression.span),
             )
-          } else if (scrutineeBinding?.mutability !== 'Mutable') {
+          } else if (!supportsExclusiveAccess(scrutineeBinding)) {
             state.diagnostics.push(
               Diagnostic.exclusiveMatchRequiresMutable(
                 scrutineeBinding?.name ?? '?',
@@ -1125,7 +1139,7 @@ const checkExpression = (
       }
       const rootSite: BindingSite =
         expression.place._tag === 'WritePlace'
-          ? Object.freeze({ _tag: 'Let', binding: expression.place.root })
+          ? ownedWriteSite(expression.place.root)
           : expression.place.root._tag === 'BindingSliceRoot'
             ? Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
             : Object.freeze({ _tag: 'Parameter', parameter: expression.place.root.parameter })
@@ -1245,7 +1259,7 @@ const sameSite = (left: BindingSite, right: BindingSite): boolean =>
 
 const borrowedPlaceAccess = (
   expression: Elaboration.ExpressionFact,
-): Type.Slice['access'] | undefined => {
+): Type.BorrowAccess | undefined => {
   if (expression._tag === 'Grouped') return borrowedPlaceAccess(expression.expression)
   if (expression._tag === 'IndexProjection' || expression._tag === 'FieldProjection') {
     return expression.borrowAccess
@@ -1524,6 +1538,9 @@ const analyzeLoans = (
   scanStatementRunEnds(fn.statements)
 
   const executableAliases = new Map<number, Set<number>>()
+  const captureKey = (span: SourceSpan.SourceSpan, ordinal: number): string =>
+    `${span.sourceId}:${span.start}:${span.end}:${ordinal}`
+  const returnedCallableCaptures = new Set<string>()
   for (const binding of fn.bindings) {
     const directAlias = directSite(binding.initializer)?.site
     const callableAlias =
@@ -1572,6 +1589,10 @@ const analyzeLoans = (
     return Elaboration.returnedBorrowArgument(expression)?.id.ordinal
   }
 
+  const returnedSource = (
+    expression: Elaboration.ExpressionFact,
+  ): Elaboration.ExpressionFact | undefined => Elaboration.returnedBorrowExpression(expression)
+
   const viewRoots = new Map<number, BindingSite>()
   const viewAliases = new Map<number, number>()
   const sourceSite = (expression: Elaboration.ExpressionFact): BindingSite | undefined => {
@@ -1584,11 +1605,8 @@ const analyzeLoans = (
     if (direct !== undefined) {
       return direct._tag === 'Let' ? (viewRoots.get(direct.binding.ordinal) ?? direct) : direct
     }
-    const ordinal = returnedArgumentOrdinal(expression)
-    if (ordinal !== undefined && expression._tag === 'Call') {
-      const argument = expression.arguments.at(ordinal)
-      return argument === undefined ? undefined : sourceSite(argument.expression)
-    }
+    const returned = returnedSource(expression)
+    if (returned !== undefined) return sourceSite(returned)
     return undefined
   }
 
@@ -1598,18 +1616,33 @@ const analyzeLoans = (
     if (
       binding.inferredType._tag !== 'Available' ||
       !Type.containsViewBorrow(binding.inferredType.type) ||
-      (!directBorrow && returnedArgumentOrdinal(binding.initializer) === undefined)
+      (!directBorrow && returnedSource(binding.initializer) === undefined)
     ) {
       continue
     }
-    const returnedOrdinal = returnedArgumentOrdinal(binding.initializer)
-    if (returnedOrdinal !== undefined && binding.initializer._tag === 'Call') {
-      const argument = binding.initializer.arguments.at(returnedOrdinal)
-      const source = argument === undefined ? undefined : directSite(argument.expression)?.site
+    const returned = returnedSource(binding.initializer)
+    if (returned !== undefined) {
+      const source = directSite(returned)?.site
       if (source?._tag === 'Let') viewAliases.set(binding.id.ordinal, source.binding.ordinal)
     }
     const root = sourceSite(binding.initializer)
     if (root !== undefined) viewRoots.set(binding.id.ordinal, root)
+
+    if (
+      binding.initializer._tag === 'CallableApply' &&
+      binding.initializer.returnedBorrowSource?._tag === 'Capture'
+    ) {
+      const capture = binding.initializer.returnedBorrowSource.capture
+      returnedCallableCaptures.add(captureKey(capture.expression.syntax.span, capture.ordinal))
+      const callable = directSite(binding.initializer.callee)?.site
+      const ending = viewEnds.get(binding.id.ordinal)
+      if (callable?._tag === 'Let' && ending !== undefined) {
+        const previous = callableEnds.get(callable.binding.ordinal)
+        if (previous === undefined || previous.span.end < ending.span.end) {
+          callableEnds.set(callable.binding.ordinal, ending)
+        }
+      }
+    }
   }
 
   let propagatedViewEnd = true
@@ -1696,7 +1729,7 @@ const analyzeLoans = (
         )
         if (conflict !== undefined) {
           diagnostics.push(
-            Diagnostic.conflictingSliceLoan(
+            Diagnostic.conflictingViewLoan(
               conflict.access,
               expression.access,
               conflict.startSpan,
@@ -1805,7 +1838,7 @@ const analyzeLoans = (
           )
           if (conflict !== undefined)
             diagnostics.push(
-              Diagnostic.conflictingSliceLoan(
+              Diagnostic.conflictingViewLoan(
                 conflict.access,
                 operandType.access,
                 conflict.startSpan,
@@ -1871,7 +1904,7 @@ const analyzeLoans = (
           )
           if (conflict !== undefined) {
             diagnostics.push(
-              Diagnostic.conflictingSliceLoan(
+              Diagnostic.conflictingViewLoan(
                 conflict.access,
                 capture.access,
                 conflict.startSpan,
@@ -1889,7 +1922,9 @@ const analyzeLoans = (
             }),
             root,
             access: capture.access,
-            origin: 'CallableCapture',
+            origin: returnedCallableCaptures.has(captureKey(candidate.syntax.span, capture.ordinal))
+              ? 'ReturnedCallableCapture'
+              : 'CallableCapture',
             suspendsParent: false,
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
@@ -1902,6 +1937,8 @@ const analyzeLoans = (
         return
       }
       case 'CallableApply': {
+        const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
+        const returnedOrdinal = returnedArgumentOrdinal(expression)
         const inspectCallee = (): void =>
           inspect(
             expression.callee,
@@ -1915,15 +1952,65 @@ const analyzeLoans = (
             delayedEnd,
           )
         const inspectArguments = (): void => {
-          for (const argument of expression.arguments) {
+          for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
+            const candidate = argument.expression
+            if (candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable') {
+              const directRoot = borrowSite(candidate.formation.root)
+              const root =
+                directRoot._tag === 'Let'
+                  ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
+                  : directRoot
+              const conflict = callActive.find(
+                (loan) =>
+                  sameSite(loan.root, root) &&
+                  (loan.access === 'Exclusive' || candidate.access === 'Exclusive'),
+              )
+              if (conflict !== undefined) {
+                diagnostics.push(
+                  Diagnostic.conflictingViewLoan(
+                    conflict.access,
+                    candidate.access,
+                    conflict.startSpan,
+                    candidate.syntax.span,
+                  ),
+                )
+              }
+              const returned = returnedOrdinal === argumentOrdinal
+              const loan: LoanFact = Object.freeze({
+                _tag: 'Loan',
+                id: Object.freeze({
+                  _tag: 'BorrowId',
+                  function: fn.declaration.id,
+                  callSpan: expression.syntax.span,
+                  ordinal: argumentOrdinal,
+                }),
+                root,
+                access: candidate.access,
+                origin: returned ? 'ReturnedView' : candidate.formation._tag,
+                ...(candidate.formation._tag === 'SliceReborrow'
+                  ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
+                  : { suspendsParent: false }),
+                startRegion: region,
+                endRegion: returned ? (delayedEnd?.region ?? region) : region,
+                startSpan: candidate.syntax.span,
+                endSpan: returned
+                  ? (delayedEnd?.span ?? expression.syntax.span)
+                  : expression.syntax.span,
+              })
+              loans.push(loan)
+              callActive.push(loan)
+              continue
+            }
             inspect(
-              argument.expression,
+              candidate,
               region,
-              active,
-              naturalAccess(argument.expression),
+              callActive,
+              naturalAccess(candidate),
               argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
                 ? delayedEnd
-                : undefined,
+                : returnedOrdinal === argumentOrdinal
+                  ? (delayedEnd ?? Object.freeze({ region, span: expression.syntax.span }))
+                  : undefined,
             )
           }
         }
@@ -1977,7 +2064,7 @@ const analyzeLoans = (
           )
           if (conflict !== undefined) {
             diagnostics.push(
-              Diagnostic.conflictingSliceLoan(
+              Diagnostic.conflictingViewLoan(
                 conflict.access,
                 candidate.access,
                 conflict.startSpan,
@@ -2027,7 +2114,7 @@ const analyzeLoans = (
           )
           if (conflict !== undefined) {
             diagnostics.push(
-              Diagnostic.conflictingSliceLoan(
+              Diagnostic.conflictingViewLoan(
                 conflict.access,
                 candidateAccess,
                 conflict.startSpan,
@@ -2087,7 +2174,7 @@ const analyzeLoans = (
         )
         if (conflict !== undefined)
           diagnostics.push(
-            Diagnostic.conflictingSliceLoan(
+            Diagnostic.conflictingViewLoan(
               conflict.access,
               provider.captureAccess,
               conflict.startSpan,
@@ -2447,12 +2534,7 @@ const checkFunction = (
     const binding: MutableBinding = {
       site: Object.freeze({ _tag: 'Parameter', parameter: parameter.id }),
       name: parameter.name._tag === 'Present' ? parameter.name.spelling : undefined,
-      mutability:
-        type !== undefined &&
-        (Type.isSlice(type) || Type.isReference(type)) &&
-        type.access === 'Exclusive'
-          ? 'Mutable'
-          : 'Immutable',
+      mutability: parameter.bindingMutability,
       liveFrom: parameter.syntax.span,
       liveTo: declaration.syntax.span,
       category: categoryOf(index, type, copyAssumptions),
@@ -2524,7 +2606,7 @@ const checkFunction = (
     if (selection.access === 'Exclusive') {
       if (subjectSite === undefined)
         state.diagnostics.push(Diagnostic.invalidMatchScrutineePlace('Exclusive', selection.span))
-      else if (subjectBinding?.mutability !== 'Mutable')
+      else if (!supportsExclusiveAccess(subjectBinding))
         state.diagnostics.push(
           Diagnostic.exclusiveMatchRequiresMutable(subjectBinding?.name ?? '?', selection.span),
         )
@@ -2850,7 +2932,7 @@ const checkFunction = (
         }
         const rootSite: BindingSite =
           statement.place._tag === 'WritePlace'
-            ? Object.freeze({ _tag: 'Let', binding: statement.place.root })
+            ? ownedWriteSite(statement.place.root)
             : statement.place.root._tag === 'BindingSliceRoot'
               ? Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
               : Object.freeze({ _tag: 'Parameter', parameter: statement.place.root.parameter })

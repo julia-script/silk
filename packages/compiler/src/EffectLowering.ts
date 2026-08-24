@@ -973,6 +973,7 @@ export const endRunLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): 
     if (
       loan.origin !== 'EffectCapture' &&
       loan.origin !== 'CallableCapture' &&
+      loan.origin !== 'ReturnedCallableCapture' &&
       loan.origin !== 'ValueBorrow' &&
       loan.origin !== 'InterfaceOperand'
     )
@@ -1004,7 +1005,7 @@ export const dropOwnedProvider = (
 
 export const endReturnedViewLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void => {
   for (const loan of fn.ownership?.loans ?? []) {
-    if (loan.origin !== 'ReturnedView') continue
+    if (loan.origin !== 'ReturnedView' && loan.origin !== 'ReturnedCallableCapture') continue
     if (
       loan.endSpan.sourceId !== span.sourceId ||
       loan.endSpan.start < span.start ||
@@ -1058,6 +1059,14 @@ export const borrowedWriteRoot = (
   root: Hir.BorrowedWritePlace['root'],
 ): Mir.LocalId | undefined =>
   root._tag === 'ParameterSliceRoot'
+    ? fn.parameterLocals.get(root.parameter.ordinal)
+    : fn.bindingLocals.get(root.binding.ordinal)
+
+export const ownedWriteRoot = (
+  fn: FunctionLowering,
+  root: Hir.OwnedWriteRoot,
+): Mir.LocalId | undefined =>
+  root._tag === 'ParameterWriteRoot'
     ? fn.parameterLocals.get(root.parameter.ordinal)
     : fn.bindingLocals.get(root.binding.ordinal)
 
@@ -1151,6 +1160,7 @@ const prepareProvidedEffect = (
     (candidate) =>
       (candidate.origin === 'EffectCapture' ||
         candidate.origin === 'CallableCapture' ||
+        candidate.origin === 'ReturnedCallableCapture' ||
         candidate.origin === 'ValueBorrow') &&
       candidate.access === access &&
       candidate.startSpan.start === providerFact.span.start &&

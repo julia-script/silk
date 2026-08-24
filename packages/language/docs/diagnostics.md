@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 134 |
+| `SEM` | Semantic | 137 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 164 codes in total.
+There are 167 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -107,9 +107,9 @@ There are 164 codes in total.
 | `SEM0051` |  | `<target> expects <expected> type argument<expected1s>, received <actual>` |
 | `SEM0052` |  | `Cannot infer all type arguments for <target> from supplied values` |
 | `SEM0053` |  | `Recursive specialization changes type arguments from <caller> to <target>` |
-| `SEM0054` | Stable code for a borrowed slice type outside a direct ordinary-function parameter. | `A slice must be the complete type of an ordinary function parameter`<br>`A slice cannot appear in a <position> type` |
-| `SEM0055` |  | `A slice borrow is only valid as an immediate ordinary-call argument` |
-| `SEM0056` |  | `A slice borrow requires a direct stable array binding or slice parameter` |
+| `SEM0054` | Stable code for a borrowed view outside an allowed direct type position. | `A borrowed view must be the complete type of an ordinary function parameter`<br>`A borrowed view cannot appear in a <position> type` |
+| `SEM0055` |  | `A borrowed view is not valid in this expression position` |
+| `SEM0056` |  | `A borrowed view requires a direct stable owner or borrowed view` |
 | `SEM0057` |  | `Exclusive borrowing requires mutable binding <spelling>` |
 | `SEM0058` |  | `A shared slice cannot be reborrowed exclusively` |
 | `SEM0059` |  | `Passing an array as <expected> requires an explicit borrow` |
@@ -141,8 +141,8 @@ There are 164 codes in total.
 | `SEM0088` | Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. | `Generic parameter <spelling> has kind <actual>, expected <expected>` |
 | `SEM0089` | Stable code for a failure or requirement row that cannot be finitely decomposed. | `Failure type does not contain selected member <member>`<br>`Requirement row does not contain &mut <capability>@<role>`<br>`Requirement row does not contain &<capability>@<role>`<br>`Requirement <capability> has role <joinor>, expected <expected>`<br>`Requirement <capability>@<role> has access <joinor>, expected <expected>`<br>`Requirement row remainder is ambiguous across <join>`<br>`Requirement row specialization is not finite and concrete` |
 | `SEM0090` | Stable code for storage, bodies, or defaults inside a source service contract. | `Invalid service declaration: <detail>` |
-| `SEM0091` |  | `A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter` |
-| `SEM0092` |  | `The returned slice does not originate from the function's single borrowed parameter` |
+| `SEM0091` |  | `A returned borrowed view must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter` |
+| `SEM0092` |  | `The returned borrowed view does not originate from the function's single borrowed parameter` |
 | `SEM0093` | Stable code for one reachable intrinsic unavailable on the requested execution target. | `<operation> is unavailable for <target>` |
 | `SEM0095` | Stable code for a float literal spelling no floating-point value can represent. | `Invalid float literal: <spelling>` |
 | `SEM0097` | Stable code for a bound operation call whose receiver names more than one bounded parameter. | `<spelling> is ambiguous across bounded type parameters <join>` |
@@ -189,6 +189,9 @@ There are 164 codes in total.
 | `SEM0140` | Stable code for an externally parking entry with no explicit Execution owner. | `External parking requires an explicit Intrinsic.Execution owner` |
 | `SEM0141` | Stable code for an ordinary capability conjoined with one exact executable bound. | `<conjunct> is not a sealed executable property` |
 | `SEM0142` | Stable code for a statically known execution-package allocation/layout mismatch. | `Execution allocation was planned for <actual>, not <expected>` |
+| `SEM0143` | Stable code for `mut` where no mutable owned parameter storage exists. | `` `mut` declares function-local owned parameter storage and is not valid in a service or interface contract ``<br>`` `mut` declares mutable owned parameter storage; use `&mut` for exclusive borrowed access `` |
+| `SEM0144` | Stable code for applying a callable whose borrowed result has no exact source identity. | `A callable returning a borrowed view requires one unchanged exact function or section identity` |
+| `SEM0145` | Stable code for mutating an outer callable from a deferred effect recipe. | `A deferred effect cannot mutate captured callable binding <spelling>` |
 
 ## Ownership (`OWN`)
 
@@ -203,9 +206,9 @@ There are 164 codes in total.
 | `OWN0007` |  | `Exclusive match requires mutable binding <spelling>` |
 | `OWN0008` |  | `Match guard cannot consume pattern binding <spelling>` |
 | `OWN0009` |  | `<access> match requires a complete binding place` |
-| `OWN0010` |  | `<requested> slice loan conflicts with an active <toLowerCase> loan` |
-| `OWN0011` |  | `<toLowerCase> access to <spelling> conflicts with an active slice loan` |
-| `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
+| `OWN0010` |  | `<requested> borrowed-view loan conflicts with an active <toLowerCase> loan` |
+| `OWN0011` |  | `<toLowerCase> access to <spelling> conflicts with an active borrowed-view loan` |
+| `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed-view place` |
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0016` | Stable code for an access-scoped local-shared borrow escaping or crossing suspension. | `Local-shared access cannot suspend while its exclusive borrow is live`<br>`Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live`<br>`Local-shared access callback cannot return a value that retains its exclusive borrow` |

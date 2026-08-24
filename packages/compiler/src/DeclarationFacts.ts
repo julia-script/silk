@@ -226,7 +226,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Reference'
-      readonly access: 'Shared' | 'Exclusive'
+      readonly access: Type.BorrowAccess
       readonly target: DeclaredTypeFact
       readonly spelling: string
       readonly token: Token.Token
@@ -407,15 +407,16 @@ export interface ParameterFact {
   readonly _tag: 'ParameterDeclaration'
   readonly id: ParameterId
   readonly name: DeclaredName
+  readonly bindingMutability: 'Immutable' | 'Mutable'
   readonly declaredType: DeclaredTypeFact
   readonly syntax: SyntaxTree.Node
 }
 
-/** The single borrowed parameter an ordinary slice result is lexically tied to. */
+/** The single borrowed parameter an ordinary returned view is lexically tied to. */
 export interface ReturnedBorrowFact {
   readonly _tag: 'ReturnedBorrow'
   readonly parameter: ParameterFact
-  readonly access: Type.Slice['access']
+  readonly access: Type.BorrowAccess
 }
 
 /**
@@ -428,22 +429,21 @@ export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact
   if (
     declaration.functionKind !== 'Ordinary' ||
     result === undefined ||
-    !Type.containsViewBorrow(result)
+    !Type.isViewBorrow(result)
   ) {
     return undefined
   }
   const borrowed = declaration.parameters.filter(
     (parameter) =>
-      parameter.declaredType._tag === 'Resolved' &&
-      (Type.isReference(parameter.declaredType.type) ||
-        Type.containsViewBorrow(parameter.declaredType.type)),
+      parameter.declaredType._tag === 'Resolved' && Type.isViewBorrow(parameter.declaredType.type),
   )
   const parameter = borrowed.length === 1 ? borrowed[0] : undefined
   if (parameter?.declaredType._tag !== 'Resolved') return undefined
   const source = parameter.declaredType.type
-  const sourceAccess: 'Shared' | 'Exclusive' =
+  const sourceAccess: Type.BorrowAccess =
     Type.isSlice(source) || Type.isReference(source) ? source.access : 'Shared'
-  const resultAccess: 'Shared' | 'Exclusive' = Type.isSlice(result) ? result.access : 'Shared'
+  const resultAccess: Type.BorrowAccess =
+    Type.isSlice(result) || Type.isReference(result) ? result.access : 'Shared'
   if (resultAccess === 'Exclusive' && sourceAccess !== 'Exclusive') {
     return undefined
   }
@@ -785,6 +785,7 @@ const interfaceOperationContract = (
               spelling: 'self',
               token: operation.name.token,
             }),
+            bindingMutability: 'Immutable',
             declaredType,
             syntax: operation.syntax,
           })

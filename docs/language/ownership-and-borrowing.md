@@ -271,11 +271,18 @@ fn replace() -> i32 {
 
 The root remains one complete initialized owner before and after the replacement.
 
-**Boundary:** `mut` grants the owner permission to change; it does not override an active shared or
-exclusive loan under BORROW-001 and BORROW-002. Assignment must replace a complete value of the
-destination type—it cannot create a temporarily uninitialized place.
+The same storage rule applies to an owned ordinary-function parameter declared `mut name: T`.
+Calling the function and returning an affine value still require explicit `move`; the prefix only
+makes the callee's parameter root writable. Whole-parameter replacement cleans the displaced value
+once, and a value explicitly moved out may be reinitialized before later use.
+
+**Boundary:** `mut` grants one owned local or parameter root permission to change; it does not
+override an active shared or exclusive loan under BORROW-001 and BORROW-002. Assignment must
+replace a complete value of the destination type—it cannot create a temporarily uninitialized
+place. `mut` is invalid on borrowed parameters and on service or interface contract parameters.
 
 **Diagnostics:** Mutation through an immutable root reports `SEM0035` at the assignment target.
+Invalid parameter-level `mut` reports `SEM0143` at the keyword.
 Assignment to a consumed or borrowed root reports the applicable ownership diagnostic rather than
 reviving that root implicitly.
 
@@ -698,7 +705,7 @@ and cannot outlive its root owner. Placing the same reference inside an owned ag
 that aggregate claim an independently movable lifetime-bearing value and may create a
 self-referential owner-and-view structure, so owned storage remains invalid.
 
-**Diagnostics:** A slice nested in owned storage or supplied as an ordinary generic type argument
+**Diagnostics:** A borrowed view nested in owned storage or supplied as an ordinary generic type argument
 reports `SEM0054` at the invalid type position. A borrowed binding that outlives its root reports an
 ownership escape diagnostic at the escaping use. Escape through a callable, Effect, or return
 boundary reports that boundary's specific diagnostic rather than silently extending the owner's
@@ -1043,6 +1050,11 @@ fn adjusted(token: Token) -> i32 {
 The explicit `move` consumes `token` exactly once. A pipeline into a borrowed leading parameter must
 similarly provide the appropriate explicit borrow. Pipeline syntax does not add, remove, or infer an
 ownership conversion.
+
+A returned borrowed view carries the same source root through a pipeline as through a direct call.
+For an exact callable section, that source may be either the newly supplied leading argument or one
+known trailing capture. An opaque callable contract does not guess which captured value backs the
+result.
 
 **Boundary:** The left expression evaluates before the callable or leading-argument section on the
 right is constructed or accessed. Pipelines associate left-to-right, and each stage applies the
@@ -1791,8 +1803,8 @@ parameter, or with insufficient exclusive access reports `SEM0091`. A returned e
 not derive from that parameter reports `SEM0092` at the expression and identifies the required
 source.
 
-**Current compiler:** Slice returns implement this exactly-one contract. Other lifetime-bearing
-view types must use the same rule rather than developing independent lifetime behavior.
+**Current compiler:** Direct slice and nominal-reference returns implement this exactly-one
+contract, including direct calls, pipelines, and exact callable-section applications.
 
 **Conflicting artifact:** The original
 [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md)

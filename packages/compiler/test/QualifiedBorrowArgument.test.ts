@@ -94,9 +94,9 @@ it.effect('accepts an exclusive borrow through the qualified spelling', () =>
 
 it.effect('still rejects a borrow where the parameter wants an owned value', () =>
   Effect.gen(function* () {
-    // `get`'s second parameter is a `usize`, so the borrow has no reference type to take.
+    // `get`'s second parameter is a `usize`, so the natural reference type is incompatible.
     const snapshot = yield* Analysis.ofSourceRealized('borrow/owned', ascii(ownedPosition))
-    assert.include(codes(snapshot), 'SEM0055')
+    assert.deepEqual(codes(snapshot), ['SEM0012'])
   }),
 )
 

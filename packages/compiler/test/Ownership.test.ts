@@ -467,6 +467,9 @@ pub fn main() -> i32 {
   const propagated = check(
     'ownership://evaluate-propagation.silk',
     `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
 struct Problem {}
 effect fn stop() -> () ! Problem { fail move Problem {} }
 effect fn outer() -> () ! Problem {
@@ -611,6 +614,202 @@ pub fn main() -> i32 {
   assert.deepEqual(
     facts.diagnostics.map((diagnostic) => diagnostic.code),
     ['OWN0001'],
+  )
+})
+
+it('distinguishes immutable and mutable owned parameter storage', () => {
+  const immutable = check(
+    'ownership://immutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const mutable = check(
+    'ownership://mutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const indexed = check(
+    'ownership://mutable-owned-array-parameter.silk',
+    `fn update(mut values: [i32; 2]) -> [i32; 2] {
+  values[0] = values[0] + 1
+  return move values
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(immutable.diagnostics, [])
+  assert.deepEqual(mutable.diagnostics, [])
+  assert.deepEqual(indexed.diagnostics, [])
+  assert.strictEqual(immutable.functions.at(0)?.bindings.at(0)?.mutability, 'Immutable')
+  assert.strictEqual(mutable.functions.at(0)?.bindings.at(0)?.mutability, 'Mutable')
+})
+
+it('reinitializes a mutable owned parameter after an explicit move', () => {
+  const accepted = check(
+    'ownership://reinitialized-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn reset(mut counter: Counter) -> Counter {
+  let previous = move counter
+  counter = Counter { value: previous.value + 1 }
+  drop previous
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const rejected = check(
+    'ownership://moved-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn invalid(mut counter: Counter) -> i32 {
+  let moved = move counter
+  return counter.value
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.deepEqual(
+    rejected.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+})
+
+it('borrows mutable owned parameter storage exclusively', () => {
+  const facts = check(
+    'ownership://borrowed-mutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(view: &mut Counter) -> i32 {
+  view.value = view.value + 1
+  return view.value
+}
+fn update(mut counter: Counter) -> Counter {
+  let result = increment(&mut counter)
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.root._tag, 'Parameter')
+  assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.access, 'Exclusive')
+})
+
+it('blocks mutable owned parameter access until its exclusive loan ends', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-active-loan.silk',
+    `struct Counter { value: i32 }
+fn invalid(mut counter: Counter) -> Counter {
+  let mut view = &mut counter
+  counter.value = 1
+  view.value = 2
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0011'],
+  )
+})
+
+it('releases a live mutable owned parameter on typed failure', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-failure.silk',
+    `struct Token { value: i32 }
+struct Problem {}
+effect fn stop(mut token: Token) -> never ! Problem {
+  fail Problem {}
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const failureExit = facts.functions
+    .at(0)
+    ?.exits.find((exit) => exit.releases.some((release) => release.binding.name === 'token'))
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(failureExit?.kind, 'Return')
+  assert.deepEqual(
+    failureExit?.releases.map((release) => release.binding.name),
+    ['token'],
+  )
+})
+
+it('keeps a mutable owned parameter live across loop transfer and releases it once on return', () => {
+  const facts = check(
+    'ownership://mutable-owned-parameter-loop-transfer.silk',
+    `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+fn finish(mut token: Token) -> () {
+  while token.value > 0 {
+    break
+  }
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const finish = facts.functions.at(0)
+  const breakExit = finish?.exits.find((exit) => exit.kind === 'Break')
+  const returnExit = finish?.exits.find(
+    (exit) =>
+      exit.kind === 'Return' && exit.releases.some((release) => release.binding.name === 'token'),
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.notInclude(breakExit?.releases.map((release) => release.binding.name) ?? [], 'token')
+  assert.deepEqual(
+    returnExit?.releases.map((release) => release.binding.name),
+    ['token'],
+  )
+})
+
+it('requires explicit transfer at mutable owned parameter boundaries and rejects overlap', () => {
+  const caller = check(
+    'ownership://mutable-owned-parameter-caller-move.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter { return move counter }
+pub fn main() -> i32 {
+  let counter = Counter { value: 0 }
+  let result = increment(counter)
+  return result.value
+}`,
+  )
+  const returned = check(
+    'ownership://mutable-owned-parameter-return-move.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter { return counter }
+pub fn main() -> i32 { return 0 }`,
+  )
+  const overlap = check(
+    'ownership://mutable-owned-parameter-overlap.silk',
+    `struct Counter { value: i32 }
+fn replace(mut counter: Counter) -> Counter {
+  counter = move counter
+  return Counter { value: 0 }
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    caller.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0003'],
+  )
+  assert.deepEqual(
+    returned.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0003'],
+  )
+  assert.deepEqual(
+    overlap.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0004'],
   )
 })
 

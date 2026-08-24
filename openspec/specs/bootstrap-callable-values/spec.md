@@ -113,6 +113,21 @@ callable with that value. Pipelines SHALL associate left-to-right.
 - **WHEN** both the left expression and the callable-producing right expression have observable eager work
 - **THEN** the left expression completes once before the callable-producing expression begins
 
+#### Scenario: Pipe an explicit borrowed view
+
+- **WHEN** the left expression forms `&value` or `&mut value` and the unary callable expects that exact borrowed-view type
+- **THEN** ordinary argument compatibility accepts the application and ownership retains the same loan as the equivalent direct call
+
+#### Scenario: Retain a returned borrow from an exact section source
+
+- **WHEN** an exact function item or section returns a borrowed view backed by a supplied argument or one known trailing capture
+- **THEN** callable application records that exact source and keeps its loan active through the result's last use
+
+#### Scenario: Keep opaque callable provenance unknown
+
+- **WHEN** application knows only a structural callable contract whose result is a borrowed view
+- **THEN** it does not infer a returned-borrow source from an arbitrary argument or hidden environment
+
 ### Requirement: Higher-order calls preserve callable guarantees
 
 Function parameters, local bindings, generic substitutions, and Effect combinators SHALL preserve
