@@ -3344,51 +3344,62 @@ const emitExecutionWakeOperation = (
     const package_ = state.plan.executionPackages.plans.at(ordinal)
     if (package_ === undefined) return [Instr.op('unreachable')]
     const control = executionComponentOffset(package_, 'WakeControl')
-    if (control === undefined) return branches(ordinal + 1)
-    const phase = (expected: number): ReadonlyArray<Instr.Instr> => [
-      Instr.localGet(base),
-      Instr.memoryAccess('i32.load', memory, { offset: control }),
-      Instr.i32Const(expected),
-      Instr.op('i32.eq'),
-    ]
-    const notify = [
-      Instr.localGet(base),
-      Instr.i32Const(3),
-      Instr.memoryAccess('i32.store', memory),
-      Instr.localGet(base),
-      Instr.i32Const(4),
-      Instr.memoryAccess('i32.store', memory, { offset: control }),
-      ...emitExecutionReadyNotification(package_, base, state),
-      Instr.localGet(base),
-      Instr.memoryAccess('i32.load', memory),
-      Instr.i32Const(7),
-      Instr.op('i32.eq'),
-      Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
-        Instr.localGet(base),
-        Instr.i32Const(5),
-        Instr.memoryAccess('i32.store', memory, { offset: control }),
-        Instr.localGet(base),
-        Instr.i32Const(4),
-        Instr.memoryAccess('i32.store', memory),
-      ]),
-    ]
+    const selected =
+      control === undefined
+        ? [Instr.op('unreachable')]
+        : (() => {
+            const phase = (expected: number): ReadonlyArray<Instr.Instr> => [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', memory, { offset: control }),
+              Instr.i32Const(expected),
+              Instr.op('i32.eq'),
+            ]
+            const notify = [
+              Instr.localGet(base),
+              Instr.i32Const(3),
+              Instr.memoryAccess('i32.store', memory),
+              Instr.localGet(base),
+              Instr.i32Const(4),
+              Instr.memoryAccess('i32.store', memory, { offset: control }),
+              ...emitExecutionReadyNotification(package_, base, state),
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', memory),
+              Instr.i32Const(7),
+              Instr.op('i32.eq'),
+              Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+                Instr.localGet(base),
+                Instr.i32Const(5),
+                Instr.memoryAccess('i32.store', memory, { offset: control }),
+                Instr.localGet(base),
+                Instr.i32Const(4),
+                Instr.memoryAccess('i32.store', memory),
+              ]),
+            ]
+            return [
+              ...phase(1),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(base),
+                  Instr.i32Const(2),
+                  Instr.memoryAccess('i32.store', memory, { offset: control }),
+                ],
+                [
+                  ...phase(3),
+                  Instr.ifElse(Instr.emptyBlockType, notify, [
+                    ...phase(6),
+                    Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+                  ]),
+                ],
+              ),
+            ]
+          })()
     return [
-      ...phase(1),
-      Instr.ifElse(
-        Instr.emptyBlockType,
-        [
-          Instr.localGet(base),
-          Instr.i32Const(2),
-          Instr.memoryAccess('i32.store', memory, { offset: control }),
-        ],
-        [
-          ...phase(3),
-          Instr.ifElse(Instr.emptyBlockType, notify, [
-            ...phase(6),
-            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
-          ]),
-        ],
-      ),
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory, { offset: state.plan.target.pointerSize }),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, selected, branches(ordinal + 1)),
     ]
   }
   return branches(0)
@@ -3429,55 +3440,61 @@ const emitExecutionParkOperation = (
     state,
     Object.freeze([Object.freeze([Instr.globalGet(runtime.activeExecution)])]),
   )
-  const matching = state.plan.executionPackages.plans.filter(
-    (package_) => package_.readinessStorage,
-  )
-  if (matching.length !== 1) return [Instr.op('unreachable')]
-  const control = executionComponentOffset(
-    matching.at(0) ??
-      (() => {
-        throw new RangeError('missing execution package')
-      })(),
-    'WakeControl',
-  )
-  if (control === undefined) return [Instr.op('unreachable')]
-  return [
-    Instr.globalGet(runtime.activeExecution),
-    Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
-    Instr.i32Const(0),
-    Instr.op('i32.ne'),
-    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-    Instr.globalGet(runtime.activeExecution),
-    Instr.i32Const(1),
-    Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
-    Instr.globalGet(runtime.activeExecution),
-    Instr.globalGet(runtime.activeExecution),
-    Instr.memoryAccess('i32.load', runtime.memory, {
-      offset: control + state.plan.target.pointerSize,
-    }),
-    Instr.i32Const(1),
-    Instr.op('i32.add'),
-    Instr.memoryAccess('i32.store', runtime.memory, {
-      offset: control + state.plan.target.pointerSize,
-    }),
-    ...registration,
-    Instr.globalGet(runtime.activeExecution),
-    Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
-    Instr.i32Const(2),
-    Instr.op('i32.ne'),
-    Instr.ifElse(
-      Instr.emptyBlockType,
-      [
-        Instr.globalGet(runtime.activeExecution),
-        Instr.i32Const(3),
-        Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
-      ],
-      [],
-    ),
-    Instr.i32Const(2),
-    Instr.globalSet(runtime.status),
-    ...(suspension?.relay(region) ?? []),
-  ]
+  const select = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+    const package_ = state.plan.executionPackages.plans.at(ordinal)
+    if (package_ === undefined) return [Instr.op('unreachable')]
+    const control = executionComponentOffset(package_, 'WakeControl')
+    const selected =
+      control === undefined
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+            Instr.i32Const(0),
+            Instr.op('i32.ne'),
+            Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.i32Const(1),
+            Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, {
+              offset: control + state.plan.target.pointerSize,
+            }),
+            Instr.i32Const(1),
+            Instr.op('i32.add'),
+            Instr.memoryAccess('i32.store', runtime.memory, {
+              offset: control + state.plan.target.pointerSize,
+            }),
+            ...registration,
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+            Instr.i32Const(2),
+            Instr.op('i32.ne'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                Instr.globalGet(runtime.activeExecution),
+                Instr.i32Const(3),
+                Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+              ],
+              [],
+            ),
+            Instr.i32Const(2),
+            Instr.globalSet(runtime.status),
+            ...(suspension?.relay(region) ?? []),
+          ]
+    return [
+      Instr.globalGet(runtime.activeExecution),
+      Instr.memoryAccess('i32.load', runtime.memory, {
+        offset: state.plan.target.pointerSize,
+      }),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, selected, select(ordinal + 1)),
+    ]
+  }
+  return select(0)
 }
 
 const emitSharedCloneOperation = (

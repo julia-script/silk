@@ -3,11 +3,83 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as Layout from '../src/Layout.js'
+import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Type from '../src/Type.js'
-import { independentExecutionNonLifo } from './support/corpus.js'
+import {
+  independentExecutionEligibleDrop,
+  independentExecutionLateCancelledWake,
+  independentExecutionLocalReactor,
+  independentExecutionMultiplePackages,
+  independentExecutionNonLifo,
+  independentExecutionParkedTypedFailure,
+  independentExecutionReentrantDestroy,
+  independentExecutionRepeatedGenerations,
+} from './support/corpus.js'
+
+const replaceMirOperation = (
+  module: Mir.Module,
+  target: Mir.Operation,
+  replacement: Mir.Operation,
+): Mir.Module => {
+  const rewrite = (operation: Mir.Operation): Mir.Operation => {
+    if (operation === target) return replacement
+    if (operation._tag === 'ShortCircuit')
+      return Object.freeze({
+        ...operation,
+        right: Object.freeze({
+          ...operation.right,
+          operations: Object.freeze(operation.right.operations.map(rewrite)),
+        }),
+      })
+    if (operation._tag !== 'Match') return operation
+    return Object.freeze({
+      ...operation,
+      arms: Object.freeze(
+        operation.arms.map((arm) =>
+          Object.freeze({
+            ...arm,
+            ...(arm.guard === undefined
+              ? {}
+              : {
+                  guard: Object.freeze({
+                    ...arm.guard,
+                    operations: Object.freeze(arm.guard.operations.map(rewrite)),
+                  }),
+                }),
+            selected: Object.freeze({
+              ...arm.selected,
+              operations: Object.freeze(arm.selected.operations.map(rewrite)),
+            }),
+          }),
+        ),
+      ),
+    })
+  }
+  return Object.freeze({
+    ...module,
+    functions: Object.freeze(
+      module.functions.map((fn) =>
+        Object.freeze({
+          ...fn,
+          regions: Object.freeze(
+            fn.regions.map(
+              (region): Mir.Region =>
+                region._tag === 'OperationRegion'
+                  ? Object.freeze({
+                      ...region,
+                      operations: Object.freeze(region.operations.map(rewrite)),
+                    })
+                  : region,
+            ),
+          ),
+        }),
+      ),
+    ),
+  })
+}
 
 const source = `import silk.core as Core
 import silk.core { Allocator }
@@ -262,6 +334,262 @@ it.effect('resumes two independent execution roots in non-LIFO owner-selected or
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('selects exact package provenance when one result type has multiple body packages', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/multiple-packages',
+      new TextEncoder().encode(independentExecutionMultiplePackages),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(snapshot.layout._tag, 'Available')
+    if (snapshot.layout._tag !== 'Available') return
+    assert.isAtLeast(snapshot.layout.value.executionPackages.plans.length, 2)
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect(
+  'rejects forged execution package and take-once callback authorities before lowering',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'independent-execution/forged-mir-authority',
+        new TextEncoder().encode(independentExecutionMultiplePackages),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.strictEqual(snapshot.mir._tag, 'Available')
+      assert.strictEqual(snapshot.layout._tag, 'Available')
+      if (snapshot.mir._tag !== 'Available' || snapshot.layout._tag !== 'Available') return
+      const module = snapshot.mir.value
+      const operations = module.functions.flatMap(MirVerification.operations)
+      const initialize = operations.find(
+        (
+          operation,
+        ): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionFromAllocation' }> =>
+          operation._tag === 'ExecutionFromAllocation',
+      )
+      const drive = operations.find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionDrive' }> =>
+          operation._tag === 'ExecutionDrive',
+      )
+      const wake = operations.find(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ExecutionWake' }> =>
+          operation._tag === 'ExecutionWake',
+      )
+      const otherPlan = snapshot.layout.value.executionPackages.plans.find(
+        (plan) => plan.provenance !== initialize?.plan.provenance,
+      )
+      assert.isDefined(initialize)
+      assert.isDefined(drive)
+      assert.isDefined(wake)
+      assert.isDefined(otherPlan)
+      if (
+        initialize === undefined ||
+        drive === undefined ||
+        wake === undefined ||
+        otherPlan === undefined
+      )
+        return
+      const forgeries: ReadonlyArray<Mir.Module> = [
+        replaceMirOperation(module, initialize, Object.freeze({ ...initialize, plan: otherPlan })),
+        replaceMirOperation(module, drive, Object.freeze({ ...drive, completionAccess: 'Shared' })),
+        replaceMirOperation(module, wake, Object.freeze({ ...wake, wakeAccess: 'Shared' })),
+      ]
+      for (const forged of forgeries)
+        assert.include(
+          MirVerification.verify(forged).map((violation) => violation.rule),
+          'InvalidExecutionOperation',
+        )
+    }),
+)
+
+it.effect('releases a destroyed dormant execution only when its late cancelled Wake arrives', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/late-cancelled-wake',
+      new TextEncoder().encode(independentExecutionLateCancelledWake),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+    assert.deepEqual(
+      transitions.map((event) => event.event),
+      ['Initialize', 'Drive', 'Register', 'Park', 'Cancel', 'Release'],
+    )
+    const acquired = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length
+    const released = evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length
+    assert.strictEqual(released, acquired)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('defers reentrant notification destruction and never publishes Eligible', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/reentrant-destroy',
+      new TextEncoder().encode(independentExecutionReentrantDestroy),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+    assert.deepEqual(
+      transitions.map((event) => event.event),
+      ['Initialize', 'Drive', 'Register', 'Latch', 'Park', 'Notify', 'Cancel', 'Release'],
+    )
+    assert.isFalse(transitions.some((event) => event.event === 'Eligible'))
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('reuses one execution for repeated generations and releases an eligible drop', () =>
+  Effect.gen(function* () {
+    const repeated = yield* Analysis.ofSourceRealized(
+      'independent-execution/repeated-generations',
+      new TextEncoder().encode(independentExecutionRepeatedGenerations),
+      'wasm32-unknown-unknown',
+    )
+    const eligibleDrop = yield* Analysis.ofSourceRealized(
+      'independent-execution/eligible-drop',
+      new TextEncoder().encode(independentExecutionEligibleDrop),
+      'wasm32-unknown-unknown',
+    )
+    const typedFailure = yield* Analysis.ofSourceRealized(
+      'independent-execution/parked-typed-failure',
+      new TextEncoder().encode(independentExecutionParkedTypedFailure),
+      'wasm32-unknown-unknown',
+    )
+    for (const snapshot of [repeated, eligibleDrop, typedFailure]) {
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') continue
+      assert.strictEqual(evaluated.result.value, 42n)
+      const acquired = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length
+      const released = evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length
+      assert.strictEqual(released, acquired)
+      const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+      const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+      assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    }
+    const transitions = Analysis.evaluate(repeated)
+    assert.strictEqual(transitions._tag, 'Completed')
+    if (transitions._tag !== 'Completed') return
+    assert.deepEqual(
+      transitions.trace
+        .filter((event) => event._tag === 'ExecutionTransition' && event.event === 'Register')
+        .map((event) => event.generation),
+      [1, 2],
+    )
+    const dropped = Analysis.evaluate(eligibleDrop)
+    assert.strictEqual(dropped._tag, 'Completed')
+    if (dropped._tag !== 'Completed') return
+    assert.deepEqual(
+      dropped.trace
+        .filter((event) => event._tag === 'ExecutionTransition')
+        .map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'Latch',
+        'Park',
+        'Notify',
+        'Eligible',
+        'Cancel',
+        'Release',
+      ],
+    )
+  }),
+)
+
+it.effect('delivers a retained Wake through an ordinary same-thread reactor poll', () =>
+  Effect.gen(function* () {
+    const renamed = independentExecutionLocalReactor
+      .replaceAll('Reactor', 'PulseSource')
+      .replaceAll('reactor', 'pulseSource')
+      .replaceAll('poll', 'advance')
+    const snapshots = yield* Effect.all(
+      [independentExecutionLocalReactor, renamed].map((text, ordinal) =>
+        Analysis.ofSourceRealized(
+          `independent-execution/local-reactor-${ordinal}`,
+          new TextEncoder().encode(text),
+          'wasm32-unknown-unknown',
+        ),
+      ),
+    )
+    for (const snapshot of snapshots) {
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') continue
+      assert.strictEqual(evaluated.result.value, 42n)
+    }
+    const snapshot = snapshots.at(0)
+    if (snapshot === undefined) return
+    const transitions = Analysis.evaluate(snapshot)
+    assert.strictEqual(transitions._tag, 'Completed')
+    if (transitions._tag !== 'Completed') return
+    assert.deepEqual(
+      transitions.trace
+        .filter((event) => event._tag === 'ExecutionTransition')
+        .map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'Park',
+        'Park',
+        'Notify',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Complete',
+      ],
+    )
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const wasmInstance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((wasmInstance.exports.silk_main as () => number)(), 42)
+    assert.notMatch(wasm.wat, /atomic\.|worker|work.steal|scheduler/i)
+    const nativeSnapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/local-reactor-native',
+      new TextEncoder().encode(independentExecutionLocalReactor),
+      'aarch64-apple-darwin',
+    )
+    const native = yield* Analysis.codegen(nativeSnapshot, { mode: 'release' })
+    assert.strictEqual(native._tag, 'LlvmBitcodeArtifact')
+    if (native._tag !== 'LlvmBitcodeArtifact') return
+    assert.notMatch(native.ir, /atomicrmw|cmpxchg|worker|work.steal|scheduler/i)
+    const unavailable = yield* Analysis.ofSourceRealized(
+      'independent-execution/local-reactor-unavailable',
+      new TextEncoder().encode(independentExecutionLocalReactor),
+      'mips-unknown-none',
+    )
+    assert.strictEqual(Analysis.targetOf(unavailable)._tag, 'Unavailable')
+    assert.strictEqual(Analysis.layoutOf(unavailable)._tag, 'Unavailable')
+    assert.strictEqual(Analysis.mirOf(unavailable)._tag, 'Unavailable')
   }),
 )
 

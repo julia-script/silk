@@ -712,6 +712,7 @@ function* executeFunction(
           return undefined
         }
         package_.state = 'Destroyed'
+        traceExecution(package_, owner.ticket, 'Cancel', provenance.span)
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
           Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
@@ -2568,6 +2569,9 @@ function* executeFunction(
                   operation.execution.ordinal,
                 )
                 if (notified !== undefined) return notified
+              } else if (returned.state.phase === 'Cancelled') {
+                package_.state = 'Destroyed'
+                state.executionMachines.delete(execution.ticket)
               } else {
                 package_.state = 'Dormant'
                 traceExecution(package_, execution.ticket, 'Park', operation.provenance.span)
@@ -2678,17 +2682,24 @@ function* executeFunction(
               )
               if (notified !== undefined) return notified
             } else {
-              traceExecution(package_, wakeValue.ticket, 'Cancel', operation.provenance.span)
-              if (
-                consumed.state.allocation === 'Released' &&
-                !BootstrapStorage.release(state.allocations, wakeValue.ticket, true)
-              )
-                return blockedStep({
-                  _tag: 'Trap',
-                  function: fn.id,
-                  reason: 'Late cancelled Wake consumed reclaim authority twice',
-                  span: operation.provenance.span,
-                })
+              if (consumed.state.allocation === 'Released') {
+                if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
+                  return blockedStep({
+                    _tag: 'Trap',
+                    function: fn.id,
+                    reason: 'Late cancelled Wake consumed reclaim authority twice',
+                    span: operation.provenance.span,
+                  })
+                trace.push(
+                  Object.freeze({
+                    _tag: 'AllocationRelease',
+                    function: fn.id,
+                    ticket: wakeValue.ticket,
+                    span: operation.provenance.span,
+                  }),
+                )
+                traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
+              }
             }
             write(operation.destination, {
               value: Object.freeze({

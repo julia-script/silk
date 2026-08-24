@@ -79,6 +79,35 @@ working direct-Wasm external-resume path.
 The complete cancellation/DestroyPending matrix, multiple same-result package dispatch, reactor
 availability evidence, and full gates remain open, so tasks 3.1, 3.2, and 4.1 remain unchecked.
 
+## Checkpoint 4: cleanup matrix, exact package dispatch, and local reactor
+
+- Evaluator and native cancellation now distinguish a consumed/latched Wake from an outstanding
+  retained Wake. Destroying the Dormant execution removes its continuation and endpoint authority
+  immediately, while the registration allocation remains until the late cancelled Wake consumes
+  the final authority and emits one canonical `Release`.
+- Reentrant endpoint destruction enters DestroyPending, cleans retained frames and the package only
+  after notification returns, and never publishes Eligible. The same callback-return boundary is
+  used by evaluator, native, and direct Wasm.
+- Native and direct Wasm select initialization, Park wake-control storage, Wake notification, and
+  Drive code by the exact package ordinal stored in the runtime package. Two packages with the same
+  result type but different body layouts therefore cannot alias through a name- or result-keyed
+  dispatch path.
+- The negative MIR fixture forges an initializer plan, a completion callback access, and a Wake
+  access; verification rejects each as `InvalidExecutionOperation` before lowering. Together with
+  the transition-unit cases, this covers invalid predecessors, duplicate authorities, premature
+  generation reuse, DestroyPending endpoint ordering, and retained-loan/callback contracts.
+- The differential matrix now includes repeated park generations, Eligible destruction, late
+  cancelled Wake, reentrant notification destruction, and reified typed failure after a park.
+  Evaluator and direct Wasm agree at every case; all target-specific boundaries are also entries in
+  the unchanged designated native differential corpus.
+- An ordinary same-thread source reactor retains, extracts, and consumes Wake. Renaming its actor
+  and poll operation does not alter analysis. Native and Wasm artifacts contain no atomics, workers,
+  work-stealing, scheduler, or compiler-known timer path, and an unsupported target remains
+  explicitly unavailable.
+
+Tasks 1.2, 2.1-2.3, 3.1-3.3, and 4.1-4.3 are complete. Nested/fatal regression, repeated artifact
+determinism, and repository gates remain open until the formal gate sequence.
+
 ## Verification history
 
 - Initial focused command could not resolve unbuilt workspace package `@silk-effect/llvm/Bitcode`;
@@ -100,6 +129,10 @@ availability evidence, and full gates remain open, so tasks 3.1, 3.2, and 4.1 re
 - Targeted Biome check over the native/Wasm milestone — **PASS** after mechanical formatting and
   removal of unused destructured bindings.
 - Toolchain integrity generation and check after native source additions — **PASS**.
+- Full designated native differential corpus after cleanup, provenance, reactor, generation, and
+  typed-failure additions — **PASS**, 1 harness test, 126.74s; interpreter and native outcomes agree.
+- Closure focused regression — **PASS**, 4 files / 41 tests, including all target-neutral transition,
+  Wake-cell, execution-package, evaluator, and direct-Wasm external-parking cases.
 
 ## Attempt budget
 
