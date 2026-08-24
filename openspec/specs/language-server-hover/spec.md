@@ -5,6 +5,26 @@
 Defines token-specific semantic hover for Silk source, including source-like declarations,
 intrinsic language operations, recovered programs, and anonymous expression type fallback.
 ## Requirements
+
+### Requirement: Concrete provider hover lists proved contracts
+
+Hover for a concrete nominal value, produced function result, inferred binding, or nominal type
+occurrence SHALL append an `Implements` section containing every distinct valid, proved, and
+endpoint-visible service or interface conformance. Contract names SHALL use the requesting module's
+shortest unambiguous presentation and deterministic order. Existing signature and documentation
+content SHALL remain unchanged, and a subject with no applicable conformance MUST NOT receive an
+empty section. The language server SHALL format compiler-owned facts without repeating conformance
+proof or recognizing a standard-library declaration by spelling.
+
+#### Scenario: Hover a standard-stream provider
+
+- **WHEN** hover selects `Core.native()`, its inferred binding, or `NativeStandardStreams`
+- **THEN** it lists `Core.StandardStreams` in an appended `Implements` section
+
+#### Scenario: Omit an unproved conditional conformance
+
+- **WHEN** a concrete generic provider does not satisfy a conditional conformance's requirements
+- **THEN** hover does not advertise that contract
 ### Requirement: Hover renders canonical integer types
 
 Hover SHALL render lowercase integer spellings, `bool`, `()`, and `never`, never removed uppercase or backend lane names.

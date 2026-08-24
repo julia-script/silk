@@ -755,7 +755,9 @@ pub fn main() -> i32 { return 0 }`,
     const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
     assert.strictEqual(providerType?._tag, 'Available')
     if (providerType?._tag === 'Available')
-      assert.isTrue(Type.equals(providerType.type, Type.nominal('silk/allocator', 'SystemAllocator')))
+      assert.isTrue(
+        Type.equals(providerType.type, Type.nominal('silk/allocator', 'SystemAllocator')),
+      )
 
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',
@@ -1029,6 +1031,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     typeArguments: [],
     substitution: new Map(),
     evidence: [],
+    inferredProviderSelectors: [],
   })
   assert.deepEqual(
     twoCall.arguments.map((argument) => argument.id.ordinal),
@@ -1048,6 +1051,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     typeArguments: [],
     substitution: new Map(),
     evidence: [],
+    inferredProviderSelectors: [],
   })
   assert.strictEqual(Object.isFrozen(oneCall.arguments), true)
   assert.strictEqual(Object.isFrozen(firstArgument), true)

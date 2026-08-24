@@ -2387,7 +2387,10 @@ effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! 
 }
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }`,
     )
-    .replace(`let mut ${allocator} = Allocator.systemAllocatorService()`, `let mut ${allocator} = ExhaustedAllocator {}`)
+    .replace(
+      `let mut ${allocator} = Allocator.systemAllocatorService()`,
+      `let mut ${allocator} = ExhaustedAllocator {}`,
+    )
 }
 const localSharedPressureFailure = (ordinal: 0 | 1): string =>
   localSharedPressure.replace(

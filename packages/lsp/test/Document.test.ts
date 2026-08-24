@@ -168,13 +168,13 @@ pub fn main() -> i32 {
     }
     assert.strictEqual(
       hoverText('allocator', 1),
-      '```silk\nlet mut allocator: SystemAllocator\n```',
+      '```silk\nlet mut allocator: SystemAllocator\n```\n\n**Implements**\n\n- `Allocator`',
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.include(hoverText('Allocator', 2) ?? '', 'pub service Allocator')
     assert.strictEqual(
       hoverText('systemAllocatorService'),
-      '```silk\npub fn systemAllocatorService() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.',
+      '```silk\npub fn systemAllocatorService() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Allocator`',
     )
   }),
 )
@@ -311,6 +311,145 @@ pub fn main() -> i32 {
           paddingRight: false,
         },
       ],
+    )
+  }),
+)
+
+it.effect('renders proved hover contracts and inferred provider selectors', () =>
+  Effect.gen(function* () {
+    const source = `import silk.standard_streams as Streams
+import silk.effect as Effect
+
+pub effect fn main() -> () ! Streams.StreamWriteError {
+  let mut streams = Streams.nativeStandardStreamService()
+  // π🙂 keeps the selector position on UTF-16 coordinates
+  return run Streams.send(Streams.stdout(), b"Hello\\n")
+    |> Effect.provideMut(&mut streams)
+}`
+    const { document, snapshot } = yield* open(source)
+    const hover = Document.hover(document, snapshot, positionOf(source, 'streams', 1))
+    assert.deepEqual(hover?.contents, {
+      kind: 'markdown',
+      value:
+        '```silk\nlet mut streams: Streams.NativeStandardStreams\n```\n\n**Implements**\n\n- `Streams.StandardStreams`',
+    })
+
+    const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
+    const bindingEnd = source.indexOf('let mut streams') + 'let mut streams'.length
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, source.length),
+      }),
+      [
+        {
+          position: positionAt(source, bindingEnd),
+          label: ': Streams.NativeStandardStreams',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+        {
+          position: positionAt(source, selectorOffset),
+          label: '<Streams.StandardStreams>',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+      ],
+    )
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, selectorOffset),
+      }).map((hint) => hint.label),
+      [': Streams.NativeStandardStreams'],
+    )
+    const selectorRange = {
+      start: positionAt(source, selectorOffset),
+      end: positionAt(source, selectorOffset + 1),
+    }
+    const clipped = Document.inlayHints(document, snapshot, selectorRange)
+    assert.deepEqual(Document.inlayHints(document, snapshot, selectorRange), clipped)
+    assert.deepEqual(
+      clipped.map((hint) => hint.label),
+      ['<Streams.StandardStreams>'],
+    )
+  }),
+)
+
+it.effect('preserves hover Markdown across contract subjects and recovered source', () =>
+  Effect.gen(function* () {
+    const source = `service Beta {}
+service Alpha {}
+struct Provider {}
+struct Plain {}
+impl Beta for Provider {}
+impl Alpha for Provider {}
+
+/// Constructs a provider.
+fn make() -> Provider { return Provider {} }
+
+pub fn main() -> i32 {
+  let provider = make()
+  let plain = Plain {}
+  return 0
+}
+
+pub fn broken() -> i32 { return missing() }`
+    const { document, snapshot } = yield* open(source)
+    assert.isAbove(Document.diagnostics(document, snapshot, () => undefined).length, 0)
+    const markdownAt = (spelling: string, occurrence = 0) => {
+      const contents = Document.hover(
+        document,
+        snapshot,
+        positionOf(source, spelling, occurrence),
+      )?.contents
+      return typeof contents === 'object' && 'value' in contents ? contents.value : undefined
+    }
+    const implementations = '**Implements**\n\n- `Alpha`\n- `Beta`'
+
+    assert.strictEqual(
+      markdownAt('Provider'),
+      `\`\`\`silk\nstruct Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('Provider', 3),
+      `\`\`\`silk\nstruct Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('make'),
+      `\`\`\`silk\nfn make() -> Provider\n\`\`\`\n\nConstructs a provider.\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('make', 1),
+      `\`\`\`silk\nfn make() -> Provider\n\`\`\`\n\nConstructs a provider.\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('provider', 1),
+      `\`\`\`silk\nlet provider: Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(markdownAt('plain'), '```silk\nlet plain: Plain\n```')
+    assert.strictEqual(markdownAt('0'), '```silk\ni32\n```')
+  }),
+)
+
+it.effect('does not duplicate an explicitly written provider selector', () =>
+  Effect.gen(function* () {
+    const source = `import silk.standard_streams as Streams
+import silk.effect as Effect
+pub effect fn main() -> () ! Streams.StreamWriteError {
+  let mut streams = Streams.nativeStandardStreamService()
+  return run Streams.send(Streams.stdout(), b"ok\\n")
+    |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, source.length),
+      }).map((hint) => hint.label),
+      [': Streams.NativeStandardStreams'],
     )
   }),
 )

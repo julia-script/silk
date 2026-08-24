@@ -747,7 +747,9 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     240_000,
   )
 
-  const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.allocator { Allocator }
+  const suspendingProgram = (
+    kind: DropKind = 'poison',
+  ): string => `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }

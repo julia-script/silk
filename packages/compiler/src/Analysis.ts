@@ -10,6 +10,7 @@ import * as AutoImport from './AutoImport.js'
 import * as Backend from './Backend.js'
 import * as BootstrapEvaluation from './BootstrapEvaluation.js'
 import * as Completion from './Completion.js'
+import * as ConformanceProof from './ConformanceProof.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
 import type * as Elaboration from './Elaboration.js'
@@ -108,11 +109,13 @@ export type HoverSubject =
       readonly _tag: 'OccurrenceHoverSubject'
       readonly occurrence: SemanticOccurrence.SemanticOccurrence
       readonly presentation: Presentation.Presentation
+      readonly implementedContracts: ReadonlyArray<Presentation.Presentation>
     }
   | {
       readonly _tag: 'ExpressionHoverSubject'
       readonly expression: AnonymousExpression
       readonly presentation: Presentation.Presentation
+      readonly implementedContracts: ReadonlyArray<Presentation.Presentation>
     }
 
 /** Source facts that make backend emission unavailable while keeping analysis queryable. */
@@ -409,23 +412,67 @@ export const documentationAt = (
     : undefined
 }
 
+interface HoverPresentation {
+  readonly presentation: Presentation.Presentation
+  readonly type?: Type.Type
+}
+
+const hoverPresentation = (
+  presentation: Presentation.Presentation | undefined,
+  type?: Type.Type,
+): HoverPresentation | undefined =>
+  presentation === undefined
+    ? undefined
+    : Object.freeze({ presentation, ...(type === undefined ? {} : { type }) })
+
+const nominalDeclarationType = (
+  declaration: DeclarationFacts.StructFact | DeclarationFacts.ContractFact,
+): Type.Nominal | undefined =>
+  declaration.canonical._tag === 'Canonical'
+    ? Type.nominal(
+        declaration.canonical.id.module,
+        declaration.canonical.id.name,
+        declaration.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+      )
+    : undefined
+
+const declaredType = (fact: DeclarationFacts.DeclaredTypeFact): Type.Type | undefined =>
+  fact._tag === 'Resolved' ? fact.type : undefined
+
 const presentationOfIdentity = (
   self: FrontendSnapshot,
   module: string,
   identity: SemanticOccurrence.Identity,
-): Presentation.Presentation | undefined => {
+): HoverPresentation | undefined => {
   const scope = NameResolution.scopeOf(self.resolution, module)
   if (identity._tag === 'DeclarationIdentity') {
     const declaration = declarationForIdentity(self, identity)
-    return declaration?._tag === 'FunctionDeclaration'
-      ? Presentation.functionDeclaration(declaration)
-      : declaration?._tag === 'StructDeclaration'
-        ? Presentation.structDeclaration(declaration)
-        : declaration?._tag === 'ServiceDeclaration'
-          ? Presentation.serviceDeclaration(declaration)
-          : declaration?._tag === 'ConstantDeclaration'
-            ? Presentation.constantDeclaration(declaration)
-            : undefined
+    if (declaration?._tag === 'FunctionDeclaration')
+      return hoverPresentation(
+        Presentation.functionDeclaration(declaration),
+        declaredType(declaration.returnType),
+      )
+    if (declaration?._tag === 'StructDeclaration')
+      return hoverPresentation(
+        Presentation.structDeclaration(declaration),
+        nominalDeclarationType(declaration),
+      )
+    if (declaration?._tag === 'ServiceDeclaration')
+      return hoverPresentation(
+        Presentation.serviceDeclaration(declaration),
+        nominalDeclarationType(declaration),
+      )
+    if (declaration?._tag === 'InterfaceDeclaration')
+      return hoverPresentation(
+        Presentation.serviceDeclaration(declaration),
+        nominalDeclarationType(declaration),
+      )
+    return declaration?._tag === 'ConstantDeclaration'
+      ? hoverPresentation(
+          Presentation.constantDeclaration(declaration),
+          declaredType(declaration.declaredType),
+        )
+      : undefined
   }
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
@@ -433,14 +480,14 @@ const presentationOfIdentity = (
         const parameter = member.typeParameters.find((candidate) =>
           Type.equals(candidate.type, identity.id),
         )
-        if (parameter !== undefined) return Presentation.typeParameter(parameter)
+        if (parameter !== undefined) return hoverPresentation(Presentation.typeParameter(parameter))
         if (member._tag === 'ServiceDeclaration')
           for (const operation of member.operations) {
             const operationParameter = operation.typeParameters.find((candidate) =>
               Type.equals(candidate.type, identity.id),
             )
             if (operationParameter !== undefined)
-              return Presentation.typeParameter(operationParameter)
+              return hoverPresentation(Presentation.typeParameter(operationParameter))
           }
       }
     return undefined
@@ -457,7 +504,11 @@ const presentationOfIdentity = (
             candidate.id.function.ordinal === identity.id.function.ordinal &&
             candidate.id.ordinal === identity.id.ordinal,
         )
-        if (parameter !== undefined) return Presentation.parameter(parameter)
+        if (parameter !== undefined)
+          return hoverPresentation(
+            Presentation.parameter(parameter),
+            declaredType(parameter.declaredType),
+          )
       }
     return undefined
   }
@@ -470,7 +521,8 @@ const presentationOfIdentity = (
             candidate.id.struct.ordinal === identity.id.struct.ordinal &&
             candidate.id.ordinal === identity.id.ordinal,
         )
-        if (field !== undefined) return Presentation.field(field)
+        if (field !== undefined)
+          return hoverPresentation(Presentation.field(field), declaredType(field.declaredType))
       }
     return undefined
   }
@@ -483,7 +535,11 @@ const presentationOfIdentity = (
             candidate.id.function.ordinal === identity.id.function.ordinal &&
             candidate.id.ordinal === identity.id.ordinal,
         )
-        if (binding !== undefined) return Presentation.binding(binding, module, scope)
+        if (binding !== undefined)
+          return hoverPresentation(
+            Presentation.binding(binding, module, scope),
+            binding.inferredType._tag === 'Available' ? binding.inferredType.type : undefined,
+          )
       }
     return undefined
   }
@@ -518,7 +574,10 @@ const presentationOfIdentity = (
       for (const fn of result.functions) {
         const statementBinding = findStatementBinding(fn.statements)
         if (statementBinding !== undefined)
-          return Presentation.patternBinding(statementBinding, module, scope)
+          return hoverPresentation(
+            Presentation.patternBinding(statementBinding, module, scope),
+            statementBinding.type._tag === 'Available' ? statementBinding.type.type : undefined,
+          )
       }
     for (const result of self.results.values())
       for (const fn of result.functions)
@@ -532,21 +591,33 @@ const presentationOfIdentity = (
                       Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
                     ) === key
                   )
-                    return Presentation.patternBinding(binding, module, scope)
+                    return hoverPresentation(
+                      Presentation.patternBinding(binding, module, scope),
+                      binding.type._tag === 'Available' ? binding.type.type : undefined,
+                    )
     return undefined
   }
   if (identity._tag === 'ImportNamespaceIdentity')
-    return Presentation.importBinding(identity.spelling, identity.module)
+    return hoverPresentation(Presentation.importBinding(identity.spelling, identity.module))
   if (identity._tag === 'ServiceOperationIdentity') {
     const operation = serviceOperationForIdentity(self, identity)
-    return operation === undefined ? undefined : Presentation.serviceOperation(operation)
+    return operation === undefined
+      ? undefined
+      : hoverPresentation(
+          Presentation.serviceOperation(operation),
+          declaredType(operation.returnType),
+        )
   }
   if (identity._tag === 'IntrinsicActorIdentity') {
     const intrinsic = Intrinsic.findActor(identity.id.name)
-    return intrinsic === undefined ? undefined : Presentation.intrinsicActor(intrinsic)
+    return intrinsic === undefined
+      ? undefined
+      : hoverPresentation(Presentation.intrinsicActor(intrinsic))
   }
   const intrinsic = Intrinsic.findOperation(identity.id.actor, identity.id.name)
-  return intrinsic === undefined ? undefined : Presentation.intrinsicOperation(intrinsic)
+  return intrinsic === undefined
+    ? undefined
+    : hoverPresentation(Presentation.intrinsicOperation(intrinsic))
 }
 
 /** Lazily presents one available occurrence through declaration and scope facts. */
@@ -556,8 +627,22 @@ export const occurrencePresentation = (
   occurrence: SemanticOccurrence.SemanticOccurrence,
 ): Presentation.Presentation | undefined =>
   occurrence.resolution._tag === 'Available'
-    ? presentationOfIdentity(self, module, occurrence.resolution.identity)
+    ? presentationOfIdentity(self, module, occurrence.resolution.identity)?.presentation
     : undefined
+
+const implementedContractPresentations = (
+  self: FrontendSnapshot,
+  module: string,
+  type: Type.Type | undefined,
+): ReadonlyArray<Presentation.Presentation> => {
+  if (type === undefined) return Object.freeze([])
+  const scope = NameResolution.scopeOf(self.resolution, module)
+  return Object.freeze(
+    ConformanceProof.implementedContracts(self.index, module, type).map((contract) =>
+      Presentation.scopedNominal(contract, module, scope),
+    ),
+  )
+}
 
 /** Returns the smallest cached available anonymous expression containing one byte offset. */
 export const anonymousExpressionAt = (
@@ -582,10 +667,18 @@ export const hoverSubjectAt = (
 ): HoverSubject | undefined => {
   const occurrence = semanticOccurrenceAt(self, module, offset)
   if (occurrence !== undefined) {
-    const presentation = occurrencePresentation(self, module, occurrence)
-    return presentation === undefined
+    const answer =
+      occurrence.resolution._tag === 'Available'
+        ? presentationOfIdentity(self, module, occurrence.resolution.identity)
+        : undefined
+    return answer === undefined
       ? undefined
-      : Object.freeze({ _tag: 'OccurrenceHoverSubject', occurrence, presentation })
+      : Object.freeze({
+          _tag: 'OccurrenceHoverSubject',
+          occurrence,
+          presentation: answer.presentation,
+          implementedContracts: implementedContractPresentations(self, module, answer.type),
+        })
   }
   const expression = anonymousExpressionAt(self, module, offset)
   if (expression === undefined) return undefined
@@ -597,6 +690,7 @@ export const hoverSubjectAt = (
       module,
       NameResolution.scopeOf(self.resolution, module),
     ),
+    implementedContracts: implementedContractPresentations(self, module, expression.type),
   })
 }
 
@@ -608,7 +702,7 @@ export const typeHints = (
   end: number,
 ): ReadonlyArray<TypeHint.TypeHint> =>
   TypeHint.make(
-    Object.freeze(self.results.get(module)?.functions.flatMap((fn) => fn.bindings) ?? []),
+    self.results.get(module)?.functions ?? Object.freeze([]),
     module,
     NameResolution.scopeOf(self.resolution, module),
     start,

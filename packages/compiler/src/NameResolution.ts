@@ -374,9 +374,7 @@ export const lookup = (
  * basename — case-insensitively, ignoring underscores, so `hash_map` names `HashMap`. Returns the
  * module it scopes, or undefined for every other declaration.
  */
-export const scopedModule = (
-  declaration: DeclarationFacts.MemberFact,
-): string | undefined => {
+export const scopedModule = (declaration: DeclarationFacts.MemberFact): string | undefined => {
   if (
     declaration._tag !== 'StructDeclaration' &&
     declaration._tag !== 'ServiceDeclaration' &&

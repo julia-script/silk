@@ -17,7 +17,9 @@ const specialization = (suspension: SuspensionMode.Summary): ExecutionPackage.Sp
     suspension,
   })
 
-const exactCleanupProgram = (owner: 'Body' | 'Endpoint'): string => `import silk.allocator { Allocator }
+const exactCleanupProgram = (
+  owner: 'Body' | 'Endpoint',
+): string => `import silk.allocator { Allocator }
 import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution

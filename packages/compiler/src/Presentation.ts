@@ -334,6 +334,83 @@ export const genericArgument = (
                     )}`
                   : type(self, module, scope)
 
+const scopedNominalBase = (
+  self: Type.Nominal,
+  module: string,
+  scope: NameResolution.ModuleScope | undefined,
+): string => {
+  if (self.module === module) return self.name
+  const imported = importedMemberSpelling(self, scope)
+  if (imported !== undefined) return imported
+  const namespace = namespaceSpelling(self.module, scope)
+  return namespace === undefined ? `${self.module}.${self.name}` : `${namespace}.${self.name}`
+}
+
+function scopedGenericArgumentText(
+  self: Type.GenericArgument,
+  module: string,
+  scope: NameResolution.ModuleScope | undefined,
+): string {
+  if (Type.isUnavailableGenericArgument(self)) return Type.encodeGenericArgument(self)
+  if (Type.isRepresentationParameterArgument(self)) return self.parameter.name
+  if (
+    Type.isOpaqueRepresentationArgument(self) ||
+    Type.isExactRepresentationArgument(self) ||
+    Type.isCompositeEffectRepresentationArgument(self)
+  )
+    return Type.encodeGenericArgument(self)
+  if (Type.isEffectIdentityArgument(self)) return `effect@${self.identity}`
+  if (Type.isCallableIdentityArgument(self)) return `callable@${self.identity}`
+  if (Type.isRequirementRowArgument(self))
+    return `? ${RowAlgebra.encode(
+      Type.requirementRowPolicy(),
+      self.row,
+      (requirement) =>
+        Type.encodeRequirement(requirement, (capability) =>
+          scopedTypeText(capability, module, scope),
+        ),
+      (parameter_) => parameter_.name,
+      (member) =>
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
+    )}`
+  return scopedTypeText(self, module, scope)
+}
+
+function scopedTypeText(
+  self: Type.Type,
+  module: string,
+  scope: NameResolution.ModuleScope | undefined,
+): string {
+  if (!Type.isNominal(self)) return type(self, module, scope)
+  const base = scopedNominalBase(self, module, scope)
+  return self.arguments.length === 0
+    ? base
+    : `${base}<${self.arguments
+        .map((argument) => scopedGenericArgumentText(argument, module, scope))
+        .join(', ')}>`
+}
+
+/** Renders a nominal through source-valid imports without the inferred-type core shortcut. */
+export const scopedNominal = (
+  self: Type.Nominal,
+  module: string,
+  scope?: NameResolution.ModuleScope,
+): Presentation =>
+  Object.freeze({ _tag: 'ExpressionTypePresentation', text: scopedTypeText(self, module, scope) })
+
+/** Renders the selector syntax for one successfully inferred service requirement. */
+export const providerSelector = (
+  self: Pick<Type.Requirement, 'role'> & { readonly capability: Type.Nominal },
+  module: string,
+  scope?: NameResolution.ModuleScope,
+): Presentation =>
+  Object.freeze({
+    _tag: 'ExpressionTypePresentation',
+    text: `${scopedTypeText(self.capability, module, scope)}${
+      self.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(self.role)}`
+    }`,
+  })
+
 export const binding = (
   self: Elaboration.BindingDeclarationFact,
   module: string,

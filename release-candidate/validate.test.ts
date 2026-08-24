@@ -377,14 +377,17 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(existsSync(resolve(packedRoot, 'README.md'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'LICENSE'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/manifest.json'))).toBe(true)
-    expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/allocator.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/effect.silk'))).toBe(true)
-    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logger.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/standard_streams.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/vector.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/core.silk'))).toBe(false)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/logging.silk'))).toBe(false)
     expect(existsSync(resolve(packedRoot, 'src'))).toBe(false)
     const sourceStdlibManifest = JSON.parse(
       readFileSync(resolve(compilerPackageRoot, 'stdlib/manifest.json'), 'utf8'),
@@ -398,7 +401,10 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/effect.silk'), 'utf8')).toContain(
       'pub effect fn mapBoth',
     )
-    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/logging.silk'), 'utf8')).toContain(
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/allocator.silk'), 'utf8')).toContain(
+      'pub service Allocator',
+    )
+    expect(readFileSync(resolve(packedRoot, 'stdlib/silk/logger.silk'), 'utf8')).toContain(
       'pub service Logger',
     )
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/option.silk'), 'utf8')).toContain(
@@ -410,6 +416,9 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/result.silk'), 'utf8')).toContain(
       'pub struct Result<A, F>',
     )
+    expect(
+      readFileSync(resolve(packedRoot, 'stdlib/silk/standard_streams.silk'), 'utf8'),
+    ).toContain('pub service StandardStreams')
     expect(readFileSync(resolve(packedRoot, 'stdlib/silk/vector.silk'), 'utf8')).toContain(
       'pub struct Vector<T>',
     )
@@ -922,6 +931,7 @@ console.log(
         typeArguments: [],
         substitution: {},
         evidence: [],
+        inferredProviderSelectors: [],
       },
       callType: { _tag: 'Available', type: 'i32' },
       callTargetOrdinal: 0,

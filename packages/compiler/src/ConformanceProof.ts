@@ -2,6 +2,7 @@ import * as ConformanceGoal from './ConformanceGoal.js'
 import type * as Constraint from './Constraint.js'
 import type {
   CanonicalId,
+  CanonicalState,
   ConformanceFact,
   ConformanceWitness,
   ContractFact,
@@ -71,6 +72,72 @@ export const conformanceCandidates = (
       }),
     ),
   )
+
+const endpointVisible = (
+  declaration: { readonly visibility: 'Public' | 'Private'; readonly canonical: CanonicalState },
+  requestingModule: string,
+): boolean =>
+  declaration.visibility === 'Public' ||
+  (declaration.canonical._tag === 'Canonical' &&
+    declaration.canonical.id.module === requestingModule)
+
+/**
+ * Returns the proved, endpoint-visible contracts implemented by one concrete nominal provider.
+ *
+ * This is an editor query over the same conformance authority used by semantic analysis. Merely
+ * matching a declared header is insufficient: conditional, invalid, incoherent, and ambiguous
+ * conformances are admitted only when the ordinary proof selects that exact source declaration.
+ */
+export const implementedContracts = (
+  self: Index,
+  requestingModule: string,
+  provider: Type.Type,
+): ReadonlyArray<Type.Nominal> => {
+  if (!Type.isNominal(provider) || !Type.isRuntimeConcrete(provider)) return Object.freeze([])
+  const providerDeclaration = memberByNominal(self.modules, provider)
+  if (providerDeclaration === undefined || !endpointVisible(providerDeclaration, requestingModule))
+    return Object.freeze([])
+
+  const implemented = new Map<string, Type.Nominal>()
+  for (const headers of self.modules)
+    for (const conformance of headers.conformances) {
+      if (
+        conformance.validity._tag !== 'ValidConformance' ||
+        conformance.coherence._tag !== 'Coherent' ||
+        conformance.termination._tag !== 'Terminating' ||
+        conformance.capability._tag !== 'Resolved' ||
+        !Type.isNominal(conformance.capability.type) ||
+        conformance.provider._tag !== 'Resolved'
+      )
+        continue
+      const substitution = new Map<string, Type.GenericArgument>()
+      if (!TypeInference.infer(conformance.provider.type, provider, substitution)) continue
+      const specialized = Type.substitute(conformance.capability.type, substitution)
+      if (
+        !Type.isNominal(specialized) ||
+        !Type.isRuntimeConcrete(specialized) ||
+        Type.equals(specialized, Type.copyCapability) ||
+        Type.equals(specialized, Type.dropCapability)
+      )
+        continue
+      const contract = contractByCapability(self, specialized)
+      if (contract === undefined || !endpointVisible(contract, requestingModule)) continue
+      const proof = prove(self, provider, specialized)
+      if (
+        proof._tag !== 'Proved' ||
+        proof.selection._tag !== 'SourceSelection' ||
+        proof.selection.module !== conformance.module ||
+        proof.selection.ordinal !== conformance.ordinal
+      )
+        continue
+      implemented.set(Type.key(specialized), specialized)
+    }
+  return Object.freeze(
+    [...implemented.entries()]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([, capability]) => capability),
+  )
+}
 
 const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 

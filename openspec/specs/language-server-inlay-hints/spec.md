@@ -7,6 +7,30 @@ compiler inference facts and exposed through the standard LSP inlay-hint protoco
 
 ## Requirements
 
+### Requirement: Omitted provider selectors receive type-argument hints
+
+When compiler provider selection successfully resolves an omitted generic requirement selector,
+the language server SHALL place a type inlay hint of the form `<Service>` immediately before the
+call's opening parenthesis. The presentation SHALL use the requesting module's shortest
+unambiguous imports and include a non-default role. Explicit selectors and unresolved, ambiguous,
+invalid, assumed, or unrelated inference MUST NOT produce a hint. User-defined combinators using
+the provider-selector constraint SHALL receive the same behavior without name-based recognition.
+
+#### Scenario: Hint an inferred mutable provider selector
+
+- **WHEN** `Effect.provideMut(&mut streams)` selects `Core.StandardStreams`
+- **THEN** `<Core.StandardStreams>` appears immediately before the opening parenthesis
+
+#### Scenario: Keep an explicit selector singular
+
+- **WHEN** the source writes `Effect.provideMut<Core.StandardStreams>(...)`
+- **THEN** no provider-selector inlay hint duplicates the authored argument
+
+#### Scenario: Reject an ambiguous provider hint
+
+- **WHEN** one provider matches several requirements and selection cannot choose one
+- **THEN** no misleading selector hint appears and the ordinary diagnostic remains
+
 ### Requirement: The server advertises inferred-type inlay hints
 
 The language server SHALL advertise inlay-hint support and SHALL answer range requests from the

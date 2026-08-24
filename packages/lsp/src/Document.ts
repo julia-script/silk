@@ -680,13 +680,18 @@ export const hover = (
       ? undefined
       : Documentation.toDocCommentMarkdown(Documentation.parse(source, raw))
   const signature = `\`\`\`silk\n${subject.presentation.text}\n\`\`\``
+  const implementations =
+    subject.implementedContracts.length === 0
+      ? undefined
+      : `**Implements**\n\n${subject.implementedContracts
+          .map((contract) => `- \`${contract.text}\``)
+          .join('\n')}`
   return {
     contents: {
       kind: 'markdown',
-      value:
-        documentation === undefined || documentation.length === 0
-          ? signature
-          : `${signature}\n\n${documentation}`,
+      value: [signature, documentation, implementations]
+        .filter((section): section is string => section !== undefined && section.length > 0)
+        .join('\n\n'),
     },
     range: LineIndex.rangeOf(self.index, span),
   }
@@ -1306,7 +1311,7 @@ export const rename = (
   return Object.freeze({ _tag: 'RenameEdit', edit: { changes } })
 }
 
-/** Converts compiler-owned inferred local types into standard protocol inlay hints. */
+/** Converts compiler-owned editor facts into standard protocol inlay hints. */
 export const inlayHints = (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
@@ -1314,13 +1319,23 @@ export const inlayHints = (
 ): ReadonlyArray<InlayHint> => {
   const start = LineIndex.offsetOf(self.index, range.start)
   const end = LineIndex.offsetOf(self.index, range.end)
-  return Analysis.typeHints(snapshot, self.module, start, end).map((hint) => ({
-    position: LineIndex.positionOf(self.index, hint.span.end),
-    label: `: ${hint.presentation.text}`,
-    kind: InlayHintKind.Type,
-    paddingLeft: false,
-    paddingRight: false,
-  }))
+  return Analysis.typeHints(snapshot, self.module, start, end).map((hint) =>
+    hint._tag === 'BindingTypeHint'
+      ? {
+          position: LineIndex.positionOf(self.index, hint.span.end),
+          label: `: ${hint.presentation.text}`,
+          kind: InlayHintKind.Type,
+          paddingLeft: false,
+          paddingRight: false,
+        }
+      : {
+          position: LineIndex.positionOf(self.index, hint.span.start),
+          label: `<${hint.presentation.text}>`,
+          kind: InlayHintKind.Type,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+  )
 }
 
 const completionKind = (kind: string): CompletionItemKind => {
