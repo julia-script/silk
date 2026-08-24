@@ -13,6 +13,7 @@ import * as ProviderSelection from './ProviderSelection.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Specialization from './Specialization.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
 /**
@@ -37,6 +38,7 @@ export interface Instance {
   readonly function: Hir.HirFunction
   readonly substitution: Type.Substitution
   readonly specialization: ConcreteSpecialization
+  readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
   readonly effectSuccesses?: ReadonlyArray<{
     readonly site: Hir.EffectSiteId
@@ -110,7 +112,17 @@ export interface EffectInstance {
     }
   }>
   readonly type: Type.Effect
-  readonly suspendable: boolean
+  readonly suspension: SuspensionMode.Summary
+}
+
+/** One deterministic semantic-inspection entry for an executable node. */
+export interface SuspensionFact {
+  readonly _tag: 'SuspensionFact'
+  readonly subject:
+    | { readonly _tag: 'Instance'; readonly key: InstanceKey }
+    | { readonly _tag: 'Execution'; readonly key: InstanceKey }
+    | { readonly _tag: 'Effect'; readonly identity: string }
+  readonly summary: SuspensionMode.Summary
 }
 
 /** One monomorphic ordinary/effect constructor call with hidden Effect identities resolved. */
@@ -178,10 +190,8 @@ export interface Discovery {
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
-  /** Exact concrete function executions that can suspend, excluding lazy result runners. */
-  readonly suspendableExecutions: ReadonlyArray<InstanceKey>
-  readonly suspendable: ReadonlyArray<InstanceKey>
-  readonly suspendableEffects: ReadonlyArray<string>
+  /** Exact direct/nested/external-park summaries in canonical subject order. */
+  readonly suspension: ReadonlyArray<SuspensionFact>
   readonly specializationFailures: ReadonlyArray<NonConcreteSpecialization>
   readonly violations: ReadonlyArray<PolymorphicRecursion>
 }
@@ -265,9 +275,7 @@ export const invalid = (rootModule: string): Discovery =>
     effects: Object.freeze([]),
     calls: Object.freeze([]),
     intrinsics: Object.freeze([]),
-    suspendableExecutions: Object.freeze([]),
-    suspendable: Object.freeze([]),
-    suspendableEffects: Object.freeze([]),
+    suspension: Object.freeze([]),
     specializationFailures: Object.freeze([]),
     violations: Object.freeze([]),
   })
@@ -717,6 +725,7 @@ const {
   directCallInstances,
   callableCallTargets,
   forwardedRequirementTargets,
+  resultCallableIdentity,
   resultEffectIdentity,
   effectSuccesses,
   concreteCallables,
@@ -749,17 +758,49 @@ const compareInstanceKeys = (left: InstanceKey, right: InstanceKey): number => {
   return leftText < rightText ? -1 : leftText > rightText ? 1 : 0
 }
 
-/** Reports whether one exact concrete instance can reach the suspension intrinsic. */
-export const isSuspendable = (self: Discovery, key: InstanceKey): boolean =>
-  self.suspendable.some((candidate) => keyText(candidate) === keyText(key))
+const suspensionFact = (
+  self: Discovery,
+  predicate: (subject: SuspensionFact['subject']) => boolean,
+): SuspensionMode.Summary =>
+  self.suspension.find((fact) => predicate(fact.subject))?.summary ?? SuspensionMode.direct
 
-/** Reports whether executing one exact concrete function can suspend, excluding its lazy result. */
-export const isExecutionSuspendable = (self: Discovery, key: InstanceKey): boolean =>
-  self.suspendableExecutions.some((candidate) => keyText(candidate) === keyText(key))
+/** Returns the complete summary of a function plus any lazy Effect it returns. */
+export const suspensionOf = (self: Discovery, key: InstanceKey): SuspensionMode.Summary =>
+  suspensionFact(
+    self,
+    (subject) => subject._tag === 'Instance' && keyText(subject.key) === keyText(key),
+  )
 
-/** Reports whether one exact hidden Effect runner can reach the suspension intrinsic. */
-export const isEffectSuspendable = (self: Discovery, identity: string): boolean =>
-  self.suspendableEffects.includes(identity)
+/** Returns the summary of executing one function body, excluding its lazy result. */
+export const executionSuspensionOf = (self: Discovery, key: InstanceKey): SuspensionMode.Summary =>
+  suspensionFact(
+    self,
+    (subject) => subject._tag === 'Execution' && keyText(subject.key) === keyText(key),
+  )
+
+/** Returns the summary of one exact hidden Effect runner. */
+export const effectSuspensionOf = (self: Discovery, identity: string): SuspensionMode.Summary =>
+  suspensionFact(self, (subject) => subject._tag === 'Effect' && subject.identity === identity)
+
+/** Resolves an owner-scoped source representation identity to its concrete hidden Effect. */
+export const representedEffectSuspensionOf = (
+  self: Discovery,
+  identity: Type.EffectIdentityArgument,
+): SuspensionMode.Summary => {
+  const selected = self.effects.find(
+    (effect) =>
+      effect.representationIdentity === identity.identity &&
+      (identity.owner === undefined ||
+        (effect.owner.declaration.module === identity.owner.declaration.module &&
+          effect.owner.declaration.name === identity.owner.declaration.name &&
+          effect.owner.typeArguments.length === identity.owner.typeArguments.length &&
+          effect.owner.typeArguments.every((argument, ordinal) => {
+            const expected = identity.owner?.typeArguments.at(ordinal)
+            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+          }))),
+  )
+  return selected?.suspension ?? effectSuspensionOf(self, identity.identity)
+}
 
 /**
  * Discovers the reachable instances from the root module's entry. The worklist records an
@@ -786,9 +827,7 @@ export const discover = (
       effects: Object.freeze([]),
       calls: Object.freeze([]),
       intrinsics: Object.freeze([]),
-      suspendableExecutions: Object.freeze([]),
-      suspendable: Object.freeze([]),
-      suspendableEffects: Object.freeze([]),
+      suspension: Object.freeze([]),
       specializationFailures: Object.freeze([]),
       violations: Object.freeze([]),
     })
@@ -884,6 +923,7 @@ export const discover = (
       continue
     }
     if (!recorded.has(keyText(key))) {
+      const resultCallable = resultCallableIdentity(fn, key, results, index)
       const resultEffect = resultEffectIdentity(fn, key, results, index)
       recorded.set(
         keyText(key),
@@ -894,6 +934,7 @@ export const discover = (
           substitution,
           specialization,
           effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
+          ...(resultCallable === undefined ? {} : { resultCallable }),
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )
@@ -1056,10 +1097,9 @@ export const discover = (
 
   const instances = Object.freeze([...recorded.values()])
   const graph = suspensionGraph(instances, results, index)
-  const suspendable = ExecutableOrigin.suspendableNodes(graph)
-  const suspendableEffectIdentities = Object.freeze(
-    [...graph.effectIdentities].filter((identity) => suspendable.has(effectNode(identity))).sort(),
-  )
+  const summaries = ExecutableOrigin.suspensionSummaries(graph)
+  const summaryOfNode = (node: string): SuspensionMode.Summary =>
+    summaries.get(node) ?? SuspensionMode.direct
   const callInstances = Object.freeze([...recordedCalls.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
@@ -1069,32 +1109,45 @@ export const discover = (
     callables: Object.freeze([...recordedCallables.values()]),
     effects: concreteEffects(
       instances,
-      new Set(suspendableEffectIdentities),
+      summaries,
       results,
       index,
       Object.freeze([...recordedCallables.values()]),
     ),
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
-    suspendableExecutions: Object.freeze(
-      instances
-        .filter((instance) => suspendable.has(instanceNode(instance.key)))
-        .map((instance) => instance.key)
-        .sort(compareInstanceKeys),
-    ),
-    suspendable: Object.freeze(
-      instances
-        .flatMap((instance) => {
-          const runnerSuspendable =
-            instance.resultEffect !== undefined &&
-            suspendable.has(effectNode(instance.resultEffect))
-          return suspendable.has(instanceNode(instance.key)) || runnerSuspendable
-            ? [instance.key]
-            : []
-        })
-        .sort(compareInstanceKeys),
-    ),
-    suspendableEffects: suspendableEffectIdentities,
+    suspension: Object.freeze([
+      ...instances
+        .slice()
+        .sort((left, right) => compareInstanceKeys(left.key, right.key))
+        .flatMap((instance): ReadonlyArray<SuspensionFact> => {
+          const execution = summaryOfNode(instanceNode(instance.key))
+          const result =
+            instance.resultEffect === undefined
+              ? SuspensionMode.direct
+              : summaryOfNode(effectNode(instance.resultEffect))
+          return Object.freeze([
+            Object.freeze({
+              _tag: 'SuspensionFact',
+              subject: Object.freeze({ _tag: 'Instance', key: instance.key }),
+              summary: SuspensionMode.join([execution, result]),
+            }),
+            Object.freeze({
+              _tag: 'SuspensionFact',
+              subject: Object.freeze({ _tag: 'Execution', key: instance.key }),
+              summary: execution,
+            }),
+          ])
+        }),
+      ...[...graph.effectIdentities].sort().map(
+        (identity): SuspensionFact =>
+          Object.freeze({
+            _tag: 'SuspensionFact',
+            subject: Object.freeze({ _tag: 'Effect', identity }),
+            summary: summaryOfNode(effectNode(identity)),
+          }),
+      ),
+    ]),
     specializationFailures: Object.freeze([...specializationFailures.values()]),
     violations: Object.freeze(violations),
   })

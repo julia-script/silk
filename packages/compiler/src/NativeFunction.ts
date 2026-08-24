@@ -111,7 +111,9 @@ export const discoverRoots = (
       region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
         ? [
             region.operation.destination.ordinal,
-            region.operation.outcome.ordinal,
+            ...(region.operation._tag === 'ExecutionPark'
+              ? []
+              : [region.operation.outcome.ordinal]),
             ...region.relay.state.slots.map((slot) => slot.local.ordinal),
           ]
         : [],
@@ -135,6 +137,7 @@ export const discoverRoots = (
 }
 
 export interface EmissionContext {
+  readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly builder: Builder.Builder
   readonly program: Mir.Module
   readonly request: Backend.CodegenRequest
@@ -152,6 +155,9 @@ export interface EmissionContext {
   readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
+  readonly transferStorageSize: number
+  readonly childThunkType?: LlvmType.Type
+  readonly resumeThunkType?: LlvmType.Type
   readonly signedOverflowSignatures: Map<
     number,
     { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
@@ -204,6 +210,7 @@ export interface EmissionContext {
 /** Emits every declared native function body from explicit program lowering state. */
 export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext) {
   const {
+    runtimeFeatures,
     builder,
     program,
     request,
@@ -221,6 +228,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     laneType,
     transferHeaderSize,
     transferResultOffset,
+    transferStorageSize,
+    childThunkType,
+    resumeThunkType,
     signedOverflowSignatures,
     unsignedOverflowSignatures,
     malloc,
@@ -762,7 +772,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           pointer,
           ...(usizeType === undefined ? {} : { usizeType }),
           ...(free === undefined ? {} : { free }),
+          ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
           declared,
+          resumeThunks,
           types: nativeTypes,
           lanePointers,
           call: callContext,
@@ -771,6 +783,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         })
 
         const actorContext: NativeOperationContext.Context = Object.freeze({
+          runtimeFeatures,
           builder,
           body,
           program,
@@ -781,6 +794,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           f32,
           f64,
           pointer,
+          transferStorageSize,
+          ...(childThunkType === undefined ? {} : { childThunkType }),
+          ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
           ...(usizeType === undefined ? {} : { usizeType }),
           integerTypes,
           signedOverflowSignatures,
@@ -809,6 +825,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           place: actorContext,
           scalar: actorContext,
           effect: actorContext,
+          execution: actorContext,
           call: actorContext,
         })
         for (const [blockOrdinal, block] of entry.linear.entries()) {

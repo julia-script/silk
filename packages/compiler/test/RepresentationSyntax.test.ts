@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Lexer from '../src/Lexer.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
@@ -8,6 +9,7 @@ import * as Parser from '../src/Parser.js'
 import * as Presentation from '../src/Presentation.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
@@ -112,6 +114,55 @@ pub struct Deferred<A, E, ?R, F: once Effect<A ! E ? R>> { operation: F }`,
       true,
     )
     assert.deepEqual(analyzed.diagnostics, [])
+  }),
+)
+
+it.effect('retains only the closed executable static-property set in canonical order', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* index(
+      'representation-syntax/static-properties',
+      `interface Marker {}
+struct Deferred<F: once Effect<i32> + Intrinsic.NonParking + Intrinsic.Detached> { operation: F }
+struct Forwarded<F: once Effect<i32> + Intrinsic.Detached + Intrinsic.NonParking> { value: Deferred<F> }
+struct NotRepresentation<F: once Effect<i32> + Marker> { value: F }`,
+    )
+    const [_, deferred, forwarded, invalid] = analyzed.modules.at(0)?.members ?? []
+
+    assert.deepEqual(deferred?.typeParameters.at(0)?.staticProperties, [
+      'Intrinsic.Detached',
+      'Intrinsic.NonParking',
+    ])
+    assert.deepEqual(forwarded?.typeParameters.at(0)?.staticProperties, [
+      'Intrinsic.Detached',
+      'Intrinsic.NonParking',
+    ])
+    assert.strictEqual(deferred?.typeParameters.at(0)?.type.kind, 'EffectRepresentation')
+    assert.strictEqual(forwarded?.typeParameters.at(0)?.type.kind, 'EffectRepresentation')
+    assert.strictEqual(invalid?.typeParameters.at(0)?.type.kind, 'EffectRepresentation')
+    assert.deepEqual(invalid?.typeParameters.at(0)?.staticProperties, [])
+    assert.deepEqual(
+      SuspensionMode.openExecutable(deferred?.typeParameters.at(0)?.staticProperties ?? []).modes,
+      ['NestedTransfer'],
+    )
+    assert.deepEqual(SuspensionMode.openExecutable([]).modes, ['NestedTransfer', 'ExternalPark'])
+  }),
+)
+
+it.effect('rejects ordinary conjuncts without reinterpreting the exact executable binder', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'representation-syntax/invalid-property-conjunct',
+      encoder.encode(`interface Marker {}
+struct Deferred<F: Effect<i32> + Marker> { operation: F }
+pub fn main() -> i32 { return 0 }`),
+    )
+    const deferred = self.index.modules.at(0)?.structs.at(0)
+
+    assert.strictEqual(deferred?.typeParameters.at(0)?.type.kind, 'EffectRepresentation')
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0141'],
+    )
   }),
 )
 

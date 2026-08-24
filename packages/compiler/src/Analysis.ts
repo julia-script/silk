@@ -13,9 +13,10 @@ import * as Completion from './Completion.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as DocBlock from './DocBlock.js'
 import type * as Elaboration from './Elaboration.js'
+import * as ExecutableProperty from './ExecutableProperty.js'
 import * as Frontend from './Frontend.js'
 import * as FrontendTooling from './FrontendTooling.js'
-import type * as Instances from './Instances.js'
+import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as Layout from './Layout.js'
@@ -727,6 +728,10 @@ export const ownershipOf = (
 
 /** Returns the snapshot's instance discovery: entry state and ordered instances. */
 export const instancesOf = (self: Snapshot): Instances.Discovery => self.instances
+
+/** Returns normalized environment and suspension properties for every realized executable. */
+export const executablePropertiesOf = (self: Snapshot): ReadonlyArray<ExecutableProperty.Fact> =>
+  ExecutableProperty.derive(self.instances, self.index, Instances.callableIdentity)
 
 /** Returns the snapshot's resolved or unavailable target selection. */
 export const targetOf = (self: Snapshot): Target.Selection => self.target

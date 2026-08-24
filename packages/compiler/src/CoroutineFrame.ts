@@ -155,6 +155,34 @@ export const stateLayout = (
     )
     ?.states.find((state) => pointKey(state.point) === pointKey(point))
 
+export type CleanupPayloadField = Mir.CoroutineFramePayloadField & {
+  readonly access: Extract<Mir.CoroutineFrameAccess, { readonly _tag: 'AffineTransfer' }>
+}
+
+const isCleanupPayloadField = (
+  field: Mir.CoroutineFramePayloadField,
+): field is CleanupPayloadField => field.access._tag === 'AffineTransfer'
+
+/** Orders physical payload cleanup by the canonical ownership failure path. */
+export const cleanupReleases = (
+  fn: Mir.MirFunction,
+  layout: Mir.CoroutineFrameTargetStateLayout,
+): ReadonlyArray<CleanupPayloadField> => {
+  const state = fn.suspension?.frame?.states.find(
+    (candidate) => pointKey(candidate.point) === pointKey(layout.point),
+  )
+  if (state === undefined) throw new RangeError('coroutine cleanup lost its ownership state')
+  const fields = layout.payload.filter(isCleanupPayloadField)
+  const byLocal = new Map(fields.map((field) => [field.local.ordinal, field]))
+  const ordered = state.failure.releases.flatMap((release) => {
+    const field = byLocal.get(release.local.ordinal)
+    return field === undefined ? [] : [field]
+  })
+  if (ordered.length !== fields.length)
+    throw new RangeError('coroutine cleanup diverged from its canonical release plan')
+  return Object.freeze(ordered)
+}
+
 /** Attaches physical target plans without changing target-neutral frame descriptors. */
 export const apply = (program: Mir.Module): Mir.Module => {
   const coroutineFrames = plan(program)

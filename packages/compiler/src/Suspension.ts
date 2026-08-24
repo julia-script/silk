@@ -104,7 +104,7 @@ export type SuspensionRegion =
       readonly ownerRegion: Mir.RegionId
       readonly operation: Extract<
         Mir.Operation,
-        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+        { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
       >
       readonly runner: SuspensionRunner
       readonly completion: SuspensionCompletion

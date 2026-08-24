@@ -1,15 +1,20 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as ExecutableProperty from '../src/ExecutableProperty.js'
+import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
+import * as SourceSpan from '../src/SourceSpan.js'
+import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('suspendability/main', encoder.encode(source))
+  Analysis.ofSourceRealized('suspendability/main', encoder.encode(ordinaryStorageSource(source)))
 
 const key = (instance: Instances.InstanceKey): string =>
   `${instance.declaration.module}.${instance.declaration.name}<${instance.typeArguments
@@ -17,9 +22,74 @@ const key = (instance: Instances.InstanceKey): string =>
     .join(',')}>`
 
 const names = (self: Analysis.Snapshot): ReadonlyArray<string> =>
-  Projections.suspendableInstancesOf(self).map(key)
+  self.instances.instances
+    .filter((instance) =>
+      SuspensionMode.has(Instances.suspensionOf(self.instances, instance.key), 'NestedTransfer'),
+    )
+    .map((instance) => key(instance.key))
+
+const effectNames = (self: Analysis.Snapshot): ReadonlyArray<string> =>
+  Projections.suspensionFactsOf(self).flatMap((fact) =>
+    fact.subject._tag === 'Effect' && SuspensionMode.has(fact.summary, 'NestedTransfer')
+      ? [fact.subject.identity]
+      : [],
+  )
 
 const main = (recipe: string): string => `pub fn main() -> i32 { return run ${recipe} }`
+
+it('normalizes direct, nested, external, open, and unavailable graph summaries deterministically', () => {
+  const graph: SuspensionMode.Graph = Object.freeze({
+    roots: new Map<SuspensionMode.Mode, ReadonlySet<string>>([
+      ['NestedTransfer', new Set(['nested'])],
+      ['ExternalPark', new Set(['park'])],
+    ]),
+    dependencies: new Map([
+      ['both', new Set(['park', 'nested'])],
+      ['owner', new Set(['both'])],
+      ['nested', new Set<string>()],
+      ['park', new Set<string>()],
+      ['direct', new Set<string>()],
+    ]),
+    permitted: new Map<string, ReadonlySet<SuspensionMode.Mode>>([
+      ['open', new Set(['NestedTransfer', 'ExternalPark'])],
+    ]),
+    unavailable: new Set(['damaged']),
+  })
+  const first = SuspensionMode.summarize(graph)
+  const second = SuspensionMode.summarize(graph)
+  assert.strictEqual(
+    SuspensionMode.encode(first.get('direct') ?? SuspensionMode.direct),
+    'Complete[Direct]',
+  )
+  assert.deepEqual(first.get('both')?.modes, ['NestedTransfer', 'ExternalPark'])
+  assert.deepEqual(first.get('open')?.modes, ['NestedTransfer', 'ExternalPark'])
+  assert.strictEqual(first.get('open')?.availability, 'Open')
+  assert.strictEqual(first.get('damaged')?.availability, 'Unavailable')
+  assert.deepEqual(
+    [...first].map(([node, summary]) => `${node}=${SuspensionMode.encode(summary)}`),
+    [...second].map(([node, summary]) => `${node}=${SuspensionMode.encode(summary)}`),
+  )
+
+  const external = first.get('owner') ?? SuspensionMode.direct
+  const delimiter = ExecutionBoundary.delimit(external)
+  assert.isTrue(SuspensionMode.has(delimiter.body, 'ExternalPark'))
+  assert.strictEqual(SuspensionMode.encode(delimiter.owner), 'Complete[Direct]')
+  const span = SourceSpan.fromOffsets('suspension-boundary', 4, 12)
+  assert.isDefined(span)
+  if (span === undefined) return
+  const diagnostic = ExecutionBoundary.entryDiagnostic(external, false, span)
+  assert.strictEqual(diagnostic?.code, 'SEM0140')
+  assert.strictEqual(diagnostic?.reason._tag, 'MissingExplicitExecutionOwner')
+  assert.strictEqual(ExecutionBoundary.entryDiagnostic(external, true, span), undefined)
+  const nestedOnly = first.get('nested') ?? SuspensionMode.direct
+  assert.strictEqual(ExecutableProperty.nonParkingOfSummary(nestedOnly)._tag, 'Satisfied')
+  const nonParking = ExecutableProperty.nonParkingOfSummary(external)
+  assert.strictEqual(nonParking._tag, 'Unsatisfied')
+  assert.deepEqual(
+    nonParking._tag === 'Unsatisfied' ? nonParking.causes.map((entry) => entry.path) : [],
+    [['owner', 'both', 'park']],
+  )
+})
 
 it.effect('separates lazy Effect runners from their factory and synchronous siblings', () =>
   Effect.gen(function* () {
@@ -50,7 +120,10 @@ ${main('recipes()')}`)
     assert.isFalse(
       synchronousIdentity === undefined
         ? true
-        : Instances.isEffectSuspendable(self.instances, synchronousIdentity),
+        : SuspensionMode.has(
+            Instances.effectSuspensionOf(self.instances, synchronousIdentity),
+            'NestedTransfer',
+          ),
     )
     const delayed = self.instances.instances.find(
       (instance) => instance.key.declaration.name === 'delayed',
@@ -59,7 +132,254 @@ ${main('recipes()')}`)
     assert.isTrue(
       delayed?.resultEffect === undefined
         ? false
-        : Instances.isEffectSuspendable(self.instances, delayed.resultEffect),
+        : SuspensionMode.has(
+            Instances.effectSuspensionOf(self.instances, delayed.resultEffect),
+            'NestedTransfer',
+          ),
+    )
+  }),
+)
+
+it.effect(
+  'derives Detached independently from affinity and NonParking independently from nested transfer',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* snapshot(`import silk.effect as Effect
+struct Box { value: i32 }
+struct HiddenResult { value: i32 }
+fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
+fn copied(value: i32) -> Effect<i32> { return effect { return value } }
+fn opaqueProducer() -> some<F: Effect<HiddenResult>> F {
+  return effect { return HiddenResult { value: 42 } }
+}
+effect fn nested(value: i32) -> i32 {
+  return run Effect.suspend(effect { return value })
+}
+pub fn main() -> i32 {
+  let box = Box { value: 40 }
+  let first = borrowed(&box)
+  let second = copied(41)
+  let opaque = opaqueProducer()
+  drop first
+  drop second
+  drop opaque
+  return run nested(42)
+}`)
+      const repeated = yield* snapshot(`import silk.effect as Effect
+struct Box { value: i32 }
+struct HiddenResult { value: i32 }
+fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
+fn copied(value: i32) -> Effect<i32> { return effect { return value } }
+fn opaqueProducer() -> some<F: Effect<HiddenResult>> F {
+  return effect { return HiddenResult { value: 42 } }
+}
+effect fn nested(value: i32) -> i32 {
+  return run Effect.suspend(effect { return value })
+}
+pub fn main() -> i32 {
+  let box = Box { value: 40 }
+  let first = borrowed(&box)
+  let second = copied(41)
+  let opaque = opaqueProducer()
+  drop first
+  drop second
+  drop opaque
+  return run nested(42)
+}`)
+
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const facts = Analysis.executablePropertiesOf(self).filter(
+        (fact) => fact.subject._tag === 'Effect',
+      )
+      assert.deepEqual(
+        Analysis.executablePropertiesOf(self).map(ExecutableProperty.encode),
+        Analysis.executablePropertiesOf(repeated).map(ExecutableProperty.encode),
+      )
+      const borrowed = facts.find(
+        (fact) =>
+          fact.detached._tag === 'Unsatisfied' &&
+          fact.detached.causes.some((entry) => entry.reason === 'LexicalLoan'),
+      )
+      assert.isDefined(borrowed)
+      assert.strictEqual(borrowed?.affinity._tag, 'Unrestricted')
+      assert.strictEqual(borrowed?.nonParking._tag, 'Satisfied')
+      const nested = facts.find((fact) => {
+        if (fact.subject._tag !== 'Effect') return false
+        return SuspensionMode.has(
+          Instances.effectSuspensionOf(self.instances, fact.subject.identity),
+          'NestedTransfer',
+        )
+      })
+      assert.isDefined(nested)
+      assert.strictEqual(nested?.nonParking._tag, 'Satisfied')
+      assert.isTrue(
+        facts.some(
+          (fact) => fact.detached._tag === 'Satisfied' && fact.nonParking._tag === 'Satisfied',
+        ),
+      )
+      const opaqueProducer = self.instances.effects.find(
+        (effect) =>
+          Type.isNominal(effect.type.success) && effect.type.success.name === 'HiddenResult',
+      )
+      assert.isDefined(opaqueProducer)
+      assert.strictEqual(
+        facts.find(
+          (fact) =>
+            fact.subject._tag === 'Effect' && fact.subject.identity === opaqueProducer?.identity,
+        )?.detached._tag,
+        'Satisfied',
+      )
+    }),
+)
+
+it.effect('diagnoses a failed concrete sealed-property obligation at the generic application', () =>
+  Effect.gen(function* () {
+    const source = `struct Box { value: i32 }
+fn requireDetached<F: Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+  drop body
+  return 1
+}
+pub fn main() -> i32 {
+  let box = Box { value: 42 }
+  let view = &box
+  let inner = effect { return view.value }
+  return requireDetached(effect { return run inner })
+}`
+    const self = yield* snapshot(source)
+    const diagnostic = Analysis.diagnostics(self).find((candidate) => candidate.code === 'SEM0139')
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((candidate) => candidate.code),
+      ['SEM0139'],
+    )
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.include(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.causes.join(';')
+        : '',
+      'Effect:',
+    )
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'requireDetached(effect { return run inner })',
+    )
+  }),
+)
+
+it.effect('retains borrowed provider provenance through an ordinary provide wrapper', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect as Effect
+service Clock { effect fn read() -> i32 ? &Clock }
+struct FixedClock {}
+effect fn read(self: &FixedClock) -> i32 { return 42 }
+impl Clock for FixedClock { read: FixedClock.read }
+effect fn program() -> i32 ? &Clock { return run Clock.read() }
+fn requireDetached<F: Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+  drop body
+  return 1
+}
+pub fn main() -> i32 {
+  let clock = FixedClock {}
+  let provided = program() |> Effect.provide(&clock)
+  return requireDetached(move provided)
+}`
+    const self = yield* snapshot(source)
+
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+    const diagnostic = diagnostics.at(0)
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.isTrue(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty' &&
+        diagnostic.reason.causes.some((cause) => cause.startsWith('ProviderLoan:')),
+    )
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'requireDetached(move provided)',
+    )
+    assert.notInclude(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      'SEM0071',
+    )
+  }),
+)
+
+it.effect('diagnoses sealed-property obligations on represented nominal fields', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Box { value: i32 }
+struct Deferred<F: once Effect<i32> + Intrinsic.Detached> { operation: F }
+pub fn main() -> i32 {
+  let box = Box { value: 42 }
+  let view = &box
+  let deferred = Deferred { operation: effect { return view.value } }
+  drop deferred
+  return 0
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+  }),
+)
+
+it.effect('follows represented executables nested inside captured nominals', () =>
+  Effect.gen(function* () {
+    const source = `struct Box { value: i32 }
+struct Deferred<F: once Effect<i32>> { operation: F }
+fn requireDetached<F: once Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+  drop body
+  return 1
+}
+pub fn main() -> i32 {
+  let box = Box { value: 42 }
+  let view = &box
+  let deferred = Deferred { operation: effect { return view.value } }
+  return requireDetached(effect { drop deferred return 1 })
+}`
+    const self = yield* snapshot(source)
+
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+    const diagnostic = diagnostics.at(0)
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.isTrue(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty' &&
+        diagnostic.reason.causes.some((cause) => cause.startsWith('LexicalLoan:')),
+    )
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'requireDetached(effect { drop deferred return 1 })',
     )
   }),
 )
@@ -106,29 +426,26 @@ effect fn program() -> i32 {
 ${main('program()')}`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const suspendable = Projections.suspendableInstancesOf(self)
-    assert.deepEqual(
-      suspendable.map(Instances.keyText),
-      [...suspendable.map(Instances.keyText)].sort(),
+    const suspendable = self.instances.instances.filter((instance) =>
+      SuspensionMode.has(Instances.suspensionOf(self.instances, instance.key), 'NestedTransfer'),
     )
-    assert.deepEqual(
-      Projections.suspendableEffectsOf(self),
-      [...Projections.suspendableEffectsOf(self)].sort(),
-    )
+    const suspendableKeys = suspendable.map((instance) => Instances.keyText(instance.key)).sort()
+    assert.deepEqual(suspendableKeys, [...suspendableKeys].sort())
+    assert.deepEqual(effectNames(self), [...effectNames(self)].sort())
     assert.isTrue(
       suspendable.some(
         (instance) =>
-          instance.declaration.module === 'silk/effect' &&
-          instance.declaration.name === 'map' &&
-          instance.typeArguments.length > 0,
+          instance.key.declaration.module === 'silk/effect' &&
+          instance.key.declaration.name === 'map' &&
+          instance.key.typeArguments.length > 0,
       ),
     )
     assert.isTrue(
       suspendable.some(
         (instance) =>
-          instance.declaration.module === 'silk/effect' &&
-          instance.declaration.name === 'flatMap' &&
-          instance.typeArguments.length > 0,
+          instance.key.declaration.module === 'silk/effect' &&
+          instance.key.declaration.name === 'flatMap' &&
+          instance.key.typeArguments.length > 0,
       ),
     )
   }),
@@ -164,17 +481,51 @@ pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
     const first = yield* snapshot(source)
     const second = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(Projections.suspendableInstancesOf(first), [])
-    assert.deepEqual(Projections.suspendableEffectsOf(first), [])
-    assert.deepEqual(
-      Projections.suspendableInstancesOf(second),
-      Projections.suspendableInstancesOf(first),
-    )
-    assert.deepEqual(
-      Projections.suspendableEffectsOf(second),
-      Projections.suspendableEffectsOf(first),
-    )
+    assert.deepEqual(names(first), [])
+    assert.deepEqual(effectNames(first), [])
+    assert.deepEqual(names(second), names(first))
+    assert.deepEqual(effectNames(second), effectNames(first))
   }),
+)
+
+it.effect(
+  'grants no sealed identity, property, or suspension mode to privileged-looking names',
+  () =>
+    Effect.gen(function* () {
+      const spellings = [
+        'Execution',
+        'Wake',
+        'Detached',
+        'NonParking',
+        'Scheduler',
+        'Fiber',
+        'Deferred',
+        'Timer',
+        'Coroutine',
+      ] as const
+      const declarations = spellings.map((name) => `struct ${name} { value: i32 }`).join('\n')
+      const self = yield* snapshot(`${declarations}
+pub fn main() -> i32 { return 42 }`)
+
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      for (const name of spellings) {
+        const type = Type.nominal('suspendability/main', name)
+        assert.isFalse(Type.isExecution(type))
+        assert.strictEqual(
+          self.index.modules
+            .at(-1)
+            ?.structs.find(
+              (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === name,
+            )
+            ?.typeParameters.some((parameter) => parameter.staticProperties.length > 0),
+          false,
+        )
+      }
+      assert.deepEqual(names(self), [])
+      assert.isTrue(
+        Analysis.executablePropertiesOf(self).every((fact) => fact.nonParking._tag === 'Satisfied'),
+      )
+    }),
 )
 
 const suspendingAllocator = `import silk.core { Allocator }
@@ -227,15 +578,70 @@ it.effect('allows ordinary allocator implementations to suspend', () =>
 import silk.effect as Effect
 ${suspendingAllocator}
 
-effect fn inert() -> i32 ? &mut Allocator { return 1 }
-pub fn main() -> i32 {
+effect fn acquire() -> Allocation ! OutOfMemoryError ? &mut Allocator {
+  return run Allocator.allocate(Layout.of<i32>())
+}
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut custom = SuspendingAllocator {}
-  let ordinary = run inert() |> Effect.provideMut(&mut custom)
-  let delayed = Effect.suspend(effect { return 41 })
-  return ordinary + run delayed
-}`)
+  let pending = acquire() |> Effect.provideMut(&mut custom)
+  let allocation = run pending
+  drop allocation
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(Analysis.mirOf(self)._tag, 'Available')
+    const entry = self.instances.entry
+    const summary =
+      entry._tag === 'Resolved'
+        ? Instances.suspensionOf(self.instances, entry.key)
+        : SuspensionMode.direct
+    assert.isTrue(SuspensionMode.has(summary, 'NestedTransfer'))
+    assert.isTrue(
+      summary.causes.some((entry) =>
+        entry.path.some(
+          (node) => node.includes('suspendability/main') && node.includes('\u0000allocate\u0000'),
+        ),
+      ),
+    )
+  }),
+)
+
+it.effect('ignores unused suspending operations on the selected provider witness', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect as Effect
+service Work {
+  effect fn direct() -> i32 ? &mut Work
+  effect fn delayed() -> i32 ? &mut Work
+}
+struct Worker {}
+effect fn direct(self: &mut Worker) -> i32 { return 42 }
+effect fn delayed(self: &mut Worker) -> i32 {
+  return run Effect.suspend(effect { return 0 })
+}
+impl Work for Worker { direct: Worker.direct delayed: Worker.delayed }
+effect fn program() -> i32 ? &mut Work { return run Work.direct() }
+pub fn main() -> i32 {
+  let mut worker = Worker {}
+  return run program() |> Effect.provideMut(&mut worker)
+}`)
+
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const entry = self.instances.entry
+    const summary =
+      entry._tag === 'Resolved'
+        ? Instances.suspensionOf(self.instances, entry.key)
+        : SuspensionMode.direct
+    assert.isFalse(SuspensionMode.has(summary, 'NestedTransfer'))
+    const delayed = self.instances.instances.find(
+      (instance) => instance.key.declaration.name === 'delayed',
+    )
+    assert.isTrue(
+      delayed === undefined
+        ? false
+        : SuspensionMode.has(Instances.suspensionOf(self.instances, delayed.key), 'NestedTransfer'),
+    )
   }),
 )

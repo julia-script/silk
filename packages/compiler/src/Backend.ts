@@ -47,6 +47,15 @@ export interface ControlProvenance {
 export type Id = 'llvm' | 'wasm'
 export type Termination = TerminationModel.Contract
 
+/** Canonical target-runtime capabilities that the backend actually emitted. */
+export type RuntimeFeature =
+  | 'DormantContinuation'
+  | 'ExecutionDrive'
+  | 'ExecutionPackage'
+  | 'ExternalWakeCell'
+  | 'NestedSuspensionRuntime'
+  | 'ReadinessNotification'
+
 interface ArtifactBase {
   readonly module: string
   readonly backend: Id
@@ -54,6 +63,7 @@ interface ArtifactBase {
   readonly symbols: ReadonlyArray<SymbolEntry>
   readonly termination: Termination
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
+  readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
   readonly control: ReadonlyArray<ControlProvenance>
 }
 

@@ -164,8 +164,29 @@ pub fn main() -> i32 {
     const discovery: Instances.Discovery = Object.freeze({
       ...self.instances,
       instances: Object.freeze([...self.instances.instances, otherInstance]),
-      suspendable: Object.freeze([...self.instances.suspendable, otherKey]),
-      suspendableExecutions: Object.freeze([...self.instances.suspendableExecutions, otherKey]),
+      suspension: Object.freeze([
+        ...self.instances.suspension,
+        Object.freeze({
+          _tag: 'SuspensionFact' as const,
+          subject: Object.freeze({ _tag: 'Instance' as const, key: otherKey }),
+          summary: Object.freeze({
+            _tag: 'SuspensionModeSummary' as const,
+            availability: 'Complete' as const,
+            modes: Object.freeze(['NestedTransfer' as const]),
+            causes: Object.freeze([]),
+          }),
+        }),
+        Object.freeze({
+          _tag: 'SuspensionFact' as const,
+          subject: Object.freeze({ _tag: 'Execution' as const, key: otherKey }),
+          summary: Object.freeze({
+            _tag: 'SuspensionModeSummary' as const,
+            availability: 'Complete' as const,
+            modes: Object.freeze(['NestedTransfer' as const]),
+            causes: Object.freeze([]),
+          }),
+        }),
+      ]),
     })
     assert.strictEqual(self.layout._tag, 'Available')
     if (self.layout._tag !== 'Available') return

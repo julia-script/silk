@@ -1,4 +1,5 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import type {
   CoroutineFramePathPlan,
@@ -89,6 +90,14 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SharedFromAllocation':
       return `${localText(operation.destination)} = shared-from-allocation ${localText(operation.allocation)}:${operation.allocationAccess.toLowerCase()}, ${localText(operation.value)}:${operation.valueAccess.toLowerCase()} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} allocation-layout=${operation.allocationBlock.provenance} allocation-fact=${operation.allocationFact} allocation-origin=${spanText(operation.allocationProvenance)} count=1 access=available : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ExecutionFromAllocation':
+      return `${localText(operation.destination)} = execution-from-allocation ${localText(operation.allocation)}:take, ${localText(operation.body)}:take, ${localText(operation.endpoint)}:take, ${localText(operation.callback)}:take package=${operation.plan.provenance} allocation-fact=${operation.allocationFact} allocation-origin=${spanText(operation.allocationProvenance)} state=initial : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ExecutionDrive':
+      return `${localText(operation.destination)} = execution-drive ${localText(operation.execution)}:take branch=${localText(operation.branch)}:take complete=${localText(operation.onComplete)}:take/${operation.completionCleanup._tag}<${operation.completionTypeArguments.map(SilkType.genericArgumentKey).join(',')}> suspend=${localText(operation.onSuspend)}:take/${operation.suspensionCleanup._tag}<${operation.suspensionTypeArguments.map(SilkType.genericArgumentKey).join(',')}> private-result=${localText(operation.result)} legal=initial|eligible trap=dormant|notifying result=unit ${provenanceText(operation.provenance)}`
+    case 'ExecutionWake':
+      return `${localText(operation.destination)} = execution-wake ${localText(operation.wake)}:take transition=latched|notifying|cancelled-noop result=unit ${provenanceText(operation.provenance)}`
+    case 'ExecutionPark':
+      return `${localText(operation.destination)} = execution-park register=${localText(operation.register)}:take/${operation.registerCleanup._tag}<${operation.registrationTypeArguments.map(SilkType.genericArgumentKey).join(',')}> private-guard=${localText(operation.guard)}/${operation.guardCleanup._tag} transition=registering>latched|dormant result=unit ${provenanceText(operation.provenance)}`
     case 'SharedClone':
       return `${localText(operation.destination)} = shared-clone ${localText(operation.self)} element=${SilkType.encode(operation.element)} layout=${operation.block.provenance} maximum=${operation.block.strongMaximum} transition=compare-trap-store : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SharedWithMut':
@@ -352,6 +361,7 @@ export const encode = (self: Module): string =>
         : `normalization rejected reason=${verdict.reason} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} ${provenanceText(verdict.provenance)}`,
     ),
     ...coroutineFrameTargetLines(self),
+    ...self.executionTransitions.flatMap(ExecutionTransition.encodeAuthority),
     ...LayoutEncode.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)}${

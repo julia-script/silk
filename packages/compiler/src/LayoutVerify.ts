@@ -375,6 +375,41 @@ const verifyEntry = (
         ])
   }
   if (Type.isRepresented(candidate.type)) {
+    const type = candidate.type
+    const argument = type.representation.argument
+    if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      const alternatives = argument.alternatives.map((alternative) =>
+        available.get(
+          Type.key(Type.represented(type.contract, type.representation.requiredBound, alternative)),
+        ),
+      )
+      const payloadAlignment = alternatives.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative?.alignment ?? 1),
+        1,
+      )
+      const payloadSize = alternatives.reduce(
+        (maximum, alternative) => Math.max(maximum, alternative?.size ?? 0),
+        0,
+      )
+      const alignment = Math.max(4, payloadAlignment)
+      const size = alignUp(alignUp(4, payloadAlignment) + payloadSize, alignment)
+      return alternatives.every((alternative) => alternative !== undefined) &&
+        candidate.executable === undefined &&
+        candidate.representation._tag === 'Aggregate' &&
+        candidate.representation.fields.length === 0 &&
+        candidate.representation.tailPadding === size &&
+        candidate.copy === alternatives.every((alternative) => alternative?.copy === true) &&
+        candidate.size === size &&
+        candidate.alignment === alignment
+        ? Object.freeze([])
+        : Object.freeze([
+            invalid(
+              'InvalidAggregate',
+              candidate.type,
+              `${Type.encode(candidate.type)} has non-canonical composite Effect storage facts`,
+            ),
+          ])
+    }
     if (candidate.executable !== undefined) {
       return candidate.representation._tag === 'Aggregate' &&
         candidate.representation.fields.length === 0 &&
@@ -551,7 +586,12 @@ const verifyEntry = (
     }
     return Object.freeze(violations)
   }
-  if (Type.isSharedCore(candidate.type) && candidate.representation._tag === 'Reference') {
+  if (
+    (Type.isSharedCore(candidate.type) ||
+      Type.isExecution(candidate.type) ||
+      Type.isWake(candidate.type)) &&
+    candidate.representation._tag === 'Reference'
+  ) {
     const address = candidate.representation.address
     return candidate.copy === false &&
       candidate.size === target.pointerSize &&
@@ -566,7 +606,7 @@ const verifyEntry = (
           invalid(
             'InvalidAggregate',
             candidate.type,
-            `${Type.encode(candidate.type)} has a non-canonical opaque local-shared handle`,
+            `${Type.encode(candidate.type)} has a non-canonical sealed owning handle`,
           ),
         ])
   }

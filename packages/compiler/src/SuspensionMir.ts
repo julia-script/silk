@@ -40,11 +40,11 @@ const runnerOf = (
   index: DeclarationIndex.Index,
   operation?: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
   functions: ReadonlyArray<Mir.MirFunction> = [],
 ): Mir.SuspensionRunner => {
-  const arguments_ = operation?.arguments ?? []
+  const arguments_ = operation?._tag === 'ExecutionPark' ? [] : (operation?.arguments ?? [])
   const operationProviders = operation?._tag === 'RunEffectValue' ? operation.providers : []
   // One selection identity for both the dedup and the argument lookup below — two predicates
   // here previously let a provider count as "already selected" yet miss its runtime argument.
@@ -98,13 +98,13 @@ const runnerOf = (
       })
     })
   const declaration =
-    operation === undefined
+    operation === undefined || operation._tag === 'ExecutionPark'
       ? runner.declaration
       : operation._tag === 'RunEffect'
         ? operation.target
         : operation.runner
   const typeArguments =
-    operation === undefined
+    operation === undefined || operation._tag === 'ExecutionPark'
       ? runner.typeArguments
       : operation._tag === 'RunEffect'
         ? operation.typeArguments
@@ -126,7 +126,10 @@ const runnerOf = (
       : { instance: exact.instance }),
     ...(runner.effectIdentity === undefined ? {} : { effectIdentity: runner.effectIdentity }),
     typeArguments,
-    outcome: operation?.outcomeType.type ?? runner.outcome,
+    outcome:
+      operation === undefined || operation._tag === 'ExecutionPark'
+        ? runner.outcome
+        : operation.outcomeType.type,
     captures: runner.captures,
     providers: Object.freeze(providers),
   })
@@ -167,7 +170,7 @@ interface LocatedOperation {
   readonly region: Mir.RegionId
   readonly operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >
 }
 
@@ -184,7 +187,8 @@ const operationsOf = (fn: Mir.MirFunction): ReadonlyArray<LocatedOperation> =>
       .flatMap((operation) =>
         operation._tag === 'RunEffect' ||
         operation._tag === 'RunEffectValue' ||
-        operation._tag === 'ReifyEffect'
+        operation._tag === 'ReifyEffect' ||
+        operation._tag === 'ExecutionPark'
           ? [Object.freeze({ region: region.id, operation })]
           : [],
       )
@@ -219,7 +223,7 @@ const regionsOf = (
             entry.operation.provenance.span.start === outcome.span.start &&
             entry.operation.provenance.span.end === outcome.span.end,
         )
-        if (candidate === undefined) return []
+        if (candidate === undefined || candidate.operation._tag === 'ExecutionPark') return []
         const deferred = runnerOf(outcome.deferred, index, candidate.operation, program.functions)
         return [
           Object.freeze({
@@ -239,7 +243,10 @@ const regionsOf = (
           sameSpan(entry.operation, outcome) &&
           (outcome.completion._tag === 'Reify'
             ? entry.operation._tag === 'ReifyEffect'
-            : entry.operation._tag !== 'ReifyEffect'),
+            : entry.operation._tag !== 'ReifyEffect') &&
+          (entry.operation._tag === 'ExecutionPark'
+            ? Type.equals(outcome.runner.outcome.success, Type.unit)
+            : true),
       )
       if (candidate === undefined) return []
       const plan = ownership.plans.find(
@@ -283,14 +290,9 @@ export const finalize = (
   const functions = Object.freeze(
     program.functions.map((fn) =>
       (() => {
+        const execution = ProvisionalMir.executionOf(provisional, fn.instance)
         const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
-        const regions = regionsOf(
-          program,
-          fn,
-          ProvisionalMir.executionOf(provisional, fn.instance),
-          ownership,
-          index,
-        )
+        const regions = regionsOf(program, fn, execution, ownership, index)
         const states = Object.freeze(
           regions
             .flatMap((region) =>
@@ -305,7 +307,7 @@ export const finalize = (
                 left.point.ordinal - right.point.ordinal,
             ),
         )
-        return classification === 'Synchronous' && regions.length === 0
+        return regions.length === 0 && (classification === 'Synchronous' || execution === undefined)
           ? fn
           : Object.freeze({
               ...fn,
@@ -327,7 +329,11 @@ export const finalize = (
     ),
   )
   const hasRetainedOrigin = functions.some((fn) =>
-    fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
+    fn.suspension?.regions.some(
+      (region) =>
+        region._tag === 'SuspendEffectRegion' ||
+        (region._tag === 'RunSuspendableEffectRegion' && region.operation._tag === 'ExecutionPark'),
+    ),
   )
   if (!hasRetainedOrigin) return program
   return Object.freeze({

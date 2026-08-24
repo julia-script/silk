@@ -91,6 +91,7 @@ it('reports broken graphs deterministically as data', () => {
     intrinsics: straight?.intrinsics ?? raise('expected the sample intrinsic inventory'),
     entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
+    executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
     functions: [
       { ...fn, entry: { _tag: 'Region', ordinal: 9 } },
       {

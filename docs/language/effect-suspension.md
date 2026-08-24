@@ -7,6 +7,10 @@ bounded native and WebAssembly machine stack.
 Suspension is not async execution. It does not park a task, let another task run, wait for a wakeup,
 or introduce a scheduler. It also does not make ordinary recursion stack safe automatically.
 
+Explicit owner-controlled parking and later resumption are defined separately by
+[independently resumable Effect executions](independent-execution.md). Allocation-backed dynamic
+local state shared by those owners is defined by [local shared ownership](local-shared-ownership.md).
+
 The intended public contract is:
 
 ```silk,ignore
@@ -35,6 +39,69 @@ instead of appearing as standalone language-reference rules.
   distinct from the source-selected `Allocator` service and from the physical machine stack.
 - **Parking** — leave execution dormant until an external wakeup condition occurs. `Effect.suspend`
   does not provide parking.
+- **Independent Execution** — an affine lazy Effect package with an owner outside its body. The
+  owner selects each legal activation.
+- **Wake** — one affine authority for one parked generation. Signaling or dropping it consumes that
+  authority.
+
+## Static execution facts
+
+Semantic inspection records one normalized suspension summary for every reachable exact executable.
+Direct execution has no mode bit. `NestedTransfer` means the selected call graph can reach
+`Effect.suspend`; `ExternalPark` is reserved for the sealed external-wake primitive. Complete
+specializations include ordinary helper calls and selected provider implementations. An unresolved
+generic executable conservatively retains the modes permitted by its declared exact bound, while an
+unavailable executable remains unavailable rather than being reported as direct.
+
+This is a target-neutral semantic substrate. The ordinary `silk.execution` module supplies safe
+construction, drive, and park operations over sealed compiler identities. An explicit `Execution`
+construction is the propagation delimiter. Its erased body keeps its complete summary. An ordinary
+owner-side drive caller does not inherit the body's `ExternalPark` mode.
+
+Two compiler-owned properties may refine one exact Effect or callable representation bound:
+
+- `Intrinsic.Detached` proves that the executable retains no external lexical or provider loan.
+  It is independent of the success and failure payload spellings and of execution affinity; an
+  owned local shared handle may be detached while remaining local.
+- `Intrinsic.NonParking` proves that the specialized transitive graph cannot reach external
+  parking. Nested transfer remains allowed.
+
+These properties are static, witness-free obligations rather than interfaces or services. A failed
+concrete application reports the property obligation at the application and retains its stable
+capture/provider or reachability path.
+
+`Intrinsic.Execution<A>` is an opaque affine, non-copyable, initially non-thread-transferable local
+identity. Its logical lifecycle is `Initial`, `Running`, `Dormant`, `Notifying`, `Eligible`,
+`Completed`, and `Destroyed`; these are semantic states, not a promised backend tag layout. The
+owner may drive only `Initial` or `Eligible`, and driving a dormant or notifying execution is a
+fatal intrinsic-state trap. Execution-internal stable loans may cross parking, but construction
+cannot retain caller loans and completion cannot return a loan into package-owned storage.
+
+## Independent execution and external parking
+
+This section summarizes the relationship to suspension. The complete public lifecycle, Wake,
+cancellation, ownership, and scheduling-policy rules are in
+[independently resumable Effect executions](independent-execution.md).
+
+`Execution.make` allocates one combined package through the caller-selected `Allocator`. The
+package owns the lazy body and its fixed readiness endpoint. Construction returns an `Initial`
+Execution and does not start the body. Package allocation refusal is a typed construction failure.
+Later growth of the private execution stack is a fatal trap outside the typed failure channel.
+
+The owner calls `Execution.drive` for an `Initial` or `Eligible` activation. A nested
+`Effect.suspend` transfers directly to a child and can return during the same drive. `Execution.park`
+instead relinquishes the running Execution. Its registration callback receives one affine Wake for
+that parked generation. Signaling the Wake makes the Execution eligible and invokes its fixed
+readiness endpoint at most one time.
+
+Dropping a dormant Execution cancels its Wake and cleans the suspended values exactly once. If an
+external owner still retains that Wake, the Wake keeps the complete inert package allocation alive.
+Signaling or dropping the cancelled Wake releases the final package authority and cannot publish
+readiness.
+
+Schedulers, deferred values, timers, coroutine ports, ready queues, and cancellation policies are
+ordinary source actors built over this narrow seam. The language does not select one of these
+actors, and the compiler does not recognize their source names.
 
 ## Public contract and recursion
 

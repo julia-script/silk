@@ -3,6 +3,7 @@ import type * as Constant from '@silk-effect/llvm/Constant'
 import type * as FunctionActor from '@silk-effect/llvm/Function'
 import type * as FunctionBody from '@silk-effect/llvm/FunctionBody'
 import type * as LlvmType from '@silk-effect/llvm/Type'
+import type * as Backend from './Backend.js'
 import type * as Mir from './Mir.js'
 import type * as NativeAggregate from './NativeAggregate.js'
 import type * as NativeArith from './NativeArith.js'
@@ -23,6 +24,7 @@ interface OverflowSignature {
 
 /** Data and cohesive actor contexts shared by native operation emitters. */
 export interface Context {
+  readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
   readonly program: Mir.Module
@@ -33,6 +35,9 @@ export interface Context {
   readonly f32: LlvmType.Type
   readonly f64: LlvmType.Type
   readonly pointer: LlvmType.Type
+  readonly transferStorageSize: number
+  readonly childThunkType?: LlvmType.Type
+  readonly resumeThunkType?: LlvmType.Type
   readonly usizeType?: LlvmType.Type
   readonly integerTypes: Map<number, LlvmType.Type>
   readonly signedOverflowSignatures: Map<number, OverflowSignature>

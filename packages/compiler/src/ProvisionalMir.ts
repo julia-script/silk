@@ -7,6 +7,7 @@ import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Suspension from './Suspension.js'
+import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
 
 /**
@@ -274,9 +275,12 @@ const classificationOfEffect = (
 ): Classification =>
   identity === undefined
     ? 'Unknown'
-    : Instances.isEffectSuspendable(discovery, identity)
+    : suspendableSummary(Instances.effectSuspensionOf(discovery, identity))
       ? 'Suspendable'
       : 'Synchronous'
+
+const suspendableSummary = (summary: SuspensionMode.Summary): boolean =>
+  SuspensionMode.has(summary, 'NestedTransfer') || SuspensionMode.has(summary, 'ExternalPark')
 
 const sameDeclaration = (
   left: DeclarationFacts.CanonicalId,
@@ -602,7 +606,7 @@ const runnerOf = (
       if (
         resultEffect !== undefined &&
         (context.effectClassifications.get(resultEffect) === 'Suspendable' ||
-          Instances.isEffectSuspendable(context.discovery, resultEffect))
+          suspendableSummary(Instances.effectSuspensionOf(context.discovery, resultEffect)))
       )
         return 'Suspendable'
       const capability = Type.substitute(service.service, owner.substitution)
@@ -621,9 +625,11 @@ const runnerOf = (
       if (
         candidates.some(
           (candidate) =>
-            Instances.isSuspendable(context.discovery, candidate.key) ||
+            suspendableSummary(Instances.suspensionOf(context.discovery, candidate.key)) ||
             (candidate.resultEffect !== undefined &&
-              Instances.isEffectSuspendable(context.discovery, candidate.resultEffect)),
+              suspendableSummary(
+                Instances.effectSuspensionOf(context.discovery, candidate.resultEffect),
+              )),
         )
       )
         return 'Suspendable'
@@ -1051,9 +1057,8 @@ export const build = (
         functionOrdinal: instance.function.declaration.id.ordinal,
         identity: Instances.keyText(instance.key),
       })
-      const instanceClassification: Classification = Instances.isExecutionSuspendable(
-        discovery,
-        instance.key,
+      const instanceClassification: Classification = suspendableSummary(
+        Instances.executionSuspensionOf(discovery, instance.key),
       )
         ? 'Suspendable'
         : 'Synchronous'

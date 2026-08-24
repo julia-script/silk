@@ -175,6 +175,14 @@ export const ambiguousOperatorCode = 'SEM0136' as const
 export const misplacedUnsafeAcknowledgementCode = 'SEM0137' as const
 /** Stable code for a statically known allocation/layout specialization mismatch. */
 export const localSharedLayoutMismatchCode = 'SEM0138' as const
+/** Stable code for a concrete executable that fails one sealed static-property obligation. */
+export const unsatisfiedExecutablePropertyCode = 'SEM0139' as const
+/** Stable code for an externally parking entry with no explicit Execution owner. */
+export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
+/** Stable code for an ordinary capability conjoined with one exact executable bound. */
+export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
+/** Stable code for a statically known execution-package allocation/layout mismatch. */
+export const executionLayoutMismatchCode = 'SEM0142' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -393,6 +401,10 @@ export type Code =
   | typeof ambiguousOperatorCode
   | typeof misplacedUnsafeAcknowledgementCode
   | typeof localSharedLayoutMismatchCode
+  | typeof unsatisfiedExecutablePropertyCode
+  | typeof missingExplicitExecutionOwnerCode
+  | typeof invalidExecutablePropertyConjunctCode
+  | typeof executionLayoutMismatchCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -524,6 +536,18 @@ export type Reason =
       readonly expected: string
       readonly actual: string
     }
+  | {
+      readonly _tag: 'ExecutionLayoutMismatch'
+      readonly expected: string
+      readonly actual: string
+    }
+  | {
+      readonly _tag: 'UnsatisfiedExecutableProperty'
+      readonly property: 'Intrinsic.Detached' | 'Intrinsic.NonParking'
+      readonly causes: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'MissingExplicitExecutionOwner'; readonly summary: string }
+  | { readonly _tag: 'InvalidExecutablePropertyConjunct'; readonly conjunct: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
   | {
@@ -929,7 +953,7 @@ export type Reason =
   | { readonly _tag: 'BorrowedMove' }
   | {
       readonly _tag: 'LocalSharedAccessEscape'
-      readonly kind: 'Result' | 'Suspension'
+      readonly kind: 'Callback' | 'Result' | 'Suspension'
     }
 
 /** One additional source span labeled with its relationship to the diagnostic. */
@@ -2996,6 +3020,79 @@ export const localSharedLayoutMismatch = (
     ]),
   })
 
+/** Diagnoses a mismatched execution-package allocation before initializer publication. */
+export const executionLayoutMismatch = (
+  expected: string,
+  actual: string,
+  allocationSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: executionLayoutMismatchCode,
+    severity: 'error',
+    message: `Execution allocation was planned for ${actual}, not ${expected}`,
+    reason: Object.freeze({ _tag: 'ExecutionLayoutMismatch', expected, actual }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({
+        label: 'allocation layout provenance originates here',
+        span: allocationSpan,
+      }),
+    ]),
+  })
+
+/** Diagnoses one failed sealed-property check at its concrete application obligation. */
+export const unsatisfiedExecutableProperty = (
+  property: 'Intrinsic.Detached' | 'Intrinsic.NonParking',
+  causes: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsatisfiedExecutablePropertyCode,
+    severity: 'error',
+    message: `${property} is unsatisfied: ${causes.join('; ')}`,
+    reason: Object.freeze({
+      _tag: 'UnsatisfiedExecutableProperty',
+      property,
+      causes: Object.freeze(Array.from(causes)),
+    }),
+    span,
+  })
+
+/** Diagnoses external parking whose complete entry has no explicit owner delimiter. */
+export const missingExplicitExecutionOwner = (
+  summary: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingExplicitExecutionOwnerCode,
+    severity: 'error',
+    message: 'External parking requires an explicit Intrinsic.Execution owner',
+    reason: Object.freeze({ _tag: 'MissingExplicitExecutionOwner', summary }),
+    span,
+  })
+
+/** Rejects ordinary interface/service bounds in the sealed exact-executable conjunction lane. */
+export const invalidExecutablePropertyConjunct = (
+  conjunct: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidExecutablePropertyConjunctCode,
+    severity: 'error',
+    message: `${conjunct} is not a sealed executable property`,
+    reason: Object.freeze({ _tag: 'InvalidExecutablePropertyConjunct', conjunct }),
+    span,
+  })
+
 export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -3691,7 +3788,7 @@ export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
 
 /** Relates one access-scoped escape to the sealed boundary that created the exclusive loan. */
 export const localSharedAccessEscape = (
-  kind: 'Result' | 'Suspension',
+  kind: 'Callback' | 'Result' | 'Suspension',
   span: SourceSpan.SourceSpan,
   boundary: SourceSpan.SourceSpan,
 ): Diagnostic =>
@@ -3703,7 +3800,9 @@ export const localSharedAccessEscape = (
     message:
       kind === 'Suspension'
         ? 'Local-shared access cannot suspend while its exclusive borrow is live'
-        : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
+        : kind === 'Callback'
+          ? 'Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live'
+          : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
     reason: Object.freeze({ _tag: 'LocalSharedAccessEscape', kind }),
     span,
     relatedSpans: Object.freeze([

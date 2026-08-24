@@ -9,6 +9,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
 
@@ -1040,7 +1041,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 )
 
 const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+  Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
 
 /** The accepted shape every negative below deviates from in exactly one way. */
 const guarded = (body: string): string => `import silk.core { Allocator }

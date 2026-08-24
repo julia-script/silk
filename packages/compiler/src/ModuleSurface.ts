@@ -119,6 +119,7 @@ const encodeParameter = (value: Type.Parameter): SerializedRecord => ({
   ordinal: value.ordinal,
   name: value.name,
   kind: value.kind,
+  staticProperties: value.staticProperties,
   ...(value.representationBound === undefined
     ? {}
     : { representationBound: encodeTypeNode(value.representationBound) }),
@@ -134,6 +135,34 @@ function decodeParameter(value: unknown): Type.Parameter {
     encoded.representationBound === undefined
       ? undefined
       : decodeTypeNode(encoded.representationBound)
+  const staticProperties = serializedArray(
+    encoded.staticProperties ?? [],
+    'parameter.staticProperties',
+  ).map((value_) => {
+    const property = serializedString(value_, 'parameter.staticProperties[]')
+    if (property !== 'Intrinsic.Detached' && property !== 'Intrinsic.NonParking')
+      throw new InvalidModuleSurfaceEncoding('parameter has an unknown sealed static property')
+    return property
+  })
+  const canonicalStaticProperties = Type.sealedStaticPropertyOrder.filter((property) =>
+    staticProperties.includes(property),
+  )
+  if (
+    staticProperties.length !== canonicalStaticProperties.length ||
+    staticProperties.some((property, ordinal) => property !== canonicalStaticProperties.at(ordinal))
+  )
+    throw new InvalidModuleSurfaceEncoding(
+      'parameter sealed static properties must be unique and in canonical order',
+    )
+  if (
+    staticProperties.length > 0 &&
+    kind !== 'CallableRepresentation' &&
+    kind !== 'EffectRepresentation' &&
+    (kind !== 'Value' || staticProperties.some((property) => property !== 'Intrinsic.Detached'))
+  )
+    throw new InvalidModuleSurfaceEncoding(
+      'value parameters may carry only the sealed Intrinsic.Detached property',
+    )
   if (bound !== undefined && !Type.isCallable(bound) && !Type.isEffect(bound))
     throw new InvalidModuleSurfaceEncoding(
       'parameter representation bound must be callable or Effect',
@@ -156,6 +185,7 @@ function decodeParameter(value: unknown): Type.Parameter {
     serializedString(encoded.name, 'parameter.name'),
     kind,
     bound,
+    staticProperties,
   )
 }
 

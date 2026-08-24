@@ -7,15 +7,33 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 const instanceViolationDiagnostics = (
   self: Frontend,
   discovery: Instances.Discovery,
-): ReadonlyArray<Diagnostic.Diagnostic> =>
-  Diagnostic.merge(
+): ReadonlyArray<Diagnostic.Diagnostic> => {
+  const entryKey = discovery.entry._tag === 'Resolved' ? discovery.entry.key : undefined
+  const entryInstance =
+    entryKey !== undefined
+      ? discovery.instances.find(
+          (instance) => Instances.keyText(instance.key) === Instances.keyText(entryKey),
+        )
+      : undefined
+  const entryDiagnostic =
+    entryKey !== undefined && entryInstance !== undefined
+      ? ExecutionBoundary.entryDiagnostic(
+          Instances.suspensionOf(discovery, entryKey),
+          false,
+          entryInstance.function.declaration.syntax.span,
+        )
+      : undefined
+  return Diagnostic.merge(
     InstanceDiagnostics.violationDiagnostics(discovery),
     InstanceDiagnostics.copyDropViolations(discovery, self.index),
     InstanceDiagnostics.requirementBindingViolations(discovery, self.index),
     InstanceDiagnostics.unlowerableWitnessViolations(discovery, self.index),
     InstanceDiagnostics.storedCallableViolations(discovery, self.index),
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
+    ExecutableProperty.violationDiagnostics(discovery, self.index),
+    ...(entryDiagnostic === undefined ? [] : [[entryDiagnostic]]),
   )
+}
 
 function discoverAndLower(
   self: Frontend,
@@ -292,6 +310,8 @@ import * as Backend from './Backend.js'
 import * as BackendRegistry from './BackendRegistry.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as ExecutableProperty from './ExecutableProperty.js'
+import * as ExecutionBoundary from './ExecutionBoundary.js'
 import type { Frontend, Options } from './Frontend.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'

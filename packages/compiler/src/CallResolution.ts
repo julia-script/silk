@@ -542,6 +542,56 @@ export interface SeededSpecialization {
   readonly unresolved?: Diagnostic.Diagnostic
 }
 
+/** Converts one written source type argument to the generic kind its declaration binder owns. */
+export const genericArgumentOfTypeArgument = (
+  parameter: Type.Parameter,
+  fact: TypeArgumentFact,
+): Type.GenericArgument | undefined => {
+  const writtenType = fact.type
+  if (writtenType === undefined) return undefined
+  if (parameter.kind === 'Value') return Type.isTypeArgument(writtenType) ? writtenType : undefined
+  if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation') {
+    if (
+      Type.isParameter(writtenType) &&
+      writtenType.kind === parameter.kind &&
+      writtenType.representationBound !== undefined
+    )
+      return Type.representationParameterArgument(writtenType)
+    if (
+      Type.isRepresented(writtenType) &&
+      Type.representationArgumentKind(writtenType.representation.argument) === parameter.kind
+    )
+      return writtenType.representation.argument
+    return undefined
+  }
+  if (Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow')
+    return Type.requirementRowArgument([], [writtenType])
+  if (
+    !Type.isNominal(writtenType) &&
+    !(Type.isParameter(writtenType) && writtenType.kind === 'Value')
+  )
+    return undefined
+  return Type.isParameter(writtenType)
+    ? Type.requirementRowArgumentFromRow(
+        RowAlgebra.singleton(
+          Type.requirementRowPolicy(),
+          Type.requirementMemberShape(
+            writtenType,
+            'Shared',
+            fact.requirementRole ?? RequirementRow.defaultRole,
+          ),
+          fact.syntax.span,
+        ),
+      )
+    : Type.requirementRowArgument([
+        Object.freeze({
+          capability: writtenType,
+          role: fact.requirementRole ?? RequirementRow.defaultRole,
+          access: 'Shared',
+        }),
+      ])
+}
+
 /**
  * Specializes a call from an explicit prefix of its type arguments plus its value arguments. The
  * prefix seeds the substitution and the parameters past it are inferred exactly as they are when
@@ -568,35 +618,7 @@ export const seededSpecialization = (
     const parameter = declared.at(fact.ordinal)
     const writtenType = fact.type
     if (parameter === undefined || writtenType === undefined) continue
-    const argument: Type.GenericArgument | undefined =
-      parameter.kind === 'Value' && Type.isTypeArgument(writtenType)
-        ? writtenType
-        : parameter.kind === 'RequirementRow'
-          ? Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow'
-            ? Type.requirementRowArgument([], [writtenType])
-            : Type.isNominal(writtenType) ||
-                (Type.isParameter(writtenType) && writtenType.kind === 'Value')
-              ? Type.isParameter(writtenType)
-                ? Type.requirementRowArgumentFromRow(
-                    RowAlgebra.singleton(
-                      Type.requirementRowPolicy(),
-                      Type.requirementMemberShape(
-                        writtenType,
-                        'Shared',
-                        fact.requirementRole ?? RequirementRow.defaultRole,
-                      ),
-                      fact.syntax.span,
-                    ),
-                  )
-                : Type.requirementRowArgument([
-                    Object.freeze({
-                      capability: writtenType,
-                      role: fact.requirementRole ?? RequirementRow.defaultRole,
-                      access: 'Shared',
-                    }),
-                  ])
-              : undefined
-          : undefined
+    const argument = genericArgumentOfTypeArgument(parameter, fact)
     if (argument === undefined) {
       conflicts.push(
         Object.freeze({

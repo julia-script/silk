@@ -587,6 +587,49 @@ const storeMutable = Effect.fnUntraced(function* (
   yield* NativeStorage.storeMutable(context.storage, root, values)
 })
 
+/** Restores every retained relay payload lane at its verified resume label. */
+export const restoreRelayPayload = Effect.fnUntraced(function* (
+  context: OperationContext,
+  region: Mir.RunSuspendableEffectRegion,
+  name: string,
+) {
+  const { body, entry, lanePointers, program, resumeFrame, resumeThunks, storage, types } = context
+  if (resumeFrame === undefined) throw new RangeError('LLVM relay restore lost its frame argument')
+  const generated = resumeThunks.get(suspensionPointKey(region.point))
+  if (generated === undefined) throw new RangeError('LLVM relay restore lost generated control')
+  for (const field of generated.layout.payload) {
+    const type = entry.fn.localTypes.at(field.local.ordinal)
+    const targets = storage.mutableStorage.get(field.local.ordinal)
+    if (type === undefined || targets === undefined)
+      throw new RangeError('LLVM relay payload has no mutable restore storage')
+    const packed = NativeType.packLanes(
+      program.layout.target,
+      NativeType.lanesFor(types, type),
+      field.offset,
+    )
+    const values: Array<Value.Input> = []
+    for (const [ordinal, lane] of packed.entries.entries()) {
+      const target = targets.at(ordinal)
+      if (target === undefined) throw new RangeError('LLVM relay restore lost a payload lane')
+      const value = yield* FunctionBody.load(
+        body,
+        NativeType.laneType(types, lane.lane),
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          resumeFrame,
+          lane.offset,
+          `${name}_restore${field.slot}_${ordinal}_ptr`,
+        ),
+        `${name}_restore${field.slot}_${ordinal}`,
+      )
+      yield* FunctionBody.store(body, value, target)
+      values.push(value)
+    }
+    storage.locals.set(field.local.ordinal, Object.freeze(values))
+  }
+})
+
 const originateTransfer = Effect.fnUntraced(function* (
   context: OperationContext,
   region: Mir.SuspendEffectRegion,

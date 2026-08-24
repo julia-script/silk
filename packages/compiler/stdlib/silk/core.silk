@@ -96,12 +96,27 @@ pub fn make() -> SystemAllocator {
   return SystemAllocator {}
 }
 
-effect fn allocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
+effect fn storageRefused(error: Intrinsic.StorageFailure) -> Allocation ! OutOfMemoryError {
+  drop error
+  fail OutOfMemoryError {}
+}
+
+effect fn rawSystemAllocate(
+  self: &mut SystemAllocator,
+  layout: LayoutValue
+) -> Allocation ! Intrinsic.StorageFailure {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }
 
+effect fn systemAllocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
+  return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
+    rawSystemAllocate(move self, move layout),
+    storageRefused
+  )
+}
+
 impl Allocator for SystemAllocator {
-  allocate: SystemAllocator.allocate
+  allocate: SystemAllocator.systemAllocate
 }
 
 /// A failure to commit one complete standard-stream message.

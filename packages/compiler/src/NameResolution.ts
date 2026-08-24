@@ -515,11 +515,14 @@ export const resolveType = (
   if (result._tag === 'Intrinsic') {
     if (
       result.actor === 'Intrinsic' &&
-      second?.spelling === 'SharedCore' &&
+      (second?.spelling === 'SharedCore' ||
+        second?.spelling === 'Execution' ||
+        second?.spelling === 'Wake' ||
+        second?.spelling === 'StorageFailure') &&
       path.segments.length === 2
     ) {
-      const sharedCore = Type.intrinsicNominals.get('Intrinsic.SharedCore')
-      if (sharedCore !== undefined) return resolvedType(path, sharedCore)
+      const intrinsicType = Type.intrinsicNominals.get(`Intrinsic.${second.spelling}`)
+      if (intrinsicType !== undefined) return resolvedType(path, intrinsicType)
     }
     if (Type.isBuiltin(result.actor)) return resolvedType(path, result.actor)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))

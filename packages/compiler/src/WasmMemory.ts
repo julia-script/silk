@@ -40,7 +40,8 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   const escaping = new Set([
     ...formations.flatMap((operation) =>
       operation.sourceType._tag === 'Slice' ||
-      fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference'
+      fn.localTypes.at(operation.root.ordinal)?._tag === 'Reference' ||
+      fn.localTypes.at(operation.root.ordinal)?._tag === 'EffectBorrow'
         ? []
         : [operation.root.ordinal],
     ),

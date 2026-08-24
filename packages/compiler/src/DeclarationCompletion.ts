@@ -9,6 +9,7 @@ import type {
   ModuleHeaders,
   ServiceFact,
   StructFact,
+  TypeParameterFact,
 } from './DeclarationFacts.js'
 import {
   closeConformanceSelf,
@@ -48,6 +49,19 @@ import * as ResolutionSeams from './ResolutionSeams.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
+/** Makes resolved executable-representation bounds visible while closing their declaration. */
+const withResolvedRepresentationParameters = (
+  resolvers: ResolutionSeams.ResolutionSeams,
+  collected: ReadonlyArray<TypeParameterFact>,
+  resolved: ReadonlyArray<TypeParameterFact>,
+): ResolutionSeams.ResolutionSeams =>
+  collected.reduce((current, parameter, ordinal) => {
+    const closed = resolved.at(ordinal)
+    return closed === undefined || closed.type.representationBound === undefined
+      ? current
+      : ResolutionSeams.withRepresentationBinding(current, parameter.type, closed.type)
+  }, resolvers)
+
 export const complete = (
   self: DeclarationIndex.Index,
   resolvers: ResolutionSeams.ResolutionSeams,
@@ -80,11 +94,16 @@ export const complete = (
           self.modules,
           diagnostics,
         )
+        const typeParameterResolvers = withResolvedRepresentationParameters(
+          resolvers,
+          member.typeParameters,
+          resolvedTypeParameters,
+        )
         const memberResolvers: ResolutionSeams.ResolutionSeams =
           member.opaqueResult === undefined || opaqueResult === undefined
-            ? resolvers
+            ? typeParameterResolvers
             : ResolutionSeams.withRepresentationBinding(
-                resolvers,
+                typeParameterResolvers,
                 member.opaqueResult.binder.type,
                 opaqueResult.binder.type,
               )
@@ -92,7 +111,7 @@ export const complete = (
           const resolved = resolveDeclaredType(
             module.module,
             parameter.declaredType,
-            resolvers,
+            memberResolvers,
             self.modules,
           )
           diagnostics.push(...resolved.diagnostics)
@@ -113,21 +132,21 @@ export const complete = (
         const failureRow = resolveFailureRow(
           module.module,
           member.failureRow,
-          resolvers,
+          memberResolvers,
           self.modules,
         )
         diagnostics.push(...failureRow.diagnostics)
         const requirementRow = resolveRequirementRow(
           module.module,
           member.requirementRow,
-          resolvers,
+          memberResolvers,
           self.modules,
         )
         diagnostics.push(...requirementRow.diagnostics)
         const constraints = resolveConstraintFacts(
           module.module,
           member.constraints,
-          resolvers,
+          memberResolvers,
           self.modules,
         )
         diagnostics.push(...constraints.diagnostics)
@@ -151,6 +170,11 @@ export const complete = (
           self.modules,
           diagnostics,
         )
+        const memberResolvers = withResolvedRepresentationParameters(
+          resolvers,
+          member.typeParameters,
+          resolvedMemberTypeParameters,
+        )
         const operations = member.operations.map((operation) => {
           if (operation.opaqueResult !== undefined) {
             const owner = member.name._tag === 'Present' ? member.name.spelling : '<anonymous>'
@@ -166,22 +190,27 @@ export const complete = (
           const resolvedOperationTypeParameters = resolveBounds(
             module.module,
             operation.typeParameters,
-            resolvers,
+            memberResolvers,
             self.modules,
             diagnostics,
           )
           const opaqueResult = resolveOpaqueResult(
             module.module,
             operation.opaqueResult,
-            resolvers,
+            memberResolvers,
             self.modules,
             diagnostics,
           )
+          const operationTypeParameterResolvers = withResolvedRepresentationParameters(
+            memberResolvers,
+            operation.typeParameters,
+            resolvedOperationTypeParameters,
+          )
           const operationResolvers: ResolutionSeams.ResolutionSeams =
             operation.opaqueResult === undefined || opaqueResult === undefined
-              ? resolvers
+              ? operationTypeParameterResolvers
               : ResolutionSeams.withRepresentationBinding(
-                  resolvers,
+                  operationTypeParameterResolvers,
                   operation.opaqueResult.binder.type,
                   opaqueResult.binder.type,
                 )
@@ -189,7 +218,7 @@ export const complete = (
             const resolved = resolveDeclaredType(
               module.module,
               parameter.declaredType,
-              resolvers,
+              operationResolvers,
               self.modules,
             )
             diagnostics.push(...resolved.diagnostics)
@@ -208,19 +237,19 @@ export const complete = (
           const failureRow = resolveFailureRow(
             module.module,
             operation.failureRow,
-            resolvers,
+            operationResolvers,
             self.modules,
           )
           const requirementRow = resolveRequirementRow(
             module.module,
             operation.requirementRow,
-            resolvers,
+            operationResolvers,
             self.modules,
           )
           const constraints = resolveConstraintFacts(
             module.module,
             operation.constraints,
-            resolvers,
+            operationResolvers,
             self.modules,
           )
           diagnostics.push(

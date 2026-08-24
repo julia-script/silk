@@ -1,5 +1,7 @@
 import {
   authored,
+  callableLocalCleanup,
+  concreteCleanup,
   generated,
   lowerBorrowedWriteSelectors,
   lowerBorrowSelectors,
@@ -47,6 +49,7 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import {
   baseRunnerKey,
+  callableValueByIdentity,
   callableValueType,
   directCallableSectionValueType,
   effectCompositeShape,
@@ -800,6 +803,188 @@ export function lowerExpressionInner(
             ? undefined
             : lowerEffectExecution(fn, deferred, expression.type, expression.span)
         }
+        if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionDrive') {
+          const [executionExpression, branchExpression, completeExpression, suspendExpression] =
+            recipe.arguments
+          if (
+            executionExpression === undefined ||
+            branchExpression === undefined ||
+            completeExpression === undefined ||
+            suspendExpression === undefined
+          )
+            return undefined
+          const execution = lowerExpression(fn, executionExpression)
+          const branch = lowerExpression(fn, branchExpression)
+          const onComplete = lowerExpression(fn, completeExpression)
+          const onSuspend = lowerExpression(fn, suspendExpression)
+          const type = fn.type(expression.type)
+          const executionType =
+            execution === undefined ? undefined : fn.localTypes.at(execution.result.ordinal)
+          if (
+            execution === undefined ||
+            branch === undefined ||
+            onComplete === undefined ||
+            onSuspend === undefined ||
+            executionType?._tag !== 'Nominal' ||
+            !Type.isExecution(executionType.type) ||
+            type?._tag !== 'Nominal' ||
+            !Type.equals(type.type, Type.unit)
+          )
+            return undefined
+          const destination = fn.alloc(type)
+          const drivenResult = Type.typeArgumentAt(executionType.type, 0)
+          const result = drivenResult === undefined ? undefined : fn.type(drivenResult)
+          if (result === undefined || result._tag === 'EffectOutcome') return undefined
+          const resultLocal = fn.alloc(result)
+          const representedArguments = recipe.typeArguments.map((argument) =>
+            fn.semanticArgument(argument),
+          )
+          const callableTypeArguments = (ordinal: number): ReadonlyArray<Type.GenericArgument> => {
+            const argument = representedArguments.at(ordinal)
+            return argument !== undefined &&
+              Type.isExactRepresentationArgument(argument) &&
+              Type.isCallableIdentityArgument(argument.identity)
+              ? argument.identity.typeArguments
+              : Object.freeze([])
+          }
+          const callbackCleanup = (local: Mir.LocalId): CleanupPlan.CleanupPlan => {
+            const localType = fn.localTypes.at(local.ordinal)
+            return localType?._tag === 'CallableValue'
+              ? callableLocalCleanup(fn, localType)
+              : concreteCleanup(
+                  fn,
+                  localType === undefined ? Type.unit : Mir.semanticType(localType),
+                )
+          }
+          fn.emit(
+            Object.freeze({
+              _tag: 'ExecutionDrive' as const,
+              destination,
+              result: resultLocal,
+              execution: execution.result,
+              branch: branch.result,
+              onComplete: onComplete.result,
+              onSuspend: onSuspend.result,
+              executionAccess: 'Take' as const,
+              branchAccess: 'Take' as const,
+              completionAccess: 'Take' as const,
+              suspensionAccess: 'Take' as const,
+              completionCleanup: callbackCleanup(onComplete.result),
+              suspensionCleanup: callbackCleanup(onSuspend.result),
+              completionTypeArguments: callableTypeArguments(2),
+              suspensionTypeArguments: callableTypeArguments(3),
+              type,
+              provenance: authored(expression.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
+        }
+        if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionPark') {
+          const [registerExpression] = recipe.arguments
+          if (registerExpression === undefined) return undefined
+          const register = lowerExpression(fn, registerExpression)
+          const type = fn.type(expression.type)
+          const guardArgument = recipe.typeArguments.at(0)
+          const semanticGuard =
+            guardArgument === undefined ? undefined : fn.semanticArgument(guardArgument)
+          const representation = recipe.typeArguments.at(1)
+          const semanticRepresentation =
+            representation === undefined ? undefined : fn.semanticArgument(representation)
+          const guardType =
+            semanticGuard !== undefined &&
+            (Type.isTypeArgument(semanticGuard) ||
+              (typeof semanticGuard !== 'string' && semanticGuard._tag === 'RepresentedType'))
+              ? semanticGuard
+              : undefined
+          const registrationIdentity =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity
+              : undefined
+          const registrationTarget = registrationIdentity?.target
+          const registrationArguments = registrationIdentity?.typeArguments ?? Object.freeze([])
+          const resultCallableCandidates =
+            registrationTarget?._tag === 'Declaration'
+              ? fn.instances.flatMap((candidate) => {
+                  if (
+                    candidate.key.declaration.module !== registrationTarget.module ||
+                    candidate.key.declaration.name !== registrationTarget.name ||
+                    !registrationArguments.every((argument, ordinal) => {
+                      const candidateArgument = candidate.key.typeArguments.at(ordinal)
+                      return (
+                        candidateArgument !== undefined &&
+                        Type.equalsGenericArgument(argument, candidateArgument)
+                      )
+                    }) ||
+                    candidate.resultCallable === undefined
+                  )
+                    return []
+                  return [candidate.resultCallable]
+                })
+              : Object.freeze([])
+          const resultCallable = resultCallableCandidates.at(0)
+          const unambiguousResultCallable =
+            resultCallable !== undefined &&
+            resultCallableCandidates.every((candidate) =>
+              Type.equalsGenericArgument(resultCallable, candidate),
+            )
+              ? resultCallable
+              : undefined
+          const guard =
+            guardType === undefined
+              ? undefined
+              : (fn.type(guardType) ??
+                (Type.isCallable(guardType) && unambiguousResultCallable !== undefined
+                  ? (() => {
+                      const realized = callableValueByIdentity(
+                        fn.layout,
+                        unambiguousResultCallable,
+                        guardType,
+                      )
+                      return realized === undefined
+                        ? undefined
+                        : Object.freeze({ ...realized, type: guardType })
+                    })()
+                  : undefined))
+          const registerType =
+            register === undefined ? undefined : fn.localTypes.at(register.result.ordinal)
+          if (
+            register === undefined ||
+            registerType?._tag !== 'CallableValue' ||
+            guard === undefined ||
+            guard._tag === 'EffectOutcome' ||
+            type?._tag !== 'Nominal' ||
+            !Type.equals(type.type, Type.unit)
+          )
+            return undefined
+          const destination = fn.alloc(type)
+          const guardLocal = fn.alloc(guard)
+          const registrationTypeArguments =
+            semanticRepresentation !== undefined &&
+            Type.isExactRepresentationArgument(semanticRepresentation) &&
+            Type.isCallableIdentityArgument(semanticRepresentation.identity)
+              ? semanticRepresentation.identity.typeArguments
+              : Object.freeze([])
+          fn.emit(
+            Object.freeze({
+              _tag: 'ExecutionPark' as const,
+              destination,
+              guard: guardLocal,
+              register: register.result,
+              registerAccess: 'Take' as const,
+              guardCleanup:
+                guard._tag === 'CallableValue'
+                  ? callableLocalCleanup(fn, guard)
+                  : concreteCleanup(fn, Mir.semanticType(guard)),
+              registerCleanup: callableLocalCleanup(fn, registerType),
+              registrationTypeArguments,
+              type,
+              provenance: authored(expression.span),
+            }),
+          )
+          return Object.freeze({ result: destination })
+        }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
           const [layoutExpression] = recipe.arguments
           if (layoutExpression === undefined || fn.effectOutcome === undefined) return undefined
@@ -807,7 +992,7 @@ export function lowerExpressionInner(
           const type = fn.type(expression.type)
           const propagationType = fn.type(fn.effectOutcome)
           const failureTag = Type.failureMembers(fn.effectOutcome).findIndex((failure) =>
-            Type.equals(failure, Type.outOfMemoryError),
+            Type.equals(failure, Type.storageFailure),
           )
           if (
             loweredLayout === undefined ||
@@ -824,7 +1009,7 @@ export function lowerExpressionInner(
               destination,
               layout: loweredLayout.result,
               type,
-              failure: Type.outOfMemoryError,
+              failure: Type.storageFailure,
               propagationType,
               failureTag: failureTag + 1,
               provenance: authored(expression.span),

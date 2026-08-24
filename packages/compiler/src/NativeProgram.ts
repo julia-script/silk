@@ -9,7 +9,7 @@ import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Variable from '@silk-effect/llvm/Variable'
 import * as Verify from '@silk-effect/llvm/Verify'
 import * as Effect from 'effect/Effect'
-import type { CodegenRequest, SymbolEntry } from './Backend.js'
+import type { CodegenRequest, RuntimeFeature, SymbolEntry } from './Backend.js'
 import {
   BackendError,
   formatModuleViolations,
@@ -41,12 +41,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   {
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
+    readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
     readonly ir: string
     readonly bitcode: Uint8Array
   },
   BackendError | LlvmError.LlvmError
 > {
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
+  const runtimeFeatures = new Set<RuntimeFeature>()
   const i32Layout = Layout.entry(program.layout, 'i32')
   if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
     return yield* new BackendError({
@@ -155,7 +157,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     NativeType.valueLanesFor(typeContext, type)
   const laneType = (lane: Layout.CallingLane): LlvmType.Type =>
     NativeType.laneType(typeContext, lane)
-  const transferHeaderSize = program.layout.target.pointerSize * 3
+  // The fourth private word identifies the independently driven Execution owner.
+  const transferHeaderSize = program.layout.target.pointerSize * 4
   const originArgumentLanes = program.functions.flatMap((fn) =>
     (fn.suspension?.regions ?? []).flatMap((region) =>
       region._tag === 'SuspendEffectRegion'
@@ -416,6 +419,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   })
   yield* NativeFunction.emitBodies(
     Object.freeze({
+      runtimeFeatures,
       builder,
       program,
       request,
@@ -433,6 +437,9 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       laneType,
       transferHeaderSize,
       transferResultOffset,
+      transferStorageSize,
+      ...(childThunkType === undefined ? {} : { childThunkType }),
+      ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
       signedOverflowSignatures,
       unsignedOverflowSignatures,
       ...(malloc === undefined ? {} : { malloc }),
@@ -475,6 +482,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
     }),
   )
+  if (originThunks.size > 0 || resumeThunks.size > 0) runtimeFeatures.add('NestedSuspensionRuntime')
 
   // The module is verified before it is encoded: what reaches Clang has already been checked
   // for the SSA invariants Clang itself will not check on `-x ir` input.
@@ -501,6 +509,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
     ]),
+    runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     ir: yield* IrText.render(builder),
     bitcode: yield* Bitcode.encode(builder),
   }

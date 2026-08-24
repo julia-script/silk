@@ -65,11 +65,11 @@ interface CostCase {
     readonly directStaticRuns: number
   }
   readonly runners: ReadonlyArray<RunnerClassification>
-  readonly suspendability: {
-    readonly instances: ReadonlyArray<string>
-    readonly executions: ReadonlyArray<string>
-    readonly effects: ReadonlyArray<string>
-  }
+  readonly suspension: ReadonlyArray<{
+    readonly subject: string
+    readonly availability: 'Complete' | 'Open' | 'Unavailable'
+    readonly modes: ReadonlyArray<'NestedTransfer' | 'ExternalPark'>
+  }>
   readonly coroutineFrameDescriptors: number
   readonly pipeTokens: { readonly hir: number; readonly mir: number }
   readonly mirOperationTags: ReadonlyArray<TagCount>
@@ -143,9 +143,12 @@ it('captures synchronous Effect entry structure', () => {
     // encoder spelling change. The fixture's centralized reserved vocabulary classifies new tags.
     assert.isAbove(sample.mirOperationTags.length, 0, sample.id)
     assert.deepEqual(sample.suspensionOperationTags, [], sample.id)
-    assert.deepEqual(sample.suspendability.instances, [], sample.id)
-    assert.deepEqual(sample.suspendability.executions, [], sample.id)
-    assert.deepEqual(sample.suspendability.effects, [], sample.id)
+    assert.isTrue(
+      sample.suspension.every(
+        (fact) => fact.availability === 'Complete' && fact.modes.length === 0,
+      ),
+      sample.id,
+    )
     assert.strictEqual(sample.coroutineFrameDescriptors, 0, sample.id)
     // These values come from backend symbol tables, native-runtime requirements, LLVM
     // declarations, and Wasm imports. An unreferenced but linked suspension component is covered.

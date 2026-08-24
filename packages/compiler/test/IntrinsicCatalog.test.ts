@@ -138,6 +138,24 @@ effect fn storage() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
+  `import silk.core { Allocator, OutOfMemoryError }
+import silk.execution as Execution
+fn ready(state: &()) -> () { return () }
+fn complete(state: (), value: i32) -> () { return () }
+fn suspend(state: (), execution: Intrinsic.Execution<i32>) -> () { drop execution return () }
+effect fn packaged() -> () ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(effect { return 42 }, (), ready)
+  return run Execution.drive(move execution, (), complete, suspend)
+}
+pub fn main() -> i32 { return 42 }`,
+  `import silk.execution as Execution
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn parking() -> () { return run Execution.park(register) }
+pub fn main() -> i32 { return 42 }`,
   `import silk.effect as Effect
 import silk.i32 as i32
 struct Problem {}
@@ -503,6 +521,38 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
         targets: ['Evaluator', 'LLVM', 'Wasm'],
       },
     ],
+  )
+  const externalParking = Intrinsic.inventory().filter(
+    (entry) => entry.consumer === 'language:external-wake-parking',
+  )
+  assert.deepEqual(
+    externalParking.map((entry) => ({
+      operation: entry.operation,
+      signature: entry.signature,
+      unsafe: entry.unsafe,
+      targets: entry.targets,
+    })),
+    [
+      {
+        operation: 'Intrinsic.wake',
+        signature: 'fn Intrinsic.wake(wake: Wake) -> ()',
+        unsafe: false,
+        targets: ['Evaluator', 'LLVM', 'Wasm'],
+      },
+      {
+        operation: 'Intrinsic.park',
+        signature: 'fn Intrinsic.park<G, F>(register: F) -> Effect<()>',
+        unsafe: false,
+        targets: ['Evaluator', 'LLVM', 'Wasm'],
+      },
+    ],
+  )
+  assert.isFalse(
+    externalParking.some((entry) =>
+      /cancel|destroy|scheduler|timer|payload|allocator/i.test(
+        `${entry.operation} ${entry.signature} ${entry.hir}`,
+      ),
+    ),
   )
 })
 

@@ -60,6 +60,12 @@
     "namespace": "Effect"
   },
   {
+    "module": "silk/execution",
+    "path": "silk/execution.silk",
+    "layer": "portable",
+    "namespace": "Execution"
+  },
+  {
     "module": "silk/f32",
     "path": "silk/f32.silk",
     "layer": "portable",

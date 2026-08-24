@@ -11,6 +11,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
+const languageReferenceRoot = fileURLToPath(new URL('../../../docs/language/', import.meta.url))
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
 
 interface Block {
@@ -25,8 +26,8 @@ interface Block {
  * A block fenced ```silk is compiled whole. A block fenced ```silk ignore documents a rejected
  * form and is only checked for its presence, because the compiler is expected to refuse it.
  */
-const blocksOf = (file: string): ReadonlyArray<Block> => {
-  const text = readFileSync(join(documentationRoot, file), 'utf8')
+const blocksOf = (root: string, file: string): ReadonlyArray<Block> => {
+  const text = readFileSync(join(root, file), 'utf8')
   const lines = text.split('\n')
   const blocks: Array<Block> = []
   let start: number | undefined
@@ -56,7 +57,11 @@ const documents = readdirSync(documentationRoot)
   .filter((entry) => entry.endsWith('.md'))
   .sort()
 
-const blocks = documents.filter((entry) => !generated.has(entry)).flatMap(blocksOf)
+const blocks = documents
+  .filter((entry) => !generated.has(entry))
+  .flatMap((file) => blocksOf(documentationRoot, file))
+
+const featureExamples = blocksOf(languageReferenceRoot, 'local-shared-ownership.md')
 
 const diagnosticText = readFileSync(diagnosticSource, 'utf8')
 
@@ -156,6 +161,30 @@ for (const block of blocks) {
         [],
         `${block.file}:${block.line}\n${block.source}`,
       )
+    }),
+  )
+}
+
+for (const block of featureExamples) {
+  it.effect(`compiles and runs docs/language/${block.file}:${block.line}`, () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        `documentation/language-${block.file.replace(/[^A-Za-z0-9_-]/g, '-')}/${block.line}`,
+        ascii(block.source),
+        'wasm32-unknown-unknown',
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
+        [],
+        `docs/language/${block.file}:${block.line}\n${block.source}`,
+      )
+      const evaluated = Analysis.evaluate(snapshot)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag !== 'Completed') return
+      assert.strictEqual(evaluated.result._tag, 'IntegerValue')
+      if (evaluated.result._tag !== 'IntegerValue') return
+      assert.strictEqual(evaluated.result.value, 42n)
     }),
   )
 }

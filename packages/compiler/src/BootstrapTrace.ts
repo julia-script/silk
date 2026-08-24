@@ -246,6 +246,32 @@ export interface CoroutineFrameTraceEvent {
   readonly span: SourceSpan.SourceSpan
 }
 
+/** Canonical representation-free independent-execution transition event. */
+export interface ExecutionTraceEvent {
+  readonly _tag: 'ExecutionTransition'
+  readonly function: DeclarationFacts.CanonicalId
+  readonly package: number
+  readonly root: number
+  readonly generation: number
+  readonly event:
+    | 'Initialize'
+    | 'Drive'
+    | 'Register'
+    | 'Latch'
+    | 'RetainGuard'
+    | 'Relinquish'
+    | 'Notify'
+    | 'Eligible'
+    | 'Resume'
+    | 'Complete'
+    | 'Cancel'
+    | 'DestroyPending'
+    | 'Cleanup'
+    | 'Release'
+  readonly state: string
+  readonly span: SourceSpan.SourceSpan
+}
+
 /** One complete attempted host write, including its deterministic typed outcome. */
 export interface StandardStreamTraceEvent {
   readonly _tag: 'HostWrite'
@@ -302,6 +328,7 @@ export type TraceEvent =
   | CallableTraceEvent
   | AllocationTraceEvent
   | CoroutineFrameTraceEvent
+  | ExecutionTraceEvent
   | StandardStreamTraceEvent
   | OsCallTraceEvent
   | StringTraceEvent
@@ -342,6 +369,11 @@ export type BlockedReason =
       readonly ticket: number
       readonly state: 'Running' | 'Consumed' | 'Released'
       readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      /** Internal control result intercepted by ExecutionDrive before evaluation can finish. */
+      readonly _tag: 'ExecutionRelinquished'
+      readonly ticket: number
     }
   | { readonly _tag: 'MissingStandardStreams' }
   | { readonly _tag: 'MissingStandardInput' }

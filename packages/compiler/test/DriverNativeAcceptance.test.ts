@@ -29,6 +29,18 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 
+const runCompiled = Effect.fnUntraced(function* (
+  path: string,
+  nativeEnvironment: Readonly<Record<string, string>> | undefined,
+) {
+  return yield* Effect.sync(() =>
+    spawnSync(path, [], {
+      encoding: 'utf8',
+      ...(nativeEnvironment === undefined ? {} : { env: { ...process.env, ...nativeEnvironment } }),
+    }),
+  )
+})
+
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-driver-native-acceptance-'))
 afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
@@ -51,7 +63,9 @@ it.effect(
   'keeps the interpreter and native execution in agreement across the corpus',
   () =>
     Effect.gen(function* () {
+      const selected = process.env.SILK_NATIVE_CORPUS_CASE
       for (const program of nativeCorpus) {
+        if (selected !== undefined && program.name !== selected) continue
         const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
         assert.strictEqual(
           snapshot.mir._tag,
@@ -62,7 +76,10 @@ it.effect(
         )
         if (snapshot.mir._tag !== 'Available') continue
         const interpreted = Analysis.evaluate(snapshot)
-        const outcome = yield* compileSource(`corpus-${program.name}`, program.source)
+        const outcome = yield* compileSource(
+          `corpus-${program.name}`,
+          program.nativeSource ?? program.source,
+        )
 
         if (program.expected._tag === 'UnavailableEntry') {
           assert.strictEqual(outcome._tag, 'NoEntry', program.name)
@@ -75,16 +92,25 @@ it.effect(
           continue
         }
 
-        assert.strictEqual(outcome._tag, 'Compiled', program.name)
+        assert.strictEqual(
+          outcome._tag,
+          'Compiled',
+          outcome._tag === 'BackendFailed'
+            ? `${program.name}: ${outcome.error.message}\n${JSON.stringify(outcome.error.reason)}`
+            : program.name,
+        )
         if (outcome._tag !== 'Compiled') continue
 
         if (program.expected._tag === 'Completes') {
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
+          const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
           const nativeStatus = run.status === null ? null : BigInt(run.status)
+          // POSIX exposes only the low unsigned byte of a process exit value.
+          const interpretedStatus =
+            interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
           assert.strictEqual(
             nativeStatus,
-            interpreted._tag === 'Completed' ? interpreted.result.value : -1n,
+            interpretedStatus,
             `differential divergence on ${program.name}: interpreter ${
               interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
             }, native ${run.status}`,
@@ -93,7 +119,7 @@ it.effect(
         }
 
         if (program.expected._tag === 'Trap') {
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
+          const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
           assert.strictEqual(
             run.signal !== null || (run.status !== null && run.status !== 0),
             true,

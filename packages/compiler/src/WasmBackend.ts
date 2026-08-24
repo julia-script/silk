@@ -15,8 +15,12 @@ import * as Effect from 'effect/Effect'
 import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import * as CleanupPlan from './CleanupPlan.js'
+import * as CoroutineFrame from './CoroutineFrame.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as ExecutionPackage from './ExecutionPackage.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
+import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
@@ -592,6 +596,11 @@ interface Layout {
   readonly scratch64: number
   /** One preserved control-block address per statically nested local-shared cleanup. */
   readonly localSharedCleanupScratch: ReadonlyArray<number>
+  /** Distinct package authorities and continuation cursors for recursive execution cleanup. */
+  readonly executionCleanupScratch: ReadonlyArray<{
+    readonly package: number
+    readonly frame: number
+  }>
   readonly scratchF32?: readonly [number, number]
   readonly scratchF64?: readonly [number, number]
   readonly frameBase?: number
@@ -648,6 +657,8 @@ const operationCleanupPlans = (
       return Object.freeze([operation.cleanup])
     case 'SharedWithMut':
       return Object.freeze([operation.useCleanup, operation.conflictCleanup])
+    case 'ExecutionPark':
+      return Object.freeze([operation.guardCleanup, operation.registerCleanup])
     case 'PropagateEffectFailure':
     case 'RunEffect':
     case 'RunEffectValue':
@@ -662,6 +673,31 @@ const operationCleanupPlans = (
       )
     default:
       return Object.freeze([])
+  }
+}
+
+const containsExecutionCleanup = (cleanup: CleanupPlan.CleanupPlan): boolean => {
+  switch (cleanup._tag) {
+    case 'ExecutionCleanup':
+    case 'WakeCleanup':
+      return true
+    case 'RawBufferCleanup':
+      return containsExecutionCleanup(cleanup.allocation)
+    case 'HookCleanup':
+      return containsExecutionCleanup(cleanup.inner)
+    case 'StructCleanup':
+      return cleanup.fields.some((field) => containsExecutionCleanup(field.cleanup))
+    case 'ArrayCleanup':
+      return containsExecutionCleanup(cleanup.element)
+    case 'UnionCleanup':
+      return cleanup.cases.some((entry) => containsExecutionCleanup(entry.cleanup))
+    case 'CallableCleanup':
+    case 'EffectCleanup':
+      return cleanup.slots.some((slot) => containsExecutionCleanup(slot.cleanup))
+    case 'EffectCompositeCleanup':
+      return cleanup.alternatives.some(containsExecutionCleanup)
+    default:
+      return false
   }
 }
 
@@ -995,6 +1031,33 @@ const layoutOf = (
     declared.push(named(i32, `local_shared_cleanup_${depth}`))
   }
   nextInternal += localSharedCleanupScratch.length
+  const operations = MirVerification.operations(fn)
+  const needsExecutionCleanup =
+    operations.some(
+      (operation) =>
+        operation._tag === 'ExecutionFromAllocation' ||
+        operation._tag === 'ExecutionDrive' ||
+        operation._tag === 'ExecutionWake' ||
+        operation._tag === 'ExecutionPark',
+    ) || operations.flatMap(operationCleanupPlans).some(containsExecutionCleanup)
+  const executionCleanupDepth = needsExecutionCleanup
+    ? Math.max(1, plan.executionPackages.plans.length + 1)
+    : 0
+  const executionCleanupScratch = Object.freeze(
+    Array.from({ length: executionCleanupDepth }, (_, depth) =>
+      Object.freeze({
+        package: nextInternal + depth * 2,
+        frame: nextInternal + depth * 2 + 1,
+      }),
+    ),
+  )
+  for (const [depth] of executionCleanupScratch.entries()) {
+    declared.push(
+      named(i32, `execution_cleanup_package_${depth}`),
+      named(i32, `execution_cleanup_frame_${depth}`),
+    )
+  }
+  nextInternal += executionCleanupScratch.length * 2
   const needsScratchF32 = MirVerification.operations(fn).some(
     (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f32',
   )
@@ -1038,6 +1101,7 @@ const layoutOf = (
     scratch,
     scratch64,
     localSharedCleanupScratch,
+    executionCleanupScratch,
     ...(scratchF32 === undefined ? {} : { scratchF32 }),
     ...(scratchF64 === undefined ? {} : { scratchF64 }),
     declared: Object.freeze(declared),
@@ -1056,27 +1120,32 @@ const layoutOf = (
 const suspensionOperationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect'
-    ? operation.arguments
-    : Object.freeze([operation.effect, ...operation.arguments])
+  operation._tag === 'ExecutionPark'
+    ? Object.freeze([operation.register])
+    : operation._tag === 'RunEffect'
+      ? operation.arguments
+      : Object.freeze([operation.effect, ...operation.arguments])
 
 const matchesSuspensionOperation = (
   candidate: Mir.Operation,
   expected: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
 ): boolean =>
   candidate === expected ||
   ((candidate._tag === 'RunEffect' ||
     candidate._tag === 'RunEffectValue' ||
-    candidate._tag === 'ReifyEffect') &&
+    candidate._tag === 'ReifyEffect' ||
+    candidate._tag === 'ExecutionPark') &&
     candidate._tag === expected._tag &&
     candidate.destination.ordinal === expected.destination.ordinal &&
-    candidate.outcome.ordinal === expected.outcome.ordinal)
+    (candidate._tag === 'ExecutionPark' ||
+      expected._tag === 'ExecutionPark' ||
+      candidate.outcome.ordinal === expected.outcome.ordinal))
 
 interface WasmSuspensionFunctionContext {
   readonly regions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
@@ -1093,7 +1162,7 @@ const makeOperationContext = (
   suspension?: WasmSuspensionFunctionContext,
   skipInvocation = false,
 ) => {
-  const { layout, plan, resolve, memory } = emitter
+  const { layout, plan, resolve, resolveIndependent, memory, executionPackageCleanups } = emitter
   const slots = (local: Mir.LocalId): ReadonlyArray<number> => layout.slots.at(local.ordinal) ?? []
   const scalar = (local: Mir.LocalId): number => {
     const selected = slots(local)
@@ -1354,6 +1423,23 @@ const makeOperationContext = (
     if (range !== undefined) return range
     throw new RangeError('Wasm callable cleanup lost an owned capture lane')
   }
+  const effectEnvironmentForCleanup = (
+    cleanup: Extract<CleanupPlan.CleanupPlan, { readonly _tag: 'EffectCleanup' }>,
+  ): Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> => {
+    const environment = plan.effectEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<
+        LayoutPlan.EffectEnvironment,
+        { readonly _tag: 'EffectEnvironment' }
+      > =>
+        candidate._tag === 'EffectEnvironment' &&
+        Hir.sameExecutableSite(candidate.site, cleanup.site) &&
+        SilkType.equals(candidate.effect, cleanup.type),
+    )
+    if (environment !== undefined) return environment
+    throw new RangeError('Wasm Effect cleanup lost its exact stored environment')
+  }
   const hookReleaseWalk = (
     cleanup: CleanupPlan.CleanupPlan,
     addressAt: (byteOffset: number) => ReadonlyArray<Instr.Instr>,
@@ -1381,6 +1467,24 @@ const makeOperationContext = (
               ),
             ),
           })
+        case 'EffectCleanup': {
+          const environment = effectEnvironmentForCleanup(plan_)
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.flatMap((slot) => {
+                const field = environment.fields.at(slot.ordinal)
+                return field === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: slot.cleanup,
+                        state: byteOffset + field.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
         case 'StructCleanup': {
           const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
           if (representation?._tag !== 'Aggregate') return Object.freeze({})
@@ -1706,6 +1810,38 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup': {
+          const value = currentValues.at(0)
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (value === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package pointer')
+          }
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(scratch.package),
+              ...releaseExecutionBase(scratch.package),
+            ]),
+          })
+        }
+        case 'WakeCleanup': {
+          const value = currentValues.at(0)
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (value === undefined)
+            throw new RangeError('Wasm Wake cleanup lost its package pointer')
+          if (scratch === undefined)
+            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(scratch.package),
+              ...releaseWakeBase(scratch.package),
+            ]),
+          })
+        }
         case 'LocalSharedCoreCleanup': {
           const base = currentValues.at(0)
           const elementLayout = LayoutPlan.entry(plan, plan_.element)
@@ -1930,6 +2066,32 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup': {
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(scratch.package),
+              ...releaseExecutionBase(scratch.package),
+            ]),
+          })
+        }
+        case 'WakeCleanup': {
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(scratch.package),
+              ...releaseWakeBase(scratch.package),
+            ]),
+          })
+        }
         case 'AllocationCleanup':
         case 'RawBufferCleanup': {
           const contextOffset = SilkType.isRawBuffer(plan_.type)
@@ -1960,6 +2122,24 @@ const makeOperationContext = (
               ),
             ),
           })
+        case 'EffectCleanup': {
+          const environment = effectEnvironmentForCleanup(plan_)
+          return Object.freeze({
+            children: Object.freeze(
+              plan_.slots.flatMap((slot) => {
+                const field = environment.fields.at(slot.ordinal)
+                return field === undefined
+                  ? []
+                  : [
+                      Object.freeze({
+                        cleanup: slot.cleanup,
+                        state: currentOffset + field.offset,
+                      }),
+                    ]
+              }),
+            ),
+          })
+        }
         case 'StructCleanup': {
           const representation = LayoutPlan.entry(memory.plan, plan_.type)?.representation
           if (representation?._tag !== 'Aggregate') return Object.freeze({})
@@ -2035,19 +2215,306 @@ const makeOperationContext = (
     cleanup: CleanupPlan.CleanupPlan,
     local: Mir.LocalId,
   ): ReadonlyArray<Instr.Instr> =>
-    WasmCleanup.release(
-      hookReleaseInstructions(cleanup, local),
-      reclaimReleaseInstructions(
-        cleanup,
-        slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
-      ),
-    )
+    cleanup._tag === 'ExecutionCleanup'
+      ? releaseExecutionBase(scalar(local))
+      : cleanup._tag === 'WakeCleanup'
+        ? releaseWakeBase(scalar(local))
+        : WasmCleanup.release(
+            hookReleaseInstructions(cleanup, local),
+            reclaimReleaseInstructions(
+              cleanup,
+              slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
+            ),
+          )
+  function releaseWakeBase(base: number): ReadonlyArray<Instr.Instr> {
+    const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+      const package_ = plan.executionPackages.plans.at(ordinal)
+      const controlOffset =
+        package_ === undefined ? undefined : executionComponentOffset(package_, 'WakeControl')
+      const allocationOffset =
+        package_ === undefined
+          ? undefined
+          : executionComponentOffset(package_, 'AllocationAuthority')
+      if (package_ === undefined || controlOffset === undefined || allocationOffset === undefined)
+        return [Instr.op('unreachable')]
+      const allocationCleanup: Extract<
+        CleanupPlan.CleanupPlan,
+        { readonly _tag: 'AllocationCleanup' }
+      > = Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: SilkType.allocation,
+        ticket: 'ActiveReclaimTicket',
+      })
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory, { offset: controlOffset }),
+        Instr.i32Const(6),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          releaseAtAddress(allocationCleanup, base, allocationOffset),
+          [
+            Instr.localGet(base),
+            Instr.i32Const(6),
+            Instr.memoryAccess('i32.store', requireMemory().memory, { offset: controlOffset }),
+          ],
+        ),
+      ]
+    }
+    const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
+      ordinal >= plan.executionPackages.plans.length
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', requireMemory().memory, {
+              offset: plan.target.pointerSize,
+            }),
+            Instr.i32Const(ordinal),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, releasePackage(ordinal), select(ordinal + 1)),
+          ]
+    return select(0)
+  }
+  function releaseExecutionBase(base: number, cleanupDepth = 0): ReadonlyArray<Instr.Instr> {
+    const cleanupScratch = layout.executionCleanupScratch.at(cleanupDepth)
+    if (cleanupScratch === undefined) {
+      throw new RangeError(`Wasm Execution cleanup exceeded depth ${cleanupDepth}`)
+    }
+    const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+      const package_ = plan.executionPackages.plans.at(ordinal)
+      const cleanup =
+        package_ === undefined ? undefined : executionPackageCleanups.get(package_.provenance)
+      const bodyOffset =
+        package_ === undefined ? undefined : executionComponentOffset(package_, 'BodyEnvironment')
+      const allocationOffset =
+        package_ === undefined
+          ? undefined
+          : executionComponentOffset(package_, 'AllocationAuthority')
+      if (
+        package_ === undefined ||
+        cleanup === undefined ||
+        bodyOffset === undefined ||
+        allocationOffset === undefined
+      )
+        return [Instr.op('unreachable')]
+      const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
+      const endpointOffset = executionComponentOffset(package_, 'EndpointState')
+      const allocationCleanup: Extract<
+        CleanupPlan.CleanupPlan,
+        { readonly _tag: 'AllocationCleanup' }
+      > = Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: SilkType.allocation,
+        ticket: 'ActiveReclaimTicket',
+      })
+      const cleanupEndpoint = [
+        ...(callbackOffset === undefined
+          ? []
+          : releaseAtAddress(cleanup.callback, base, callbackOffset, 0, cleanupDepth + 1)),
+        ...(endpointOffset === undefined
+          ? []
+          : releaseAtAddress(cleanup.endpoint, base, endpointOffset, 0, cleanupDepth + 1)),
+      ]
+      const cleanupBody = releaseAtAddress(cleanup.body, base, bodyOffset, 0, cleanupDepth + 1)
+      const controlOffset = executionComponentOffset(package_, 'WakeControl')
+      const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
+      const runtime = emitter.suspensionRuntime
+      const frame = cleanupScratch.frame
+      const cleanupCurrentFrame = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+        if (runtime === undefined) return [Instr.op('unreachable')]
+        const entries = [...runtime.frameCleanups.entries()].sort(([left], [right]) => left - right)
+        const selected = entries.at(ordinal)
+        if (selected === undefined) return [Instr.op('unreachable')]
+        const [id, cleanup] = selected
+        return [
+          Instr.localGet(frame),
+          Instr.memoryAccess('i32.load', runtime.frameMemory, {
+            offset: plan.target.pointerSize,
+          }),
+          Instr.i32Const(id),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.localGet(frame), Instr.call(cleanup)],
+            cleanupCurrentFrame(ordinal + 1),
+          ),
+        ]
+      }
+      const cleanupFramePass = (): ReadonlyArray<Instr.Instr> => {
+        if (runtime === undefined || continuationOffset === undefined)
+          return [Instr.op('unreachable')]
+        return [
+          Instr.block(Instr.emptyBlockType, [
+            Instr.loop(Instr.emptyBlockType, [
+              Instr.localGet(frame),
+              Instr.op('i32.eqz'),
+              Instr.brIf(1),
+              ...cleanupCurrentFrame(0),
+              Instr.localGet(base),
+              Instr.localGet(frame),
+              Instr.memoryAccess('i32.load', runtime.frameMemory),
+              Instr.memoryAccess('i32.store', runtime.memory, {
+                offset: continuationOffset,
+              }),
+              Instr.localGet(frame),
+              Instr.globalGet(runtime.freeFrameHead),
+              Instr.memoryAccess('i32.store', runtime.frameMemory),
+              Instr.localGet(frame),
+              Instr.globalSet(runtime.freeFrameHead),
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', runtime.memory, {
+                offset: continuationOffset,
+              }),
+              Instr.localSet(frame),
+              Instr.br(0),
+            ]),
+          ]),
+        ]
+      }
+      const cleanupFrames =
+        continuationOffset === undefined || runtime === undefined
+          ? []
+          : [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
+              Instr.localSet(frame),
+              ...cleanupFramePass(),
+            ]
+      const cleanupInitial = [
+        ...cleanupEndpoint,
+        ...cleanupBody,
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupActivated = [
+        ...cleanupFrames,
+        ...cleanupEndpoint,
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupPackage = [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory),
+        Instr.i32Const(ExecutionTransition.tagOf('Initial')),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, cleanupInitial, cleanupActivated),
+      ]
+      const cancelDormant =
+        controlOffset === undefined
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.localGet(base),
+              Instr.i32Const(ExecutionTransition.tagOf('Destroyed')),
+              Instr.memoryAccess('i32.store', requireMemory().memory),
+              Instr.localGet(base),
+              Instr.i32Const(6),
+              Instr.memoryAccess('i32.store', requireMemory().memory, {
+                offset: controlOffset,
+              }),
+              ...cleanupFrames,
+              ...cleanupEndpoint,
+            ]
+      const cancelRegistration =
+        controlOffset === undefined
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', requireMemory().memory, { offset: controlOffset }),
+              Instr.i32Const(2),
+              Instr.op('i32.eq'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(base),
+                  Instr.i32Const(ExecutionTransition.tagOf('DestroyPending')),
+                  Instr.memoryAccess('i32.store', requireMemory().memory),
+                  Instr.localGet(base),
+                  Instr.i32Const(8),
+                  Instr.memoryAccess('i32.store', requireMemory().memory, {
+                    offset: controlOffset,
+                  }),
+                ],
+                cancelDormant,
+              ),
+            ]
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory),
+        Instr.i32Const(ExecutionTransition.tagOf('Notifying')),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.localGet(base),
+            Instr.i32Const(ExecutionTransition.tagOf('DestroyPending')),
+            Instr.memoryAccess('i32.store', requireMemory().memory),
+            ...(controlOffset === undefined
+              ? []
+              : [
+                  Instr.localGet(base),
+                  Instr.i32Const(8),
+                  Instr.memoryAccess('i32.store', requireMemory().memory, {
+                    offset: controlOffset,
+                  }),
+                ]),
+          ],
+          [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', requireMemory().memory),
+            Instr.i32Const(ExecutionTransition.tagOf('Running')),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, cancelRegistration, [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', requireMemory().memory),
+              Instr.i32Const(ExecutionTransition.tagOf('Dormant')),
+              Instr.op('i32.eq'),
+              Instr.ifElse(Instr.emptyBlockType, cancelDormant, cleanupPackage),
+            ]),
+          ],
+        ),
+      ]
+    }
+    const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
+      ordinal >= plan.executionPackages.plans.length
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', requireMemory().memory, {
+              offset: plan.target.pointerSize,
+            }),
+            Instr.i32Const(ordinal),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, releasePackage(ordinal), select(ordinal + 1)),
+          ]
+    return select(0)
+  }
   function releaseAtAddress(
     cleanup: CleanupPlan.CleanupPlan,
     address: number,
     byteOffset = 0,
     localSharedDepth = 0,
+    executionCleanupDepth = 0,
   ): ReadonlyArray<Instr.Instr> {
+    if (cleanup._tag === 'ExecutionCleanup') {
+      const scratch = layout.executionCleanupScratch.at(executionCleanupDepth)
+      if (scratch === undefined) {
+        throw new RangeError(`Wasm Execution cleanup exceeded depth ${executionCleanupDepth}`)
+      }
+      return [
+        ...loadAt(address, byteOffset),
+        Instr.localSet(scratch.package),
+        ...releaseExecutionBase(scratch.package, executionCleanupDepth),
+      ]
+    }
+    if (cleanup._tag === 'WakeCleanup') {
+      const scratch = layout.executionCleanupScratch.at(executionCleanupDepth)
+      if (scratch === undefined) {
+        throw new RangeError(`Wasm Wake cleanup exceeded depth ${executionCleanupDepth}`)
+      }
+      return [
+        ...loadAt(address, byteOffset),
+        Instr.localSet(scratch.package),
+        ...releaseWakeBase(scratch.package),
+      ]
+    }
     if (cleanup._tag === 'LocalSharedCoreCleanup') {
       const base = layout.localSharedCleanupScratch.at(localSharedDepth)
       const elementLayout = LayoutPlan.entry(plan, cleanup.element)
@@ -2076,7 +2543,13 @@ const makeOperationContext = (
         }),
         Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
         Instr.op('drop'),
-        ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset, localSharedDepth),
+        ...releaseAtAddress(
+          cleanup.allocation,
+          base,
+          block.allocationOffset,
+          localSharedDepth,
+          executionCleanupDepth,
+        ),
       ]
       return [
         ...loadAt(address, byteOffset),
@@ -2119,6 +2592,7 @@ const makeOperationContext = (
     layout,
     plan,
     resolve,
+    resolveIndependent,
     memory,
     suspension,
     skipInvocation,
@@ -2146,6 +2620,7 @@ const makeOperationContext = (
     reclaimReleaseInstructions,
     reclaimReleaseAtAddress,
     releaseInstructions,
+    releaseExecutionBase,
     releaseAtAddress,
     flushBorrowRoot,
   }
@@ -2623,6 +3098,758 @@ const emitSharedFromAllocationOperation = (
     instructions.push(...storeAt(base, value, operation.block.valueOffset + offset, lane))
   }
   return instructions
+}
+
+/** Reconstructs one target-private component address without publishing it in the common plan. */
+const executionComponentOffset = (
+  plan: ExecutionPackage.Plan,
+  role: ExecutionPackage.Component['role'],
+): number | undefined => {
+  let cursor = 0
+  for (const component of plan.components) {
+    cursor = alignUp(cursor, component.alignment)
+    if (component.role === role) return cursor
+    cursor += component.size
+  }
+  return undefined
+}
+
+const emitExecutionFromAllocationOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionFromAllocation' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExecutionPackage')
+  if (operation.plan.readinessStorage) state.emitter.runtimeFeatures.add('ExternalWakeCell')
+  const { layout, plan, slots, scalar, storeAt, requireMemory } = state
+  const allocation = slots(operation.allocation)
+  const base = allocation.at(0)
+  const bytes = allocation.at(1)
+  const alignment = allocation.at(2)
+  const destination = scalar(operation.destination)
+  const allocationOffset = executionComponentOffset(operation.plan, 'AllocationAuthority')
+  const bodyOffset = executionComponentOffset(operation.plan, 'BodyEnvironment')
+  if (
+    base === undefined ||
+    bytes === undefined ||
+    alignment === undefined ||
+    allocationOffset === undefined ||
+    bodyOffset === undefined
+  )
+    throw new RangeError('Wasm execution initialization lost its package placement')
+  const instructions: Array<Instr.Instr> = [
+    Instr.localGet(bytes),
+    Instr.i32Const(operation.plan.size),
+    Instr.op('i32.ne'),
+    Instr.localGet(alignment),
+    Instr.i32Const(operation.plan.alignment),
+    Instr.op('i32.ne'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.localGet(base),
+    Instr.localSet(destination),
+    Instr.localGet(base),
+    Instr.i32Const(0),
+    Instr.memoryAccess('i32.store', requireMemory().memory),
+  ]
+  const packageOrdinal = plan.executionPackages.plans.findIndex((candidate) =>
+    ExecutionPackage.equals(candidate, operation.plan),
+  )
+  if (packageOrdinal < 0)
+    throw new RangeError('Wasm execution initialization lost its canonical package ordinal')
+  instructions.push(
+    Instr.localGet(base),
+    Instr.i32Const(packageOrdinal),
+    Instr.memoryAccess('i32.store', requireMemory().memory, {
+      offset: plan.target.pointerSize,
+    }),
+  )
+  for (const role of ['WakeControl', 'InitialContinuationSegment'] as const) {
+    const offset = executionComponentOffset(operation.plan, role)
+    if (offset === undefined) continue
+    const words = role === 'WakeControl' ? 4 : 1
+    for (let ordinal = 0; ordinal < words; ordinal += 1)
+      instructions.push(
+        Instr.localGet(base),
+        Instr.i32Const(0),
+        Instr.memoryAccess('i32.store', requireMemory().memory, {
+          offset: offset + ordinal * plan.target.pointerSize,
+        }),
+      )
+  }
+  const storeValue = (
+    local: Mir.LocalId,
+    type: DeclarationFacts.SemanticType,
+    byteOffset: number,
+  ): void => {
+    const values = slots(local)
+    const lanes = layout.lanes.at(local.ordinal) ?? []
+    if (values.length !== lanes.length)
+      throw new RangeError('Wasm execution initialization lost an exact value lane')
+    lanes.forEach((lane, ordinal) => {
+      const value = values.at(ordinal)
+      const offset = LayoutVerify.laneOffset(plan, type, lane.path)
+      if (value === undefined || offset === undefined)
+        throw new RangeError('Wasm execution initialization lost a package lane offset')
+      instructions.push(...storeAt(base, value, byteOffset + offset, lane))
+    })
+  }
+  const storeExecutableValue = (
+    local: Mir.LocalId,
+    fallback: DeclarationFacts.SemanticType,
+    byteOffset: number,
+  ): void => {
+    const localType = layout.types.at(local.ordinal)
+    if (localType?._tag !== 'EffectValue' && localType?._tag !== 'CallableValue') {
+      storeValue(local, fallback, byteOffset)
+      return
+    }
+    if (localType.environment === undefined) {
+      storeValue(local, fallback, byteOffset)
+      return
+    }
+    const values = slots(local)
+    let ordinal = 0
+    if (localType._tag === 'EffectValue') {
+      for (const field of localType.environment.fields) {
+        for (const lane of LayoutPlan.effectFieldLanes(plan, field)) {
+          const value = values.at(ordinal)
+          const offset =
+            field.representation === 'Borrow'
+              ? 0
+              : LayoutVerify.laneOffset(plan, field.type, lane.path)
+          if (value === undefined || offset === undefined)
+            throw new RangeError('Wasm execution initialization lost an executable package lane')
+          instructions.push(...storeAt(base, value, byteOffset + field.offset + offset, lane))
+          ordinal += 1
+        }
+      }
+    } else {
+      for (const field of localType.environment.fields) {
+        for (const lane of LayoutPlan.callableFieldLanes(plan, field)) {
+          const value = values.at(ordinal)
+          const offset =
+            field.representation === 'Borrow'
+              ? 0
+              : LayoutVerify.laneOffset(plan, field.type, lane.path)
+          if (value === undefined || offset === undefined)
+            throw new RangeError('Wasm execution initialization lost an executable package lane')
+          instructions.push(...storeAt(base, value, byteOffset + field.offset + offset, lane))
+          ordinal += 1
+        }
+      }
+    }
+    if (ordinal !== values.length)
+      throw new RangeError('Wasm execution initialization retained a stale executable lane')
+  }
+  const allocationShape = LayoutPlan.callingShape(plan, SilkType.allocation)
+  if (allocationShape === undefined || allocationShape.lanes.length !== allocation.length)
+    throw new RangeError('Wasm execution initialization lost its reclaim authority lanes')
+  allocationShape.lanes.forEach((lane, ordinal) => {
+    const value = allocation.at(ordinal)
+    const offset = LayoutVerify.laneOffset(plan, SilkType.allocation, lane.path)
+    if (value === undefined || offset === undefined)
+      throw new RangeError('Wasm execution initialization lost reclaim provenance')
+    instructions.push(...storeAt(base, value, allocationOffset + offset, lane))
+  })
+  storeExecutableValue(operation.body, operation.plan.specialization.body, bodyOffset)
+  const endpointOffset = executionComponentOffset(operation.plan, 'EndpointState')
+  if (endpointOffset !== undefined)
+    storeValue(operation.endpoint, operation.plan.specialization.endpoint, endpointOffset)
+  const callbackOffset = executionComponentOffset(operation.plan, 'EndpointCallback')
+  if (callbackOffset !== undefined)
+    storeExecutableValue(operation.callback, operation.plan.specialization.callback, callbackOffset)
+  return instructions
+}
+
+const emitExecutionDriveOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionDrive' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExecutionDrive')
+  if (state.plan.executionPackages.plans.some((package_) => package_.readinessStorage))
+    state.emitter.runtimeFeatures.add('ReadinessNotification')
+  const {
+    emitter,
+    layout,
+    plan,
+    resolveIndependent,
+    slots,
+    scalar,
+    loadAt,
+    releaseAtAddress,
+    releaseInstructions,
+  } = state
+  const runtime = emitter.suspensionRuntime
+  const base = scalar(operation.execution)
+  const result = slots(operation.result)
+  const completeType = layout.types.at(operation.onComplete.ordinal)
+  const suspendType = layout.types.at(operation.onSuspend.ordinal)
+  if (completeType?._tag !== 'CallableValue')
+    throw new RangeError('Wasm execution drive lost its completion callable identity')
+  const completion = emitApplyCallableOperation(
+    Object.freeze({
+      _tag: 'ApplyCallable' as const,
+      destination: operation.destination,
+      callable: operation.onComplete,
+      typeArguments: operation.completionTypeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([operation.branch, operation.result]),
+      callableType: completeType.type,
+      access: completeType.type.mode,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: operation.type,
+      provenance: operation.provenance,
+    }),
+    state,
+  )
+  const suspension = emitApplyCallableOperation(
+    Object.freeze({
+      _tag: 'ApplyCallable' as const,
+      destination: operation.destination,
+      callable: operation.onSuspend,
+      typeArguments: operation.suspensionTypeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([operation.branch, operation.execution]),
+      callableType:
+        suspendType?._tag === 'CallableValue'
+          ? suspendType.type
+          : (() => {
+              throw new RangeError('Wasm execution drive lost its suspension callable identity')
+            })(),
+      access: 'Take' as const,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: operation.type,
+      provenance: operation.provenance,
+    }),
+    state,
+  )
+  const branchFor = (packageOrdinal: number): ReadonlyArray<Instr.Instr> => {
+    const package_ = plan.executionPackages.plans.at(packageOrdinal)
+    if (package_ === undefined) return [Instr.op('unreachable')]
+    const represented = package_.specialization.body
+    const representation = SilkType.isRepresented(represented)
+      ? represented.representation.argument
+      : undefined
+    const identity =
+      representation !== undefined && SilkType.isExactRepresentationArgument(representation)
+        ? representation.identity
+        : undefined
+    const environment =
+      identity !== undefined && SilkType.isEffectIdentityArgument(identity)
+        ? (LayoutPlan.effectEnvironmentByFieldIdentity(plan, identity.identity) ??
+          plan.effectEnvironments.find(
+            (
+              candidate,
+            ): candidate is Extract<
+              LayoutPlan.EffectEnvironment,
+              { readonly _tag: 'EffectEnvironment' }
+            > =>
+              candidate._tag === 'EffectEnvironment' &&
+              Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
+              identity.owner !== undefined &&
+              candidate.instance.declaration.module === identity.owner.declaration.module &&
+              candidate.instance.declaration.name === identity.owner.declaration.name &&
+              candidate.instance.typeArguments.length === identity.owner.typeArguments.length &&
+              candidate.instance.typeArguments.every((argument, ordinal) => {
+                const expected = identity.owner?.typeArguments.at(ordinal)
+                return (
+                  expected !== undefined &&
+                  SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(expected)
+                )
+              }),
+          ))
+        : undefined
+    const bodyOffset = executionComponentOffset(package_, 'BodyEnvironment')
+    const allocationOffset = executionComponentOffset(package_, 'AllocationAuthority')
+    const packageCleanup = state.emitter.executionPackageCleanups.get(package_.provenance)
+    if (
+      environment === undefined ||
+      bodyOffset === undefined ||
+      allocationOffset === undefined ||
+      packageCleanup === undefined
+    )
+      throw new RangeError(
+        `Wasm execution drive lost package authority: environment=${environment !== undefined}, body=${bodyOffset !== undefined}, allocation=${allocationOffset !== undefined}, cleanup=${packageCleanup !== undefined}`,
+      )
+    const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
+    const endpointOffset = executionComponentOffset(package_, 'EndpointState')
+    const controlOffset = executionComponentOffset(package_, 'WakeControl')
+    const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
+    const bodyOperands = environment.fields.flatMap((field) =>
+      LayoutPlan.effectFieldLanes(plan, field).flatMap((lane) => {
+        const offset =
+          field.representation === 'Borrow'
+            ? 0
+            : LayoutVerify.laneOffset(plan, field.type, lane.path)
+        return offset === undefined
+          ? [Instr.op('unreachable')]
+          : loadAt(base, bodyOffset + field.offset + offset, lane)
+      }),
+    )
+    const outcomeShape = LayoutPlan.callingShape(plan, environment.effect)
+    if (outcomeShape === undefined || outcomeShape.lanes.length !== result.length + 1)
+      return [Instr.op('unreachable')]
+    const allocationCleanup: Extract<
+      CleanupPlan.CleanupPlan,
+      { readonly _tag: 'AllocationCleanup' }
+    > = Object.freeze({
+      _tag: 'AllocationCleanup',
+      type: SilkType.allocation,
+      ticket: 'ActiveReclaimTicket',
+    })
+    if (continuationOffset === undefined)
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', state.requireMemory().memory),
+        Instr.i32Const(0),
+        Instr.op('i32.ne'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        Instr.localGet(base),
+        Instr.i32Const(1),
+        Instr.memoryAccess('i32.store', state.requireMemory().memory),
+        ...bodyOperands,
+        Instr.call(
+          resolveIndependent(
+            Hir.effectRunnerId(environment.instance.declaration, environment.site),
+            environment.instance.typeArguments,
+          ),
+        ),
+        ...[layout.scratch, ...result].reverse().map((slot) => Instr.localSet(slot)),
+        Instr.localGet(layout.scratch),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...releaseInstructions(operation.suspensionCleanup, operation.onSuspend),
+        Instr.localGet(base),
+        Instr.i32Const(5),
+        Instr.memoryAccess('i32.store', state.requireMemory().memory),
+        ...(callbackOffset === undefined
+          ? []
+          : releaseAtAddress(packageCleanup.callback, base, callbackOffset)),
+        ...(endpointOffset === undefined
+          ? []
+          : releaseAtAddress(packageCleanup.endpoint, base, endpointOffset)),
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+        ...completion,
+      ]
+    if (runtime === undefined)
+      throw new RangeError('Wasm execution drive lost its suspension runtime')
+    const notification =
+      controlOffset === undefined
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.localGet(base),
+            Instr.i32Const(3),
+            Instr.memoryAccess('i32.store', runtime.memory),
+            Instr.localGet(base),
+            Instr.i32Const(4),
+            Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+            ...emitExecutionReadyNotification(package_, base, state),
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', runtime.memory),
+            Instr.i32Const(7),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+              Instr.localGet(base),
+              Instr.i32Const(5),
+              Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+              Instr.localGet(base),
+              Instr.i32Const(4),
+              Instr.memoryAccess('i32.store', runtime.memory),
+            ]),
+          ]
+    const suspended = [
+      ...releaseInstructions(operation.completionCleanup, operation.onComplete),
+      Instr.i32Const(runtime.transferAddress + plan.target.pointerSize),
+      Instr.memoryAccess('i32.load', runtime.memory),
+      Instr.localSet(layout.scratch),
+      Instr.localGet(base),
+      Instr.localGet(layout.scratch),
+      Instr.memoryAccess('i32.store', runtime.memory, { offset: continuationOffset }),
+      Instr.i32Const(runtime.transferAddress + plan.target.pointerSize),
+      Instr.i32Const(0),
+      Instr.memoryAccess('i32.store', runtime.memory),
+      ...suspension,
+      ...(controlOffset === undefined
+        ? [Instr.localGet(base), Instr.i32Const(2), Instr.memoryAccess('i32.store', runtime.memory)]
+        : [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', runtime.memory),
+            Instr.i32Const(7),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', runtime.memory),
+              Instr.i32Const(6),
+              Instr.op('i32.eq'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [],
+                [
+                  Instr.localGet(base),
+                  Instr.memoryAccess('i32.load', runtime.memory, { offset: controlOffset }),
+                  Instr.i32Const(2),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(Instr.emptyBlockType, notification, [
+                    Instr.localGet(base),
+                    Instr.i32Const(2),
+                    Instr.memoryAccess('i32.store', runtime.memory),
+                  ]),
+                ],
+              ),
+            ]),
+          ]),
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.status),
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.activeExecution),
+    ]
+    const completed = [
+      Instr.localGet(layout.scratch),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      ...releaseInstructions(operation.suspensionCleanup, operation.onSuspend),
+      Instr.localGet(base),
+      Instr.i32Const(2),
+      Instr.memoryAccess('i32.store', state.requireMemory().memory),
+      ...(callbackOffset === undefined
+        ? []
+        : releaseAtAddress(packageCleanup.callback, base, callbackOffset)),
+      ...(endpointOffset === undefined
+        ? []
+        : releaseAtAddress(packageCleanup.endpoint, base, endpointOffset)),
+      ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+      ...completion,
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.activeExecution),
+    ]
+    return [
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', state.requireMemory().memory),
+      Instr.localTee(layout.scratch),
+      Instr.i32Const(0),
+      Instr.op('i32.eq'),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(4),
+      Instr.op('i32.eq'),
+      Instr.op('i32.or'),
+      Instr.op('i32.eqz'),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(4),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [
+          Instr.localGet(base),
+          Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
+          Instr.globalSet(runtime.externalResumeHead),
+          ...(controlOffset === undefined
+            ? []
+            : [
+                Instr.localGet(base),
+                Instr.i32Const(0),
+                Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+              ]),
+        ],
+        [Instr.i32Const(0), Instr.globalSet(runtime.externalResumeHead)],
+      ),
+      Instr.localGet(base),
+      Instr.globalSet(runtime.activeExecution),
+      Instr.localGet(base),
+      Instr.i32Const(1),
+      Instr.memoryAccess('i32.store', state.requireMemory().memory),
+      ...bodyOperands,
+      Instr.call(
+        resolveIndependent(
+          Hir.effectRunnerId(environment.instance.declaration, environment.site),
+          environment.instance.typeArguments,
+        ),
+      ),
+      ...[layout.scratch, ...result].reverse().map((slot) => Instr.localSet(slot)),
+      Instr.globalGet(runtime.status),
+      Instr.i32Const(2),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, suspended, completed),
+    ]
+  }
+  const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
+    ordinal >= plan.executionPackages.plans.length
+      ? [Instr.op('unreachable')]
+      : [
+          Instr.localGet(base),
+          Instr.memoryAccess('i32.load', state.requireMemory().memory, {
+            offset: plan.target.pointerSize,
+          }),
+          Instr.i32Const(ordinal),
+          Instr.op('i32.eq'),
+          Instr.ifElse(Instr.emptyBlockType, branchFor(ordinal), select(ordinal + 1)),
+        ]
+  const executionType = layout.types.at(operation.execution.ordinal)
+  const executionResult =
+    executionType?._tag === 'Nominal' && SilkType.isExecution(executionType.type)
+      ? SilkType.typeArgumentAt(executionType.type, 0)
+      : undefined
+  const matching = plan.executionPackages.plans.flatMap((package_, ordinal) =>
+    executionResult !== undefined &&
+    SilkType.equals(package_.specialization.result, executionResult)
+      ? [ordinal]
+      : [],
+  )
+  return matching.length === 1 ? branchFor(matching.at(0) ?? -1) : select(0)
+}
+
+/** Invokes the package's fixed readiness endpoint from its exact represented callable identity. */
+const emitExecutionReadyNotification = (
+  package_: ExecutionPackage.Plan,
+  base: number,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, resolve, loadAt, requireMemory } = state
+  const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
+  const endpointOffset = executionComponentOffset(package_, 'EndpointState')
+  const callback = package_.specialization.callback
+  const representation = SilkType.isRepresented(callback)
+    ? callback.representation.argument
+    : undefined
+  const identity =
+    representation !== undefined &&
+    SilkType.isExactRepresentationArgument(representation) &&
+    SilkType.isCallableIdentityArgument(representation.identity)
+      ? representation.identity
+      : undefined
+  const target =
+    identity === undefined ? undefined : Hir.callableTargetFromIdentity(identity.target)
+  const environment =
+    identity?.environment === undefined
+      ? undefined
+      : LayoutPlan.callableEnvironmentByIdentity(plan, identity.environment)
+  if (
+    callbackOffset === undefined ||
+    endpointOffset === undefined ||
+    identity === undefined ||
+    target?._tag !== 'DeclarationCallableTarget' ||
+    (identity.environment !== undefined && environment === undefined)
+  )
+    throw new RangeError('Wasm readiness notification lost its exact package callback authority')
+  const captureOperands = (environment?.fields ?? [])
+    .flatMap((field) => {
+      const lanes = LayoutPlan.callableFieldLanes(plan, field)
+      if (field.representation !== 'Borrow')
+        return [
+          Object.freeze({
+            parameterOrdinal: field.parameterOrdinal,
+            instructions: lanes.flatMap((lane) => {
+              const offset = LayoutVerify.laneOffset(plan, field.type, lane.path)
+              if (offset === undefined)
+                throw new RangeError('Wasm readiness callback lost a capture lane')
+              return loadAt(base, callbackOffset + field.offset + offset, lane)
+            }),
+          }),
+        ]
+      const shape = LayoutPlan.callingShape(plan, field.type)
+      if (shape === undefined)
+        throw new RangeError('Wasm readiness callback lost a borrowed capture shape')
+      return [
+        Object.freeze({
+          parameterOrdinal: field.parameterOrdinal,
+          instructions: shape.lanes.flatMap((lane) => {
+            const offset = LayoutVerify.laneOffset(plan, field.type, lane.path)
+            if (offset === undefined)
+              throw new RangeError('Wasm readiness callback lost a borrowed capture lane')
+            return [
+              ...loadAt(base, callbackOffset + field.offset),
+              Instr.memoryAccess(laneLoadMnemonic(plan, lane), requireMemory().memory, { offset }),
+            ]
+          }),
+        }),
+      ]
+    })
+    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+    .flatMap((capture) => capture.instructions)
+  return [
+    Instr.localGet(base),
+    ...(endpointOffset === 0 ? [] : [Instr.i32Const(endpointOffset), Instr.op('i32.add')]),
+    ...captureOperands,
+    Instr.call(
+      resolve(
+        target.declaration,
+        environment === undefined
+          ? identity.typeArguments
+          : LayoutPlan.callableTargetArguments(environment),
+      ),
+    ),
+  ]
+}
+
+const emitExecutionWakeOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionWake' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExternalWakeCell')
+  state.emitter.runtimeFeatures.add('ReadinessNotification')
+  const { scalar } = state
+  const memory = state.requireMemory().memory
+  const base = scalar(operation.wake)
+  const branches = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+    const package_ = state.plan.executionPackages.plans.at(ordinal)
+    if (package_ === undefined) return [Instr.op('unreachable')]
+    const control = executionComponentOffset(package_, 'WakeControl')
+    const selected =
+      control === undefined
+        ? [Instr.op('unreachable')]
+        : (() => {
+            const phase = (expected: number): ReadonlyArray<Instr.Instr> => [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', memory, { offset: control }),
+              Instr.i32Const(expected),
+              Instr.op('i32.eq'),
+            ]
+            const notify = [
+              Instr.localGet(base),
+              Instr.i32Const(3),
+              Instr.memoryAccess('i32.store', memory),
+              Instr.localGet(base),
+              Instr.i32Const(4),
+              Instr.memoryAccess('i32.store', memory, { offset: control }),
+              ...emitExecutionReadyNotification(package_, base, state),
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', memory),
+              Instr.i32Const(7),
+              Instr.op('i32.eq'),
+              Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+                Instr.localGet(base),
+                Instr.i32Const(5),
+                Instr.memoryAccess('i32.store', memory, { offset: control }),
+                Instr.localGet(base),
+                Instr.i32Const(4),
+                Instr.memoryAccess('i32.store', memory),
+              ]),
+            ]
+            return [
+              ...phase(1),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(base),
+                  Instr.i32Const(2),
+                  Instr.memoryAccess('i32.store', memory, { offset: control }),
+                ],
+                [
+                  ...phase(3),
+                  Instr.ifElse(Instr.emptyBlockType, notify, [
+                    ...phase(6),
+                    Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+                  ]),
+                ],
+              ),
+            ]
+          })()
+    return [
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory, { offset: state.plan.target.pointerSize }),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, selected, branches(ordinal + 1)),
+    ]
+  }
+  return branches(0)
+}
+
+const emitExecutionParkOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionPark' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('DormantContinuation')
+  state.emitter.runtimeFeatures.add('ExternalWakeCell')
+  const { emitter, layout, suspension, skipInvocation } = state
+  // The execution package, not the resumed coroutine frame, owns the registration guard after
+  // parking. Eligibility consumes it before this resume label is entered, so the skipped
+  // invocation must not materialize or release the transferred local a second time.
+  if (skipInvocation) return []
+  const runtime = emitter.suspensionRuntime
+  const region = suspension?.regions.get(operation)
+  const registerType = layout.types.at(operation.register.ordinal)
+  const guardType = layout.types.at(operation.guard.ordinal)
+  if (
+    runtime === undefined ||
+    region?._tag !== 'RunSuspendableEffectRegion' ||
+    registerType?._tag !== 'CallableValue' ||
+    guardType === undefined
+  )
+    return [Instr.op('unreachable')]
+  const registration = emitApplyCallableOperation(
+    Object.freeze({
+      _tag: 'ApplyCallable' as const,
+      destination: operation.guard,
+      callable: operation.register,
+      typeArguments: operation.registrationTypeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([]),
+      callableType: registerType.type,
+      access: 'Take' as const,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: guardType,
+      provenance: operation.provenance,
+    }),
+    state,
+    Object.freeze([Object.freeze([Instr.globalGet(runtime.activeExecution)])]),
+  )
+  const select = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+    const package_ = state.plan.executionPackages.plans.at(ordinal)
+    if (package_ === undefined) return [Instr.op('unreachable')]
+    const control = executionComponentOffset(package_, 'WakeControl')
+    const selected =
+      control === undefined
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+            Instr.i32Const(0),
+            Instr.op('i32.ne'),
+            Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.i32Const(1),
+            Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, {
+              offset: control + state.plan.target.pointerSize,
+            }),
+            Instr.i32Const(1),
+            Instr.op('i32.add'),
+            Instr.memoryAccess('i32.store', runtime.memory, {
+              offset: control + state.plan.target.pointerSize,
+            }),
+            ...registration,
+            Instr.globalGet(runtime.activeExecution),
+            Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+            Instr.i32Const(2),
+            Instr.op('i32.ne'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                Instr.globalGet(runtime.activeExecution),
+                Instr.i32Const(3),
+                Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+              ],
+              [],
+            ),
+            Instr.i32Const(2),
+            Instr.globalSet(runtime.status),
+            ...(suspension?.relay(region) ?? []),
+          ]
+    return [
+      Instr.globalGet(runtime.activeExecution),
+      Instr.memoryAccess('i32.load', runtime.memory, {
+        offset: state.plan.target.pointerSize,
+      }),
+      Instr.i32Const(ordinal),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, selected, select(ordinal + 1)),
+    ]
+  }
+  return select(0)
 }
 
 const emitSharedCloneOperation = (
@@ -3140,6 +4367,10 @@ const emitBeginLoanOperation = (
   } else {
     const rootType = layout.types.at(operation.root.ordinal)
     const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+    const borrowedRoot = rootType?._tag === 'EffectBorrow'
+    const borrowedPointer = borrowedRoot
+      ? layout.borrowPointers.get(operation.root.ordinal)
+      : undefined
     if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
       const [selector, ...suffixSelectors] = operation.selectors
       const [base, length] = slots(operation.root)
@@ -3235,12 +4466,22 @@ const emitBeginLoanOperation = (
     }
     const planned = memory?.frame.roots.get(operation.root.ordinal)
     const [address, length] = slots(operation.destination)
-    if (
-      rootSemantic === undefined ||
-      address === undefined ||
-      (!SilkType.isReference(rootSemantic) && planned === undefined)
-    ) {
+    if (rootSemantic === undefined || address === undefined) {
       throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+    }
+    let rootAddress: ReadonlyArray<Instr.Instr>
+    if (borrowedRoot) {
+      if (borrowedPointer === undefined) {
+        throw new RangeError('Wasm borrow formation lost its inherited borrow pointer')
+      }
+      rootAddress = [Instr.localGet(borrowedPointer)]
+    } else if (SilkType.isReference(rootSemantic)) {
+      rootAddress = [Instr.localGet(scalar(operation.root))]
+    } else {
+      if (planned === undefined) {
+        throw new RangeError('Wasm borrow formation lost its address-taken frame root')
+      }
+      rootAddress = [...materializeRoot(operation.root), ...frameAddress(planned.offset)]
     }
     const instructions: Array<Instr.Instr> = []
     for (const offset of dynamicOffsets) {
@@ -3252,9 +4493,7 @@ const emitBeginLoanOperation = (
       )
     }
     instructions.push(
-      ...(SilkType.isReference(rootSemantic)
-        ? [Instr.localGet(scalar(operation.root))]
-        : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
+      ...rootAddress,
       ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
     )
     for (const offset of dynamicOffsets) {
@@ -4474,6 +5713,7 @@ const emitCallOperation = (
 const emitApplyCallableOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }>,
   state: WasmOperationContext,
+  explicitArguments?: ReadonlyArray<ReadonlyArray<Instr.Instr>>,
 ): ReadonlyArray<Instr.Instr> => {
   const { layout, plan, resolve, memory, slots, scalar, reloadReachableRoots } = state
 
@@ -4799,9 +6039,10 @@ const emitApplyCallableOperation = (
   }
   const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
   return [
-    ...operation.arguments.flatMap((argument) =>
-      slots(argument).map((slot) => Instr.localGet(slot)),
-    ),
+    ...(
+      explicitArguments ??
+      operation.arguments.map((argument) => slots(argument).map((slot) => Instr.localGet(slot)))
+    ).flat(),
     ...captureOperands,
     Instr.call(resolve(target.declaration, operation.typeArguments)),
     ...(diverges
@@ -5549,6 +6790,14 @@ const emitOperationWithContext = (
       return emitRawBufferFromOperation(operation, context)
     case 'SharedFromAllocation':
       return emitSharedFromAllocationOperation(operation, context)
+    case 'ExecutionFromAllocation':
+      return emitExecutionFromAllocationOperation(operation, context)
+    case 'ExecutionDrive':
+      return emitExecutionDriveOperation(operation, context)
+    case 'ExecutionWake':
+      return emitExecutionWakeOperation(operation, context)
+    case 'ExecutionPark':
+      return emitExecutionParkOperation(operation, context)
     case 'SharedClone':
       return emitSharedCloneOperation(operation, context)
     case 'SharedWithMut':
@@ -5676,7 +6925,16 @@ interface WasmSuspensionRuntime {
   readonly resumes: ReadonlyMap<string, number>
   readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
   readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
+  /** Canonically ordered cleanup thunk selected by each retained frame's resume id. */
+  readonly frameCleanups: ReadonlyMap<number, FuncActor.Func>
   readonly frameStackPointer: Global.Global
+  /** Non-LIFO-safe free list for fixed-size continuation frame slots. */
+  readonly freeFrameHead: Global.Global
+  readonly frameSlotSize: number
+  /** Package selected by the currently running independent root; zero outside ExecutionDrive. */
+  readonly activeExecution: Global.Global
+  /** Retained frame head restored by the next owner-selected drive. */
+  readonly externalResumeHead: Global.Global
   readonly frameMemory: Memory.Memory
   readonly memory: Memory.Memory
 }
@@ -5848,7 +7106,7 @@ const emitBody = (
     if (suspensionRuntime === undefined || coroutineFrame === undefined || scratch === undefined)
       return []
     const frameAlignment = Math.max(16, coroutineFrame.alignment)
-    const frameSize = alignUp(Math.max(1, coroutineFrame.size), frameAlignment)
+    const frameSize = suspensionRuntime.frameSlotSize
     const reportStorageExhaustion = [
       Instr.i32Const(statusAddress),
       Instr.i32Const(statusStackOverflow),
@@ -5861,43 +7119,55 @@ const emitBody = (
         Instr.emptyBlockType,
         [],
         [
-          Instr.globalGet(suspensionRuntime.frameStackPointer),
-          Instr.i32Const(frameAlignment - 1),
-          Instr.op('i32.add'),
-          Instr.i32Const(-frameAlignment),
-          Instr.op('i32.and'),
+          Instr.globalGet(suspensionRuntime.freeFrameHead),
           Instr.localTee(scratch.frame),
-          Instr.i32Const(frameSize),
-          Instr.op('i32.add'),
-          Instr.localTee(scratch.append),
-          Instr.localGet(scratch.frame),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
-          Instr.localGet(scratch.append),
-          Instr.i32Const(1),
-          Instr.op('i32.sub'),
-          Instr.i32Const(16),
-          Instr.op('i32.shr_u'),
-          Instr.i32Const(1),
-          Instr.op('i32.add'),
-          Instr.localTee(scratch.next),
-          Instr.memorySize(suspensionRuntime.frameMemory),
-          Instr.op('i32.gt_u'),
           Instr.ifElse(
             Instr.emptyBlockType,
             [
-              Instr.localGet(scratch.next),
-              Instr.memorySize(suspensionRuntime.frameMemory),
-              Instr.op('i32.sub'),
-              Instr.memoryGrow(suspensionRuntime.frameMemory),
-              Instr.i32Const(-1),
-              Instr.op('i32.eq'),
-              Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+              Instr.localGet(scratch.frame),
+              Instr.memoryAccess('i32.load', suspensionRuntime.frameMemory),
+              Instr.globalSet(suspensionRuntime.freeFrameHead),
             ],
-            [],
+            [
+              Instr.globalGet(suspensionRuntime.frameStackPointer),
+              Instr.i32Const(frameAlignment - 1),
+              Instr.op('i32.add'),
+              Instr.i32Const(-frameAlignment),
+              Instr.op('i32.and'),
+              Instr.localTee(scratch.frame),
+              Instr.i32Const(frameSize),
+              Instr.op('i32.add'),
+              Instr.localTee(scratch.append),
+              Instr.localGet(scratch.frame),
+              Instr.op('i32.lt_u'),
+              Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+              Instr.localGet(scratch.append),
+              Instr.i32Const(1),
+              Instr.op('i32.sub'),
+              Instr.i32Const(16),
+              Instr.op('i32.shr_u'),
+              Instr.i32Const(1),
+              Instr.op('i32.add'),
+              Instr.localTee(scratch.next),
+              Instr.memorySize(suspensionRuntime.frameMemory),
+              Instr.op('i32.gt_u'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(scratch.next),
+                  Instr.memorySize(suspensionRuntime.frameMemory),
+                  Instr.op('i32.sub'),
+                  Instr.memoryGrow(suspensionRuntime.frameMemory),
+                  Instr.i32Const(-1),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+                ],
+                [],
+              ),
+              Instr.localGet(scratch.append),
+              Instr.globalSet(suspensionRuntime.frameStackPointer),
+            ],
           ),
-          Instr.localGet(scratch.append),
-          Instr.globalSet(suspensionRuntime.frameStackPointer),
         ],
       ),
     ]
@@ -5910,7 +7180,13 @@ const emitBody = (
           Instr.localGet(scratch.frame),
           Instr.ifElse(
             Instr.emptyBlockType,
-            [Instr.localGet(scratch.frame), Instr.globalSet(suspensionRuntime.frameStackPointer)],
+            [
+              Instr.localGet(scratch.frame),
+              Instr.globalGet(suspensionRuntime.freeFrameHead),
+              Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
+              Instr.localGet(scratch.frame),
+              Instr.globalSet(suspensionRuntime.freeFrameHead),
+            ],
             [],
           ),
         ]
@@ -6202,8 +7478,14 @@ const emitBody = (
           ]
         })
       })
-      const outcomeLanes = layout.lanes.at(region.operation.outcome.ordinal) ?? []
-      const outcomeSlots = layout.slots.at(region.operation.outcome.ordinal) ?? []
+      const outcomeLanes =
+        region.operation._tag === 'ExecutionPark'
+          ? []
+          : (layout.lanes.at(region.operation.outcome.ordinal) ?? [])
+      const outcomeSlots =
+        region.operation._tag === 'ExecutionPark'
+          ? []
+          : (layout.slots.at(region.operation.outcome.ordinal) ?? [])
       const packedOutcome = packWasmLanes(
         outcomeLanes,
         plan,
@@ -6313,6 +7595,7 @@ const emitBody = (
 
 interface EmittedProgram {
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly runtimeFeatures: ReadonlyArray<Backend.RuntimeFeature>
   readonly ir: string
   readonly bitcode: Uint8Array
 }
@@ -6350,6 +7633,19 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   // what the LLVM backend's `strip` flag does with its own metadata.
   const debug = request.mode === 'debug'
   const builder = yield* Builder.make(debug ? { moduleName: program.module } : {})
+  const runtimeFeatures = new Set<Backend.RuntimeFeature>()
+  const executionPackageCleanups = new Map<string, WasmEmitContext.ExecutionPackageCleanup>()
+  for (const operation of program.functions.flatMap(MirVerification.operations)) {
+    if (operation._tag !== 'ExecutionFromAllocation') continue
+    executionPackageCleanups.set(
+      operation.plan.provenance,
+      Object.freeze({
+        body: operation.bodyCleanup,
+        endpoint: operation.endpointCleanup,
+        callback: operation.callbackCleanup,
+      }),
+    )
+  }
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
   const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     if (type._tag === 'EffectBorrow')
@@ -6373,6 +7669,14 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   const resumeIds = suspensionRecords.resumeIds
   const coroutineFrames = suspensionRecords.frames
   const coroutineFrameStates = suspensionRecords.layouts
+  const coroutineFrameSlotAlignment = Math.max(
+    16,
+    ...[...coroutineFrames.values()].map((frame) => frame.alignment),
+  )
+  const coroutineFrameSlotSize = alignUp(
+    Math.max(1, ...[...coroutineFrames.values()].map((frame) => frame.size)),
+    coroutineFrameSlotAlignment,
+  )
   const transferHeaderSize = program.layout.target.pointerSize * 3
   const originArgumentSize = program.functions.reduce((maximum, fn) => {
     const size = (fn.suspension?.regions ?? []).reduce((innerMaximum, region) => {
@@ -6554,6 +7858,33 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         debug ? { name: 'silk_coroutine_frame_stack_pointer' } : {},
       )
     : undefined
+  const suspendFreeFrameHead = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_coroutine_frame_free_head' } : {},
+      )
+    : undefined
+  const activeExecution = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_active_execution' } : {},
+      )
+    : undefined
+  const externalResumeHead = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_external_resume_head' } : {},
+      )
+    : undefined
   const heapAllocate =
     needsHeap && privateMemory !== undefined && heapPointer !== undefined
       ? yield* FuncActor.declare(
@@ -6650,32 +7981,55 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ),
       )
     }
+  const frameCleanupThunks = new Map<number, FuncActor.Func>()
+  if (suspensionEnabled && executionPackageCleanups.size > 0)
+    for (const [ordinal, record] of resumeRecords.entries()) {
+      const id = ordinal + 1
+      frameCleanupThunks.set(
+        id,
+        yield* FuncActor.declare(
+          builder,
+          yield* WasmType.func(builder, [i32], []),
+          debug ? { name: `silk_suspend_cleanup_${id}_${record.region.point.ordinal}` } : {},
+        ),
+      )
+    }
   const machine = declared.find((entry) =>
     Mir.matchesInstanceKey(entry.fn, Mir.machineEntry(program)),
   )
+  const independentDrivers = new Map<string, FuncActor.Func>()
+  for (const entry of declared) {
+    if (!entry.suspendable) continue
+    const signature = yield* WasmType.func(
+      builder,
+      entry.fn.regions.length === 0
+        ? []
+        : entry.fn.localTypes
+            .slice(0, entry.fn.parameterCount)
+            .flatMap((type) => lanesFor(type).map((lane) => laneValueType(program.layout, lane))),
+      lanesFor(entry.fn.result).map((lane) => laneValueType(program.layout, lane)),
+    )
+    independentDrivers.set(
+      Instances.keyText(entry.fn.instance),
+      yield* FuncActor.declare(
+        builder,
+        signature,
+        debug ? { name: `${entry.symbol}$independent_root` } : {},
+      ),
+    )
+  }
   const driver =
-    suspensionEnabled && machine !== undefined
-      ? yield* FuncActor.declare(
-          builder,
-          yield* WasmType.func(
-            builder,
-            machine.fn.regions.length === 0
-              ? []
-              : machine.fn.localTypes
-                  .slice(0, machine.fn.parameterCount)
-                  .flatMap((type) =>
-                    lanesFor(type).map((lane) => laneValueType(program.layout, lane)),
-                  ),
-            lanesFor(machine.fn.result).map((lane) => laneValueType(program.layout, lane)),
-          ),
-          debug ? { name: symbolFor(machine.fn, Mir.machineEntry(program)) } : {},
-        )
-      : undefined
+    machine === undefined
+      ? undefined
+      : independentDrivers.get(Instances.keyText(machine.fn.instance))
   const suspensionRuntime: WasmSuspensionRuntime | undefined =
     suspendStatus === undefined ||
     suspendResumePath === undefined ||
     suspendResumeFrame === undefined ||
     suspendFrameStackPointer === undefined ||
+    suspendFreeFrameHead === undefined ||
+    activeExecution === undefined ||
+    externalResumeHead === undefined ||
     coroutineFrameMemory === undefined ||
     transferAddress === undefined ||
     privateMemory === undefined
@@ -6691,10 +8045,17 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           resumes: resumeIds,
           frames: coroutineFrames,
           layouts: coroutineFrameStates,
+          frameCleanups: frameCleanupThunks,
           frameStackPointer: suspendFrameStackPointer,
+          freeFrameHead: suspendFreeFrameHead,
+          frameSlotSize: coroutineFrameSlotSize,
+          activeExecution,
+          externalResumeHead,
           frameMemory: coroutineFrameMemory,
           memory: privateMemory,
         })
+  if (suspensionRuntime !== undefined && (originThunks.size > 0 || resumeThunks.size > 0))
+    runtimeFeatures.add('NestedSuspensionRuntime')
 
   const resolve = (
     targetId: DeclarationFacts.CanonicalId,
@@ -6718,6 +8079,125 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       )
     }
     return target.handle
+  }
+  const resolveIndependent = (
+    targetId: DeclarationFacts.CanonicalId,
+    typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+  ): FuncActor.Func => {
+    const target = declared.find((candidate) =>
+      Mir.matchesInstance(candidate.fn, targetId, typeArguments),
+    )
+    if (target === undefined) return resolve(targetId, typeArguments)
+    return independentDrivers.get(Instances.keyText(target.fn.instance)) ?? target.handle
+  }
+
+  for (const [ordinal, record] of frameCleanupThunks.size === 0 ? [] : resumeRecords.entries()) {
+    const id = ordinal + 1
+    const handle = frameCleanupThunks.get(id)
+    const frameLayout = coroutineFrameStates.get(Backend.suspensionPointKey(record.region.point))
+    if (
+      handle === undefined ||
+      frameLayout === undefined ||
+      privateMemory === undefined ||
+      coroutineFrameMemory === undefined ||
+      stackPointer === undefined ||
+      heapPointer === undefined
+    )
+      throw new RangeError('Wasm frame cleanup thunk lost its typed frame plan')
+    const { suspension: _suspension, ...cleanupFunctionBase } = record.fn
+    const fields = CoroutineFrame.cleanupReleases(record.fn, frameLayout)
+    const affineLocals = new Set(fields.map((field) => field.local.ordinal))
+    const provenance = record.region.provenance
+    const cleanupFunction: Mir.MirFunction = Object.freeze({
+      ...cleanupFunctionBase,
+      parameterCount: 1,
+      localTypes: Object.freeze([
+        Object.freeze({ _tag: 'usize' as const }),
+        ...record.fn.localTypes.map((type, local) =>
+          affineLocals.has(local) ? type : Object.freeze({ _tag: 'usize' as const }),
+        ),
+      ]),
+      entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
+      regions: Object.freeze([
+        Object.freeze({
+          _tag: 'CleanupRegion' as const,
+          id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+          releases: Object.freeze(
+            fields.map((field) =>
+              Object.freeze({
+                _tag: 'Drop' as const,
+                local: Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 }),
+                cleanup: field.access.cleanup,
+                provenance,
+              }),
+            ),
+          ),
+          outcome: Object.freeze({
+            _tag: 'Trap' as const,
+            reason: 'frame cleanup helper',
+            provenance,
+          }),
+        }),
+      ]),
+    })
+    const cleanupFrame = framePlan(cleanupFunction, program.layout)
+    const cleanupLayout = layoutOf(cleanupFunction, program.layout, cleanupFrame, debug, false)
+    const memory: MemoryContext = Object.freeze({
+      memory: privateMemory,
+      stackPointer,
+      stackBase: staticEnd,
+      stackLimit: needsHeap ? stackLimit : undefined,
+      heapPointer,
+      frame: cleanupFrame,
+      plan: program.layout,
+      staticOffsets,
+      ...(standardWrite === undefined ? {} : { standardWrite }),
+      ...(heapAllocate === undefined ? {} : { heapAllocate }),
+      ...(heapRelease === undefined ? {} : { heapRelease }),
+    })
+    const operation = makeOperationContext(
+      Object.freeze({
+        runtimeFeatures,
+        fn: cleanupFunction,
+        layout: cleanupLayout,
+        plan: program.layout,
+        resolve,
+        resolveIndependent,
+        memory,
+        executionPackageCleanups,
+        ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
+      }),
+    )
+    const body = fields.flatMap((field) => {
+      const local = Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 })
+      const lanes = cleanupLayout.lanes.at(local.ordinal) ?? []
+      const slots = cleanupLayout.slots.at(local.ordinal) ?? []
+      const packed = packWasmLanes(lanes, program.layout, field.offset)
+      if (packed.lanes.length !== slots.length)
+        throw new RangeError('Wasm frame cleanup lost an affine payload lane')
+      return [
+        ...packed.lanes.flatMap((lane, laneOrdinal) => {
+          const target = slots.at(laneOrdinal)
+          const callingLane = lanes.at(laneOrdinal)
+          if (target === undefined || callingLane === undefined)
+            throw new RangeError('Wasm frame cleanup lost its typed local lane')
+          return [
+            Instr.localGet(0),
+            Instr.memoryAccess(
+              laneLoadMnemonic(program.layout, callingLane),
+              coroutineFrameMemory,
+              { offset: lane.offset },
+            ),
+            Instr.localSet(target),
+          ]
+        }),
+        ...operation.releaseInstructions(field.access.cleanup, local),
+      ]
+    })
+    yield* FuncActor.define(builder, handle, {
+      locals: cleanupLayout.declared,
+      body,
+    })
   }
 
   for (const entry of declared) {
@@ -6749,14 +8229,15 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ? [Instr.op('unreachable')]
         : emitBody(
             Object.freeze({
+              runtimeFeatures,
               fn: entry.fn,
               layout,
               plan: program.layout,
               resolve,
+              resolveIndependent,
               memory,
-              ...(entry.suspendable && suspensionRuntime !== undefined
-                ? { suspensionRuntime }
-                : {}),
+              executionPackageCleanups,
+              ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
             }),
           )
     // Body validation happens here, inside the wasm builder, and its failure names only the
@@ -6928,131 +8409,171 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     })
   }
   if (
-    driver !== undefined &&
-    machine !== undefined &&
     privateMemory !== undefined &&
     transferAddress !== undefined &&
     suspendStatus !== undefined &&
     suspendResumeFrame !== undefined &&
     suspendFrameStackPointer !== undefined &&
+    externalResumeHead !== undefined &&
     coroutineFrameMemory !== undefined
   ) {
-    const parameterLanes = machine.fn.localTypes
-      .slice(0, machine.fn.parameterCount)
-      .flatMap((type) => lanesFor(type))
-    const resultLanes = lanesFor(machine.fn.result)
-    const resultPacked = packWasmLanes(resultLanes, program.layout, transferResultOffset)
-    const resultBase = parameterLanes.length
-    const statusLocal = resultBase + resultLanes.length
-    const headLocal = statusLocal + 1
-    const idLocal = headLocal + 1
-    const dispatch = (
-      entries: ReadonlyArray<readonly [number, FuncActor.Func]>,
-      ordinal = 0,
-    ): ReadonlyArray<Instr.Instr> => {
-      const entry = entries.at(ordinal)
-      if (entry === undefined) return [Instr.op('unreachable')]
-      return [
-        Instr.localGet(idLocal),
-        Instr.i32Const(entry[0]),
-        Instr.op('i32.eq'),
-        Instr.ifElse(
-          Instr.valueBlockType(i32),
-          [Instr.call(entry[1])],
-          dispatch(entries, ordinal + 1),
-        ),
-      ]
-    }
-    const childDispatch = dispatch([...originThunks.entries()])
-    const resumeDispatch = dispatch([...resumeThunks.entries()])
-    const storeMachineResults = resultPacked.lanes.flatMap((lane, laneOrdinal) => {
-      const callingLane = resultLanes.at(laneOrdinal)
-      return callingLane === undefined
-        ? []
-        : storeTransferLocal(resultBase + laneOrdinal, callingLane, lane.offset)
-    })
-    const finish = resultPacked.lanes.flatMap((lane, laneOrdinal) => {
-      const callingLane = resultLanes.at(laneOrdinal)
-      return callingLane === undefined ? [] : loadTransferLane(callingLane, lane.offset)
-    })
-    yield* FuncActor.define(builder, driver, {
-      locals: [
-        ...resultLanes.map((lane, laneOrdinal) =>
-          debug
-            ? { type: laneValueType(program.layout, lane), name: `result${laneOrdinal}` }
-            : { type: laneValueType(program.layout, lane) },
-        ),
-        debug ? { type: i32, name: 'status' } : { type: i32 },
-        debug ? { type: i32, name: 'head' } : { type: i32 },
-        debug ? { type: i32, name: 'dispatch' } : { type: i32 },
-      ],
-      body: [
-        Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-        Instr.i32Const(0),
-        Instr.memoryAccess('i32.store', privateMemory),
-        Instr.i32Const(0),
-        Instr.globalSet(suspendStatus),
-        Instr.i32Const(16),
-        Instr.globalSet(suspendFrameStackPointer),
-        ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
-        Instr.call(machine.handle),
-        ...resultLanes
-          .map((_lane, laneOrdinal) => resultBase + laneOrdinal)
-          .reverse()
-          .map((local) => Instr.localSet(local)),
-        ...storeMachineResults,
-        Instr.globalGet(suspendStatus),
-        Instr.localSet(statusLocal),
-        Instr.loop(Instr.emptyBlockType, [
-          Instr.localGet(statusLocal),
+    for (const root of declared) {
+      const rootDriver = independentDrivers.get(Instances.keyText(root.fn.instance))
+      if (rootDriver === undefined) continue
+      const parameterLanes = root.fn.localTypes
+        .slice(0, root.fn.parameterCount)
+        .flatMap((type) => lanesFor(type))
+      const resultLanes = lanesFor(root.fn.result)
+      const resultPacked = packWasmLanes(resultLanes, program.layout, transferResultOffset)
+      const resultBase = parameterLanes.length
+      const statusLocal = resultBase + resultLanes.length
+      const headLocal = statusLocal + 1
+      const idLocal = headLocal + 1
+      const dispatch = (
+        entries: ReadonlyArray<readonly [number, FuncActor.Func]>,
+        ordinal = 0,
+      ): ReadonlyArray<Instr.Instr> => {
+        const entry = entries.at(ordinal)
+        if (entry === undefined) return [Instr.op('unreachable')]
+        return [
+          Instr.localGet(idLocal),
+          Instr.i32Const(entry[0]),
+          Instr.op('i32.eq'),
           Instr.ifElse(
-            Instr.emptyBlockType,
-            [
-              Instr.i32Const(transferAddress),
-              Instr.memoryAccess('i32.load', privateMemory),
-              Instr.localSet(idLocal),
-              ...childDispatch,
-              Instr.localSet(statusLocal),
-            ],
-            [],
+            Instr.valueBlockType(i32),
+            [Instr.call(entry[1])],
+            dispatch(entries, ordinal + 1),
           ),
-          Instr.localGet(statusLocal),
+        ]
+      }
+      const childDispatch = dispatch([...originThunks.entries()])
+      const resumeDispatch = dispatch([...resumeThunks.entries()])
+      const storeMachineResults = resultPacked.lanes.flatMap((lane, laneOrdinal) => {
+        const callingLane = resultLanes.at(laneOrdinal)
+        return callingLane === undefined
+          ? []
+          : storeTransferLocal(resultBase + laneOrdinal, callingLane, lane.offset)
+      })
+      const finish = resultPacked.lanes.flatMap((lane, laneOrdinal) => {
+        const callingLane = resultLanes.at(laneOrdinal)
+        return callingLane === undefined ? [] : loadTransferLane(callingLane, lane.offset)
+      })
+      yield* FuncActor.define(builder, rootDriver, {
+        locals: [
+          ...resultLanes.map((lane, laneOrdinal) =>
+            debug
+              ? { type: laneValueType(program.layout, lane), name: `result${laneOrdinal}` }
+              : { type: laneValueType(program.layout, lane) },
+          ),
+          debug ? { type: i32, name: 'status' } : { type: i32 },
+          debug ? { type: i32, name: 'head' } : { type: i32 },
+          debug ? { type: i32, name: 'dispatch' } : { type: i32 },
+        ],
+        body: [
+          Instr.i32Const(0),
+          Instr.globalSet(suspendStatus),
+          Instr.globalGet(externalResumeHead),
+          Instr.localTee(headLocal),
           Instr.op('i32.eqz'),
           Instr.ifElse(
             Instr.emptyBlockType,
             [
               Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-              Instr.memoryAccess('i32.load', privateMemory),
-              Instr.localTee(headLocal),
-              Instr.op('i32.eqz'),
-              Instr.ifElse(
-                Instr.emptyBlockType,
-                [...finish, Instr.op('return')],
-                [
-                  Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-                  Instr.localGet(headLocal),
-                  Instr.memoryAccess('i32.load', coroutineFrameMemory),
-                  Instr.memoryAccess('i32.store', privateMemory),
-                  Instr.localGet(headLocal),
-                  Instr.globalSet(suspendResumeFrame),
-                  Instr.localGet(headLocal),
-                  Instr.memoryAccess('i32.load', coroutineFrameMemory, {
-                    offset: program.layout.target.pointerSize,
-                  }),
-                  Instr.localSet(idLocal),
-                  ...resumeDispatch,
-                  Instr.localSet(statusLocal),
-                ],
-              ),
+              Instr.i32Const(0),
+              Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize * 2),
+              Instr.i32Const(0),
+              Instr.memoryAccess('i32.store', privateMemory),
+              ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
+              Instr.call(root.handle),
+              ...resultLanes
+                .map((_lane, laneOrdinal) => resultBase + laneOrdinal)
+                .reverse()
+                .map((local) => Instr.localSet(local)),
+              ...storeMachineResults,
+              Instr.globalGet(suspendStatus),
+              Instr.localSet(statusLocal),
             ],
-            [],
+            [
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize),
+              Instr.localGet(headLocal),
+              Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize * 2),
+              Instr.i32Const(0),
+              Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(0),
+              Instr.globalSet(externalResumeHead),
+              Instr.i32Const(0),
+              Instr.localSet(statusLocal),
+            ],
           ),
-          Instr.br(0),
-        ]),
-        Instr.op('unreachable'),
-      ],
-    })
-    yield* ExportActor.func(builder, symbolFor(machine.fn, Mir.machineEntry(program)), driver)
+          Instr.loop(Instr.emptyBlockType, [
+            Instr.localGet(statusLocal),
+            Instr.i32Const(2),
+            Instr.op('i32.eq'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                ...resultLanes.map((lane) => zeroConst(laneValueType(program.layout, lane))),
+                Instr.op('return'),
+              ],
+              [],
+            ),
+            Instr.localGet(statusLocal),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                Instr.i32Const(transferAddress),
+                Instr.memoryAccess('i32.load', privateMemory),
+                Instr.localSet(idLocal),
+                ...childDispatch,
+                Instr.localSet(statusLocal),
+              ],
+              [],
+            ),
+            Instr.localGet(statusLocal),
+            Instr.op('i32.eqz'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                Instr.i32Const(transferAddress + program.layout.target.pointerSize),
+                Instr.memoryAccess('i32.load', privateMemory),
+                Instr.localTee(headLocal),
+                Instr.op('i32.eqz'),
+                Instr.ifElse(
+                  Instr.emptyBlockType,
+                  [...finish, Instr.op('return')],
+                  [
+                    Instr.i32Const(transferAddress + program.layout.target.pointerSize),
+                    Instr.localGet(headLocal),
+                    Instr.memoryAccess('i32.load', coroutineFrameMemory),
+                    Instr.memoryAccess('i32.store', privateMemory),
+                    Instr.localGet(headLocal),
+                    Instr.globalSet(suspendResumeFrame),
+                    Instr.localGet(headLocal),
+                    Instr.memoryAccess('i32.load', coroutineFrameMemory, {
+                      offset: program.layout.target.pointerSize,
+                    }),
+                    Instr.localSet(idLocal),
+                    ...resumeDispatch,
+                    Instr.localSet(statusLocal),
+                  ],
+                ),
+              ],
+              [],
+            ),
+            Instr.br(0),
+          ]),
+          Instr.op('unreachable'),
+        ],
+      })
+      if (machine === root && driver === rootDriver)
+        yield* ExportActor.func(
+          builder,
+          symbolFor(machine.fn, Mir.machineEntry(program)),
+          rootDriver,
+        )
+    }
   }
 
   const bitcode = yield* Binary.encode(builder)
@@ -7076,6 +8597,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         symbol: symbolFor(entry.fn, Mir.machineEntry(program)),
       }),
     ),
+    runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     ir: yield* WatText.render(builder),
     bitcode,
   }
@@ -7236,6 +8758,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       symbols: Object.freeze(output.symbols),
       termination: Backend.terminationOf(program),
       nativeRuntimeSymbols: Object.freeze([]),
+      runtimeFeatures: output.runtimeFeatures,
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

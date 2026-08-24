@@ -1,0 +1,165 @@
+// Compiler fixture: alternate owner pressure evidence, not a canonical Coroutine API.
+import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+struct Empty {}
+struct Yielded { value: i32 wake: Intrinsic.Wake }
+struct PortState {
+  slot: Empty | Yielded
+  ready: i32
+  notifications: i32
+}
+struct PortGuard {}
+
+fn install(self: &mut PortState, wake: Intrinsic.Wake, value: i32) -> () {
+  let previous = Intrinsic.replace(self.slot, Yielded { value: value, wake: move wake })
+  drop previous
+  self.ready = 0
+  return ()
+}
+
+fn takeYield(self: &mut PortState) -> Empty | Yielded {
+  return Intrinsic.replace(self.slot, Empty {})
+}
+
+fn markReady(self: &mut PortState) -> () {
+  self.ready = 1
+  self.notifications = self.notifications + 1
+  return ()
+}
+
+fn readReady(self: &PortState) -> i32 { return self.ready }
+fn readNotifications(self: &PortState) -> i32 { return self.notifications }
+
+fn register(
+  wake: Intrinsic.Wake,
+  port: Shared.Shared<PortState>,
+  value: i32,
+) -> PortGuard {
+  let installed = Shared.withMut(&port, install(move wake, value))
+  drop port
+  return PortGuard {}
+}
+
+effect fn yieldValue(port: Shared.Shared<PortState>, value: i32) -> () {
+  let registration = register(move port, value)
+  return run Execution.park(move registration)
+}
+
+effect fn body(port: Shared.Shared<PortState>) -> i32 {
+  let first = Shared.clone<PortState>(&port)
+  run yieldValue(move first, 1)
+  let second = Shared.clone<PortState>(&port)
+  run yieldValue(move second, 2)
+  drop port
+  return 3
+}
+
+fn ready(port: &Shared.Shared<PortState>) -> () {
+  return Shared.withMut(port, markReady)
+}
+
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner {
+  slot: Empty | Stored
+  order: i32
+  result: i32
+}
+
+fn complete(owner: &mut Owner, result: i32) -> () {
+  owner.result = result
+  return ()
+}
+
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+
+effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move owner)
+  }
+}
+
+effect fn resumeYield(value: i32, wake: Intrinsic.Wake, owner: &mut Owner) -> () {
+  owner.order = owner.order * 10 + value
+  Intrinsic.wake(move wake)
+  let execution = Intrinsic.replace(owner.slot, Empty {})
+  return run driveStored(move execution, move owner)
+}
+
+effect fn resumeSelected(selected: Empty | Yielded, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Yielded { value, wake } => run resumeYield(value, move wake, move owner)
+  }
+}
+
+effect fn resume(port: &Shared.Shared<PortState>, owner: &mut Owner) -> () {
+  let selected = Shared.withMut(port, takeYield)
+  return run resumeSelected(move selected, move owner)
+}
+
+fn consumeLate(selected: Empty | Yielded) -> () {
+  return match move selected {
+    Empty {} => ()
+    Yielded { value, wake } => Intrinsic.wake(move wake)
+  }
+}
+
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let port = run Shared.make<PortState>(PortState {
+    slot: Empty {},
+    ready: 0,
+    notifications: 0,
+  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let bodyPort = Shared.clone<PortState>(&port)
+  let endpoint = Shared.clone<PortState>(&port)
+  let execution = run Execution.make(body(move bodyPort), move endpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut owner = Owner { slot: Empty {}, order: 0, result: 0 }
+  run drive(move execution, &mut owner)
+  run resume(&port, &mut owner)
+  run resume(&port, &mut owner)
+  let notifications = Shared.with<PortState, i32>(&port, readNotifications)
+  let result = owner.order * 10 + owner.result
+  drop owner
+  drop port
+
+  let cancelledPort = run Shared.make<PortState>(PortState {
+    slot: Empty {},
+    ready: 0,
+    notifications: 0,
+  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let cancelledBodyPort = Shared.clone<PortState>(&cancelledPort)
+  let cancelledEndpoint = Shared.clone<PortState>(&cancelledPort)
+  let cancelled = run Execution.make(body(move cancelledBodyPort), move cancelledEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut cancelledOwner = Owner { slot: Empty {}, order: 0, result: 0 }
+  run drive(move cancelled, &mut cancelledOwner)
+  let dormant = Intrinsic.replace(cancelledOwner.slot, Empty {})
+  drop dormant
+  let beforeLate = Shared.with<PortState, i32>(&cancelledPort, readNotifications)
+  let late = Shared.withMut(&cancelledPort, takeYield)
+  consumeLate(move late)
+  let cancelledNotifications = Shared.with<PortState, i32>(&cancelledPort, readNotifications)
+  drop cancelledOwner
+  drop cancelledPort
+  if notifications != 2 { return -1 }
+  if beforeLate != 0 { return -3 }
+  if cancelledNotifications != 0 { return -2 }
+  return result
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

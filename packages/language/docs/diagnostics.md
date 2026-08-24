@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 130 |
+| `SEM` | Semantic | 134 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 160 codes in total.
+There are 164 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -185,6 +185,10 @@ There are 160 codes in total.
 | `SEM0136` | Stable code for operator syntax matched by more than one marked operation. | `Operator <operator> is ambiguous between <join>` |
 | `SEM0137` | Stable code for an unsafe acknowledgement that does not complete an unsafe invocation. | `` `unsafe` must acknowledge a complete unsafe invocation `` |
 | `SEM0138` | Stable code for a statically known allocation/layout specialization mismatch. | `Local-shared allocation was planned for <actual>, not <expected>` |
+| `SEM0139` | Stable code for a concrete executable that fails one sealed static-property obligation. | `<property> is unsatisfied: <join>` |
+| `SEM0140` | Stable code for an externally parking entry with no explicit Execution owner. | `External parking requires an explicit Intrinsic.Execution owner` |
+| `SEM0141` | Stable code for an ordinary capability conjoined with one exact executable bound. | `<conjunct> is not a sealed executable property` |
+| `SEM0142` | Stable code for a statically known execution-package allocation/layout mismatch. | `Execution allocation was planned for <actual>, not <expected>` |
 
 ## Ownership (`OWN`)
 
@@ -204,7 +208,7 @@ There are 160 codes in total.
 | `OWN0012` |  | `A non-Copy value cannot be moved out through a borrowed slice place` |
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
-| `OWN0016` | Stable code for an access-scoped local-shared borrow escaping or crossing suspension. | `Local-shared access cannot suspend while its exclusive borrow is live`<br>`Local-shared access callback cannot return a value that retains its exclusive borrow` |
+| `OWN0016` | Stable code for an access-scoped local-shared borrow escaping or crossing suspension. | `Local-shared access cannot suspend while its exclusive borrow is live`<br>`Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live`<br>`Local-shared access callback cannot return a value that retains its exclusive borrow` |
 
 ## Layout (`LAY`)
 

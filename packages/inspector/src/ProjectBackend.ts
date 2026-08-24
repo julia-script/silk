@@ -329,6 +329,10 @@ const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
       return `${typeText(cleanup.type)} · ${cleanupText(cleanup.allocation)}`
     case 'LocalSharedCoreCleanup':
       return `${typeText(cleanup.type)} · opaque decrement or last ${typeText(cleanup.element)} cleanup`
+    case 'ExecutionCleanup':
+      return `${typeText(cleanup.type)} · opaque package cleanup · ${cleanupText(cleanup.allocation)}`
+    case 'WakeCleanup':
+      return `${typeText(cleanup.type)} · generation readiness cleanup · ${cleanupText(cleanup.allocation)}`
     case 'HookCleanup':
       return `${typeText(cleanup.type)} · drop hook ${cleanup.hook.module}.${cleanup.hook.name} · ${cleanupText(cleanup.inner)}`
     case 'StructCleanup':
@@ -804,6 +808,14 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${operation.operation}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':
       return `${localText(operation.destination)} = shared core from ${localText(operation.allocation)} with ${localText(operation.value)}`
+    case 'ExecutionFromAllocation':
+      return `${localText(operation.destination)} = execution from ${localText(operation.allocation)} with ${localText(operation.body)}`
+    case 'ExecutionDrive':
+      return `${localText(operation.destination)} = drive ${localText(operation.execution)} with ${localText(operation.branch)}`
+    case 'ExecutionWake':
+      return `${localText(operation.destination)} = wake ${localText(operation.wake)} · take`
+    case 'ExecutionPark':
+      return `${localText(operation.destination)} = park with ${localText(operation.register)} · guard ${localText(operation.guard)}`
     case 'SharedClone':
       return `${localText(operation.destination)} = clone shared core ${localText(operation.self)}`
     case 'SharedWithMut':
@@ -1067,9 +1079,13 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                                     ? `${typeText(value.type)} ticket=${value.ticket}[${value.index.toString()}] · ${typeText(value.element)}`
                                     : value._tag === 'SharedCoreValue'
                                       ? `${typeText(value.type)} ticket=${value.ticket} · ${typeText(value.element)}`
-                                      : value._tag === 'ReferenceValue'
-                                        ? `borrow f${value.frame}.c${value.cell}`
-                                        : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                                      : value._tag === 'ExecutionValue'
+                                        ? `${typeText(value.type)} package #${value.ticket}`
+                                        : value._tag === 'WakeValue'
+                                          ? `${typeText(value.type)} package #${value.ticket} generation ${value.generation}`
+                                          : value._tag === 'ReferenceValue'
+                                            ? `borrow f${value.frame}.c${value.cell}`
+                                            : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {
@@ -1195,6 +1211,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `resume coroutine frame #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
     case 'CoroutineFrameComplete':
       return `complete coroutine frame #${event.ticket ?? '?'}`
+    case 'ExecutionTransition':
+      return `${event.event.toLowerCase()} execution package #${event.package} · root ${event.root} · generation ${event.generation} · ${event.state}`
     case 'SuspensionChildStart':
       return `start suspended child · point ${event.point.ordinal}`
     case 'SuspensionChildComplete':
@@ -1278,6 +1296,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'CoroutineFrameStateTransition':
     case 'CoroutineFrameResume':
     case 'CoroutineFrameComplete':
+    case 'ExecutionTransition':
     case 'SuspensionChildStart':
     case 'SuspensionChildComplete':
     case 'HostWrite':
@@ -1308,6 +1327,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `${reason.kind === 'Steps' ? 'step' : 'call-depth'} limit · ${reason.count}/${reason.limit} · stopped in ${reason.function.module}.${reason.function.name} · active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
     case 'InvalidCallableReuse':
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
+    case 'ExecutionRelinquished':
+      return `execution relinquished · package #${reason.ticket}`
     case 'MissingStandardStreams':
       return 'missing StandardStreams host provider'
     case 'MissingStandardInput':

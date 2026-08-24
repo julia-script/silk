@@ -126,6 +126,10 @@
       "types": "./dist/Stdlib.d.ts",
       "import": "./dist/Stdlib.js"
     },
+    "./SuspensionMode": {
+      "types": "./dist/SuspensionMode.d.ts",
+      "import": "./dist/SuspensionMode.js"
+    },
     "./ChildProcess": {
       "types": "./dist/ChildProcess.d.ts",
       "import": "./dist/ChildProcess.js"
@@ -330,9 +334,25 @@
       "types": "./dist/Elaboration.d.ts",
       "import": "./dist/Elaboration.js"
     },
+    "./ExecutableProperty": {
+      "types": "./dist/ExecutableProperty.d.ts",
+      "import": "./dist/ExecutableProperty.js"
+    },
     "./ExecutionAffinity": {
       "types": "./dist/ExecutionAffinity.d.ts",
       "import": "./dist/ExecutionAffinity.js"
+    },
+    "./ExecutionBoundary": {
+      "types": "./dist/ExecutionBoundary.d.ts",
+      "import": "./dist/ExecutionBoundary.js"
+    },
+    "./ExecutionLifecycle": {
+      "types": "./dist/ExecutionLifecycle.d.ts",
+      "import": "./dist/ExecutionLifecycle.js"
+    },
+    "./ExecutionPackage": {
+      "types": "./dist/ExecutionPackage.d.ts",
+      "import": "./dist/ExecutionPackage.js"
     },
     "./FormattedDocument": {
       "types": "./dist/FormattedDocument.d.ts",

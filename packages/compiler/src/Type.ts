@@ -23,7 +23,11 @@ export interface Nominal {
   readonly name: string
   readonly arguments: ReadonlyArray<GenericArgument>
   /** Compiler-minted provenance for sealed nominal identities unavailable to source declarations. */
-  readonly sealed?: 'Intrinsic.SharedCore'
+  readonly sealed?:
+    | 'Intrinsic.SharedCore'
+    | 'Intrinsic.Execution'
+    | 'Intrinsic.Wake'
+    | 'Intrinsic.StorageFailure'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -32,6 +36,15 @@ export type ParameterKind =
   | 'RequirementRow'
   | 'CallableRepresentation'
   | 'EffectRepresentation'
+
+/** Compiler-owned, witness-free obligations admitted only beside one executable bound. */
+export type SealedStaticProperty = 'Intrinsic.Detached' | 'Intrinsic.NonParking'
+
+/** Canonical witness-free obligation order used by syntax, keys, and serialized surfaces. */
+export const sealedStaticPropertyOrder: ReadonlyArray<SealedStaticProperty> = Object.freeze([
+  'Intrinsic.Detached',
+  'Intrinsic.NonParking',
+])
 
 export interface Parameter {
   readonly _tag: 'TypeParameter'
@@ -43,6 +56,7 @@ export interface Parameter {
   readonly name: string
   readonly kind: ParameterKind
   readonly representationBound?: RepresentationBound
+  readonly staticProperties: ReadonlyArray<SealedStaticProperty>
 }
 
 /** One canonical inline fixed array whose length participates in structural identity. */
@@ -193,6 +207,11 @@ const nonScalarBuiltinOperations = Object.freeze([
   'SharedFromAllocation',
   'SharedClone',
   'SharedWithMut',
+  'ExecutionLayout',
+  'ExecutionFromAllocation',
+  'ExecutionDrive',
+  'ExecutionWake',
+  'ExecutionPark',
   'EffectSuspend',
   'StorageAcquire',
   'HostWrite',
@@ -424,6 +443,33 @@ const sealedSharedCore = (arguments_: ReadonlyArray<GenericArgument>): Nominal =
     sealed: 'Intrinsic.SharedCore',
   })
 
+const sealedExecution = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Execution',
+    arguments: Object.freeze(Array.from(arguments_)),
+    sealed: 'Intrinsic.Execution',
+  })
+
+const sealedWake = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'Wake',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.Wake',
+  })
+
+const sealedStorageFailure = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'StorageFailure',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.StorageFailure',
+  })
+
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
   self: Nominal,
@@ -431,15 +477,17 @@ export const specializeNominal = (
 ): Nominal =>
   self.sealed === 'Intrinsic.SharedCore'
     ? sealedSharedCore(arguments_)
-    : nominal(self.module, self.name, arguments_)
+    : self.sealed === 'Intrinsic.Execution'
+      ? sealedExecution(arguments_)
+      : self.sealed === 'Intrinsic.Wake'
+        ? sealedWake()
+        : self.sealed === 'Intrinsic.StorageFailure'
+          ? sealedStorageFailure()
+          : nominal(self.module, self.name, arguments_)
 
-/** Canonical allocation-free failure used by every allocator implementation. */
-export const outOfMemoryError: Nominal = nominal('silk/core', 'OutOfMemoryError')
 export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
 export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
-/** The implementation-erased allocation capability requested by allocation Effects. */
-export const allocator: Nominal = nominal('silk/core', 'Allocator')
 /** Explicit host capability for complete stdout and stderr byte writes. */
 export const standardStreams: Nominal = nominal('silk/core', 'StandardStreams')
 /** Allocation-free typed failure returned when a host cannot commit a complete write. */
@@ -452,8 +500,6 @@ export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
 /** Compiler-sealed zero-operation property proving that values duplicate without user code. */
 export const copyCapability: Nominal = nominal('silk/core', 'Copy')
-/** The nominal system-backed implementation of the Allocator capability. */
-export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
 /** The canonical empty success value used by effect-free cleanup operations. */
 export const unit: Nominal = nominal('silk/core', 'Unit')
 /** Compiler-checked typed raw storage owned independently from its allocator provider. */
@@ -462,6 +508,12 @@ export const rawBuffer = (element: Type): Nominal => nominal('silk/core', 'RawBu
 export const slot = (element: Type): Nominal => nominal('silk/core', 'Slot', [element])
 /** The compiler-sealed local strong handle identity. Its representation is intentionally opaque. */
 export const sharedCore = (element: Type): Nominal => sealedSharedCore([element])
+/** Opaque affine owner-neutral execution identity. Runtime layout belongs to the packaging slice. */
+export const execution = (result: Type): Nominal => sealedExecution([result])
+/** Opaque affine readiness authority for one local Execution park generation. */
+export const wake: Nominal = sealedWake()
+/** Sealed host-storage refusal carried only by the primitive allocation boundary. */
+export const storageFailure: Nominal = sealedStorageFailure()
 /** Canonical recoverable success and failure members shipped by silk/option. */
 export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
 export const none: Nominal = nominal('silk/option', 'None')
@@ -529,6 +581,39 @@ export const isSharedCore = (
   return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
 }
 
+/** Tests the canonical sealed execution identity without consulting source spelling. */
+export const isExecution = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'Intrinsic'
+  readonly name: 'Execution'
+  readonly arguments: readonly [Type]
+} => {
+  if (
+    !isNominal(self) ||
+    self.module !== 'Intrinsic' ||
+    self.name !== 'Execution' ||
+    self.sealed !== 'Intrinsic.Execution'
+  )
+    return false
+  const argument = self.arguments.at(0)
+  return self.arguments.length === 1 && argument !== undefined && isTypeArgument(argument)
+}
+
+/** Tests the canonical sealed Wake identity without consulting source spelling. */
+export const isWake = (
+  self: Type,
+): self is Nominal & {
+  readonly module: 'Intrinsic'
+  readonly name: 'Wake'
+  readonly arguments: readonly []
+} =>
+  isNominal(self) &&
+  self.module === 'Intrinsic' &&
+  self.name === 'Wake' &&
+  self.sealed === 'Intrinsic.Wake' &&
+  self.arguments.length === 0
+
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
   [osHandle.name, osHandle],
@@ -537,12 +622,16 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],
   ['Slot', nominal('silk/core', 'Slot')],
   ['Intrinsic.SharedCore', sealedSharedCore([])],
+  ['Intrinsic.Execution', sealedExecution([])],
+  ['Intrinsic.Wake', sealedWake()],
+  ['Intrinsic.StorageFailure', sealedStorageFailure()],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */
 export const intrinsicNominalArity = (self: Nominal): number =>
   (self.module === 'silk/core' && (self.name === 'RawBuffer' || self.name === 'Slot')) ||
-  self.sealed === 'Intrinsic.SharedCore'
+  self.sealed === 'Intrinsic.SharedCore' ||
+  self.sealed === 'Intrinsic.Execution'
     ? 1
     : 0
 export const intrinsicNominalOrdinal = (self: Nominal): number =>
@@ -569,6 +658,7 @@ export const parameter = (
   name: string,
   kind: ParameterKind = 'Value',
   representationBound?: RepresentationBound,
+  staticProperties: ReadonlyArray<SealedStaticProperty> = Object.freeze([]),
 ): Parameter =>
   Object.freeze({
     _tag: 'TypeParameter',
@@ -576,6 +666,9 @@ export const parameter = (
     ordinal,
     name,
     kind,
+    staticProperties: Object.freeze(
+      sealedStaticPropertyOrder.filter((property) => staticProperties.includes(property)),
+    ),
     ...(representationBound === undefined ? {} : { representationBound }),
   })
 
@@ -1205,6 +1298,13 @@ const representationArgumentContract = (
     ? self.parameter.representationBound
     : self.contract
 
+/** Reifies one executable representation argument as its exact runtime value type. */
+export const representedType = (self: GenericArgument): Represented | undefined => {
+  if (!isRepresentationArgument(self)) return undefined
+  const contract = representationArgumentContract(self)
+  return contract === undefined ? undefined : represented(contract, contract, self)
+}
+
 export const isHiddenIdentityArgument = (
   self: GenericArgument,
 ): self is EffectIdentityArgument | CallableIdentityArgument =>
@@ -1463,7 +1563,7 @@ const computeKey = (self: Type): string => {
   if (isNominal(self))
     return `${self.sealed === undefined ? 'nominal' : `sealed:${self.sealed}`}:${self.module}.${self.name}<${self.arguments.map(genericArgumentKey).join(',')}>`
   if (isParameter(self))
-    return `parameter:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}`
+    return `parameter:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}:properties=${self.staticProperties.join('+')}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self)) return `slice:${self.access}<${key(self.element)}>`
   if (isReference(self)) return `reference:${self.access}<${key(self.target)}>`
@@ -2301,7 +2401,7 @@ const runtimeAvailableEvidence = (evidence: Constraint.ConstraintEvidence): bool
   }
 }
 
-function runtimeAvailable(self: Type): boolean {
+export function runtimeAvailable(self: Type): boolean {
   if (typeof self === 'string' || isParameter(self)) return true
   if (isNominal(self)) return self.arguments.every(runtimeAvailableGenericArgument)
   if (isFixedArray(self) || isSlice(self)) return runtimeAvailable(self.element)
@@ -2439,6 +2539,7 @@ export const containsPositionRestrictedBorrow = (self: Type): boolean =>
  */
 export const isParameterBorrowType = (self: Type): boolean => {
   if (!containsPositionRestrictedBorrow(self)) return true
+  if (isRepresented(self)) return isParameterBorrowType(self.contract)
   if (isSlice(self)) return !containsPositionRestrictedBorrow(self.element)
   if (isReference(self)) return !containsPositionRestrictedBorrow(self.target)
   if (isSlot(self)) return !containsPositionRestrictedBorrow(typeArgumentAt(self, 0) ?? 'never')

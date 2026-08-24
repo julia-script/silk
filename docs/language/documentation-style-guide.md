@@ -320,7 +320,17 @@ accident part of the public contract.
 An example must teach a fact that prose and the declaration cannot show as clearly. Examples are
 optional, including for public APIs.
 
-Every example must:
+Use only these two example forms:
+
+1. A complete, self-contained Silk program that a reader can copy, build, and run. Always prefer
+   this form.
+2. A legal sequence of statements that can appear unchanged inside a function or block. Use this
+   form only when the declarations and setup of a complete program would obscure the behavior.
+
+Do not publish isolated declarations, call lists, or expression fragments as examples. Put exact
+signatures in reference prose or a declaration block instead.
+
+Every complete-program example must:
 
 - have a short, result-oriented `##` title;
 - contain one focused scenario;
@@ -333,8 +343,18 @@ Every example must:
 - pass `silk format --check`; and
 - run successfully when it has executable behavior.
 
-Do not use pseudocode, `...`, incomplete expressions, hidden imports, or placeholder APIs. Do not
-assume that the reader can open other documentation.
+Every statement-sequence example must:
+
+- contain only statements that are legal in a Silk function or block;
+- use names and types that the adjacent text defines;
+- show one operation whose surrounding program would add irrelevant detail; and
+- be verified inside a minimal complete program before publication.
+
+Use short comments inside an example when they explain ownership transfer, control flow, failure,
+or another fact that is not clear from syntax alone.
+
+Do not use pseudocode, `...`, incomplete expressions, hidden imports, placeholder APIs, or bare API
+call inventories. Do not assume that the reader can open other documentation.
 
 Prefer titles such as “Use an absent fallback” or “Get the second vector element”.
 Do not use “Example”, “Basic usage”, or “Syntax”.
@@ -568,9 +588,9 @@ Documentation is part of the public contract. Develop it from the same evidence 
 6. Check each behavioral statement against implementation and tests.
 7. Check the text against ASD-STE100.
 8. Check that each symbol link resolves to one public target.
-9. Extract each example as a complete Silk program.
-10. Run `silk check` for each example.
-11. Run `silk format --check` for each example.
+9. Classify each example as a complete program or a statement sequence.
+10. Extract each complete program. Put each statement sequence in a minimal complete program.
+11. Run `silk check` and `silk format --check` for each extracted program.
 12. Run each example that has executable behavior.
 13. Generate the reference documentation.
 14. Inspect spacing, wrapping, links, headings, and code blocks.
@@ -594,7 +614,8 @@ publication.
 - [ ] Each symbol link resolves and has useful link text.
 - [ ] Links improve selection, understanding, or navigation.
 - [ ] Each example has a specific title and observable result.
-- [ ] Each example is a complete Silk program with namespace imports.
+- [ ] Each example is a complete program or a legal statement sequence with defined context.
+- [ ] Complete programs are preferred and contain all imports and setup.
 - [ ] Each operation name has useful context, such as `Vector.get`.
 - [ ] Examples use `|>` when the resulting Silk is valid and clear.
 - [ ] Each example passes `silk check` and `silk format --check`.

@@ -2,6 +2,7 @@ import { authored, cleanupForLocal, concreteCleanup, generated } from './Cleanup
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
+import * as ExecutionPackage from './ExecutionPackage.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
@@ -63,9 +64,15 @@ export const lowerBuiltinExpression = (
   }
   const witnessCall = lowerInterfaceWitnessCall(fn, expression, argumentLocals)
   if (witnessCall !== undefined) return finishBuiltin(witnessCall)
-  if (expression.operation === 'LayoutOf' || expression.operation === 'SharedLayout') {
+  if (
+    expression.operation === 'LayoutOf' ||
+    expression.operation === 'SharedLayout' ||
+    expression.operation === 'ExecutionLayout'
+  ) {
     const raw = expression.typeArguments.at(0)
-    const element = raw === undefined ? undefined : fn.semantic(raw)
+    const semanticRaw = raw === undefined ? undefined : fn.semanticArgument(raw)
+    const element =
+      semanticRaw !== undefined && Type.isTypeArgument(semanticRaw) ? semanticRaw : undefined
     const elementLayout = element === undefined ? undefined : Layout.entry(fn.layout, element)
     const sharedBlock =
       expression.operation === 'SharedLayout' &&
@@ -73,10 +80,41 @@ export const lowerBuiltinExpression = (
       elementLayout !== undefined
         ? LocalSharedControlBlock.plan(fn.layout.target, element, elementLayout)
         : undefined
+    const executionArguments = expression.typeArguments.map((argument) =>
+      fn.semanticArgument(argument),
+    )
+    const executionBody = executionArguments.at(1)
+    const executionEndpoint = executionArguments.at(2)
+    const executionCallback = executionArguments.at(3)
+    const executionSpecialization =
+      expression.operation !== 'ExecutionLayout' ||
+      element === undefined ||
+      executionBody === undefined ||
+      executionEndpoint === undefined ||
+      executionCallback === undefined ||
+      !Type.isTypeArgument(executionEndpoint)
+        ? undefined
+        : (() => {
+            const body = Type.representedType(executionBody)
+            const callback = Type.representedType(executionCallback)
+            if (body === undefined || callback === undefined) return undefined
+            return fn.layout.executionPackages.plans.find(
+              (candidate) =>
+                ExecutionPackage.specializationKey(candidate.specialization) ===
+                ExecutionPackage.specializationKey({
+                  result: element,
+                  body,
+                  endpoint: executionEndpoint,
+                  callback,
+                  suspension: candidate.specialization.suspension,
+                }),
+            )
+          })()
     const layoutEntry = Layout.entry(fn.layout, Type.layout)
     const type = fn.type(Type.layout)
     if (
       elementLayout === undefined ||
+      (expression.operation === 'ExecutionLayout' && executionSpecialization === undefined) ||
       (sharedBlock !== undefined && sharedBlock._tag !== 'LocalSharedControlBlockPlan') ||
       layoutEntry?.representation._tag !== 'Aggregate' ||
       type?._tag !== 'Nominal'
@@ -95,8 +133,10 @@ export const lowerBuiltinExpression = (
           type: usize,
           value: BigInt(
             field.name === 'bytes'
-              ? (sharedBlock?.size ?? elementLayout.size)
-              : (sharedBlock?.alignment ?? elementLayout.alignment),
+              ? (executionSpecialization?.size ?? sharedBlock?.size ?? elementLayout.size)
+              : (executionSpecialization?.alignment ??
+                  sharedBlock?.alignment ??
+                  elementLayout.alignment),
           ),
           provenance: generated(expression.span),
         }),
@@ -213,6 +253,110 @@ export const lowerBuiltinExpression = (
         allocationProvenance: allocationProvenance.span,
         allocationAccess: 'Take',
         valueAccess: 'Take',
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'ExecutionFromAllocation') {
+    const [allocation, body, endpoint, callback] = argumentLocals
+    const type = fn.type(expression.type)
+    const arguments_ = expression.typeArguments.map((argument) => fn.semanticArgument(argument))
+    const result = arguments_.at(0)
+    const bodyArgument = arguments_.at(1)
+    const endpointArgument = arguments_.at(2)
+    const callbackArgument = arguments_.at(3)
+    const bodyType = bodyArgument === undefined ? undefined : Type.representedType(bodyArgument)
+    const callbackType =
+      callbackArgument === undefined ? undefined : Type.representedType(callbackArgument)
+    const plan =
+      result === undefined ||
+      !Type.isTypeArgument(result) ||
+      bodyType === undefined ||
+      endpointArgument === undefined ||
+      !Type.isTypeArgument(endpointArgument) ||
+      callbackType === undefined
+        ? undefined
+        : fn.layout.executionPackages.plans.find(
+            (candidate) =>
+              Type.equals(candidate.specialization.result, result) &&
+              Type.equals(candidate.specialization.body, bodyType) &&
+              Type.equals(candidate.specialization.endpoint, endpointArgument) &&
+              Type.equals(candidate.specialization.callback, callbackType),
+          )
+    const allocationProvenance = LocalSharedAllocationProvenance.findExecution(
+      fn.layout.localSharedAllocationProvenance,
+      fn.owner.key,
+      expression,
+    )
+    const allocationFact =
+      allocationProvenance === undefined
+        ? -1
+        : fn.layout.localSharedAllocationProvenance.executionFacts.indexOf(allocationProvenance)
+    if (
+      allocation === undefined ||
+      body === undefined ||
+      endpoint === undefined ||
+      callback === undefined ||
+      type?._tag !== 'Nominal' ||
+      !Type.isExecution(type.type) ||
+      plan === undefined ||
+      allocationProvenance === undefined ||
+      allocationFact < 0 ||
+      allocationProvenance.arguments.length !== arguments_.length ||
+      !allocationProvenance.arguments.every((argument, ordinal) => {
+        const expected = arguments_.at(ordinal)
+        return (
+          expected !== undefined &&
+          Type.genericArgumentKey(argument) === Type.genericArgumentKey(expected)
+        )
+      })
+    )
+      return undefined
+    const bodyLocalType = fn.localTypes.at(body.ordinal)
+    const endpointLocalType = fn.localTypes.at(endpoint.ordinal)
+    const callbackLocalType = fn.localTypes.at(callback.ordinal)
+    if (
+      bodyLocalType === undefined ||
+      endpointLocalType === undefined ||
+      callbackLocalType === undefined
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    const bodyCleanup = cleanupForLocal(
+      fn,
+      plan.cleanup?.body ?? concreteCleanup(fn, plan.specialization.body),
+      bodyLocalType,
+    )
+    const endpointCleanup = cleanupForLocal(
+      fn,
+      plan.cleanup?.endpoint ?? concreteCleanup(fn, plan.specialization.endpoint),
+      endpointLocalType,
+    )
+    const callbackCleanup = cleanupForLocal(
+      fn,
+      plan.cleanup?.callback ?? concreteCleanup(fn, plan.specialization.callback),
+      callbackLocalType,
+    )
+    fn.emit(
+      Object.freeze({
+        _tag: 'ExecutionFromAllocation' as const,
+        destination,
+        allocation,
+        body,
+        endpoint,
+        callback,
+        plan,
+        bodyCleanup,
+        endpointCleanup,
+        callbackCleanup,
+        allocationFact,
+        allocationProvenance: allocationProvenance.span,
+        allocationAccess: 'Take' as const,
+        bodyAccess: 'Take' as const,
+        endpointAccess: 'Take' as const,
+        callbackAccess: 'Take' as const,
         type,
         provenance: authored(expression.span),
       }),
@@ -604,6 +748,33 @@ export const lowerBuiltinExpression = (
     )
     return finishBuiltin(destination)
   }
+  if (expression.operation === 'ExecutionWake') {
+    const [wake] = argumentLocals
+    const wakeType = wake === undefined ? undefined : fn.localTypes.at(wake.ordinal)
+    const type = fn.type(expression.type)
+    if (
+      wake === undefined ||
+      wakeType?._tag !== 'Nominal' ||
+      !Type.isWake(wakeType.type) ||
+      type?._tag !== 'Nominal' ||
+      !Type.equals(type.type, Type.unit)
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'ExecutionWake' as const,
+        destination,
+        wake,
+        wakeAccess: 'Take' as const,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'ExecutionDrive' || expression.operation === 'ExecutionPark')
+    return undefined
   if (expression.operation === 'StringEqualsExact') return undefined
   const conversionTarget = Scalar.conversionTarget(expression.operation)
   if (Scalar.isCheckedOperation(expression.operation)) {

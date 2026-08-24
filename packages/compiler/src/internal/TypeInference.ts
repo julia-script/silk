@@ -591,6 +591,15 @@ export const prefixSubstitution = (
       (isCallable(substitutedRepresentationBound) || isEffect(substitutedRepresentationBound))
         ? substitutedRepresentationBound
         : undefined
+    const suppliedStaticProperties =
+      isRepresentationArgument(argument) && argument._tag === 'RepresentationParameterArgument'
+        ? argument.parameter.staticProperties
+        : isTypeArgument(argument) && isParameter(argument)
+          ? argument.staticProperties
+          : undefined
+    const preservesStaticProperties =
+      suppliedStaticProperties === undefined ||
+      parameter_.staticProperties.every((property) => suppliedStaticProperties.includes(property))
     if (
       (parameter_.kind === 'Value' && !isTypeArgument(argument)) ||
       (parameter_.kind === 'RequirementRow' && !isRequirementRowArgument(argument)) ||
@@ -600,6 +609,7 @@ export const prefixSubstitution = (
           representationArgumentKind(argument) !== parameter_.kind ||
           requiredRepresentationBound === undefined ||
           representationContract === undefined ||
+          !preservesStaticProperties ||
           representationAdmissibility(representationContract, requiredRepresentationBound)._tag !==
             'Admitted'))
     )
