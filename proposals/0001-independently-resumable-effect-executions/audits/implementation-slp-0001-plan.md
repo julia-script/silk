@@ -105,3 +105,8 @@ Layer 4 checkpoint `1545bcb` completes the evaluator, Wasm, and native transitio
 including exact multi-package dispatch, local reactor polling, repeated generations, Eligible drop,
 reentrant destroy, typed failure, and non-LIFO roots. Focused verification is 41/41 and the full
 native differential corpus passes; OpenSpec progress is 12/15 before formal gates.
+
+Layer 4 conformance checkpoint `e46f5e6` makes transition authority production-consumed, adds
+typed Wasm frame cleanup and cancelled-Wake final release, fixes evaluator parked-machine/stack
+accounting, publishes canonical traces, and adds the missing destructive/order-sensitive evidence.
+Focused verification and the full native differential corpus pass before the single final rerun.
