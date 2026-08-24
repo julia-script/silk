@@ -1,6 +1,6 @@
 # Implementation report: add-independent-execution-engine-parity
 
-Status: **consolidated conformance fixes complete; final hard-gate rerun pending**
+Status: **complete; conformance fixes and final hard gates passed**
 
 ## Scope
 
@@ -165,9 +165,15 @@ corpus **PASS**, 1 test / all programs, 120.16s. No second conformance pass was 
   were localized and verified; no third root-cause repair was used.
 - After those fixes, the pre-conformance formal sequence passed in order: focused regression, root
   typecheck, full Biome, the full repository test graph, repository check, and release candidate.
-  All 15 OpenSpec tasks are complete. The required three-lens conformance review and its single
-  consolidated fix pass are complete; the post-conformance formal sequence remains before final
-  handoff.
+  The required three-lens conformance review and its single consolidated fix pass then completed.
+- The first post-conformance `pnpm test` attempt exposed the final bounded root cause: typed Wasm
+  cancellation cleanup thunks were generated for every ordinary suspension module even when it
+  had no execution package. Those helpers asked the normal callable ABI for frame-only semantic
+  types and failed with `Wasm backend lost a calling shape`. The repair restricts these thunks to
+  modules with execution-package cleanup authority and retains only affine payload types in each
+  helper. Ordinary suspension and external-Wake suites then passed together before the full rerun.
+- The complete post-conformance sequence passed after that repair. All 15 OpenSpec tasks are
+  complete and no Critical, High, or gate blocker remains.
 
 ## Verification history
 
@@ -205,8 +211,21 @@ corpus **PASS**, 1 test / all programs, 120.16s. No second conformance pass was 
 - `pnpm check` — **PASS**, 14/14 build tasks, 42/42 cached typecheck/test tasks, and 16/16 script
   tests.
 - `pnpm release:candidate` — **PASS**, release-candidate validation 1 file / 9 tests.
+- Post-conformance attempt 1: focused regression **PASS**, 4 files / 36 tests; root typecheck
+  **PASS**, 24/24 tasks; full Biome **PASS**. `pnpm test` **FAIL**, compiler parallel suite reported
+  2 files / 8 assertions failing from the shared eager Wasm frame-cleanup helper cause; Turbo
+  stopped at 16 successful / 21 total tasks in 4m08.657s. Non-interactive localization reproduced
+  the cause in `EffectSuspensionWasm`, 7 assertions, before its bounded bail.
+- Final repair localization: compiler TypeScript **PASS**; `EffectSuspensionWasm` plus
+  `ExternalWakeParking` **PASS**, 2 files / 27 tests.
+- Final post-conformance sequence: focused regression **PASS**, 4 files / 36 tests in 126.16s;
+  `pnpm typecheck` **PASS**, 24/24 tasks; `pnpm exec biome check .` **PASS**, 989 files;
+  `pnpm test` **PASS**, 28/28 tasks in 12m56.015s, including compiler 220 files / 2,134 tests and
+  native differential 1/1; `pnpm check` **PASS**, 14/14 build tasks, 42/42 typecheck/test tasks, and
+  16/16 script tests; `pnpm release:candidate` **PASS**, 1 file / 9 tests in 32.32s.
 
 ## Attempt budget
 
-Hard-gate root-cause fixes used: **2/3**. Fresh-worktree build prerequisites and normal generated
-identity refresh occurred before the formal gate sequence.
+Hard-gate root-cause fixes used: **3/3**. The final slot was the eager Wasm frame-cleanup thunk
+generation described above. Fresh-worktree build prerequisites and normal generated identity
+refreshes were mechanical setup, not additional semantic repairs.
