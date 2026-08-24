@@ -126,3 +126,9 @@ disposal evidence. It also fixes recursive Wasm cleanup for nested Execution/Wak
 first of three bounded root-cause repairs. Focused pressure verification is 8/8; OpenSpec progress
 is 4/21 while allocation, pay-for-use, diagnostic, native-corpus, report, and documentation gates
 remain.
+
+Layer 5 checkpoint `9cbb79e` adds allocation rollback and post-publication failure evidence, the
+seven-case structural pay-for-use matrix, actor-neutral privilege inventory, unowned-entry
+diagnostics, and designated native corpus cases. It fixes Wasm `EffectBorrow` frame-root planning
+without selecting independent machinery for local Shared captures, consuming repair 2/3. Focused
+pressure verification is 14/14 and compiler typecheck is green; OpenSpec progress is 10/21.
