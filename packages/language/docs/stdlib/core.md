@@ -155,7 +155,7 @@ impl Allocator for SystemAllocator
 ### Operation `allocate`
 
 ```silk
-allocate = SystemAllocator.allocate
+allocate = SystemAllocator.systemAllocate
 ```
 
 <a id="declaration-73696c6b2f636f72653a3a53747265616d57726974654572726f72"></a>

@@ -2306,15 +2306,15 @@ const makeOperationContext = (
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket',
       })
-      const cleanupValues = [
+      const cleanupEndpoint = [
         ...(callbackOffset === undefined
           ? []
           : releaseAtAddress(cleanup.callback, base, callbackOffset, 0, cleanupDepth + 1)),
         ...(endpointOffset === undefined
           ? []
           : releaseAtAddress(cleanup.endpoint, base, endpointOffset, 0, cleanupDepth + 1)),
-        ...releaseAtAddress(cleanup.body, base, bodyOffset, 0, cleanupDepth + 1),
       ]
+      const cleanupBody = releaseAtAddress(cleanup.body, base, bodyOffset, 0, cleanupDepth + 1)
       const controlOffset = executionComponentOffset(package_, 'WakeControl')
       const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
       const runtime = emitter.suspensionRuntime
@@ -2368,10 +2368,22 @@ const makeOperationContext = (
                 ]),
               ]),
             ]
-      const cleanupPackage = [
-        ...cleanupValues,
+      const cleanupInitial = [
+        ...cleanupEndpoint,
+        ...cleanupBody,
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupActivated = [
+        ...cleanupEndpoint,
         ...cleanupFrames,
         ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupPackage = [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory),
+        Instr.i32Const(ExecutionTransition.tagOf('Initial')),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, cleanupInitial, cleanupActivated),
       ]
       const cancelDormant =
         controlOffset === undefined
@@ -2385,7 +2397,7 @@ const makeOperationContext = (
               Instr.memoryAccess('i32.store', requireMemory().memory, {
                 offset: controlOffset,
               }),
-              ...cleanupValues,
+              ...cleanupEndpoint,
               ...cleanupFrames,
             ]
       const cancelRegistration =

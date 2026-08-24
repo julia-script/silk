@@ -2224,7 +2224,7 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     { name: 'connected-owner', result: 42 },
     { name: 'first-activation', result: 20 },
     { name: 'coroutine', result: 123 },
-    { name: 'dormant-cancel', result: 111 },
+    { name: 'dormant-cancel', result: 1111 },
     { name: 'post-publication-failure', result: 42 },
     { name: 'selective-ready', result: 22 },
     { name: 'timer', result: 42 },

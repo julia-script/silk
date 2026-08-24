@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import type * as Backend from '../src/Backend.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
+import * as Instances from '../src/Instances.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -172,6 +174,31 @@ const runtimeInventory = (snapshot: Analysis.Snapshot) => {
   }
 }
 
+const emittedRuntimeInventory = (artifact: Backend.Artifact) => {
+  const text = artifact._tag === 'WebAssemblyModuleArtifact' ? artifact.wat : artifact.ir
+  const declarations = artifact.symbols.map(
+    (entry) => `${entry.declaration.module}.${entry.declaration.name}`,
+  )
+  const hasDeclaration = (module: string, name: string): boolean =>
+    declarations.includes(`${module}.${name}`)
+  const externalParking = hasDeclaration('silk/execution', 'park')
+  const nestedRunner = /suspend_step|silk_coroutine_frame_push_v1/.test(text)
+  return Object.freeze({
+    nestedRunner,
+    executionPackage: hasDeclaration('silk/execution', 'make'),
+    drive: hasDeclaration('silk/execution', 'drive'),
+    dormantContinuation: externalParking && nestedRunner,
+    wake: externalParking,
+    notification: externalParking,
+    atomicThread: [
+      ...artifact.nativeRuntimeSymbols,
+      ...(artifact._tag === 'WebAssemblyModuleArtifact'
+        ? artifact.hostImports.map((entry) => `${entry.module}.${entry.name}`)
+        : []),
+    ].some((entry) => /atomic|thread|worker/i.test(entry)),
+  })
+}
+
 const realized = Effect.fnUntraced(function* (name: string, source: string) {
   return yield* Analysis.ofSourceRealized(name, encoder.encode(source), 'wasm32-unknown-unknown')
 })
@@ -193,6 +220,7 @@ const runWasm = Effect.fnUntraced(function* (snapshot: Analysis.Snapshot) {
   assert.strictEqual(typeof main, 'function')
   return {
     bytes: artifact.bytes,
+    artifact,
     result: typeof main === 'function' ? main() : unreachable('expected Wasm entry'),
   }
 })
@@ -291,16 +319,35 @@ const renamePairs = [
   ['pauseLocal', 'sleep'],
   ['tickLocal', 'poll'],
   ['advancePort', 'resume'],
+  ['ExecutionFacade', 'Execution'],
+  ['Platform', 'Core'],
+  ['StoragePolicy', 'Allocator'],
+  ['HeapProvider', 'SystemAllocator'],
 ] as const
 
-const independentRenamePairs = renamePairs.slice(34)
+const independentRenamePairs = renamePairs.slice(34, -4)
 
-const renameIndependentPolicy = (source: string): string =>
-  independentRenamePairs.reduce(
+const renameIndependentPolicy = (source: string): string => {
+  const policyRenamed = independentRenamePairs.reduce(
     (renamed, [replacement, original]) =>
       renamed.replace(new RegExp(`\\b${original}\\b`, 'g'), replacement),
     source,
   )
+  return policyRenamed
+    .replaceAll('import silk.execution as Execution', 'import silk.execution as ExecutionFacade')
+    .replace(/\bExecution\./g, 'ExecutionFacade.')
+    .replaceAll('import silk.core as Core', 'import silk.core as Platform')
+    .replace(/\bCore\b/g, 'Platform')
+    .replace(/import silk\.core \{([^}]*)\}/g, (declaration) =>
+      declaration
+        .replace(/\bAllocator\b/g, '__SOURCE_ALLOCATOR__ as StoragePolicy')
+        .replace(/\bSystemAllocator\b/g, '__SOURCE_SYSTEM_ALLOCATOR__ as HeapProvider'),
+    )
+    .replace(/(?<!\.)\bAllocator\b/g, 'StoragePolicy')
+    .replace(/(?<!\.)\bSystemAllocator\b/g, 'HeapProvider')
+    .replaceAll('__SOURCE_ALLOCATOR__', 'Allocator')
+    .replaceAll('__SOURCE_SYSTEM_ALLOCATOR__', 'SystemAllocator')
+}
 
 const normalizeSpelling = (value: string): string => {
   const moduleNormalized = value.replaceAll(
@@ -583,7 +630,7 @@ it.effect('reuses the Execution and Wake lifecycle from a bounded alternate owne
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['drop@impl#1', 'drop@impl#0', 'drop@impl#2'],
+      [],
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
@@ -643,13 +690,14 @@ it.effect('suppresses a retained Wake after post-suspension Dormant destruction'
     const evaluated = completed(snapshot)
     assert.deepEqual(
       evaluated.trace.flatMap((event) =>
-        event._tag === 'Call' && event.target.name.startsWith('drop@impl')
+        event._tag === 'Call' &&
+        ['markGuard', 'markFrame', 'markBody', 'markEndpoint'].includes(event.target.name)
           ? [event.target.name]
           : [],
       ),
-      ['drop@impl#1', 'drop@impl#0', 'drop@impl#2'],
+      ['markBody', 'markFrame', 'markGuard', 'markEndpoint'],
     )
-    assert.strictEqual(evaluated.result.value, 111n)
+    assert.strictEqual(evaluated.result.value, 1111n)
     assert.deepEqual(
       evaluated.trace
         .filter((event) => event._tag === 'ExecutionTransition')
@@ -673,7 +721,7 @@ it.effect('suppresses a retained Wake after post-suspension Dormant destruction'
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
       JSON.stringify(allocationEvents),
     )
-    assert.strictEqual((yield* runWasm(snapshot)).result, 111)
+    assert.strictEqual((yield* runWasm(snapshot)).result, 1111)
   }),
 )
 
@@ -698,8 +746,18 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
         'Register',
         'RetainGuard',
         'Relinquish',
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Notify',
         'Notify',
         'Eligible',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Complete',
         'Resume',
         'Drive',
         'Complete',
@@ -708,15 +766,24 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
         'Register',
         'RetainGuard',
         'Relinquish',
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Cancel',
         'Cancel',
         'Cleanup',
+        'Cleanup',
+        'Release',
         'Release',
       ],
     )
     const callIndex = (name: string): number =>
       evaluated.trace.findIndex((event) => event._tag === 'Call' && event.target.name === name)
     assert.isBelow(callIndex('progressSibling'), callIndex('poll'))
-    assert.isBelow(callIndex('poll'), callIndex('ready'))
+    assert.isBelow(callIndex('poll'), callIndex('childReady'))
+    assert.isBelow(callIndex('childReady'), callIndex('outerReady'))
     const allocationEvents = evaluated.trace.filter(
       (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
     )
@@ -810,6 +877,18 @@ it.effect('preserves a published Initial task when later waiter allocation fails
         .filter((event) => event._tag === 'ExecutionTransition')
         .map((event) => event.event),
       ['Initialize', 'Drive', 'Complete'],
+    )
+    assert.isFalse(
+      evaluated.trace.some(
+        (event) => event._tag === 'Call' && event.target.name === 'insertWaiter',
+      ),
+    )
+    const allocationEvents = evaluated.trace.filter(
+      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+    )
+    assert.strictEqual(
+      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
+      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
     )
     assert.strictEqual((yield* runWasm(snapshot)).result, 42)
   }),
@@ -912,6 +991,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const snapshots = new Map<string, Analysis.Snapshot>()
+      const wasmArtifacts = new Map<string, Backend.WebAssemblyModuleArtifact>()
       for (const [name, source] of Object.entries(payUseSources)) {
         const snapshot = yield* realized(`pressure/pay-use-${name}`, source)
         snapshots.set(name, snapshot)
@@ -922,7 +1002,9 @@ it.effect(
         )
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [], name)
         assert.strictEqual(completed(snapshot).result.value, 42n, name)
-        assert.strictEqual((yield* runWasm(snapshot)).result, 42, name)
+        const wasm = yield* runWasm(snapshot)
+        assert.strictEqual(wasm.result, 42, name)
+        wasmArtifacts.set(name, wasm.artifact)
       }
 
       const inventory = (name: keyof typeof payUseSources) =>
@@ -996,13 +1078,75 @@ it.effect(
       assert.strictEqual(repeatedArtifact.wat, externalArtifact.wat)
       assert.notMatch(externalArtifact.wat, /atomic|worker|scheduler/i)
 
-      for (const name of [
-        'direct',
-        'nested',
-        'explicitDirect',
-        'explicitNested',
-        'explicitExternal',
-      ] as const) {
+      const expectedArtifacts = {
+        direct: {
+          nestedRunner: false,
+          executionPackage: false,
+          drive: false,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+        nested: {
+          nestedRunner: true,
+          executionPackage: false,
+          drive: false,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+        explicitDirect: {
+          nestedRunner: false,
+          executionPackage: true,
+          drive: true,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+        explicitNested: {
+          nestedRunner: true,
+          executionPackage: true,
+          drive: true,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+        explicitExternal: {
+          nestedRunner: true,
+          executionPackage: true,
+          drive: true,
+          dormantContinuation: true,
+          wake: true,
+          notification: true,
+          atomicThread: false,
+        },
+        sharedDirect: {
+          nestedRunner: false,
+          executionPackage: false,
+          drive: false,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+        sharedNested: {
+          nestedRunner: true,
+          executionPackage: false,
+          drive: false,
+          dormantContinuation: false,
+          wake: false,
+          notification: false,
+          atomicThread: false,
+        },
+      } as const
+
+      for (const name of Object.keys(payUseSources) as ReadonlyArray<keyof typeof payUseSources>) {
+        const wasm = wasmArtifacts.get(name) ?? unreachable(`expected ${name} Wasm artifact`)
+        assert.deepEqual(emittedRuntimeInventory(wasm), expectedArtifacts[name], `${name}: wasm`)
         const native = yield* Analysis.ofSourceRealized(
           `pressure/pay-use-${name}-native`,
           encoder.encode(payUseSources[name]),
@@ -1010,9 +1154,26 @@ it.effect(
         )
         assert.deepEqual(Analysis.diagnostics(native), [], name)
         assert.deepEqual(runtimeInventory(native), inventory(name), name)
+        const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+        assert.deepEqual(
+          emittedRuntimeInventory(nativeArtifact),
+          expectedArtifacts[name],
+          `${name}: native`,
+        )
+        for (const fn of Analysis.loweredMir(native).functions) {
+          if (
+            MirVerification.operations(fn).some((operation) => operation._tag === 'ExecutionDrive')
+          ) {
+            assert.notInclude(
+              Instances.suspensionOf(native.instances, fn.instance).modes,
+              'ExternalPark',
+              `${name}: owner-side drive must remain NonParking`,
+            )
+          }
+        }
       }
     }),
-  30_000,
+  60_000,
 )
 
 it.effect(
@@ -1040,9 +1201,29 @@ it.effect(
         }
         assert.deepEqual(semanticFingerprint(renamedPolicy), semanticFingerprint(ordinary))
         assert.deepEqual(mirStructureFingerprint(renamedPolicy), mirStructureFingerprint(ordinary))
-        assert.strictEqual(
-          (yield* runWasm(renamedPolicy)).result,
-          (yield* runWasm(ordinary)).result,
+        const ordinaryWasm = yield* runWasm(ordinary)
+        const renamedWasm = yield* runWasm(renamedPolicy)
+        assert.strictEqual(renamedWasm.result, ordinaryWasm.result)
+        assert.deepEqual(
+          emittedRuntimeInventory(renamedWasm.artifact),
+          emittedRuntimeInventory(ordinaryWasm.artifact),
+        )
+
+        const ordinaryNative = yield* Analysis.ofSourceRealized(
+          `${sourceId}-native`,
+          encoder.encode(fixture.source),
+          'aarch64-apple-darwin',
+        )
+        const renamedNative = yield* Analysis.ofSourceRealized(
+          `${sourceId}-native`,
+          encoder.encode(renameIndependentPolicy(fixture.source)),
+          'aarch64-apple-darwin',
+        )
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(ordinaryNative)), [])
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(renamedNative)), [])
+        assert.deepEqual(
+          emittedRuntimeInventory(yield* Analysis.codegen(renamedNative, { mode: 'release' })),
+          emittedRuntimeInventory(yield* Analysis.codegen(ordinaryNative, { mode: 'release' })),
         )
       }
       assert.isFalse(
@@ -1052,6 +1233,23 @@ it.effect(
           ),
         ),
       )
+      const privilegedPhases = [
+        '../src/NameResolution.ts',
+        '../src/Type.ts',
+        '../src/ExecutableOrigin.ts',
+        '../src/LowerExpression.ts',
+        '../src/LowerBuiltin.ts',
+        '../src/MirVerification.ts',
+        '../src/Intrinsic.ts',
+      ] as const
+      for (const phase of privilegedPhases) {
+        const source = readFileSync(new URL(phase, import.meta.url), 'utf8')
+        assert.notMatch(
+          source,
+          /silk\/core\.(?:OutOfMemoryError|Allocator|SystemAllocator)|\b(?:outOfMemoryError|systemAllocator)\b/,
+          phase,
+        )
+      }
     }),
-  30_000,
+  60_000,
 )

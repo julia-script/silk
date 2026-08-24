@@ -802,16 +802,24 @@ function* executeFunction(
             span: provenance.span,
           })
         package_.wake = dropped.state
-        if (
-          dropped.state.allocation === 'Released' &&
-          !BootstrapStorage.release(state.allocations, owner.ticket, true)
-        )
-          return blockedStep({
-            _tag: 'Trap',
-            function: fn.id,
-            reason: 'Wake final reclaim authority was consumed more than once',
-            span: provenance.span,
-          })
+        if (dropped.state.allocation === 'Released') {
+          if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
+            return blockedStep({
+              _tag: 'Trap',
+              function: fn.id,
+              reason: 'Wake final reclaim authority was consumed more than once',
+              span: provenance.span,
+            })
+          trace.push(
+            Object.freeze({
+              _tag: 'AllocationRelease',
+              function: fn.id,
+              ticket: owner.ticket,
+              span: provenance.span,
+            }),
+          )
+          traceExecution(package_, owner.ticket, 'Release', provenance.span)
+        }
         return undefined
       }
       case 'CallableCleanup': {
