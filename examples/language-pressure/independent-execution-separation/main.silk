@@ -1,0 +1,277 @@
+// Test-local SLP-0001 separation witness. The actor names in this file are pressure vocabulary,
+// not canonical standard-library API.
+import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+struct Empty {}
+struct TaskOutput { value: i32 }
+
+struct StoredTask { execution: Intrinsic.Execution<TaskOutput> }
+struct TaskStore {
+  first: Empty | StoredTask
+  second: Empty | StoredTask
+  completed: i32
+  result: i32
+}
+
+struct ReadyInbox {
+  first: i32
+  second: i32
+  third: i32
+  length: i32
+  taken: i32
+  notifications: i32
+}
+
+struct ReadyEndpoint {
+  inbox: Shared.Shared<ReadyInbox>
+  identity: i32
+}
+
+fn publishReady(self: &mut ReadyInbox, identity: i32) -> () {
+  if self.length == 0 { self.first = identity }
+  if self.length == 1 { self.second = identity }
+  if self.length == 2 { self.third = identity }
+  self.length = self.length + 1
+  return ()
+}
+
+fn takeReady(self: &mut ReadyInbox) -> i32 {
+  let mut selected = 0
+  if self.taken == 0 { selected = self.first }
+  if self.taken == 1 { selected = self.second }
+  if self.taken == 2 { selected = self.third }
+  self.taken = self.taken + 1
+  return selected
+}
+
+fn publishEndpoint(endpoint: &ReadyEndpoint) -> () {
+  let identity = endpoint.identity
+  let inbox = Shared.clone<ReadyInbox>(&endpoint.inbox)
+  let published = Shared.withMut(
+    &inbox,
+    publishReady(identity),
+  )
+  drop inbox
+  return ()
+}
+
+struct Awaiting { wake: Intrinsic.Wake }
+struct ResultState {
+  readiness: Empty | Awaiting
+  done: bool
+  value: i32
+}
+
+fn installWake(self: &mut ResultState, wake: Intrinsic.Wake) -> () {
+  let previous = Intrinsic.replace(self.readiness, Awaiting { wake: move wake })
+  drop previous
+  return ()
+}
+
+fn clearWake(self: &mut ResultState) -> Empty | Awaiting {
+  return Intrinsic.replace(self.readiness, Empty {})
+}
+
+struct WaitGuard { state: Shared.Shared<ResultState> }
+
+fn registerWait(
+  wake: Intrinsic.Wake,
+  state: Shared.Shared<ResultState>,
+) -> WaitGuard {
+  let installed = Shared.withMut(&state, installWake(move wake))
+  return WaitGuard { state: move state }
+}
+
+fn resultDone(self: &ResultState) -> bool { return self.done }
+fn resultValue(self: &ResultState) -> i32 { return self.value }
+
+effect fn awaitResult(state: Shared.Shared<ResultState>) -> TaskOutput {
+  if Shared.with<ResultState, bool>(&state, resultDone) {
+    let value = Shared.with<ResultState, i32>(&state, resultValue)
+    drop state
+    return TaskOutput { value: value }
+  }
+  let retained = Shared.clone<ResultState>(&state)
+  let registration = registerWait(move state)
+  run Execution.park(move registration)
+  let value = Shared.with<ResultState, i32>(&retained, resultValue)
+  drop retained
+  return TaskOutput { value: value }
+}
+
+fn storeResult(self: &mut ResultState, value: i32) -> Empty | Awaiting {
+  self.value = value
+  self.done = true
+  return Intrinsic.replace(self.readiness, Empty {})
+}
+
+fn signalResult(state: &Shared.Shared<ResultState>, value: i32) -> () {
+  let selected = Shared.withMut(state, storeResult(value))
+  return match move selected {
+    Empty {} => ()
+    Awaiting { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+effect fn produceResult(state: Shared.Shared<ResultState>) -> TaskOutput {
+  signalResult(&state, 42)
+  drop state
+  return TaskOutput { value: 0 }
+}
+
+fn storeFirst(self: &mut TaskStore, execution: Intrinsic.Execution<TaskOutput>) -> () {
+  let previous = Intrinsic.replace(self.first, StoredTask { execution: move execution })
+  drop previous
+  return ()
+}
+
+fn storeSecond(self: &mut TaskStore, execution: Intrinsic.Execution<TaskOutput>) -> () {
+  let previous = Intrinsic.replace(self.second, StoredTask { execution: move execution })
+  drop previous
+  return ()
+}
+
+fn takeTask(self: &mut TaskStore, identity: i32) -> Empty | StoredTask {
+  if identity == 1 { return Intrinsic.replace(self.first, Empty {}) }
+  return Intrinsic.replace(self.second, Empty {})
+}
+
+fn recordCompletion(self: &mut TaskStore, identity: i32, output: TaskOutput) -> () {
+  self.completed = self.completed + 1
+  if identity == 1 { self.result = output.value }
+  return ()
+}
+
+struct DriveBranch {
+  tasks: Shared.Shared<TaskStore>
+  identity: i32
+}
+
+fn complete(branch: DriveBranch, output: TaskOutput) -> () {
+  let DriveBranch { tasks, identity } = move branch
+  let recorded = Shared.withMut(
+    &tasks,
+    recordCompletion(identity, move output),
+  )
+  drop tasks
+  return ()
+}
+
+fn suspend(branch: DriveBranch, execution: Intrinsic.Execution<TaskOutput>) -> () {
+  let DriveBranch { tasks, identity } = move branch
+  if identity == 1 {
+    let stored = Shared.withMut(&tasks, storeFirst(move execution))
+  } else {
+    let stored = Shared.withMut(&tasks, storeSecond(move execution))
+  }
+  drop tasks
+  return ()
+}
+
+effect fn driveStored(
+  selected: Empty | StoredTask,
+  branch: DriveBranch,
+) -> () {
+  return match move selected {
+    Empty {} => ()
+    StoredTask { execution } => run Execution.drive(
+      move execution,
+      move branch,
+      complete,
+      suspend,
+    )
+  }
+}
+
+effect fn driveIdentity(
+  tasks: &Shared.Shared<TaskStore>,
+  identity: i32,
+) -> () {
+  let selected = Shared.withMut(tasks, takeTask(identity))
+  let branch = DriveBranch { tasks: Shared.clone<TaskStore>(tasks), identity: identity }
+  return run driveStored(move selected, move branch)
+}
+
+fn taskResult(self: &TaskStore) -> i32 { return self.result }
+fn taskCompleted(self: &TaskStore) -> i32 { return self.completed }
+fn notificationCount(self: &ReadyInbox) -> i32 { return self.length - 2 }
+
+effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
+  let mut inboxAllocator = Core.make()
+  let mut tasksAllocator = Core.make()
+  let mut resultAllocator = Core.make()
+  let mut waiterAllocator = Core.make()
+  let mut producerAllocator = Core.make()
+  let inbox = run Shared.make<ReadyInbox>(ReadyInbox {
+    first: 0,
+    second: 0,
+    third: 0,
+    length: 0,
+    taken: 0,
+    notifications: 0,
+  }) |> Effect.provideMut<Core.Allocator>(&mut inboxAllocator)
+  let tasks = run Shared.make<TaskStore>(TaskStore {
+    first: Empty {},
+    second: Empty {},
+    completed: 0,
+    result: 0,
+  }) |> Effect.provideMut<Core.Allocator>(&mut tasksAllocator)
+  let result = run Shared.make<ResultState>(ResultState {
+    readiness: Empty {},
+    done: false,
+    value: 0,
+  }) |> Effect.provideMut<Core.Allocator>(&mut resultAllocator)
+
+  let waiterEndpoint = ReadyEndpoint {
+    inbox: Shared.clone<ReadyInbox>(&inbox),
+    identity: 1,
+  }
+  let producerEndpoint = ReadyEndpoint {
+    inbox: Shared.clone<ReadyInbox>(&inbox),
+    identity: 2,
+  }
+  let waiterState = Shared.clone<ResultState>(&result)
+  let producerState = Shared.clone<ResultState>(&result)
+  let waiter = run Execution.make(
+    awaitResult(move waiterState),
+    move waiterEndpoint,
+    publishEndpoint,
+  ) |> Effect.provideMut<Core.Allocator>(&mut waiterAllocator)
+  let producer = run Execution.make(
+    produceResult(move producerState),
+    move producerEndpoint,
+    publishEndpoint,
+  ) |> Effect.provideMut<Core.Allocator>(&mut producerAllocator)
+
+  // Both exact packages exist before either homogeneous Initial task becomes observable.
+  let publishedWaiter = Shared.withMut(&tasks, storeFirst(move waiter))
+  let publishedProducer = Shared.withMut(&tasks, storeSecond(move producer))
+  let queuedWaiter = Shared.withMut(&inbox, publishReady(1))
+  let queuedProducer = Shared.withMut(&inbox, publishReady(2))
+
+  let firstIdentity = Shared.withMut<ReadyInbox, i32>(&inbox, takeReady)
+  run driveIdentity(&tasks, firstIdentity)
+  let secondIdentity = Shared.withMut<ReadyInbox, i32>(&inbox, takeReady)
+  run driveIdentity(&tasks, secondIdentity)
+  let resumedIdentity = Shared.withMut<ReadyInbox, i32>(&inbox, takeReady)
+  run driveIdentity(&tasks, resumedIdentity)
+
+  let value = Shared.with<TaskStore, i32>(&tasks, taskResult)
+  let completed = Shared.with<TaskStore, i32>(&tasks, taskCompleted)
+  let notifications = Shared.with<ReadyInbox, i32>(&inbox, notificationCount)
+  drop result
+  drop tasks
+  drop inbox
+  if completed != 2 { return -1 }
+  if notifications != 1 { return -2 }
+  return value
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(runWitness(), recover)
+}

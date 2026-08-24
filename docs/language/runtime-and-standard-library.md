@@ -510,13 +510,12 @@ calls, ownership and cleanup, Effect construction and execution, typed failure, 
 entry boundary. A program gains additional facilities by importing ordinary APIs and explicitly
 constructing or providing their implementations.
 
-This rule describes the current synchronous execution model; it does not decide that future async
-execution can be implemented entirely as ordinary library code. The existing `Effect.suspend`
-operation transfers one deferred child through the explicit stack-safe execution boundary, but it
-does not park an unfinished execution or schedule another one. A future async and concurrency
-proposal may add a narrow compiler/runtime suspension seam for resumable frames, while defining
-schedulers, executors, queues, and user-facing policy as ordinary source over that seam. Programs
-that cannot reach runtime suspension or concurrency must still acquire no scheduler or fiber cost.
+`Effect.suspend` transfers one deferred child through the explicit stack-safe execution boundary.
+It does not park an unfinished execution or schedule another one. The sealed Execution and Wake
+identities provide a separate narrow seam for independently owned activation and external parking.
+The ordinary `silk.execution` module exposes safe construction, drive, and park operations.
+Schedulers, executors, queues, timers, deferred values, and cancellation policies remain ordinary
+source. Programs that cannot reach these sealed operations acquire no scheduler or fiber cost.
 
 This makes an allocation-free, host-independent program genuinely require no heap provider or host
 runtime:
@@ -530,10 +529,9 @@ pub fn main() -> i32 {
 **Boundary:** Compiler-planned storage for a value or callable representation is part of target
 lowering, not evidence of an ambient public allocator. A toolchain adapter may receive machine
 process state so an explicitly selected provider can expose it, but ordinary source cannot read that
-state without the provider contract. Any future runtime parking or async execution must specify
-wakeup, ownership while dormant, cancellation and cleanup, target support, and whether an executor
-is explicitly provided or selected; none of those contracts is inferred from `Effect.suspend`
-today.
+state without the provider contract. External parking specifies Wake ownership, dormant cleanup,
+and target behavior. It does not select an executor. None of these contracts is inferred from
+`Effect.suspend`.
 
 **Diagnostics:** Using an unavailable language feature receives its language diagnostic; using an
 unprovided service receives a requirement diagnostic. The compiler must not silently initialize a

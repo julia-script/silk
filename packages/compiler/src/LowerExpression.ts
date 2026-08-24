@@ -992,7 +992,7 @@ export function lowerExpressionInner(
           const type = fn.type(expression.type)
           const propagationType = fn.type(fn.effectOutcome)
           const failureTag = Type.failureMembers(fn.effectOutcome).findIndex((failure) =>
-            Type.equals(failure, Type.outOfMemoryError),
+            Type.equals(failure, Type.storageFailure),
           )
           if (
             loweredLayout === undefined ||
@@ -1009,7 +1009,7 @@ export function lowerExpressionInner(
               destination,
               layout: loweredLayout.result,
               type,
-              failure: Type.outOfMemoryError,
+              failure: Type.storageFailure,
               propagationType,
               failureTag: failureTag + 1,
               provenance: authored(expression.span),

@@ -190,8 +190,14 @@ const nestedStatements = (
 interface FunctionContext {
   readonly instance: Instances.Instance
   readonly bindings: ReadonlyMap<number, Hir.Expression>
+  readonly patternBindings: ReadonlyMap<string, Hir.Expression>
   readonly writtenBindings: ReadonlySet<number>
 }
+
+const patternBindingKey = (
+  binding: Extract<Hir.Expression, { readonly _tag: 'PatternBindingReference' }>['binding'],
+): string =>
+  `${binding.arm.match.span.sourceId}:${binding.arm.match.span.start}:${binding.arm.match.span.end}:${binding.arm.ordinal}:${binding.ordinal}`
 
 const returnedExpressions = (
   statements: ReadonlyArray<Hir.Statement>,
@@ -231,6 +237,20 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
               ? [[statement.binding.ordinal, statement.initializer] as const]
               : [],
           ),
+        ),
+        patternBindings: new Map(
+          statements
+            .flatMap(Hir.statementExpressions)
+            .flatMap(Hir.expressionTree)
+            .flatMap((expression) =>
+              expression._tag === 'Match'
+                ? expression.arms.flatMap((arm) =>
+                    arm.bindings.map(
+                      (binding) => [patternBindingKey(binding.id), expression.scrutinee] as const,
+                    ),
+                  )
+                : [],
+            ),
         ),
         writtenBindings: new Set(
           statements.flatMap((statement) =>
@@ -348,6 +368,16 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
             new Set(activeBindings).add(expression.binding.ordinal),
           )
     }
+    if (expression._tag === 'PatternBindingReference') {
+      const scrutinee = context?.patternBindings.get(patternBindingKey(expression.binding))
+      return scrutinee === undefined
+        ? Object.freeze({
+            _tag: 'InvalidOrigin',
+            description: 'unknown pattern allocation provenance',
+            span: expression.span,
+          })
+        : originOf(scrutinee, instance, parameterOrigins, resolving, activeBindings)
+    }
     if (expression._tag === 'Move' || expression._tag === 'Run')
       return originOf(expression.subject, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'UnionConvert')
@@ -367,6 +397,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         span: expression.span,
       })
     if (expression._tag === 'EffectResult')
+      return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
+    if (expression._tag === 'EffectCatch')
       return originOf(expression.protected, instance, parameterOrigins, resolving, activeBindings)
     if (expression._tag === 'EffectBlock') {
       const returns = returnedExpressions(expression.statements)

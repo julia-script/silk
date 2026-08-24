@@ -1217,10 +1217,10 @@ const intrinsicOperations = Object.freeze([
       operation: 'StorageAcquire',
       parameters: Object.freeze([valueParameter('layout', 'Layout')]),
       semanticParameters: Object.freeze([Type.layout]),
-      result: 'Effect<Allocation ! OutOfMemoryError>',
+      result: 'Effect<Allocation ! Intrinsic.StorageFailure>',
       semanticResult: Type.effect(
         Type.allocation,
-        Object.freeze([Type.outOfMemoryError]),
+        Object.freeze([Type.storageFailure]),
         undefined,
         Object.freeze([]),
       ),
