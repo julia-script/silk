@@ -1,4 +1,5 @@
 import type * as FuncActor from '@silk-effect/wasm/Func'
+import type * as Backend from './Backend.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as LayoutPlan from './Layout.js'
@@ -15,6 +16,7 @@ export interface ExecutionPackageCleanup {
 
 /** Explicit state consumed by sibling WebAssembly operation emitters. */
 export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
+  readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly fn: Mir.MirFunction
   readonly layout: FunctionLayout
   readonly plan: LayoutPlan.Plan

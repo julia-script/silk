@@ -303,6 +303,7 @@ const notifyReady = Effect.fnUntraced(function* (
   base: Value.Input,
   tag: string,
 ) {
+  context.runtimeFeatures.add('ReadinessNotification')
   const callbackOffset = componentOffset(package_, 'EndpointCallback')
   const endpointOffset = componentOffset(package_, 'EndpointState')
   const callback = package_.specialization.callback
@@ -1114,6 +1115,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   if (usizeType === undefined) throw new RangeError('LLVM execution lowering requires usize')
   switch (operation._tag) {
     case 'ExecutionFromAllocation': {
+      context.runtimeFeatures.add('ExecutionPackage')
+      if (operation.plan.readinessStorage) context.runtimeFeatures.add('ExternalWakeCell')
       const allocation = NativeStorage.readLocal(storage, operation.allocation)
       const baseAddress = allocation.at(0)
       const bytes = allocation.at(1)
@@ -1231,6 +1234,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       return
     }
     case 'ExecutionPark': {
+      context.runtimeFeatures.add('DormantContinuation')
+      context.runtimeFeatures.add('ExternalWakeCell')
       const transfer = context.call.transferPointer
       const region = context.suspensionRegions.get(operation)
       const packages = program.layout.executionPackages.plans.filter(
@@ -1437,6 +1442,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       return
     }
     case 'ExecutionDrive': {
+      context.runtimeFeatures.add('ExecutionDrive')
       const executionType = context.entry.fn.localTypes.at(operation.execution.ordinal)
       const executionResult =
         executionType?._tag === 'Nominal' && SilkType.isExecution(executionType.type)
@@ -2372,6 +2378,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       return
     }
     case 'ExecutionWake': {
+      context.runtimeFeatures.add('ExternalWakeCell')
       const packages = program.layout.executionPackages.plans.filter(
         (candidate) => candidate.readinessStorage,
       )

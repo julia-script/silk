@@ -13,8 +13,9 @@ import * as Type from '../src/Type.js'
 import {
   independentExecutionEligibleDrop,
   independentExecutionIllegalDormantDrive,
+  independentExecutionIllegalDormantDriveObservable,
   independentExecutionIllegalNotifyingDrive,
-  independentExecutionIllegalNotifyingDriveWasmObservable,
+  independentExecutionIllegalNotifyingDriveObservable,
   independentExecutionLateCancelledWake,
   independentExecutionLocalReactor,
   independentExecutionMultiplePackages,
@@ -23,7 +24,7 @@ import {
   independentExecutionReentrantDestroy,
   independentExecutionRepeatedGenerations,
   independentExecutionStackExhaustion,
-  independentExecutionStackExhaustionWasmObservable,
+  independentExecutionStackExhaustionObservable,
 } from './support/corpus.js'
 
 const replaceMirOperation = (
@@ -361,6 +362,18 @@ it.effect('traps a Dormant owner drive before invoking either outcome callback',
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+    const observable = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-dormant-drive-observable',
+      new TextEncoder().encode(independentExecutionIllegalDormantDriveObservable),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(observable), [])
+    const observableArtifact = yield* Analysis.codegenWasm(observable, { mode: 'release' })
+    const observableInstance = new WebAssembly.Instance(
+      new WebAssembly.Module(observableArtifact.bytes.slice()),
+      {},
+    )
+    assert.throws(() => (observableInstance.exports.silk_main as () => number)(), /unreachable/)
   }),
 )
 
@@ -385,7 +398,7 @@ it.effect('traps a Notifying reentrant drive before invoking either outcome call
     )
     const observable = yield* Analysis.ofSourceRealized(
       'independent-execution/illegal-notifying-drive-observable',
-      new TextEncoder().encode(independentExecutionIllegalNotifyingDriveWasmObservable),
+      new TextEncoder().encode(independentExecutionIllegalNotifyingDriveObservable),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(observable), [])
@@ -393,6 +406,21 @@ it.effect('traps a Notifying reentrant drive before invoking either outcome call
     const artifact = yield* Analysis.codegenWasm(observable, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.throws(() => (instance.exports.silk_main as () => number)(), /unreachable/)
+    const native = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-notifying-drive-native',
+      new TextEncoder().encode(independentExecutionIllegalNotifyingDrive),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    assert.match(
+      nativeArtifact.ir,
+      /br i1 %drive\d+_valid, label %drive\d+_accepted, label %drive\d+_rejected/,
+    )
+    assert.match(
+      nativeArtifact.ir,
+      /drive\d+_rejected:[\s\S]*?call void @llvm\.trap\(\)[\s\S]*?unreachable/,
+    )
   }),
 )
 
@@ -414,7 +442,7 @@ it.effect('traps independent-root stack exhaustion before the completion callbac
     }
     const observable = yield* Analysis.ofSourceRealized(
       'independent-execution/stack-exhaustion-observable',
-      new TextEncoder().encode(independentExecutionStackExhaustionWasmObservable),
+      new TextEncoder().encode(independentExecutionStackExhaustionObservable),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(observable), [])
@@ -425,6 +453,21 @@ it.effect('traps independent-root stack exhaustion before the completion callbac
     })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.throws(() => (instance.exports.silk_main as () => number)(), /unreachable/)
+    const native = yield* Analysis.ofSourceRealized(
+      'independent-execution/stack-exhaustion-native',
+      new TextEncoder().encode(independentExecutionStackExhaustion),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    assert.match(
+      nativeArtifact.ir,
+      /br i1 %suspend_invocation_frame_exhausted, label %suspend_invocation_frame_trap, label %suspend_invocation_frame_pushed/,
+    )
+    assert.match(
+      nativeArtifact.ir,
+      /suspend_invocation_frame_trap:[\s\S]*?call void @llvm\.trap\(\)[\s\S]*?unreachable/,
+    )
   }),
 )
 

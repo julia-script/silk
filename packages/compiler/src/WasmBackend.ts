@@ -3118,6 +3118,8 @@ const emitExecutionFromAllocationOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionFromAllocation' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExecutionPackage')
+  if (operation.plan.readinessStorage) state.emitter.runtimeFeatures.add('ExternalWakeCell')
   const { layout, plan, slots, scalar, storeAt, requireMemory } = state
   const allocation = slots(operation.allocation)
   const base = allocation.at(0)
@@ -3263,6 +3265,9 @@ const emitExecutionDriveOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionDrive' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExecutionDrive')
+  if (state.plan.executionPackages.plans.some((package_) => package_.readinessStorage))
+    state.emitter.runtimeFeatures.add('ReadinessNotification')
   const {
     emitter,
     layout,
@@ -3680,6 +3685,8 @@ const emitExecutionWakeOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionWake' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('ExternalWakeCell')
+  state.emitter.runtimeFeatures.add('ReadinessNotification')
   const { scalar } = state
   const memory = state.requireMemory().memory
   const base = scalar(operation.wake)
@@ -3752,6 +3759,8 @@ const emitExecutionParkOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionPark' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
+  state.emitter.runtimeFeatures.add('DormantContinuation')
+  state.emitter.runtimeFeatures.add('ExternalWakeCell')
   const { emitter, layout, suspension, skipInvocation } = state
   // The execution package, not the resumed coroutine frame, owns the registration guard after
   // parking. Eligibility consumes it before this resume label is entered, so the skipped
@@ -7624,6 +7633,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   // what the LLVM backend's `strip` flag does with its own metadata.
   const debug = request.mode === 'debug'
   const builder = yield* Builder.make(debug ? { moduleName: program.module } : {})
+  const runtimeFeatures = new Set<Backend.RuntimeFeature>()
   const executionPackageCleanups = new Map<string, WasmEmitContext.ExecutionPackageCleanup>()
   for (const operation of program.functions.flatMap(MirVerification.operations)) {
     if (operation._tag !== 'ExecutionFromAllocation') continue
@@ -7637,12 +7647,6 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
   }
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
-  const operations = program.functions.flatMap(MirVerification.operations)
-  const hasExecutionDrive = operations.some((operation) => operation._tag === 'ExecutionDrive')
-  const hasExternalPark = operations.some((operation) => operation._tag === 'ExecutionPark')
-  const hasWakeCell = operations.some(
-    (operation) => operation._tag === 'ExecutionFromAllocation' && operation.plan.readinessStorage,
-  )
   const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     if (type._tag === 'EffectBorrow')
       return Object.freeze([
@@ -8050,6 +8054,8 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           frameMemory: coroutineFrameMemory,
           memory: privateMemory,
         })
+  if (suspensionRuntime !== undefined && (originThunks.size > 0 || resumeThunks.size > 0))
+    runtimeFeatures.add('NestedSuspensionRuntime')
 
   const resolve = (
     targetId: DeclarationFacts.CanonicalId,
@@ -8151,6 +8157,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     })
     const operation = makeOperationContext(
       Object.freeze({
+        runtimeFeatures,
         fn: cleanupFunction,
         layout: cleanupLayout,
         plan: program.layout,
@@ -8222,6 +8229,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ? [Instr.op('unreachable')]
         : emitBody(
             Object.freeze({
+              runtimeFeatures,
               fn: entry.fn,
               layout,
               plan: program.layout,
@@ -8589,13 +8597,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         symbol: symbolFor(entry.fn, Mir.machineEntry(program)),
       }),
     ),
-    runtimeFeatures: Object.freeze([
-      ...(suspensionEnabled ? (['NestedSuspensionRuntime'] as const) : []),
-      ...(executionPackageCleanups.size > 0 ? (['ExecutionPackage'] as const) : []),
-      ...(hasExecutionDrive ? (['ExecutionDrive'] as const) : []),
-      ...(hasExternalPark && frameCleanupThunks.size > 0 ? (['DormantContinuation'] as const) : []),
-      ...(hasWakeCell ? (['ExternalWakeCell', 'ReadinessNotification'] as const) : []),
-    ]),
+    runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     ir: yield* WatText.render(builder),
     bitcode,
   }

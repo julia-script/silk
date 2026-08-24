@@ -48,15 +48,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   BackendError | LlvmError.LlvmError
 > {
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
-  const operations = program.functions.flatMap(MirVerification.operations)
-  const hasExecutionPackage = operations.some(
-    (operation) => operation._tag === 'ExecutionFromAllocation',
-  )
-  const hasExecutionDrive = operations.some((operation) => operation._tag === 'ExecutionDrive')
-  const hasExternalPark = operations.some((operation) => operation._tag === 'ExecutionPark')
-  const hasWakeCell = operations.some(
-    (operation) => operation._tag === 'ExecutionFromAllocation' && operation.plan.readinessStorage,
-  )
+  const runtimeFeatures = new Set<RuntimeFeature>()
   const i32Layout = Layout.entry(program.layout, 'i32')
   if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
     return yield* new BackendError({
@@ -427,6 +419,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   })
   yield* NativeFunction.emitBodies(
     Object.freeze({
+      runtimeFeatures,
       builder,
       program,
       request,
@@ -489,6 +482,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
     }),
   )
+  if (originThunks.size > 0 || resumeThunks.size > 0) runtimeFeatures.add('NestedSuspensionRuntime')
 
   // The module is verified before it is encoded: what reaches Clang has already been checked
   // for the SSA invariants Clang itself will not check on `-x ir` input.
@@ -515,13 +509,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
     ]),
-    runtimeFeatures: Object.freeze([
-      ...(suspensionEnabled ? (['NestedSuspensionRuntime'] as const) : []),
-      ...(hasExecutionPackage ? (['ExecutionPackage'] as const) : []),
-      ...(hasExecutionDrive ? (['ExecutionDrive'] as const) : []),
-      ...(hasExternalPark && suspensionEnabled ? (['DormantContinuation'] as const) : []),
-      ...(hasWakeCell ? (['ExternalWakeCell', 'ReadinessNotification'] as const) : []),
-    ]),
+    runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     ir: yield* IrText.render(builder),
     bitcode: yield* Bitcode.encode(builder),
   }

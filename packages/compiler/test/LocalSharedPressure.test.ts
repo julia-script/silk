@@ -1281,9 +1281,7 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
   ] as const
   const policyActor =
     'Scheduler|Fiber|Deferred|Timer|Coroutine|ReadyInbox|TaskStore|Reactor|WorkRegistry|SignalQueue|EventLoop|ChannelState'
-  const sourceNameBranch = new RegExp(
-    String.raw`(?:===|!==|\bcase\s+|\.(?:get|has|includes)\()\s*['"](?:${policyActor})['"]`,
-  )
+  const policyActorLiteral = new RegExp(`['"](?:${policyActor})['"]`)
   for (const phase of privilegedPhases) {
     const source = readFileSync(new URL(phase, import.meta.url), 'utf8')
     assert.notMatch(
@@ -1291,6 +1289,6 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
       /silk\/core\.(?:OutOfMemoryError|Allocator|SystemAllocator)|\b(?:outOfMemoryError|systemAllocator)\b/,
       phase,
     )
-    assert.notMatch(source, sourceNameBranch, phase)
+    assert.notMatch(source, policyActorLiteral, phase)
   }
 })

@@ -120,7 +120,6 @@ it.effect(
 
         if (program.expected._tag === 'Trap') {
           const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
-          if (program.forbidStdout === true) assert.strictEqual(run.stdout, '', program.name)
           assert.strictEqual(
             run.signal !== null || (run.status !== null && run.status !== 0),
             true,

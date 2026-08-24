@@ -69,7 +69,6 @@ export interface CorpusProgram {
   readonly source: string
   readonly nativeSource?: string
   readonly nativeEnvironment?: Readonly<Record<string, string>>
-  readonly forbidStdout?: boolean
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -255,35 +254,37 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionIllegalNotifyingDriveObservable =
-  independentExecutionIllegalNotifyingDrive
-    .replace('struct Guard {}', 'struct Guard {}\nstruct MarkerState { value: i32 }')
-    .replaceAll('&mut ()', '&mut MarkerState')
-    .replaceAll('let mut state = ()', 'let mut state = MarkerState { value: 0 }')
-    .replace(
-      'fn reentrantComplete(state: &mut (), result: i32) -> () { return () }',
-      `effect fn ignoreWrite(error: Core.StreamWriteError) -> () { return () }
-fn reentrantComplete(state: &mut (), result: i32) -> () {
-  drop run Effect.catchAll(Intrinsic.standardStreamWrite(false, b"!"), ignoreWrite)
-  return ()
-}`,
-    )
-    .replace(
-      'fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {',
-      `fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
-  drop run Effect.catchAll(Intrinsic.standardStreamWrite(false, b"!"), ignoreWrite)`,
-    )
-
-export const independentExecutionIllegalNotifyingDriveWasmObservable =
-  independentExecutionIllegalNotifyingDrive
-    .replace(
-      'fn reentrantComplete(state: &mut (), result: i32) -> () { return () }',
-      `fn callbackSentinel(value: i32) -> () {
+const fatalCallbackSentinel = `fn callbackSentinel(value: i32) -> () {
   let zero = value - value
   let impossible = 1 / zero
   drop impossible
   return ()
-}
+}`
+
+export const independentExecutionIllegalDormantDriveObservable =
+  independentExecutionIllegalDormantDrive
+    .replace(
+      'struct Owner { slot: Empty | Stored }',
+      'struct Owner { slot: Empty | Stored callbacks: i32 }',
+    )
+    .replace('Owner { slot: Empty {} }', 'Owner { slot: Empty {}, callbacks: 0 }')
+    .replace(
+      'fn complete(owner: &mut Owner, result: i32) -> () { return () }',
+      `${fatalCallbackSentinel}
+fn complete(owner: &mut Owner, result: i32) -> () { return callbackSentinel(result) }`,
+    )
+    .replace(
+      'fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {',
+      `fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  if owner.callbacks != 0 { callbackSentinel(1) }
+  owner.callbacks = owner.callbacks + 1`,
+    )
+
+export const independentExecutionIllegalNotifyingDriveObservable =
+  independentExecutionIllegalNotifyingDrive
+    .replace(
+      'fn reentrantComplete(state: &mut (), result: i32) -> () { return () }',
+      `${fatalCallbackSentinel}
 fn reentrantComplete(state: &mut (), result: i32) -> () { return callbackSentinel(result) }`,
     )
     .replace(
@@ -324,7 +325,7 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionStackExhaustionWasmObservable =
+export const independentExecutionStackExhaustionObservable =
   independentExecutionStackExhaustion.replace(
     'fn complete(state: &mut State, value: i32) -> () { state.completed = 1 return () }',
     `fn complete(state: &mut State, value: i32) -> () {
@@ -2436,8 +2437,6 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'independent-execution-illegal-notifying-drive',
     source: independentExecutionIllegalNotifyingDrive,
-    nativeSource: independentExecutionIllegalNotifyingDriveObservable,
-    forbidStdout: true,
     expected: { _tag: 'Trap' },
   },
   {

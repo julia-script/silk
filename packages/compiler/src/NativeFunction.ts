@@ -137,6 +137,7 @@ export const discoverRoots = (
 }
 
 export interface EmissionContext {
+  readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly builder: Builder.Builder
   readonly program: Mir.Module
   readonly request: Backend.CodegenRequest
@@ -209,6 +210,7 @@ export interface EmissionContext {
 /** Emits every declared native function body from explicit program lowering state. */
 export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext) {
   const {
+    runtimeFeatures,
     builder,
     program,
     request,
@@ -781,6 +783,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         })
 
         const actorContext: NativeOperationContext.Context = Object.freeze({
+          runtimeFeatures,
           builder,
           body,
           program,
