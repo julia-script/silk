@@ -12,6 +12,8 @@ export type NodeKind =
   | 'ImportMemberList'
   | 'ImportMember'
   | 'StructDeclaration'
+  | 'EnumDeclaration'
+  | 'EnumMember'
   | 'ServiceDeclaration'
   | 'InterfaceDeclaration'
   | 'RoleDeclaration'

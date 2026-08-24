@@ -346,6 +346,60 @@ const printStructDeclaration = (
   )
 }
 
+const printEnumDeclaration = (
+  context: Context,
+  node: SyntaxTree.Node,
+  prefix: FormatDocument.Document,
+): FormatDocument.Document => {
+  const members = directNodes(node).filter((child) => child.kind === 'EnumMember')
+  const representation = directNodes(node).find((child) => child.kind !== 'EnumMember')
+  const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
+  const head = FormatDocument.concat(
+    ...(publicKeyword === undefined
+      ? []
+      : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
+    printToken(
+      context,
+      tokenOf(node, 'EnumKeyword'),
+      publicKeyword === undefined ? prefix : FormatDocument.empty,
+    ),
+    ...(representation === undefined
+      ? []
+      : [
+          printToken(context, tokenOf(node, 'LeftParenthesis')),
+          printNode(context, representation),
+          printToken(context, tokenOf(node, 'RightParenthesis')),
+        ]),
+    printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+  )
+  const open = tokenOf(node, 'LeftBrace')
+  const close = tokenOf(node, 'RightBrace')
+  if (members.length === 0) {
+    return FormatDocument.concat(
+      head,
+      printToken(context, open, FormatDocument.text(' ')),
+      printToken(context, close),
+    )
+  }
+  const commas = commaTokens(node)
+  return FormatDocument.concat(
+    head,
+    printToken(context, open, FormatDocument.text(' ')),
+    FormatDocument.indent(
+      FormatDocument.concat(
+        ...members.flatMap((member, index) => {
+          const comma = commas.at(index)
+          return [
+            printNode(context, member, FormatDocument.hardLine, true),
+            comma === undefined ? FormatDocument.text(',') : printToken(context, comma),
+          ]
+        }),
+      ),
+    ),
+    printToken(context, close, FormatDocument.hardLine),
+  )
+}
+
 const printServiceOperation = (
   context: Context,
   node: SyntaxTree.Node,
@@ -741,6 +795,8 @@ const printNode = (
     }
     case 'StructDeclaration':
       return printStructDeclaration(context, node, prefix)
+    case 'EnumDeclaration':
+      return printEnumDeclaration(context, node, prefix)
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return printServiceDeclaration(context, node, prefix)
@@ -795,6 +851,20 @@ const printNode = (
           directNodes(node).at(-1) ?? nodeOf(node, 'TypePath'),
           FormatDocument.text(' '),
         ),
+      )
+    }
+    case 'EnumMember': {
+      const discriminant = directNodes(node).find(
+        (child) => child.kind === 'IntegerLiteralExpression',
+      )
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        ...(discriminant === undefined
+          ? []
+          : [
+              printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
+              printNode(context, discriminant, FormatDocument.text(' ')),
+            ]),
       )
     }
     case 'FixedArrayType':

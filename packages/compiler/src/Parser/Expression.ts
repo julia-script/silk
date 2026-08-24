@@ -263,6 +263,7 @@ export const primaryKind = (
       token.kind === 'FailKeyword' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'EnumKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
@@ -287,6 +288,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'RightBrace' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'EnumKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
@@ -320,6 +322,7 @@ export const expectCallRightParenthesis = (
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'EnumKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -332,6 +335,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'EnumKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -345,6 +349,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     kind !== 'RightBrace' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'EnumKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -359,6 +364,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       kind === 'RightBrace' ||
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
+      kind === 'EnumKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -370,6 +376,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       'RightBrace',
       'PubKeyword',
       'StructKeyword',
+      'EnumKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -468,6 +475,7 @@ export function parseStructLiteralExpression(
     kind !== 'ReturnKeyword' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'EnumKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -854,6 +862,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'ElseKeyword',
   'PubKeyword',
   'StructKeyword',
+  'EnumKeyword',
   'FnKeyword',
   'ImportKeyword',
   'EndOfFile',

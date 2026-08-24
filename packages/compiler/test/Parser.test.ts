@@ -2276,6 +2276,67 @@ it('parses nominal struct declarations and qualified field types losslessly', ()
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
+it('parses enums with implicit and explicitly represented integer members losslessly', () => {
+  const source = `enum AssertionResult {
+  Pass,
+  Fail,
+  Skip,
+}
+pub enum(u8) ExitCode {
+  Success = 0,
+  Failure = 1,
+}`
+  const result = parseText('memory/enums', source)
+  const enums = SyntaxTree.directNodes(result.root, 'EnumDeclaration')
+  const implicit = enums.at(0) ?? result.root
+  const represented = enums.at(1) ?? result.root
+  const implicitMembers = SyntaxTree.directNodes(implicit, 'EnumMember')
+  const representedMembers = SyntaxTree.directNodes(represented, 'EnumMember')
+  const representation = SyntaxTree.directNode(represented, 'TypePath')
+
+  assert.strictEqual(enums.length, 2)
+  assert.deepEqual(
+    implicitMembers.map((member) => directTokenText(result, member, 'Identifier')),
+    ['Pass', 'Fail', 'Skip'],
+  )
+  assert.strictEqual(SyntaxTree.directNode(implicit, 'TypePath'), undefined)
+  assert.strictEqual(
+    representation === undefined
+      ? undefined
+      : directTokenText(result, representation, 'Identifier'),
+    'u8',
+  )
+  assert.deepEqual(
+    representedMembers.map((member) => {
+      const discriminant = SyntaxTree.directNode(member, 'IntegerLiteralExpression')
+      return discriminant === undefined
+        ? undefined
+        : directTokenText(result, discriminant, 'DecimalInteger')
+    }),
+    ['0', '1'],
+  )
+  assert.notStrictEqual(SyntaxTree.directToken(represented, 'PubKeyword'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers damaged enum members before the following declaration', () => {
+  const source = 'enum Broken { Pass Fail = } pub fn after() -> i32 { return 1 }'
+  const result = parseText('memory/damaged-enum', source)
+  const declaration = SyntaxTree.directNode(result.root, 'EnumDeclaration')
+  const after = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
+
+  assert.deepEqual(
+    missingLeaves(declaration ?? result.root).map((leaf) => leaf.expected),
+    ['Comma', 'DecimalInteger'],
+  )
+  assert.notStrictEqual(after, undefined)
+  assert.deepEqual(after === undefined ? [] : missingLeaves(after), [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('keeps damaged struct fields and following declarations separate', () => {
   const source = damagedStructSource
   const result = parseText('memory/damaged-structs', source)

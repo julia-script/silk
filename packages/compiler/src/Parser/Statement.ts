@@ -297,6 +297,7 @@ export const endsBlock = (state: State): boolean => {
     kind === 'PubKeyword' ||
     kind === 'ConstKeyword' ||
     kind === 'StructKeyword' ||
+    kind === 'EnumKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'ImplKeyword' ||
     (kind === 'EffectKeyword' && peek(state, 1) === 'FnKeyword')
@@ -434,6 +435,7 @@ export function parseBlock(
     'ElseKeyword',
     'PubKeyword',
     'StructKeyword',
+    'EnumKeyword',
     'FnKeyword',
     'EffectKeyword',
     'ImportKeyword',
