@@ -1,6 +1,6 @@
 # Implementation report: prove-independent-execution-separation
 
-Status: **GATE RESUME — FULL COMPILER GREEN, REPOSITORY GATES PENDING**
+Status: **DONE — 21/21 TASKS AND ALL POST-CONFORMANCE GATES GREEN**
 
 ## Implemented pressure surface
 
@@ -161,7 +161,23 @@ test and no timeout was raised.
 - Exact full compiler context, `pnpm --filter @silk-effect/compiler test:parallel`: **PASS**, 220
   files and 2,150 tests in 201.36s.
 
-This is gate-resume root-cause fix 1/3. The mandated full repository gate sequence is pending.
+This is gate-resume root-cause fix 1/3. No further repair was needed.
+
+The fresh gate-only hard-gate sequence then ran once in the required order:
+
+1. `pnpm typecheck` — **PASS**, 24/24 Turbo tasks in 5.597s. The existing 31 TypeDoc warnings
+   remained warnings.
+2. `pnpm exec biome check .` — **PASS**, 991 files in 710ms with no fixes.
+3. `pnpm test` — **PASS**, 28/28 Turbo tasks in 11m11.808s. The compiler parallel suite passed
+   220/220 files and 2,150/2,150 tests in 177.67s; `LocalSharedPressure.test.ts` passed 18/18 under
+   repository contention, and the designated native differential corpus passed 1/1.
+4. `pnpm check` — **PASS**. Biome checked 991 files in 722ms, the build completed 14/14 cached
+   tasks, the combined typecheck/test phase completed 42/42 cached tasks, and all 16 repository
+   script tests passed.
+5. `pnpm release:candidate` — **PASS**. The build completed 14/14 cached tasks and release-candidate
+   validation passed 1/1 file and 9/9 tests in 28.86s.
+
+There were no gate retries or failures in this fresh sequence. The repair budget closed at 1/3.
 
 ## Scope and privilege dispositions
 
@@ -181,5 +197,5 @@ This is gate-resume root-cause fix 1/3. The mandated full repository gate sequen
 
 OpenSpec tasks remain **21/21 complete**. The parent-owned single three-lens conformance pass is
 complete and all verified Critical/High findings are closed in its one consolidated fix pass. The
-fresh gate-only resume has closed the full-suite timeout and is awaiting its full repository gate
-sequence; no second conformance pass was run.
+fresh gate-only resume closed the full-suite timeout and all required repository gates passed. No
+second conformance pass was run.

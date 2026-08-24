@@ -82,5 +82,8 @@
       The initial sequence passed. The first post-conformance rerun parked at `pnpm test` on the
       actor-neutrality witness's 60-second full-suite timeout after that resume's repair budget was
       exhausted; `pnpm check` and `pnpm release:candidate` were therefore not rerun. A fresh
-      gate-only resume has since made the exact compiler parallel context green; its full repository
-      gate sequence is pending.
+      gate-only resume made the exact compiler parallel context green without raising the timeout
+      or reducing evidence. Its fresh sequence then passed typecheck (24/24), Biome (991 files),
+      test (28/28 Turbo tasks; compiler 220/220 files and 2,150/2,150 tests), check (42/42 cached
+      tasks plus 16/16 script tests), and release-candidate validation (9/9 tests). The fresh repair
+      budget closed at 1/3 with no gate retry.

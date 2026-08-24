@@ -5,7 +5,8 @@ Status: **pressure evidence only; not a canonical concurrency API**
 The gate-only resume closed the post-conformance actor-neutrality timeout by assigning each of the
 four independent fixtures its own test boundary and reusing every analysis/MIR/artifact once. The
 full compiler parallel context now passes without raising a timeout or reducing evidence. Exact
-attempts are recorded in `implementation-report.md`.
+attempts are recorded in `implementation-report.md`. The subsequent full repository gate sequence
+passed through release-candidate validation with no retry.
 
 The fixtures under `examples/language-pressure/independent-execution-separation` demonstrate that
 ordinary Silk source can assemble owners around the sealed Execution/Wake substrate. Names such as
