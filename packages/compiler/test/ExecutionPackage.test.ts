@@ -162,46 +162,6 @@ it('rejects overflow and every mismatched initializer provenance dimension', () 
   )
 })
 
-it('enforces legal drive entry and exactly-once ownership branches', () => {
-  const initial = ExecutionPackage.initializedOwnership()
-  const entered = ExecutionPackage.enterDrive(initial, 'owner-a')
-  assert.strictEqual(entered._tag, 'Entered')
-  if (entered._tag !== 'Entered') return
-  const completed = ExecutionPackage.completeDrive(entered.ownership)
-  assert.strictEqual(completed.state, 'Completed')
-  assert.strictEqual(completed.branch, 'Transferred')
-  assert.strictEqual(completed.completionCallback, 'Invoked')
-  assert.strictEqual(completed.suspensionCallback, 'Cleaned')
-  assert.strictEqual(completed.allocation, 'Released')
-  const second = ExecutionPackage.completeDrive(completed)
-  assert.strictEqual(second, completed)
-
-  const suspended = ExecutionPackage.suspendDrive(entered.ownership)
-  assert.strictEqual(suspended.state, 'Dormant')
-  assert.strictEqual(suspended.suspensionCallback, 'Invoked')
-  assert.strictEqual(suspended.completionCallback, 'Cleaned')
-  assert.strictEqual(
-    ExecutionPackage.enterDrive(suspended, 'owner-b')._tag,
-    'FatalIntrinsicStateTrap',
-  )
-  const notifying = Object.freeze({ ...suspended, state: 'Notifying' as const })
-  assert.strictEqual(
-    ExecutionPackage.enterDrive(notifying, 'owner-b')._tag,
-    'FatalIntrinsicStateTrap',
-  )
-  const eligible = Object.freeze({ ...suspended, state: 'Eligible' as const })
-  const resumed = ExecutionPackage.enterDrive(eligible, 'execution-a')
-  assert.strictEqual(resumed._tag, 'Entered')
-  if (resumed._tag !== 'Entered') return
-  assert.strictEqual(resumed.root, 'execution-a')
-
-  const other = ExecutionPackage.enterDrive(ExecutionPackage.initializedOwnership(), 'execution-b')
-  assert.strictEqual(other._tag, 'Entered')
-  if (other._tag !== 'Entered') return
-  assert.strictEqual(other.root, 'execution-b')
-  assert.notStrictEqual(resumed.root, other.root)
-})
-
 it.effect('constructs without running source and never-driven drop releases one package', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(

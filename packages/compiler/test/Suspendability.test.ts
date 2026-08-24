@@ -276,7 +276,7 @@ pub fn main() -> i32 {
 
 it.effect('retains borrowed provider provenance through an ordinary provide wrapper', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect as Effect
+    const source = `import silk.effect as Effect
 service Clock { effect fn read() -> i32 ? &Clock }
 struct FixedClock {}
 effect fn read(self: &FixedClock) -> i32 { return 42 }
@@ -290,14 +290,32 @@ pub fn main() -> i32 {
   let clock = FixedClock {}
   let provided = program() |> Effect.provide(&clock)
   return requireDetached(move provided)
-}`)
+}`
+    const self = yield* snapshot(source)
 
     const diagnostics = Analysis.diagnostics(self)
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0139'],
     )
-    assert.include(diagnostics.at(0)?.message ?? '', 'ProviderLoan')
+    const diagnostic = diagnostics.at(0)
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.isTrue(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty' &&
+        diagnostic.reason.causes.some((cause) => cause.startsWith('ProviderLoan:')),
+    )
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'requireDetached(move provided)',
+    )
     assert.notInclude(
       diagnostics.map((diagnostic) => diagnostic.code),
       'SEM0071',
@@ -326,7 +344,7 @@ pub fn main() -> i32 {
 
 it.effect('follows represented executables nested inside captured nominals', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Box { value: i32 }
+    const source = `struct Box { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 fn requireDetached<F: once Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
   drop body
@@ -337,14 +355,32 @@ pub fn main() -> i32 {
   let view = &box
   let deferred = Deferred { operation: effect { return view.value } }
   return requireDetached(effect { drop deferred return 1 })
-}`)
+}`
+    const self = yield* snapshot(source)
 
     const diagnostics = Analysis.diagnostics(self)
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0139'],
     )
-    assert.include(diagnostics.at(0)?.message ?? '', 'LexicalLoan')
+    const diagnostic = diagnostics.at(0)
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
+        ? diagnostic.reason.property
+        : undefined,
+      'Intrinsic.Detached',
+    )
+    assert.isTrue(
+      diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty' &&
+        diagnostic.reason.causes.some((cause) => cause.startsWith('LexicalLoan:')),
+    )
+    assert.strictEqual(
+      diagnostic === undefined
+        ? undefined
+        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      'requireDetached(effect { drop deferred return 1 })',
+    )
   }),
 )
 

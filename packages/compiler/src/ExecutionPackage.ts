@@ -1,5 +1,4 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import * as ExecutionLifecycle from './ExecutionLifecycle.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
@@ -239,106 +238,6 @@ export interface CleanupMetadata {
   readonly endpoint: CleanupPlan.CleanupPlan
   readonly callback: CleanupPlan.CleanupPlan
 }
-
-export interface Ownership {
-  readonly _tag: 'ExecutionPackageOwnership'
-  readonly state: ExecutionLifecycle.State
-  readonly allocation: 'Owned' | 'Released'
-  readonly body: 'Owned' | 'Transferred' | 'Cleaned'
-  readonly endpoint: 'Owned' | 'Cleaned'
-  readonly callback: 'Owned' | 'Invoked' | 'Cleaned'
-  readonly branch: 'Absent' | 'Owned' | 'Transferred'
-  readonly completionCallback: 'Absent' | 'Owned' | 'Invoked' | 'Cleaned'
-  readonly suspensionCallback: 'Absent' | 'Owned' | 'Invoked' | 'Cleaned'
-}
-
-/** Publishes the all-or-nothing post-initializer ownership state without running source. */
-export const initializedOwnership = (): Ownership =>
-  Object.freeze({
-    _tag: 'ExecutionPackageOwnership',
-    state: 'Initial',
-    allocation: 'Owned',
-    body: 'Owned',
-    endpoint: 'Owned',
-    callback: 'Owned',
-    branch: 'Absent',
-    completionCallback: 'Absent',
-    suspensionCallback: 'Absent',
-  })
-
-export type DriveEntry =
-  | { readonly _tag: 'Entered'; readonly ownership: Ownership; readonly root: string }
-  | { readonly _tag: 'FatalIntrinsicStateTrap'; readonly state: ExecutionLifecycle.State }
-  | { readonly _tag: 'OwnershipRejected'; readonly state: ExecutionLifecycle.State }
-
-/** Consumes one legal activation and roots its logical stack independently of the owner caller. */
-export const enterDrive = (self: Ownership, root: string): DriveEntry => {
-  const transition = ExecutionLifecycle.transition(self.state, 'Drive')
-  if (transition._tag !== 'Transition') return Object.freeze({ ...transition })
-  return Object.freeze({
-    _tag: 'Entered',
-    root,
-    ownership: Object.freeze({
-      ...self,
-      state: transition.state,
-      branch: 'Owned',
-      completionCallback: 'Owned',
-      suspensionCallback: 'Owned',
-    }),
-  })
-}
-
-/** Completes one drive: only the take-once completion branch receives the affine lease. */
-export const completeDrive = (self: Ownership): Ownership =>
-  self.state !== 'Running' ||
-  self.branch !== 'Owned' ||
-  self.completionCallback !== 'Owned' ||
-  self.suspensionCallback !== 'Owned'
-    ? self
-    : Object.freeze({
-        ...self,
-        state: 'Completed',
-        allocation: 'Released',
-        body: 'Transferred',
-        endpoint: 'Cleaned',
-        callback: 'Cleaned',
-        branch: 'Transferred',
-        completionCallback: 'Invoked',
-        suspensionCallback: 'Cleaned',
-      })
-
-/** Relinquishes one drive: only the take-once suspension branch receives the lease and Execution. */
-export const suspendDrive = (self: Ownership): Ownership =>
-  self.state !== 'Running' ||
-  self.branch !== 'Owned' ||
-  self.completionCallback !== 'Owned' ||
-  self.suspensionCallback !== 'Owned'
-    ? self
-    : Object.freeze({
-        ...self,
-        state: 'Dormant',
-        branch: 'Transferred',
-        completionCallback: 'Cleaned',
-        suspensionCallback: 'Invoked',
-      })
-
-/** Ordinary affine drop cleans values before releasing the one package authority. */
-export const drop = (self: Ownership): Ownership =>
-  self.state !== 'Initial' && self.state !== 'Dormant' && self.state !== 'Eligible'
-    ? self
-    : Object.freeze({
-        ...self,
-        state: 'Destroyed',
-        allocation: 'Released',
-        body: 'Cleaned',
-        endpoint: 'Cleaned',
-        callback: 'Cleaned',
-        branch: self.branch === 'Owned' ? 'Transferred' : self.branch,
-        completionCallback:
-          self.completionCallback === 'Owned' ? 'Cleaned' : self.completionCallback,
-        suspensionCallback:
-          self.suspensionCallback === 'Owned' ? 'Cleaned' : self.suspensionCallback,
-      })
 
 /** Canonical inspection form shared by Layout and target-neutral MIR artifacts. */
 export const encode = (self: Plan): string =>
