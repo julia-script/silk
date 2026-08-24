@@ -17,6 +17,7 @@ import { symbolFor } from './Backend.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -2099,13 +2100,64 @@ const makeOperationContext = (
   ): ReadonlyArray<Instr.Instr> =>
     cleanup._tag === 'ExecutionCleanup'
       ? releaseExecutionBase(scalar(local))
-      : WasmCleanup.release(
-          hookReleaseInstructions(cleanup, local),
-          reclaimReleaseInstructions(
-            cleanup,
-            slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
-          ),
-        )
+      : cleanup._tag === 'WakeCleanup'
+        ? releaseWakeBase(scalar(local))
+        : WasmCleanup.release(
+            hookReleaseInstructions(cleanup, local),
+            reclaimReleaseInstructions(
+              cleanup,
+              slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
+            ),
+          )
+  function releaseWakeBase(base: number): ReadonlyArray<Instr.Instr> {
+    const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+      const package_ = plan.executionPackages.plans.at(ordinal)
+      const controlOffset =
+        package_ === undefined ? undefined : executionComponentOffset(package_, 'WakeControl')
+      const allocationOffset =
+        package_ === undefined
+          ? undefined
+          : executionComponentOffset(package_, 'AllocationAuthority')
+      if (package_ === undefined || controlOffset === undefined || allocationOffset === undefined)
+        return [Instr.op('unreachable')]
+      const allocationCleanup: Extract<
+        CleanupPlan.CleanupPlan,
+        { readonly _tag: 'AllocationCleanup' }
+      > = Object.freeze({
+        _tag: 'AllocationCleanup',
+        type: SilkType.allocation,
+        ticket: 'ActiveReclaimTicket',
+      })
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory, { offset: controlOffset }),
+        Instr.i32Const(6),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          releaseAtAddress(allocationCleanup, base, allocationOffset),
+          [
+            Instr.localGet(base),
+            Instr.i32Const(6),
+            Instr.memoryAccess('i32.store', requireMemory().memory, { offset: controlOffset }),
+          ],
+        ),
+      ]
+    }
+    const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
+      ordinal >= plan.executionPackages.plans.length
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', requireMemory().memory, {
+              offset: plan.target.pointerSize,
+            }),
+            Instr.i32Const(ordinal),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, releasePackage(ordinal), select(ordinal + 1)),
+          ]
+    return select(0)
+  }
   function releaseExecutionBase(base: number): ReadonlyArray<Instr.Instr> {
     const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
       const package_ = plan.executionPackages.plans.at(ordinal)
@@ -2134,7 +2186,7 @@ const makeOperationContext = (
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket',
       })
-      const cleanupPackage = [
+      const cleanupValues = [
         ...(callbackOffset === undefined
           ? []
           : releaseAtAddress(cleanup.callback, base, callbackOffset)),
@@ -2142,19 +2194,113 @@ const makeOperationContext = (
           ? []
           : releaseAtAddress(cleanup.endpoint, base, endpointOffset)),
         ...releaseAtAddress(cleanup.body, base, bodyOffset),
-        ...releaseAtAddress(allocationCleanup, base, allocationOffset),
       ]
       const controlOffset = executionComponentOffset(package_, 'WakeControl')
+      const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
+      const runtime = emitter.suspensionRuntime
+      const frame = layout.scratch
+      const cleanupCurrentFrame = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+        if (runtime === undefined) return [Instr.op('unreachable')]
+        const entries = [...runtime.frameCleanups.entries()].sort(([left], [right]) => left - right)
+        const selected = entries.at(ordinal)
+        if (selected === undefined) return [Instr.op('unreachable')]
+        const [id, cleanup] = selected
+        return [
+          Instr.localGet(frame),
+          Instr.memoryAccess('i32.load', runtime.frameMemory, {
+            offset: plan.target.pointerSize,
+          }),
+          Instr.i32Const(id),
+          Instr.op('i32.eq'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [Instr.localGet(frame), Instr.call(cleanup)],
+            cleanupCurrentFrame(ordinal + 1),
+          ),
+        ]
+      }
+      const cleanupFrames =
+        continuationOffset === undefined || runtime === undefined
+          ? []
+          : [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
+              Instr.localSet(frame),
+              Instr.block(Instr.emptyBlockType, [
+                Instr.loop(Instr.emptyBlockType, [
+                  Instr.localGet(frame),
+                  Instr.op('i32.eqz'),
+                  Instr.brIf(1),
+                  ...cleanupCurrentFrame(0),
+                  Instr.localGet(base),
+                  Instr.localGet(frame),
+                  Instr.memoryAccess('i32.load', runtime.frameMemory),
+                  Instr.memoryAccess('i32.store', runtime.memory, { offset: continuationOffset }),
+                  Instr.localGet(frame),
+                  Instr.globalGet(runtime.freeFrameHead),
+                  Instr.memoryAccess('i32.store', runtime.frameMemory),
+                  Instr.localGet(frame),
+                  Instr.globalSet(runtime.freeFrameHead),
+                  Instr.localGet(base),
+                  Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
+                  Instr.localSet(frame),
+                  Instr.br(0),
+                ]),
+              ]),
+            ]
+      const cleanupPackage = [
+        ...cleanupValues,
+        ...cleanupFrames,
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+      ]
+      const cancelDormant =
+        controlOffset === undefined
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.localGet(base),
+              Instr.i32Const(ExecutionTransition.tagOf('Destroyed')),
+              Instr.memoryAccess('i32.store', requireMemory().memory),
+              Instr.localGet(base),
+              Instr.i32Const(6),
+              Instr.memoryAccess('i32.store', requireMemory().memory, {
+                offset: controlOffset,
+              }),
+              ...cleanupValues,
+              ...cleanupFrames,
+            ]
+      const cancelRegistration =
+        controlOffset === undefined
+          ? [Instr.op('unreachable')]
+          : [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', requireMemory().memory, { offset: controlOffset }),
+              Instr.i32Const(2),
+              Instr.op('i32.eq'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(base),
+                  Instr.i32Const(ExecutionTransition.tagOf('DestroyPending')),
+                  Instr.memoryAccess('i32.store', requireMemory().memory),
+                  Instr.localGet(base),
+                  Instr.i32Const(8),
+                  Instr.memoryAccess('i32.store', requireMemory().memory, {
+                    offset: controlOffset,
+                  }),
+                ],
+                cancelDormant,
+              ),
+            ]
       return [
         Instr.localGet(base),
         Instr.memoryAccess('i32.load', requireMemory().memory),
-        Instr.i32Const(3),
+        Instr.i32Const(ExecutionTransition.tagOf('Notifying')),
         Instr.op('i32.eq'),
         Instr.ifElse(
           Instr.emptyBlockType,
           [
             Instr.localGet(base),
-            Instr.i32Const(7),
+            Instr.i32Const(ExecutionTransition.tagOf('DestroyPending')),
             Instr.memoryAccess('i32.store', requireMemory().memory),
             ...(controlOffset === undefined
               ? []
@@ -2166,7 +2312,19 @@ const makeOperationContext = (
                   }),
                 ]),
           ],
-          cleanupPackage,
+          [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', requireMemory().memory),
+            Instr.i32Const(ExecutionTransition.tagOf('Running')),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, cancelRegistration, [
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', requireMemory().memory),
+              Instr.i32Const(ExecutionTransition.tagOf('Dormant')),
+              Instr.op('i32.eq'),
+              Instr.ifElse(Instr.emptyBlockType, cancelDormant, cleanupPackage),
+            ]),
+          ],
         ),
       ]
     }
@@ -2193,6 +2351,10 @@ const makeOperationContext = (
     if (cleanup._tag === 'ExecutionCleanup') {
       const base = layout.scratch
       return [...loadAt(address, byteOffset), Instr.localSet(base), ...releaseExecutionBase(base)]
+    }
+    if (cleanup._tag === 'WakeCleanup') {
+      const base = layout.scratch
+      return [...loadAt(address, byteOffset), Instr.localSet(base), ...releaseWakeBase(base)]
     }
     if (cleanup._tag === 'LocalSharedCoreCleanup') {
       const base = layout.localSharedCleanupScratch.at(localSharedDepth)
@@ -3142,13 +3304,29 @@ const emitExecutionDriveOperation = (
         ? [Instr.localGet(base), Instr.i32Const(2), Instr.memoryAccess('i32.store', runtime.memory)]
         : [
             Instr.localGet(base),
-            Instr.memoryAccess('i32.load', runtime.memory, { offset: controlOffset }),
-            Instr.i32Const(2),
+            Instr.memoryAccess('i32.load', runtime.memory),
+            Instr.i32Const(7),
             Instr.op('i32.eq'),
-            Instr.ifElse(Instr.emptyBlockType, notification, [
+            Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
               Instr.localGet(base),
-              Instr.i32Const(2),
-              Instr.memoryAccess('i32.store', runtime.memory),
+              Instr.memoryAccess('i32.load', runtime.memory),
+              Instr.i32Const(6),
+              Instr.op('i32.eq'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [],
+                [
+                  Instr.localGet(base),
+                  Instr.memoryAccess('i32.load', runtime.memory, { offset: controlOffset }),
+                  Instr.i32Const(2),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(Instr.emptyBlockType, notification, [
+                    Instr.localGet(base),
+                    Instr.i32Const(2),
+                    Instr.memoryAccess('i32.store', runtime.memory),
+                  ]),
+                ],
+              ),
             ]),
           ]),
       Instr.i32Const(0),
@@ -6558,6 +6736,8 @@ interface WasmSuspensionRuntime {
   readonly resumes: ReadonlyMap<string, number>
   readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
   readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
+  /** Typed cleanup thunk selected by the resume id stored in each retained frame. */
+  readonly frameCleanups: ReadonlyMap<number, FuncActor.Func>
   readonly frameStackPointer: Global.Global
   /** Non-LIFO-safe free list for fixed-size continuation frame slots. */
   readonly freeFrameHead: Global.Global
@@ -7610,6 +7790,19 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ),
       )
     }
+  const frameCleanupThunks = new Map<number, FuncActor.Func>()
+  if (suspensionEnabled)
+    for (const [ordinal, record] of resumeRecords.entries()) {
+      const id = ordinal + 1
+      frameCleanupThunks.set(
+        id,
+        yield* FuncActor.declare(
+          builder,
+          yield* WasmType.func(builder, [i32], []),
+          debug ? { name: `silk_suspend_cleanup_${id}_${record.region.point.ordinal}` } : {},
+        ),
+      )
+    }
   const machine = declared.find((entry) =>
     Mir.matchesInstanceKey(entry.fn, Mir.machineEntry(program)),
   )
@@ -7661,6 +7854,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           resumes: resumeIds,
           frames: coroutineFrames,
           layouts: coroutineFrameStates,
+          frameCleanups: frameCleanupThunks,
           frameStackPointer: suspendFrameStackPointer,
           freeFrameHead: suspendFreeFrameHead,
           frameSlotSize: coroutineFrameSlotSize,
@@ -7702,6 +7896,114 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
     if (target === undefined) return resolve(targetId, typeArguments)
     return independentDrivers.get(Instances.keyText(target.fn.instance)) ?? target.handle
+  }
+
+  for (const [ordinal, record] of resumeRecords.entries()) {
+    const id = ordinal + 1
+    const handle = frameCleanupThunks.get(id)
+    const frameLayout = coroutineFrameStates.get(Backend.suspensionPointKey(record.region.point))
+    if (
+      handle === undefined ||
+      frameLayout === undefined ||
+      privateMemory === undefined ||
+      coroutineFrameMemory === undefined ||
+      stackPointer === undefined ||
+      heapPointer === undefined
+    )
+      throw new RangeError('Wasm frame cleanup thunk lost its typed frame plan')
+    const { suspension: _suspension, ...cleanupFunctionBase } = record.fn
+    const fields = frameLayout.payload.filter(
+      (
+        field,
+      ): field is Mir.CoroutineFramePayloadField & {
+        readonly access: Extract<Mir.CoroutineFrameAccess, { readonly _tag: 'AffineTransfer' }>
+      } => field.access._tag === 'AffineTransfer',
+    )
+    const provenance = record.region.provenance
+    const cleanupFunction: Mir.MirFunction = Object.freeze({
+      ...cleanupFunctionBase,
+      parameterCount: 1,
+      localTypes: Object.freeze([
+        Object.freeze({ _tag: 'usize' as const }),
+        ...record.fn.localTypes,
+      ]),
+      entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
+      regions: Object.freeze([
+        Object.freeze({
+          _tag: 'CleanupRegion' as const,
+          id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
+          releases: Object.freeze(
+            fields.map((field) =>
+              Object.freeze({
+                _tag: 'Drop' as const,
+                local: Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 }),
+                cleanup: field.access.cleanup,
+                provenance,
+              }),
+            ),
+          ),
+          outcome: Object.freeze({
+            _tag: 'Trap' as const,
+            reason: 'frame cleanup helper',
+            provenance,
+          }),
+        }),
+      ]),
+    })
+    const cleanupFrame = framePlan(cleanupFunction, program.layout)
+    const cleanupLayout = layoutOf(cleanupFunction, program.layout, cleanupFrame, debug, false)
+    const memory: MemoryContext = Object.freeze({
+      memory: privateMemory,
+      stackPointer,
+      stackBase: staticEnd,
+      stackLimit: needsHeap ? stackLimit : undefined,
+      heapPointer,
+      frame: cleanupFrame,
+      plan: program.layout,
+      staticOffsets,
+      ...(standardWrite === undefined ? {} : { standardWrite }),
+      ...(heapAllocate === undefined ? {} : { heapAllocate }),
+      ...(heapRelease === undefined ? {} : { heapRelease }),
+    })
+    const operation = makeOperationContext(
+      Object.freeze({
+        fn: cleanupFunction,
+        layout: cleanupLayout,
+        plan: program.layout,
+        resolve,
+        resolveIndependent,
+        memory,
+        executionPackageCleanups,
+        ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
+      }),
+    )
+    const body = fields.flatMap((field) => {
+      const local = Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 })
+      const lanes = cleanupLayout.lanes.at(local.ordinal) ?? []
+      const slots = cleanupLayout.slots.at(local.ordinal) ?? []
+      const packed = packWasmLanes(lanes, program.layout, field.offset)
+      if (packed.lanes.length !== slots.length)
+        throw new RangeError('Wasm frame cleanup lost an affine payload lane')
+      return [
+        ...packed.lanes.flatMap((lane, laneOrdinal) => {
+          const target = slots.at(laneOrdinal)
+          const callingLane = lanes.at(laneOrdinal)
+          if (target === undefined || callingLane === undefined)
+            throw new RangeError('Wasm frame cleanup lost its typed local lane')
+          return [
+            Instr.localGet(0),
+            Instr.memoryAccess(
+              laneLoadMnemonic(program.layout, callingLane),
+              coroutineFrameMemory,
+              { offset: lane.offset },
+            ),
+            Instr.localSet(target),
+          ]
+        }),
+        ...operation.releaseInstructions(field.access.cleanup, local),
+      ]
+    })
+    yield* FuncActor.define(builder, handle, { locals: cleanupLayout.declared, body })
   }
 
   for (const entry of declared) {

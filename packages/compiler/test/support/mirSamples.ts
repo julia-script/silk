@@ -46,6 +46,7 @@ export const samples = (): ReadonlyArray<Module> => {
       machine: instance(canonical(source.id, 'answer')),
     }),
     layout: Layout.make(Target.aarch64AppleDarwin, ['i32']),
+    executionTransitions: Object.freeze([]),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,
@@ -88,6 +89,7 @@ export const samples = (): ReadonlyArray<Module> => {
       machine: instance(canonical(source.id, 'choose')),
     }),
     layout: Layout.make(Target.aarch64AppleDarwin, ['i32', 'bool']),
+    executionTransitions: Object.freeze([]),
     functions: Object.freeze([
       Object.freeze({
         _tag: 'MirFunction' as const,

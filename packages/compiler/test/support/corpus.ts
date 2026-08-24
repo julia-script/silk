@@ -122,7 +122,46 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   run finish(move selectedSecond, &mut secondOwner)
   let selectedFirst = Intrinsic.replace(firstOwner.slot, Empty {})
   run finish(move selectedFirst, &mut firstOwner)
-  return firstOwner.result + secondOwner.result
+  return secondOwner.result * 10 + firstOwner.result
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
+export const independentExecutionIllegalDormantDrive = `import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored }
+struct Guard { wake: Intrinsic.Wake }
+fn register(wake: Intrinsic.Wake) -> Guard { return Guard { wake: move wake } }
+effect fn body() -> i32 { run Execution.park(register) return 42 }
+fn complete(owner: &mut Owner, result: i32) -> () { return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn ready(state: &()) -> () { return () }
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run driveOnce(move execution, move owner)
+  }
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut owner = Owner { slot: Empty {} }
+  let execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  run driveOnce(move execution, &mut owner)
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  run driveStored(move selected, &mut owner)
+  return 0
 }
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
@@ -182,6 +221,7 @@ struct Empty {}
 struct Waiting { wake: Intrinsic.Wake }
 struct Mailbox { slot: Empty | Waiting }
 struct Guard { mailbox: Shared.Shared<Mailbox> }
+struct ReadyState { called: i32 }
 fn install(mailbox: &mut Mailbox, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(mailbox.slot, Waiting { wake: move wake })
   drop previous
@@ -205,7 +245,15 @@ fn cancel(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
   drop execution
   return ()
 }
-fn ready(state: &()) -> () { return () }
+fn markReady(state: &mut ReadyState) -> () {
+  state.called = 1
+  return ()
+}
+fn ready(state: &Shared.Shared<ReadyState>) -> () {
+  Shared.withMut(state, markReady)
+  return ()
+}
+fn readReady(state: &mut ReadyState) -> i32 { return state.called }
 effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, cancel)
 }
@@ -214,16 +262,22 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   let mailbox = run Shared.make<Mailbox>(Mailbox { slot: Empty {} })
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   let registrationMailbox = Shared.clone(&mailbox)
-  let execution = run Execution.make(body(move registrationMailbox), (), ready)
+  let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let endpoint = Shared.clone(&readyState)
+  let execution = run Execution.make(body(move registrationMailbox), move endpoint, ready)
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   let mut state = ()
   run driveOnce(move execution, &mut state)
   let selected = Shared.withMut(&mailbox, extract)
   drop mailbox
-  return match move selected {
+  let result = match move selected {
     Empty {} => 0
     Waiting { wake } => signalLate(move wake)
   }
+  let called = Shared.withMut(&readyState, readReady)
+  drop readyState
+  return result + called * 1000
 }
 fn signalLate(wake: Intrinsic.Wake) -> i32 {
   Intrinsic.wake(move wake)
@@ -2143,7 +2197,12 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'independent-execution-non-lifo',
     source: independentExecutionNonLifo,
-    expected: { _tag: 'Completes', result: 42 },
+    expected: { _tag: 'Completes', result: 240 },
+  },
+  {
+    name: 'independent-execution-illegal-dormant-drive',
+    source: independentExecutionIllegalDormantDrive,
+    expected: { _tag: 'Trap' },
   },
   {
     name: 'independent-execution-multiple-packages',

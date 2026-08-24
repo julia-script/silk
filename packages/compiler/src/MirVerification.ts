@@ -1,6 +1,7 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -2239,6 +2240,25 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
+  const expectedAuthorities = self.layout.executionPackages.plans.length
+  if (
+    self.executionTransitions.length !== expectedAuthorities ||
+    self.executionTransitions.some(
+      (authority, ordinal) =>
+        authority.package !== ordinal ||
+        authority.root !== ordinal + 1 ||
+        authority.readiness !== self.layout.executionPackages.plans.at(ordinal)?.readinessStorage ||
+        ExecutionTransition.verifyAuthority(authority).length > 0,
+    )
+  ) {
+    violations.push(
+      Object.freeze({
+        _tag: 'Violation',
+        rule: 'InvalidExecutionOperation',
+        detail: 'execution transition authority is incomplete or non-canonical',
+      }),
+    )
+  }
   const staticData = self.staticData ?? []
   const staticTableValid = staticData.every((data, ordinal) => {
     const previous = ordinal === 0 ? undefined : staticData.at(ordinal - 1)

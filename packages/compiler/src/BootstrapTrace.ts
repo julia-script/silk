@@ -258,12 +258,15 @@ export interface ExecutionTraceEvent {
     | 'Drive'
     | 'Register'
     | 'Latch'
-    | 'Park'
+    | 'RetainGuard'
+    | 'Relinquish'
     | 'Notify'
     | 'Eligible'
     | 'Resume'
     | 'Complete'
     | 'Cancel'
+    | 'DestroyPending'
+    | 'Cleanup'
     | 'Release'
   readonly state: string
   readonly span: SourceSpan.SourceSpan

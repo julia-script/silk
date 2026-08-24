@@ -8,6 +8,7 @@ import type * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
 import { suspensionPointKey } from './Backend.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as Hir from './Hir.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
@@ -827,7 +828,11 @@ export const dropExecution = Effect.fnUntraced(function* (
           body,
           'eq',
           state,
-          yield* Constant.integerUnsigned(builder, usizeType, 0n),
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('Initial')),
+          ),
           `${tag}_is_initial`,
         ),
         initial,
@@ -836,7 +841,11 @@ export const dropExecution = Effect.fnUntraced(function* (
       yield* LlvmBlock.setInsertionPoint(body, initial)
       yield* FunctionBody.store(
         body,
-        yield* Constant.integerUnsigned(builder, usizeType, 6n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Destroyed')),
+        ),
         statePointer,
       )
       yield* dropStoredPackage(
@@ -855,14 +864,22 @@ export const dropExecution = Effect.fnUntraced(function* (
         body,
         'eq',
         state,
-        yield* Constant.integerUnsigned(builder, usizeType, 1n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Running')),
+        ),
         `${tag}_is_running`,
       )
       const notifying = yield* FunctionBody.integerCompare(
         body,
         'eq',
         state,
-        yield* Constant.integerUnsigned(builder, usizeType, 3n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Notifying')),
+        ),
         `${tag}_is_notifying`,
       )
       yield* FunctionBody.conditionalBranch(
@@ -874,7 +891,11 @@ export const dropExecution = Effect.fnUntraced(function* (
       yield* LlvmBlock.setInsertionPoint(body, pending)
       yield* FunctionBody.store(
         body,
-        yield* Constant.integerUnsigned(builder, usizeType, 7n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('DestroyPending')),
+        ),
         statePointer,
       )
       yield* FunctionBody.branch(body, done)
@@ -884,14 +905,22 @@ export const dropExecution = Effect.fnUntraced(function* (
         body,
         'eq',
         state,
-        yield* Constant.integerUnsigned(builder, usizeType, 2n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Dormant')),
+        ),
         `${tag}_is_dormant`,
       )
       const eligible = yield* FunctionBody.integerCompare(
         body,
         'eq',
         state,
-        yield* Constant.integerUnsigned(builder, usizeType, 4n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Eligible')),
+        ),
         `${tag}_is_eligible`,
       )
       const release = yield* LlvmBlock.make(body, `${tag}_release`)
@@ -931,7 +960,11 @@ export const dropExecution = Effect.fnUntraced(function* (
       }
       yield* FunctionBody.store(
         body,
-        yield* Constant.integerUnsigned(builder, usizeType, 6n),
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Destroyed')),
+        ),
         statePointer,
       )
       yield* dropStoredPackage(
@@ -1467,13 +1500,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           body,
           `drive${operation.destination.ordinal}_accepted`,
         )
-        const rejected = yield* LlvmBlock.make(
-          body,
-          `drive${operation.destination.ordinal}_rejected`,
-        )
-        yield* FunctionBody.conditionalBranch(body, valid, accepted, rejected)
-        yield* LlvmBlock.setInsertionPoint(body, rejected)
-        yield* FunctionBody.unreachable(body)
+        if (context.state.trapBlock === undefined)
+          context.state.trapBlock = yield* LlvmBlock.make(
+            body,
+            `drive${operation.destination.ordinal}_rejected`,
+          )
+        yield* FunctionBody.conditionalBranch(body, valid, accepted, context.state.trapBlock)
         yield* LlvmBlock.setInsertionPoint(body, accepted)
         yield* FunctionBody.store(
           body,

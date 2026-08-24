@@ -1,6 +1,7 @@
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
+import type * as ExecutionTransition from './ExecutionTransition.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
@@ -1354,6 +1355,8 @@ export interface Module {
   readonly layout: Layout.Plan
   readonly staticData?: ReadonlyArray<StaticText.Data>
   readonly functions: ReadonlyArray<MirFunction>
+  /** Complete logical lifecycle authority verified before evaluator or backend lowering. */
+  readonly executionTransitions: ReadonlyArray<ExecutionTransition.Authority>
   readonly normalization?: ReadonlyArray<NormalizationVerdict>
   readonly coroutineFrames?: CoroutineFramePlan
 }

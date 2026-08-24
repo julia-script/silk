@@ -1,6 +1,6 @@
 # Implementation report: add-independent-execution-engine-parity
 
-Status: **implementation complete; conformance review in progress**
+Status: **consolidated conformance fixes complete; final hard-gate rerun pending**
 
 ## Scope
 
@@ -49,7 +49,8 @@ non-LIFO fixture pass.
 - Coroutine frames now use deterministic fixed-size slots with a non-LIFO-safe free list. A later
   drive of one root cannot rewind or overwrite another parked root's continuation frame.
 - The evaluator/Wasm latched-resume acceptance program agrees on result `42`, one stable logical
-  root, and `Initialize, Drive, Register, Latch, Park, Notify, Eligible, Resume, Drive, Complete`.
+  root, and `Initialize, Drive, Register, Latch, RetainGuard, Notify, Eligible, Resume, Drive,
+  Complete`.
 
 Native realization, the complete destruction/cancellation matrix, two-root alternating acceptance,
 and reactor availability remain open; task 3.2 therefore remains unchecked despite the first
@@ -67,7 +68,8 @@ working direct-Wasm external-resume path.
 - Native Execution initialization, drive, park, Wake, completion, continuation restoration, frame
   cleanup, package cleanup, and late-Wake allocation discharge lower from canonical package and
   suspension facts. A linked single-root signal/resume probe exits `42`, and the designated native
-  corpus' two-root non-LIFO case agrees with evaluation at `42`.
+  corpus' order-sensitive two-root non-LIFO case agrees with evaluation at `240` (`222` would
+  expose swapped root restoration while remaining inside native process-exit range).
 - Direct Wasm now clears the transient transfer-tail cell when a new independent-root drive begins.
   Without that reset, a detached first root left the shared relay tail pointing into its retained
   chain and a second root appended into it. The execution-owned continuation head remains the sole
@@ -108,6 +110,45 @@ availability evidence, and full gates remain open, so tasks 3.1, 3.2, and 4.1 re
 Tasks 1.2, 2.1-2.3, 3.1-3.3, and 4.1-4.3 are complete. Nested/fatal regression, repeated artifact
 determinism, and repository gates remain open until the formal gate sequence.
 
+## Required three-lens conformance pass and consolidated fix
+
+The language/SLP, OpenSpec/task, and architecture/minimal-privilege lenses completed exactly once.
+Their independently reported Critical/High findings converged and were verified locally before the
+single consolidated fix pass:
+
+- **Critical — transition authority was test-only:** accepted. `Mir.Module` now carries one complete
+  canonical `ExecutionTransition.Authority` per exact execution-package plan. Lowering constructs
+  it, `MirVerification` rejects missing, reordered, forged-generation, illegal-predecessor, and
+  early-cleanup edges, and `MirEncoding` prints logical state/root/generation/cleanup edges.
+  Evaluator drive/register/guard/relinquish/wake/notify/cancel operations consume this actor; native
+  and Wasm select lifecycle tags from it after MIR verification.
+- **Critical — Wasm cancellation freed live package storage before a late Wake:** accepted. Dormant
+  destruction marks the wake cell Cancelled before value cleanup, retains Allocation while an
+  external Wake exists, and makes the final Wake consume/drop release Allocation exactly once.
+  Latched destruction during `onSuspend` enters DestroyPending until that callback returns. A
+  strengthened fixture keeps endpoint state alive elsewhere: the old path observably returned
+  `1042` by invoking the cancelled endpoint; the repaired evaluator and Wasm both return `42`.
+- **High — Wasm omitted WakeCleanup and continuation-value cleanup:** accepted. `WakeCleanup` has a
+  dedicated package-aware lowering. Every retained resume id has a typed cleanup thunk that loads
+  affine lanes from the separate coroutine-frame memory, runs the existing cleanup plan including
+  hooks and reclaim, and only then returns the slot to the non-LIFO free list.
+- **High — evaluator cancellation leaked retained machines and stack accounting:** accepted. Cleanup
+  removes the parked machine, walks canonical affine frame slots once, emits `Cleanup`, completes
+  frame trace records, and subtracts each charged frame before a later execution can reserve it.
+- **High — evidence gaps:** accepted. Negative MIR authority forgeries cover incomplete paths,
+  generation drift, and endpoint cleanup before a live invocation. The non-LIFO program returns the
+  order-sensitive value `240`; direct Wasm emission is repeated byte-for-byte; evaluator/Wasm cover
+  latched `onSuspend` destruction, illegal Dormant drive, and independent-root stack exhaustion
+  before callbacks. The illegal-drive native corpus case exposed LLVM `unreachable` as optimizer
+  undefined behavior, so native now branches to the existing real `llvm.trap` block.
+- **Medium — duplicate `Park` trace vocabulary:** accepted. Guard retention and actual suspension
+  handoff are distinct `RetainGuard` and `Relinquish` events; cancellation teardown is an explicit
+  `Cleanup` event.
+
+Consolidated focused evidence: compiler source/test TypeScript **PASS**; transition, external Wake,
+and execution-package suites **PASS**, 3 files / 35 tests; full designated native differential
+corpus **PASS**, 1 test / all programs, 120.16s. No second conformance pass was run.
+
 ## Gate closure
 
 - The complete existing nested/LIFO, evaluator execution-stack exhaustion, native bounded-stack,
@@ -122,9 +163,10 @@ determinism, and repository gates remain open until the formal gate sequence.
   `ExecutionRelinquished` control result. The verifier-negative fixture also needed its deliberately
   malformed operation cast isolated at the test rewrite boundary and exact trace narrowing. Both
   were localized and verified; no third root-cause repair was used.
-- After those fixes, the formal sequence passed in order: focused regression, root typecheck, full
-  Biome, the full repository test graph, repository check, and release candidate. All 15 OpenSpec
-  tasks are complete; the required three-lens conformance review remains in progress before final
+- After those fixes, the pre-conformance formal sequence passed in order: focused regression, root
+  typecheck, full Biome, the full repository test graph, repository check, and release candidate.
+  All 15 OpenSpec tasks are complete. The required three-lens conformance review and its single
+  consolidated fix pass are complete; the post-conformance formal sequence remains before final
   handoff.
 
 ## Verification history

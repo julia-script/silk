@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
+import type * as ExecutionTransition from '../src/ExecutionTransition.js'
 import * as Layout from '../src/Layout.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -10,6 +11,7 @@ import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Type from '../src/Type.js'
 import {
   independentExecutionEligibleDrop,
+  independentExecutionIllegalDormantDrive,
   independentExecutionLateCancelledWake,
   independentExecutionLocalReactor,
   independentExecutionMultiplePackages,
@@ -204,6 +206,9 @@ it.effect('seals Wake and lowers ordinary-source park and wake through verified 
       3,
     )
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const repeatedArtifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.deepEqual(repeatedArtifact.bytes, artifact.bytes)
+    assert.strictEqual(repeatedArtifact.wat, artifact.wat)
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 0)
   }),
@@ -299,7 +304,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
         'Drive',
         'Register',
         'Latch',
-        'Park',
+        'RetainGuard',
         'Notify',
         'Eligible',
         'Resume',
@@ -325,7 +330,7 @@ it.effect('resumes two independent execution roots in non-LIFO owner-selected or
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
-    assert.strictEqual(evaluated.result.value, 42n)
+    assert.strictEqual(evaluated.result.value, 240n)
     const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
     const roots = [...new Set(transitions.map((event) => event.root))]
     assert.lengthOf(roots, 2)
@@ -335,7 +340,72 @@ it.effect('resumes two independent execution roots in non-LIFO owner-selected or
     )
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 240)
+  }),
+)
+
+it.effect('traps a Dormant owner drive before invoking either outcome callback', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-dormant-drive',
+      new TextEncoder().encode(independentExecutionIllegalDormantDrive),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+  }),
+)
+
+it.effect('traps independent-root stack exhaustion before the completion callback', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/stack-exhaustion',
+      new TextEncoder().encode(`import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+struct State { completed: i32 }
+effect fn count(value: i32) -> i32 {
+  if value == 0 { return 42 }
+  let next = run Effect.suspend(effect { return value - 1 })
+  return run count(next)
+}
+effect fn body() -> i32 { return run count(10000) }
+fn ready(state: &()) -> () { return () }
+fn complete(state: &mut State, value: i32) -> () { state.completed = 1 return () }
+fn suspend(state: &mut State, execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut State) -> () {
+  return run Execution.drive(move execution, move state, complete, suspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut state = State { completed: 0 }
+  let execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  run driveOnce(move execution, &mut state)
+  return state.completed
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot, { maxExecutionStackBytes: 1 })
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag === 'Trap')
+      assert.strictEqual(evaluated.reason, 'private execution stack exhausted')
+    const artifact = yield* Analysis.codegenWasm(snapshot, {
+      mode: 'release',
+      privateExecutionStackPages: 1,
+    })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
   }),
 )
 
@@ -403,10 +473,60 @@ it.effect(
         otherPlan === undefined
       )
         return
+      const authority = module.executionTransitions.at(0)
+      const registerEdge = authority?.edges.find((edge) => edge.event === 'Register')
+      const pendingEdge = authority?.edges.find((edge) => edge.after.execution === 'DestroyPending')
+      assert.isDefined(authority)
+      assert.isDefined(registerEdge)
+      assert.isDefined(pendingEdge)
+      if (authority === undefined || registerEdge === undefined || pendingEdge === undefined) return
+      const authorityForgeries: ReadonlyArray<ExecutionTransition.Authority> = [
+        Object.freeze({ ...authority, edges: Object.freeze(authority.edges.slice(1)) }),
+        Object.freeze({
+          ...authority,
+          edges: Object.freeze(
+            authority.edges.map((edge) =>
+              edge === registerEdge
+                ? edge.after.wake === undefined
+                  ? edge
+                  : Object.freeze({
+                      ...edge,
+                      after: Object.freeze({
+                        ...edge.after,
+                        wake: Object.freeze({
+                          ...edge.after.wake,
+                          generation: edge.after.wake.generation + 1,
+                        }),
+                      }),
+                    })
+                : edge,
+            ),
+          ),
+        }),
+        Object.freeze({
+          ...authority,
+          edges: Object.freeze(
+            authority.edges.map((edge) =>
+              edge === pendingEdge
+                ? Object.freeze({ ...edge, cleanup: Object.freeze(['Endpoint' as const]) })
+                : edge,
+            ),
+          ),
+        }),
+      ]
       const forgeries: ReadonlyArray<Mir.Module> = [
         replaceMirOperation(module, initialize, Object.freeze({ ...initialize, plan: otherPlan })),
         replaceMirOperation(module, drive, Object.freeze({ ...drive, completionAccess: 'Shared' })),
         replaceMirOperation(module, wake, Object.freeze({ ...wake, wakeAccess: 'Shared' })),
+        ...authorityForgeries.map((forgedAuthority) =>
+          Object.freeze({
+            ...module,
+            executionTransitions: Object.freeze([
+              forgedAuthority,
+              ...module.executionTransitions.slice(1),
+            ]),
+          }),
+        ),
       ]
       for (const forged of forgeries)
         assert.include(
@@ -431,11 +551,69 @@ it.effect('releases a destroyed dormant execution only when its late cancelled W
     const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
     assert.deepEqual(
       transitions.map((event) => event.event),
-      ['Initialize', 'Drive', 'Register', 'Park', 'Cancel', 'Release'],
+      ['Initialize', 'Drive', 'Register', 'RetainGuard', 'Cancel', 'Cleanup', 'Release'],
     )
     const acquired = evaluated.trace.filter((event) => event._tag === 'AllocationAcquire').length
     const released = evaluated.trace.filter((event) => event._tag === 'AllocationRelease').length
     assert.strictEqual(released, acquired)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('cancels a latched Wake when onSuspend destroys the execution', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/latched-on-suspend-destroy',
+      new TextEncoder().encode(`import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+struct Guard {}
+struct ReadyState { called: i32 }
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn body() -> i32 { run Execution.park(register) return 1 }
+fn markReady(state: &mut ReadyState) -> () { state.called = 1 return () }
+fn ready(state: &Shared.Shared<ReadyState>) -> () {
+  Shared.withMut(state, markReady)
+  return ()
+}
+fn readReady(state: &mut ReadyState) -> i32 { return state.called }
+fn complete(state: &mut (), value: i32) -> () { return () }
+fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
+  return run Execution.drive(move execution, move state, complete, suspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let endpoint = Shared.clone(&readyState)
+  let execution = run Execution.make(body(), move endpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut state = ()
+  run driveOnce(move execution, &mut state)
+  let called = Shared.withMut(&readyState, readReady)
+  drop readyState
+  return 42 + called * 1000
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
@@ -457,7 +635,17 @@ it.effect('defers reentrant notification destruction and never publishes Eligibl
     const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
     assert.deepEqual(
       transitions.map((event) => event.event),
-      ['Initialize', 'Drive', 'Register', 'Latch', 'Park', 'Notify', 'Cancel', 'Release'],
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'Latch',
+        'RetainGuard',
+        'Notify',
+        'Cancel',
+        'Cleanup',
+        'Release',
+      ],
     )
     assert.isFalse(transitions.some((event) => event.event === 'Eligible'))
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
@@ -524,10 +712,11 @@ it.effect('reuses one execution for repeated generations and releases an eligibl
         'Drive',
         'Register',
         'Latch',
-        'Park',
+        'RetainGuard',
         'Notify',
         'Eligible',
         'Cancel',
+        'Cleanup',
         'Release',
       ],
     )
@@ -569,8 +758,8 @@ it.effect('delivers a retained Wake through an ordinary same-thread reactor poll
         'Initialize',
         'Drive',
         'Register',
-        'Park',
-        'Park',
+        'RetainGuard',
+        'Relinquish',
         'Notify',
         'Eligible',
         'Resume',

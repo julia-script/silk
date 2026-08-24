@@ -1,4 +1,5 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import type {
   CoroutineFramePathPlan,
@@ -360,6 +361,7 @@ export const encode = (self: Module): string =>
         : `normalization rejected reason=${verdict.reason} function=${targetText(verdict.function)} region=${regionText(verdict.region)} local=${localText(verdict.local)} ${provenanceText(verdict.provenance)}`,
     ),
     ...coroutineFrameTargetLines(self),
+    ...self.executionTransitions.flatMap(ExecutionTransition.encodeAuthority),
     ...LayoutEncode.encode(self.layout).trimEnd().split('\n'),
     ...self.functions.flatMap((fn) => [
       `fn ${targetText(fn.id)}${

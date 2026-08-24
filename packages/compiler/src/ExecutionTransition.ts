@@ -38,6 +38,18 @@ export interface Edge {
   readonly cleanup: ReadonlyArray<'Guard' | 'Body' | 'Endpoint' | 'Callback' | 'Allocation'>
 }
 
+/**
+ * The complete backend-neutral transition authority carried by MIR for one exact package plan.
+ * Backends may fuse physical tags, but only after this table has been verified.
+ */
+export interface Authority {
+  readonly _tag: 'ExecutionTransitionAuthority'
+  readonly package: number
+  readonly root: number
+  readonly readiness: boolean
+  readonly edges: ReadonlyArray<Edge>
+}
+
 export type Result =
   | Edge
   | {
@@ -141,13 +153,28 @@ export const retainGuard = (self: State): Result =>
 
 /** Completes the suspension callback boundary before allowing notification. */
 export const relinquish = (self: State): Result => {
-  if (self.execution !== 'Running' || self.wake === undefined)
+  if (
+    self.wake === undefined ||
+    (self.execution !== 'Running' &&
+      !(self.execution === 'Destroyed' && self.wake.phase === 'Cancelled'))
+  )
     return violation(self, 'Relinquish', 'IllegalPredecessor')
   const returned = WakeCell.suspensionReturned(self.wake)
   if (returned._tag === 'WakeCellViolation') return violation(self, 'Relinquish', 'WakeAuthority')
-  const execution = returned.state.phase === 'Notifying' ? 'Notifying' : 'Dormant'
+  const execution =
+    returned.state.phase === 'Notifying'
+      ? 'Notifying'
+      : returned.state.phase === 'Released'
+        ? 'Released'
+        : returned.state.phase === 'Cancelled'
+          ? 'Destroyed'
+          : 'Dormant'
   return edge(
-    returned.state.phase === 'Notifying' ? 'Notify' : 'Relinquish',
+    returned.state.phase === 'Notifying'
+      ? 'Notify'
+      : returned.state.phase === 'Released'
+        ? 'Release'
+        : 'Relinquish',
     self,
     state(self.identity, execution, returned.state),
   )
@@ -239,9 +266,84 @@ export const verifyEdge = (self: Edge): ReadonlyArray<string> => {
   return Object.freeze([...new Set(violations)])
 }
 
+const requiredEdge = (result: Result): Edge => {
+  if (result._tag !== 'ExecutionTransitionEdge')
+    throw new RangeError(`canonical execution transition ${result.event} was rejected`)
+  return result
+}
+
+/** Builds the complete legal branch table that MIR validates before backend lowering. */
+export const authority = (packageIdentity: number, root: number, readiness: boolean): Authority => {
+  const initial = initialize(packageIdentity, root, readiness)
+  const running = requiredEdge(drive(initial))
+  const edges: Array<Edge> = [running, requiredEdge(complete(running.after))]
+  if (readiness) {
+    const registering = requiredEdge(register(running.after))
+    const guarded = requiredEdge(retainGuard(registering.after))
+    const dormant = requiredEdge(relinquish(guarded.after))
+    const notifying = requiredEdge(wake(dormant.after))
+    const eligible = requiredEdge(notificationReturned(notifying.after))
+    const resumed = requiredEdge(drive(eligible.after))
+    const latched = requiredEdge(wake(registering.after))
+    const latchedGuard = requiredEdge(retainGuard(latched.after))
+    const latchedNotify = requiredEdge(relinquish(latchedGuard.after))
+    const cancelledDormant = requiredEdge(cancel(dormant.after))
+    const releasedWake = requiredEdge(wake(cancelledDormant.after))
+    const destroyPending = requiredEdge(cancel(notifying.after))
+    const releasedNotification = requiredEdge(notificationReturned(destroyPending.after))
+    edges.push(
+      registering,
+      guarded,
+      dormant,
+      notifying,
+      eligible,
+      resumed,
+      requiredEdge(complete(resumed.after)),
+      latched,
+      latchedGuard,
+      latchedNotify,
+      cancelledDormant,
+      releasedWake,
+      destroyPending,
+      releasedNotification,
+    )
+  }
+  return Object.freeze({
+    _tag: 'ExecutionTransitionAuthority',
+    package: packageIdentity,
+    root,
+    readiness,
+    edges: Object.freeze(edges),
+  })
+}
+
+/** Rejects forged, incomplete, reordered, or internally-invalid MIR transition authority. */
+export const verifyAuthority = (self: Authority): ReadonlyArray<string> => {
+  const violations = self.edges.flatMap(verifyEdge)
+  const expected = authority(self.package, self.root, self.readiness)
+  if (self.edges.length !== expected.edges.length) violations.push('IncompleteTransitionAuthority')
+  if (
+    self.edges.some((candidate, ordinal) => {
+      const expectedEdge = expected.edges.at(ordinal)
+      return expectedEdge === undefined || encode(candidate) !== encode(expectedEdge)
+    })
+  )
+    violations.push('NonCanonicalTransitionAuthority')
+  return Object.freeze([...new Set(violations)])
+}
+
+/** Deterministic MIR inspection of a complete per-package transition authority. */
+export const encodeAuthority = (self: Authority): ReadonlyArray<string> =>
+  Object.freeze(
+    self.edges.map(
+      (candidate, ordinal) =>
+        `execution-transition package=${self.package} root=${self.root} edge=${ordinal} ${encode(candidate)}`,
+    ),
+  )
+
 /** Compact private tag selected by native and Wasm only after MIR validation. */
-export const tag = (self: State): number => {
-  switch (self.execution) {
+export const tagOf = (execution: State['execution']): number => {
+  switch (execution) {
     case 'Initial':
       return 0
     case 'Running':
@@ -262,6 +364,8 @@ export const tag = (self: State): number => {
       return 8
   }
 }
+
+export const tag = (self: State): number => tagOf(self.execution)
 
 /** Representation-free deterministic inspection of one state or transition edge. */
 export const encode = (self: State | Edge): string => {
