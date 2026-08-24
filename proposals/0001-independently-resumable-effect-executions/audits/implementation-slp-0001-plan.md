@@ -132,3 +132,11 @@ seven-case structural pay-for-use matrix, actor-neutral privilege inventory, uno
 diagnostics, and designated native corpus cases. It fixes Wasm `EffectBorrow` frame-root planning
 without selecting independent machinery for local Shared captures, consuming repair 2/3. Focused
 pressure verification is 14/14 and compiler typecheck is green; OpenSpec progress is 10/21.
+
+Layer 5's initial bounded run parked at `b7004e0` after consuming repair 3/3. The third repair fixes
+native exact-package capability dispatch and passes the minimized mixed direct/external case, first
+activation, compiler typecheck, and targeted Biome checks. OpenSpec progress is 12/21. The
+designated native Coroutine and dormant-cancel cases then exposed a new distinct cancellation/
+resumption lifetime defect after the budget was exhausted, so formal hard gates and conformance
+did not start. A fresh bounded resume will begin from the preserved checkpoint and target that
+named native lifetime blocker.
