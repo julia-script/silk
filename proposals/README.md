@@ -27,3 +27,9 @@ SLP (direction and coherence)
 - [SLP-0003: Implicit ownership for park-capable Effect entries](0003-implicit-ownership-for-park-capable-effect-entries/proposal.md)
   — Draft; split from SLP-0001 to decide synchronous root execution ownership, storage, target
   validation, and final-outcome adaptation while preserving ordinary `run` as the desired API.
+- [SLP-0004: Silk-native testing](0004-silk-native-testing/proposal.md)
+  — Accepted direction; general testing for user projects and the standard library through marked
+  declarations, opaque inventory and invocation, a replaceable Reporter service,
+  `Test.assert(bool)`, non-generic `Test.equalBytes`, and reused evaluator logical failure paths,
+  with basic runner-owned ASCII case-insensitive substring filters on one ordinary host/evaluator
+  execution path.
