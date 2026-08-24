@@ -21,6 +21,48 @@ const renamed = readFileSync(
   ),
   'utf8',
 )
+const independentExecution = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/main.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const deferredFirstActivation = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/first-activation.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const alternateOwner = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/coroutine.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const dormantCancellation = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/dormant-cancel.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const timerOwner = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/timer.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const selectiveReady = readFileSync(
+  new URL(
+    '../../../examples/language-pressure/independent-execution-separation/selective-ready.silk',
+    import.meta.url,
+  ),
+  'utf8',
+)
 
 const realized = Effect.fnUntraced(function* (name: string, source: string) {
   return yield* Analysis.ofSourceRealized(name, encoder.encode(source), 'wasm32-unknown-unknown')
@@ -286,5 +328,166 @@ it.effect('recovers deterministically at every exercised construction quota', ()
         Number(expected),
       )
     }
+  }),
+)
+
+it.effect('runs the connected ordinary-source Execution and Wake companion', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-separation',
+      independentExecution,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      JSON.stringify(Analysis.diagnostics(snapshot)),
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.strictEqual(completed(snapshot).result.value, 42n)
+    assert.strictEqual((yield* runWasm(snapshot)).result, 42)
+  }),
+)
+
+it.effect('lets one ordinary owner choose first activation across exact body representations', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-first-activation',
+      deferredFirstActivation,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = completed(snapshot)
+    assert.strictEqual(evaluated.result.value, 20n)
+    assert.isFalse(
+      evaluated.trace.some(
+        (event) => event._tag === 'Call' && event.target.name === 'firstBody$effect$-1',
+      ),
+    )
+    const allocationEvents = evaluated.trace.filter(
+      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+    )
+    assert.strictEqual(
+      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
+      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
+      JSON.stringify(allocationEvents),
+    )
+    assert.strictEqual((yield* runWasm(snapshot)).result, 20)
+  }),
+)
+
+it.effect('reuses the Execution and Wake lifecycle from a bounded alternate owner', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-alternate-owner',
+      alternateOwner,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      JSON.stringify(Analysis.diagnostics(snapshot)),
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = completed(snapshot)
+    assert.strictEqual(evaluated.result.value, 123n)
+    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+    assert.deepEqual(
+      transitions.map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Notify',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Notify',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Complete',
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Cancel',
+        'Cleanup',
+        'Release',
+      ],
+    )
+    const allocationEvents = evaluated.trace.filter(
+      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+    )
+    assert.strictEqual(
+      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
+      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
+      JSON.stringify(allocationEvents),
+    )
+    assert.strictEqual((yield* runWasm(snapshot)).result, 123)
+  }),
+)
+
+it.effect('suppresses a retained Wake after post-suspension Dormant destruction', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-dormant-cancel',
+      dormantCancellation,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.strictEqual(completed(snapshot).result.value, 0n)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 0)
+  }),
+)
+
+it.effect('drives a fallibly prepared same-thread timer and cancels before readiness', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-timer-owner',
+      timerOwner,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      JSON.stringify(Analysis.diagnostics(snapshot)),
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = completed(snapshot)
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.strictEqual((yield* runWasm(snapshot)).result, 42)
+  }),
+)
+
+it.effect('publishes one task identity without scanning and consumes a stale ready identity', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* realized(
+      'pressure/independent-execution-selective-ready',
+      selectiveReady,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      JSON.stringify(Analysis.diagnostics(snapshot)),
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = completed(snapshot)
+    assert.strictEqual(evaluated.result.value, 22n)
+    const notifications = evaluated.trace.filter(
+      (event) =>
+        event._tag === 'ExecutionTransition' &&
+        (event.event === 'Notify' || event.event === 'Eligible'),
+    )
+    assert.deepEqual(
+      notifications.map((event) => event.event),
+      ['Notify', 'Eligible', 'Notify', 'Eligible'],
+    )
+    assert.strictEqual((yield* runWasm(snapshot)).result, 22)
   }),
 )

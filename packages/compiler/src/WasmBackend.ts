@@ -1751,6 +1751,30 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup': {
+          const value = currentValues.at(0)
+          if (value === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package pointer')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(layout.scratch),
+              ...releaseExecutionBase(layout.scratch),
+            ]),
+          })
+        }
+        case 'WakeCleanup': {
+          const value = currentValues.at(0)
+          if (value === undefined) throw new RangeError('Wasm Wake cleanup lost its package pointer')
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(layout.scratch),
+              ...releaseWakeBase(layout.scratch),
+            ]),
+          })
+        }
         case 'LocalSharedCoreCleanup': {
           const base = currentValues.at(0)
           const elementLayout = LayoutPlan.entry(plan, plan_.element)
@@ -1975,6 +1999,22 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup':
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(layout.scratch),
+              ...releaseExecutionBase(layout.scratch),
+            ]),
+          })
+        case 'WakeCleanup':
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(layout.scratch),
+              ...releaseWakeBase(layout.scratch),
+            ]),
+          })
         case 'AllocationCleanup':
         case 'RawBufferCleanup': {
           const contextOffset = SilkType.isRawBuffer(plan_.type)
