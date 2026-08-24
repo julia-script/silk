@@ -7,6 +7,10 @@ bounded native and WebAssembly machine stack.
 Suspension is not async execution. It does not park a task, let another task run, wait for a wakeup,
 or introduce a scheduler. It also does not make ordinary recursion stack safe automatically.
 
+Explicit owner-controlled parking and later resumption are defined separately by
+[independently resumable Effect executions](independent-execution.md). Allocation-backed dynamic
+local state shared by those owners is defined by [local shared ownership](local-shared-ownership.md).
+
 The intended public contract is:
 
 ```silk,ignore
@@ -74,6 +78,10 @@ fatal intrinsic-state trap. Execution-internal stable loans may cross parking, b
 cannot retain caller loans and completion cannot return a loan into package-owned storage.
 
 ## Independent execution and external parking
+
+This section summarizes the relationship to suspension. The complete public lifecycle, Wake,
+cancellation, ownership, and scheduling-policy rules are in
+[independently resumable Effect executions](independent-execution.md).
 
 `Execution.make` allocates one combined package through the caller-selected `Allocator`. The
 package owns the lazy body and its fixed readiness endpoint. Construction returns an `Initial`

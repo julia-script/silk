@@ -5,6 +5,10 @@ owner, a move transfers that ownership, and a borrow grants access without trans
 This keeps copying and cleanup visible in function contracts without requiring manual memory
 management.
 
+[`Shared<T>`](local-shared-ownership.md) adds dynamically lived, allocation-backed strong ownership
+inside one local execution domain. Its callback references obey the borrowing rules on this page,
+but its handles are affine owners rather than lexical references.
+
 This page defines owned values, lexical borrowing, projection and control-flow behavior, captured
 ownership, cleanup, allocation lifecycles, and returned views. Each rule states its boundary and
 the diagnostic a programmer should expect when that boundary is crossed.
