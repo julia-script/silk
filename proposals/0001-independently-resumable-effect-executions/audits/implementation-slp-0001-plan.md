@@ -158,3 +158,10 @@ cleanup ownership. A nested-union dormant cancellation probe now observes exact 
 transitions, balanced evaluator releases, a safe late Wake, and direct-Wasm result `111`. Focused
 dormant/timer evaluator-Wasm tests and compiler typecheck pass; the six consolidated High
 corrections remain in the same single conformance fix pass.
+
+Layer 5 conformance checkpoint `9932bdd` removes compiler canonical identities and spelling checks
+for `OutOfMemoryError`, `Allocator`, and `SystemAllocator`. Sealed `Intrinsic.StorageFailure` now
+carries primitive refusal authority, while ordinary Silk converts it to public allocation policy;
+allocation provenance follows Effect catch/pattern flow without actor names. Compiler typecheck and
+the focused ordinary/renamed local-Shared witness pass. Timer, waiter, emitted-artifact, and
+cross-engine observability findings remain in the same fix pass.
