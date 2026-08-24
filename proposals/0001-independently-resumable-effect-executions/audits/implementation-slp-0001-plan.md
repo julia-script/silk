@@ -35,8 +35,8 @@ merge, the integration branch runs the full repository gates before the next lay
 | 1 | `establish-independent-execution-semantics` | Done | 3 + 1 post-audit rerun | Integrated at `ffb0ec2`; barrier passed | 21 reviewed; 11 fixed, 10 rejected as out of scope |
 | 2 | `add-independent-execution-packaging` | Done | 3 initial fixes; 3 resume attempts + 1 post-audit rerun | Integrated at `ff39ca0`; barrier passed | 1 High fixed; 1 High rejected as Layer 3 scope; Medium/Low recorded |
 | 3 | `add-external-wake-parking` | Done | 3 initial fixes + 1 conformance rerun + 1 resume bootstrap fix | Integrated at `f2e82a8`; barrier passed | 7 reviewed; 3 High fixed, 3 High rejected as Layer 4 scope, 1 Medium recorded |
-| 4 | `add-independent-execution-engine-parity` | Running | — | — | — |
-| 5 | `prove-independent-execution-separation` | Pending | — | Waiting for layer 4 | — |
+| 4 | `add-independent-execution-engine-parity` | Done | 3 + 1 post-conformance rerun | Integrated at `81f55ac`; barrier passed | 9 reviewed; 2 Critical, 5 High, and 2 Medium fixed |
+| 5 | `prove-independent-execution-separation` | Running | — | Isolated implementation starting | — |
 
 ## Integration gates
 
@@ -110,3 +110,12 @@ Layer 4 conformance checkpoint `e46f5e6` makes transition authority production-c
 typed Wasm frame cleanup and cancelled-Wake final release, fixes evaluator parked-machine/stack
 accounting, publishes canonical traces, and adds the missing destructive/order-sensitive evidence.
 Focused verification and the full native differential corpus pass before the single final rerun.
+
+Layer 4 completed at `81f55ac`. Its final hard-gate rerun passed focused verification 36/36,
+typecheck 24/24, Biome over 989 files, test 28/28 (compiler 2,134/2,134 plus native differential
+1/1), check 42/42 plus scripts 16/16, and release candidate 9/9. The run consumed its 3/3 repair
+budget; the final root cause scoped Wasm frame-cleanup thunk generation to modules with
+execution-package cleanup authority. No Critical or High finding remains open.
+
+Layer 4's integrated full hard-gate command also exited successfully. Layer 5 may now begin from
+the verified integration branch.
