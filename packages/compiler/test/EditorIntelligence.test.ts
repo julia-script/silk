@@ -874,10 +874,11 @@ pub fn make() -> Provider { return Provider {} }`
 struct Provider {}
 impl Visible for Provider {}
 pub fn make() -> Provider { return Provider {} }`
-  const analyze = (library: string) =>
-    Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+  const analyze = Effect.fnUntraced(function* (library: string) {
+    return yield* Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
       Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     )
+  })
   return Effect.all([analyze(privateContractLibrary), analyze(privateProviderLibrary)]).pipe(
     Effect.map((snapshots) => {
       for (const snapshot of snapshots) {
