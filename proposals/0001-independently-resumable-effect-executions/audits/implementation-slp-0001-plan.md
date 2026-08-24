@@ -140,3 +140,9 @@ designated native Coroutine and dormant-cancel cases then exposed a new distinct
 resumption lifetime defect after the budget was exhausted, so formal hard gates and conformance
 did not start. A fresh bounded resume will begin from the preserved checkpoint and target that
 named native lifetime blocker.
+
+Layer 5 resume checkpoint `8679557` fixes native address-root synchronization after `WritePlace`
+and normalizes intentional negative native exits through the POSIX low byte, consuming resume
+repairs 1/3 and 2/3. The pressure suite is 14/14, repository typecheck and the full designated
+native differential corpus pass, and focused Biome is green. OpenSpec remains 12/21 while the
+remaining evidence, report, documentation, and formal gates continue.
