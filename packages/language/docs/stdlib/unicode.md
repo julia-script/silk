@@ -29,7 +29,7 @@ locale-sensitive comparison, grapheme segmentation, or case folding.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.string as String
 

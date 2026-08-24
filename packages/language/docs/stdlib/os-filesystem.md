@@ -38,7 +38,7 @@ rather than inventing filesystem imports; evaluator execution requires an inject
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.os_filesystem as OsFileSystem
 

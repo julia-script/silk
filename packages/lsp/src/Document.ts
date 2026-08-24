@@ -1455,7 +1455,12 @@ export const completion = (
             entry.module === self.module ||
             partial.length === 0 ||
             !entry.namespace.startsWith(partial) ||
-            importedNamespaces.has(entry.module)
+            importedNamespaces.has(entry.module) ||
+            // A module whose namespace name is also one of its exported members is anchored: the
+            // ordinary member import names the same scope, so a namespace import adds nothing.
+            (inventory.byName.get(entry.namespace) ?? []).some(
+              (candidate) => candidate.module === entry.module,
+            )
           )
             return []
           const localSpelling = visible.has(entry.namespace)

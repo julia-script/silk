@@ -27,7 +27,7 @@ cryptographic keys, nonces, or security tokens.
 ### Reproduce the first word from one seed
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.random as Random
 

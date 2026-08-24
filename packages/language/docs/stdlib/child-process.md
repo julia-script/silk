@@ -37,7 +37,7 @@ import silk.child_process as Process
 
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.filesystem as Path
 

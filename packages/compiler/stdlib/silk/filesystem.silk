@@ -25,7 +25,7 @@
 //! ```silk
 //! import silk.allocator { Allocator }
 //!
-//! import silk.effect as Effect
+//! import silk.effect { Effect }
 //!
 //! import silk.filesystem as FileSystem
 //!
@@ -58,7 +58,7 @@ import silk.bytes {
 }
 import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }
 import silk.result { Failure, Result, Success }

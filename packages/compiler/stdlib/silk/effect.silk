@@ -28,7 +28,7 @@
 //! # Examples
 //! ## Transform and continue a successful computation
 //! ```silk
-//! import silk.effect as Effect
+//! import silk.effect { Effect }
 //!
 //! struct Problem {
 //!   code: i32
@@ -65,7 +65,7 @@
 //!
 //! ## Supply a custom service for one lexical computation
 //! ```silk
-//! import silk.effect as Effect
+//! import silk.effect { Effect }
 //!
 //! service Clock {
 //!   effect fn value() -> i32 ? &Clock
@@ -96,7 +96,7 @@
 //!
 //! ## Recover a typed failure into success
 //! ```silk
-//! import silk.effect as Effect
+//! import silk.effect { Effect }
 //!
 //! struct Problem {
 //!   answer: i32
@@ -123,6 +123,16 @@ import silk.bool as bool
 import silk.logger { LogError, LogLevel, Logger }
 import silk.result { Result, Success, Failure }
 import silk.usize as usize
+
+/// The importable name of the `silk.effect` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.effect { Effect }` names the module scope, so `Effect.map(...)` and every other
+/// combinator resolve through it exactly as through a module alias. It is unrelated to the builtin
+/// `Effect<A ! E ? R>` type, which needs no import.
+pub struct Effect {}
 
 /// Sends one complete message at `Logger.info()` through the required mutable [`Logger`].
 ///
@@ -160,7 +170,7 @@ pub effect fn logAt(
 /// # Examples
 /// ## Inspect a failure as ordinary data
 /// ```silk
-/// import silk.effect as Effect
+/// import silk.effect { Effect }
 ///
 /// import silk.result as Result
 ///
@@ -582,7 +592,7 @@ where &P provides S from R {
 /// ## Mutate a custom service for one computation
 ///
 /// ```silk
-/// import silk.effect as Effect
+/// import silk.effect { Effect }
 ///
 /// service Counter {
 ///   effect fn next() -> i32 ? &mut Counter

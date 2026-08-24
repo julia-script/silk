@@ -32,7 +32,7 @@ Extract work under [`withMut`](#declaration-73696c6b2f7368617265643a3a776974684d
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.shared { clone, make, with, withMut }
 

@@ -20,7 +20,7 @@ process-backed implementation lexically. Stream failure is typed as [`StreamWrit
 ### Write one complete standard-output message
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.standard_streams { StandardStreams }
 

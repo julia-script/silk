@@ -34,7 +34,7 @@ the bytes were validated as UTF-8; [`view`](#declaration-73696c6b2f66696c6573797
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.filesystem as FileSystem
 
