@@ -91,6 +91,29 @@ const replaceMirOperation = (
   })
 }
 
+const llvmIndentedBlock = (ir: string, label: RegExp): string => {
+  const match = ir.match(new RegExp(String.raw`${label.source}:\n((?:  .*\n)+)`))
+  assert.isDefined(match, `missing LLVM block ${label.source}`)
+  return match?.at(1) ?? ''
+}
+
+const assertTrapOnlyBlock = (block: string): void => {
+  assert.match(block, /call void @llvm\.trap\(\)/)
+  assert.match(block, /unreachable/)
+  assert.notMatch(block, /call (?!void @llvm\.trap\(\))/)
+  assert.notMatch(block, /on_(?:complete|suspend)/)
+}
+
+const assertNativeDriveAdmissionBeforeCallbacks = (ir: string): void => {
+  const admission = ir.search(
+    /br i1 %drive\d+_valid, label %drive\d+_accepted, label %drive\d+_rejected/,
+  )
+  assert.isAtLeast(admission, 0)
+  const callback = ir.search(/drive\d+_on_(?:complete|suspend)/)
+  assert.strictEqual(callback < 0 || admission < callback, true)
+  assertTrapOnlyBlock(llvmIndentedBlock(ir, /drive\d+_rejected/))
+}
+
 const source = `import silk.core as Core
 import silk.core { Allocator }
 import silk.effect as Effect
@@ -374,6 +397,14 @@ it.effect('traps a Dormant owner drive before invoking either outcome callback',
       {},
     )
     assert.throws(() => (observableInstance.exports.silk_main as () => number)(), /unreachable/)
+    const native = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-dormant-drive-native',
+      new TextEncoder().encode(independentExecutionIllegalDormantDrive),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
+    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact.ir)
   }),
 )
 
@@ -413,14 +444,7 @@ it.effect('traps a Notifying reentrant drive before invoking either outcome call
     )
     assert.deepEqual(Analysis.diagnostics(native), [])
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    assert.match(
-      nativeArtifact.ir,
-      /br i1 %drive\d+_valid, label %drive\d+_accepted, label %drive\d+_rejected/,
-    )
-    assert.match(
-      nativeArtifact.ir,
-      /drive\d+_rejected:[\s\S]*?call void @llvm\.trap\(\)[\s\S]*?unreachable/,
-    )
+    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact.ir)
   }),
 )
 
@@ -464,10 +488,7 @@ it.effect('traps independent-root stack exhaustion before the completion callbac
       nativeArtifact.ir,
       /br i1 %suspend_invocation_frame_exhausted, label %suspend_invocation_frame_trap, label %suspend_invocation_frame_pushed/,
     )
-    assert.match(
-      nativeArtifact.ir,
-      /suspend_invocation_frame_trap:[\s\S]*?call void @llvm\.trap\(\)[\s\S]*?unreachable/,
-    )
+    assertTrapOnlyBlock(llvmIndentedBlock(nativeArtifact.ir, /suspend_invocation_frame_trap/))
   }),
 )
 
