@@ -1,0 +1,78 @@
+// Test-local proof that one owner may store distinct exact bodies homogeneously before first drive.
+import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+struct Marker { value: i32 callbacks: i32 }
+fn mark(self: &mut Marker, value: i32) -> () { self.value = value return () }
+fn recordCallback(self: &mut Marker) -> () {
+  self.callbacks = self.callbacks + 1
+  return ()
+}
+fn fingerprint(self: &Marker) -> i32 { return self.value * 10 + self.callbacks }
+
+struct TaskOutput {}
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<TaskOutput> }
+struct Owner { first: Empty | Stored second: Empty | Stored }
+
+effect fn firstBody(marker: Shared.Shared<Marker>) -> TaskOutput {
+  let changed = Shared.withMut(&marker, mark(1))
+  drop marker
+  return TaskOutput {}
+}
+
+effect fn secondBody(marker: Shared.Shared<Marker>, selected: i32) -> TaskOutput {
+  let changed = Shared.withMut(&marker, mark(selected))
+  drop marker
+  return TaskOutput {}
+}
+
+fn ready(marker: &Shared.Shared<Marker>) -> () {
+  return Shared.withMut(marker, recordCallback)
+}
+
+fn complete(owner: &mut Owner, output: TaskOutput) -> () {
+  drop output
+  return ()
+}
+
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<TaskOutput>) -> () {
+  drop execution
+  return ()
+}
+
+effect fn driveSelected(execution: Intrinsic.Execution<TaskOutput>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let marker = run Shared.make<Marker>(Marker { value: 0, callbacks: 0 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let firstMarker = Shared.clone<Marker>(&marker)
+  let secondMarker = Shared.clone<Marker>(&marker)
+  let firstEndpoint = Shared.clone<Marker>(&marker)
+  let secondEndpoint = Shared.clone<Marker>(&marker)
+  let first = run Execution.make(firstBody(move firstMarker), move firstEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let second = run Execution.make(secondBody(move secondMarker, 2), move secondEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut owner = Owner {
+    first: Stored { execution: move first },
+    second: Stored { execution: move second },
+  }
+  let selected = Intrinsic.replace(owner.second, Empty {})
+  match move selected {
+    Empty {} => ()
+    Stored { execution } => run driveSelected(move execution, &mut owner)
+  }
+  let observed = Shared.with<Marker, i32>(&marker, fingerprint)
+  drop owner
+  drop marker
+  return observed
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

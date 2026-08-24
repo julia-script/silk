@@ -3179,7 +3179,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination?._tag !== 'Nominal' ||
             !SilkType.equals(destination.type, SilkType.allocation) ||
             !SilkType.equals(operation.type.type, SilkType.allocation) ||
-            !SilkType.equals(operation.failure, SilkType.outOfMemoryError) ||
+            !SilkType.equals(operation.failure, SilkType.storageFailure) ||
             expectedFailure === undefined ||
             !SilkType.equals(expectedFailure, operation.failure) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
@@ -3191,7 +3191,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail:
-                  'allocation does not preserve Layout, Allocation, or OutOfMemoryError contracts',
+                  'allocation does not preserve Layout, Allocation, or sealed storage-failure contracts',
               }),
             )
         }
@@ -3379,6 +3379,16 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             factCallbackArgument === undefined
               ? undefined
               : SilkType.representedType(factCallbackArgument)
+          const bodyType = body === undefined ? undefined : semanticType(body)
+          const plannedBodyType = SilkType.isRepresented(operation.plan.specialization.body)
+            ? operation.plan.specialization.body.contract
+            : operation.plan.specialization.body
+          const bodyMatches =
+            bodyType !== undefined &&
+            SilkType.isEffect(bodyType) &&
+            SilkType.isEffect(plannedBodyType)
+              ? SilkType.representationAdmissibility(plannedBodyType, bodyType)._tag === 'Admitted'
+              : bodyType !== undefined && SilkType.equals(bodyType, plannedBodyType)
           if (
             allocation?._tag !== 'Nominal' ||
             !SilkType.equals(allocation.type, SilkType.allocation) ||
@@ -3390,12 +3400,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             !SilkType.equals(destination.type, operation.type.type) ||
             result === undefined ||
             !SilkType.equals(result, operation.plan.specialization.result) ||
-            !SilkType.equals(
-              semanticType(body),
-              SilkType.isRepresented(operation.plan.specialization.body)
-                ? operation.plan.specialization.body.contract
-                : operation.plan.specialization.body,
-            ) ||
+            !bodyMatches ||
             !SilkType.equals(semanticType(endpoint), operation.plan.specialization.endpoint) ||
             !SilkType.equals(
               semanticType(callback),

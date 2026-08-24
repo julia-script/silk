@@ -409,8 +409,12 @@ export const make = (operations: Operations) => {
   ): ReadonlyArray<CallTarget> => {
     const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
       const own =
-        expression._tag === 'BuiltinCall' && expression.operation === 'SlotDrop'
-          ? expression.typeArguments.flatMap((argument) =>
+        expression._tag === 'BuiltinCall' &&
+        (expression.operation === 'SlotDrop' || expression.operation === 'ExecutionPark')
+          ? (expression.operation === 'ExecutionPark'
+              ? expression.typeArguments.slice(0, 1)
+              : expression.typeArguments
+            ).flatMap((argument) =>
               (() => {
                 const specialized = Type.substituteGenericArgument(argument, substitution)
                 return Type.isTypeArgument(specialized)

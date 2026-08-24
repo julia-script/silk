@@ -595,6 +595,11 @@ interface Layout {
   readonly scratch64: number
   /** One preserved control-block address per statically nested local-shared cleanup. */
   readonly localSharedCleanupScratch: ReadonlyArray<number>
+  /** Distinct package authorities and continuation cursors for recursive execution cleanup. */
+  readonly executionCleanupScratch: ReadonlyArray<{
+    readonly package: number
+    readonly frame: number
+  }>
   readonly scratchF32?: readonly [number, number]
   readonly scratchF64?: readonly [number, number]
   readonly frameBase?: number
@@ -667,6 +672,31 @@ const operationCleanupPlans = (
       )
     default:
       return Object.freeze([])
+  }
+}
+
+const containsExecutionCleanup = (cleanup: CleanupPlan.CleanupPlan): boolean => {
+  switch (cleanup._tag) {
+    case 'ExecutionCleanup':
+    case 'WakeCleanup':
+      return true
+    case 'RawBufferCleanup':
+      return containsExecutionCleanup(cleanup.allocation)
+    case 'HookCleanup':
+      return containsExecutionCleanup(cleanup.inner)
+    case 'StructCleanup':
+      return cleanup.fields.some((field) => containsExecutionCleanup(field.cleanup))
+    case 'ArrayCleanup':
+      return containsExecutionCleanup(cleanup.element)
+    case 'UnionCleanup':
+      return cleanup.cases.some((entry) => containsExecutionCleanup(entry.cleanup))
+    case 'CallableCleanup':
+    case 'EffectCleanup':
+      return cleanup.slots.some((slot) => containsExecutionCleanup(slot.cleanup))
+    case 'EffectCompositeCleanup':
+      return cleanup.alternatives.some(containsExecutionCleanup)
+    default:
+      return false
   }
 }
 
@@ -1000,6 +1030,33 @@ const layoutOf = (
     declared.push(named(i32, `local_shared_cleanup_${depth}`))
   }
   nextInternal += localSharedCleanupScratch.length
+  const operations = MirVerification.operations(fn)
+  const needsExecutionCleanup =
+    operations.some(
+      (operation) =>
+        operation._tag === 'ExecutionFromAllocation' ||
+        operation._tag === 'ExecutionDrive' ||
+        operation._tag === 'ExecutionWake' ||
+        operation._tag === 'ExecutionPark',
+    ) || operations.flatMap(operationCleanupPlans).some(containsExecutionCleanup)
+  const executionCleanupDepth = needsExecutionCleanup
+    ? Math.max(1, plan.executionPackages.plans.length + 1)
+    : 0
+  const executionCleanupScratch = Object.freeze(
+    Array.from({ length: executionCleanupDepth }, (_, depth) =>
+      Object.freeze({
+        package: nextInternal + depth * 2,
+        frame: nextInternal + depth * 2 + 1,
+      }),
+    ),
+  )
+  for (const [depth] of executionCleanupScratch.entries()) {
+    declared.push(
+      named(i32, `execution_cleanup_package_${depth}`),
+      named(i32, `execution_cleanup_frame_${depth}`),
+    )
+  }
+  nextInternal += executionCleanupScratch.length * 2
   const needsScratchF32 = MirVerification.operations(fn).some(
     (operation) => operation._tag === 'FloatTranscendental' && operation.sourceType._tag === 'f32',
   )
@@ -1043,6 +1100,7 @@ const layoutOf = (
     scratch,
     scratch64,
     localSharedCleanupScratch,
+    executionCleanupScratch,
     ...(scratchF32 === undefined ? {} : { scratchF32 }),
     ...(scratchF64 === undefined ? {} : { scratchF64 }),
     declared: Object.freeze(declared),
@@ -1751,6 +1809,38 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, values, (plan_, currentValues) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup': {
+          const value = currentValues.at(0)
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (value === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package pointer')
+          }
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(scratch.package),
+              ...releaseExecutionBase(scratch.package),
+            ]),
+          })
+        }
+        case 'WakeCleanup': {
+          const value = currentValues.at(0)
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (value === undefined)
+            throw new RangeError('Wasm Wake cleanup lost its package pointer')
+          if (scratch === undefined)
+            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          return Object.freeze({
+            before: Object.freeze([
+              ...value,
+              Instr.localSet(scratch.package),
+              ...releaseWakeBase(scratch.package),
+            ]),
+          })
+        }
         case 'LocalSharedCoreCleanup': {
           const base = currentValues.at(0)
           const elementLayout = LayoutPlan.entry(plan, plan_.element)
@@ -1975,6 +2065,32 @@ const makeOperationContext = (
     return WasmCleanup.emitCleanupWalk(cleanup, byteOffset, (plan_, currentOffset) => {
       if (!CleanupPlan.reclaims(plan_)) return Object.freeze({})
       switch (plan_._tag) {
+        case 'ExecutionCleanup': {
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Execution cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(scratch.package),
+              ...releaseExecutionBase(scratch.package),
+            ]),
+          })
+        }
+        case 'WakeCleanup': {
+          const scratch = layout.executionCleanupScratch.at(0)
+          if (scratch === undefined) {
+            throw new RangeError('Wasm Wake cleanup lost its package authority local')
+          }
+          return Object.freeze({
+            before: Object.freeze([
+              ...loadAt(address, currentOffset),
+              Instr.localSet(scratch.package),
+              ...releaseWakeBase(scratch.package),
+            ]),
+          })
+        }
         case 'AllocationCleanup':
         case 'RawBufferCleanup': {
           const contextOffset = SilkType.isRawBuffer(plan_.type)
@@ -2158,7 +2274,11 @@ const makeOperationContext = (
           ]
     return select(0)
   }
-  function releaseExecutionBase(base: number): ReadonlyArray<Instr.Instr> {
+  function releaseExecutionBase(base: number, cleanupDepth = 0): ReadonlyArray<Instr.Instr> {
+    const cleanupScratch = layout.executionCleanupScratch.at(cleanupDepth)
+    if (cleanupScratch === undefined) {
+      throw new RangeError(`Wasm Execution cleanup exceeded depth ${cleanupDepth}`)
+    }
     const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
       const package_ = plan.executionPackages.plans.at(ordinal)
       const cleanup =
@@ -2186,19 +2306,19 @@ const makeOperationContext = (
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket',
       })
-      const cleanupValues = [
+      const cleanupEndpoint = [
         ...(callbackOffset === undefined
           ? []
-          : releaseAtAddress(cleanup.callback, base, callbackOffset)),
+          : releaseAtAddress(cleanup.callback, base, callbackOffset, 0, cleanupDepth + 1)),
         ...(endpointOffset === undefined
           ? []
-          : releaseAtAddress(cleanup.endpoint, base, endpointOffset)),
-        ...releaseAtAddress(cleanup.body, base, bodyOffset),
+          : releaseAtAddress(cleanup.endpoint, base, endpointOffset, 0, cleanupDepth + 1)),
       ]
+      const cleanupBody = releaseAtAddress(cleanup.body, base, bodyOffset, 0, cleanupDepth + 1)
       const controlOffset = executionComponentOffset(package_, 'WakeControl')
       const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
       const runtime = emitter.suspensionRuntime
-      const frame = layout.scratch
+      const frame = cleanupScratch.frame
       const cleanupCurrentFrame = (ordinal: number): ReadonlyArray<Instr.Instr> => {
         if (runtime === undefined) return [Instr.op('unreachable')]
         const entries = [...runtime.frameCleanups.entries()].sort(([left], [right]) => left - right)
@@ -2248,10 +2368,22 @@ const makeOperationContext = (
                 ]),
               ]),
             ]
-      const cleanupPackage = [
-        ...cleanupValues,
+      const cleanupInitial = [
+        ...cleanupEndpoint,
+        ...cleanupBody,
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupActivated = [
+        ...cleanupEndpoint,
         ...cleanupFrames,
-        ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset, 0, cleanupDepth + 1),
+      ]
+      const cleanupPackage = [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory),
+        Instr.i32Const(ExecutionTransition.tagOf('Initial')),
+        Instr.op('i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, cleanupInitial, cleanupActivated),
       ]
       const cancelDormant =
         controlOffset === undefined
@@ -2265,7 +2397,7 @@ const makeOperationContext = (
               Instr.memoryAccess('i32.store', requireMemory().memory, {
                 offset: controlOffset,
               }),
-              ...cleanupValues,
+              ...cleanupEndpoint,
               ...cleanupFrames,
             ]
       const cancelRegistration =
@@ -2347,14 +2479,29 @@ const makeOperationContext = (
     address: number,
     byteOffset = 0,
     localSharedDepth = 0,
+    executionCleanupDepth = 0,
   ): ReadonlyArray<Instr.Instr> {
     if (cleanup._tag === 'ExecutionCleanup') {
-      const base = layout.scratch
-      return [...loadAt(address, byteOffset), Instr.localSet(base), ...releaseExecutionBase(base)]
+      const scratch = layout.executionCleanupScratch.at(executionCleanupDepth)
+      if (scratch === undefined) {
+        throw new RangeError(`Wasm Execution cleanup exceeded depth ${executionCleanupDepth}`)
+      }
+      return [
+        ...loadAt(address, byteOffset),
+        Instr.localSet(scratch.package),
+        ...releaseExecutionBase(scratch.package, executionCleanupDepth),
+      ]
     }
     if (cleanup._tag === 'WakeCleanup') {
-      const base = layout.scratch
-      return [...loadAt(address, byteOffset), Instr.localSet(base), ...releaseWakeBase(base)]
+      const scratch = layout.executionCleanupScratch.at(executionCleanupDepth)
+      if (scratch === undefined) {
+        throw new RangeError(`Wasm Wake cleanup exceeded depth ${executionCleanupDepth}`)
+      }
+      return [
+        ...loadAt(address, byteOffset),
+        Instr.localSet(scratch.package),
+        ...releaseWakeBase(scratch.package),
+      ]
     }
     if (cleanup._tag === 'LocalSharedCoreCleanup') {
       const base = layout.localSharedCleanupScratch.at(localSharedDepth)
@@ -2384,7 +2531,13 @@ const makeOperationContext = (
         }),
         Instr.call(resolve(LocalSharedPayloadCleanup.declaration, [cleanup.element])),
         Instr.op('drop'),
-        ...releaseAtAddress(cleanup.allocation, base, block.allocationOffset, localSharedDepth),
+        ...releaseAtAddress(
+          cleanup.allocation,
+          base,
+          block.allocationOffset,
+          localSharedDepth,
+          executionCleanupDepth,
+        ),
       ]
       return [
         ...loadAt(address, byteOffset),
@@ -3587,8 +3740,11 @@ const emitExecutionParkOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionPark' }>,
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
-  const { emitter, layout, suspension, skipInvocation, releaseInstructions } = state
-  if (skipInvocation) return releaseInstructions(operation.guardCleanup, operation.guard)
+  const { emitter, layout, suspension, skipInvocation } = state
+  // The execution package, not the resumed coroutine frame, owns the registration guard after
+  // parking. Eligibility consumes it before this resume label is entered, so the skipped
+  // invocation must not materialize or release the transferred local a second time.
+  if (skipInvocation) return []
   const runtime = emitter.suspensionRuntime
   const region = suspension?.regions.get(operation)
   const registerType = layout.types.at(operation.register.ordinal)
@@ -4190,6 +4346,10 @@ const emitBeginLoanOperation = (
   } else {
     const rootType = layout.types.at(operation.root.ordinal)
     const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+    const borrowedRoot = rootType?._tag === 'EffectBorrow'
+    const borrowedPointer = borrowedRoot
+      ? layout.borrowPointers.get(operation.root.ordinal)
+      : undefined
     if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
       const [selector, ...suffixSelectors] = operation.selectors
       const [base, length] = slots(operation.root)
@@ -4285,12 +4445,22 @@ const emitBeginLoanOperation = (
     }
     const planned = memory?.frame.roots.get(operation.root.ordinal)
     const [address, length] = slots(operation.destination)
-    if (
-      rootSemantic === undefined ||
-      address === undefined ||
-      (!SilkType.isReference(rootSemantic) && planned === undefined)
-    ) {
+    if (rootSemantic === undefined || address === undefined) {
       throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+    }
+    let rootAddress: ReadonlyArray<Instr.Instr>
+    if (borrowedRoot) {
+      if (borrowedPointer === undefined) {
+        throw new RangeError('Wasm borrow formation lost its inherited borrow pointer')
+      }
+      rootAddress = [Instr.localGet(borrowedPointer)]
+    } else if (SilkType.isReference(rootSemantic)) {
+      rootAddress = [Instr.localGet(scalar(operation.root))]
+    } else {
+      if (planned === undefined) {
+        throw new RangeError('Wasm borrow formation lost its address-taken frame root')
+      }
+      rootAddress = [...materializeRoot(operation.root), ...frameAddress(planned.offset)]
     }
     const instructions: Array<Instr.Instr> = []
     for (const offset of dynamicOffsets) {
@@ -4302,9 +4472,7 @@ const emitBeginLoanOperation = (
       )
     }
     instructions.push(
-      ...(SilkType.isReference(rootSemantic)
-        ? [Instr.localGet(scalar(operation.root))]
-        : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
+      ...rootAddress,
       ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
     )
     for (const offset of dynamicOffsets) {

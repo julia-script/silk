@@ -931,6 +931,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (operation.selectors.length === 0) {
         nativeStorage.locals.set(operation.root.ordinal, sourceValues)
         yield* NativeStorage.storeMutable(nativeStorage, operation.root, sourceValues)
+        if (nativeStorage.addressRoots.has(operation.root.ordinal)) {
+          yield* NativeStorage.storeAddressValues(
+            nativeStorage,
+            operation.root.ordinal,
+            sourceValues,
+            `write_addr${operation.root.ordinal}`,
+          )
+        }
         break
       }
       const updated: Array<Value.Input> = []
@@ -1036,6 +1044,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const frozen = Object.freeze(updated)
       nativeStorage.locals.set(operation.root.ordinal, frozen)
       yield* NativeStorage.storeMutable(nativeStorage, operation.root, frozen)
+      if (nativeStorage.addressRoots.has(operation.root.ordinal)) {
+        yield* NativeStorage.storeAddressValues(
+          nativeStorage,
+          operation.root.ordinal,
+          frozen,
+          `write_addr${operation.root.ordinal}`,
+        )
+      }
       break
     }
   }

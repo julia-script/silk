@@ -62,11 +62,12 @@ import {
   validCallSource,
 } from './fixtures/BootstrapSemanticFixture.js'
 import { elaborate } from './support/elaborate.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import { raise } from './support/raise.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+  Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
 
 const parseText = (id: string, source: string): SyntaxFile.SyntaxFile =>
   Parser.parse(Lexer.lex(SourceFile.make(id, ascii(source))))
@@ -752,7 +753,7 @@ pub fn main() -> i32 { return 0 }`,
     const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
     assert.strictEqual(providerType?._tag, 'Available')
     if (providerType?._tag === 'Available')
-      assert.isTrue(Type.equals(providerType.type, Type.systemAllocator))
+      assert.isTrue(Type.equals(providerType.type, Type.nominal('silk/core', 'SystemAllocator')))
 
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',

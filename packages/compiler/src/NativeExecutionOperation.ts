@@ -745,7 +745,7 @@ const selectPackage = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, following)
 })
 
-const selectDrivePackage = Effect.fnUntraced(function* (
+const selectPackageFrom = Effect.fnUntraced(function* (
   context: NativeAggregate.Context,
   base: Value.Input,
   matching: ReadonlyArray<ExecutionPackage.Plan>,
@@ -753,7 +753,7 @@ const selectDrivePackage = Effect.fnUntraced(function* (
   emitPlan: (package_: ExecutionPackage.Plan) => Effect.Effect<void, LlvmError.LlvmError>,
 ) {
   const { body, builder, program, usizeType } = context
-  if (usizeType === undefined) throw new RangeError('LLVM execution drive lost usize')
+  if (usizeType === undefined) throw new RangeError('LLVM package selection lost usize')
   const packageOrdinal = yield* FunctionBody.load(
     body,
     usizeType,
@@ -772,7 +772,7 @@ const selectDrivePackage = Effect.fnUntraced(function* (
     const ordinal = program.layout.executionPackages.plans.findIndex((candidate) =>
       ExecutionPackage.equals(candidate, package_),
     )
-    if (ordinal < 0) throw new RangeError('LLVM execution drive lost a matching package ordinal')
+    if (ordinal < 0) throw new RangeError('LLVM package selection lost a matching package ordinal')
     if (otherwise !== undefined) yield* LlvmBlock.setInsertionPoint(body, otherwise)
     const selected = yield* LlvmBlock.make(body, `${tag}_selected_package_${ordinal}`)
     const next = yield* LlvmBlock.make(body, `${tag}_selected_package_${ordinal}_otherwise`)
@@ -793,7 +793,7 @@ const selectDrivePackage = Effect.fnUntraced(function* (
     yield* FunctionBody.branch(body, following)
     otherwise = next
   }
-  if (otherwise === undefined) throw new RangeError('LLVM execution drive has no matching packages')
+  if (otherwise === undefined) throw new RangeError('LLVM package selection has no matching plans')
   yield* LlvmBlock.setInsertionPoint(body, otherwise)
   yield* FunctionBody.unreachable(body)
   yield* LlvmBlock.setInsertionPoint(body, following)
@@ -1009,7 +1009,10 @@ export const dropWake = Effect.fnUntraced(function* (
   const { body, builder, usizeType } = context
   if (base === undefined || usizeType === undefined)
     throw new RangeError('LLVM Wake cleanup lost its package reference')
-  yield* selectPackage(context, base, tag, (package_) =>
+  const packages = context.program.layout.executionPackages.plans.filter(
+    (candidate) => candidate.readinessStorage,
+  )
+  yield* selectPackageFrom(context, base, packages, tag, (package_) =>
     Effect.gen(function* () {
       const controlOffset = componentOffset(package_, 'WakeControl')
       if (controlOffset === undefined) return yield* Effect.die('Wake package lacks control state')
@@ -1400,7 +1403,180 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const base = NativeStorage.readLocal(storage, operation.execution).at(0)
       if (base === undefined)
         throw new RangeError('LLVM execution drive lost its package reference')
+      const emitDirectPackage = Effect.fnUntraced(function* (package_: ExecutionPackage.Plan) {
+        if (package_.specialization.suspension.modes.length !== 0)
+          throw new RangeError('LLVM direct execution selected a suspendable package')
+        const statePointer = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          base,
+          0,
+          `drive${operation.destination.ordinal}_direct_state_ptr`,
+        )
+        const packagePointer = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          base,
+          program.layout.target.pointerSize,
+          `drive${operation.destination.ordinal}_direct_package_ptr`,
+        )
+        const packageOrdinal = program.layout.executionPackages.plans.findIndex((candidate) =>
+          ExecutionPackage.equals(candidate, package_),
+        )
+        if (packageOrdinal < 0)
+          throw new RangeError('LLVM direct execution lost its package ordinal')
+        const state = yield* FunctionBody.load(
+          body,
+          usizeType,
+          statePointer,
+          `drive${operation.destination.ordinal}_direct_state`,
+        )
+        const storedPackage = yield* FunctionBody.load(
+          body,
+          usizeType,
+          packagePointer,
+          `drive${operation.destination.ordinal}_direct_package`,
+        )
+        const validState = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          state,
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('Initial')),
+          ),
+          `drive${operation.destination.ordinal}_direct_initial`,
+        )
+        const validPackage = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          storedPackage,
+          yield* Constant.integerUnsigned(builder, usizeType, BigInt(packageOrdinal)),
+          `drive${operation.destination.ordinal}_direct_valid_package`,
+        )
+        const valid = yield* FunctionBody.binary(
+          body,
+          'and',
+          validState,
+          validPackage,
+          `drive${operation.destination.ordinal}_direct_valid`,
+        )
+        const accepted = yield* LlvmBlock.make(
+          body,
+          `drive${operation.destination.ordinal}_direct_accepted`,
+        )
+        if (context.state.trapBlock === undefined)
+          context.state.trapBlock = yield* LlvmBlock.make(
+            body,
+            `drive${operation.destination.ordinal}_rejected`,
+          )
+        yield* FunctionBody.conditionalBranch(body, valid, accepted, context.state.trapBlock)
+        yield* LlvmBlock.setInsertionPoint(body, accepted)
+        yield* FunctionBody.store(
+          body,
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('Running')),
+          ),
+          statePointer,
+        )
+        const executable = yield* bodyOperands(
+          context,
+          package_,
+          base,
+          `drive${operation.destination.ordinal}_direct_body`,
+        )
+        if (executable.target.suspendable)
+          throw new RangeError('LLVM direct execution selected a suspendable body')
+        const started = yield* FunctionBody.callDirect(
+          body,
+          executable.target.handle,
+          executable.values,
+          `drive${operation.destination.ordinal}_direct_started`,
+        )
+        if (executable.target.resultLaneCount > 0 && started === undefined)
+          throw new RangeError('LLVM direct execution body returned no outcome')
+        const outcome: Array<Value.Input> = []
+        if (started !== undefined) {
+          if (executable.target.resultLaneCount === 1) outcome.push(started)
+          else
+            for (let ordinal = 0; ordinal < executable.target.resultLaneCount; ordinal += 1)
+              outcome.push(
+                yield* FunctionBody.extractValue(
+                  body,
+                  started,
+                  [ordinal],
+                  `drive${operation.destination.ordinal}_direct_result${ordinal}`,
+                ),
+              )
+        }
+        const outcomeTag = outcome.at(0)
+        if (outcomeTag === undefined)
+          throw new RangeError('LLVM direct execution body lost its outcome tag')
+        const succeeded = yield* LlvmBlock.make(
+          body,
+          `drive${operation.destination.ordinal}_direct_succeeded`,
+        )
+        const failed = yield* LlvmBlock.make(
+          body,
+          `drive${operation.destination.ordinal}_direct_failed`,
+        )
+        yield* FunctionBody.conditionalBranch(
+          body,
+          yield* FunctionBody.integerCompare(
+            body,
+            'eq',
+            outcomeTag,
+            yield* Constant.integerSigned(builder, i32, 0n),
+            `drive${operation.destination.ordinal}_direct_success`,
+          ),
+          succeeded,
+          failed,
+        )
+        yield* LlvmBlock.setInsertionPoint(body, failed)
+        yield* FunctionBody.unreachable(body)
+        yield* LlvmBlock.setInsertionPoint(body, succeeded)
+        const resultValues = Object.freeze(outcome.slice(1))
+        storage.locals.set(operation.result.ordinal, resultValues)
+        yield* NativeAggregate.dropThroughPlan(
+          context.cleanup,
+          operation.suspensionCleanup,
+          NativeStorage.readLocal(storage, operation.onSuspend),
+          `drive${operation.destination.ordinal}_direct_unused_suspend`,
+        )
+        yield* FunctionBody.store(
+          body,
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('Completed')),
+          ),
+          statePointer,
+        )
+        yield* releasePackage(
+          context,
+          package_,
+          base,
+          `drive${operation.destination.ordinal}_direct_complete`,
+        )
+        storage.locals.set(
+          operation.destination.ordinal,
+          yield* applyCallable(
+            context,
+            operation.onComplete,
+            operation.completionTypeArguments,
+            [...NativeStorage.readLocal(storage, operation.branch), ...resultValues],
+            `drive${operation.destination.ordinal}_direct_on_complete`,
+          ),
+        )
+      })
       const emitPackage = Effect.fnUntraced(function* (package_: ExecutionPackage.Plan) {
+        if (!package_.initialContinuationSegment) {
+          yield* emitDirectPackage(package_)
+          return
+        }
         const continuationOffset = componentOffset(package_, 'InitialContinuationSegment')
         const childThunkType = context.childThunkType
         const resumeThunkType = context.resumeThunkType
@@ -2144,7 +2320,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* emitPackage(selected)
         return
       }
-      yield* selectDrivePackage(
+      yield* selectPackageFrom(
         context.cleanup,
         base,
         matchingPackages,
@@ -2334,7 +2510,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (selected === undefined) throw new RangeError('LLVM Wake lost its package')
         yield* emitPackage(selected)
       } else {
-        yield* selectDrivePackage(
+        yield* selectPackageFrom(
           context.cleanup,
           base,
           packages,

@@ -6,6 +6,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 
 const specialization = (suspension: SuspensionMode.Summary): ExecutionPackage.Specialization =>
   Object.freeze({
@@ -205,7 +206,8 @@ it.effect('constructs without running source and never-driven drop releases one 
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'execution-package/never-driven',
-      new TextEncoder().encode(`import silk.core as Core
+      new TextEncoder().encode(
+        ordinaryStorageSource(`import silk.core as Core
 import silk.core { Allocator }
 import silk.effect as Effect
 import silk.layout { Layout }
@@ -248,6 +250,7 @@ effect fn package() -> i32 ! Core.OutOfMemoryError {
 }
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(package(), recover) }`),
+      ),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
@@ -383,7 +386,8 @@ it.effect('keeps wrapper failure and cleanup before a refused package is initial
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'execution-package/refused',
-      new TextEncoder().encode(`import silk.core { Allocator, OutOfMemoryError }
+      new TextEncoder().encode(
+        ordinaryStorageSource(`import silk.core { Allocator, OutOfMemoryError }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.layout { Layout }
@@ -413,6 +417,7 @@ effect fn package() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(package(), recover) }`),
+      ),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])

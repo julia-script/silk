@@ -82,9 +82,12 @@ it.effect(
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
           const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
           const nativeStatus = run.status === null ? null : BigInt(run.status)
+          // POSIX exposes only the low unsigned byte of a process exit value.
+          const interpretedStatus =
+            interpreted._tag === 'Completed' ? interpreted.result.value & 0xffn : -1n
           assert.strictEqual(
             nativeStatus,
-            interpreted._tag === 'Completed' ? interpreted.result.value : -1n,
+            interpretedStatus,
             `differential divergence on ${program.name}: interpreter ${
               interpreted._tag === 'Completed' ? interpreted.result.value : interpreted._tag
             }, native ${run.status}`,

@@ -1,0 +1,83 @@
+// Test-local Deferred/Fiber proof that waiter insertion failure does not damage a published task.
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.layout { Layout }
+import silk.shared as Shared
+
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { result: i32 }
+struct Waiter { ticket: i32 }
+struct Deferred { task: Empty | Stored waiters: i32 }
+struct Fiber { deferred: Shared.Shared<Deferred> }
+
+struct ExhaustedAllocator {}
+effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  drop layout
+  fail OutOfMemoryError {}
+}
+impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }
+
+effect fn body() -> i32 { return 42 }
+fn ready(state: &()) -> () { return () }
+fn complete(owner: &mut Owner, result: i32) -> () { owner.result = result return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  owner.result = -2
+  return ()
+}
+fn publish(self: &mut Deferred, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(self.task, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn takePublished(self: &mut Deferred) -> Empty | Stored {
+  return Intrinsic.replace(self.task, Empty {})
+}
+fn insertWaiter(self: &mut Deferred, waiter: Shared.Shared<Waiter>) -> i32 {
+  self.waiters = self.waiters + 1
+  drop waiter
+  return self.waiters
+}
+fn waiterCount(self: &Deferred) -> i32 { return self.waiters }
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move owner)
+  }
+}
+
+effect fn joinOrAwait(fiber: &Fiber) -> i32 ! OutOfMemoryError {
+  let mut exhausted = ExhaustedAllocator {}
+  let waiter = run Shared.make<Waiter>(Waiter { ticket: 1 })
+    |> Effect.provideMut<Allocator>(&mut exhausted)
+  return Shared.withMut(&fiber.deferred, insertWaiter(move waiter))
+}
+effect fn waiterFailed(error: OutOfMemoryError) -> i32 { return 7 }
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let deferred = run Shared.make<Deferred>(Deferred { task: Empty {}, waiters: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let fiber = Fiber { deferred: Shared.clone(&deferred) }
+  let task = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let published = Shared.withMut(&deferred, publish(move task))
+  // Joining inserts one actual Deferred waiter, and fails through Allocator's declared channel.
+  let waiterOutcome = run Effect.catchAll(joinOrAwait(&fiber), waiterFailed)
+  let waiters = Shared.with(&deferred, waiterCount)
+  let selected = Shared.withMut(&deferred, takePublished)
+  let mut owner = Owner { result: 0 }
+  run driveStored(move selected, &mut owner)
+  drop fiber
+  drop deferred
+  if waiterOutcome != 7 { return -1 }
+  if waiters != 0 { return -3 }
+  return owner.result
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -100 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }
