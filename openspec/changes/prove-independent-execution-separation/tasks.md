@@ -8,15 +8,15 @@
 - [x] 1.2 Implement deferred first activation from two distinct exact Effect body representations
       erased into homogeneous `Execution<TaskOutput>` values in one owner store; verify owner-selected
       activation and never-started cleanup without callbacks.
-- [ ] 1.3 Implement a one-consumer Deferred-shaped waiter/producer program over Shared state and Wake;
+- [x] 1.3 Implement a one-consumer Deferred-shaped waiter/producer program over Shared state and Wake;
       verify waiter park, producer publication, task-specific readiness, later owner drive, final
       value `42`, and exact result/guard/package cleanup across all engines.
-- [ ] 1.4 Implement the explicit outer timer driver and same-thread reactor with fallible preparation;
+- [x] 1.4 Implement the explicit outer timer driver and same-thread reactor with fallible preparation;
       verify sibling progress, local Wake delivery, reified success/failure, and no Scheduler
       requirement added to the timer operation itself.
-- [ ] 1.5 Add cancellation before timer readiness; verify outer and child wait cleanup, late timer
+- [x] 1.5 Add cancellation before timer readiness; verify outer and child wait cleanup, late timer
       Wake no-op behavior, no outer readiness publication, and no legal redrive.
-- [ ] 1.6 Implement a bounded Coroutine-shaped shared port with two yields, completion, and drop while
+- [x] 1.6 Implement a bounded Coroutine-shaped shared port with two yields, completion, and drop while
       yielded; verify it reuses the same Execution/Wake lifecycle with no Scheduler-specific facts.
 - [x] 1.7 Park several homogeneous tasks, wake exactly one, and verify its pre-reserved identity is
       published and selected without inspecting or scanning unrelated dormant executions.
@@ -29,7 +29,7 @@
 - [x] 2.1 Implement task reservation rollback so all fallible Shared, result, queue, and exact
       package allocations finish before observational publication; verify success publishes one
       complete Initial task and failure publishes none.
-- [ ] 2.2 Extend the landed local-shared failure-quota harness to sweep every exercised
+- [x] 2.2 Extend the landed local-shared failure-quota harness to sweep every exercised
       construction-failure ordinal in evaluation and Wasm and native boundary ordinals through the
       designated corpus; verify each prior affine value and Allocation is cleaned once and
       subsequent runs remain deterministic; separately fail post-publication waiter allocation and
@@ -51,7 +51,7 @@
 - [x] 3.2 Verify a dynamically direct path inside a statically park-capable Execution retains the
       external tier while owner-side drive code remains NonParking; assert structural identities,
       not byte, timing, or instruction counts.
-- [ ] 3.3 Rename every Scheduler-shaped, Deferred-shaped, timer-shaped, Coroutine-shaped, allocator,
+- [x] 3.3 Rename every Scheduler-shaped, Deferred-shaped, timer-shaped, Coroutine-shaped, allocator,
       ready-inbox, and safe-wrapper actor in an equivalent fixture; verify semantic facts, MIR,
       engine outcomes, and intrinsic inventories remain equivalent apart from source identities,
       reusing the landed local-shared normalization approach rather than adding a disconnected
@@ -62,7 +62,7 @@
       and recoverable package admission to pressure evidence; record the rejected eager-start/owner-
       sweep/fatal-package model and the deferred concurrency, Coroutine, implicit-root, and parallel-
       memory boundaries without adding a compatibility path or canonical API.
-- [ ] 3.6 Update language and standard-library documentation to distinguish hidden representation,
+- [x] 3.6 Update language and standard-library documentation to distinguish hidden representation,
       visible relinquishment, nested transfer, external parking, Initial activation, package failure,
       fatal later growth, and whole-package retention behind a forgotten cancelled Wake; verify
       pressure actors are not presented as canonical APIs.
@@ -71,7 +71,7 @@
 
 - [x] 4.1 Add the unowned park-capable complete-entry boundary fixture and verify its stable diagnostic
       code/span is distinct from service requirements and no SLP-0003 implicit owner is synthesized.
-- [ ] 4.2 Extend the existing local-shared pressure test harness with companion connected
+- [x] 4.2 Extend the existing local-shared pressure test harness with companion connected
       Execution/Wake programs and add target-specific cases to the designated native differential
       corpus; keep one realized Analysis snapshot per source and verify values,
       activation/readiness order, cleanup/release order, diagnostics, and deterministic artifacts at

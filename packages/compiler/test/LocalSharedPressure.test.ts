@@ -656,6 +656,43 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const evaluated = completed(snapshot)
     assert.strictEqual(evaluated.result.value, 42n)
+    assert.deepEqual(
+      evaluated.trace
+        .filter((event) => event._tag === 'ExecutionTransition')
+        .map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Notify',
+        'Eligible',
+        'Resume',
+        'Drive',
+        'Complete',
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Cancel',
+        'Cleanup',
+        'Release',
+      ],
+    )
+    const callIndex = (name: string): number =>
+      evaluated.trace.findIndex((event) => event._tag === 'Call' && event.target.name === name)
+    assert.isBelow(callIndex('progressSibling'), callIndex('poll'))
+    assert.isBelow(callIndex('poll'), callIndex('ready'))
+    const allocationEvents = evaluated.trace.filter(
+      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+    )
+    assert.strictEqual(
+      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
+      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
+      JSON.stringify(allocationEvents),
+    )
     assert.strictEqual((yield* runWasm(snapshot)).result, 42)
   }),
 )
