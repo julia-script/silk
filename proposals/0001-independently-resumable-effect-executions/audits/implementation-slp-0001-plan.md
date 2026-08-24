@@ -172,3 +172,9 @@ inventories, owner-side `NonParking`, expanded wrapper/provider renaming and pha
 cross-engine body/frame/guard/endpoint/late-Wake cleanup probes. It also fixes post-activation Wasm
 body/frame authority. The full pressure suite is 14/14; report/task reconciliation and the single
 post-conformance hard-gate rerun remain.
+
+Layer 5 consolidated conformance fix is pushed at `639549c`. The pressure suite passes 14/14, the
+sealed-storage ordinary-policy migration suite passes 147/147, and the designated native
+differential corpus passes with four renamed-policy outcomes. The report records all seven verified
+findings and their dispositions, with no second conformance review. The single formal
+post-conformance hard-gate sequence is now running.
