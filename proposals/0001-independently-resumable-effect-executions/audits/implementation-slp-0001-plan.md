@@ -5,7 +5,7 @@ SLP revision: 31
 SLP digest: `963a7420f16bce3bd0ec50acd906b4a4ee43319d132c5452d3686cde643c5635`
 Integration branch: `julia/slp-0001-reaudit`
 Started: 2026-08-23
-State: Running (resume 1)
+State: Done
 
 ## Dependency DAG
 
@@ -36,7 +36,7 @@ merge, the integration branch runs the full repository gates before the next lay
 | 2 | `add-independent-execution-packaging` | Done | 3 initial fixes; 3 resume attempts + 1 post-audit rerun | Integrated at `ff39ca0`; barrier passed | 1 High fixed; 1 High rejected as Layer 3 scope; Medium/Low recorded |
 | 3 | `add-external-wake-parking` | Done | 3 initial fixes + 1 conformance rerun + 1 resume bootstrap fix | Integrated at `f2e82a8`; barrier passed | 7 reviewed; 3 High fixed, 3 High rejected as Layer 4 scope, 1 Medium recorded |
 | 4 | `add-independent-execution-engine-parity` | Done | 3 + 1 post-conformance rerun | Integrated at `81f55ac`; barrier passed | 9 reviewed; 2 Critical, 5 High, and 2 Medium fixed |
-| 5 | `prove-independent-execution-separation` | Running | — | Isolated implementation starting | — |
+| 5 | `prove-independent-execution-separation` | Done | 3 initial; 2 resume; 3 post-conformance; 1 gate-resume | Integrated at `dd8e336`; barrier passed | 7 verified; 1 Critical and 6 High fixed; gate-cost blocker fixed |
 
 ## Integration gates
 
@@ -194,3 +194,13 @@ MIR, renamed source, and artifact is reused once, and compiler spelling inventor
 synchronous check. Focused pressure verification passes 18/18 and the exact compiler parallel
 context passes 220 files/2,150 tests. Fresh gate-resume repair usage is 1/3; the full mandated gates
 are running.
+
+Layer 5 completed at `dd8e336`. Its fresh isolated gates passed in the required order: typecheck
+24/24, Biome over 991 files, test 28/28 (compiler 220 files/2,150 tests plus native corpus 1/1),
+check 42/42 plus scripts 16/16, and release candidate 9/9. OpenSpec is 21/21, all seven conformance
+findings are fixed, no second conformance review ran, and the final worktree was clean and pushed.
+
+The final five-layer integration merge is `9a46646`. The complete integration branch then passed
+`pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
+`pnpm release:candidate` in order. SLP-0001 implementation is ready for the separate
+`slp-6-audit-implementation` stage.
