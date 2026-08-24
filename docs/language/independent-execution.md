@@ -19,88 +19,32 @@ one activation, while `Execution.park` returns control to an owner outside the b
 - The **registration guard** is the value returned by `Execution.park`'s registration callback and
   retained until that generation resumes or is destroyed.
 
-## Yield once and resume
+## Park and resume one task
 
-This complete program implements one cooperative yield. The first drive parks the body and returns
-the Execution to its owner. The second drive resumes the body and completes with `42`.
+The body calls `Execution.park` when an event is not ready. `registerWake` stores the supplied Wake
+in the event source and returns a registration guard. The body continues only after the owner
+drives the Execution again.
 
-```silk
-import silk.core as Core
-import silk.effect as Effect
-import silk.execution as Execution
+```silk,ignore
+// This statement is inside the task body.
+run Execution.park(registerWake)
+// Execution continues here after the Wake is signaled and the owner drives it again.
+```
 
-struct Empty {}
-struct Stored { execution: Intrinsic.Execution<i32> }
-struct Owner {
-  slot: Empty | Stored
-  result: i32
-}
-struct YieldGuard {}
+The owner uses the following statements inside its effect function. `suspend` stores the returned
+Execution in `owner.slot`. `ready` runs when signaling the Wake makes that Execution eligible.
 
-fn requestResume(wake: Intrinsic.Wake) -> YieldGuard {
-  // A reactor normally retains the Wake until an external event is ready.
-  // This cooperative yield signals immediately but still resumes on a later drive.
-  Intrinsic.wake(move wake)
-  return YieldGuard {}
-}
+```silk,ignore
+// make allocates a lazy task package. body has not started yet.
+let execution = run Execution.make(body(), (), ready)
+  |> Effect.provideMut<Core.Allocator>(&mut allocator)
 
-effect fn body() -> i32 {
-  // park relinquishes this activation. Execution retains YieldGuard until resumption.
-  run Execution.park(requestResume)
-  return 42
-}
+// The first drive runs body until completion or park.
+run Execution.drive(move execution, &mut owner, complete, suspend)
 
-fn ready(state: &()) -> () {
-  // A scheduler normally puts the Execution identity in its ready queue here.
-  return ()
-}
-
-fn complete(owner: &mut Owner, result: i32) -> () {
-  owner.result = result
-  return ()
-}
-
-fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
-  // drive transfers the still-live Execution back through this callback.
-  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
-  drop previous
-  return ()
-}
-
-effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
-  return run Execution.drive(move execution, move owner, complete, suspend)
-}
-
-effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
-  return match move selected {
-    Empty {} => ()
-    Stored { execution } => run drive(move execution, move owner)
-  }
-}
-
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
-  let mut owner = Owner { slot: Empty {}, result: 0 }
-
-  // make allocates a lazy package. The body has not started yet.
-  let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
-
-  // The first drive reaches park. suspend stores the returned Execution in owner.slot.
-  run drive(move execution, &mut owner)
-
-  // The Wake made that Execution eligible. Take it from the owner and drive it again.
-  let selected = Intrinsic.replace(owner.slot, Empty {})
-  run driveStored(move selected, &mut owner)
-  return owner.result
-}
-
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -1 }
-
-pub fn main() -> i32 {
-  // The program returns 42. It returns -1 if package allocation fails.
-  return run Effect.catchAll(program(), recover)
-}
+// After ready reports eligibility, take the stored Execution and drive it again.
+let selected = Intrinsic.replace(owner.slot, Empty {})
+run driveStored(move selected, &mut owner)
 ```
 
 `Execution.make` returns `Intrinsic.Execution<A>`. `Execution.drive` consumes that value and

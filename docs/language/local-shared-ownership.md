@@ -10,8 +10,8 @@ source schedulers, deferred values, and readiness inboxes.
 
 ## Share and update a counter
 
-This complete program creates one shared counter and gives it two owners. It updates the value
-through one owner and reads the value through the other owner.
+This small program creates one shared counter. It updates the value through one owner and reads the
+value through a second owner.
 
 ```silk
 import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
@@ -19,33 +19,23 @@ import silk.effect as Effect
 import silk.shared as Shared
 
 struct Counter { value: i32 }
-
 fn increment(counter: &mut Counter) -> i32 {
   counter.value = counter.value + 1
   return counter.value
 }
-
-fn read(counter: &Counter) -> i32 {
-  return counter.value
-}
+fn read(counter: &Counter) -> i32 { return counter.value }
 
 effect fn useCounter() -> i32 ! OutOfMemoryError {
   let mut allocator = SystemAllocator.make()
 
-  // make transfers the counter into a new allocation and returns its first strong owner.
-  let creating = Shared.make<Counter>(Counter { value: 41 })
+  // make allocates the Counter. clone adds an owner without copying the Counter.
+  let counter = run Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let counter = run creating
-
-  // clone creates another strong owner. It does not copy the Counter value.
   let observer = Shared.clone<Counter>(&counter)
 
-  // withMut gives increment temporary exclusive access to the Counter.
+  // withMut allows one update. with allows one read.
   let updated = Shared.withMut<Counter, i32>(&counter, increment)
-
-  // with gives read temporary read-only access through the other owner.
   let observed = Shared.with<Counter, i32>(&observer, read)
-
   drop observer
   drop counter
   if updated != observed { return -1 }
@@ -55,7 +45,7 @@ effect fn useCounter() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 
 pub fn main() -> i32 {
-  // The program returns 42. It returns 0 if allocation fails.
+  // Returns 42, or 0 if Shared.make cannot allocate.
   return run Effect.catchAll(useCounter(), recover)
 }
 ```

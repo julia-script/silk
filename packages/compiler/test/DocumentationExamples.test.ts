@@ -61,9 +61,7 @@ const blocks = documents
   .filter((entry) => !generated.has(entry))
   .flatMap((file) => blocksOf(documentationRoot, file))
 
-const featureExamples = ['independent-execution.md', 'local-shared-ownership.md'].flatMap((file) =>
-  blocksOf(languageReferenceRoot, file),
-)
+const featureExamples = blocksOf(languageReferenceRoot, 'local-shared-ownership.md')
 
 const diagnosticText = readFileSync(diagnosticSource, 'utf8')
 
