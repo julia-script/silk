@@ -56,9 +56,9 @@
       engine outcomes, and intrinsic inventories remain equivalent apart from source identities,
       reusing the landed local-shared normalization approach rather than adding a disconnected
       spelling audit.
-- [ ] 3.4 Inventory semantic, HIR, MIR, evaluation, native, and Wasm branches for source-name checks;
+- [x] 3.4 Inventory semantic, HIR, MIR, evaluation, native, and Wasm branches for source-name checks;
       verify only sealed Intrinsic identities grant execution/wake privilege.
-- [ ] 3.5 Write a checked-in findings report mapping Initial ownership, task-specific push readiness,
+- [x] 3.5 Write a checked-in findings report mapping Initial ownership, task-specific push readiness,
       and recoverable package admission to pressure evidence; record the rejected eager-start/owner-
       sweep/fatal-package model and the deferred concurrency, Coroutine, implicit-root, and parallel-
       memory boundaries without adding a compatibility path or canonical API.
