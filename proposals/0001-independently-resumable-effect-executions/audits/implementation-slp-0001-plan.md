@@ -95,3 +95,8 @@ Layer 4 checkpoint `34a9922` completes externally parked Wasm resume, readiness-
 reconstruction, evaluator-to-Wasm later-owner transfer, and a non-LIFO-safe fixed-slot coroutine
 frame freelist. Focused verification is 27/27 with compiler TypeScript and targeted Biome green;
 native parity and cancellation/two-root matrices remain.
+
+Layer 4 checkpoint `83798f7` adds native construction, drive, park, wake, frame/package cleanup,
+and external status-2 relay. The designated evaluator/native differential case is 42/42, and Wasm
+reverse-order root isolation is repaired by clearing transient transfer state. Cancellation,
+DestroyPending, exact multi-package dispatch, and reactor evidence remain.
