@@ -52,7 +52,7 @@
 // A program that never names this module never loads it, so the counts cost nothing until they
 // are read.
 
-import silk.core { Allocator }
+import silk.allocator { Allocator }
 import silk.usize as usize
 
 /// Copyable counters for one provider's successful allocation acquisitions and releases.

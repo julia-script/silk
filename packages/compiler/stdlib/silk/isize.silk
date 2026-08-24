@@ -31,8 +31,8 @@
 //! ```
 
 import silk.bool as bool
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.f32 as f32
 import silk.f64 as f64
 import silk.format as Format

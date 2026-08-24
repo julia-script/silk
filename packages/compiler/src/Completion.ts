@@ -11,7 +11,6 @@ import type * as SemanticOccurrence from './SemanticOccurrence.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SourceSpanFactory from './SourceSpan.js'
-import * as Stdlib from './Stdlib.js'
 import * as Type from './Type.js'
 
 export type Context =
@@ -673,11 +672,10 @@ export const complete = (options: {
       })
     if (
       lookup?._tag === 'Resolved' &&
-      qualifier !== undefined &&
       (lookup.declaration._tag === 'StructDeclaration' ||
         lookup.declaration._tag === 'InterfaceDeclaration') &&
       lookup.declaration.canonical._tag === 'Canonical' &&
-      Stdlib.findNamespace(qualifier)?.module === lookup.declaration.canonical.id.module
+      NameResolution.scopedModule(lookup.declaration) !== undefined
     )
       return Object.freeze({
         _tag: 'CompletionResult',
@@ -690,7 +688,8 @@ export const complete = (options: {
           namespaceCandidates(options.index, lookup.declaration.canonical.id.module),
         ),
       })
-    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration')
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration') {
+      const scoped = NameResolution.scopedModule(lookup.declaration)
       return Object.freeze({
         _tag: 'CompletionResult',
         context: Object.freeze({
@@ -701,8 +700,12 @@ export const complete = (options: {
               : (qualifier ?? 'service'),
         }),
         replacement: replacement.span,
-        candidates: stable(serviceCandidates(lookup.declaration)),
+        candidates: stable([
+          ...serviceCandidates(lookup.declaration),
+          ...(scoped === undefined ? [] : namespaceCandidates(options.index, scoped)),
+        ]),
       })
+    }
     return Object.freeze({
       _tag: 'CompletionResult',
       context: Object.freeze({

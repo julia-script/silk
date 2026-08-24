@@ -154,27 +154,27 @@ it.effect('maps hover and definition positions after non-ASCII recovery bytes', 
 
 it.effect('distinguishes a binding and a source-owned standard-library namespace', () =>
   Effect.gen(function* () {
-    const source = `import silk.core as Core
+    const source = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = Core.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
-    const hoverText = (spelling: string) => {
-      const hover = Document.hover(document, snapshot, positionOf(source, spelling))
+    const hoverText = (spelling: string, occurrence = 0) => {
+      const hover = Document.hover(document, snapshot, positionOf(source, spelling, occurrence))
       return typeof hover?.contents === 'object' && 'value' in hover.contents
         ? hover.contents.value
         : undefined
     }
     assert.strictEqual(
-      hoverText('allocator'),
-      '```silk\nlet mut allocator: SystemAllocator\n```\n\n**Implements**\n\n- `Core.Allocator`',
+      hoverText('allocator', 1),
+      '```silk\nlet mut allocator: SystemAllocator\n```\n\n**Implements**\n\n- `Allocator`',
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
-    assert.strictEqual(hoverText('Core'), '```silk\nimport silk/core as Core\n```')
+    assert.include(hoverText('Allocator', 2) ?? '', 'pub service Allocator')
     assert.strictEqual(
-      hoverText('make'),
-      '```silk\npub fn make() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Core.Allocator`',
+      hoverText('systemAllocatorService'),
+      '```silk\npub fn systemAllocatorService() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Allocator`',
     )
   }),
 )
@@ -291,9 +291,9 @@ pub fn main() -> i32 {
 
 it.effect('returns inferred local type inlay hints in the requested range', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -317,25 +317,25 @@ pub fn main() -> i32 {
 
 it.effect('renders proved hover contracts and inferred provider selectors', () =>
   Effect.gen(function* () {
-    const source = `import silk.core as Core
+    const source = `import silk.standard_streams as Streams
 import silk.effect as Effect
 
-pub effect fn main() -> () ! Core.StreamWriteError {
-  let mut streams = Core.native()
+pub effect fn main() -> () ! Streams.StreamWriteError {
+  let mut streams = Streams.nativeStandardStreamService()
   // π🙂 keeps the selector position on UTF-16 coordinates
-  return run Core.send(Core.stdout(), b"Hello\\n")
+  return run Streams.send(Streams.stdout(), b"Hello\\n")
     |> Effect.provideMut(&mut streams)
 }`
     const { document, snapshot } = yield* open(source)
-    const hover = Document.hover(document, snapshot, positionOf(source, 'streams'))
+    const hover = Document.hover(document, snapshot, positionOf(source, 'streams', 1))
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
       value:
-        '```silk\nlet mut streams: NativeStandardStreams\n```\n\n**Implements**\n\n- `Core.StandardStreams`',
+        '```silk\nlet mut streams: Streams.NativeStandardStreams\n```\n\n**Implements**\n\n- `Streams.StandardStreams`',
     })
 
     const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
-    const bindingEnd = source.indexOf('streams') + 'streams'.length
+    const bindingEnd = source.indexOf('let mut streams') + 'let mut streams'.length
     assert.deepEqual(
       Document.inlayHints(document, snapshot, {
         start: { line: 0, character: 0 },
@@ -344,14 +344,14 @@ pub effect fn main() -> () ! Core.StreamWriteError {
       [
         {
           position: positionAt(source, bindingEnd),
-          label: ': NativeStandardStreams',
+          label: ': Streams.NativeStandardStreams',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
         },
         {
           position: positionAt(source, selectorOffset),
-          label: '<Core.StandardStreams>',
+          label: '<Streams.StandardStreams>',
           kind: 1,
           paddingLeft: false,
           paddingRight: false,
@@ -363,7 +363,7 @@ pub effect fn main() -> () ! Core.StreamWriteError {
         start: { line: 0, character: 0 },
         end: positionAt(source, selectorOffset),
       }).map((hint) => hint.label),
-      [': NativeStandardStreams'],
+      [': Streams.NativeStandardStreams'],
     )
     const selectorRange = {
       start: positionAt(source, selectorOffset),
@@ -373,7 +373,7 @@ pub effect fn main() -> () ! Core.StreamWriteError {
     assert.deepEqual(Document.inlayHints(document, snapshot, selectorRange), clipped)
     assert.deepEqual(
       clipped.map((hint) => hint.label),
-      ['<Core.StandardStreams>'],
+      ['<Streams.StandardStreams>'],
     )
   }),
 )
@@ -436,12 +436,12 @@ pub fn broken() -> i32 { return missing() }`
 
 it.effect('does not duplicate an explicitly written provider selector', () =>
   Effect.gen(function* () {
-    const source = `import silk.core as Core
+    const source = `import silk.standard_streams as Streams
 import silk.effect as Effect
-pub effect fn main() -> () ! Core.StreamWriteError {
-  let mut streams = Core.native()
-  return run Core.send(Core.stdout(), b"ok\\n")
-    |> Effect.provideMut<Core.StandardStreams>(&mut streams)
+pub effect fn main() -> () ! Streams.StreamWriteError {
+  let mut streams = Streams.nativeStandardStreamService()
+  return run Streams.send(Streams.stdout(), b"ok\\n")
+    |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
 }`
     const { document, snapshot } = yield* open(source)
     assert.deepEqual(
@@ -449,18 +449,18 @@ pub effect fn main() -> () ! Core.StreamWriteError {
         start: { line: 0, character: 0 },
         end: positionAt(source, source.length),
       }).map((hint) => hint.label),
-      [': NativeStandardStreams'],
+      [': Streams.NativeStandardStreams'],
     )
   }),
 )
 
 it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode snapshots', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
   let broken = missing()
   // π🙂
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -509,7 +509,7 @@ pub fn main() -> i32 {
       'pub effect fn catch',
     )
 
-    const allocatorSource = `import silk.core { Allocator }
+    const allocatorSource = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
   return Allocator.
 }`
@@ -788,11 +788,11 @@ pub fn main() -> () {
 
 it.effect('navigates local declaration names but not library imports', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator }
 struct Problem {}
 fn recover<T>(error: Problem, value: T) -> T { return value }
 pub fn main() -> i32 {
-  let allocator = SystemAllocator.make()
+  let allocator = Allocator.systemAllocatorService()
   return recover<i32>(0, 0)
 }`
     const { document, snapshot } = yield* open(source)
@@ -1470,7 +1470,7 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
     const { document, snapshot } = yield* open(source)
     const inventory = inventoryOf([
       { module: 'main', text: source },
-      { module: 'silk/logging', text: 'pub service Logger {}' },
+      { module: 'silk/logger', text: 'pub service Logger {}' },
     ])
     const completion = Document.completion(
       document,
@@ -1479,19 +1479,19 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
       inventory,
     )
     const imported = completion.items.find(
-      (item) => item.label === 'Logger' && item.detail === 'Import from silk/logging',
+      (item) => item.label === 'Logger' && item.detail === 'Import from silk/logger',
     )
     assert.deepEqual(imported?.textEdit, {
       range: {
         start: positionAt(source, source.indexOf('Logg')),
         end: positionAt(source, source.indexOf('Logg') + 'Logg'.length),
       },
-      newText: 'LoggingLogger',
+      newText: 'LoggerLogger',
     })
     assert.deepEqual(imported?.additionalTextEdits, [
       {
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-        newText: 'import silk.logging { Logger as LoggingLogger }\n',
+        newText: 'import silk.logger { Logger as LoggerLogger }\n',
       },
     ])
   }),

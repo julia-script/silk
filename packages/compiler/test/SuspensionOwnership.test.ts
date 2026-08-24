@@ -27,9 +27,10 @@ const plansFor = (
 ): ReadonlyArray<SuspensionOwnership.Plan> =>
   self.plans.filter((plan) => plan.function.declaration.name.startsWith(`${declaration}$effect$`))
 
-const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Owner { value: i32 }
@@ -64,7 +65,7 @@ effect fn branched(flag: bool, left: i32, right: i32) -> i32 {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let scalarValue = run scalar()
-  let mut ownedAllocator = SystemAllocator.make()
+  let mut ownedAllocator = Allocator.systemAllocatorService()
   let ownedPending = owned() |> Effect.provideMut(&mut ownedAllocator)
   let ownedValue = run Effect.catchAll(move ownedPending, recover)
   let mut owner = Owner { value: 20 }

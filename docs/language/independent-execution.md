@@ -37,7 +37,7 @@ Execution in `owner.slot`. `ready` runs when signaling the Wake makes that Execu
 ```silk,ignore
 // make allocates a lazy task package. body has not started yet.
 let execution = run Execution.make(body(), (), ready)
-  |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  |> Effect.provideMut<Allocator>(&mut allocator)
 
 // The first drive runs body until completion or park.
 run Execution.drive(move execution, &mut owner, complete, suspend)
@@ -56,10 +56,10 @@ body.
 **Status:** Confirmed
 
 `Execution.make` transfers the body and fixed readiness endpoint into one combined package obtained
-through the selected `Core.Allocator`. It returns the package in the `Initial` state without
+through the selected `Allocator`. It returns the package in the `Initial` state without
 starting the body.
 
-Construction failure is `Core.OutOfMemoryError`. It publishes no Execution and leaves every input
+Construction failure is `Allocator.OutOfMemoryError`. It publishes no Execution and leaves every input
 under ordinary Effect cleanup. Later growth of the compiler-owned execution stack is a fatal trap,
 not an allocator requirement or typed failure.
 

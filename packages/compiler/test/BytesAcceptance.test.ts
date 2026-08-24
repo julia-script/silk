@@ -6,8 +6,9 @@ import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const parity = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const parity = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
@@ -26,7 +27,7 @@ fn checksum(values: &[u8]) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let source = [octet(0), octet(255), octet(128), octet(1)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
   let mut bytes = run copying
@@ -89,9 +90,10 @@ it.effect(
   60_000,
 )
 
-const failedCopy = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const failedCopy = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.bytes { Bytes, copy }
@@ -101,7 +103,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

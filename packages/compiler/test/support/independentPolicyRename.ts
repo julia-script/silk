@@ -46,9 +46,7 @@ export const renameIndependentPolicy = (source: string): string => {
   return policyRenamed
     .replaceAll('import silk.execution as Execution', 'import silk.execution as ExecutionFacade')
     .replace(/\bExecution\./g, 'ExecutionFacade.')
-    .replaceAll('import silk.core as Core', 'import silk.core as Platform')
-    .replace(/\bCore\b/g, 'Platform')
-    .replace(/import silk\.core \{([^}]*)\}/g, (declaration) =>
+    .replace(/import silk\.allocator \{([^}]*)\}/g, (declaration) =>
       declaration
         .replace(/\bAllocator\b/g, '__SOURCE_ALLOCATOR__ as StoragePolicy')
         .replace(/\bSystemAllocator\b/g, '__SOURCE_SYSTEM_ALLOCATOR__ as HeapProvider'),

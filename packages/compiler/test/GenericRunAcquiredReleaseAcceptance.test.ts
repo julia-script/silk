@@ -10,15 +10,16 @@ const ascii = (value: string): Uint8Array =>
  * evaluator's allocation trace: an owner stranded by a propagating failure shows up as an acquire
  * with no matching release, and one released twice traps instead of completing.
  */
-const provider = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const provider = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Clock { storage: Allocation }
 
 effect fn openClock() -> Clock ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -38,7 +39,7 @@ effect fn openClock() -> Clock ! OutOfMemoryError {
  * *passed in* rather than acquired; that one never leaked, and pins that the caller does not also
  * release an owner it moved into the callee.
  */
-const generic = `import silk.core { OutOfMemoryError }
+const generic = `import silk.allocator { OutOfMemoryError }
 ${provider}
 
 effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemoryError {
@@ -49,7 +50,7 @@ effect fn acquiring<A, E>(self: once Effect<A ! E>) -> A ! E | OutOfMemoryError 
 }`
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
-const failingRun = `import silk.core { OutOfMemoryError }
+const failingRun = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${generic}
 
@@ -62,7 +63,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release was never in doubt. */
-const succeedingRun = `import silk.core { OutOfMemoryError }
+const succeedingRun = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${generic}
 
@@ -79,7 +80,7 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
  * generic body and must release it before the next one acquires, so a per-execution leak shows up
  * as a growing imbalance rather than a single missing release.
  */
-const retriedRun = `import silk.core { OutOfMemoryError }
+const retriedRun = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${generic}
 

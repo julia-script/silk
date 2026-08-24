@@ -1,5 +1,12 @@
 [
   {
+    "module": "silk/allocator",
+    "path": "silk/allocator.silk",
+    "layer": "portable",
+    "namespace": "Allocator",
+    "aliases": ["AllocationFailure", "OutOfMemoryError", "SystemAllocator"]
+  },
+  {
     "module": "silk/bool",
     "path": "silk/bool.silk",
     "layer": "portable",
@@ -36,21 +43,6 @@
       "ProcessReason",
       "ProcessRequest",
       "Signaled"
-    ]
-  },
-  {
-    "module": "silk/core",
-    "path": "silk/core.silk",
-    "layer": "portable",
-    "namespace": "Allocator",
-    "aliases": [
-      "AllocationFailure",
-      "NativeStandardStreams",
-      "OutOfMemoryError",
-      "StandardStream",
-      "StandardStreams",
-      "StreamWriteError",
-      "SystemAllocator"
     ]
   },
   {
@@ -164,8 +156,8 @@
     "aliases": ["InvalidAlignment", "LayoutOverflow"]
   },
   {
-    "module": "silk/logging",
-    "path": "silk/logging.silk",
+    "module": "silk/logger",
+    "path": "silk/logger.silk",
     "layer": "portable",
     "namespace": "Logger",
     "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
@@ -261,6 +253,13 @@
     "layer": "portable",
     "namespace": "StandardInput",
     "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
+  },
+  {
+    "module": "silk/standard_streams",
+    "path": "silk/standard_streams.silk",
+    "layer": "portable",
+    "namespace": "StandardStreams",
+    "aliases": ["NativeStandardStreams", "StandardStream", "StreamWriteError"]
   },
   {
     "module": "silk/string",

@@ -93,10 +93,11 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.include(edits[0]?.newText, 'return 7')
 
     const hintUri = 'file:///silk-lsp-e2e/hints.silk'
-    const hintText = `import silk.core { SystemAllocator }
+    const hintText = `import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }`
     didOpen(client, hintUri, hintText)

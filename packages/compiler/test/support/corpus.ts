@@ -82,8 +82,8 @@ export interface InvalidCorpusProgram {
 }
 
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
-export const independentExecutionNonLifo = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionNonLifo = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -111,14 +111,14 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
 effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut firstOwner = Owner { slot: Empty {}, result: 0 }
   let mut secondOwner = Owner { slot: Empty {}, result: 0 }
   let first = run Execution.make(body(20), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Execution.make(body(22), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run driveOnce(move first, &mut firstOwner)
   run driveOnce(move second, &mut secondOwner)
   let selectedSecond = Intrinsic.replace(secondOwner.slot, Empty {})
@@ -127,11 +127,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   run finish(move selectedFirst, &mut firstOwner)
   return secondOwner.result * 10 + firstOwner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionIllegalDormantDrive = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionIllegalDormantDrive = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -156,22 +156,22 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
     Stored { execution } => run driveOnce(move execution, move owner)
   }
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {} }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run driveOnce(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run driveStored(move selected, &mut owner)
   return 0
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 /** Attempts to drive a Dormant execution reentrantly while its fixed endpoint is being notified. */
-export const independentExecutionIllegalNotifyingDrive = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionIllegalNotifyingDrive = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -237,21 +237,21 @@ effect fn driveOnce<
 ) -> () {
   return run Execution.drive(move execution, move state, complete, move onSuspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let owner = run Shared.make<Owner>(Owner { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&owner)
   let suspensionOwner = Shared.clone(&owner)
   let onSuspend = suspend(move suspensionOwner)
   let execution = run Execution.make(body(), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut state = ()
   run driveOnce(move execution, &mut state, move onSuspend)
   drop owner
   return 0
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 const fatalCallbackSentinel = `fn callbackSentinel(value: i32) -> () {
@@ -294,8 +294,8 @@ fn reentrantComplete(state: &mut (), result: i32) -> () { return callbackSentine
     )
 
 /** Builds a logical continuation frame so a configured private-stack limit can reject its push. */
-export const independentExecutionStackExhaustion = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionStackExhaustion = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct State { completed: i32 }
@@ -314,15 +314,15 @@ fn suspend(state: &mut State, execution: Intrinsic.Execution<i32>) -> () {
 effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut State) -> () {
   return run Execution.drive(move execution, move state, complete, suspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut state = State { completed: 0 }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run driveOnce(move execution, &mut state)
   return 0
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 export const independentExecutionStackExhaustionObservable =
@@ -337,8 +337,8 @@ export const independentExecutionStackExhaustionObservable =
 }`,
   )
 
-export const independentExecutionMultiplePackages = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionMultiplePackages = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -364,14 +364,14 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
     Stored { execution } => run driveOnce(move execution, move owner)
   }
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut firstOwner = Owner { slot: Empty {}, result: 0 }
   let mut secondOwner = Owner { slot: Empty {}, result: 0 }
   let first = run Execution.make(firstBody(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Execution.make(secondBody(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run driveOnce(move first, &mut firstOwner)
   run driveOnce(move second, &mut secondOwner)
   let selectedSecond = Intrinsic.replace(secondOwner.slot, Empty {})
@@ -380,11 +380,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   run finish(move selectedFirst, &mut firstOwner)
   return firstOwner.result + secondOwner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionLateCancelledWake = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionLateCancelledWake = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -428,16 +428,16 @@ fn readReady(state: &mut ReadyState) -> i32 { return state.called }
 effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, cancel)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mailbox = run Shared.make<Mailbox>(Mailbox { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let registrationMailbox = Shared.clone(&mailbox)
   let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&readyState)
   let execution = run Execution.make(body(move registrationMailbox), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut state = ()
   run driveOnce(move execution, &mut state)
   let selected = Shared.withMut(&mailbox, extract)
@@ -454,11 +454,11 @@ fn signalLate(wake: Intrinsic.Wake) -> i32 {
   Intrinsic.wake(move wake)
   return 42
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionReentrantDestroy = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionReentrantDestroy = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -507,25 +507,25 @@ effect fn driveOnce<
 ) -> () {
   return run Execution.drive(move execution, move state, complete, move onSuspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let owner = run Shared.make<Owner>(Owner { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&owner)
   let suspensionOwner = Shared.clone(&owner)
   let onSuspend = suspend(move suspensionOwner)
   let execution = run Execution.make(body(), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut state = ()
   run driveOnce(move execution, &mut state, move onSuspend)
   drop owner
   return 42
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionLocalReactor = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionLocalReactor = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -576,13 +576,13 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
     Stored { execution } => run driveOnce(move execution, move owner)
   }
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let reactor = run Shared.make<Reactor>(Reactor { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let bodyReactor = Shared.clone(&reactor)
   let execution = run Execution.make(body(move bodyReactor), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {}, result: 0 }
   run driveOnce(move execution, &mut owner)
   poll(&reactor)
@@ -591,11 +591,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   drop reactor
   return owner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionRepeatedGenerations = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionRepeatedGenerations = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -624,11 +624,11 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
     Stored { execution } => run drive(move execution, move owner)
   }
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run drive(move execution, &mut owner)
   let first = Intrinsic.replace(owner.slot, Empty {})
   run driveStored(move first, &mut owner)
@@ -636,11 +636,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   run driveStored(move second, &mut owner)
   return owner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionEligibleDrop = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionEligibleDrop = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -659,21 +659,21 @@ fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
 effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {} }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run drive(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   drop selected
   return 42
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-export const independentExecutionParkedTypedFailure = `import silk.core as Core
-import silk.core { Allocator }
+export const independentExecutionParkedTypedFailure = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.result { Result, Success, Failure }
@@ -715,17 +715,17 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
     Stored { execution } => run drive(move execution, move owner)
   }
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run drive(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run driveStored(move selected, &mut owner)
   return owner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
 export const constrainedCallableForwarding = `import silk.effect as Effect
@@ -803,16 +803,17 @@ pub fn main() -> i32 { return run completeResidual() }
 `
 
 /** Detached address payloads survive a row carrier widened by a floating handler failure. */
-export const heterogeneousOwnedFailurePayload = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+export const heterogeneousOwnedFailurePayload = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
 effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run pending
@@ -840,16 +841,17 @@ pub fn main() -> i32 { return run completeResidual() }
 `
 
 /** Reified residual unions release owned address payloads from a floating carrier when dropped. */
-export const heterogeneousOwnedFailureResultDrop = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+export const heterogeneousOwnedFailureResultDrop = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect as Effect
 struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
 effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let storage = run pending
   fail Owned { storage: move storage }
@@ -990,9 +992,10 @@ pub fn main() -> i32 { return run choose(First {}) }`,
   },
   {
     name: 'finite-effect-join-selected-cleanup',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct First {}
@@ -1008,7 +1011,7 @@ fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -1487,8 +1490,9 @@ pub fn main() -> i32 {
   // scalar traversal.
   {
     name: 'string-owned-scalars',
-    source: `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u32 as u32
 import silk.string {
@@ -1523,7 +1527,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if literal == "A\\u{a2}" {} else { return 1 }
   if literal != "A\\u{a3}" {} else { return 2 }
 
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let copying = copy(literal) |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
   let appending = append(&mut owned, "\\u{20ac}\\u{10348}")
@@ -1544,14 +1548,15 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // the evaluator and native answer correctly while direct WebAssembly still cannot.
   {
     name: 'unicode-compared-directly',
-    source: `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
   let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
   if view(&left) == view(&right) {} else { return 1 }
@@ -1649,20 +1654,22 @@ pub fn main() -> i32 {
   // folded from HashedCollections.test.ts: seeded map growth with checked reads.
   {
     name: 'hashed-map-growth',
-    source: `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.i32 as i32
+import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
-  let mut map = make<Word, i32>(HashKey.seed(4242))
+  let mut allocator = Allocator.systemAllocatorService()
+  let mut map = make<Word, i32>(Hash.seed(4242))
   let mut key = 0
   while key < 40 {
-    let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key * 3)
+    let previous = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key * 3)
       |> Effect.provideMut(&mut allocator)
     drop previous
     key = key + 1
@@ -1672,7 +1679,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let mut probe = 0
   let mut total = 0
   while probe < 40 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(probe))), -1)
+    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe * 3 { return 3 }
     total = total + found
     probe = probe + 1
@@ -1689,13 +1696,14 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from VectorAcceptance.test.ts: growth past the initial capacity with boundary reads.
   {
     name: 'vector-growth-reads',
-    source: `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -1724,9 +1732,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from OwnedAllocationDispatch.test.ts: quota refusal propagates typed OutOfMemoryError.
   {
     name: 'owned-allocation-quota-refusal',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
@@ -1734,7 +1743,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run recipe
   return move block
@@ -1810,7 +1819,8 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   },
   {
     name: 'local-shared-standard-library-wrapper',
-    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
 
@@ -1824,7 +1834,7 @@ fn increment(value: &mut Counter) -> i32 {
 fn read(value: &Counter) -> i32 { return value.value }
 
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let first = run (Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let second = Shared.clone<Counter>(&first)
@@ -1877,16 +1887,17 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   // folded from SlotLaneWidth.test.ts: u8 lane writes, copies, and takes through a raw buffer.
   {
     name: 'slot-lane-u8',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u8 as u8
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -1912,16 +1923,17 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from SlotLaneWidth.test.ts: f64 lane parity including a negative value.
   {
     name: 'slot-lane-f64',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.f64 as f64
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[f64; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -1947,8 +1959,9 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   // folded from BytesAcceptance.test.ts: copy, append, and mutate through byte slices (exit 180).
   {
     name: 'bytes-parity',
-    source: `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
@@ -1967,7 +1980,7 @@ fn checksum(values: &[u8]) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let source = [octet(0), octet(255), octet(128), octet(1)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
   let mut bytes = run copying
@@ -2001,9 +2014,10 @@ pub fn main() -> i32 {
   // folded from OwnedAllocationAcceptance.test.ts: guarded slot writes and takes release cleanly.
   {
     name: 'owned-allocation-guard',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
@@ -2011,7 +2025,7 @@ import silk.slot as Slot
 struct Element { value: i32 }
 
 effect fn build(count: usize) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[Element; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -2136,9 +2150,10 @@ pub fn main() -> i32 { return run twice() }`,
   // cleaned exactly once when a typed failure exits the frame.
   {
     name: 'stored-callable-cleanup-typed-failure',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
@@ -2154,7 +2169,7 @@ struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -2170,9 +2185,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // before the typed failure propagates to the recovery (exit 7).
   {
     name: 'drop-hook-failure-propagation',
-    source: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
@@ -2193,7 +2209,7 @@ effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -2362,7 +2378,7 @@ const independentExecutionConstructionFailure = (ordinal: 0 | 4): string => {
     .replace(
       'import silk.shared as Shared',
       `import silk.shared as Shared
-import silk.core { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.layout { Layout }
 struct ExhaustedAllocator {}
 effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
@@ -2371,13 +2387,16 @@ effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! 
 }
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }`,
     )
-    .replace(`let mut ${allocator} = Core.make()`, `let mut ${allocator} = ExhaustedAllocator {}`)
+    .replace(
+      `let mut ${allocator} = Allocator.systemAllocatorService()`,
+      `let mut ${allocator} = ExhaustedAllocator {}`,
+    )
 }
 const localSharedPressureFailure = (ordinal: 0 | 1): string =>
   localSharedPressure.replace(
     ordinal === 0
-      ? 'let mut firstAllocator = SystemAllocator.make()'
-      : 'let mut secondAllocator = SystemAllocator.make()',
+      ? 'let mut firstAllocator = Allocator.systemAllocatorService()'
+      : 'let mut secondAllocator = Allocator.systemAllocatorService()',
     ordinal === 0
       ? 'let mut firstAllocator = ExhaustedAllocator {}'
       : 'let mut secondAllocator = ExhaustedAllocator {}',
@@ -2501,7 +2520,8 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
         const innerCallback = inner === 'with' ? 'read' : 'increment'
         return {
           name: `local-shared-conflict-${outer}-${inner}`,
-          source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+          source: `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
 struct Counter { value: i32 }
@@ -2514,7 +2534,7 @@ fn nested(value: ${outerReference}, alias: Shared.Shared<Counter>) -> i32 {
   return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
 }
 effect fn conflictCase() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let first = run (Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let alias = Shared.clone<Counter>(&first)
@@ -2528,7 +2548,8 @@ pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`,
   ),
   {
     name: 'local-shared-affine-movement',
-    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.shared as Shared
@@ -2546,7 +2567,7 @@ fn consume(value: Empty | Token) -> i32 {
 }
 fn release(storage: Allocation) -> i32 { drop storage return 42 }
 effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let storage = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator))
   let mailbox = run (Shared.make<Mailbox>(Mailbox {
@@ -2562,7 +2583,7 @@ pub fn main() -> i32 { return run Effect.catchAll(useCell(), recover) }`,
   },
   {
     name: 'local-shared-two-frame-failure',
-    source: `import silk.core { OutOfMemoryError }
+    source: `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Problem {}
 effect fn failInner(core: Intrinsic.SharedCore<i32>) -> i32 ! Problem {
@@ -2583,7 +2604,8 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   },
   {
     name: 'local-shared-construction-exhaustion',
-    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+    source: `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.shared as Shared
@@ -2594,7 +2616,7 @@ effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemo
 }
 impl Allocator for Exhausted { allocate: Exhausted.reject }
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut system = SystemAllocator.make()
+  let mut system = Allocator.systemAllocatorService()
   let payload = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut system))
   let token = Token { storage: move payload }
@@ -2610,7 +2632,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   },
   {
     name: 'local-shared-clone-drop-during-access',
-    source: `import silk.core { OutOfMemoryError }
+    source: `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn selected(value: &mut i32) -> i32 { return 0 }
 fn conflict() -> i32 { return 21 }
@@ -2638,7 +2660,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   },
   {
     name: 'local-shared-strong-cycle',
-    source: `import silk.core { OutOfMemoryError }
+    source: `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Empty {}
 struct Bomb {}

@@ -27,7 +27,7 @@
 //!
 //! import silk.child_process as Process
 //!
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
@@ -38,8 +38,8 @@
 //! struct Completed {}
 //!
 //! effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
-//! ! Process.ProcessError | Core.OutOfMemoryError
-//! ? &mut Core.Allocator {
+//! ! Process.ProcessError | Allocator.OutOfMemoryError
+//! ? &mut Allocator {
 //!   return Process.exited(7, Bytes.make(), Bytes.make())
 //! }
 //!
@@ -48,23 +48,23 @@
 //! }
 //!
 //! effect fn program() -> i32
-//! ! Path.FileError | Core.OutOfMemoryError | Process.ProcessError {
-//!   let mut allocator = Core.make()
+//! ! Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError {
+//!   let mut allocator = Allocator.systemAllocatorService()
 //!   let mut provider = Completed {}
 //!   let path = run Path.make("/tool")
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let request = run Process.request(&path)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let outcome = run Process.submit(&request)
 //!     |> Effect.provideMut<Process.ChildProcess>(&mut provider)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   return match move Process.exitCode(&outcome) {
 //!     Option.Some<i32> {value} => 35 + value
 //!     Option.None {} => 1
 //!   }
 //! }
 //!
-//! effect fn recover(error: Path.FileError | Core.OutOfMemoryError | Process.ProcessError) -> i32 {
+//! effect fn recover(error: Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -87,8 +87,8 @@ import silk.bytes {
   length as bytesLength,
   make as bytesMake
 }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.filesystem { Path, rawBytes as pathRawBytes }
 import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }

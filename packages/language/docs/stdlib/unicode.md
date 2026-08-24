@@ -27,7 +27,7 @@ locale-sensitive comparison, grapheme segmentation, or case folding.
 ### Make canonically equivalent text compare equal
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -36,13 +36,13 @@ import silk.string as String
 import silk.unicode as Unicode
 
 effect fn normalize() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let composing = Unicode.normalizeNfc("e\u{301}")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let composed = run composing
   let decomposing = Unicode.normalizeNfd("é")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let decomposed = run decomposing
   if String.view(&composed) != "é" {
     return 0
@@ -53,7 +53,7 @@ effect fn normalize() -> i32
   return 42
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

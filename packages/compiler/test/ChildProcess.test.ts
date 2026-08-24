@@ -39,8 +39,8 @@ const scriptedProvider = `import silk.child_process { ChildProcess }
 import silk.child_process { ProcessError }
 import silk.child_process { ProcessOutcome }
 import silk.child_process { ProcessRequest }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 struct Scripted {
   code: i32
   signal: bool
@@ -109,7 +109,7 @@ import silk.result { Failure, Result, Success }
 
 /** Reports the program's own return value, or a distinct band for each typed failure it recovers. */
 const recovery = `import silk.child_process { ProcessError }
-import silk.core { OutOfMemoryError }
+import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError }
 import silk.option { None }
 import silk.option { Some }
@@ -133,13 +133,14 @@ pub fn main() -> i32 {
 }`
 
 const scriptedRun = (provider: string, body: string) => `import silk.child_process { ProcessError }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.filesystem { FileError }
 ${imports}
 ${scriptedProvider}
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = ${provider}
 ${vocabulary}
 ${body}
@@ -148,14 +149,15 @@ ${body}
 ${recovery}`
 
 const nativeRun = (body: string) => `import silk.child_process { ProcessError }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.filesystem { FileError }
 ${imports}
 import silk.os_child_process { make as osChildMake }
 
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = osChildMake()
 ${vocabulary}
 ${body}

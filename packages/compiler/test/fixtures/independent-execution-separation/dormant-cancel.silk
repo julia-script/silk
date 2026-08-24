@@ -1,5 +1,5 @@
 // Compiler fixture: cancellation after onSuspend returns and before a retained Wake.
-import silk.core as Core
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -115,8 +115,8 @@ fn signal(selected: Empty | Armed) -> () {
   }
 }
 
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let state = run Shared.make<State>(State {
     slot: Empty {},
     ready: 0,
@@ -126,14 +126,14 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
     endpointDrops: 0,
     cleanupOrder: 0
   })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let bodyState = Shared.clone<State>(&state)
   let endpointState = Shared.clone<State>(&state)
   let bodyTokenState = Shared.clone<State>(&state)
   let bodyToken = BodyToken { state: move bodyTokenState }
   let endpoint = Endpoint { state: move endpointState }
   let execution = run Execution.make(body(move bodyState, move bodyToken), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {} }
   run drive(move execution, &mut owner)
   let dormant = Intrinsic.replace(owner.slot, Empty {})
@@ -145,5 +145,5 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   drop state
   return observed
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -1 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

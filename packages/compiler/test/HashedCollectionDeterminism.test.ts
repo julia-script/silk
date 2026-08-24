@@ -92,7 +92,8 @@ const agrees = (
 const ORDER_UNDER_12345 = 971199974
 const ORDER_UNDER_6789 = 434552010
 
-const mapImports = `import silk.hash { HashKey, HashSeed, Word }
+const mapImports = `import silk.hash as Hash
+import silk.hash { HashKey, HashSeed, Word }
 import silk.i32 as i32
 import silk.hash_map { HashMap, bucketCount, insert, keyAt, length, make, occupiedAt }
 import silk.option { Option, Some, None }
@@ -119,7 +120,7 @@ const foldOrder = (map: string, into: string): string =>
 const fill = (map: string): string =>
   `  let mut ${map}Key = 0
   while ${map}Key < 12 {
-    let previous = run insert<Word, i32>(&mut ${map}, HashKey.word(i32.toU64(${map}Key * 7 + 1)), ${map}Key)
+    let previous = run insert<Word, i32>(&mut ${map}, Hash.word(i32.toU64(${map}Key * 7 + 1)), ${map}Key)
       |> Effect.provideMut(&mut allocator)
     drop previous
     ${map}Key = ${map}Key + 1
@@ -132,17 +133,19 @@ const fill = (map: string): string =>
  * folded the very same order.
  */
 const ordered = (seed: number, digest: number): string =>
-  `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
+import silk.hash as Hash
 import silk.hash { HashKey }
 import silk.hash { Word }
 import silk.u64 as u64
 ${mapImports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
-  let mut map = make<Word, i32>(HashKey.seed(${seed}))
+  let mut allocator = Allocator.systemAllocatorService()
+  let mut map = make<Word, i32>(Hash.seed(${seed}))
 ${fill('map')}
 ${foldOrder('map', 'folded')}
   if u64.toI32(u64.remainder(folded, 1000000007)) != ${digest} { return 1 }

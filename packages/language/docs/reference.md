@@ -782,12 +782,13 @@ the complete selected row is supplied as the first generic argument. A partially
 section retains that selection obligation until a statically visible Effect application completes
 it.
 
-Here `StdoutLogger` conforms to `Logger`. The explicit selected row removes `&mut Logger` while
-preserving `&mut Clock`, independently of canonical row order:
+Here `Logger.stdoutService()` returns a `StdoutLogger`, which conforms to `Logger`. The explicit
+selected row removes `&mut Logger` while preserving `&mut Clock`, independently of canonical row
+order:
 
 ```silk
 import silk.effect as Effect
-import silk.logging { Logger, LogError, StdoutLogger }
+import silk.logger { Logger, LogError }
 
 service Clock {
   effect fn tick() -> i32 ? &mut Clock
@@ -799,7 +800,7 @@ effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
 }
 
 effect fn withLogger() -> i32 ! LogError ? &mut Clock {
-  let mut logger = StdoutLogger.stdout()
+  let mut logger = Logger.stdoutService()
   return run Effect.provideMut<Logger>(read(), &mut logger)
 }
 ```

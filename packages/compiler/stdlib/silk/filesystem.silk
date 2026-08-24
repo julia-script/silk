@@ -23,15 +23,15 @@
 //! # Examples
 //! ## Construct and inspect a portable path
 //! ```silk
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
 //! import silk.filesystem as FileSystem
 //!
 //! effect fn example() -> i32
-//! ! FileSystem.FileError | Core.OutOfMemoryError {
-//!   let mut allocator = Core.make()
+//! ! FileSystem.FileError | Allocator.OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorService()
 //!   let path = run FileSystem.make("/workspace")
 //!     |> Effect.provideMut(&mut allocator)
 //!   if FileSystem.name(&path) == "workspace" {
@@ -40,7 +40,7 @@
 //!   return 0
 //! }
 //!
-//! effect fn recover(error: FileSystem.FileError | Core.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: FileSystem.FileError | Allocator.OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -56,8 +56,8 @@ import silk.bytes {
   append as bytesAppend,
   asSlice as bytesAsSlice
 }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.i32 as i32
 import silk.option { None, Option, Some, none, some }
@@ -669,15 +669,15 @@ pub effect fn parent(
 /// # Examples
 /// ## Write a file after creating its parents
 /// ```silk
-/// import silk.core as Core
+/// import silk.allocator { Allocator }
 ///
 /// import silk.filesystem as FileSystem
 ///
 /// import silk.usize as usize
 ///
 /// pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
-/// ! FileSystem.FileError | Core.OutOfMemoryError
-/// ? &mut FileSystem.FileSystem | &mut Core.Allocator {
+/// ! FileSystem.FileError | Allocator.OutOfMemoryError
+/// ? &mut FileSystem.FileSystem | &mut Allocator {
 ///   let written = run FileSystem.writeFileWithParents(path, contents)
 ///   return contents.length
 /// }

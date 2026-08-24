@@ -27,9 +27,9 @@ on a runtime check.
 ### Copy and then take one initialized value
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
-import silk.core {Allocator}
+import silk.allocator {Allocator}
 
 import silk.effect as Effect
 
@@ -40,8 +40,8 @@ import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let acquiring = Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let allocation = run acquiring
@@ -55,7 +55,7 @@ effect fn build() -> i32
   return 0
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

@@ -248,8 +248,9 @@ import its portable contract. Catalog verification rejects a dependency cycle th
 portable closure depend transitively on target-provider source.
 
 **Current standard library:** Largely aligned. Filesystem, standard input, host input, and child
-process contracts are separate from their OS providers. Some aggregation in `silk.core` and the
-manifest still needs classification against this boundary.
+process contracts are separate from their OS providers. Allocation (`silk.allocator`) and standard
+streams (`silk.standard_streams`) are their own modules; the manifest still needs classification
+against this boundary.
 
 **Evidence:** [portable/provider separation](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [requirements and services](requirements-and-services.md),
@@ -265,7 +266,7 @@ initialization and acquires no allocator, provider, registry entry, thread, glob
 resource.
 
 ```silk,ignore
-import silk.core { Allocator, OutOfMemoryError }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.vector as Vector
 
 effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemoryError ? &mut Allocator {
@@ -383,14 +384,14 @@ stream, or other service merely because an official implementation ships with th
 
 ```silk,ignore
 import silk.effect as Effect
-import silk.logging { Logger, StdoutLogger }
+import silk.logger { Logger }
 
 effect fn program() -> () ? &mut Logger {
   return run Logger.log("ready")
 }
 
 pub effect fn main() {
-  let logger = StdoutLogger.make()
+  let mut logger = Logger.stdoutService()
   return run Effect.provideMut<Logger>(program(), &mut logger)
 }
 ```

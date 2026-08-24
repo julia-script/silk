@@ -64,8 +64,8 @@ import silk.child_process {
   unsupported,
   workingDirectory as requestWorkingDirectory
 }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.i32 as i32
 import silk.option { None, Option, Some, none }
 import silk.u32 as u32

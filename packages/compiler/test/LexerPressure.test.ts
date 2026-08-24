@@ -280,9 +280,9 @@ const quotaSourceFor = (input: string, id: string, quota: number): string => {
   const withAllocator = replaceExactlyOnce(
     generated,
     'import silk.vector { Vector, make, append, get, length }',
-    `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length }
@@ -292,7 +292,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }
@@ -301,7 +301,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }`,
   )
   return replaceExactlyOnce(
     withAllocator,
-    '  let mut allocator = SystemAllocator.make()',
+    '  let mut allocator = Allocator.systemAllocatorService()',
     `  let mut allocator = QuotaAllocator { remaining: ${quota} }`,
   )
 }
@@ -555,7 +555,7 @@ it.effect(
         const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
         assert.strictEqual(run.status, quota === allocationCount ? 0 : 1, `${id}: ${run.stderr}`)
         if (quota === allocationCount) assert.strictEqual(run.stderr, '')
-        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemoryError\n')
+        else assert.strictEqual(run.stderr, 'Error: silk/allocator.OutOfMemoryError\n')
       }
     }),
   180_000,

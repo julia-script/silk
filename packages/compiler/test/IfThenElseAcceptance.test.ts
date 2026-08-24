@@ -71,9 +71,10 @@ pub fn main() -> i32 {
  * pre-built `Effect` arguments would evaluate both arms at the call site and produce both bodies'
  * allocation pairs whatever the condition, even though only one branch's *effect* would then run.
  */
-const eager = (condition: string) => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const eager = (condition: string) => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${counter}
@@ -81,7 +82,7 @@ ${counter}
 struct Clock { storage: Allocation }
 
 effect fn openClock() -> Clock ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

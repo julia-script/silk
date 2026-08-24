@@ -1,8 +1,8 @@
-import silk.core {Allocator}
+import silk.allocator {Allocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
 import silk.effect as Effect
 
@@ -307,7 +307,7 @@ effect fn recoverOutOfMemory(error: OutOfMemoryError) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(
     routeNode(chooseNode())
       |> Effect.provideMut(&mut allocator),

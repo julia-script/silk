@@ -14,7 +14,7 @@ fixed array when the length is part of the type, and `silk.bytes.Bytes` for bulk
 [`make`](#declaration-73696c6b2f766563746f723a3a6d616b65) is allocation-free. The first growth reserves four elements and later growth doubles
 capacity; [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) can move that cost ahead of mutation. Growth completes in replacement
 storage before committing, so [`append`](#declaration-73696c6b2f766563746f723a3a617070656e64) and [`reserve`](#declaration-73696c6b2f766563746f723a3a72657365727665) leave the vector unchanged on
-[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). Removing, clearing, and truncating drop exactly the elements they discard
+[`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72). Removing, clearing, and truncating drop exactly the elements they discard
 while retaining capacity.
 
 [`sort`](#declaration-73696c6b2f766563746f723a3a736f7274) is stable, deterministic, and supports move-only elements, but allocates scratch space.
@@ -32,28 +32,28 @@ produces a copied value.
 ### Grow and edit an owned sequence
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
 import silk.vector as Vector
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = Vector.make<i32>()
   let first = run Vector.append<i32>(&mut values, 10)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Vector.append<i32>(&mut values, 30)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let middle = run Vector.insert<i32>(&mut values, 1, 20)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let changed = Vector.set<i32>(&mut values, 2, 22)
   let removed = Vector.remove<i32>(&mut values, 0)
   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1)
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -65,7 +65,7 @@ pub fn main() -> i32 {
 ### Sort values and find the first equal value
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -76,17 +76,17 @@ import silk.usize as usize
 import silk.vector as Vector
 
 effect fn search() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = Vector.make<i32>()
   let first = run Vector.append<i32>(&mut values, 3)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Vector.append<i32>(&mut values, 36)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let third = run Vector.append<i32>(&mut values, 3)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let sorting = Vector.sort<i32>(&mut values)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let sorted = run sorting
   let found = Vector.binarySearch<i32>(&values, 3)
     |> Option.unwrapOr<usize>(99)
@@ -96,7 +96,7 @@ effect fn search() -> i32
   return Vector.get<i32>(&values, 0) + Vector.get<i32>(&values, 1) + Vector.get<i32>(&values, 2)
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

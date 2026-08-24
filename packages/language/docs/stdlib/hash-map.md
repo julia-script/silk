@@ -33,7 +33,7 @@ transfer a move-only value out. Equivalent keys must also obey the [`HashKey`](.
 ### Insert, read, and remove one value
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -44,11 +44,11 @@ import silk.hash_map as HashMap
 import silk.option as Option
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut map = HashMap.make<Hash.Word, i32>(Hash.seed(17))
   let inserting = HashMap.insert<Hash.Word, i32>(&mut map, Hash.word(7), 42)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let previous = run inserting
   drop previous
   let found = HashMap.get<Hash.Word, i32>(&map, Hash.word(7))
@@ -61,7 +61,7 @@ effect fn build() -> i32
   return found
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

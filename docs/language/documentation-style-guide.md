@@ -526,7 +526,7 @@ pipeline.
 /// ## Get the second vector element
 ///
 /// ```silk
-/// import silk.core as Core
+/// import silk.allocator { Allocator }
 ///
 /// import silk.effect as Effect
 ///
@@ -535,13 +535,13 @@ pipeline.
 /// import silk.vector as Vector
 ///
 /// pub effect fn main() -> ()
-/// ! Core.OutOfMemoryError {
-///   let mut allocator = Core.make()
+/// ! Allocator.OutOfMemoryError {
+///   let mut allocator = Allocator.systemAllocatorService()
 ///   let mut values = Vector.make<i32>()
 ///   let first = run Vector.append<i32>(&mut values, 10)
-///     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+///     |> Effect.provideMut<Allocator>(&mut allocator)
 ///   let second = run Vector.append<i32>(&mut values, 20)
-///     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+///     |> Effect.provideMut<Allocator>(&mut allocator)
 ///   let value = Vector.get<i32>(&values, usize.ONE)
 ///   if value != 20 {
 ///     let mismatch = 1 / 0

@@ -6,7 +6,7 @@
 //! Use [`drive`] for the initial activation and each later eligible activation.
 //!
 //! # Details
-//! Construction obtains one combined package from the selected `Core.Allocator`
+//! Construction obtains one combined package from the selected `Allocator`
 //! and does not start the Effect. The body representation, continuation, and fixed readiness
 //! endpoint remain private. A nested `Effect.suspend` transfers execution
 //! immediately. In contrast, [`park`] relinquishes the Execution until one Wake makes it eligible.
@@ -18,8 +18,7 @@
 //! until the Wake is consumed or dropped. [`drive`] returns continued ownership only to
 //! `onSuspend`.
 
-import silk.core as Core
-import silk.core { Allocator as CoreAllocator }
+import silk.allocator { Allocator }
 
 fn absurd<T>() -> T {
   let boom = 1 / 0
@@ -32,17 +31,17 @@ fn absurd<T>() -> T {
 ///
 /// The returned Execution is `Initial`. The body does not start during this call. Allocation refusal
 /// produces no Execution and leaves every input under ordinary Effect cleanup. Later private stack
-/// growth is a fatal trap and is not a `Core.OutOfMemoryError`.
+/// growth is a fatal trap and is not a `Allocator.OutOfMemoryError`.
 pub effect fn make<
   A,
   F: once Effect<A> + Intrinsic.Detached,
   O: Intrinsic.Detached,
   R: fn(&O) -> () + Intrinsic.Detached + Intrinsic.NonParking
 >(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A>
-! Core.OutOfMemoryError
-? &mut Core.Allocator {
+! Allocator.OutOfMemoryError
+? &mut Allocator {
   let layout = Intrinsic.executionLayout<A, F, O, R>()
-  let allocation = run CoreAllocator.allocate(move layout)
+  let allocation = run Allocator.allocate(move layout)
   unsafe {
     return Intrinsic.executionFromAllocation<A, F, O, R>(
       move allocation,

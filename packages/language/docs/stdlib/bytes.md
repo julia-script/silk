@@ -12,7 +12,7 @@ the value is known to be valid UTF-8 and callers need text operations.
 ## Details
 
 [`make`](#declaration-73696c6b2f62797465733a3a6d616b65) creates an empty value without allocating, while [`zeroed`](#declaration-73696c6b2f62797465733a3a7a65726f6564), [`copy`](#declaration-73696c6b2f62797465733a3a636f7079), and [`append`](#declaration-73696c6b2f62797465733a3a617070656e64)
-may require an [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72). Shared and exclusive views borrow only the initialized prefix;
+may require an [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72). Shared and exclusive views borrow only the initialized prefix;
 later appends can reallocate, so do not retain a view across a mutation.
 
 ## Examples
@@ -22,22 +22,22 @@ later appends can reallocate, so do not retain a view across a mutation.
 ```silk
 import silk.bytes as Bytes
 
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
 import silk.u8 as u8
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let source = b"AB"
   let copying = Bytes.copy(&source)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut bytes = run copying
   let suffix = b"C"
   let appending = Bytes.append(&mut bytes, &suffix)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let appended = run appending
   let mut writable = Bytes.asMutSlice(&mut bytes)
   writable[1] = u8.toU8(48)
@@ -45,7 +45,7 @@ effect fn build() -> i32
   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

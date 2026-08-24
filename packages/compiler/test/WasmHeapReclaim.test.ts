@@ -22,13 +22,14 @@ const pagesOf = (instance: WebAssembly.Instance): number => {
  * Each block is 512 payload bytes, so a thousand iterations acquire roughly 1.5 MiB. The heap that
  * serves it stays inside a couple of pages only if released blocks come back.
  */
-const interleaved = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const interleaved = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut index = 0
   while index < 1000 {
     let firstLayout = Layout.of<[i64; 64]>()
@@ -119,9 +120,10 @@ it.effect(
  * before either backend reclaimed anything. This test pins the count Wasm reports, and says
  * nothing about how much memory the engine holds while doing it.
  */
-const counted = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const counted = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.usize as usize
@@ -149,7 +151,7 @@ impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
-    inner: SystemAllocator.make(),
+    inner: Allocator.systemAllocatorService(),
     metrics: zeroedMetrics()
   }
   let firstLayout = Layout.of<[i32; 8]>()
@@ -197,11 +199,12 @@ it.effect('reports the folded release count on Wasm', () =>
   }),
 )
 
-const interleavedShared = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+const interleavedShared = `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut index = 0
   while index < 10000 {
     let first = run (Shared.make<i32>(1) |> Effect.provideMut<Allocator>(&mut allocator))
@@ -235,7 +238,8 @@ it.effect(
   120_000,
 )
 
-const repeatedSharedAccess = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+const repeatedSharedAccess = `import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
 struct Counter { value: i32 }
@@ -245,7 +249,7 @@ fn increment(value: &mut Counter) -> i32 {
 }
 fn read(value: &Counter) -> i32 { return value.value }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let shared = run (Shared.make<Counter>(Counter { value: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let mut index = 0

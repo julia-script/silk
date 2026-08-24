@@ -628,8 +628,9 @@ it.effect('releases an affine owned provider after a pre-read scalar suspends an
 
 it.effect('keeps a synchronous service with an allocator requirement synchronous', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { Allocator }
-import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 service Value {
   effect fn read() -> i32 ? &mut Value | &mut Allocator
@@ -642,7 +643,7 @@ effect fn program() -> i32 ? &mut Value | &mut Allocator {
 }
 pub fn main() -> i32 {
   let mut fixed = Fixed { value: 42 }
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.provideMut<Allocator>(
     Effect.provideMut<Value>(program(), &mut fixed),
     &mut allocator,
@@ -696,9 +697,10 @@ it.effect('keeps mixed provider specializations exact at one service site', () =
 
 it.effect('releases an owned source provider after the protected Effect completes', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect as Effect
 struct Problem { code: i32 }
@@ -707,7 +709,7 @@ struct Provider { storage: Allocation }
 effect fn read(self: &mut Provider) -> i32 { return 42 }
 impl Value for Provider { read: Provider.read }
 effect fn open() -> Provider ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   return Provider { storage: move allocation }

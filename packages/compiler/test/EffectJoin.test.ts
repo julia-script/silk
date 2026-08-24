@@ -122,9 +122,10 @@ pub fn main() -> i32 {
   return run selected
 }`
 
-const affineCaptureSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const affineCaptureSource = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct First {}
@@ -142,7 +143,7 @@ fn choose(input: First | Second, storage: Allocation) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -171,9 +172,10 @@ pub fn main() -> i32 {
   return run pending
 }`
 
-const hookCaptureSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const hookCaptureSource = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct First {}
@@ -195,7 +197,7 @@ fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe

@@ -36,22 +36,22 @@ rather than inventing filesystem imports; evaluator execution requires an inject
 ### Construct a provider without accessing the filesystem
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
 import silk.os_filesystem as OsFileSystem
 
 effect fn program() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let provider = run OsFileSystem.make("/tmp")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   drop provider
   return 42
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

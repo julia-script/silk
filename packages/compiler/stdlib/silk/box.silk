@@ -19,15 +19,15 @@
 //! ```silk
 //! import silk.box as Box
 //!
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
 //! effect fn build() -> i32
-//! ! Core.OutOfMemoryError {
-//!   let mut allocator = Core.make()
+//! ! Allocator.OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorService()
 //!   let creating = Box.make<i32>(42)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let boxed = run creating
 //!   let borrowed = Box.get<i32>(&boxed)
 //!   if borrowed[0] != 42 {
@@ -36,7 +36,7 @@
 //!   return Box.into<i32>(move boxed)
 //! }
 //!
-//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -59,8 +59,8 @@
 // over T: a `[T; 0]` anchor of the kind Vector uses would be an inline reach into T and would make
 // a struct holding `Box` of itself recursive again.
 
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot

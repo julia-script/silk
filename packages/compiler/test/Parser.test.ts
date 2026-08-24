@@ -394,8 +394,8 @@ it('parses explicit drop as a statement without making the block terminal', () =
 })
 
 it('parses unsafe blocks and allocator and Drop conformances losslessly', () => {
-  const source = `import silk.core { Allocator }
-import silk.core { SystemAllocator }
+  const source = `import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 struct Guard<T> { value: T }
 impl Allocator for SystemAllocator { allocate: SystemAllocator.allocate }
@@ -484,7 +484,7 @@ it('recovers from a malformed bounded impl type-parameter list inside the declar
 it('bounds damaged conformance recovery before the following declaration', () => {
   const result = parseText(
     'memory://damaged-conformance.silk',
-    'import silk.core { Allocator }\nimpl Allocator for Broken fn after() -> i32 { return 42 }',
+    'import silk.allocator { Allocator }\nimpl Allocator for Broken fn after() -> i32 { return 42 }',
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
   assert.include(
@@ -530,7 +530,7 @@ it('parses an explicit selected requirement row in a provision pipeline', () => 
 it('parses explicit Effect contracts and declaration requirement rows', () => {
   const result = parseText(
     'memory://effect-contract-rows.silk',
-    `import silk.core { Allocator }
+    `import silk.allocator { Allocator }
 import silk.filesystem { FileSystem }
 fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }

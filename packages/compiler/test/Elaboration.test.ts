@@ -695,15 +695,16 @@ it.effect('defines allocation as an exclusive service Effect with an affine resu
   Effect.gen(function* () {
     const result = yield* analyzeWithStdlib(
       'allocation://capability-contract',
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemoryError ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
-  let allocator = SystemAllocator.make()
+  let allocator = Allocator.systemAllocatorService()
   return 42
 }`,
     )
@@ -715,7 +716,7 @@ fn main() -> i32 {
     if (allocation?._tag !== 'Resolved' || !Type.isEffect(allocation.type)) return
     assert.ok(Type.equals(allocation.type.success, Type.allocation))
     assert.deepEqual(Type.failureMembers(allocation.type).map(Type.encode), [
-      'silk/core.OutOfMemoryError',
+      'silk/allocator.OutOfMemoryError',
     ])
     assert.deepEqual(
       Type.requirementMembers(allocation.type).map((requirement) => ({
@@ -723,7 +724,7 @@ fn main() -> i32 {
         role: requirement.role,
         access: requirement.access,
       })),
-      [{ capability: 'silk/core.Allocator', role: 'DefaultRole', access: 'Exclusive' }],
+      [{ capability: 'silk/allocator.Allocator', role: 'DefaultRole', access: 'Exclusive' }],
     )
     assert.strictEqual(operation?._tag, 'Available')
     if (operation?._tag === 'Available' && Type.isEffect(operation.type))
@@ -735,13 +736,14 @@ it.effect('provides Allocator through nominal system and user-authored witnesses
   Effect.gen(function* () {
     const system = yield* analyzeWithStdlib(
       'allocation://nominal-system-provider',
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation
@@ -753,12 +755,14 @@ pub fn main() -> i32 { return 0 }`,
     const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
     assert.strictEqual(providerType?._tag, 'Available')
     if (providerType?._tag === 'Available')
-      assert.isTrue(Type.equals(providerType.type, Type.nominal('silk/core', 'SystemAllocator')))
+      assert.isTrue(
+        Type.equals(providerType.type, Type.nominal('silk/allocator', 'SystemAllocator')),
+      )
 
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct TestAllocator { remaining: i32 }

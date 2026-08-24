@@ -3,11 +3,11 @@ const storageAcquire = 'Intrinsic.systemAllocationAcquire'
 /**
  * Keeps low-level allocation-origin fixtures focused on provenance while adapting the sealed
  * storage refusal into the ordinary source allocation error. The compiler never recognizes the
- * adapter names; this is the same policy boundary implemented by `silk/core.SystemAllocator`.
+ * adapter names; this is the same policy boundary implemented by `silk/allocator.SystemAllocator`.
  */
 export const ordinaryStorageSource = (source: string): string => {
   if (!source.includes(storageAcquire)) return source
-  return `import silk.core { OutOfMemoryError as TestStorageFailure }
+  return `import silk.allocator { OutOfMemoryError as TestStorageFailure }
 import silk.layout { Layout as TestStorageLayout }
 ${source.replaceAll(storageAcquire, 'testStorageAcquire')}
 effect fn testStorageRefused(

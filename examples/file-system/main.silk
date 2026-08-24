@@ -1,6 +1,6 @@
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
@@ -119,7 +119,7 @@ fn checksum(bytes: &[u8]) -> i32 {
 }
 
 effect fn example() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut files = MemoryFileSystem {
     bytes: emptyBytes(),
     present: false,
