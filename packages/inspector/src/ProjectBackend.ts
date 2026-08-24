@@ -1211,6 +1211,8 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
       return `resume coroutine frame #${event.ticket ?? '?'} · ${event.outcome?.toLowerCase() ?? '?'}`
     case 'CoroutineFrameComplete':
       return `complete coroutine frame #${event.ticket ?? '?'}`
+    case 'ExecutionTransition':
+      return `${event.event.toLowerCase()} execution package #${event.package} · root ${event.root} · generation ${event.generation} · ${event.state}`
     case 'SuspensionChildStart':
       return `start suspended child · point ${event.point.ordinal}`
     case 'SuspensionChildComplete':
@@ -1294,6 +1296,7 @@ const traceDepth = (event: BootstrapEvaluation.TraceEvent): number => {
     case 'CoroutineFrameStateTransition':
     case 'CoroutineFrameResume':
     case 'CoroutineFrameComplete':
+    case 'ExecutionTransition':
     case 'SuspensionChildStart':
     case 'SuspensionChildComplete':
     case 'HostWrite':
@@ -1324,6 +1327,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return `${reason.kind === 'Steps' ? 'step' : 'call-depth'} limit · ${reason.count}/${reason.limit} · stopped in ${reason.function.module}.${reason.function.name} · active ${reason.activeFrames.map((frame) => `f${frame.frame}:d${frame.depth} ${frame.function.name}`).join(' → ')}`
     case 'InvalidCallableReuse':
       return `invalid callable reuse · #${reason.ticket} is ${reason.state.toLowerCase()}`
+    case 'ExecutionRelinquished':
+      return `execution relinquished · package #${reason.ticket}`
     case 'MissingStandardStreams':
       return 'missing StandardStreams host provider'
     case 'MissingStandardInput':

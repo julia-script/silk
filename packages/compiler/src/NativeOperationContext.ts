@@ -33,6 +33,9 @@ export interface Context {
   readonly f32: LlvmType.Type
   readonly f64: LlvmType.Type
   readonly pointer: LlvmType.Type
+  readonly transferStorageSize: number
+  readonly childThunkType?: LlvmType.Type
+  readonly resumeThunkType?: LlvmType.Type
   readonly usizeType?: LlvmType.Type
   readonly integerTypes: Map<number, LlvmType.Type>
   readonly signedOverflowSignatures: Map<number, OverflowSignature>

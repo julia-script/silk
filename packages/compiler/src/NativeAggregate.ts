@@ -17,6 +17,7 @@ import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Mir from './Mir.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeExecutionOperation from './NativeExecutionOperation.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeStorage from './NativeStorage.js'
@@ -153,6 +154,14 @@ export interface Context {
   readonly pointer: LlvmType.Type
   readonly usizeType?: LlvmType.Type
   readonly free?: FunctionActor.Function
+  readonly coroutineFramePop?: FunctionActor.Function
+  readonly resumeThunks: ReadonlyMap<
+    string,
+    {
+      readonly handle: FunctionActor.Function
+      readonly layout: Mir.CoroutineFrameTargetStateLayout
+    }
+  >
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
   readonly types: NativeType.LoweringContext
   readonly lanePointers: NativeLanePointer.Context
@@ -200,6 +209,10 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     case 'NoCleanup':
     case 'ParameterCleanup':
       return
+    case 'ExecutionCleanup':
+      return yield* NativeExecutionOperation.dropExecution(context, values, tag)
+    case 'WakeCleanup':
+      return yield* NativeExecutionOperation.dropWake(context, values, tag)
     case 'CallableCleanup': {
       if (plan.environment._tag !== 'CallableEnvironmentIdentity')
         throw new RangeError('LLVM callable cleanup lost its specialized environment')

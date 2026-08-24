@@ -111,7 +111,9 @@ export const discoverRoots = (
       region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
         ? [
             region.operation.destination.ordinal,
-            region.operation.outcome.ordinal,
+            ...(region.operation._tag === 'ExecutionPark'
+              ? []
+              : [region.operation.outcome.ordinal]),
             ...region.relay.state.slots.map((slot) => slot.local.ordinal),
           ]
         : [],
@@ -152,6 +154,9 @@ export interface EmissionContext {
   readonly laneType: (lane: Layout.CallingLane) => LlvmType.Type
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
+  readonly transferStorageSize: number
+  readonly childThunkType?: LlvmType.Type
+  readonly resumeThunkType?: LlvmType.Type
   readonly signedOverflowSignatures: Map<
     number,
     { readonly returnType: LlvmType.Type; readonly parameters: ReadonlyArray<LlvmType.Type> }
@@ -221,6 +226,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     laneType,
     transferHeaderSize,
     transferResultOffset,
+    transferStorageSize,
+    childThunkType,
+    resumeThunkType,
     signedOverflowSignatures,
     unsignedOverflowSignatures,
     malloc,
@@ -762,7 +770,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           pointer,
           ...(usizeType === undefined ? {} : { usizeType }),
           ...(free === undefined ? {} : { free }),
+          ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
           declared,
+          resumeThunks,
           types: nativeTypes,
           lanePointers,
           call: callContext,
@@ -781,6 +791,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           f32,
           f64,
           pointer,
+          transferStorageSize,
+          ...(childThunkType === undefined ? {} : { childThunkType }),
+          ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
           ...(usizeType === undefined ? {} : { usizeType }),
           integerTypes,
           signedOverflowSignatures,
@@ -809,6 +822,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           place: actorContext,
           scalar: actorContext,
           effect: actorContext,
+          execution: actorContext,
           call: actorContext,
         })
         for (const [blockOrdinal, block] of entry.linear.entries()) {

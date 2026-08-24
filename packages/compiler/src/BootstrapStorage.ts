@@ -17,7 +17,7 @@ export interface Allocation {
   }
   execution?: {
     readonly provenance: string
-    state: 'Initial' | 'Running' | 'Dormant' | 'Eligible' | 'Completed' | 'Destroyed'
+    state: 'Initial' | 'Running' | 'Dormant' | 'Notifying' | 'Eligible' | 'Completed' | 'Destroyed'
     readonly body: Value
     readonly endpoint: Value
     readonly callback: Value
@@ -25,12 +25,18 @@ export interface Allocation {
     readonly endpointCleanup: CleanupPlan.CleanupPlan
     readonly callbackCleanup: CleanupPlan.CleanupPlan
     wake?: WakeCell.State
+    guard?: {
+      readonly value: Value
+      readonly cleanup: CleanupPlan.CleanupPlan
+    }
+    cleanupPending?: boolean
     /** Stable root depth restored for every activation of this package. */
     logicalDepth?: number
   }
 }
 
 export type Allocations = Map<number, Allocation>
+export type ExecutionState = NonNullable<Allocation['execution']>
 
 /** Acquires one empty evaluator allocation ticket. */
 export const allocate = (allocations: Allocations, ticket: number): void => {

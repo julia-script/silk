@@ -2,6 +2,7 @@ import * as BootstrapArithmetic from './BootstrapArithmetic.js'
 import * as BootstrapEffect from './BootstrapEffect.js'
 import type {
   CallRequest,
+  ExecutionParkRequest,
   IndependentCallRequest,
   LocalState,
   MachineRequest,
@@ -15,6 +16,7 @@ import * as BootstrapPlace from './BootstrapPlace.js'
 import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
 import type * as HostInput from './HostInput.js'
@@ -238,6 +240,7 @@ interface EvaluationState {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
+  readonly executionMachines: Map<number, IndependentMachine>
 }
 
 interface TransferContext {
@@ -255,6 +258,7 @@ interface ActivationRecord extends ActiveFrame {
   continuation?: FunctionExecution
   pendingCall?: CallRequest
   cleanupState?: CleanupPlan.CleanupPlan['_tag']
+  readonly execution?: number
   coroutineFrame?: {
     readonly ticket: number
     readonly bytes: number
@@ -265,6 +269,12 @@ interface ActivationRecord extends ActiveFrame {
 type FunctionExecution = Generator<MachineRequest, Step, Step>
 type CleanupExecution = Generator<MachineRequest, Step | undefined, Step>
 type OperationsExecution = Generator<MachineRequest, Step | undefined, Step>
+
+interface IndependentMachine {
+  readonly stack: Array<ActivationRecord>
+  transfer?: TransferContext
+  resumed?: Step
+}
 
 const cellKey = (frame: number, cell: number): string => `${frame}:${cell}`
 
@@ -302,6 +312,7 @@ function* executeFunction(
     arguments_: ReadonlyArray<Value>,
     span: SourceSpan.SourceSpan,
     logicalDepth: number,
+    execution: number,
   ): FunctionExecution {
     const request: IndependentCallRequest = Object.freeze({
       _tag: 'IndependentCallRequest',
@@ -309,7 +320,13 @@ function* executeFunction(
       arguments: arguments_,
       span,
       logicalDepth,
+      execution,
     })
+    return yield request
+  }
+
+  const parkIndependentRoot = function* (span: SourceSpan.SourceSpan): FunctionExecution {
+    const request: ExecutionParkRequest = Object.freeze({ _tag: 'ExecutionParkRequest', span })
     return yield request
   }
 
@@ -669,8 +686,10 @@ function* executeFunction(
         if (
           package_ === undefined ||
           (package_.state !== 'Initial' &&
+            package_.state !== 'Running' &&
             package_.state !== 'Dormant' &&
-            package_.state !== 'Eligible')
+            package_.state !== 'Eligible' &&
+            package_.state !== 'Notifying')
         )
           return blockedStep({
             _tag: 'Trap',
@@ -678,17 +697,32 @@ function* executeFunction(
             reason: 'Execution cleanup entered an illegal lifecycle state',
             span: provenance.span,
           })
-        const wakeDestroyed =
-          package_.wake === undefined ? undefined : WakeCell.destroyExecution(package_.wake)
-        if (wakeDestroyed?._tag === 'WakeCellViolation')
+        const cancelled = ExecutionTransition.cancel(transitionState(package_, owner.ticket))
+        if (cancelled._tag !== 'ExecutionTransitionEdge')
           return blockedStep({
             _tag: 'Trap',
             function: fn.id,
             reason: 'Execution cleanup violated wake-control ownership',
             span: provenance.span,
           })
-        if (wakeDestroyed !== undefined) package_.wake = wakeDestroyed.state
+        if (cancelled.after.wake !== undefined) package_.wake = cancelled.after.wake
+        if (cancelled.after.execution === 'DestroyPending') {
+          package_.cleanupPending = true
+          package_.state = 'Notifying'
+          traceExecution(package_, owner.ticket, 'Cancel', provenance.span)
+          return undefined
+        }
         package_.state = 'Destroyed'
+        traceExecution(package_, owner.ticket, 'Cancel', provenance.span)
+        const guard = package_.guard
+        const machineCleanup = yield* cleanupExecutionMachine(
+          owner.ticket,
+          provenance,
+          localOrdinal,
+          new Set([package_.body, package_.endpoint, package_.callback]),
+        )
+        if (machineCleanup !== undefined) return machineCleanup
+        if (guard !== undefined) delete package_.guard
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
           Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
@@ -704,7 +738,7 @@ function* executeFunction(
         }
         // An outstanding Wake is the final reclaim authority after the Execution handle is gone.
         // Its ordinary affine cleanup releases the allocation exactly once.
-        if (wakeDestroyed !== undefined && wakeDestroyed.state.allocation !== 'Released')
+        if (cancelled.after.wake !== undefined && cancelled.after.wake.allocation !== 'Released')
           return undefined
         if (!BootstrapStorage.release(state.allocations, owner.ticket, true))
           return blockedStep({
@@ -721,6 +755,7 @@ function* executeFunction(
             span: provenance.span,
           }),
         )
+        traceExecution(package_, owner.ticket, 'Release', provenance.span)
         return undefined
       }
       case 'WakeCleanup': {
@@ -1451,6 +1486,235 @@ function* executeFunction(
       identity: Number(identity.value),
       kind: kind.value === 0n ? 'File' : 'Directory',
     })
+  }
+
+  const transitionState = (
+    package_: BootstrapStorage.ExecutionState,
+    ticket: number,
+  ): ExecutionTransition.State =>
+    Object.freeze({
+      _tag: 'ExecutionTransitionState',
+      identity: Object.freeze({ _tag: 'ExecutionIdentity', package: ticket, root: ticket }),
+      execution:
+        package_.cleanupPending === true && package_.state === 'Notifying'
+          ? 'DestroyPending'
+          : package_.state,
+      ...(package_.wake === undefined ? {} : { wake: package_.wake }),
+    })
+
+  const traceExecution = (
+    package_: BootstrapStorage.ExecutionState,
+    ticket: number,
+    event: Extract<TraceEvent, { readonly _tag: 'ExecutionTransition' }>['event'],
+    span: SourceSpan.SourceSpan,
+  ): void => {
+    trace.push(
+      Object.freeze({
+        _tag: 'ExecutionTransition',
+        function: fn.id,
+        package: ticket,
+        root: ticket,
+        generation: package_.wake?.generation ?? 0,
+        event,
+        state: package_.state,
+        span,
+      }),
+    )
+  }
+
+  const cleanupExecutionMachine = function* (
+    ticket: number,
+    provenance: Mir.Provenance,
+    localOrdinal: number,
+    packageValues: ReadonlySet<Value>,
+  ): CleanupExecution {
+    const machine = state.executionMachines.get(ticket)
+    if (machine === undefined) return undefined
+    state.executionMachines.delete(ticket)
+    const activations = new Map<number, ActivationRecord>()
+    for (const current of machine.stack) activations.set(current.frame, current)
+    const collectTransfer = (transfer: TransferContext | undefined): void => {
+      if (transfer === undefined) return
+      for (const pending of transfer.pending)
+        activations.set(pending.activation.frame, pending.activation)
+      collectTransfer(transfer.parent)
+    }
+    collectTransfer(machine.transfer)
+    for (const current of activations.values()) {
+      const frame = current.coroutineFrame
+      if (frame === undefined) continue
+      const owner = program.functions.find(
+        (candidate) =>
+          Instances.keyText(candidate.instance) === Instances.keyText(current.instance),
+      )
+      const frameState = owner?.suspension?.frame?.states.find(
+        (candidate) =>
+          candidate.point.sourceId === frame.point.sourceId &&
+          candidate.point.spanStart === frame.point.spanStart &&
+          candidate.point.spanEnd === frame.point.spanEnd &&
+          candidate.point.ordinal === frame.point.ordinal,
+      )
+      for (const slot of frameState?.slots ?? []) {
+        if (slot.access._tag !== 'AffineTransfer') continue
+        const stored = current.locals.get(slot.local.ordinal)?.value
+        if (stored === undefined || packageValues.has(stored)) continue
+        const blocked = yield* releaseThroughPlan(
+          slot.access.cleanup,
+          stored,
+          provenance,
+          localOrdinal,
+        )
+        if (blocked !== undefined) return blocked
+      }
+      state.executionStackBytes -= frame.bytes
+      trace.push(
+        Object.freeze({
+          _tag: 'CoroutineFrameComplete',
+          function: current.function,
+          point: frame.point,
+          ticket: frame.ticket,
+          span: suspensionSpan(program, frame.point),
+        }),
+      )
+      delete current.coroutineFrame
+    }
+    const package_ = BootstrapStorage.execution(state.allocations, ticket)
+    if (package_ === undefined) throw new RangeError('Execution machine cleanup lost its package')
+    traceExecution(package_, ticket, 'Cleanup', provenance.span)
+    return undefined
+  }
+
+  const invokeStoredCallable = function* (
+    callable: Extract<Value, { readonly _tag: 'CallableValue' }>,
+    arguments_: ReadonlyArray<Value>,
+    span: SourceSpan.SourceSpan,
+    consume: boolean,
+  ): FunctionExecution {
+    const callableState = state.callables.get(callable.ticket)
+    if (callableState?.state !== 'Available')
+      return blockedStep({
+        _tag: 'InvalidCallableReuse',
+        function: fn.id,
+        ticket: callable.ticket,
+        state: callableState?.state ?? 'Released',
+        span,
+      })
+    callableState.state = consume ? 'Consumed' : 'Running'
+    const parameters = new Map<number, Value>()
+    arguments_.forEach((argument, ordinal) => {
+      parameters.set(ordinal, argument)
+    })
+    for (const capture of callable.captures) {
+      const resolved =
+        capture.value._tag === 'CallableBorrowValue'
+          ? state.cells.get(cellKey(capture.value.frame, capture.value.cell))?.value
+          : capture.value
+      if (resolved === undefined)
+        throw new RangeError('Execution callback capture references a missing evaluator cell')
+      parameters.set(capture.parameterOrdinal, resolved)
+    }
+    trace.push(
+      Object.freeze({
+        _tag: 'CallableApply',
+        function: fn.id,
+        ticket: callable.ticket,
+        mode: callable.type.mode,
+        span,
+      }),
+    )
+    const result = yield* invokeCallableTarget(
+      callable.target,
+      callable.typeArguments,
+      Object.freeze(
+        [...parameters.entries()].sort(([left], [right]) => left - right).map(([, value]) => value),
+      ),
+      span,
+    )
+    if (!consume && callableState.state === 'Running') callableState.state = 'Available'
+    return result
+  }
+
+  const notifyExecution = function* (
+    package_: BootstrapStorage.ExecutionState,
+    ticket: number,
+    provenance: Mir.Provenance,
+    localOrdinal: number,
+  ): CleanupExecution {
+    if (package_.wake?.phase !== 'Notifying')
+      return blockedStep({
+        _tag: 'Trap',
+        function: fn.id,
+        reason: 'Execution notification entered without invocation authority',
+        span: provenance.span,
+      })
+    if (package_.callback._tag !== 'CallableValue')
+      throw new RangeError('Execution package lost its endpoint callback identity')
+    package_.state = 'Notifying'
+    traceExecution(package_, ticket, 'Notify', provenance.span)
+    const endpointCell = -ticket - 1
+    state.cells.set(cellKey(frame, endpointCell), { value: package_.endpoint, fromCall: false })
+    const notified = yield* invokeStoredCallable(
+      package_.callback,
+      Object.freeze([
+        Object.freeze({
+          _tag: 'ReferenceValue',
+          frame,
+          cell: endpointCell,
+          selectors: Object.freeze([]),
+          indexes: Object.freeze([]),
+        }),
+      ]),
+      provenance.span,
+      false,
+    )
+    state.cells.delete(cellKey(frame, endpointCell))
+    if (notified._tag !== 'Value') return notified
+    const returned = ExecutionTransition.notificationReturned(transitionState(package_, ticket))
+    if (returned._tag !== 'ExecutionTransitionEdge' || returned.after.wake === undefined)
+      return blockedStep({
+        _tag: 'Trap',
+        function: fn.id,
+        reason: 'Execution endpoint return violated invocation authority',
+        span: provenance.span,
+      })
+    package_.wake = returned.after.wake
+    if (returned.after.wake.phase !== 'Released') {
+      package_.state = 'Eligible'
+      traceExecution(package_, ticket, 'Eligible', provenance.span)
+      return undefined
+    }
+    const guard = package_.guard
+    const machineCleanup = yield* cleanupExecutionMachine(
+      ticket,
+      provenance,
+      localOrdinal,
+      new Set([package_.body, package_.endpoint, package_.callback]),
+    )
+    if (machineCleanup !== undefined) return machineCleanup
+    if (guard !== undefined) delete package_.guard
+    for (const retained of [
+      Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
+      Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
+      Object.freeze({ value: package_.body, cleanup: package_.bodyCleanup }),
+    ]) {
+      const blocked = yield* releaseThroughPlan(
+        retained.cleanup,
+        retained.value,
+        provenance,
+        localOrdinal,
+      )
+      if (blocked !== undefined) return blocked
+    }
+    package_.state = 'Destroyed'
+    if (!BootstrapStorage.release(state.allocations, ticket, true))
+      return blockedStep({
+        _tag: 'Trap',
+        function: fn.id,
+        reason: 'Execution deferred destroy consumed reclaim authority more than once',
+        span: provenance.span,
+      })
+    traceExecution(package_, ticket, 'Release', provenance.span)
+    return undefined
   }
 
   let regionOrdinal = fn.entry.ordinal
@@ -2255,6 +2519,9 @@ function* executeFunction(
               ticket: allocation.ticket,
             })
             write(operation.destination, { value: execution, fromCall: false })
+            const package_ = BootstrapStorage.execution(state.allocations, allocation.ticket)
+            if (package_ !== undefined)
+              traceExecution(package_, allocation.ticket, 'Initialize', operation.provenance.span)
             break
           }
           case 'ExecutionDrive': {
@@ -2269,10 +2536,11 @@ function* executeFunction(
             )
               throw new RangeError('MIR verifier allowed invalid Execution drive values')
             const package_ = BootstrapStorage.execution(state.allocations, execution.ticket)
-            if (
-              package_ === undefined ||
-              (package_.state !== 'Initial' && package_.state !== 'Eligible')
-            )
+            const entered =
+              package_ === undefined
+                ? undefined
+                : ExecutionTransition.drive(transitionState(package_, execution.ticket))
+            if (package_ === undefined || entered?._tag !== 'ExecutionTransitionEdge')
               return blockedStep({
                 _tag: 'Trap',
                 function: fn.id,
@@ -2292,8 +2560,31 @@ function* executeFunction(
                 target: package_.body.runner,
                 span: operation.provenance.span,
               })
+            if (package_.state === 'Eligible') {
+              if (package_.wake === undefined || package_.guard === undefined)
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Eligible execution lost its Wake generation or retained guard',
+                  span: operation.provenance.span,
+                })
+              const guard = package_.guard
+              const released = yield* releaseThroughPlan(
+                guard.cleanup,
+                guard.value,
+                operation.provenance,
+                operation.execution.ordinal,
+              )
+              if (released !== undefined) return released
+              delete package_.guard
+              if (entered.after.wake === undefined)
+                throw new RangeError('Eligible transition lost its Wake generation')
+              package_.wake = entered.after.wake
+              traceExecution(package_, execution.ticket, 'Resume', operation.provenance.span)
+            }
             package_.state = 'Running'
             package_.logicalDepth ??= 1
+            traceExecution(package_, execution.ticket, 'Drive', operation.provenance.span)
             trace.push(
               Object.freeze({
                 _tag: 'Call',
@@ -2311,7 +2602,82 @@ function* executeFunction(
               package_.body.captures,
               operation.provenance.span,
               package_.logicalDepth,
+              execution.ticket,
             )
+            if (
+              driven._tag === 'Blocked' &&
+              driven.reason._tag === 'ExecutionRelinquished' &&
+              driven.reason.ticket === execution.ticket
+            ) {
+              const unused = yield* releaseThroughPlan(
+                operation.completionCleanup,
+                onComplete,
+                operation.provenance,
+                operation.onComplete.ordinal,
+              )
+              if (unused !== undefined) return unused
+              const suspended = yield* invokeStoredCallable(
+                onSuspend,
+                Object.freeze([branch, execution]),
+                operation.provenance.span,
+                true,
+              )
+              if (suspended._tag !== 'Value') return suspended
+              const wake = package_.wake
+              if (wake === undefined)
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Execution relinquished without a Wake generation',
+                  span: operation.provenance.span,
+                })
+              const returned = ExecutionTransition.relinquish(
+                transitionState(package_, execution.ticket),
+              )
+              if (returned._tag !== 'ExecutionTransitionEdge' || returned.after.wake === undefined)
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Execution suspension callback returned across invalid authority',
+                  span: operation.provenance.span,
+                })
+              package_.wake = returned.after.wake
+              if (returned.after.wake.phase === 'Released') {
+                package_.state = 'Destroyed'
+                state.executionMachines.delete(execution.ticket)
+                if (!BootstrapStorage.release(state.allocations, execution.ticket, true))
+                  return blockedStep({
+                    _tag: 'Trap',
+                    function: fn.id,
+                    reason: 'Execution suspension destroy consumed reclaim authority twice',
+                    span: operation.provenance.span,
+                  })
+                traceExecution(package_, execution.ticket, 'Release', operation.provenance.span)
+              } else if (returned.after.wake.phase === 'Notifying') {
+                const notified = yield* notifyExecution(
+                  package_,
+                  execution.ticket,
+                  operation.provenance,
+                  operation.execution.ordinal,
+                )
+                if (notified !== undefined) return notified
+              } else if (returned.after.wake.phase === 'Cancelled') {
+                package_.state = 'Destroyed'
+                state.executionMachines.delete(execution.ticket)
+              } else {
+                package_.state = 'Dormant'
+                traceExecution(package_, execution.ticket, 'Relinquish', operation.provenance.span)
+              }
+              write(operation.destination, {
+                value: Object.freeze({
+                  _tag: 'AggregateValue',
+                  type: Type.unit,
+                  fields: Object.freeze([]),
+                }),
+                fromCall: true,
+              })
+              break
+            }
             if (driven._tag === 'Blocked') return driven
             if (driven._tag === 'Transfer')
               throw new RangeError('Execution retained a nested transfer outside its root')
@@ -2358,39 +2724,12 @@ function* executeFunction(
                 span: operation.provenance.span,
               }),
             )
-            const callableState = state.callables.get(onComplete.ticket)
-            if (callableState === undefined)
-              return blockedStep({
-                _tag: 'InvalidCallableReuse',
-                function: fn.id,
-                ticket: onComplete.ticket,
-                state: 'Released',
-                span: operation.provenance.span,
-              })
-            if (callableState.state !== 'Available')
-              return blockedStep({
-                _tag: 'InvalidCallableReuse',
-                function: fn.id,
-                ticket: onComplete.ticket,
-                state: callableState.state,
-                span: operation.provenance.span,
-              })
-            callableState.state = 'Consumed'
-            const parameters = new Map<number, Value>([
-              [0, branch],
-              [1, driven.value.payload],
-            ])
-            for (const capture of onComplete.captures)
-              parameters.set(capture.parameterOrdinal, capture.value)
-            const callback = yield* invokeCallableTarget(
-              onComplete.target,
-              onComplete.typeArguments,
-              Object.freeze(
-                [...parameters.entries()]
-                  .sort(([left], [right]) => left - right)
-                  .map(([, value]) => value),
-              ),
+            traceExecution(package_, execution.ticket, 'Complete', operation.provenance.span)
+            const callback = yield* invokeStoredCallable(
+              onComplete,
+              Object.freeze([branch, driven.value.payload]),
               operation.provenance.span,
+              true,
             )
             if (callback._tag !== 'Value') return callback
             write(operation.destination, {
@@ -2403,14 +2742,129 @@ function* executeFunction(
             })
             break
           }
-          case 'ExecutionWake':
-          case 'ExecutionPark':
-            return blockedStep({
-              _tag: 'Trap',
-              function: fn.id,
-              reason: 'External wake parking requires resumable engine realization',
-              span: operation.provenance.span,
+          case 'ExecutionWake': {
+            const wakeValue = read(operation.wake).value
+            if (wakeValue._tag !== 'WakeValue')
+              throw new RangeError('MIR verifier allowed signaling a non-Wake value')
+            const package_ = BootstrapStorage.execution(state.allocations, wakeValue.ticket)
+            if (package_ === undefined || package_.wake?.generation !== wakeValue.generation)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Wake referenced missing or stale execution generation',
+                span: operation.provenance.span,
+              })
+            const consumed = ExecutionTransition.wake(transitionState(package_, wakeValue.ticket))
+            if (consumed._tag !== 'ExecutionTransitionEdge' || consumed.after.wake === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Wake readiness authority was consumed more than once',
+                span: operation.provenance.span,
+              })
+            package_.wake = consumed.after.wake
+            if (consumed.after.wake.phase === 'Latched')
+              traceExecution(package_, wakeValue.ticket, 'Latch', operation.provenance.span)
+            else if (consumed.after.wake.phase === 'Notifying') {
+              const notified = yield* notifyExecution(
+                package_,
+                wakeValue.ticket,
+                operation.provenance,
+                operation.wake.ordinal,
+              )
+              if (notified !== undefined) return notified
+            } else {
+              if (consumed.after.wake.allocation === 'Released') {
+                if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
+                  return blockedStep({
+                    _tag: 'Trap',
+                    function: fn.id,
+                    reason: 'Late cancelled Wake consumed reclaim authority twice',
+                    span: operation.provenance.span,
+                  })
+                trace.push(
+                  Object.freeze({
+                    _tag: 'AllocationRelease',
+                    function: fn.id,
+                    ticket: wakeValue.ticket,
+                    span: operation.provenance.span,
+                  }),
+                )
+                traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
+              }
+            }
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: true,
             })
+            break
+          }
+          case 'ExecutionPark': {
+            const ticket = activation.execution
+            const register = read(operation.register).value
+            if (ticket === undefined || register._tag !== 'CallableValue')
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Execution park escaped its independently owned running root',
+                span: operation.provenance.span,
+              })
+            const package_ = BootstrapStorage.execution(state.allocations, ticket)
+            if (package_?.state !== 'Running' || package_.wake === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Execution park entered an illegal lifecycle state',
+                span: operation.provenance.span,
+              })
+            const begun = ExecutionTransition.register(transitionState(package_, ticket))
+            if (begun._tag !== 'ExecutionTransitionEdge' || begun.after.wake === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Execution reused a Wake generation before safe resume',
+                span: operation.provenance.span,
+              })
+            package_.wake = begun.after.wake
+            traceExecution(package_, ticket, 'Register', operation.provenance.span)
+            const registered = yield* invokeStoredCallable(
+              register,
+              Object.freeze([
+                Object.freeze({
+                  _tag: 'WakeValue',
+                  type: Type.wake,
+                  ticket,
+                  generation: begun.after.wake.generation,
+                }),
+              ]),
+              operation.provenance.span,
+              true,
+            )
+            if (registered._tag !== 'Value') return registered
+            write(operation.guard, { value: registered.value, fromCall: true })
+            const retained = ExecutionTransition.retainGuard(transitionState(package_, ticket))
+            if (retained._tag !== 'ExecutionTransitionEdge' || retained.after.wake === undefined)
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Execution registration guard violated generation authority',
+                span: operation.provenance.span,
+              })
+            package_.wake = retained.after.wake
+            package_.guard = Object.freeze({
+              value: registered.value,
+              cleanup: operation.guardCleanup,
+            })
+            traceExecution(package_, ticket, 'RetainGuard', operation.provenance.span)
+            const parked = yield* parkIndependentRoot(operation.provenance.span)
+            if (parked._tag !== 'Value') return parked
+            write(operation.destination, { value: parked.value, fromCall: true })
+            break
+          }
           case 'SharedClone': {
             const core = referenced(operation.self).value
             if (core._tag !== 'SharedCoreValue')
@@ -4008,6 +4462,7 @@ const makeActivation = (
   depth: number,
   trace: Array<TraceEvent>,
   state: EvaluationState,
+  execution?: number,
 ): ActivationRecord => {
   const frame = state.nextFrame
   state.nextFrame += 1
@@ -4022,6 +4477,7 @@ const makeActivation = (
     instance: fn.instance,
     locals,
     cells: state.cells,
+    ...(execution === undefined ? {} : { execution }),
   }
   trace.push(
     Object.freeze({
@@ -4062,12 +4518,16 @@ const executeMachine = (
   state: EvaluationState,
   arguments_: ReadonlyArray<Value> = Object.freeze([]),
   logicalDepth = 1,
+  execution?: number,
+  retained?: IndependentMachine,
 ): Step => {
-  const stack: Array<ActivationRecord> = [
-    makeActivation(program, entry, arguments_, logicalDepth, trace, state),
-  ]
-  let transfer: TransferContext | undefined
-  let resumed: Step | undefined
+  const machine: IndependentMachine = retained ?? {
+    stack: [makeActivation(program, entry, arguments_, logicalDepth, trace, state, execution)],
+  }
+  const stack = machine.stack
+  let transfer = machine.transfer
+  let resumed = machine.resumed
+  delete machine.resumed
 
   const releaseActivationFrame = (activation: ActivationRecord): void => {
     const frame = activation.coroutineFrame
@@ -4148,6 +4608,7 @@ const executeMachine = (
         origin.depth + 1,
         trace,
         state,
+        origin.execution,
       ),
     )
     trace.push(
@@ -4271,6 +4732,8 @@ const executeMachine = (
       continue
     }
     if (request._tag === 'IndependentCallRequest') {
+      const parked = state.executionMachines.get(request.execution)
+      if (parked !== undefined) state.executionMachines.delete(request.execution)
       const result = executeMachine(
         program,
         request.target,
@@ -4278,9 +4741,32 @@ const executeMachine = (
         state,
         request.arguments,
         request.logicalDepth,
+        request.execution,
+        parked,
       )
       resumed = result
       continue
+    }
+    if (request._tag === 'ExecutionParkRequest') {
+      if (activation.execution === undefined)
+        return blockedStep({
+          _tag: 'Trap',
+          function: activation.function,
+          reason: 'external park escaped an independently owned execution root',
+          span: request.span,
+        })
+      if (transfer === undefined) delete machine.transfer
+      else machine.transfer = transfer
+      machine.resumed = Object.freeze({
+        _tag: 'Value',
+        value: Object.freeze({
+          _tag: 'AggregateValue',
+          type: Type.unit,
+          fields: Object.freeze([]),
+        }),
+      })
+      state.executionMachines.set(activation.execution, machine)
+      return blockedStep({ _tag: 'ExecutionRelinquished', ticket: activation.execution })
     }
     let suspendedDepth = 0
     for (let current = transfer; current !== undefined; current = current.parent)
@@ -4321,6 +4807,7 @@ const executeMachine = (
         request.logicalDepth ?? activation.depth + 1,
         trace,
         state,
+        activation.execution,
       ),
     )
   }
@@ -4429,6 +4916,7 @@ export const evaluate = (
     maxCallDepth,
     maxExecutionStackBytes,
     executionStackBytes: 0,
+    executionMachines: new Map(),
     activeFrames: Object.freeze([]),
     cells: new Map(),
     allocations: new Map(),

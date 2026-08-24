@@ -2,6 +2,7 @@ import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
+import * as ExecutionTransition from './ExecutionTransition.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
@@ -472,6 +473,11 @@ export const lowerProgram = (
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason: discovery.entry.reason }),
       layout,
       staticData,
+      executionTransitions: Object.freeze(
+        layout.executionPackages.plans.map((plan, ordinal) =>
+          ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
+        ),
+      ),
       functions: withLocalSharedDropPlans(layout, functions),
     })
   }
@@ -664,6 +670,11 @@ export const lowerProgram = (
     entry,
     layout,
     staticData,
+    executionTransitions: Object.freeze(
+      layout.executionPackages.plans.map((plan, ordinal) =>
+        ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
+      ),
+    ),
     functions: withLocalSharedDropPlans(layout, functions),
   })
 }

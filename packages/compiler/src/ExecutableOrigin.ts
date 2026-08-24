@@ -2038,11 +2038,7 @@ export const make = (operations: Operations) => {
       }
 
       const isExternalParkSubject = (expression: Hir.Expression): boolean => {
-        if (
-          expression._tag === 'BuiltinCall' &&
-          expression.intrinsic.actor === 'Intrinsic' &&
-          expression.intrinsic.name === 'park'
-        )
+        if (expression._tag === 'BuiltinCall' && expression.operation === 'ExecutionPark')
           return true
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
