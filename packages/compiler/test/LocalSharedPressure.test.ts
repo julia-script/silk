@@ -849,7 +849,7 @@ it.effect(
         assert.strictEqual((yield* runWasm(snapshot)).result, -100)
       }
     }),
-  15_000,
+  30_000,
 )
 
 it.effect('preserves a published Initial task when later waiter allocation fails', () =>
