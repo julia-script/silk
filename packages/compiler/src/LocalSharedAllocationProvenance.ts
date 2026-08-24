@@ -246,8 +246,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
               expression._tag === 'Match'
                 ? expression.arms.flatMap((arm) =>
                     arm.bindings.map(
-                      (binding) =>
-                        [patternBindingKey(binding.id), expression.scrutinee] as const,
+                      (binding) => [patternBindingKey(binding.id), expression.scrutinee] as const,
                     ),
                   )
                 : [],
