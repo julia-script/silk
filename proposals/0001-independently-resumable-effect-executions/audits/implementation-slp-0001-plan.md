@@ -146,3 +146,8 @@ and normalizes intentional negative native exits through the POSIX low byte, con
 repairs 1/3 and 2/3. The pressure suite is 14/14, repository typecheck and the full designated
 native differential corpus pass, and focused Biome is green. OpenSpec remains 12/21 while the
 remaining evidence, report, documentation, and formal gates continue.
+
+Layer 5 resume checkpoint `9940961` completes the connected evidence, findings, and public
+Execution lifecycle documentation. The pressure suite is 14/14, documentation policy/generation
+and doctests are 54/54, and repository typecheck passes. OpenSpec progress is 20/21; only the
+formal hard-gate task remains, with resume repair usage still at 2/3.
