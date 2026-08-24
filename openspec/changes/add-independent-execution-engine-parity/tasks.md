@@ -33,9 +33,9 @@
 - [x] 3.3 Lower local Wake coordination without mandatory atomics or thread-transfer support and
       implement same-thread reactor delivery; verify native and Wasm artifacts contain no worker,
       work-stealing, or compiler-known timer/scheduler policy.
-- [ ] 3.4 Preserve existing nested/LIFO lowering and fatal stack/no-unwind traps; verify nested-only
+- [x] 3.4 Preserve existing nested/LIFO lowering and fatal stack/no-unwind traps; verify nested-only
       corpus behavior is unchanged and illegal drive/exhaustion traps occur before outcome callbacks.
-- [ ] 3.5 Repeat native and direct-Wasm emission for equivalent verified plans and verify runtime
+- [x] 3.5 Repeat native and direct-Wasm emission for equivalent verified plans and verify runtime
       helper selection, resume labels, package-layout references, structural inspection, and final
       artifact bytes are deterministic for each target.
 
@@ -50,6 +50,6 @@
       native at target-specific boundary cases.
 - [x] 4.3 Cover same-thread timer/reactor delivery and explicit target unavailability; verify no
       fallback blocks, transfers Wake across threads, or adds hidden host scheduling.
-- [ ] 4.4 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; record every
+- [x] 4.4 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, and `pnpm check`; record every
       exact result, then run `pnpm release:candidate`; identify pre-existing failures before the
       separation-evidence slice.

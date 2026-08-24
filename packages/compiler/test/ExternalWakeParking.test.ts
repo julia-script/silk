@@ -22,10 +22,12 @@ import {
 const replaceMirOperation = (
   module: Mir.Module,
   target: Mir.Operation,
-  replacement: Mir.Operation,
+  replacement: object,
 ): Mir.Module => {
   const rewrite = (operation: Mir.Operation): Mir.Operation => {
-    if (operation === target) return replacement
+    // This boundary deliberately admits malformed operation shapes so verifier-negative tests can
+    // prove rejection of values TypeScript correctly excludes from the valid MIR union.
+    if (operation === target) return replacement as Mir.Operation
     if (operation._tag === 'ShortCircuit')
       return Object.freeze({
         ...operation,
@@ -499,7 +501,14 @@ it.effect('reuses one execution for repeated generations and releases an eligibl
     if (transitions._tag !== 'Completed') return
     assert.deepEqual(
       transitions.trace
-        .filter((event) => event._tag === 'ExecutionTransition' && event.event === 'Register')
+        .filter(
+          (
+            event,
+          ): event is Extract<
+            (typeof transitions.trace)[number],
+            { readonly _tag: 'ExecutionTransition' }
+          > => event._tag === 'ExecutionTransition' && event.event === 'Register',
+        )
         .map((event) => event.generation),
       [1, 2],
     )

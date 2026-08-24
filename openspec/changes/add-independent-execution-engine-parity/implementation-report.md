@@ -1,6 +1,6 @@
 # Implementation report: add-independent-execution-engine-parity
 
-Status: **in progress**
+Status: **implementation complete; conformance review in progress**
 
 ## Scope
 
@@ -108,6 +108,25 @@ availability evidence, and full gates remain open, so tasks 3.1, 3.2, and 4.1 re
 Tasks 1.2, 2.1-2.3, 3.1-3.3, and 4.1-4.3 are complete. Nested/fatal regression, repeated artifact
 determinism, and repository gates remain open until the formal gate sequence.
 
+## Gate closure
+
+- The complete existing nested/LIFO, evaluator execution-stack exhaustion, native bounded-stack,
+  and direct-Wasm bounded-stack suites pass unchanged. Fatal paths remain traps outside the typed
+  outcome channel and run no newly introduced cleanup or outcome callback.
+- Repeated native artifacts, direct-Wasm golden/byte determinism, fresh-process artifact canaries,
+  canonical MIR encoding, and deterministic runtime label/package selection all pass in the full
+  repository suite. Task 3.5 relies on these existing global determinism canaries rather than adding
+  a redundant per-feature fresh-process test.
+- `pnpm typecheck` first exposed two distinct closure causes. The inspector's exhaustive renderers
+  needed representation-free cases for `ExecutionTransition` and the internal
+  `ExecutionRelinquished` control result. The verifier-negative fixture also needed its deliberately
+  malformed operation cast isolated at the test rewrite boundary and exact trace narrowing. Both
+  were localized and verified; no third root-cause repair was used.
+- After those fixes, the formal sequence passed in order: focused regression, root typecheck, full
+  Biome, the full repository test graph, repository check, and release candidate. All 15 OpenSpec
+  tasks are complete; the required three-lens conformance review remains in progress before final
+  handoff.
+
 ## Verification history
 
 - Initial focused command could not resolve unbuilt workspace package `@silk-effect/llvm/Bitcode`;
@@ -133,8 +152,19 @@ determinism, and repository gates remain open until the formal gate sequence.
   typed-failure additions — **PASS**, 1 harness test, 126.74s; interpreter and native outcomes agree.
 - Closure focused regression — **PASS**, 4 files / 41 tests, including all target-neutral transition,
   Wake-cell, execution-package, evaluator, and direct-Wasm external-parking cases.
+- Formal focused regression — **PASS**, 4 files / 41 tests; designated native differential corpus
+  **PASS**, 1 test / all corpus programs.
+- `pnpm typecheck` — attempt 1 **FAIL**, inspector exhaustive consumers omitted the new trace/control
+  variants; attempt 2 **FAIL**, verifier-negative test typing and trace narrowing; attempt 3
+  **PASS**, 24/24 tasks.
+- `pnpm exec biome check .` — **PASS**, 989 files.
+- `pnpm test` — **PASS**, 28/28 tasks in 12m05.959s; compiler parallel suite 220 files / 2,131 tests,
+  designated native differential 1/1, and every downstream package suite passed.
+- `pnpm check` — **PASS**, 14/14 build tasks, 42/42 cached typecheck/test tasks, and 16/16 script
+  tests.
+- `pnpm release:candidate` — **PASS**, release-candidate validation 1 file / 9 tests.
 
 ## Attempt budget
 
-Hard-gate root-cause fixes used: **0/3**. Fresh-worktree build prerequisites and normal generated
+Hard-gate root-cause fixes used: **2/3**. Fresh-worktree build prerequisites and normal generated
 identity refresh occurred before the formal gate sequence.
