@@ -51,12 +51,14 @@ export const callSynchronous = Effect.fnUntraced(function* (
 export const operationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect'
-    ? Object.freeze(operation.arguments)
-    : Object.freeze([operation.effect, ...operation.arguments])
+  operation._tag === 'ExecutionPark'
+    ? Object.freeze([operation.register])
+    : operation._tag === 'RunEffect'
+      ? Object.freeze(operation.arguments)
+      : Object.freeze([operation.effect, ...operation.arguments])
 
 export interface Context {
   readonly builder: Builder.Builder

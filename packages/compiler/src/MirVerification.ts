@@ -466,7 +466,10 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       owning !== undefined && operationsOf(owning).flatMap(operationTree).includes(region.operation)
     if (!operationPresent)
       invalid('InvalidSuspension', 'suspendable run references no operation in its owner region')
-    const operationOutcome = region.operation.outcomeType.type
+    const operationOutcome =
+      region.operation._tag === 'ExecutionPark'
+        ? region.runner.outcome
+        : region.operation.outcomeType.type
     if (
       !sameEffectContract(operationOutcome, region.runner.outcome) ||
       !sameEffectChannels(region.completion.outcome, operationOutcome)
@@ -475,54 +478,57 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
         'InvalidSuspension',
         `runner, operation, and completion outcome contracts disagree: operation=${SilkType.encode(operationOutcome)} runner=${SilkType.encode(region.runner.outcome)} completion=${SilkType.encode(region.completion.outcome)}`,
       )
-    const operationRunner =
-      region.operation._tag === 'RunEffect' ? region.operation.target : region.operation.runner
-    const operationTypeArguments =
-      region.operation._tag === 'RunEffect'
-        ? region.operation.typeArguments
-        : region.operation.runnerTypeArguments
-    if (
-      region.runner.declaration === undefined ||
-      region.runner.declaration.module !== operationRunner.module ||
-      region.runner.declaration.name !== operationRunner.name ||
-      region.runner.typeArguments.map(SilkType.genericArgumentKey).join(',') !==
-        operationTypeArguments.map(SilkType.genericArgumentKey).join(',')
-    )
-      invalid('InvalidSuspension', 'suspension runner identity disagrees with its exact MIR call')
-    if (
-      (region.completion._tag === 'Propagate' &&
-        (region.operation._tag === 'ReifyEffect' ||
-          region.completion.failureMappings.length !==
-            SilkType.failureMembers(region.operation.outcomeType.type).length ||
-          region.completion.failureMappings.some((mapping, ordinal) => {
-            const source = SilkType.failureMembers(region.operation.outcomeType.type).at(ordinal)
-            const selectedSource = SilkType.failureCarrierMember(
-              region.operation.outcomeType.type,
-              mapping.source,
-              'OneBased',
-            )
-            const target = SilkType.failureCarrierMember(
-              region.completion.outcome,
-              mapping.target,
-              'OneBased',
-            )
-            return (
-              mapping.source !== ordinal + 1 ||
-              source === undefined ||
-              selectedSource === undefined ||
-              target === undefined ||
-              !SilkType.equals(source, selectedSource) ||
-              !SilkType.equals(source, target)
-            )
-          }))) ||
-      (region.completion._tag === 'Reify' &&
-        (region.operation._tag !== 'ReifyEffect' ||
-          !SilkType.equals(region.completion.resultType, region.operation.resultType.type) ||
-          region.completion.resultField.ordinal !== region.operation.resultField.ordinal ||
-          region.completion.successTag !== region.operation.successTag ||
-          region.completion.failureTag !== region.operation.failureTag))
-    )
-      invalid('InvalidSuspension', 'typed completion mapping disagrees with its MIR operation')
+    if (region.operation._tag !== 'ExecutionPark') {
+      const effectOperation = region.operation
+      const operationRunner =
+        effectOperation._tag === 'RunEffect' ? effectOperation.target : effectOperation.runner
+      const operationTypeArguments =
+        effectOperation._tag === 'RunEffect'
+          ? effectOperation.typeArguments
+          : effectOperation.runnerTypeArguments
+      if (
+        region.runner.declaration === undefined ||
+        region.runner.declaration.module !== operationRunner.module ||
+        region.runner.declaration.name !== operationRunner.name ||
+        region.runner.typeArguments.map(SilkType.genericArgumentKey).join(',') !==
+          operationTypeArguments.map(SilkType.genericArgumentKey).join(',')
+      )
+        invalid('InvalidSuspension', 'suspension runner identity disagrees with its exact MIR call')
+      if (
+        (region.completion._tag === 'Propagate' &&
+          (effectOperation._tag === 'ReifyEffect' ||
+            region.completion.failureMappings.length !==
+              SilkType.failureMembers(effectOperation.outcomeType.type).length ||
+            region.completion.failureMappings.some((mapping, ordinal) => {
+              const source = SilkType.failureMembers(effectOperation.outcomeType.type).at(ordinal)
+              const selectedSource = SilkType.failureCarrierMember(
+                effectOperation.outcomeType.type,
+                mapping.source,
+                'OneBased',
+              )
+              const target = SilkType.failureCarrierMember(
+                region.completion.outcome,
+                mapping.target,
+                'OneBased',
+              )
+              return (
+                mapping.source !== ordinal + 1 ||
+                source === undefined ||
+                selectedSource === undefined ||
+                target === undefined ||
+                !SilkType.equals(source, selectedSource) ||
+                !SilkType.equals(source, target)
+              )
+            }))) ||
+        (region.completion._tag === 'Reify' &&
+          (effectOperation._tag !== 'ReifyEffect' ||
+            !SilkType.equals(region.completion.resultType, effectOperation.resultType.type) ||
+            region.completion.resultField.ordinal !== effectOperation.resultField.ordinal ||
+            region.completion.successTag !== effectOperation.successTag ||
+            region.completion.failureTag !== effectOperation.failureTag))
+      )
+        invalid('InvalidSuspension', 'typed completion mapping disagrees with its MIR operation')
+    }
     for (const provider of region.runner.providers) {
       const argumentValid =
         provider.argument === undefined ||
@@ -596,12 +602,28 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
           `continuation slot %${slot.local.ordinal} has incompatible type or access`,
         )
     }
+    const parkGuardOrdinal =
+      region.operation._tag === 'ExecutionPark' ? region.operation.guard.ordinal : undefined
+    const expectedRestores =
+      parkGuardOrdinal === undefined
+        ? expectedOrdinals
+        : slots
+            .filter((slot) => slot.local.ordinal !== parkGuardOrdinal)
+            .map((slot) => slot.ordinal)
     if (
-      descriptor.success.restores.join(',') !== expectedOrdinals.join(',') ||
+      descriptor.success.restores.join(',') !== expectedRestores.join(',') ||
       descriptor.failure.restores.length !== 0
     )
       invalid('InvalidCoroutineFrame', 'resume path plan is incomplete')
-    if (descriptor.success.loanEnds.length !== 0 || descriptor.success.releases.length !== 0)
+    if (
+      descriptor.success.loanEnds.length !== 0 ||
+      (parkGuardOrdinal !== undefined
+        ? descriptor.success.releases.length !==
+            (descriptor.slots.some((slot) => slot.local.ordinal === parkGuardOrdinal) ? 1 : 0) ||
+          (descriptor.success.releases.length === 1 &&
+            descriptor.success.releases.at(0)?.local.ordinal !== parkGuardOrdinal)
+        : descriptor.success.releases.length !== 0)
+    )
       invalid('InvalidCoroutineFrame', 'success or failure cleanup plan diverges')
   }
   return Object.freeze(violations)
@@ -1966,7 +1988,12 @@ const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> =
   const reachable = new Set(
     self.functions
       .filter((fn) =>
-        fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
+        fn.suspension?.regions.some(
+          (region) =>
+            region._tag === 'SuspendEffectRegion' ||
+            (region._tag === 'RunSuspendableEffectRegion' &&
+              region.operation._tag === 'ExecutionPark'),
+        ),
       )
       .map((fn) => instanceText(fn.instance)),
   )

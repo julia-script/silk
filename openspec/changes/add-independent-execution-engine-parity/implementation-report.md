@@ -31,6 +31,30 @@ Tasks 1.1 and 1.3 are complete. Task 1.2 remains open until callback/provenance/
 fixtures are added. Evaluator tasks remain open until the full ordering/cleanup matrix and two-root
 non-LIFO fixture pass.
 
+## Checkpoint 2: canonical external relay and direct-Wasm resume
+
+- Final MIR now retains an `ExecutionPark` relay as an explicit external transfer origin. The prior
+  origin-only finalization discarded the otherwise valid park frame and caused direct Wasm to omit
+  its suspension runtime entirely. Orphan verification now treats only the closed `ExecutionPark`
+  operation as that origin; ordinary suspendable calls still require a reachable transfer source.
+- Coroutine verification accepts the park guard's purpose-bound success release and excludes that
+  consumed guard from restored payload slots. Zero-lane guards correctly require no frame release.
+- Direct Wasm persists the independent continuation head in its exact execution package, restores
+  it only for a later Eligible drive, and relinquishes without running the source continuation.
+  Registration receives the sealed Wake pointer, latch occurs during registration, and notification
+  runs only after `onSuspend` returns.
+- Wasm readiness delivery reconstructs the exact represented callback and hidden environment from
+  package-layout facts and invokes it through the stored endpoint borrow before publishing Eligible.
+  It does not recognize a source actor or declaration spelling.
+- Coroutine frames now use deterministic fixed-size slots with a non-LIFO-safe free list. A later
+  drive of one root cannot rewind or overwrite another parked root's continuation frame.
+- The evaluator/Wasm latched-resume acceptance program agrees on result `42`, one stable logical
+  root, and `Initialize, Drive, Register, Latch, Park, Notify, Eligible, Resume, Drive, Complete`.
+
+Native realization, the complete destruction/cancellation matrix, two-root alternating acceptance,
+and reactor availability remain open; task 3.2 therefore remains unchecked despite the first
+working direct-Wasm external-resume path.
+
 ## Verification history
 
 - Initial focused command could not resolve unbuilt workspace package `@silk-effect/llvm/Bitcode`;
@@ -40,6 +64,8 @@ non-LIFO fixture pass.
 - Focused transition/Wake/package/external-parking sequence — **PASS**, 4 files / 33 tests.
 - Compiler source and test TypeScript checks — **PASS**.
 - Targeted Biome check over all changed files — **PASS** after mechanical formatting.
+- Post-checkpoint focused regression — **PASS**, 4 files / 27 tests, including evaluator-to-Wasm
+  latched external resume and existing synchronous Execution package completion/failure behavior.
 - Generated toolchain identity was refreshed after compiler source changed; direct TypeScript checks
   then passed. The formal hard-gate loop has not started.
 

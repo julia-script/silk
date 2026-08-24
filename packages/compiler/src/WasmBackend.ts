@@ -1060,27 +1060,32 @@ const layoutOf = (
 const suspensionOperationInputs = (
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
 ): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'RunEffect'
-    ? operation.arguments
-    : Object.freeze([operation.effect, ...operation.arguments])
+  operation._tag === 'ExecutionPark'
+    ? Object.freeze([operation.register])
+    : operation._tag === 'RunEffect'
+      ? operation.arguments
+      : Object.freeze([operation.effect, ...operation.arguments])
 
 const matchesSuspensionOperation = (
   candidate: Mir.Operation,
   expected: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
 ): boolean =>
   candidate === expected ||
   ((candidate._tag === 'RunEffect' ||
     candidate._tag === 'RunEffectValue' ||
-    candidate._tag === 'ReifyEffect') &&
+    candidate._tag === 'ReifyEffect' ||
+    candidate._tag === 'ExecutionPark') &&
     candidate._tag === expected._tag &&
     candidate.destination.ordinal === expected.destination.ordinal &&
-    candidate.outcome.ordinal === expected.outcome.ordinal)
+    (candidate._tag === 'ExecutionPark' ||
+      expected._tag === 'ExecutionPark' ||
+      candidate.outcome.ordinal === expected.outcome.ordinal))
 
 interface WasmSuspensionFunctionContext {
   readonly regions: ReadonlyMap<Mir.Operation, Mir.SuspensionRegion>
@@ -2129,7 +2134,7 @@ const makeOperationContext = (
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket',
       })
-      return [
+      const cleanupPackage = [
         ...(callbackOffset === undefined
           ? []
           : releaseAtAddress(cleanup.callback, base, callbackOffset)),
@@ -2138,6 +2143,31 @@ const makeOperationContext = (
           : releaseAtAddress(cleanup.endpoint, base, endpointOffset)),
         ...releaseAtAddress(cleanup.body, base, bodyOffset),
         ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+      ]
+      const controlOffset = executionComponentOffset(package_, 'WakeControl')
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', requireMemory().memory),
+        Instr.i32Const(3),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [
+            Instr.localGet(base),
+            Instr.i32Const(7),
+            Instr.memoryAccess('i32.store', requireMemory().memory),
+            ...(controlOffset === undefined
+              ? []
+              : [
+                  Instr.localGet(base),
+                  Instr.i32Const(8),
+                  Instr.memoryAccess('i32.store', requireMemory().memory, {
+                    offset: controlOffset,
+                  }),
+                ]),
+          ],
+          cleanupPackage,
+        ),
       ]
     }
     const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
@@ -2263,6 +2293,7 @@ const makeOperationContext = (
     reclaimReleaseInstructions,
     reclaimReleaseAtAddress,
     releaseInstructions,
+    releaseExecutionBase,
     releaseAtAddress,
     flushBorrowRoot,
   }
@@ -2803,6 +2834,19 @@ const emitExecutionFromAllocationOperation = (
       offset: plan.target.pointerSize,
     }),
   )
+  for (const role of ['WakeControl', 'InitialContinuationSegment'] as const) {
+    const offset = executionComponentOffset(operation.plan, role)
+    if (offset === undefined) continue
+    const words = role === 'WakeControl' ? 4 : 1
+    for (let ordinal = 0; ordinal < words; ordinal += 1)
+      instructions.push(
+        Instr.localGet(base),
+        Instr.i32Const(0),
+        Instr.memoryAccess('i32.store', requireMemory().memory, {
+          offset: offset + ordinal * plan.target.pointerSize,
+        }),
+      )
+  }
   const storeValue = (
     local: Mir.LocalId,
     type: DeclarationFacts.SemanticType,
@@ -2893,6 +2937,7 @@ const emitExecutionDriveOperation = (
   state: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   const {
+    emitter,
     layout,
     plan,
     resolveIndependent,
@@ -2902,9 +2947,11 @@ const emitExecutionDriveOperation = (
     releaseAtAddress,
     releaseInstructions,
   } = state
+  const runtime = emitter.suspensionRuntime
   const base = scalar(operation.execution)
   const result = slots(operation.result)
   const completeType = layout.types.at(operation.onComplete.ordinal)
+  const suspendType = layout.types.at(operation.onSuspend.ordinal)
   if (completeType?._tag !== 'CallableValue')
     throw new RangeError('Wasm execution drive lost its completion callable identity')
   const completion = emitApplyCallableOperation(
@@ -2917,6 +2964,28 @@ const emitExecutionDriveOperation = (
       arguments: Object.freeze([operation.branch, operation.result]),
       callableType: completeType.type,
       access: completeType.type.mode,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: operation.type,
+      provenance: operation.provenance,
+    }),
+    state,
+  )
+  const suspension = emitApplyCallableOperation(
+    Object.freeze({
+      _tag: 'ApplyCallable' as const,
+      destination: operation.destination,
+      callable: operation.onSuspend,
+      typeArguments: operation.suspensionTypeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([operation.branch, operation.execution]),
+      callableType:
+        suspendType?._tag === 'CallableValue'
+          ? suspendType.type
+          : (() => {
+              throw new RangeError('Wasm execution drive lost its suspension callable identity')
+            })(),
+      access: 'Take' as const,
       evaluation: 'CalleeThenArguments' as const,
       realization: 'Environment' as const,
       type: operation.type,
@@ -2969,9 +3038,13 @@ const emitExecutionDriveOperation = (
       allocationOffset === undefined ||
       packageCleanup === undefined
     )
-      return [Instr.op('unreachable')]
+      throw new RangeError(
+        `Wasm execution drive lost package authority: environment=${environment !== undefined}, body=${bodyOffset !== undefined}, allocation=${allocationOffset !== undefined}, cleanup=${packageCleanup !== undefined}`,
+      )
     const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
     const endpointOffset = executionComponentOffset(package_, 'EndpointState')
+    const controlOffset = executionComponentOffset(package_, 'WakeControl')
+    const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
     const bodyOperands = environment.fields.flatMap((field) =>
       LayoutPlan.effectFieldLanes(plan, field).flatMap((lane) => {
         const offset =
@@ -2994,23 +3067,96 @@ const emitExecutionDriveOperation = (
       type: SilkType.allocation,
       ticket: 'ActiveReclaimTicket',
     })
-    return [
-      Instr.localGet(base),
-      Instr.memoryAccess('i32.load', state.requireMemory().memory),
-      Instr.i32Const(0),
-      Instr.op('i32.ne'),
-      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-      Instr.localGet(base),
-      Instr.i32Const(1),
-      Instr.memoryAccess('i32.store', state.requireMemory().memory),
-      ...bodyOperands,
-      Instr.call(
-        resolveIndependent(
-          Hir.effectRunnerId(environment.instance.declaration, environment.site),
-          environment.instance.typeArguments,
+    if (continuationOffset === undefined)
+      return [
+        Instr.localGet(base),
+        Instr.memoryAccess('i32.load', state.requireMemory().memory),
+        Instr.i32Const(0),
+        Instr.op('i32.ne'),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        Instr.localGet(base),
+        Instr.i32Const(1),
+        Instr.memoryAccess('i32.store', state.requireMemory().memory),
+        ...bodyOperands,
+        Instr.call(
+          resolveIndependent(
+            Hir.effectRunnerId(environment.instance.declaration, environment.site),
+            environment.instance.typeArguments,
+          ),
         ),
-      ),
-      ...[layout.scratch, ...result].reverse().map((slot) => Instr.localSet(slot)),
+        ...[layout.scratch, ...result].reverse().map((slot) => Instr.localSet(slot)),
+        Instr.localGet(layout.scratch),
+        Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+        ...releaseInstructions(operation.suspensionCleanup, operation.onSuspend),
+        Instr.localGet(base),
+        Instr.i32Const(5),
+        Instr.memoryAccess('i32.store', state.requireMemory().memory),
+        ...(callbackOffset === undefined
+          ? []
+          : releaseAtAddress(packageCleanup.callback, base, callbackOffset)),
+        ...(endpointOffset === undefined
+          ? []
+          : releaseAtAddress(packageCleanup.endpoint, base, endpointOffset)),
+        ...releaseAtAddress(allocationCleanup, base, allocationOffset),
+        ...completion,
+      ]
+    if (runtime === undefined)
+      throw new RangeError('Wasm execution drive lost its suspension runtime')
+    const notification =
+      controlOffset === undefined
+        ? [Instr.op('unreachable')]
+        : [
+            Instr.localGet(base),
+            Instr.i32Const(3),
+            Instr.memoryAccess('i32.store', runtime.memory),
+            Instr.localGet(base),
+            Instr.i32Const(4),
+            Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+            ...emitExecutionReadyNotification(package_, base, state),
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', runtime.memory),
+            Instr.i32Const(7),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+              Instr.localGet(base),
+              Instr.i32Const(5),
+              Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+              Instr.localGet(base),
+              Instr.i32Const(4),
+              Instr.memoryAccess('i32.store', runtime.memory),
+            ]),
+          ]
+    const suspended = [
+      ...releaseInstructions(operation.completionCleanup, operation.onComplete),
+      Instr.i32Const(runtime.transferAddress + plan.target.pointerSize),
+      Instr.memoryAccess('i32.load', runtime.memory),
+      Instr.localSet(layout.scratch),
+      Instr.localGet(base),
+      Instr.localGet(layout.scratch),
+      Instr.memoryAccess('i32.store', runtime.memory, { offset: continuationOffset }),
+      Instr.i32Const(runtime.transferAddress + plan.target.pointerSize),
+      Instr.i32Const(0),
+      Instr.memoryAccess('i32.store', runtime.memory),
+      ...suspension,
+      ...(controlOffset === undefined
+        ? [Instr.localGet(base), Instr.i32Const(2), Instr.memoryAccess('i32.store', runtime.memory)]
+        : [
+            Instr.localGet(base),
+            Instr.memoryAccess('i32.load', runtime.memory, { offset: controlOffset }),
+            Instr.i32Const(2),
+            Instr.op('i32.eq'),
+            Instr.ifElse(Instr.emptyBlockType, notification, [
+              Instr.localGet(base),
+              Instr.i32Const(2),
+              Instr.memoryAccess('i32.store', runtime.memory),
+            ]),
+          ]),
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.status),
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.activeExecution),
+    ]
+    const completed = [
       Instr.localGet(layout.scratch),
       Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
       ...releaseInstructions(operation.suspensionCleanup, operation.onSuspend),
@@ -3025,6 +3171,57 @@ const emitExecutionDriveOperation = (
         : releaseAtAddress(packageCleanup.endpoint, base, endpointOffset)),
       ...releaseAtAddress(allocationCleanup, base, allocationOffset),
       ...completion,
+      Instr.i32Const(0),
+      Instr.globalSet(runtime.activeExecution),
+    ]
+    return [
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', state.requireMemory().memory),
+      Instr.localTee(layout.scratch),
+      Instr.i32Const(0),
+      Instr.op('i32.eq'),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(4),
+      Instr.op('i32.eq'),
+      Instr.op('i32.or'),
+      Instr.op('i32.eqz'),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+      Instr.localGet(layout.scratch),
+      Instr.i32Const(4),
+      Instr.op('i32.eq'),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [
+          Instr.localGet(base),
+          Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
+          Instr.globalSet(runtime.externalResumeHead),
+          ...(controlOffset === undefined
+            ? []
+            : [
+                Instr.localGet(base),
+                Instr.i32Const(0),
+                Instr.memoryAccess('i32.store', runtime.memory, { offset: controlOffset }),
+              ]),
+        ],
+        [Instr.i32Const(0), Instr.globalSet(runtime.externalResumeHead)],
+      ),
+      Instr.localGet(base),
+      Instr.globalSet(runtime.activeExecution),
+      Instr.localGet(base),
+      Instr.i32Const(1),
+      Instr.memoryAccess('i32.store', state.requireMemory().memory),
+      ...bodyOperands,
+      Instr.call(
+        resolveIndependent(
+          Hir.effectRunnerId(environment.instance.declaration, environment.site),
+          environment.instance.typeArguments,
+        ),
+      ),
+      ...[layout.scratch, ...result].reverse().map((slot) => Instr.localSet(slot)),
+      Instr.globalGet(runtime.status),
+      Instr.i32Const(2),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, suspended, completed),
     ]
   }
   const select = (ordinal: number): ReadonlyArray<Instr.Instr> =>
@@ -3051,6 +3248,236 @@ const emitExecutionDriveOperation = (
       : [],
   )
   return matching.length === 1 ? branchFor(matching.at(0) ?? -1) : select(0)
+}
+
+/** Invokes the package's fixed readiness endpoint from its exact represented callable identity. */
+const emitExecutionReadyNotification = (
+  package_: ExecutionPackage.Plan,
+  base: number,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { plan, resolve, loadAt, requireMemory } = state
+  const callbackOffset = executionComponentOffset(package_, 'EndpointCallback')
+  const endpointOffset = executionComponentOffset(package_, 'EndpointState')
+  const callback = package_.specialization.callback
+  const representation = SilkType.isRepresented(callback)
+    ? callback.representation.argument
+    : undefined
+  const identity =
+    representation !== undefined &&
+    SilkType.isExactRepresentationArgument(representation) &&
+    SilkType.isCallableIdentityArgument(representation.identity)
+      ? representation.identity
+      : undefined
+  const target =
+    identity === undefined ? undefined : Hir.callableTargetFromIdentity(identity.target)
+  const environment =
+    identity?.environment === undefined
+      ? undefined
+      : LayoutPlan.callableEnvironmentByIdentity(plan, identity.environment)
+  if (
+    callbackOffset === undefined ||
+    endpointOffset === undefined ||
+    identity === undefined ||
+    target?._tag !== 'DeclarationCallableTarget' ||
+    (identity.environment !== undefined && environment === undefined)
+  )
+    throw new RangeError('Wasm readiness notification lost its exact package callback authority')
+  const captureOperands = (environment?.fields ?? [])
+    .flatMap((field) => {
+      const lanes = LayoutPlan.callableFieldLanes(plan, field)
+      if (field.representation !== 'Borrow')
+        return [
+          Object.freeze({
+            parameterOrdinal: field.parameterOrdinal,
+            instructions: lanes.flatMap((lane) => {
+              const offset = LayoutVerify.laneOffset(plan, field.type, lane.path)
+              if (offset === undefined)
+                throw new RangeError('Wasm readiness callback lost a capture lane')
+              return loadAt(base, callbackOffset + field.offset + offset, lane)
+            }),
+          }),
+        ]
+      const shape = LayoutPlan.callingShape(plan, field.type)
+      if (shape === undefined)
+        throw new RangeError('Wasm readiness callback lost a borrowed capture shape')
+      return [
+        Object.freeze({
+          parameterOrdinal: field.parameterOrdinal,
+          instructions: shape.lanes.flatMap((lane) => {
+            const offset = LayoutVerify.laneOffset(plan, field.type, lane.path)
+            if (offset === undefined)
+              throw new RangeError('Wasm readiness callback lost a borrowed capture lane')
+            return [
+              ...loadAt(base, callbackOffset + field.offset),
+              Instr.memoryAccess(laneLoadMnemonic(plan, lane), requireMemory().memory, { offset }),
+            ]
+          }),
+        }),
+      ]
+    })
+    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+    .flatMap((capture) => capture.instructions)
+  return [
+    Instr.localGet(base),
+    ...(endpointOffset === 0 ? [] : [Instr.i32Const(endpointOffset), Instr.op('i32.add')]),
+    ...captureOperands,
+    Instr.call(
+      resolve(
+        target.declaration,
+        environment === undefined
+          ? identity.typeArguments
+          : LayoutPlan.callableTargetArguments(environment),
+      ),
+    ),
+  ]
+}
+
+const emitExecutionWakeOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionWake' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { scalar } = state
+  const memory = state.requireMemory().memory
+  const base = scalar(operation.wake)
+  const branches = (ordinal: number): ReadonlyArray<Instr.Instr> => {
+    const package_ = state.plan.executionPackages.plans.at(ordinal)
+    if (package_ === undefined) return [Instr.op('unreachable')]
+    const control = executionComponentOffset(package_, 'WakeControl')
+    if (control === undefined) return branches(ordinal + 1)
+    const phase = (expected: number): ReadonlyArray<Instr.Instr> => [
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory, { offset: control }),
+      Instr.i32Const(expected),
+      Instr.op('i32.eq'),
+    ]
+    const notify = [
+      Instr.localGet(base),
+      Instr.i32Const(3),
+      Instr.memoryAccess('i32.store', memory),
+      Instr.localGet(base),
+      Instr.i32Const(4),
+      Instr.memoryAccess('i32.store', memory, { offset: control }),
+      ...emitExecutionReadyNotification(package_, base, state),
+      Instr.localGet(base),
+      Instr.memoryAccess('i32.load', memory),
+      Instr.i32Const(7),
+      Instr.op('i32.eq'),
+      Instr.ifElse(Instr.emptyBlockType, state.releaseExecutionBase(base), [
+        Instr.localGet(base),
+        Instr.i32Const(5),
+        Instr.memoryAccess('i32.store', memory, { offset: control }),
+        Instr.localGet(base),
+        Instr.i32Const(4),
+        Instr.memoryAccess('i32.store', memory),
+      ]),
+    ]
+    return [
+      ...phase(1),
+      Instr.ifElse(
+        Instr.emptyBlockType,
+        [
+          Instr.localGet(base),
+          Instr.i32Const(2),
+          Instr.memoryAccess('i32.store', memory, { offset: control }),
+        ],
+        [
+          ...phase(3),
+          Instr.ifElse(Instr.emptyBlockType, notify, [
+            ...phase(6),
+            Instr.ifElse(Instr.emptyBlockType, [], [Instr.op('unreachable')]),
+          ]),
+        ],
+      ),
+    ]
+  }
+  return branches(0)
+}
+
+const emitExecutionParkOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'ExecutionPark' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => {
+  const { emitter, layout, suspension, skipInvocation, releaseInstructions } = state
+  if (skipInvocation) return releaseInstructions(operation.guardCleanup, operation.guard)
+  const runtime = emitter.suspensionRuntime
+  const region = suspension?.regions.get(operation)
+  const registerType = layout.types.at(operation.register.ordinal)
+  const guardType = layout.types.at(operation.guard.ordinal)
+  if (
+    runtime === undefined ||
+    region?._tag !== 'RunSuspendableEffectRegion' ||
+    registerType?._tag !== 'CallableValue' ||
+    guardType === undefined
+  )
+    return [Instr.op('unreachable')]
+  const registration = emitApplyCallableOperation(
+    Object.freeze({
+      _tag: 'ApplyCallable' as const,
+      destination: operation.guard,
+      callable: operation.register,
+      typeArguments: operation.registrationTypeArguments,
+      captures: Object.freeze([]),
+      arguments: Object.freeze([]),
+      callableType: registerType.type,
+      access: 'Take' as const,
+      evaluation: 'CalleeThenArguments' as const,
+      realization: 'Environment' as const,
+      type: guardType,
+      provenance: operation.provenance,
+    }),
+    state,
+    Object.freeze([Object.freeze([Instr.globalGet(runtime.activeExecution)])]),
+  )
+  const matching = state.plan.executionPackages.plans.filter(
+    (package_) => package_.readinessStorage,
+  )
+  if (matching.length !== 1) return [Instr.op('unreachable')]
+  const control = executionComponentOffset(
+    matching.at(0) ??
+      (() => {
+        throw new RangeError('missing execution package')
+      })(),
+    'WakeControl',
+  )
+  if (control === undefined) return [Instr.op('unreachable')]
+  return [
+    Instr.globalGet(runtime.activeExecution),
+    Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+    Instr.i32Const(0),
+    Instr.op('i32.ne'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+    Instr.globalGet(runtime.activeExecution),
+    Instr.i32Const(1),
+    Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+    Instr.globalGet(runtime.activeExecution),
+    Instr.globalGet(runtime.activeExecution),
+    Instr.memoryAccess('i32.load', runtime.memory, {
+      offset: control + state.plan.target.pointerSize,
+    }),
+    Instr.i32Const(1),
+    Instr.op('i32.add'),
+    Instr.memoryAccess('i32.store', runtime.memory, {
+      offset: control + state.plan.target.pointerSize,
+    }),
+    ...registration,
+    Instr.globalGet(runtime.activeExecution),
+    Instr.memoryAccess('i32.load', runtime.memory, { offset: control }),
+    Instr.i32Const(2),
+    Instr.op('i32.ne'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        Instr.globalGet(runtime.activeExecution),
+        Instr.i32Const(3),
+        Instr.memoryAccess('i32.store', runtime.memory, { offset: control }),
+      ],
+      [],
+    ),
+    Instr.i32Const(2),
+    Instr.globalSet(runtime.status),
+    ...(suspension?.relay(region) ?? []),
+  ]
 }
 
 const emitSharedCloneOperation = (
@@ -4902,6 +5329,7 @@ const emitCallOperation = (
 const emitApplyCallableOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }>,
   state: WasmOperationContext,
+  explicitArguments?: ReadonlyArray<ReadonlyArray<Instr.Instr>>,
 ): ReadonlyArray<Instr.Instr> => {
   const { layout, plan, resolve, memory, slots, scalar, reloadReachableRoots } = state
 
@@ -5227,9 +5655,10 @@ const emitApplyCallableOperation = (
   }
   const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
   return [
-    ...operation.arguments.flatMap((argument) =>
-      slots(argument).map((slot) => Instr.localGet(slot)),
-    ),
+    ...(
+      explicitArguments ??
+      operation.arguments.map((argument) => slots(argument).map((slot) => Instr.localGet(slot)))
+    ).flat(),
     ...captureOperands,
     Instr.call(resolve(target.declaration, operation.typeArguments)),
     ...(diverges
@@ -5982,10 +6411,9 @@ const emitOperationWithContext = (
     case 'ExecutionDrive':
       return emitExecutionDriveOperation(operation, context)
     case 'ExecutionWake':
+      return emitExecutionWakeOperation(operation, context)
     case 'ExecutionPark':
-      // Layer 3 reserves and verifies the target-neutral protocol. Layer 4 replaces this
-      // fail-closed edge with the backend's non-LIFO continuation realization.
-      return [Instr.op('unreachable')]
+      return emitExecutionParkOperation(operation, context)
     case 'SharedClone':
       return emitSharedCloneOperation(operation, context)
     case 'SharedWithMut':
@@ -6114,6 +6542,13 @@ interface WasmSuspensionRuntime {
   readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
   readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
   readonly frameStackPointer: Global.Global
+  /** Non-LIFO-safe free list for fixed-size continuation frame slots. */
+  readonly freeFrameHead: Global.Global
+  readonly frameSlotSize: number
+  /** Package selected by the currently running independent root; zero outside ExecutionDrive. */
+  readonly activeExecution: Global.Global
+  /** Retained frame head restored by the next owner-selected drive. */
+  readonly externalResumeHead: Global.Global
   readonly frameMemory: Memory.Memory
   readonly memory: Memory.Memory
 }
@@ -6285,7 +6720,7 @@ const emitBody = (
     if (suspensionRuntime === undefined || coroutineFrame === undefined || scratch === undefined)
       return []
     const frameAlignment = Math.max(16, coroutineFrame.alignment)
-    const frameSize = alignUp(Math.max(1, coroutineFrame.size), frameAlignment)
+    const frameSize = suspensionRuntime.frameSlotSize
     const reportStorageExhaustion = [
       Instr.i32Const(statusAddress),
       Instr.i32Const(statusStackOverflow),
@@ -6298,43 +6733,55 @@ const emitBody = (
         Instr.emptyBlockType,
         [],
         [
-          Instr.globalGet(suspensionRuntime.frameStackPointer),
-          Instr.i32Const(frameAlignment - 1),
-          Instr.op('i32.add'),
-          Instr.i32Const(-frameAlignment),
-          Instr.op('i32.and'),
+          Instr.globalGet(suspensionRuntime.freeFrameHead),
           Instr.localTee(scratch.frame),
-          Instr.i32Const(frameSize),
-          Instr.op('i32.add'),
-          Instr.localTee(scratch.append),
-          Instr.localGet(scratch.frame),
-          Instr.op('i32.lt_u'),
-          Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
-          Instr.localGet(scratch.append),
-          Instr.i32Const(1),
-          Instr.op('i32.sub'),
-          Instr.i32Const(16),
-          Instr.op('i32.shr_u'),
-          Instr.i32Const(1),
-          Instr.op('i32.add'),
-          Instr.localTee(scratch.next),
-          Instr.memorySize(suspensionRuntime.frameMemory),
-          Instr.op('i32.gt_u'),
           Instr.ifElse(
             Instr.emptyBlockType,
             [
-              Instr.localGet(scratch.next),
-              Instr.memorySize(suspensionRuntime.frameMemory),
-              Instr.op('i32.sub'),
-              Instr.memoryGrow(suspensionRuntime.frameMemory),
-              Instr.i32Const(-1),
-              Instr.op('i32.eq'),
-              Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+              Instr.localGet(scratch.frame),
+              Instr.memoryAccess('i32.load', suspensionRuntime.frameMemory),
+              Instr.globalSet(suspensionRuntime.freeFrameHead),
             ],
-            [],
+            [
+              Instr.globalGet(suspensionRuntime.frameStackPointer),
+              Instr.i32Const(frameAlignment - 1),
+              Instr.op('i32.add'),
+              Instr.i32Const(-frameAlignment),
+              Instr.op('i32.and'),
+              Instr.localTee(scratch.frame),
+              Instr.i32Const(frameSize),
+              Instr.op('i32.add'),
+              Instr.localTee(scratch.append),
+              Instr.localGet(scratch.frame),
+              Instr.op('i32.lt_u'),
+              Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+              Instr.localGet(scratch.append),
+              Instr.i32Const(1),
+              Instr.op('i32.sub'),
+              Instr.i32Const(16),
+              Instr.op('i32.shr_u'),
+              Instr.i32Const(1),
+              Instr.op('i32.add'),
+              Instr.localTee(scratch.next),
+              Instr.memorySize(suspensionRuntime.frameMemory),
+              Instr.op('i32.gt_u'),
+              Instr.ifElse(
+                Instr.emptyBlockType,
+                [
+                  Instr.localGet(scratch.next),
+                  Instr.memorySize(suspensionRuntime.frameMemory),
+                  Instr.op('i32.sub'),
+                  Instr.memoryGrow(suspensionRuntime.frameMemory),
+                  Instr.i32Const(-1),
+                  Instr.op('i32.eq'),
+                  Instr.ifElse(Instr.emptyBlockType, reportStorageExhaustion, []),
+                ],
+                [],
+              ),
+              Instr.localGet(scratch.append),
+              Instr.globalSet(suspensionRuntime.frameStackPointer),
+            ],
           ),
-          Instr.localGet(scratch.append),
-          Instr.globalSet(suspensionRuntime.frameStackPointer),
         ],
       ),
     ]
@@ -6347,7 +6794,13 @@ const emitBody = (
           Instr.localGet(scratch.frame),
           Instr.ifElse(
             Instr.emptyBlockType,
-            [Instr.localGet(scratch.frame), Instr.globalSet(suspensionRuntime.frameStackPointer)],
+            [
+              Instr.localGet(scratch.frame),
+              Instr.globalGet(suspensionRuntime.freeFrameHead),
+              Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
+              Instr.localGet(scratch.frame),
+              Instr.globalSet(suspensionRuntime.freeFrameHead),
+            ],
             [],
           ),
         ]
@@ -6639,8 +7092,14 @@ const emitBody = (
           ]
         })
       })
-      const outcomeLanes = layout.lanes.at(region.operation.outcome.ordinal) ?? []
-      const outcomeSlots = layout.slots.at(region.operation.outcome.ordinal) ?? []
+      const outcomeLanes =
+        region.operation._tag === 'ExecutionPark'
+          ? []
+          : (layout.lanes.at(region.operation.outcome.ordinal) ?? [])
+      const outcomeSlots =
+        region.operation._tag === 'ExecutionPark'
+          ? []
+          : (layout.slots.at(region.operation.outcome.ordinal) ?? [])
       const packedOutcome = packWasmLanes(
         outcomeLanes,
         plan,
@@ -6822,6 +7281,14 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   const resumeIds = suspensionRecords.resumeIds
   const coroutineFrames = suspensionRecords.frames
   const coroutineFrameStates = suspensionRecords.layouts
+  const coroutineFrameSlotAlignment = Math.max(
+    16,
+    ...[...coroutineFrames.values()].map((frame) => frame.alignment),
+  )
+  const coroutineFrameSlotSize = alignUp(
+    Math.max(1, ...[...coroutineFrames.values()].map((frame) => frame.size)),
+    coroutineFrameSlotAlignment,
+  )
   const transferHeaderSize = program.layout.target.pointerSize * 3
   const originArgumentSize = program.functions.reduce((maximum, fn) => {
     const size = (fn.suspension?.regions ?? []).reduce((innerMaximum, region) => {
@@ -7003,6 +7470,33 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         debug ? { name: 'silk_coroutine_frame_stack_pointer' } : {},
       )
     : undefined
+  const suspendFreeFrameHead = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_coroutine_frame_free_head' } : {},
+      )
+    : undefined
+  const activeExecution = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_active_execution' } : {},
+      )
+    : undefined
+  const externalResumeHead = suspensionEnabled
+    ? yield* Global.make(
+        builder,
+        i32,
+        true,
+        [Instr.i32Const(0)],
+        debug ? { name: 'silk_external_resume_head' } : {},
+      )
+    : undefined
   const heapAllocate =
     needsHeap && privateMemory !== undefined && heapPointer !== undefined
       ? yield* FuncActor.declare(
@@ -7132,6 +7626,9 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     suspendResumePath === undefined ||
     suspendResumeFrame === undefined ||
     suspendFrameStackPointer === undefined ||
+    suspendFreeFrameHead === undefined ||
+    activeExecution === undefined ||
+    externalResumeHead === undefined ||
     coroutineFrameMemory === undefined ||
     transferAddress === undefined ||
     privateMemory === undefined
@@ -7148,6 +7645,10 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           frames: coroutineFrames,
           layouts: coroutineFrameStates,
           frameStackPointer: suspendFrameStackPointer,
+          freeFrameHead: suspendFreeFrameHead,
+          frameSlotSize: coroutineFrameSlotSize,
+          activeExecution,
+          externalResumeHead,
           frameMemory: coroutineFrameMemory,
           memory: privateMemory,
         })
@@ -7222,9 +7723,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
               resolveIndependent,
               memory,
               executionPackageCleanups,
-              ...(entry.suspendable && suspensionRuntime !== undefined
-                ? { suspensionRuntime }
-                : {}),
+              ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
             }),
           )
     // Body validation happens here, inside the wasm builder, and its failure names only the
@@ -7401,6 +7900,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     suspendStatus !== undefined &&
     suspendResumeFrame !== undefined &&
     suspendFrameStackPointer !== undefined &&
+    externalResumeHead !== undefined &&
     coroutineFrameMemory !== undefined
   ) {
     for (const root of declared) {
@@ -7456,23 +7956,49 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           debug ? { type: i32, name: 'dispatch' } : { type: i32 },
         ],
         body: [
-          Instr.i32Const(transferAddress + program.layout.target.pointerSize),
-          Instr.i32Const(0),
-          Instr.memoryAccess('i32.store', privateMemory),
           Instr.i32Const(0),
           Instr.globalSet(suspendStatus),
-          Instr.i32Const(16),
-          Instr.globalSet(suspendFrameStackPointer),
-          ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
-          Instr.call(root.handle),
-          ...resultLanes
-            .map((_lane, laneOrdinal) => resultBase + laneOrdinal)
-            .reverse()
-            .map((local) => Instr.localSet(local)),
-          ...storeMachineResults,
-          Instr.globalGet(suspendStatus),
-          Instr.localSet(statusLocal),
+          Instr.globalGet(externalResumeHead),
+          Instr.localTee(headLocal),
+          Instr.op('i32.eqz'),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize),
+              Instr.i32Const(0),
+              Instr.memoryAccess('i32.store', privateMemory),
+              ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
+              Instr.call(root.handle),
+              ...resultLanes
+                .map((_lane, laneOrdinal) => resultBase + laneOrdinal)
+                .reverse()
+                .map((local) => Instr.localSet(local)),
+              ...storeMachineResults,
+              Instr.globalGet(suspendStatus),
+              Instr.localSet(statusLocal),
+            ],
+            [
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize),
+              Instr.localGet(headLocal),
+              Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(0),
+              Instr.globalSet(externalResumeHead),
+              Instr.i32Const(0),
+              Instr.localSet(statusLocal),
+            ],
+          ),
           Instr.loop(Instr.emptyBlockType, [
+            Instr.localGet(statusLocal),
+            Instr.i32Const(2),
+            Instr.op('i32.eq'),
+            Instr.ifElse(
+              Instr.emptyBlockType,
+              [
+                ...resultLanes.map((lane) => zeroConst(laneValueType(program.layout, lane))),
+                Instr.op('return'),
+              ],
+              [],
+            ),
             Instr.localGet(statusLocal),
             Instr.ifElse(
               Instr.emptyBlockType,

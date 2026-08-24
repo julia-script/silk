@@ -212,6 +212,9 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       ],
     )
     assert.lengthOf(new Set(transitions.map((event) => event.root)), 1)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
   }),
 )
 

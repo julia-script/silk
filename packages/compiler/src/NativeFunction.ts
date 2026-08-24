@@ -111,7 +111,9 @@ export const discoverRoots = (
       region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
         ? [
             region.operation.destination.ordinal,
-            region.operation.outcome.ordinal,
+            ...(region.operation._tag === 'ExecutionPark'
+              ? []
+              : [region.operation.outcome.ordinal]),
             ...region.relay.state.slots.map((slot) => slot.local.ordinal),
           ]
         : [],
