@@ -2320,10 +2320,7 @@ const makeOperationContext = (
       const continuationOffset = executionComponentOffset(package_, 'InitialContinuationSegment')
       const runtime = emitter.suspensionRuntime
       const frame = cleanupScratch.frame
-      const cleanupCurrentFrame = (
-        kind: 'values' | 'guards',
-        ordinal: number,
-      ): ReadonlyArray<Instr.Instr> => {
+      const cleanupCurrentFrame = (ordinal: number): ReadonlyArray<Instr.Instr> => {
         if (runtime === undefined) return [Instr.op('unreachable')]
         const entries = [...runtime.frameCleanups.entries()].sort(([left], [right]) => left - right)
         const selected = entries.at(ordinal)
@@ -2338,15 +2335,12 @@ const makeOperationContext = (
           Instr.op('i32.eq'),
           Instr.ifElse(
             Instr.emptyBlockType,
-            [Instr.localGet(frame), Instr.call(cleanup[kind])],
-            cleanupCurrentFrame(kind, ordinal + 1),
+            [Instr.localGet(frame), Instr.call(cleanup)],
+            cleanupCurrentFrame(ordinal + 1),
           ),
         ]
       }
-      const cleanupFramePass = (
-        kind: 'values' | 'guards',
-        release: boolean,
-      ): ReadonlyArray<Instr.Instr> => {
+      const cleanupFramePass = (): ReadonlyArray<Instr.Instr> => {
         if (runtime === undefined || continuationOffset === undefined)
           return [Instr.op('unreachable')]
         return [
@@ -2355,31 +2349,23 @@ const makeOperationContext = (
               Instr.localGet(frame),
               Instr.op('i32.eqz'),
               Instr.brIf(1),
-              ...cleanupCurrentFrame(kind, 0),
-              ...(release
-                ? [
-                    Instr.localGet(base),
-                    Instr.localGet(frame),
-                    Instr.memoryAccess('i32.load', runtime.frameMemory),
-                    Instr.memoryAccess('i32.store', runtime.memory, {
-                      offset: continuationOffset,
-                    }),
-                    Instr.localGet(frame),
-                    Instr.globalGet(runtime.freeFrameHead),
-                    Instr.memoryAccess('i32.store', runtime.frameMemory),
-                    Instr.localGet(frame),
-                    Instr.globalSet(runtime.freeFrameHead),
-                    Instr.localGet(base),
-                    Instr.memoryAccess('i32.load', runtime.memory, {
-                      offset: continuationOffset,
-                    }),
-                    Instr.localSet(frame),
-                  ]
-                : [
-                    Instr.localGet(frame),
-                    Instr.memoryAccess('i32.load', runtime.frameMemory),
-                    Instr.localSet(frame),
-                  ]),
+              ...cleanupCurrentFrame(0),
+              Instr.localGet(base),
+              Instr.localGet(frame),
+              Instr.memoryAccess('i32.load', runtime.frameMemory),
+              Instr.memoryAccess('i32.store', runtime.memory, {
+                offset: continuationOffset,
+              }),
+              Instr.localGet(frame),
+              Instr.globalGet(runtime.freeFrameHead),
+              Instr.memoryAccess('i32.store', runtime.frameMemory),
+              Instr.localGet(frame),
+              Instr.globalSet(runtime.freeFrameHead),
+              Instr.localGet(base),
+              Instr.memoryAccess('i32.load', runtime.memory, {
+                offset: continuationOffset,
+              }),
+              Instr.localSet(frame),
               Instr.br(0),
             ]),
           ]),
@@ -2392,11 +2378,7 @@ const makeOperationContext = (
               Instr.localGet(base),
               Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
               Instr.localSet(frame),
-              ...cleanupFramePass('values', false),
-              Instr.localGet(base),
-              Instr.memoryAccess('i32.load', runtime.memory, { offset: continuationOffset }),
-              Instr.localSet(frame),
-              ...cleanupFramePass('guards', true),
+              ...cleanupFramePass(),
             ]
       const cleanupInitial = [
         ...cleanupEndpoint,
@@ -6934,11 +6916,8 @@ interface WasmSuspensionRuntime {
   readonly resumes: ReadonlyMap<string, number>
   readonly frames: ReadonlyMap<string, Mir.CoroutineFrameTargetLayout>
   readonly layouts: ReadonlyMap<string, Mir.CoroutineFrameTargetStateLayout>
-  /** Typed value and park-guard cleanup thunks selected by each retained frame's resume id. */
-  readonly frameCleanups: ReadonlyMap<
-    number,
-    { readonly values: FuncActor.Func; readonly guards: FuncActor.Func }
-  >
+  /** Canonically ordered cleanup thunk selected by each retained frame's resume id. */
+  readonly frameCleanups: ReadonlyMap<number, FuncActor.Func>
   readonly frameStackPointer: Global.Global
   /** Non-LIFO-safe free list for fixed-size continuation frame slots. */
   readonly freeFrameHead: Global.Global
@@ -7607,6 +7586,7 @@ const emitBody = (
 
 interface EmittedProgram {
   readonly symbols: ReadonlyArray<Backend.SymbolEntry>
+  readonly runtimeFeatures: ReadonlyArray<Backend.RuntimeFeature>
   readonly ir: string
   readonly bitcode: Uint8Array
 }
@@ -7657,6 +7637,12 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
   }
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
+  const operations = program.functions.flatMap(MirVerification.operations)
+  const hasExecutionDrive = operations.some((operation) => operation._tag === 'ExecutionDrive')
+  const hasExternalPark = operations.some((operation) => operation._tag === 'ExecutionPark')
+  const hasWakeCell = operations.some(
+    (operation) => operation._tag === 'ExecutionFromAllocation' && operation.plan.readinessStorage,
+  )
   const lanesFor = (type: Mir.Type): ReadonlyArray<LayoutPlan.CallingLane> => {
     if (type._tag === 'EffectBorrow')
       return Object.freeze([
@@ -7991,31 +7977,17 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ),
       )
     }
-  const frameCleanupThunks = new Map<
-    number,
-    { readonly values: FuncActor.Func; readonly guards: FuncActor.Func }
-  >()
+  const frameCleanupThunks = new Map<number, FuncActor.Func>()
   if (suspensionEnabled && executionPackageCleanups.size > 0)
     for (const [ordinal, record] of resumeRecords.entries()) {
       const id = ordinal + 1
       frameCleanupThunks.set(
         id,
-        Object.freeze({
-          values: yield* FuncActor.declare(
-            builder,
-            yield* WasmType.func(builder, [i32], []),
-            debug
-              ? { name: `silk_suspend_cleanup_values_${id}_${record.region.point.ordinal}` }
-              : {},
-          ),
-          guards: yield* FuncActor.declare(
-            builder,
-            yield* WasmType.func(builder, [i32], []),
-            debug
-              ? { name: `silk_suspend_cleanup_guards_${id}_${record.region.point.ordinal}` }
-              : {},
-          ),
-        }),
+        yield* FuncActor.declare(
+          builder,
+          yield* WasmType.func(builder, [i32], []),
+          debug ? { name: `silk_suspend_cleanup_${id}_${record.region.point.ordinal}` } : {},
+        ),
       )
     }
   const machine = declared.find((entry) =>
@@ -8115,10 +8087,10 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
 
   for (const [ordinal, record] of frameCleanupThunks.size === 0 ? [] : resumeRecords.entries()) {
     const id = ordinal + 1
-    const handles = frameCleanupThunks.get(id)
+    const handle = frameCleanupThunks.get(id)
     const frameLayout = coroutineFrameStates.get(Backend.suspensionPointKey(record.region.point))
     if (
-      handles === undefined ||
+      handle === undefined ||
       frameLayout === undefined ||
       privateMemory === undefined ||
       coroutineFrameMemory === undefined ||
@@ -8127,9 +8099,8 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     )
       throw new RangeError('Wasm frame cleanup thunk lost its typed frame plan')
     const { suspension: _suspension, ...cleanupFunctionBase } = record.fn
-    const fields = CoroutineFrame.cleanupPayload(record.fn, frameLayout)
-    const cleanupFields = Object.freeze([...fields.values, ...fields.guards])
-    const affineLocals = new Set(cleanupFields.map((field) => field.local.ordinal))
+    const fields = CoroutineFrame.cleanupReleases(record.fn, frameLayout)
+    const affineLocals = new Set(fields.map((field) => field.local.ordinal))
     const provenance = record.region.provenance
     const cleanupFunction: Mir.MirFunction = Object.freeze({
       ...cleanupFunctionBase,
@@ -8146,7 +8117,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           _tag: 'CleanupRegion' as const,
           id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
           releases: Object.freeze(
-            cleanupFields.map((field) =>
+            fields.map((field) =>
               Object.freeze({
                 _tag: 'Drop' as const,
                 local: Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 }),
@@ -8190,40 +8161,35 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
       }),
     )
-    const body = (selected: ReadonlyArray<(typeof fields.values)[number]>) =>
-      selected.flatMap((field) => {
-        const local = Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 })
-        const lanes = cleanupLayout.lanes.at(local.ordinal) ?? []
-        const slots = cleanupLayout.slots.at(local.ordinal) ?? []
-        const packed = packWasmLanes(lanes, program.layout, field.offset)
-        if (packed.lanes.length !== slots.length)
-          throw new RangeError('Wasm frame cleanup lost an affine payload lane')
-        return [
-          ...packed.lanes.flatMap((lane, laneOrdinal) => {
-            const target = slots.at(laneOrdinal)
-            const callingLane = lanes.at(laneOrdinal)
-            if (target === undefined || callingLane === undefined)
-              throw new RangeError('Wasm frame cleanup lost its typed local lane')
-            return [
-              Instr.localGet(0),
-              Instr.memoryAccess(
-                laneLoadMnemonic(program.layout, callingLane),
-                coroutineFrameMemory,
-                { offset: lane.offset },
-              ),
-              Instr.localSet(target),
-            ]
-          }),
-          ...operation.releaseInstructions(field.access.cleanup, local),
-        ]
-      })
-    yield* FuncActor.define(builder, handles.values, {
-      locals: cleanupLayout.declared,
-      body: body(fields.values),
+    const body = fields.flatMap((field) => {
+      const local = Object.freeze({ _tag: 'Local' as const, ordinal: field.local.ordinal + 1 })
+      const lanes = cleanupLayout.lanes.at(local.ordinal) ?? []
+      const slots = cleanupLayout.slots.at(local.ordinal) ?? []
+      const packed = packWasmLanes(lanes, program.layout, field.offset)
+      if (packed.lanes.length !== slots.length)
+        throw new RangeError('Wasm frame cleanup lost an affine payload lane')
+      return [
+        ...packed.lanes.flatMap((lane, laneOrdinal) => {
+          const target = slots.at(laneOrdinal)
+          const callingLane = lanes.at(laneOrdinal)
+          if (target === undefined || callingLane === undefined)
+            throw new RangeError('Wasm frame cleanup lost its typed local lane')
+          return [
+            Instr.localGet(0),
+            Instr.memoryAccess(
+              laneLoadMnemonic(program.layout, callingLane),
+              coroutineFrameMemory,
+              { offset: lane.offset },
+            ),
+            Instr.localSet(target),
+          ]
+        }),
+        ...operation.releaseInstructions(field.access.cleanup, local),
+      ]
     })
-    yield* FuncActor.define(builder, handles.guards, {
+    yield* FuncActor.define(builder, handle, {
       locals: cleanupLayout.declared,
-      body: body(fields.guards),
+      body,
     })
   }
 
@@ -8623,6 +8589,13 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         symbol: symbolFor(entry.fn, Mir.machineEntry(program)),
       }),
     ),
+    runtimeFeatures: Object.freeze([
+      ...(suspensionEnabled ? (['NestedSuspensionRuntime'] as const) : []),
+      ...(executionPackageCleanups.size > 0 ? (['ExecutionPackage'] as const) : []),
+      ...(hasExecutionDrive ? (['ExecutionDrive'] as const) : []),
+      ...(hasExternalPark && frameCleanupThunks.size > 0 ? (['DormantContinuation'] as const) : []),
+      ...(hasWakeCell ? (['ExternalWakeCell', 'ReadinessNotification'] as const) : []),
+    ]),
     ir: yield* WatText.render(builder),
     bitcode,
   }
@@ -8783,6 +8756,7 @@ export const WasmBackend: Backend.Backend<Backend.WebAssemblyModuleArtifact> = O
       symbols: Object.freeze(output.symbols),
       termination: Backend.terminationOf(program),
       nativeRuntimeSymbols: Object.freeze([]),
+      runtimeFeatures: output.runtimeFeatures,
       control: controlProvenance(program),
       bytes: output.bitcode,
       wat: output.ir,

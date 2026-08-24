@@ -31,26 +31,27 @@ fn take(self: &mut State) -> Empty | Armed {
 fn mark(self: &mut State) -> () { self.ready = self.ready + 1 return () }
 fn markBody(self: &mut State) -> () {
   self.bodyDrops = self.bodyDrops + 1
-  self.cleanupOrder = self.cleanupOrder * 10 + 1
+  self.cleanupOrder = self.cleanupOrder * 4
   return ()
 }
 fn markFrame(self: &mut State) -> () {
   self.frameDrops = self.frameDrops + 1
-  self.cleanupOrder = self.cleanupOrder * 10 + 2
+  self.cleanupOrder = self.cleanupOrder * 4 + 1
   return ()
 }
 fn markGuard(self: &mut State) -> () {
   self.guardDrops = self.guardDrops + 1
-  self.cleanupOrder = self.cleanupOrder * 10 + 3
+  self.cleanupOrder = self.cleanupOrder * 4 + 2
   return ()
 }
 fn markEndpoint(self: &mut State) -> () {
   self.endpointDrops = self.endpointDrops + 1
-  self.cleanupOrder = self.cleanupOrder * 10 + 4
+  self.cleanupOrder = self.cleanupOrder * 4 + 3
   return ()
 }
 fn read(self: &State) -> i32 {
-  if self.cleanupOrder != 1234 { return -self.cleanupOrder }
+  // The four two-bit event codes make every permutation distinct in a native exit status.
+  if self.cleanupOrder != 147 { return self.cleanupOrder }
   return self.ready * 10000 + self.bodyDrops * 1000 + self.guardDrops * 100 + self.frameDrops * 10 + self.endpointDrops
 }
 

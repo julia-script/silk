@@ -176,21 +176,14 @@ const runtimeInventory = (snapshot: Analysis.Snapshot) => {
 }
 
 const emittedRuntimeInventory = (artifact: Backend.Artifact) => {
-  const text = artifact._tag === 'WebAssemblyModuleArtifact' ? artifact.wat : artifact.ir
-  const declarations = artifact.symbols.map(
-    (entry) => `${entry.declaration.module}.${entry.declaration.name}`,
-  )
-  const hasDeclaration = (module: string, name: string): boolean =>
-    declarations.includes(`${module}.${name}`)
-  const externalParking = hasDeclaration('silk/execution', 'park')
-  const nestedRunner = /suspend_step|silk_coroutine_frame_push_v1/.test(text)
+  const features = new Set(artifact.runtimeFeatures)
   return Object.freeze({
-    nestedRunner,
-    executionPackage: hasDeclaration('silk/execution', 'make'),
-    drive: hasDeclaration('silk/execution', 'drive'),
-    dormantContinuation: externalParking && nestedRunner,
-    wake: externalParking,
-    notification: externalParking,
+    nestedRunner: features.has('NestedSuspensionRuntime'),
+    executionPackage: features.has('ExecutionPackage'),
+    drive: features.has('ExecutionDrive'),
+    dormantContinuation: features.has('DormantContinuation'),
+    wake: features.has('ExternalWakeCell'),
+    notification: features.has('ReadinessNotification'),
     atomicThread: [
       ...artifact.nativeRuntimeSymbols,
       ...(artifact._tag === 'WebAssemblyModuleArtifact'
@@ -693,7 +686,7 @@ it.effect('suppresses a retained Wake after post-suspension Dormant destruction'
           ? [event.target.name]
           : [],
       ),
-      ['markBody', 'markFrame', 'markGuard', 'markEndpoint'],
+      ['markGuard', 'markFrame', 'markBody', 'markEndpoint'],
     )
     assert.strictEqual(evaluated.result.value, 1111n)
     assert.deepEqual(
@@ -772,8 +765,8 @@ it.effect('drives a fallibly prepared same-thread timer and cancels before readi
         'Cancel',
         'Cancel',
         'Cleanup',
-        'Cleanup',
         'Release',
+        'Cleanup',
         'Release',
       ],
     )
@@ -1257,13 +1250,40 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
   )
   const privilegedPhases = [
     '../src/NameResolution.ts',
+    '../src/DeclarationResolution.ts',
+    '../src/CallResolution.ts',
     '../src/Type.ts',
     '../src/ExecutableOrigin.ts',
+    '../src/ExecutableProperty.ts',
+    '../src/IntrinsicAvailability.ts',
+    '../src/Hir.ts',
+    '../src/HirLowering.ts',
+    '../src/EffectLowering.ts',
+    '../src/FunctionLowering.ts',
+    '../src/Mir.ts',
+    '../src/Lower.ts',
     '../src/LowerExpression.ts',
     '../src/LowerBuiltin.ts',
+    '../src/LowerStatements.ts',
+    '../src/MirNormalization.ts',
     '../src/MirVerification.ts',
+    '../src/SuspensionOwnership.ts',
+    '../src/ExecutionPackage.ts',
+    '../src/BootstrapEvaluation.ts',
+    '../src/NativeProgram.ts',
+    '../src/NativeOperation.ts',
+    '../src/NativeExecutionOperation.ts',
+    '../src/NativeSuspension.ts',
+    '../src/WasmBackend.ts',
+    '../src/WasmEmitContext.ts',
+    '../src/WasmSuspension.ts',
     '../src/Intrinsic.ts',
   ] as const
+  const policyActor =
+    'Scheduler|Fiber|Deferred|Timer|Coroutine|ReadyInbox|TaskStore|Reactor|WorkRegistry|SignalQueue|EventLoop|ChannelState'
+  const sourceNameBranch = new RegExp(
+    String.raw`(?:===|!==|\bcase\s+|\.(?:get|has|includes)\()\s*['"](?:${policyActor})['"]`,
+  )
   for (const phase of privilegedPhases) {
     const source = readFileSync(new URL(phase, import.meta.url), 'utf8')
     assert.notMatch(
@@ -1271,5 +1291,6 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
       /silk\/core\.(?:OutOfMemoryError|Allocator|SystemAllocator)|\b(?:outOfMemoryError|systemAllocator)\b/,
       phase,
     )
+    assert.notMatch(source, sourceNameBranch, phase)
   }
 })

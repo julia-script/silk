@@ -39,6 +39,7 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
       symbols: Object.freeze(output.symbols),
       termination: terminationOf(program),
       nativeRuntimeSymbols: output.nativeRuntimeSymbols,
+      runtimeFeatures: output.runtimeFeatures,
       control: llvmControl(program),
       bitcode: output.bitcode,
       ir: output.ir,

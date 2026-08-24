@@ -716,6 +716,16 @@ function* executeFunction(
         traceExecution(package_, owner.ticket, 'Cancel', provenance.span)
         const guard = package_.guard
         const bodyTransferred = state.executionMachines.has(owner.ticket)
+        if (guard !== undefined) {
+          const released = yield* releaseThroughPlan(
+            guard.cleanup,
+            guard.value,
+            provenance,
+            localOrdinal,
+          )
+          if (released !== undefined) return released
+          delete package_.guard
+        }
         const machineCleanup = yield* cleanupExecutionMachine(
           owner.ticket,
           provenance,
@@ -727,16 +737,6 @@ function* executeFunction(
           ]),
         )
         if (machineCleanup !== undefined) return machineCleanup
-        if (guard !== undefined) {
-          const released = yield* releaseThroughPlan(
-            guard.cleanup,
-            guard.value,
-            provenance,
-            localOrdinal,
-          )
-          if (released !== undefined) return released
-          delete package_.guard
-        }
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
           Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
@@ -1597,22 +1597,10 @@ function* executeFunction(
           candidate.point.spanEnd === point.spanEnd &&
           candidate.point.ordinal === point.ordinal,
       )
-      for (const slot of frameState?.slots ?? []) {
-        if (slot.access._tag !== 'AffineTransfer') continue
-        const stored = current.locals.get(slot.local.ordinal)?.value
-        const transferredGuard =
-          owner !== undefined &&
-          MirVerification.operations(owner).some(
-            (operation) =>
-              operation._tag === 'ExecutionPark' && operation.guard.ordinal === slot.local.ordinal,
-          )
-        if (stored === undefined || transferredGuard || packageValues.has(stored)) continue
-        const blocked = yield* releaseThroughPlan(
-          slot.access.cleanup,
-          stored,
-          provenance,
-          localOrdinal,
-        )
+      for (const release of frameState?.failure.releases ?? []) {
+        const stored = current.locals.get(release.local.ordinal)?.value
+        if (stored === undefined || packageValues.has(stored)) continue
+        const blocked = yield* releaseThroughPlan(release.cleanup, stored, provenance, localOrdinal)
         if (blocked !== undefined) return blocked
       }
       if (frame !== undefined) state.executionStackBytes -= frame.bytes
@@ -1769,6 +1757,16 @@ function* executeFunction(
     }
     const guard = package_.guard
     const bodyTransferred = state.executionMachines.has(ticket)
+    if (guard !== undefined) {
+      const released = yield* releaseThroughPlan(
+        guard.cleanup,
+        guard.value,
+        provenance,
+        localOrdinal,
+      )
+      if (released !== undefined) return released
+      delete package_.guard
+    }
     const machineCleanup = yield* cleanupExecutionMachine(
       ticket,
       provenance,
@@ -1780,16 +1778,6 @@ function* executeFunction(
       ]),
     )
     if (machineCleanup !== undefined) return machineCleanup
-    if (guard !== undefined) {
-      const released = yield* releaseThroughPlan(
-        guard.cleanup,
-        guard.value,
-        provenance,
-        localOrdinal,
-      )
-      if (released !== undefined) return released
-      delete package_.guard
-    }
     for (const retained of [
       Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
       Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),

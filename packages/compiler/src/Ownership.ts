@@ -1291,6 +1291,7 @@ const analyzeLoans = (
       return site?._tag === 'Let' &&
         expression.subject.type._tag === 'Available' &&
         (Type.isEffect(expression.subject.type.type) ||
+          Type.isCallable(expression.subject.type.type) ||
           Type.containsExecutableRepresentation(expression.subject.type.type))
         ? Object.freeze([site.binding.ordinal])
         : movedExecutableBindings(expression.subject)
@@ -1339,6 +1340,14 @@ const analyzeLoans = (
     number,
     { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
   >()
+  const laterExecutableEnd = (
+    left: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined,
+    right: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined,
+  ): { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined => {
+    if (left === undefined) return right
+    if (right === undefined) return left
+    return left.span.end >= right.span.end ? left : right
+  }
   const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
     switch (expression._tag) {
       case 'Run': {
@@ -2146,7 +2155,10 @@ const analyzeLoans = (
                 initializerType._tag === 'Available' &&
                   (Type.isCallable(initializerType.type) ||
                     Type.containsExecutableRepresentation(initializerType.type))
-                ? (callableEnds.get(statement.binding.id.ordinal) ?? {
+                ? (laterExecutableEnd(
+                    runEnds.get(statement.binding.id.ordinal),
+                    callableEnds.get(statement.binding.id.ordinal),
+                  ) ?? {
                     region: statement.region,
                     span: fn.declaration.syntax.span,
                   })

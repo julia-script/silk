@@ -447,7 +447,13 @@ const planFor = (
         const type = fn.localTypes.at(ordinal)
         if (type === undefined) return []
         const local = Object.freeze({ _tag: 'Local' as const, ordinal })
-        const access = accessOf(program, index, fn, definitions, local, type)
+        const access =
+          operation._tag === 'ExecutionPark' && ordinal === parkGuard
+            ? Object.freeze({
+                _tag: 'AffineTransfer' as const,
+                cleanup: operation.guardCleanup,
+              })
+            : accessOf(program, index, fn, definitions, local, type)
         const executionAffinity = affinityOf(index, fn, type, access)
         const localSharedObligations = obligationsOf(index, type)
         const runtimeLanes =

@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import type * as ExecutionTransition from '../src/ExecutionTransition.js'
 import * as Layout from '../src/Layout.js'
@@ -13,6 +14,7 @@ import {
   independentExecutionEligibleDrop,
   independentExecutionIllegalDormantDrive,
   independentExecutionIllegalNotifyingDrive,
+  independentExecutionIllegalNotifyingDriveWasmObservable,
   independentExecutionLateCancelledWake,
   independentExecutionLocalReactor,
   independentExecutionMultiplePackages,
@@ -21,6 +23,7 @@ import {
   independentExecutionReentrantDestroy,
   independentExecutionRepeatedGenerations,
   independentExecutionStackExhaustion,
+  independentExecutionStackExhaustionWasmObservable,
 } from './support/corpus.js'
 
 const replaceMirOperation = (
@@ -380,9 +383,16 @@ it.effect('traps a Notifying reentrant drive before invoking either outcome call
           (event.target.name === 'reentrantComplete' || event.target.name === 'reentrantSuspend'),
       ),
     )
-    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const observable = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-notifying-drive-observable',
+      new TextEncoder().encode(independentExecutionIllegalNotifyingDriveWasmObservable),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(observable), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(observable)), [])
+    const artifact = yield* Analysis.codegenWasm(observable, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+    assert.throws(() => (instance.exports.silk_main as () => number)(), /unreachable/)
   }),
 )
 
@@ -402,12 +412,19 @@ it.effect('traps independent-root stack exhaustion before the completion callbac
         evaluated.trace.some((event) => event._tag === 'Call' && event.target.name === 'complete'),
       )
     }
-    const artifact = yield* Analysis.codegenWasm(snapshot, {
+    const observable = yield* Analysis.ofSourceRealized(
+      'independent-execution/stack-exhaustion-observable',
+      new TextEncoder().encode(independentExecutionStackExhaustionWasmObservable),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(observable), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(observable)), [])
+    const artifact = yield* Analysis.codegenWasm(observable, {
       mode: 'release',
       privateExecutionStackPages: 1,
     })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
-    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+    assert.throws(() => (instance.exports.silk_main as () => number)(), /unreachable/)
   }),
 )
 
@@ -975,31 +992,45 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('retains represented callable registration guards in ExecutionPark cleanup facts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'external-wake-parking/callable-guard',
-      new TextEncoder().encode(`import silk.core as Core
+    const module = 'external-wake-parking/callable-guard'
+    const source = `import silk.core as Core
+import silk.core { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
-fn use(value: (), holder: &i32) -> () { return () }
-fn register(wake: Intrinsic.Wake, holder: &i32) -> once fn(()) -> () {
+import silk.layout { Layout }
+fn use(value: (), holder: &Allocation) -> () { return () }
+fn register(wake: Intrinsic.Wake, holder: &Allocation) -> once fn(()) -> () {
   drop wake
   return use(holder)
 }
-effect fn parked(holder: i32) -> () {
+effect fn parked(holder: Allocation) -> () {
   let registration = register(&holder)
   let resumed = run Execution.park(move registration)
+  drop holder
   return ()
 }
 fn ready(state: &()) -> () { return () }
 effect fn program() -> () ! Core.OutOfMemoryError {
   let mut allocator = Core.make()
-  let execution = run Execution.make(parked(1), (), ready)
+  let holder = run Allocator.allocate(Layout.of<i32>())
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let execution = run Execution.make(parked(move holder), (), ready)
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   drop execution
   return ()
 }
 effect fn recover(error: Core.OutOfMemoryError) -> () { return () }
-pub fn main() -> () { return run Effect.catchAll(program(), recover) }`),
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
+    const snapshot = yield* Analysis.ofSourceRealized(module, new TextEncoder().encode(source))
+    const capture = snapshot.ownership
+      .get(module)
+      ?.functions.flatMap((fn) => [...fn.loans])
+      .find((loan) => loan.origin === 'CallableCapture')
+    assert.strictEqual(
+      capture === undefined
+        ? undefined
+        : source.slice(capture.endSpan.start, capture.endSpan.end).trim(),
+      'run Execution.park(move registration)',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.strictEqual(snapshot.mir._tag, 'Available')
@@ -1009,6 +1040,53 @@ pub fn main() -> () { return run Effect.catchAll(program(), recover) }`),
       .filter((operation) => operation._tag === 'ExecutionPark')
     assert.lengthOf(parks, 1)
     assert.strictEqual(parks.at(0)?.guardCleanup._tag, 'CallableCleanup')
+    const parked = snapshot.mir.value.functions.find((fn) =>
+      MirVerification.operations(fn).some((operation) => operation === parks.at(0)),
+    )
+    const parkRegion = parked?.suspension?.regions
+      .flatMap((region) =>
+        region._tag === 'RunSuspendableEffectRegion' && region.operation === parks.at(0)
+          ? [region]
+          : [],
+      )
+      .at(0)
+    const state = parkRegion?.relay.state
+    assert.deepEqual(
+      state?.failure.releases.map((release) => release.cleanup._tag),
+      ['CallableCleanup'],
+    )
+    const layout =
+      state === undefined ? undefined : CoroutineFrame.stateLayout(snapshot.mir.value, state.point)
+    assert.isDefined(layout)
+    if (parked !== undefined && layout !== undefined)
+      assert.deepEqual(
+        CoroutineFrame.cleanupReleases(parked, layout).map((field) => field.access.cleanup._tag),
+        ['CallableCleanup'],
+      )
+    const caller = snapshot.mir.value.functions.find((fn) =>
+      fn.id.name.startsWith('parked$effect$'),
+    )
+    const callerState = caller?.suspension?.regions
+      .flatMap((region) =>
+        region._tag === 'RunSuspendableEffectRegion' ? [region.relay.state] : [],
+      )
+      .find((candidate) => candidate !== undefined)
+    assert.deepEqual(
+      callerState?.failure.releases.map((release) => release.cleanup._tag),
+      ['AllocationCleanup'],
+    )
+    const callerLayout =
+      callerState === undefined
+        ? undefined
+        : CoroutineFrame.stateLayout(snapshot.mir.value, callerState.point)
+    assert.isDefined(callerLayout)
+    if (caller !== undefined && callerLayout !== undefined)
+      assert.deepEqual(
+        CoroutineFrame.cleanupReleases(caller, callerLayout).map(
+          (field) => field.access.cleanup._tag,
+        ),
+        ['AllocationCleanup'],
+      )
     assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
   }),
 )

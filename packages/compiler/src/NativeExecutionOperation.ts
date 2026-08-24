@@ -608,146 +608,134 @@ const dropFrames = Effect.fnUntraced(function* (
   if (coroutineFramePop === undefined || usizeType === undefined)
     throw new RangeError('LLVM execution frame cleanup lost runtime support')
   const headStorage = yield* FunctionBody.alloca(body, pointer, `${tag}_head_slot`)
-  const originalHead = yield* FunctionBody.load(
+  yield* FunctionBody.store(
     body,
-    pointer,
-    yield* NativeLanePointer.lanePointer(
-      lanePointers,
-      body,
-      base,
-      continuationOffset,
-      `${tag}_saved_head_ptr`,
-    ),
-    `${tag}_saved_head`,
-  )
-  const resetHead = Effect.fnUntraced(function* () {
-    yield* FunctionBody.store(body, originalHead, headStorage)
-  })
-  const dropPass = Effect.fnUntraced(function* (kind: 'values' | 'guards', release: boolean) {
-    const loop = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_loop`)
-    const finish = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_finish`)
-    yield* FunctionBody.branch(body, loop)
-    yield* LlvmBlock.setInsertionPoint(body, loop)
-    const head = yield* FunctionBody.load(body, pointer, headStorage, `${tag}_${kind}_head`)
-    const address = yield* FunctionBody.cast(
-      body,
-      'ptrtoint',
-      head,
-      usizeType,
-      `${tag}_${kind}_head_address`,
-    )
-    const present = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_present`)
-    yield* FunctionBody.conditionalBranch(
-      body,
-      yield* FunctionBody.integerCompare(
-        body,
-        'eq',
-        address,
-        yield* Constant.integerUnsigned(builder, usizeType, 0n),
-        `${tag}_${kind}_frames_done`,
-      ),
-      finish,
-      present,
-    )
-    yield* LlvmBlock.setInsertionPoint(body, present)
-    const next = yield* FunctionBody.load(body, pointer, head, `${tag}_${kind}_next`)
-    const resume = yield* FunctionBody.load(
+    yield* FunctionBody.load(
       body,
       pointer,
       yield* NativeLanePointer.lanePointer(
         lanePointers,
         body,
-        head,
-        program.layout.target.pointerSize,
-        `${tag}_${kind}_resume_ptr`,
+        base,
+        continuationOffset,
+        `${tag}_saved_head_ptr`,
       ),
-      `${tag}_${kind}_resume`,
-    )
-    const resumeAddress = yield* FunctionBody.cast(
+      `${tag}_saved_head`,
+    ),
+    headStorage,
+  )
+  const loop = yield* LlvmBlock.make(body, `${tag}_frame_loop`)
+  const finish = yield* LlvmBlock.make(body, `${tag}_frame_finish`)
+  yield* FunctionBody.branch(body, loop)
+  yield* LlvmBlock.setInsertionPoint(body, loop)
+  const head = yield* FunctionBody.load(body, pointer, headStorage, `${tag}_head`)
+  const address = yield* FunctionBody.cast(body, 'ptrtoint', head, usizeType, `${tag}_head_address`)
+  const present = yield* LlvmBlock.make(body, `${tag}_frame_present`)
+  yield* FunctionBody.conditionalBranch(
+    body,
+    yield* FunctionBody.integerCompare(
       body,
-      'ptrtoint',
-      resume,
-      usizeType,
-      `${tag}_${kind}_resume_address`,
+      'eq',
+      address,
+      yield* Constant.integerUnsigned(builder, usizeType, 0n),
+      `${tag}_frames_done`,
+    ),
+    finish,
+    present,
+  )
+  yield* LlvmBlock.setInsertionPoint(body, present)
+  const next = yield* FunctionBody.load(body, pointer, head, `${tag}_next`)
+  const resume = yield* FunctionBody.load(
+    body,
+    pointer,
+    yield* NativeLanePointer.lanePointer(
+      lanePointers,
+      body,
+      head,
+      program.layout.target.pointerSize,
+      `${tag}_resume_ptr`,
+    ),
+    `${tag}_resume`,
+  )
+  const resumeAddress = yield* FunctionBody.cast(
+    body,
+    'ptrtoint',
+    resume,
+    usizeType,
+    `${tag}_resume_address`,
+  )
+  const released = yield* LlvmBlock.make(body, `${tag}_frame_released`)
+  let otherwise = present
+  for (const [ordinal, generated] of [...context.resumeThunks.values()].entries()) {
+    const selected = yield* LlvmBlock.make(body, `${tag}_frame_${ordinal}`)
+    const following = yield* LlvmBlock.make(body, `${tag}_frame_${ordinal}_otherwise`)
+    if (otherwise !== present) yield* LlvmBlock.setInsertionPoint(body, otherwise)
+    const target = yield* Constant.fromGlobal(
+      builder,
+      yield* FunctionActor.global(builder, generated.handle),
     )
-    const released = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_released`)
-    let otherwise = present
-    for (const [ordinal, generated] of [...context.resumeThunks.values()].entries()) {
-      const selected = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_${ordinal}`)
-      const following = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_${ordinal}_otherwise`)
-      if (otherwise !== present) yield* LlvmBlock.setInsertionPoint(body, otherwise)
-      const target = yield* Constant.fromGlobal(
-        builder,
-        yield* FunctionActor.global(builder, generated.handle),
-      )
-      yield* FunctionBody.conditionalBranch(
+    yield* FunctionBody.conditionalBranch(
+      body,
+      yield* FunctionBody.integerCompare(
         body,
-        yield* FunctionBody.integerCompare(
+        'eq',
+        resumeAddress,
+        yield* FunctionBody.cast(
           body,
-          'eq',
-          resumeAddress,
-          yield* FunctionBody.cast(
-            body,
-            'ptrtoint',
-            target,
-            usizeType,
-            `${tag}_${kind}_target_${ordinal}_address`,
-          ),
-          `${tag}_${kind}_frame_${ordinal}_matches`,
+          'ptrtoint',
+          target,
+          usizeType,
+          `${tag}_target_${ordinal}_address`,
         ),
-        selected,
-        following,
+        `${tag}_frame_${ordinal}_matches`,
+      ),
+      selected,
+      following,
+    )
+    yield* LlvmBlock.setInsertionPoint(body, selected)
+    const owner = program.functions.find((fn) =>
+      Mir.matchesInstanceKey(fn, generated.layout.point.owner),
+    )
+    if (owner === undefined) throw new RangeError('LLVM execution frame cleanup lost its owner')
+    for (const field of CoroutineFrame.cleanupReleases(owner, generated.layout)) {
+      const values: Array<Value.Input> = []
+      const packed = NativeType.packLanes(
+        program.layout.target,
+        NativeType.lanesFor(context.types, field.type),
+        field.offset,
       )
-      yield* LlvmBlock.setInsertionPoint(body, selected)
-      const owner = program.functions.find((fn) =>
-        Mir.matchesInstanceKey(fn, generated.layout.point.owner),
-      )
-      if (owner === undefined) throw new RangeError('LLVM execution frame cleanup lost its owner')
-      for (const field of CoroutineFrame.cleanupPayload(owner, generated.layout)[kind]) {
-        const values: Array<Value.Input> = []
-        const packed = NativeType.packLanes(
-          program.layout.target,
-          NativeType.lanesFor(context.types, field.type),
-          field.offset,
-        )
-        for (const [laneOrdinal, lane] of packed.entries.entries())
-          values.push(
-            yield* FunctionBody.load(
+      for (const [laneOrdinal, lane] of packed.entries.entries())
+        values.push(
+          yield* FunctionBody.load(
+            body,
+            NativeType.laneType(context.types, lane.lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
               body,
-              NativeType.laneType(context.types, lane.lane),
-              yield* NativeLanePointer.lanePointer(
-                lanePointers,
-                body,
-                head,
-                lane.offset,
-                `${tag}_${kind}_frame_${ordinal}_${laneOrdinal}_ptr`,
-              ),
-              `${tag}_${kind}_frame_${ordinal}_${laneOrdinal}`,
+              head,
+              lane.offset,
+              `${tag}_frame_${ordinal}_${laneOrdinal}_ptr`,
             ),
-          )
-        yield* NativeAggregate.dropThroughPlan(
-          context,
-          field.access.cleanup,
-          Object.freeze(values),
-          `${tag}_${kind}_frame_${ordinal}_slot${field.slot}`,
+            `${tag}_frame_${ordinal}_${laneOrdinal}`,
+          ),
         )
-      }
-      yield* FunctionBody.branch(body, released)
-      otherwise = following
+      yield* NativeAggregate.dropThroughPlan(
+        context,
+        field.access.cleanup,
+        Object.freeze(values),
+        `${tag}_frame_${ordinal}_slot${field.slot}`,
+      )
     }
-    yield* LlvmBlock.setInsertionPoint(body, otherwise)
-    yield* FunctionBody.unreachable(body)
-    yield* LlvmBlock.setInsertionPoint(body, released)
-    if (release)
-      yield* FunctionBody.callDirect(body, coroutineFramePop, [head], `${tag}_${kind}_frame_pop`)
-    yield* FunctionBody.store(body, next, headStorage)
-    yield* FunctionBody.branch(body, loop)
-    yield* LlvmBlock.setInsertionPoint(body, finish)
-  })
-  yield* resetHead()
-  yield* dropPass('values', false)
-  yield* resetHead()
-  yield* dropPass('guards', true)
+    yield* FunctionBody.branch(body, released)
+    otherwise = following
+  }
+  yield* LlvmBlock.setInsertionPoint(body, otherwise)
+  yield* FunctionBody.unreachable(body)
+  yield* LlvmBlock.setInsertionPoint(body, released)
+  yield* FunctionBody.callDirect(body, coroutineFramePop, [head], `${tag}_frame_pop`)
+  yield* FunctionBody.store(body, next, headStorage)
+  yield* FunctionBody.branch(body, loop)
+  yield* LlvmBlock.setInsertionPoint(body, finish)
 })
 
 const dropActivatedPackage = Effect.fnUntraced(function* (

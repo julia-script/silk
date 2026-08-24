@@ -9,7 +9,7 @@ import * as LlvmType from '@silk-effect/llvm/Type'
 import * as Variable from '@silk-effect/llvm/Variable'
 import * as Verify from '@silk-effect/llvm/Verify'
 import * as Effect from 'effect/Effect'
-import type { CodegenRequest, SymbolEntry } from './Backend.js'
+import type { CodegenRequest, RuntimeFeature, SymbolEntry } from './Backend.js'
 import {
   BackendError,
   formatModuleViolations,
@@ -41,12 +41,22 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   {
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
+    readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
     readonly ir: string
     readonly bitcode: Uint8Array
   },
   BackendError | LlvmError.LlvmError
 > {
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
+  const operations = program.functions.flatMap(MirVerification.operations)
+  const hasExecutionPackage = operations.some(
+    (operation) => operation._tag === 'ExecutionFromAllocation',
+  )
+  const hasExecutionDrive = operations.some((operation) => operation._tag === 'ExecutionDrive')
+  const hasExternalPark = operations.some((operation) => operation._tag === 'ExecutionPark')
+  const hasWakeCell = operations.some(
+    (operation) => operation._tag === 'ExecutionFromAllocation' && operation.plan.readinessStorage,
+  )
   const i32Layout = Layout.entry(program.layout, 'i32')
   if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
     return yield* new BackendError({
@@ -504,6 +514,13 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
       ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
+    ]),
+    runtimeFeatures: Object.freeze([
+      ...(suspensionEnabled ? (['NestedSuspensionRuntime'] as const) : []),
+      ...(hasExecutionPackage ? (['ExecutionPackage'] as const) : []),
+      ...(hasExecutionDrive ? (['ExecutionDrive'] as const) : []),
+      ...(hasExternalPark && suspensionEnabled ? (['DormantContinuation'] as const) : []),
+      ...(hasWakeCell ? (['ExternalWakeCell', 'ReadinessNotification'] as const) : []),
     ]),
     ir: yield* IrText.render(builder),
     bitcode: yield* Bitcode.encode(builder),

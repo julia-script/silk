@@ -67,7 +67,9 @@ ${transcendentalVectors
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
+  readonly nativeSource?: string
   readonly nativeEnvironment?: Readonly<Record<string, string>>
+  readonly forbidStdout?: boolean
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -253,6 +255,43 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
+export const independentExecutionIllegalNotifyingDriveObservable =
+  independentExecutionIllegalNotifyingDrive
+    .replace('struct Guard {}', 'struct Guard {}\nstruct MarkerState { value: i32 }')
+    .replaceAll('&mut ()', '&mut MarkerState')
+    .replaceAll('let mut state = ()', 'let mut state = MarkerState { value: 0 }')
+    .replace(
+      'fn reentrantComplete(state: &mut (), result: i32) -> () { return () }',
+      `effect fn ignoreWrite(error: Core.StreamWriteError) -> () { return () }
+fn reentrantComplete(state: &mut (), result: i32) -> () {
+  drop run Effect.catchAll(Intrinsic.standardStreamWrite(false, b"!"), ignoreWrite)
+  return ()
+}`,
+    )
+    .replace(
+      'fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {',
+      `fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
+  drop run Effect.catchAll(Intrinsic.standardStreamWrite(false, b"!"), ignoreWrite)`,
+    )
+
+export const independentExecutionIllegalNotifyingDriveWasmObservable =
+  independentExecutionIllegalNotifyingDrive
+    .replace(
+      'fn reentrantComplete(state: &mut (), result: i32) -> () { return () }',
+      `fn callbackSentinel(value: i32) -> () {
+  let zero = value - value
+  let impossible = 1 / zero
+  drop impossible
+  return ()
+}
+fn reentrantComplete(state: &mut (), result: i32) -> () { return callbackSentinel(result) }`,
+    )
+    .replace(
+      'fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {',
+      `fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
+  callbackSentinel(1)`,
+    )
+
 /** Builds a logical continuation frame so a configured private-stack limit can reject its push. */
 export const independentExecutionStackExhaustion = `import silk.core as Core
 import silk.core { Allocator }
@@ -284,6 +323,18 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
 }
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
+export const independentExecutionStackExhaustionWasmObservable =
+  independentExecutionStackExhaustion.replace(
+    'fn complete(state: &mut State, value: i32) -> () { state.completed = 1 return () }',
+    `fn complete(state: &mut State, value: i32) -> () {
+  let zero = value - value
+  let impossible = 1 / zero
+  drop impossible
+  state.completed = 1
+  return ()
+}`,
+  )
 
 export const independentExecutionMultiplePackages = `import silk.core as Core
 import silk.core { Allocator }
@@ -2385,6 +2436,8 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'independent-execution-illegal-notifying-drive',
     source: independentExecutionIllegalNotifyingDrive,
+    nativeSource: independentExecutionIllegalNotifyingDriveObservable,
+    forbidStdout: true,
     expected: { _tag: 'Trap' },
   },
   {
