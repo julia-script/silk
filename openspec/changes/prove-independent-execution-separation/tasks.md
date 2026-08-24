@@ -79,3 +79,6 @@
 - [x] 4.3 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
       `pnpm release:candidate`; record every exact result and identify pre-existing failures before
       implementation handoff.
+      The initial sequence passed. The required post-conformance rerun is parked at `pnpm test` on
+      the actor-neutrality witness's 60-second full-suite timeout after the resumed repair budget was
+      exhausted; `pnpm check` and `pnpm release:candidate` were therefore not rerun.

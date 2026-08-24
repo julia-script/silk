@@ -1,6 +1,6 @@
 # Implementation report: prove-independent-execution-separation
 
-Status: **POST-CONFORMANCE GATES PENDING**
+Status: **PARKED — POST-CONFORMANCE TEST TIMEOUT**
 
 ## Implemented pressure surface
 
@@ -48,7 +48,8 @@ The fresh resume used two of its three distinct root-cause repairs:
    `result & 0xff`. The construction-failure `-100` witness therefore compares to `156` without
    changing language or runtime semantics.
 
-No hard-gate failure required the remaining repair slot.
+The remaining repair slot was consumed after conformance by completing the sealed-storage migration
+across checked/formatting surfaces. See the post-conformance gate history below.
 
 ## Single conformance pass dispositions
 
@@ -122,8 +123,28 @@ There were no gate retries and no pre-existing red gate. A first documentation-e
 before the formal gate sequence lacked `packages/doctest/dist/bin.js`; building the declared
 doctest package resolved that mechanical prerequisite, after which all 54 examples passed.
 
-The required single post-conformance hard-gate sequence has not started. Its exact results will be
-recorded here in order after the consolidated source/test migration is committed.
+## Post-conformance hard-gate history
+
+The post-conformance sequence exhausted the resumed repair budget and is parked:
+
+1. **Attempt 1.** `pnpm typecheck` passed 24/24 tasks in 12.825s. `pnpm exec biome check .`
+   stopped on two formatter-only diffs in `LocalSharedAllocationProvenance.ts` and
+   `EffectRuntime.test.ts`. Those files were formatted as part of the remaining sealed-storage
+   migration repair.
+2. **Attempt 2.** `pnpm typecheck` passed 24/24 tasks in 11.703s and Biome passed 991 files in
+   672ms. `pnpm test` then stopped after 3m32.694s with 1 of 2,146 compiler tests failing: the
+   checked intrinsic inventory still described `StorageAcquire` as failing with
+   `OutOfMemoryError`. That fixture and the resulting toolchain digest were the same incomplete
+   sealed-storage migration cause; the focused `IntrinsicCatalog` suite then passed 9/9.
+3. **Attempt 3.** `pnpm typecheck` passed 24/24 tasks in 7.143s and Biome passed 939 files in 654ms.
+   `pnpm test` stopped after 4m58.436s with 1 of 2,146 compiler tests failing: the actor-neutrality
+   witness timed out at 60,000ms under the full parallel compiler suite. The same test passes
+   focused in 35.21s, so this is a distinct test-cost/full-suite-load cause rather than a semantic
+   mismatch. The resume repair budget was already exhausted; no timeout was raised and the layer
+   failed closed.
+
+`pnpm check` and `pnpm release:candidate` were not run after conformance because the required test
+gate did not pass. No second conformance review or additional repair pass was started.
 
 ## Scope and privilege dispositions
 
@@ -141,6 +162,8 @@ recorded here in order after the consolidated source/test migration is committed
 
 ## Task state and handoff
 
-OpenSpec tasks are **21/21 complete**. The parent-owned single three-lens conformance pass is
-complete, all verified Critical/High findings are closed in its one consolidated fix pass, and the
-required post-conformance gates remain pending.
+OpenSpec tasks remain **21/21 complete** based on the implemented artifacts and the initial green
+gate sequence. The parent-owned single three-lens conformance pass is complete and all verified
+Critical/High findings are closed in its one consolidated fix pass. Final handoff is **PARKED** on
+the post-conformance full-suite actor-neutrality timeout described above; the remaining post-gates
+were not run.
