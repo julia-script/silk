@@ -119,3 +119,10 @@ execution-package cleanup authority. No Critical or High finding remains open.
 
 Layer 4's integrated full hard-gate command also exited successfully. Layer 5 may now begin from
 the verified integration branch.
+
+Layer 5 checkpoint `021ae09` connects ordinary-source Scheduler-shaped ownership, homogeneous
+first activation, selective readiness, timer/cancellation, Coroutine drop, and stale-ready
+disposal evidence. It also fixes recursive Wasm cleanup for nested Execution/Wake values, the
+first of three bounded root-cause repairs. Focused pressure verification is 8/8; OpenSpec progress
+is 4/21 while allocation, pay-for-use, diagnostic, native-corpus, report, and documentation gates
+remain.
