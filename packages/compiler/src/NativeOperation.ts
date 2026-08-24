@@ -5,6 +5,7 @@ import type * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeCallOperation from './NativeCallOperation.js'
 import * as NativeEffectOperation from './NativeEffectOperation.js'
+import * as NativeExecutionOperation from './NativeExecutionOperation.js'
 import * as NativeLocalSharedOperation from './NativeLocalSharedOperation.js'
 import * as NativeMemoryOperation from './NativeMemoryOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
@@ -39,6 +40,7 @@ export interface LoweringContext {
   readonly place: NativeOperationContext.Context
   readonly scalar: NativeOperationContext.Context
   readonly effect: NativeOperationContext.Context
+  readonly execution: NativeOperationContext.Context
   readonly call: NativeOperationContext.Context
 }
 /** Mutable per-function dispatch state shared by cohesive operation actors. */
@@ -82,6 +84,11 @@ export const emit = Effect.fnUntraced(function* (
       return yield* NativeMemoryOperation.emit(context.memory, operation)
     case 'SharedWithMut':
       return yield* NativeLocalSharedOperation.emit(context.call, operation)
+    case 'ExecutionFromAllocation':
+    case 'ExecutionDrive':
+    case 'ExecutionWake':
+    case 'ExecutionPark':
+      return yield* NativeExecutionOperation.emit(context.execution, operation)
     case 'Move':
     case 'BeginLoan':
     case 'EndLoan':

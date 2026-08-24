@@ -7,6 +7,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Type from '../src/Type.js'
+import { independentExecutionNonLifo } from './support/corpus.js'
 
 const source = `import silk.core as Core
 import silk.core { Allocator }
@@ -134,6 +135,27 @@ it.effect('seals Wake and lowers ordinary-source park and wake through verified 
   }),
 )
 
+it.effect('emits deterministic native never-driven package cleanup', () =>
+  Effect.gen(function* () {
+    const first = yield* Analysis.ofSourceRealized(
+      'external-wake-parking/native-cleanup',
+      new TextEncoder().encode(source),
+      'aarch64-apple-darwin',
+    )
+    const second = yield* Analysis.ofSourceRealized(
+      'external-wake-parking/native-cleanup',
+      new TextEncoder().encode(source),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(first), [])
+    assert.deepEqual(Analysis.diagnostics(second), [])
+    const firstArtifact = yield* Analysis.codegen(first, { mode: 'release' })
+    const secondArtifact = yield* Analysis.codegen(second, { mode: 'release' })
+    assert.strictEqual(firstArtifact.ir, secondArtifact.ir)
+    assert.deepEqual(firstArtifact.bitcode, secondArtifact.bitcode)
+  }),
+)
+
 it.effect('evaluates a latched park through an execution-owned root and later owner drive', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -212,6 +234,31 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       ],
     )
     assert.lengthOf(new Set(transitions.map((event) => event.root)), 1)
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('resumes two independent execution roots in non-LIFO owner-selected order', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/non-lifo',
+      new TextEncoder().encode(independentExecutionNonLifo),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
+    const roots = [...new Set(transitions.map((event) => event.root))]
+    assert.lengthOf(roots, 2)
+    assert.deepEqual(
+      transitions.filter((event) => event.event === 'Complete').map((event) => event.root),
+      [...roots].reverse(),
+    )
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)

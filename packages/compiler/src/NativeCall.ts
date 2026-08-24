@@ -84,12 +84,11 @@ export interface Context {
   readonly returns: NativeSuspension.ReturnContext
 }
 
-export const callValues = Effect.fnUntraced(function* (
+/** Retains one canonical relay frame in the transfer-owned continuation chain. */
+export const retainRelay = Effect.fnUntraced(function* (
   context: Context,
-  target: NativeLoweringContext.DeclaredFunction,
-  arguments_: ReadonlyArray<Value.Input>,
+  suspension: Mir.RunSuspendableEffectRegion,
   name: string,
-  suspension?: Mir.RunSuspendableEffectRegion,
 ) {
   const {
     body,
@@ -99,16 +98,97 @@ export const callValues = Effect.fnUntraced(function* (
     i32,
     invocationFrameStorage,
     lanePointers,
-    storage,
-    types,
     pointer,
     program,
     resumeThunks,
+    storage,
     transferPointer,
+    types,
   } = context
-  const readLocal = (local: Mir.LocalId): ReadonlyArray<Value.Input> => {
-    return NativeStorage.readLocal(storage, local)
+  const continuation = suspension.relay.state
+  if (continuation === undefined) return
+  if (transferPointer === undefined || invocationFrameStorage === undefined)
+    throw new RangeError('LLVM coroutine relay lost transfer or invocation-frame authority')
+  const generated = resumeThunks.get(suspensionPointKey(suspension.point))
+  if (generated === undefined)
+    throw new RangeError('LLVM coroutine relay lost its native frame plan')
+  const frame = yield* FunctionBody.load(
+    body,
+    pointer,
+    invocationFrameStorage,
+    `${name}_invocation_frame`,
+  )
+  const appendPointerPointer = yield* FunctionBody.getElementPtr(
+    body,
+    i8,
+    transferPointer,
+    [yield* Constant.integerUnsigned(builder, i32, BigInt(program.layout.target.pointerSize * 2))],
+    `${name}_append_ptr_ptr`,
+  )
+  const appendPointer = yield* FunctionBody.load(
+    body,
+    pointer,
+    appendPointerPointer,
+    `${name}_append_ptr`,
+  )
+  const next = yield* FunctionBody.load(body, pointer, appendPointer, `${name}_next`)
+  yield* FunctionBody.store(
+    body,
+    next,
+    yield* NativeLanePointer.lanePointer(lanePointers, body, frame, 0, `${name}_store_parent`),
+  )
+  yield* FunctionBody.store(
+    body,
+    yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, generated.handle)),
+    yield* NativeLanePointer.lanePointer(
+      lanePointers,
+      body,
+      frame,
+      program.layout.target.pointerSize,
+      `${name}_store_resume`,
+    ),
+  )
+  for (const field of generated.layout.payload) {
+    const values = NativeStorage.readLocal(storage, field.local)
+    const type = entry.fn.localTypes.at(field.local.ordinal)
+    if (type === undefined) throw new RangeError('LLVM frame payload lost its type')
+    const packed = NativeType.packLanes(
+      program.layout.target,
+      NativeType.lanesFor(types, type),
+      field.offset,
+    )
+    for (const [ordinal, lane] of packed.entries.entries()) {
+      const value = values.at(ordinal)
+      if (value === undefined) throw new RangeError('LLVM frame payload lost a lane')
+      yield* FunctionBody.store(
+        body,
+        value,
+        yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          frame,
+          lane.offset,
+          `${name}_payload${field.slot}_${ordinal}`,
+        ),
+      )
+    }
   }
+  yield* FunctionBody.store(body, frame, appendPointer)
+  yield* FunctionBody.store(
+    body,
+    yield* NativeLanePointer.lanePointer(lanePointers, body, frame, 0, `${name}_next_append_ptr`),
+    appendPointerPointer,
+  )
+})
+
+export const callValues = Effect.fnUntraced(function* (
+  context: Context,
+  target: NativeLoweringContext.DeclaredFunction,
+  arguments_: ReadonlyArray<Value.Input>,
+  name: string,
+  suspension?: Mir.RunSuspendableEffectRegion,
+) {
+  const { body, builder, entry, i32, storage, pointer, transferPointer } = context
   if (!target.suspendable)
     return yield* callSynchronous(context.synchronous, target, arguments_, name)
   if (transferPointer === undefined || suspension === undefined)
@@ -144,87 +224,24 @@ export const callValues = Effect.fnUntraced(function* (
     transferred,
   )
   yield* LlvmBlock.setInsertionPoint(body, transferred)
-  const continuation = suspension.relay.state
-  if (continuation !== undefined) {
-    const generated = resumeThunks.get(suspensionPointKey(suspension.point))
-    if (generated === undefined)
-      throw new RangeError('LLVM coroutine relay lost its native frame plan')
-    if (invocationFrameStorage === undefined)
-      throw new RangeError('LLVM coroutine relay lost its invocation frame')
-    const frame = yield* FunctionBody.load(
+  yield* retainRelay(context, suspension, name)
+  const external = yield* LlvmBlock.make(body, `${name}_external`)
+  const nested = yield* LlvmBlock.make(body, `${name}_nested`)
+  yield* FunctionBody.conditionalBranch(
+    body,
+    yield* FunctionBody.integerCompare(
       body,
-      pointer,
-      invocationFrameStorage,
-      `${name}_invocation_frame`,
-    )
-    const appendPointerPointer = yield* FunctionBody.getElementPtr(
-      body,
-      i8,
-      transferPointer,
-      [
-        yield* Constant.integerUnsigned(
-          builder,
-          i32,
-          BigInt(program.layout.target.pointerSize * 2),
-        ),
-      ],
-      `${name}_append_ptr_ptr`,
-    )
-    const appendPointer = yield* FunctionBody.load(
-      body,
-      pointer,
-      appendPointerPointer,
-      `${name}_append_ptr`,
-    )
-    const next = yield* FunctionBody.load(body, pointer, appendPointer, `${name}_next`)
-    yield* FunctionBody.store(
-      body,
-      next,
-      yield* NativeLanePointer.lanePointer(lanePointers, body, frame, 0, `${name}_store_parent`),
-    )
-    yield* FunctionBody.store(
-      body,
-      yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, generated.handle)),
-      yield* NativeLanePointer.lanePointer(
-        lanePointers,
-        body,
-        frame,
-        program.layout.target.pointerSize,
-        `${name}_store_resume`,
-      ),
-    )
-    for (const field of generated.layout.payload) {
-      const values = readLocal(field.local)
-      const type = entry.fn.localTypes.at(field.local.ordinal)
-      if (type === undefined) throw new RangeError('LLVM frame payload lost its type')
-      const packed = NativeType.packLanes(
-        program.layout.target,
-        NativeType.lanesFor(types, type),
-        field.offset,
-      )
-      for (const [ordinal, lane] of packed.entries.entries()) {
-        const value = values.at(ordinal)
-        if (value === undefined) throw new RangeError('LLVM frame payload lost a lane')
-        yield* FunctionBody.store(
-          body,
-          value,
-          yield* NativeLanePointer.lanePointer(
-            lanePointers,
-            body,
-            frame,
-            lane.offset,
-            `${name}_payload${field.slot}_${ordinal}`,
-          ),
-        )
-      }
-    }
-    yield* FunctionBody.store(body, frame, appendPointer)
-    yield* FunctionBody.store(
-      body,
-      yield* NativeLanePointer.lanePointer(lanePointers, body, frame, 0, `${name}_next_append_ptr`),
-      appendPointerPointer,
-    )
-  }
+      'eq',
+      status,
+      yield* Constant.integerUnsigned(builder, i32, 2n),
+      `${name}_is_external`,
+    ),
+    external,
+    nested,
+  )
+  yield* LlvmBlock.setInsertionPoint(body, external)
+  yield* NativeSuspension.returnStep(context.returns, 2n, Object.freeze([]), `${name}_external`)
+  yield* LlvmBlock.setInsertionPoint(body, nested)
   yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
   for (const root of [...storage.addressRoots].sort((left, right) => left - right)) {

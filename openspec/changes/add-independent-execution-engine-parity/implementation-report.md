@@ -55,6 +55,30 @@ Native realization, the complete destruction/cancellation matrix, two-root alter
 and reactor availability remain open; task 3.2 therefore remains unchecked despite the first
 working direct-Wasm external-resume path.
 
+## Checkpoint 3: independent native roots and reverse-order parity
+
+- Native coroutine frames are independently allocated, alignment-correct roots with a bounded
+  thread-local total-byte reservation and explicit pop. Retained executions therefore no longer
+  depend on a segmented LIFO rewind point shared with another root.
+- Native calls preserve the distinct external-relay status through suspendable callers. Translating
+  that status to an ordinary nested-child transfer caused the driver to invoke an uninitialized
+  child thunk; preserving status `2` makes the execution owner, rather than the ambient caller, the
+  next authority.
+- Native Execution initialization, drive, park, Wake, completion, continuation restoration, frame
+  cleanup, package cleanup, and late-Wake allocation discharge lower from canonical package and
+  suspension facts. A linked single-root signal/resume probe exits `42`, and the designated native
+  corpus' two-root non-LIFO case agrees with evaluation at `42`.
+- Direct Wasm now clears the transient transfer-tail cell when a new independent-root drive begins.
+  Without that reset, a detached first root left the shared relay tail pointing into its retained
+  chain and a second root appended into it. The execution-owned continuation head remains the sole
+  retained authority; reverse-order two-root evaluation and Wasm now agree at `42`.
+- The designated native corpus includes `independent-execution-non-lifo`; the ordinary focused
+  external-parking suite verifies evaluator/Wasm reverse completion order, while a filtered run of
+  the unchanged designated native differential harness verified the native case.
+
+The complete cancellation/DestroyPending matrix, multiple same-result package dispatch, reactor
+availability evidence, and full gates remain open, so tasks 3.1, 3.2, and 4.1 remain unchecked.
+
 ## Verification history
 
 - Initial focused command could not resolve unbuilt workspace package `@silk-effect/llvm/Bitcode`;
@@ -68,6 +92,14 @@ working direct-Wasm external-resume path.
   latched external resume and existing synchronous Execution package completion/failure behavior.
 - Generated toolchain identity was refreshed after compiler source changed; direct TypeScript checks
   then passed. The formal hard-gate loop has not started.
+- Native/Wasm milestone TypeScript check — **PASS**.
+- External parking focused regression — **PASS**, 1 file / 11 tests, including deterministic native
+  never-driven cleanup and reverse-order two-root evaluator/Wasm parity.
+- Designated native differential harness, temporarily filtered to the newly committed corpus entry
+  without changing harness semantics — **PASS**, 1 program; source result and native exit both `42`.
+- Targeted Biome check over the native/Wasm milestone — **PASS** after mechanical formatting and
+  removal of unused destructured bindings.
+- Toolchain integrity generation and check after native source additions — **PASS**.
 
 ## Attempt budget
 

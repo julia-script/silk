@@ -7967,6 +7967,9 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
               Instr.i32Const(transferAddress + program.layout.target.pointerSize),
               Instr.i32Const(0),
               Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize * 2),
+              Instr.i32Const(0),
+              Instr.memoryAccess('i32.store', privateMemory),
               ...parameterLanes.map((_lane, ordinal) => Instr.localGet(ordinal)),
               Instr.call(root.handle),
               ...resultLanes
@@ -7980,6 +7983,9 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
             [
               Instr.i32Const(transferAddress + program.layout.target.pointerSize),
               Instr.localGet(headLocal),
+              Instr.memoryAccess('i32.store', privateMemory),
+              Instr.i32Const(transferAddress + program.layout.target.pointerSize * 2),
+              Instr.i32Const(0),
               Instr.memoryAccess('i32.store', privateMemory),
               Instr.i32Const(0),
               Instr.globalSet(externalResumeHead),

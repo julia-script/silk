@@ -78,6 +78,55 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
+/** Two independent roots resume in reverse suspension order without sharing a frame stack. */
+export const independentExecutionNonLifo = `import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored result: i32 }
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard { Intrinsic.wake(move wake) return Guard {} }
+effect fn body(value: i32) -> i32 { run Execution.park(register) return value }
+fn complete(owner: &mut Owner, result: i32) -> () { owner.result = result return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn ready(state: &()) -> () { return () }
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run finishStored(move execution, move owner)
+  }
+}
+effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut firstOwner = Owner { slot: Empty {}, result: 0 }
+  let mut secondOwner = Owner { slot: Empty {}, result: 0 }
+  let first = run Execution.make(body(20), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let second = run Execution.make(body(22), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  run driveOnce(move first, &mut firstOwner)
+  run driveOnce(move second, &mut secondOwner)
+  let selectedSecond = Intrinsic.replace(secondOwner.slot, Empty {})
+  run finish(move selectedSecond, &mut secondOwner)
+  let selectedFirst = Intrinsic.replace(firstOwner.slot, Empty {})
+  run finish(move selectedFirst, &mut firstOwner)
+  return firstOwner.result + secondOwner.result
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
 export const constrainedCallableForwarding = `import silk.effect as Effect
 service Counter {
   effect fn get() -> i32 ? &Counter
@@ -1715,6 +1764,11 @@ const localSharedPressureFailure = (ordinal: 0 | 1): string =>
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  {
+    name: 'independent-execution-non-lifo',
+    source: independentExecutionNonLifo,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   {
     name: 'local-shared-pressure-success',
     source: localSharedPressure,

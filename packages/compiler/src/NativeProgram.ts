@@ -155,7 +155,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     NativeType.valueLanesFor(typeContext, type)
   const laneType = (lane: Layout.CallingLane): LlvmType.Type =>
     NativeType.laneType(typeContext, lane)
-  const transferHeaderSize = program.layout.target.pointerSize * 3
+  // The fourth private word identifies the independently driven Execution owner.
+  const transferHeaderSize = program.layout.target.pointerSize * 4
   const originArgumentLanes = program.functions.flatMap((fn) =>
     (fn.suspension?.regions ?? []).flatMap((region) =>
       region._tag === 'SuspendEffectRegion'
@@ -433,6 +434,9 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       laneType,
       transferHeaderSize,
       transferResultOffset,
+      transferStorageSize,
+      ...(childThunkType === undefined ? {} : { childThunkType }),
+      ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
       signedOverflowSignatures,
       unsignedOverflowSignatures,
       ...(malloc === undefined ? {} : { malloc }),
