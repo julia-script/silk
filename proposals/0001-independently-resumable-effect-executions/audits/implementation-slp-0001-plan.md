@@ -165,3 +165,10 @@ carries primitive refusal authority, while ordinary Silk converts it to public a
 allocation provenance follows Effect catch/pattern flow without actor names. Compiler typecheck and
 the focused ordinary/renamed local-Shared witness pass. Timer, waiter, emitted-artifact, and
 cross-engine observability findings remain in the same fix pass.
+
+Layer 5 conformance checkpoint `3dac3eb` completes the connected Timer/Scheduler cancellation
+witness, actual Deferred/Fiber waiter-allocation failure, seven-configuration emitted Wasm/native
+inventories, owner-side `NonParking`, expanded wrapper/provider renaming and phase inventory, and
+cross-engine body/frame/guard/endpoint/late-Wake cleanup probes. It also fixes post-activation Wasm
+body/frame authority. The full pressure suite is 14/14; report/task reconciliation and the single
+post-conformance hard-gate rerun remain.
