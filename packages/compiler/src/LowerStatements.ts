@@ -16,7 +16,12 @@ import {
   withoutLoanEndings,
 } from './CleanupEmission.js'
 import type { LoweredExpression } from './EffectLowering.js'
-import { borrowedWriteRoot, endReturnedViewLoans, retainedEffectLoans } from './EffectLowering.js'
+import {
+  borrowedWriteRoot,
+  endReturnedViewLoans,
+  ownedWriteRoot,
+  retainedEffectLoans,
+} from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import {
@@ -464,7 +469,7 @@ export const lowerSequence = (
     const root =
       place._tag === 'BorrowedWritePlace'
         ? borrowedWriteRoot(fn, place.root)
-        : fn.bindingLocals.get(place.root.ordinal)
+        : ownedWriteRoot(fn, place.root)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
     const type = fn.type(place.type)
     const [written, operations] = fn.capture(() => {

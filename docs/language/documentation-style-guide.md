@@ -401,8 +401,8 @@ For example, write `move present |> Option.unwrapOr<i32>(0)` for an owned option
 `|> Effect.provideMut(...)` to supply an Effect requirement.
 
 Do not use `|>` when the result is not valid Silk or when a direct call is clearer. A lexical borrow
-must be an immediate ordinary-call argument. Write `Vector.get<i32>(&values, usize.ONE)` in that
-case.
+may flow through a pipeline when the next callable expects that borrowed view. Prefer the form that
+makes the operation order clearest.
 
 ## ASD-STE100 Simplified Technical English
 

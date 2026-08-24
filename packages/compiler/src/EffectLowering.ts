@@ -1061,6 +1061,14 @@ export const borrowedWriteRoot = (
     ? fn.parameterLocals.get(root.parameter.ordinal)
     : fn.bindingLocals.get(root.binding.ordinal)
 
+export const ownedWriteRoot = (
+  fn: FunctionLowering,
+  root: Hir.OwnedWriteRoot,
+): Mir.LocalId | undefined =>
+  root._tag === 'ParameterWriteRoot'
+    ? fn.parameterLocals.get(root.parameter.ordinal)
+    : fn.bindingLocals.get(root.binding.ordinal)
+
 export const lowerServiceEffectValue = (
   fn: FunctionLowering,
   subject: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,

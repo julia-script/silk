@@ -1,7 +1,7 @@
 hir-module golden/operator
 fn golden/operator.main () -> i32 entry=r0 regions=r0
   return r0 [52, 76)
-    callable-apply access=shared evaluation=LeftThenCallable realization=DirectErasedSection substitution=none : i32 [52, 76)
+    callable-apply access=shared evaluation=LeftThenCallable realization=DirectErasedSection substitution=none ends=none held=none : i32 [52, 76)
       argument #0
         builtin i32.Add : i32 [52, 62)
           literal 2 : i32 [52, 54)

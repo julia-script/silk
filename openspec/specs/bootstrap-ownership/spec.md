@@ -371,9 +371,33 @@ body with concrete-only behavior.
 - **WHEN** a checked generic whole-value transfer is instantiated once with `i32` and once with an affine struct
 - **THEN** each instance receives the correct concrete copy or cleanup actions from one generic ownership proof
 
-### Requirement: Slice loans attach to stable owner roots
+### Requirement: Mutable owned parameters provide local writable storage
 
-Every available slice borrow SHALL create a compiler-only loan identity attached to the complete
+An ordinary function MAY declare `mut name: T` only when `T` is an owned parameter type. The
+parameter SHALL remain the same callable-contract type and SHALL require the same explicit caller
+transfer as `name: T`, while its function-local root permits whole-value, field, and fixed-array
+element replacement. Whole replacement MUST clean the displaced value exactly once. An explicit
+move MAY empty the root and a later complete assignment MAY reinitialize it. Borrowed parameters
+and service or interface contract parameters MUST reject the binding-level `mut` prefix.
+
+#### Scenario: Mutate and return an owned parameter
+
+- **WHEN** `fn increment(mut counter: Counter) -> Counter` updates a field and returns `move counter`
+- **THEN** the parameter root is writable, the caller must supply an explicit affine move, and the returned value owns the transferred storage
+
+#### Scenario: Replace complete parameter storage
+
+- **WHEN** a mutable affine parameter is assigned one complete replacement value
+- **THEN** cleanup destroys the displaced value once and the replacement remains live for later use or transfer
+
+#### Scenario: Reject parameter self-overlap
+
+- **WHEN** an assignment consumes a value from the same mutable parameter root that it replaces
+- **THEN** ownership reports the ordinary overlapping-assignment diagnostic without treating `mut` as permission for self-consumption
+
+### Requirement: Borrowed-view loans attach to stable owner roots
+
+Every available reference or slice borrow SHALL create a compiler-only loan identity attached to the complete
 source owner root. Any number of shared loans MAY coexist, while an exclusive loan MUST conflict
 with every other live loan. A shared loan SHALL prevent mutation, replacement, movement, or cleanup
 of its root; an exclusive loan SHALL prevent every direct use of its root. Loan identity and access
@@ -391,18 +415,18 @@ MUST NOT become runtime fields.
 
 #### Scenario: Reject owner use during a loan
 
-- **WHEN** source attempts to move, replace, mutate, or clean an owner while a conflicting slice loan is live
+- **WHEN** source attempts to move, replace, mutate, or clean an owner while a conflicting borrowed-view loan is live
 - **THEN** ownership diagnoses the owner operation and preserves the original loan and cleanup state
 
-### Requirement: Slice loans remain lexical and non-escaping
+### Requirement: Borrowed-view loans remain lexical and non-escaping
 
 An explicit borrow argument SHALL begin before its argument value is supplied and end only after the
-ordinary callee returns. A function slice parameter SHALL remain borrowed for the complete function
+ordinary callee returns. A function borrowed-view parameter SHALL remain borrowed for the complete function
 body. A returned one-source view MAY extend its call loan through a lexical local's last use. Slice
 types MUST be rejected recursively from struct or union fields, fixed arrays, owned generic
-wrappers, lazy flow environments, and other escaping captures. Direct shared and exclusive borrow
-bindings, materialized temporary owners, and stable projected places SHALL use the same lexical loan
-and non-escape rules as call-scoped borrows.
+wrappers, and escaping captures. Direct shared and exclusive borrow bindings, lexically bounded
+callable or Effect captures, materialized temporary owners, and stable projected places SHALL use
+the same lexical loan and non-escape rules as call-scoped borrows.
 
 #### Scenario: End a temporary loan after an ordinary call
 
@@ -416,8 +440,8 @@ and non-escape rules as call-scoped borrows.
 
 #### Scenario: Reject a captured slice
 
-- **WHEN** a lazy computation or callback would retain a slice after call construction
-- **THEN** ownership rejects the capture rather than ending the source loan prematurely
+- **WHEN** a lazy computation or callback would retain a borrowed view beyond its source root
+- **THEN** ownership rejects the escape rather than ending the source loan prematurely
 
 #### Scenario: Store a lexical borrow locally
 

@@ -107,7 +107,8 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
-      return `${parameterName}: ${declaredType(parameter.declaredType)}`
+      const mutability = parameter.bindingMutability === 'Mutable' ? 'mut ' : ''
+      return `${mutability}${parameterName}: ${declaredType(parameter.declaredType)}`
     })
     .join(', ')
   return Object.freeze({

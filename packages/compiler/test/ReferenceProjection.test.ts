@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -79,6 +81,105 @@ fn steal(self: &mut Holder) -> Token {
     assert.deepEqual(
       Analysis.diagnostics(stolen).map((diagnostic) => diagnostic.code),
       ['OWN0002'],
+    )
+  }),
+)
+
+it.effect('returns an exclusive nominal reference through a pipeline', () =>
+  Effect.gen(function* () {
+    const source = `struct Counter {
+  value: i32
+}
+
+fn increment(counter: &mut Counter) -> &mut Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+
+pub fn main() -> i32 {
+  let mut counter = Counter { value: 0 }
+  let result = &mut counter |> increment
+  return result.value
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/returned-pipeline',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 1n)
+
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 1)
+  }),
+)
+
+it.effect('mutates an owned parameter transferred through a pipeline', () =>
+  Effect.gen(function* () {
+    const source = `struct Counter {
+  value: i32
+}
+
+fn increment(mut counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+
+pub fn main() -> i32 {
+  let counter = Counter { value: 0 }
+  let result = move counter |> increment
+  return result.value
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/mutable-owned-parameter',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 1n)
+  }),
+)
+
+it.effect('cleans and replaces mutable owned parameter storage exactly once', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+fn replace(mut token: Token) -> Token {
+  token = Token { value: 42 }
+  return move token
+}
+pub fn main() -> i32 {
+  let token = Token { value: 1 }
+  let result = replace(move token)
+  return result.value
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'reference-projection/mutable-owned-replacement',
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(snapshot).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result.value, 42n)
+    assert.strictEqual(
+      evaluated.trace.filter((event) => event._tag === 'ReplacementCleanup').length,
+      1,
     )
   }),
 )

@@ -283,6 +283,18 @@ it('keeps string canonical, non-scalar, borrowed, and structurally atomic', () =
   )
 })
 
+it('classifies ordinary references and slices as lexical views', () => {
+  const nominal = Type.nominal('test', 'Counter')
+  const reference = Type.reference('Exclusive', nominal)
+  const slice = Type.slice('Shared', nominal)
+
+  assert.strictEqual(Type.isViewBorrow(reference), true)
+  assert.strictEqual(Type.isViewBorrow(slice), true)
+  assert.strictEqual(Type.containsViewBorrow(reference), true)
+  assert.strictEqual(Type.containsViewBorrow(Type.fixedArray(reference, 1)), true)
+  assert.strictEqual(Type.isViewBorrow(Type.fixedArray(reference, 1)), false)
+})
+
 it('keeps fixed-array element type and length in recursive structural identity', () => {
   const three = Type.fixedArray('i32', 3)
   const repeated = Type.fixedArray('i32', 3)

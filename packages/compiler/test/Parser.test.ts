@@ -1003,6 +1003,123 @@ it('parses typed parameters and bare identifier return expressions', () => {
   assertOriginalTokenTraversal(multiple)
 })
 
+it('parses mutable owned parameters losslessly', () => {
+  const result = parseText(
+    'fixture://mutable-parameters.silk',
+    'fn update(mut counter: Counter, mut amount: i32) -> Counter { return move counter }',
+  )
+  const parameters = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(parameters.map(nodeShape), [
+    {
+      kind: 'ParameterDeclaration',
+      children: [
+        'MutKeyword',
+        'Whitespace',
+        'Identifier',
+        'Colon',
+        { kind: 'TypePath', children: ['Whitespace', 'Identifier'] },
+      ],
+    },
+    {
+      kind: 'ParameterDeclaration',
+      children: [
+        'Whitespace',
+        'MutKeyword',
+        'Whitespace',
+        'Identifier',
+        'Colon',
+        { kind: 'TypePath', children: ['Whitespace', 'Identifier'] },
+      ],
+    },
+  ])
+  assertOriginalTokenTraversal(result)
+})
+
+it('recovers duplicate and misplaced parameter mutability locally', () => {
+  const duplicate = parseText(
+    'fixture://duplicate-parameter-mut.silk',
+    'fn update(mut mut counter: Counter, amount: i32) -> Counter { return move counter }',
+  )
+  const misplaced = parseText(
+    'fixture://misplaced-parameter-mut.silk',
+    'fn update(counter mut: Counter, amount: i32) -> Counter { return move counter }',
+  )
+  const parameters = (result: SyntaxFile.SyntaxFile): ReadonlyArray<SyntaxTree.Node> =>
+    descendants(result.root).filter(
+      (element): element is SyntaxTree.Node =>
+        SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+    )
+
+  assert.deepEqual(
+    duplicate.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assert.deepEqual(
+    misplaced.parserDiagnostics.map((diagnostic) => diagnostic.code),
+    ['PAR0002'],
+  )
+  assert.strictEqual(parameters(duplicate).length, 2)
+  assert.strictEqual(parameters(misplaced).length, 2)
+  assert.deepEqual(
+    errorNodes(parameters(duplicate).at(0) ?? duplicate.root)
+      .flatMap((node) => SyntaxTree.tokens(node))
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => token.kind),
+    ['MutKeyword'],
+  )
+  assert.deepEqual(
+    errorNodes(parameters(misplaced).at(0) ?? misplaced.root)
+      .flatMap((node) => SyntaxTree.tokens(node))
+      .filter((token) => token.kind !== 'Whitespace')
+      .map((token) => token.kind),
+    ['MutKeyword'],
+  )
+  assertOriginalTokenTraversal(duplicate)
+  assertOriginalTokenTraversal(misplaced)
+})
+
+it('keeps mutable parameter recovery local to the damaged parameter', () => {
+  const missingName = parseText(
+    'fixture://mutable-parameter-missing-name.silk',
+    'fn damaged(mut : i32, tail: i32) -> i32 { return tail }',
+  )
+  const missingColon = parseText(
+    'fixture://mutable-parameter-missing-colon.silk',
+    'fn damaged(mut value i32, tail: i32) -> i32 { return tail }',
+  )
+  const missingType = parseText(
+    'fixture://mutable-parameter-missing-type.silk',
+    'fn damaged(mut value:, tail: i32) -> i32 { return tail }',
+  )
+
+  assert.deepEqual(
+    missingLeaves(missingName.root).map((leaf) => leaf.expected),
+    ['Identifier'],
+  )
+  assert.deepEqual(
+    missingLeaves(missingColon.root).map((leaf) => leaf.expected),
+    ['Colon'],
+  )
+  assert.deepEqual(
+    missingLeaves(missingType.root).map((leaf) => leaf.expected),
+    ['Identifier'],
+  )
+  for (const result of [missingName, missingColon, missingType]) {
+    assert.strictEqual(
+      descendants(result.root).filter(
+        (element) => SyntaxTree.isNode(element) && element.kind === 'ParameterDeclaration',
+      ).length,
+      2,
+    )
+    assertOriginalTokenTraversal(result)
+  }
+})
+
 it('recovers missing parameter types and commas without losing later syntax', () => {
   const missingType = parseText('fixture://missing-parameter-type.silk', missingParameterTypeSource)
   const missingComma = parseText(

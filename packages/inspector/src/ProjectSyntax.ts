@@ -413,7 +413,9 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
     if (node._tag === 'Write') {
       const root =
         node.place._tag === 'WritePlace'
-          ? `b${node.place.root.ordinal}`
+          ? node.place.root._tag === 'BindingWriteRoot'
+            ? `b${node.place.root.binding.ordinal}`
+            : `p${node.place.root.parameter.ordinal}`
           : node.place.root._tag === 'BindingSliceRoot'
             ? `slice-b${node.place.root.binding.ordinal}`
             : `slice-p${node.place.root.parameter.ordinal}`

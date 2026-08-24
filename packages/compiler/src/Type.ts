@@ -67,16 +67,18 @@ export interface FixedArray {
 }
 
 /** A lexical runtime-length view whose access permission is checked statically. */
+export type BorrowAccess = 'Shared' | 'Exclusive'
+
 export interface Slice {
   readonly _tag: 'SliceType'
-  readonly access: 'Shared' | 'Exclusive'
+  readonly access: BorrowAccess
   readonly element: Type
 }
 
 /** A lexical borrow of one complete value. Unlike a Slice, it carries no runtime length. */
 export interface Reference {
   readonly _tag: 'ReferenceType'
-  readonly access: 'Shared' | 'Exclusive'
+  readonly access: BorrowAccess
   readonly target: Type
 }
 
@@ -2481,9 +2483,12 @@ export const someSubterm = (self: Type, predicate: (type: Type) => boolean): boo
 export const containsBorrow = (self: Type): boolean =>
   someSubterm(self, (type) => isString(type) || isSlice(type) || isReference(type) || isSlot(type))
 
-/** Tests whether a value may carry a lexical immutable view through data or control flow. */
-export const containsViewBorrow = (self: Type): boolean =>
-  someSubterm(self, (type) => isString(type) || isSlice(type))
+/** Tests whether this type is one direct lexical view rather than owned storage containing one. */
+export const isViewBorrow = (self: Type): self is String | Slice | Reference =>
+  isString(self) || isSlice(self) || isReference(self)
+
+/** Tests whether a value may carry a lexical view through data or control flow. */
+export const containsViewBorrow = (self: Type): boolean => someSubterm(self, isViewBorrow)
 
 /**
  * Tests whether a type stores one statically known callable environment anywhere inside it.

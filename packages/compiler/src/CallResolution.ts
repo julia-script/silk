@@ -404,7 +404,7 @@ export const analyzeCallTypeArguments = (
       (Type.isReference(resolved.fact.type)
         ? Type.containsPositionRestrictedBorrow(resolved.fact.type.target)
         : Type.containsPositionRestrictedBorrow(resolved.fact.type))
-        ? Diagnostic.sliceTypePosition('type argument', node.span)
+        ? Diagnostic.borrowedViewTypePosition('type argument', node.span)
         : undefined
     return Object.freeze({
       fact: Object.freeze({
@@ -2250,6 +2250,32 @@ export const finishCallableApplication = (
     caller !== undefined
       ? directSection
       : undefined
+  const returnedBorrowParameter = (reference: CallReferenceFact): number | undefined => {
+    if (reference._tag === 'ResolvedBuiltin') return reference.returnedBorrowParameter
+    if (reference._tag !== 'Resolved') return undefined
+    return DeclarationFacts.returnedBorrow(reference.declaration)?.parameter.id.ordinal
+  }
+  const returnedBorrowSource = (() => {
+    if (callee.fact._tag === 'FunctionItem') {
+      const parameter = returnedBorrowParameter(callee.fact.reference)
+      return parameter === undefined || argumentsResult.facts.at(parameter) === undefined
+        ? undefined
+        : Object.freeze({ _tag: 'Argument' as const, ordinal: parameter })
+    }
+    if (section !== undefined) {
+      const parameter = returnedBorrowParameter(section.reference)
+      if (parameter === undefined) return undefined
+      const ordinal = section.remainingParameters.indexOf(parameter)
+      if (ordinal >= 0 && argumentsResult.facts.at(ordinal) !== undefined) {
+        return Object.freeze({ _tag: 'Argument' as const, ordinal })
+      }
+      const capture = section.captures.find((candidate) => candidate.parameterOrdinal === parameter)
+      return capture === undefined
+        ? undefined
+        : Object.freeze({ _tag: 'Capture' as const, capture })
+    }
+    return undefined
+  })()
   const schema = callable?.schema
   const inferred = new Map<string, Type.GenericArgument>(
     schema?.substitution ?? section?.substitution ?? [],
@@ -2586,6 +2612,7 @@ export const finishCallableApplication = (
       ...(callable === undefined ? {} : { contract: callable }),
       substitution: inferred,
       inferredProviderSelectors,
+      ...(returnedBorrowSource === undefined ? {} : { returnedBorrowSource }),
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,
       syntax: node,

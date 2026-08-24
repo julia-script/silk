@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -249,6 +251,97 @@ pub fn main() -> i32 { return restored() }`)
       ownership === undefined ? '' : OwnershipEncoding.encode(ownership),
       'returned-view',
     )
+  }),
+)
+
+it.effect('retains equivalent returned-reference loans for direct and pipeline calls', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Counter { value: i32 }
+fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
+fn directConflict() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut view = identity(&mut counter)
+  let ownerRead = counter.value
+  view.value = 2
+  return ownerRead
+}
+fn pipelineConflict() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut view = &mut counter |> identity
+  let ownerRead = counter.value
+  view.value = 2
+  return ownerRead
+}
+fn directRestored() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut view = identity(&mut counter)
+  view.value = 2
+  return counter.value
+}
+fn pipelineRestored() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut view = &mut counter |> identity
+  view.value = 2
+  return counter.value
+}
+pub fn main() -> i32 { return directRestored() + pipelineRestored() }`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011', 'OWN0011'],
+    )
+    const ownership = Analysis.ownershipOf(self, 'slices/Ownership')
+    for (const ordinal of [1, 2, 3, 4]) {
+      const loan = ownership?.functions
+        .at(ordinal)
+        ?.loans.find((candidate) => candidate.origin === 'ReturnedView')
+      assert.strictEqual(loan?.root._tag, 'Let')
+      assert.strictEqual(loan?.access, 'Exclusive')
+    }
+  }),
+)
+
+it.effect('retains a returned reference sourced from an exact callable-section capture', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Counter { value: i32 }
+fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
+  counter.value = counter.value + delta
+  return move counter
+}
+fn conflict() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = select(&mut counter)
+  let mut view = callback(1)
+  counter.value = 20
+  view.value = 42
+  return counter.value
+}
+pub fn main() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let mut callback = select(&mut counter)
+  let mut view = callback(1)
+  view.value = 42
+  return counter.value
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+    assert.deepEqual(Hir.verify(Analysis.rootAnalysis(self).hir), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const main = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(2)
+    const capture = main?.loans.find((loan) => loan.origin === 'CallableCapture')
+    assert.strictEqual(capture?.access, 'Exclusive')
+    assert.strictEqual(capture?.root._tag, 'Let')
+    assert.strictEqual(
+      capture === undefined ? false : capture.endSpan.end > capture.startSpan.end,
+      true,
+    )
+
+    const evaluated = Analysis.evaluate(self)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
   }),
 )
 

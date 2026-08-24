@@ -614,6 +614,131 @@ pub fn main() -> i32 {
   )
 })
 
+it('distinguishes immutable and mutable owned parameter storage', () => {
+  const immutable = check(
+    'ownership://immutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const mutable = check(
+    'ownership://mutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const indexed = check(
+    'ownership://mutable-owned-array-parameter.silk',
+    `fn update(mut values: [i32; 2]) -> [i32; 2] {
+  values[0] = values[0] + 1
+  return move values
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(immutable.diagnostics, [])
+  assert.deepEqual(mutable.diagnostics, [])
+  assert.deepEqual(indexed.diagnostics, [])
+  assert.strictEqual(immutable.functions.at(0)?.bindings.at(0)?.mutability, 'Immutable')
+  assert.strictEqual(mutable.functions.at(0)?.bindings.at(0)?.mutability, 'Mutable')
+})
+
+it('reinitializes a mutable owned parameter after an explicit move', () => {
+  const accepted = check(
+    'ownership://reinitialized-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn reset(mut counter: Counter) -> Counter {
+  let previous = move counter
+  counter = Counter { value: previous.value + 1 }
+  drop previous
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const rejected = check(
+    'ownership://moved-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn invalid(mut counter: Counter) -> i32 {
+  let moved = move counter
+  return counter.value
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(accepted.diagnostics, [])
+  assert.deepEqual(
+    rejected.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+})
+
+it('borrows mutable owned parameter storage exclusively', () => {
+  const facts = check(
+    'ownership://borrowed-mutable-owned-parameter.silk',
+    `struct Counter { value: i32 }
+fn increment(view: &mut Counter) -> i32 {
+  view.value = view.value + 1
+  return view.value
+}
+fn update(mut counter: Counter) -> Counter {
+  let result = increment(&mut counter)
+  return move counter
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(facts.diagnostics, [])
+  assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.root._tag, 'Parameter')
+  assert.strictEqual(facts.functions.at(1)?.loans.at(0)?.access, 'Exclusive')
+})
+
+it('requires explicit transfer at mutable owned parameter boundaries and rejects overlap', () => {
+  const caller = check(
+    'ownership://mutable-owned-parameter-caller-move.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter { return move counter }
+pub fn main() -> i32 {
+  let counter = Counter { value: 0 }
+  let result = increment(counter)
+  return result.value
+}`,
+  )
+  const returned = check(
+    'ownership://mutable-owned-parameter-return-move.silk',
+    `struct Counter { value: i32 }
+fn increment(mut counter: Counter) -> Counter { return counter }
+pub fn main() -> i32 { return 0 }`,
+  )
+  const overlap = check(
+    'ownership://mutable-owned-parameter-overlap.silk',
+    `struct Counter { value: i32 }
+fn replace(mut counter: Counter) -> Counter {
+  counter = move counter
+  return Counter { value: 0 }
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    caller.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0003'],
+  )
+  assert.deepEqual(
+    returned.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0003'],
+  )
+  assert.deepEqual(
+    overlap.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0004'],
+  )
+})
+
 it('assigns Allocation one private active reclaim ticket', () => {
   const facts = check(
     'ownership://allocation-ticket.silk',

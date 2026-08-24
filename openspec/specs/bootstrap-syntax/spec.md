@@ -710,6 +710,23 @@ be an expression.
 - **WHEN** a required-return block ends with `foo` immediately before its closing brace
 - **THEN** `foo` is the recovered return expression, one parser diagnostic identifies the missing `return` keyword, and no assignment syntax is synthesized
 
+### Requirement: Owned parameter mutability parses losslessly
+
+An ordinary function parameter MAY contain one `mut` token immediately before its name. The
+concrete parameter node SHALL retain that token, its trivia, name, colon, and type in source order.
+Recovery for a missing name, colon, or type, or for a duplicate or misplaced `mut`, MUST remain
+inside the damaged parameter and preserve every following comma-separated parameter.
+
+#### Scenario: Parse a mutable owned parameter
+
+- **WHEN** source declares `fn update(mut value: Token) -> Token`
+- **THEN** the parameter node retains `mut value: Token` without changing the parameter type syntax
+
+#### Scenario: Recover duplicate parameter mutability
+
+- **WHEN** source contains `mut mut value: Token, next: i32`
+- **THEN** the second `mut` is retained as one local unexpected token and `next` remains a complete following parameter
+
 ### Requirement: Structured loop syntax is lossless and recoverable
 
 The parser SHALL recognize `while condition { statements }`, bare `break`, and bare `continue` as

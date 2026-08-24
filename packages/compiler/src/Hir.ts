@@ -308,10 +308,17 @@ export type WriteSelector =
       readonly span: SourceSpan.SourceSpan
     }
 
-/** One complete typed replacement rooted in a mutable binding. */
+export type OwnedWriteRoot =
+  | { readonly _tag: 'BindingWriteRoot'; readonly binding: BindingId }
+  | {
+      readonly _tag: 'ParameterWriteRoot'
+      readonly parameter: DeclarationFacts.ParameterId
+    }
+
+/** One complete typed replacement rooted in mutable owned storage. */
 export interface OwnedWritePlace {
   readonly _tag: 'WritePlace'
-  readonly root: BindingId
+  readonly root: OwnedWriteRoot
   readonly selectors: ReadonlyArray<WriteSelector>
   readonly type: DeclarationFacts.SemanticType
   readonly span: SourceSpan.SourceSpan
@@ -523,7 +530,7 @@ export type Expression =
       readonly nominal: Type.Nominal
       readonly field: DeclarationFacts.FieldId
       readonly access: 'CopyRead' | 'ConsumeRequested'
-      readonly borrowAccess?: Type.Slice['access']
+      readonly borrowAccess?: Type.BorrowAccess
       readonly type: DeclarationFacts.SemanticType
       readonly span: SourceSpan.SourceSpan
     }
@@ -543,7 +550,7 @@ export type Expression =
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.FixedArray | Type.Slice
-      readonly access: Type.Slice['access']
+      readonly access: Type.BorrowAccess
       readonly reborrow: boolean
       readonly suspendsParent: boolean
       readonly type: Type.Slice
@@ -555,7 +562,7 @@ export type Expression =
       readonly root: SliceRoot
       readonly selectors: ReadonlyArray<BorrowSelector>
       readonly source: Type.Type
-      readonly access: Type.Reference['access']
+      readonly access: Type.BorrowAccess
       readonly type: Type.Reference
       readonly span: SourceSpan.SourceSpan
     }
@@ -629,6 +636,8 @@ export type Expression =
       readonly _tag: 'CallableApply'
       readonly callee: Expression
       readonly arguments: ReadonlyArray<Expression>
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly heldLoans: ReadonlyArray<BorrowId>
       readonly access: Type.CallableMode
       readonly substitution: Type.Substitution
       readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
@@ -1235,7 +1244,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     if (
       expression._tag === 'Call' ||
       expression._tag === 'BuiltinCall' ||
-      expression._tag === 'BoundOperationCall'
+      expression._tag === 'BoundOperationCall' ||
+      expression._tag === 'CallableApply'
     ) {
       const begins = expression.arguments
         .flatMap(expressionTree)
@@ -1244,19 +1254,27 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             candidate,
           ): candidate is Extract<Expression, { readonly _tag: 'SliceBorrow' | 'ValueBorrow' }> =>
             (candidate._tag === 'SliceBorrow' || candidate._tag === 'ValueBorrow') &&
-            (expression._tag !== 'Call' ||
+            ((expression._tag !== 'Call' && expression._tag !== 'CallableApply') ||
               (candidate.borrow.callSpan.start === expression.span.start &&
                 candidate.borrow.callSpan.end === expression.span.end)),
         )
         .map((candidate) => borrowText(candidate.borrow))
-      const ends = [
+      const authoredEnds = [
         ...expression.loanEnds,
         ...(expression._tag === 'BoundOperationCall' ? [] : expression.heldLoans),
-      ].map(borrowText)
+      ]
+      const ends = authoredEnds
+        .filter(
+          (borrow) =>
+            (expression._tag !== 'Call' && expression._tag !== 'CallableApply') ||
+            (borrow.callSpan.start === expression.span.start &&
+              borrow.callSpan.end === expression.span.end),
+        )
+        .map(borrowText)
       if (
         begins.length !== ends.length ||
         begins.some((begin, ordinal) => begin !== ends.at(ordinal)) ||
-        new Set(ends).size !== ends.length
+        new Set(authoredEnds.map(borrowText)).size !== authoredEnds.length
       ) {
         issues.push(Object.freeze({ _tag: 'InvalidLoanEnd', span: expression.span }))
       }
@@ -1617,7 +1635,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'CallableApply':
       return [
-        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}callable-apply access=${expression.access.toLowerCase()} evaluation=${expression.evaluation} realization=${expression.realization} substitution=${[...expression.substitution.entries()].map(([parameter, argument]) => `${parameter}=${Type.encodeGenericArgument(argument)}`).join(',') || 'none'} ends=${expression.loanEnds.map(borrowText).join(',') || 'none'} held=${expression.heldLoans.map(borrowText).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         ...(expression.evaluation === 'LeftThenCallable'
           ? [
               ...expression.arguments.map(
@@ -1694,7 +1712,7 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'Write':
       return [
-        `${indent}write ${statement.place._tag === 'WritePlace' ? `b${statement.place.root.ordinal}` : statement.place.root._tag === 'BindingSliceRoot' ? `slice-b${statement.place.root.binding.ordinal}` : `slice-p${statement.place.root.parameter.ordinal}`}${statement.place.selectors
+        `${indent}write ${statement.place._tag === 'WritePlace' ? (statement.place.root._tag === 'BindingWriteRoot' ? `b${statement.place.root.binding.ordinal}` : `p${statement.place.root.parameter.ordinal}`) : statement.place.root._tag === 'BindingSliceRoot' ? `slice-b${statement.place.root.binding.ordinal}` : `slice-p${statement.place.root.parameter.ordinal}`}${statement.place.selectors
           .map((selector) =>
             selector._tag === 'Field'
               ? `.#${selector.field.ordinal}`

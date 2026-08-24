@@ -11,12 +11,14 @@ import type {
 } from './Elaboration.js'
 import {
   assignmentRoot,
+  assignmentRootAccess,
   childNode,
   compatible,
   declaredReturnTypesCompatible,
   isExpressionNode,
   representationJoinDiagnostic,
   returnedBorrowArgument,
+  returnedBorrowExpression,
   typesCompatible,
   unavailableCompatibility,
   unionConversionDiagnostic,
@@ -516,7 +518,7 @@ export const analyzeStatements = (
         if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
         }
-      } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
+      } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -524,14 +526,10 @@ export const analyzeStatements = (
           ),
         )
       } else if (
-        root._tag === 'ParameterDeclaration' &&
-        (root.declaredType._tag !== 'Resolved' ||
-          !(
-            (Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) &&
-            root.declaredType.type.access === 'Exclusive'
-          ) ||
-          (destination.fact._tag !== 'IndexProjection' &&
-            destination.fact._tag !== 'FieldProjection'))
+        assignmentRootAccess(root) === 'SharedBorrowed' ||
+        (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+          destination.fact._tag !== 'IndexProjection' &&
+          destination.fact._tag !== 'FieldProjection')
       ) {
         context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
       }
@@ -913,6 +911,7 @@ export const analyzeFunctionBody = (
     patternOrigins: ReadonlyMap<string, DeclarationFacts.ParameterFact | undefined> = new Map(),
   ): DeclarationFacts.ParameterFact | undefined => {
     if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
+    if (expression._tag === 'Move') return originOf(expression.subject, patternOrigins)
     if (expression._tag === 'Identifier') {
       if (expression.reference._tag === 'Resolved') return expression.reference.parameter
       if (expression.reference._tag === 'ResolvedBinding') {
@@ -943,14 +942,9 @@ export const analyzeFunctionBody = (
     if (expression._tag === 'FieldProjection' || expression._tag === 'IndexProjection') {
       return originOf(expression.subject, patternOrigins)
     }
-    if (expression._tag === 'Call' && expression.reference._tag === 'Resolved') {
-      const argument = returnedBorrowArgument(expression)
-      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
-    }
-    if (expression._tag === 'Call' && expression.reference._tag === 'ResolvedBuiltin') {
-      const ordinal = expression.reference.returnedBorrowParameter
-      const argument = ordinal === undefined ? undefined : expression.arguments.at(ordinal)
-      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
+    if (expression._tag === 'Call' || expression._tag === 'CallableApply') {
+      const source = returnedBorrowExpression(expression)
+      return source === undefined ? undefined : originOf(source, patternOrigins)
     }
     if (expression._tag === 'Match') {
       const scrutinee = originOf(expression.scrutinee, patternOrigins)

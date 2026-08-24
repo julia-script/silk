@@ -816,7 +816,9 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
       index.diagnostics.map((diagnostic) => ({
         code: diagnostic.code,
         position:
-          diagnostic.reason._tag === 'SliceTypePosition' ? diagnostic.reason.position : undefined,
+          diagnostic.reason._tag === 'BorrowedViewTypePosition'
+            ? diagnostic.reason.position
+            : undefined,
       })),
       [
         { code: 'SEM0054', position: 'parameter' },

@@ -31,9 +31,9 @@ A call argument `&array` SHALL create a shared slice and `&mut array` SHALL crea
 slice over the complete stable fixed-array root. The operand MUST be a direct live array binding
 whose lifetime encloses the complete call, and exclusive formation MUST additionally require a
 mutable root. There SHALL be no implicit fixed-array-to-slice conversion. Standalone slice local
-bindings formed directly from array borrows, borrowing array subplaces or temporaries, and storing
-slices in owned values SHALL remain unsupported. Ordinary functions MAY return one-source lexical
-views under the returned-view contract below.
+bindings and stable projected or materialized temporary roots SHALL use the same lexical loan
+tracking as call arguments. Storing slices in owned values SHALL remain unsupported. Ordinary
+functions MAY return one-source lexical views under the returned-view contract below.
 
 #### Scenario: Borrow two array lengths for one function
 
@@ -106,10 +106,10 @@ MUST be rejected because it would leave borrowed storage partially initialized.
 
 ### Requirement: Ordinary functions may return one-source lexical views
 
-An ordinary function SHALL be permitted to return a shared or exclusive slice view only when the
-result is proven to originate from exactly one borrowed parameter. A shared returned view MAY
-originate from `&T` or `&mut T`; an exclusive returned view MUST originate from `&mut T`. Effect,
-service, lazy, and capturing functions MUST NOT return borrowed views in this slice.
+An ordinary function SHALL be permitted to return a shared or exclusive reference or slice view
+only when the result is proven to originate from exactly one borrowed parameter. A shared returned
+view MAY originate from `&T` or `&mut T`; an exclusive returned view MUST originate from `&mut T`.
+Effect, service, interface, and other owned result contracts MUST NOT return borrowed views.
 
 #### Scenario: Return a shared subview
 
@@ -131,6 +131,21 @@ service, lazy, and capturing functions MUST NOT return borrowed views in this sl
 - **WHEN** a returned view may originate from either of two borrowed parameters
 - **THEN** analysis rejects the function without inventing lifetime parameters or a merged origin
 
+#### Scenario: Return a nominal reference through a pipeline
+
+- **WHEN** `&mut counter |> increment` invokes a function whose exclusive reference result derives from that parameter
+- **THEN** the pipeline result retains `counter` as its exact source root and the loan remains active through the result's last use
+
+#### Scenario: Return a captured view from an exact callable section
+
+- **WHEN** a known section captures the declaration's one returned-borrow parameter and a later exact application produces the result
+- **THEN** the result retains that capture's loan rather than ending it at application
+
+#### Scenario: Do not guess through an opaque callable
+
+- **WHEN** only a structural callable contract with a borrowed result is known and no exact function item or section identifies its source
+- **THEN** analysis does not infer provenance from arbitrary supplied arguments or captures
+
 ### Requirement: Returned views remain lexical and non-storable
 
 A returned view SHALL be usable as a local lexical binding and as a compatible call-scoped reborrow.
@@ -150,7 +165,7 @@ captures, and other owned storage.
 
 #### Scenario: Reject storing a returned view
 
-- **WHEN** source attempts to place a returned slice in a struct field or array element
+- **WHEN** source attempts to place a returned borrowed view in a struct field or array element
 - **THEN** analysis retains the stored-borrow prohibition and reports that the lifetime-bearing value is not an owned field value
 
 ### Requirement: Value borrows preserve stable field projections

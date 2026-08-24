@@ -55,6 +55,7 @@ import type {
 import {
   argumentFact,
   assignmentRoot,
+  assignmentRootAccess,
   availableBoolExpressionType,
   availableExpressionType,
   callCallee,
@@ -586,14 +587,18 @@ export const exclusiveBorrowRoot = (root: BorrowRootFact): boolean =>
   (root._tag === 'BindingRoot' && root.binding.mutability === 'Mutable') ||
   (root._tag === 'PatternRoot' && root.binding.access === 'Exclusive') ||
   (root._tag === 'ParameterRoot' &&
-    root.path.length > 0 &&
-    root.parameter.declaredType._tag === 'Resolved' &&
-    Type.isReference(root.parameter.declaredType.type) &&
-    root.parameter.declaredType.type.access === 'Exclusive')
+    ((root.parameter.bindingMutability === 'Mutable' &&
+      root.parameter.declaredType._tag === 'Resolved' &&
+      !Type.isReference(root.parameter.declaredType.type) &&
+      !Type.isSlice(root.parameter.declaredType.type)) ||
+      (root.path.length > 0 &&
+        root.parameter.declaredType._tag === 'Resolved' &&
+        Type.isReference(root.parameter.declaredType.type) &&
+        root.parameter.declaredType.type.access === 'Exclusive')))
 
 export const unavailableBorrow = (
   node: SyntaxTree.Node,
-  access: Type.Slice['access'],
+  access: Type.BorrowAccess,
   subject: ExpressionFact,
   diagnostics: ReadonlyArray<Diagnostic.Diagnostic>,
   cause?: Diagnostic.Diagnostic,
@@ -624,7 +629,7 @@ export const analyzeBorrow = (
   expected: SemanticType | undefined,
   borrowAllowed: boolean,
 ): ExpressionResult => {
-  const access: Type.Slice['access'] =
+  const access: Type.BorrowAccess =
     directToken(node, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
   const subjectNode = node.children.find(isExpressionNode)
   const subjectResult =
@@ -633,10 +638,7 @@ export const analyzeBorrow = (
       : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
   const subject = subjectResult?.fact ?? unavailableExpression(node)
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
-  if (
-    !borrowAllowed ||
-    (expected !== undefined && !Type.isSlice(expected) && !Type.isReference(expected))
-  ) {
+  if (!borrowAllowed) {
     return unavailableBorrow(
       node,
       access,
@@ -670,7 +672,11 @@ export const analyzeBorrow = (
       Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
     )
   }
-  if (expected === undefined && !Type.isFixedArray(sourceType) && !Type.isSlice(sourceType)) {
+  if (
+    (expected === undefined || (!Type.isSlice(expected) && !Type.isReference(expected))) &&
+    !Type.isFixedArray(sourceType) &&
+    !Type.isSlice(sourceType)
+  ) {
     if (access === 'Exclusive' && !exclusiveBorrowRoot(root)) {
       const name =
         subject._tag === 'Identifier' && 'spelling' in subject.reference
@@ -2825,7 +2831,7 @@ export function analyzePlaceReplace(
     if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
       diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
     }
-  } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
+  } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
     diagnostics.push(
       Diagnostic.immutableAssignment(
         root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -2833,13 +2839,10 @@ export function analyzePlaceReplace(
       ),
     )
   } else if (
-    root._tag === 'ParameterDeclaration' &&
-    (root.declaredType._tag !== 'Resolved' ||
-      !(
-        (Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) &&
-        root.declaredType.type.access === 'Exclusive'
-      ) ||
-      (destination.fact._tag !== 'IndexProjection' && destination.fact._tag !== 'FieldProjection'))
+    assignmentRootAccess(root) === 'SharedBorrowed' ||
+    (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+      destination.fact._tag !== 'IndexProjection' &&
+      destination.fact._tag !== 'FieldProjection')
   ) {
     diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
   }
@@ -3925,6 +3928,7 @@ export const analyzePipelineExpression = (
           scope,
           resolution,
           expectedInput,
+          true,
         )
   const inputFact = input?.fact ?? unavailableExpression(inputNode ?? node)
   const callableResult =

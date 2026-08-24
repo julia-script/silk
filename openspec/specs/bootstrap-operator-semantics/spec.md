@@ -156,6 +156,11 @@ MUST NOT create method lookup, implicit imports, or runtime namespace objects.
 - **WHEN** `increment` holds `i32.add(1)` and a body returns `2 |> increment`
 - **THEN** the pipeline invokes the stored callable and produces `3`
 
+#### Scenario: Pipe a borrowed view
+
+- **WHEN** a body evaluates `&mut counter |> increment` and `increment` accepts and returns that exclusive reference under the one-source contract
+- **THEN** the pipeline preserves the explicit borrow, source provenance, and loan lifetime of the equivalent direct invocation
+
 #### Scenario: Chain applications left-to-right
 
 - **WHEN** a body returns `2 |> i32.add(3) |> i32.multiply(4)`

@@ -609,7 +609,7 @@ borrow's lexical lifetime. Arrays of different lengths may therefore be borrowed
 exclusive access, and borrowed views cannot become owned values. Valid type positions, reborrowing,
 returned views, storage restrictions, and loan endings follow the ownership reference.
 
-**Diagnostics:** Invalid slice positions report `SEM0054`; invalid borrow positions and operands use
+**Diagnostics:** Invalid borrowed-view positions report `SEM0054`; invalid borrow positions and operands use
 `SEM0055` and `SEM0056`; exclusive borrowing of an immutable root uses `SEM0057`; invalid reborrowing
 uses `SEM0058`; implicit array decay uses `SEM0059`.
 

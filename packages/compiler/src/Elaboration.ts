@@ -321,10 +321,10 @@ export type BorrowFormationFact =
     }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
-/** One explicit whole-root slice borrow accepted only at an ordinary call boundary. */
+/** One explicit whole-root borrowed view. */
 export interface BorrowExpressionFact {
   readonly _tag: 'Borrow'
-  readonly access: Type.Slice['access']
+  readonly access: Type.BorrowAccess
   readonly subject: ExpressionFact
   readonly formation: BorrowFormationFact
   readonly type: ExpressionTypeFact
@@ -514,7 +514,7 @@ export interface FieldProjectionExpressionFact {
   readonly _tag: 'FieldProjection'
   readonly subject: ExpressionFact
   readonly nominal?: Type.Nominal
-  readonly borrowAccess?: Type.Slice['access']
+  readonly borrowAccess?: Type.BorrowAccess
   readonly fieldName: string | undefined
   readonly fieldToken?: Token.Token
   readonly state: ProjectionState
@@ -578,7 +578,7 @@ export interface IndexProjectionExpressionFact {
   readonly array?: Type.FixedArray
   readonly slice?: Type.Slice
   readonly elementType?: SemanticType
-  readonly borrowAccess?: Type.Slice['access']
+  readonly borrowAccess?: Type.BorrowAccess
   readonly access: 'CopyRead' | 'ConsumeRequested'
   readonly bounds: BoundsFact
   readonly type: ExpressionTypeFact
@@ -724,6 +724,10 @@ export interface CallableApplyExpressionFact {
   /** Generic evidence learned from the newly supplied callable arguments. */
   readonly substitution: Type.Substitution
   readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
+  /** The exact supplied argument or section capture whose lexical loan backs this result. */
+  readonly returnedBorrowSource?:
+    | { readonly _tag: 'Argument'; readonly ordinal: number }
+    | { readonly _tag: 'Capture'; readonly capture: CallableCaptureFact }
   readonly provenance:
     | { readonly _tag: 'DirectCallableApplication' }
     | {
@@ -878,6 +882,11 @@ export type ExpressionFact =
 
 /** The unique call argument whose lexical storage may back this call's result. */
 export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | undefined => {
+  if (self._tag === 'CallableApply') {
+    const source = self.returnedBorrowSource
+    const ordinal = source?._tag === 'Argument' ? source.ordinal : undefined
+    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
+  }
   if (self._tag !== 'Call') return undefined
   if (self.reference._tag === 'ResolvedBuiltin') {
     const ordinal = self.reference.returnedBorrowParameter
@@ -897,6 +906,14 @@ export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | und
       Type.containsViewBorrow(mapping.argument.type.type),
   )
   return candidates.length === 1 ? candidates.at(0)?.argument : undefined
+}
+
+/** The exact lexical expression whose storage may back this invocation's borrowed-view result. */
+export const returnedBorrowExpression = (self: ExpressionFact): ExpressionFact | undefined => {
+  if (self._tag === 'CallableApply' && self.returnedBorrowSource?._tag === 'Capture') {
+    return self.returnedBorrowSource.capture.expression
+  }
+  return returnedBorrowArgument(self)?.expression
 }
 
 /** A deterministic argument identity within one caller and concrete call site. */
@@ -978,6 +995,29 @@ export type CallContractFact =
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
 export type AssignmentRootFact = BindingDeclarationFact | ParameterFact
+
+export type AssignmentRootAccess =
+  | 'ImmutableOwned'
+  | 'MutableOwned'
+  | 'SharedBorrowed'
+  | 'ExclusiveBorrowed'
+
+/** Classifies writable roots without conflating owned binding mutability with pointee access. */
+export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAccess => {
+  const type =
+    root._tag === 'ParameterDeclaration'
+      ? root.declaredType._tag === 'Resolved'
+        ? root.declaredType.type
+        : undefined
+      : root.inferredType._tag === 'Available'
+        ? root.inferredType.type
+        : undefined
+  if (type !== undefined && (Type.isSlice(type) || Type.isReference(type))) {
+    return type.access === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
+  }
+  const mutability = root._tag === 'ParameterDeclaration' ? root.bindingMutability : root.mutability
+  return mutability === 'Mutable' ? 'MutableOwned' : 'ImmutableOwned'
+}
 
 /** Resolves the mutable root a writable-place expression is anchored to, if any. */
 export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undefined => {
