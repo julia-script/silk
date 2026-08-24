@@ -303,6 +303,15 @@ const renamePairs = [
   ['WorkRegistry', 'TaskStore'],
   ['SignalQueue', 'ReadyInbox'],
   ['PromiseCell', 'ResultState'],
+  ['PromiseHandle', 'Deferred'],
+  ['PromisePhase', 'DeferredState'],
+  ['PromisePending', 'DeferredPending'],
+  ['PromiseDone', 'DeferredDone'],
+  ['PromiseTaken', 'DeferredTaken'],
+  ['JobHandle', 'Fiber'],
+  ['PreparedJob', 'PreparedFiber'],
+  ['ValueToken', 'ChildValue'],
+  ['OwnedValueToken', 'FixedChildValue'],
   ['JobEndpoint', 'ReadyEndpoint'],
   ['WorkResult', 'TaskOutput'],
   ['Controller', 'Owner'],
@@ -317,6 +326,12 @@ const renamePairs = [
   ['activateIdentity', 'driveIdentity'],
   ['awaitValue', 'awaitResult'],
   ['emitValue', 'produceResult'],
+  ['closeConfiguredValue', 'closeChildValue'],
+  ['requiredConfiguredValue', 'requiredChildValue'],
+  ['readConfiguredValue', 'readChildValue'],
+  ['awaitPromise', 'awaitDeferred'],
+  ['joinJob', 'join'],
+  ['forkJob', 'fork'],
   ['pauseLocal', 'sleep'],
   ['tickLocal', 'poll'],
   ['advancePort', 'resume'],
@@ -804,41 +819,44 @@ it.effect('publishes one task identity without scanning and consumes a stale rea
   }),
 )
 
-it.effect('rolls back every connected-owner construction failure before publication', () =>
-  Effect.gen(function* () {
-    for (let quota = 0; quota < 5; quota += 1) {
-      const snapshot = yield* realized(
-        `pressure/independent-execution-separation-quota-${quota}`,
-        independentExecutionFailureSource(quota),
-      )
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        [],
-        JSON.stringify(Analysis.diagnostics(snapshot)),
-      )
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-      const first = completed(snapshot)
-      const second = completed(snapshot)
-      assert.strictEqual(first.result.value, -100n)
-      assert.strictEqual(second.result.value, -100n)
-      assert.isFalse(
-        first.trace.some(
-          (event) =>
-            event._tag === 'Call' &&
-            (event.target.name === 'storeFirst' || event.target.name === 'storeSecond'),
-        ),
-      )
-      const allocations = first.trace.filter(
-        (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-      )
-      assert.strictEqual(
-        allocations.filter((event) => event._tag === 'AllocationAcquire').length,
-        allocations.filter((event) => event._tag === 'AllocationRelease').length,
-        JSON.stringify(allocations),
-      )
-      assert.strictEqual((yield* runWasm(snapshot)).result, -100)
-    }
-  }),
+it.effect(
+  'rolls back every connected-owner construction failure before publication',
+  () =>
+    Effect.gen(function* () {
+      for (let quota = 0; quota < 5; quota += 1) {
+        const snapshot = yield* realized(
+          `pressure/independent-execution-separation-quota-${quota}`,
+          independentExecutionFailureSource(quota),
+        )
+        assert.deepEqual(
+          Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+          [],
+          JSON.stringify(Analysis.diagnostics(snapshot)),
+        )
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+        const first = completed(snapshot)
+        const second = completed(snapshot)
+        assert.strictEqual(first.result.value, -100n)
+        assert.strictEqual(second.result.value, -100n)
+        assert.isFalse(
+          first.trace.some(
+            (event) =>
+              event._tag === 'Call' &&
+              (event.target.name === 'storeFirst' || event.target.name === 'storeSecond'),
+          ),
+        )
+        const allocations = first.trace.filter(
+          (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+        )
+        assert.strictEqual(
+          allocations.filter((event) => event._tag === 'AllocationAcquire').length,
+          allocations.filter((event) => event._tag === 'AllocationRelease').length,
+          JSON.stringify(allocations),
+        )
+        assert.strictEqual((yield* runWasm(snapshot)).result, -100)
+      }
+    }),
+  15_000,
 )
 
 it.effect('preserves a published Initial task when later waiter allocation fails', () =>

@@ -58,68 +58,179 @@ fn publishEndpoint(endpoint: &ReadyEndpoint) -> () {
   return ()
 }
 
+// Test-local provider composition. The provider is moved into closeChildValue, so the Effect passed
+// to fork has an empty requirement row and owns rather than borrows its provider environment.
+service ChildValue {
+  effect fn read() -> i32 ? &ChildValue
+}
+
+struct FixedChildValue { value: i32 }
+
+effect fn readChildValue(self: &FixedChildValue) -> i32 { return self.value }
+
+impl ChildValue for FixedChildValue { read: FixedChildValue.readChildValue }
+
+effect fn requiredChildValue() -> i32 ? &ChildValue { return run ChildValue.read() }
+
+effect fn closeChildValue(provider: FixedChildValue) -> i32 {
+  return run requiredChildValue() |> Effect.provide<ChildValue>(&provider)
+}
+
+// One-consumer Deferred pressure state. Pending owns at most one waiter slot, Done owns the result,
+// and Taken records that the affine Fiber consumer has already observed it.
 struct Awaiting { wake: Intrinsic.Wake }
-struct ResultState {
-  readiness: Empty | Awaiting
-  done: bool
-  value: i32
+struct DeferredPending { waiter: Empty | Awaiting }
+struct DeferredDone { value: i32 }
+struct DeferredTaken {}
+struct DeferredState { phase: DeferredPending | DeferredDone | DeferredTaken }
+struct Deferred { state: Shared.Shared<DeferredState> }
+struct Fiber { result: Deferred }
+
+struct Missing {}
+struct Available { value: i32 }
+struct Linked {}
+struct AlreadyDone { wake: Intrinsic.Wake }
+
+fn restorePending(
+  self: &mut DeferredState,
+  waiter: Empty | Awaiting,
+) -> Missing {
+  self.phase = DeferredPending { waiter: move waiter }
+  return Missing {}
 }
 
-fn installWake(self: &mut ResultState, wake: Intrinsic.Wake) -> () {
-  let previous = Intrinsic.replace(self.readiness, Awaiting { wake: move wake })
-  drop previous
-  return ()
+fn takeDeferredState(self: &mut DeferredState) -> Missing | Available {
+  let previous = Intrinsic.replace(self.phase, DeferredTaken {})
+  return match move previous {
+    DeferredPending { waiter } => restorePending(move self, move waiter)
+    DeferredDone { value } => Available { value: value }
+    DeferredTaken {} => Missing {}
+  }
 }
 
-fn clearWake(self: &mut ResultState) -> Empty | Awaiting {
-  return Intrinsic.replace(self.readiness, Empty {})
-}
-
-struct WaitGuard { state: Shared.Shared<ResultState> }
-
-fn registerWait(
+fn linkWaiter(
+  self: &mut DeferredState,
+  previous: Empty | Awaiting,
   wake: Intrinsic.Wake,
-  state: Shared.Shared<ResultState>,
-) -> WaitGuard {
+) -> Linked {
+  drop previous
+  self.phase = DeferredPending { waiter: Awaiting { wake: move wake } }
+  return Linked {}
+}
+
+fn retainDone(
+  self: &mut DeferredState,
+  value: i32,
+  wake: Intrinsic.Wake,
+) -> AlreadyDone {
+  self.phase = DeferredDone { value: value }
+  return AlreadyDone { wake: move wake }
+}
+
+fn retainTaken(self: &mut DeferredState, wake: Intrinsic.Wake) -> AlreadyDone {
+  self.phase = DeferredTaken {}
+  return AlreadyDone { wake: move wake }
+}
+
+fn installWake(
+  self: &mut DeferredState,
+  wake: Intrinsic.Wake,
+) -> Linked | AlreadyDone {
+  let previous = Intrinsic.replace(self.phase, DeferredTaken {})
+  return match move previous {
+    DeferredPending { waiter } => linkWaiter(move self, move waiter, move wake)
+    DeferredDone { value } => retainDone(move self, value, move wake)
+    DeferredTaken {} => retainTaken(move self, move wake)
+  }
+}
+
+fn finishRegistration(registration: Linked | AlreadyDone) -> () {
+  return match move registration {
+    Linked {} => ()
+    AlreadyDone { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+struct WaitGuard { state: Shared.Shared<DeferredState> }
+
+fn registerWait(wake: Intrinsic.Wake, state: Shared.Shared<DeferredState>) -> WaitGuard {
   let installed = Shared.withMut(&state, installWake(move wake))
+  finishRegistration(move installed)
   return WaitGuard { state: move state }
 }
 
-fn resultDone(self: &ResultState) -> bool { return self.done }
-fn resultValue(self: &ResultState) -> i32 { return self.value }
-
-effect fn awaitResult(state: Shared.Shared<ResultState>) -> TaskOutput {
-  if Shared.with<ResultState, bool>(&state, resultDone) {
-    let value = Shared.with<ResultState, i32>(&state, resultValue)
-    drop state
-    return TaskOutput { value: value }
+fn requireAvailable(selected: Missing | Available) -> i32 {
+  return match move selected {
+    Missing {} => 0
+    Available { value } => value
   }
-  let retained = Shared.clone<ResultState>(&state)
+}
+
+fn finishAvailable(state: Shared.Shared<DeferredState>, value: i32) -> i32 {
+  drop state
+  return value
+}
+
+effect fn awaitPending(state: Shared.Shared<DeferredState>) -> i32 {
+  let retained = Shared.clone<DeferredState>(&state)
   let registration = registerWait(move state)
   run Execution.park(move registration)
-  let value = Shared.with<ResultState, i32>(&retained, resultValue)
+  let selected = Shared.withMut(&retained, takeDeferredState)
   drop retained
-  return TaskOutput { value: value }
+  return requireAvailable(move selected)
 }
 
-fn storeResult(self: &mut ResultState, value: i32) -> Empty | Awaiting {
-  self.value = value
-  self.done = true
-  return Intrinsic.replace(self.readiness, Empty {})
+effect fn finishAwait(
+  state: Shared.Shared<DeferredState>,
+  selected: Missing | Available,
+) -> i32 {
+  return match move selected {
+    Missing {} => run awaitPending(move state)
+    Available { value } => finishAvailable(move state, value)
+  }
 }
 
-fn signalResult(state: &Shared.Shared<ResultState>, value: i32) -> () {
-  let selected = Shared.withMut(state, storeResult(value))
+effect fn awaitDeferred(deferred: Deferred) -> i32 {
+  let Deferred { state } = move deferred
+  let selected = Shared.withMut(&state, takeDeferredState)
+  return run finishAwait(move state, move selected)
+}
+
+effect fn join(fiber: Fiber) -> i32 {
+  let Fiber { result } = move fiber
+  return run awaitDeferred(move result)
+}
+
+fn completeDeferred(self: &mut DeferredState, value: i32) -> Empty | Awaiting {
+  let previous = Intrinsic.replace(self.phase, DeferredDone { value: value })
+  return match move previous {
+    DeferredPending { waiter } => move waiter
+    DeferredDone { value: staleValue } => Empty {}
+    DeferredTaken {} => Empty {}
+  }
+}
+
+fn succeed(deferred: &Deferred, value: i32) -> () {
+  let selected = Shared.withMut(&deferred.state, completeDeferred(value))
   return match move selected {
     Empty {} => ()
     Awaiting { wake } => Intrinsic.wake(move wake)
   }
 }
 
-effect fn produceResult(state: Shared.Shared<ResultState>) -> TaskOutput {
-  signalResult(&state, 42)
-  drop state
+effect fn produceResult(
+  deferred: Deferred,
+  provider: FixedChildValue,
+) -> TaskOutput {
+  let value = run closeChildValue(move provider)
+  succeed(&deferred, value)
+  drop deferred
   return TaskOutput { value: 0 }
+}
+
+effect fn joinTask(fiber: Fiber) -> TaskOutput {
+  let value = run join(move fiber)
+  return TaskOutput { value: value }
 }
 
 fn storeFirst(self: &mut TaskStore, execution: Intrinsic.Execution<TaskOutput>) -> () {
@@ -199,6 +310,23 @@ fn taskResult(self: &TaskStore) -> i32 { return self.result }
 fn taskCompleted(self: &TaskStore) -> i32 { return self.completed }
 fn notificationCount(self: &ReadyInbox) -> i32 { return self.length - 2 }
 
+// `fork` commits an already funded child package to a typed Fiber handle. Publication remains in
+// the caller's all-or-nothing transaction so the sibling join task can also be funded first.
+struct PreparedFiber {
+  fiber: Fiber
+  task: Intrinsic.Execution<TaskOutput>
+}
+
+fn fork(
+  deferred: Deferred,
+  task: Intrinsic.Execution<TaskOutput>,
+) -> PreparedFiber {
+  return PreparedFiber {
+    fiber: Fiber { result: move deferred },
+    task: move task,
+  }
+}
+
 effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
   let mut inboxAllocator = Core.make()
   let mut tasksAllocator = Core.make()
@@ -219,11 +347,10 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     completed: 0,
     result: 0,
   }) |> Effect.provideMut<Core.Allocator>(&mut tasksAllocator)
-  let result = run Shared.make<ResultState>(ResultState {
-    readiness: Empty {},
-    done: false,
-    value: 0,
+  let resultState = run Shared.make<DeferredState>(DeferredState {
+    phase: DeferredPending { waiter: Empty {} },
   }) |> Effect.provideMut<Core.Allocator>(&mut resultAllocator)
+  let result = Deferred { state: move resultState }
 
   let waiterEndpoint = ReadyEndpoint {
     inbox: Shared.clone<ReadyInbox>(&inbox),
@@ -233,18 +360,21 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     inbox: Shared.clone<ReadyInbox>(&inbox),
     identity: 2,
   }
-  let waiterState = Shared.clone<ResultState>(&result)
-  let producerState = Shared.clone<ResultState>(&result)
-  let waiter = run Execution.make(
-    awaitResult(move waiterState),
-    move waiterEndpoint,
-    publishEndpoint,
-  ) |> Effect.provideMut<Core.Allocator>(&mut waiterAllocator)
-  let producer = run Execution.make(
-    produceResult(move producerState),
+  // The provider-requiring child is closed by moving its provider into the exact body before fork.
+  let publisher = Deferred { state: Shared.clone<DeferredState>(&result.state) }
+  let closedProducer = produceResult(move publisher, FixedChildValue { value: 42 })
+  let producerTask = run Execution.make(
+    move closedProducer,
     move producerEndpoint,
     publishEndpoint,
   ) |> Effect.provideMut<Core.Allocator>(&mut producerAllocator)
+  let prepared = fork(move result, move producerTask)
+  let PreparedFiber { fiber, task: producer } = move prepared
+  let waiter = run Execution.make(
+    joinTask(move fiber),
+    move waiterEndpoint,
+    publishEndpoint,
+  ) |> Effect.provideMut<Core.Allocator>(&mut waiterAllocator)
 
   // Both exact packages exist before either homogeneous Initial task becomes observable.
   let publishedWaiter = Shared.withMut(&tasks, storeFirst(move waiter))
@@ -262,7 +392,6 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
   let value = Shared.with<TaskStore, i32>(&tasks, taskResult)
   let completed = Shared.with<TaskStore, i32>(&tasks, taskCompleted)
   let notifications = Shared.with<ReadyInbox, i32>(&inbox, notificationCount)
-  drop result
   drop tasks
   drop inbox
   if completed != 2 { return -1 }
