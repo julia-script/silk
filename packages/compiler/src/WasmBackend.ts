@@ -7791,7 +7791,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       )
     }
   const frameCleanupThunks = new Map<number, FuncActor.Func>()
-  if (suspensionEnabled)
+  if (suspensionEnabled && executionPackageCleanups.size > 0)
     for (const [ordinal, record] of resumeRecords.entries()) {
       const id = ordinal + 1
       frameCleanupThunks.set(
@@ -7898,7 +7898,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     return independentDrivers.get(Instances.keyText(target.fn.instance)) ?? target.handle
   }
 
-  for (const [ordinal, record] of resumeRecords.entries()) {
+  for (const [ordinal, record] of frameCleanupThunks.size === 0 ? [] : resumeRecords.entries()) {
     const id = ordinal + 1
     const handle = frameCleanupThunks.get(id)
     const frameLayout = coroutineFrameStates.get(Backend.suspensionPointKey(record.region.point))
@@ -7919,13 +7919,16 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         readonly access: Extract<Mir.CoroutineFrameAccess, { readonly _tag: 'AffineTransfer' }>
       } => field.access._tag === 'AffineTransfer',
     )
+    const affineLocals = new Set(fields.map((field) => field.local.ordinal))
     const provenance = record.region.provenance
     const cleanupFunction: Mir.MirFunction = Object.freeze({
       ...cleanupFunctionBase,
       parameterCount: 1,
       localTypes: Object.freeze([
         Object.freeze({ _tag: 'usize' as const }),
-        ...record.fn.localTypes,
+        ...record.fn.localTypes.map((type, local) =>
+          affineLocals.has(local) ? type : Object.freeze({ _tag: 'usize' as const }),
+        ),
       ]),
       entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
       regions: Object.freeze([
