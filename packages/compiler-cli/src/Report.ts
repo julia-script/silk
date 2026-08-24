@@ -1,5 +1,7 @@
+import type * as Backend from '@silk-effect/compiler/Backend'
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
+import type * as Mir from '@silk-effect/compiler/Mir'
 import type * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
 import * as SourceFile from '@silk-effect/compiler/SourceFile'
 import type * as SourceResolver from '@silk-effect/compiler/SourceResolver'
@@ -131,6 +133,43 @@ export const toolchainError = (failure: NativeToolchain.ToolchainError): string 
   ].join('\n')
 }
 
+/** Renders one MIR violation as a diagnostic-style `path:line:column` line with rule and detail. */
+const mirViolation = (violation: Mir.Violation, sources: SourceCatalog): string => {
+  const owner =
+    violation.function === undefined
+      ? ''
+      : ` (in ${violation.function.module}.${violation.function.name})`
+  const body = `error[${violation.rule}] ${violation.detail}${owner}`
+  const span = violation.provenance?.span
+  if (span === undefined) return `  ${body}`
+  const source = sources.get(span.sourceId)
+  if (source === undefined) return `  ${span.sourceId}:?:?: ${body}`
+  const at = positionAt(source.bytes, span.start)
+  return `  ${source.path}:${at.line}:${at.column}: ${body}`
+}
+
+/**
+ * Renders a backend failure with its structured reason. The backend records exactly which MIR
+ * violations or intrinsic diagnostics stopped emission; printing only the summary message would
+ * leave the user with nothing actionable.
+ */
+export const backendError = (self: Backend.BackendError, sources: SourceCatalog): string => {
+  const head = `Backend error: ${self.message}`
+  switch (self.reason._tag) {
+    case 'InvalidMir':
+      return [
+        head,
+        ...self.reason.violations.map((violation) => mirViolation(violation, sources)),
+      ].join('\n')
+    case 'UnsupportedIntrinsic': {
+      const rendered = diagnostics(self.reason.diagnostics, sources)
+      return rendered.length > 0 ? [head, rendered].join('\n') : head
+    }
+    default:
+      return head
+  }
+}
+
 /** Explains why the root module offered no usable `main`, in terms a caller can act on. */
 const entryReason = (entry: Driver.NoEntry): string => {
   switch (entry.reason) {
@@ -187,10 +226,9 @@ export const outcome = (
     }
     case 'BackendFailed': {
       const rendered = diagnostics(self.diagnostics, sources)
-      return [
-        ...(rendered.length > 0 ? [rendered] : []),
-        `Backend error: ${self.error.message}`,
-      ].join('\n')
+      return [...(rendered.length > 0 ? [rendered] : []), backendError(self.error, sources)].join(
+        '\n',
+      )
     }
     case 'ToolchainFailed':
       return [

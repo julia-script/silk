@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as Backend from '@silk-effect/compiler/Backend'
 import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
 import type * as Driver from '@silk-effect/compiler/Driver'
 import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
@@ -141,6 +142,64 @@ it('names the executable, target, and symbol count on success', () => {
   assert.strictEqual(
     Report.outcome(outcome, source('pub fn main() -> i32 { return 42 }'), 'main.silk'),
     'Compiled main.silk -> /tmp/a.out (llvm, aarch64-apple-darwin, 1 symbols)',
+  )
+})
+
+it('lists each MIR violation with its rule, location, and owning function', () => {
+  const outcome: Driver.Outcome = {
+    _tag: 'BackendFailed',
+    error: new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: 'LLVM',
+      message: 'LLVM cannot emit invalid MIR',
+      reason: {
+        _tag: 'InvalidMir',
+        violations: [
+          {
+            _tag: 'Violation',
+            rule: 'InvalidLoan',
+            function: { _tag: 'CanonicalDeclarationId', module: 'main', name: 'useCounter' },
+            provenance: { span: span(4, 8), generated: false },
+            detail: 'loan escapes its region',
+          },
+          { _tag: 'Violation', rule: 'InvalidEntry', detail: 'entry region missing' },
+        ],
+      },
+    }),
+    diagnostics: [],
+    report: [],
+  }
+  assert.strictEqual(
+    Report.outcome(outcome, source('one\ntwo\nthree'), 'main.silk'),
+    [
+      'Backend error: LLVM cannot emit invalid MIR',
+      '  main.silk:2:1: error[InvalidLoan] loan escapes its region (in main.useCounter)',
+      '  error[InvalidEntry] entry region missing',
+    ].join('\n'),
+  )
+})
+
+it('renders unsupported intrinsic diagnostics beneath the backend error', () => {
+  const outcome: Driver.Outcome = {
+    _tag: 'BackendFailed',
+    error: new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: 'LLVM',
+      message: 'LLVM cannot emit a program with unavailable intrinsics',
+      reason: {
+        _tag: 'UnsupportedIntrinsic',
+        diagnostics: [diagnostic({ span: span(0, 1), message: 'intrinsic unavailable on llvm' })],
+      },
+    }),
+    diagnostics: [],
+    report: [],
+  }
+  assert.strictEqual(
+    Report.outcome(outcome, source('one\ntwo\nthree'), 'main.silk'),
+    [
+      'Backend error: LLVM cannot emit a program with unavailable intrinsics',
+      'main.silk:1:1: error[SEM0001] intrinsic unavailable on llvm',
+    ].join('\n'),
   )
 })
 
