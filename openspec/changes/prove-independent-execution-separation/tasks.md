@@ -76,6 +76,6 @@
       corpus; keep one realized Analysis snapshot per source and verify values,
       activation/readiness order, cleanup/release order, diagnostics, and deterministic artifacts at
       the cheapest required tiers.
-- [ ] 4.3 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
+- [x] 4.3 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and
       `pnpm release:candidate`; record every exact result and identify pre-existing failures before
       implementation handoff.
