@@ -5224,7 +5224,7 @@
     },
     {
       "operation": "Intrinsic.systemAllocationAcquire",
-      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! OutOfMemoryError>",
+      "signature": "fn Intrinsic.systemAllocationAcquire(layout: Layout) -> Effect<Allocation ! Intrinsic.StorageFailure>",
       "unsafe": false,
       "admission": "Platform",
       "consumer": "silk/core.allocate",
