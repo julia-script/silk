@@ -151,3 +151,10 @@ Layer 5 resume checkpoint `9940961` completes the connected evidence, findings, 
 Execution lifecycle documentation. The pressure suite is 14/14, documentation policy/generation
 and doctests are 54/54, and repository typecheck passes. OpenSpec progress is 20/21; only the
 formal hard-gate task remains, with resume repair usage still at 2/3.
+
+Layer 5 conformance checkpoint `681dc81` fixes the Critical recursive Wasm cleanup-authority alias,
+separates depth-indexed package and frame locals, and closes evaluator guard/frame/body-transfer
+cleanup ownership. A nested-union dormant cancellation probe now observes exact hooks, canonical
+transitions, balanced evaluator releases, a safe late Wake, and direct-Wasm result `111`. Focused
+dormant/timer evaluator-Wasm tests and compiler typecheck pass; the six consolidated High
+corrections remain in the same single conformance fix pass.
