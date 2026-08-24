@@ -19,18 +19,93 @@ one activation, while `Execution.park` returns control to an owner outside the b
 - The **registration guard** is the value returned by `Execution.park`'s registration callback and
   retained until that generation resumes or is destroyed.
 
-## Public operations
+## Yield once and resume
 
-```silk,ignore
+This complete program implements one cooperative yield. The first drive parks the body and returns
+the Execution to its owner. The second drive resumes the body and completes with `42`.
+
+```silk
+import silk.core as Core
+import silk.effect as Effect
 import silk.execution as Execution
 
-Execution.make(body, readyState, onReady)
-Execution.drive(move execution, move branchState, onComplete, onSuspend)
-Execution.park(register)
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner {
+  slot: Empty | Stored
+  result: i32
+}
+struct YieldGuard {}
+
+fn requestResume(wake: Intrinsic.Wake) -> YieldGuard {
+  // A reactor normally retains the Wake until an external event is ready.
+  // This cooperative yield signals immediately but still resumes on a later drive.
+  Intrinsic.wake(move wake)
+  return YieldGuard {}
+}
+
+effect fn body() -> i32 {
+  // park relinquishes this activation. Execution retains YieldGuard until resumption.
+  run Execution.park(requestResume)
+  return 42
+}
+
+fn ready(state: &()) -> () {
+  // A scheduler normally puts the Execution identity in its ready queue here.
+  return ()
+}
+
+fn complete(owner: &mut Owner, result: i32) -> () {
+  owner.result = result
+  return ()
+}
+
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  // drive transfers the still-live Execution back through this callback.
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+
+effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move owner)
+  }
+}
+
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut owner = Owner { slot: Empty {}, result: 0 }
+
+  // make allocates a lazy package. The body has not started yet.
+  let execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+
+  // The first drive reaches park. suspend stores the returned Execution in owner.slot.
+  run drive(move execution, &mut owner)
+
+  // The Wake made that Execution eligible. Take it from the owner and drive it again.
+  let selected = Intrinsic.replace(owner.slot, Empty {})
+  run driveStored(move selected, &mut owner)
+  return owner.result
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -1 }
+
+pub fn main() -> i32 {
+  // The program returns 42. It returns -1 if package allocation fails.
+  return run Effect.catchAll(program(), recover)
+}
 ```
 
-`make` returns `Intrinsic.Execution<A>`. `drive` consumes that value and returns continued
-ownership only through `onSuspend`. `park` is called inside the running body.
+`Execution.make` returns `Intrinsic.Execution<A>`. `Execution.drive` consumes that value and
+returns continued ownership only through `onSuspend`. `Execution.park` is called inside the running
+body.
 
 ### EXEC-001 — Construction is lazy, explicit, and caller-funded
 
@@ -39,12 +114,6 @@ ownership only through `onSuspend`. `park` is called inside the running body.
 `Execution.make` transfers the body and fixed readiness endpoint into one combined package obtained
 through the selected `Core.Allocator`. It returns the package in the `Initial` state without
 starting the body.
-
-```silk,ignore
-let creating = Execution.make(body(), readyState, onReady)
-  |> Effect.provideMut<Core.Allocator>(&mut allocator)
-let execution = run creating
-```
 
 Construction failure is `Core.OutOfMemoryError`. It publishes no Execution and leaves every input
 under ordinary Effect cleanup. Later growth of the compiler-owned execution stack is a fatal trap,

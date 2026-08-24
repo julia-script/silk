@@ -8,15 +8,56 @@ callback.
 These rules implement SLP-0002 and supply the shared-state substrate used by SLP-0001's ordinary
 source schedulers, deferred values, and readiness inboxes.
 
-## Public operations
+## Share and update a counter
 
-```silk,ignore
+This complete program creates one shared counter and gives it two owners. It updates the value
+through one owner and reads the value through the other owner.
+
+```silk
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
 import silk.shared as Shared
 
-Shared.make(value)
-Shared.clone(&cell)
-Shared.with(&cell, inspect)
-Shared.withMut(&cell, update)
+struct Counter { value: i32 }
+
+fn increment(counter: &mut Counter) -> i32 {
+  counter.value = counter.value + 1
+  return counter.value
+}
+
+fn read(counter: &Counter) -> i32 {
+  return counter.value
+}
+
+effect fn useCounter() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+
+  // make transfers the counter into a new allocation and returns its first strong owner.
+  let creating = Shared.make<Counter>(Counter { value: 41 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let counter = run creating
+
+  // clone creates another strong owner. It does not copy the Counter value.
+  let observer = Shared.clone<Counter>(&counter)
+
+  // withMut gives increment temporary exclusive access to the Counter.
+  let updated = Shared.withMut<Counter, i32>(&counter, increment)
+
+  // with gives read temporary read-only access through the other owner.
+  let observed = Shared.with<Counter, i32>(&observer, read)
+
+  drop observer
+  drop counter
+  if updated != observed { return -1 }
+  return observed
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 {
+  // The program returns 42. It returns 0 if allocation fails.
+  return run Effect.catchAll(useCounter(), recover)
+}
 ```
 
 The exact public signatures are:
@@ -81,15 +122,6 @@ diagnostics. An invalid `impl Copy` reports `SEM0083` and identifies the local s
 `Shared.withMut` invokes one take-once callback with `&mut T`. `Shared.with` narrows that access to
 `&T`, but delegates through the same exclusive runtime access state. The reference exists only for
 that callback invocation.
-
-```silk,ignore
-fn increment(value: &mut Counter) -> () {
-  value.count = value.count + 1
-  return ()
-}
-
-Shared.withMut(&counter, increment)
-```
 
 The callback may return owned data that does not retain the access reference. Work that can
 suspend, invoke external callbacks, or access the same state again must be moved out before the
