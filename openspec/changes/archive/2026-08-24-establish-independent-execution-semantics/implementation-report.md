@@ -62,3 +62,19 @@ concurrency actors from this semantic-facts slice.
 | Architecture | Cache canonicality is incomplete | Medium | Verified and fixed with canonical property ordering and strict deserialization checks. |
 | Architecture | Locale-sensitive comparison is used for canonical order | Medium | Verified and fixed: canonical sorting now compares code units. |
 | Architecture | New public actors lack package subpath exports | Medium | Verified and fixed: all four actors have explicit package exports and release-candidate coverage. |
+
+## Final re-audit and archive verification (2026-08-24)
+
+This report closes against the complete five-change SLP-0001 implementation DAG after integrating
+`origin/main` at merge commit `31bdfec`. Repeated independent language/specification,
+architecture/standards, and packaging/evidence reviews found no remaining significant defect at
+source checkpoint `444b0d9`; low-value stylistic observations were not promoted into change work.
+The accepted repairs covered canonical cleanup ordering, native POSIX status handling, callable
+loan endpoints, emission-site runtime-feature collection, sealed actor-literal inventory, and
+callback-first fatal-path evidence.
+
+The implementation and language-documentation checkpoint `9b4a311` passed `pnpm typecheck` (24/24
+tasks), `pnpm exec biome check .` (991 files), `pnpm test` (28/28 tasks, including 220 compiler
+files / 2,151 tests and the native differential suite), `pnpm check` (42/42 Turbo tasks plus 16/16
+script tests), and `pnpm release:candidate` (9/9 validations). All tasks are complete and no
+significant audit finding remains open.

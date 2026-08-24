@@ -869,3 +869,125 @@ specific escape or suspension span.
 
 - **WHEN** public shared or exclusive access is nested under public shared or exclusive access through any alias
 - **THEN** the nested call selects conflict and ownership never admits overlapping references
+
+### Requirement: Independent executions retain exact affine ownership and loan boundaries
+
+Ownership SHALL treat every available `Intrinsic.Execution<A>` as one affine, non-Copy,
+non-thread-transferable obligation independent of `A`. Moving it SHALL end the source and transfer
+the same obligation; completion or ordinary drop SHALL discharge it exactly once. Construction
+MUST reject an executable or fixed endpoint that retains an external lexical or provider loan.
+Loans created after activation MAY cross parking only when their referents are owned inside the same
+Execution and retain stable logical locations; cleanup SHALL end each loan before its referent.
+Completion MUST reject an `A` that borrows body, frame, endpoint, or package storage that completion
+will clean.
+
+#### Scenario: Move one execution owner
+
+- **WHEN** an Execution moves from a source binding into owner storage
+- **THEN** the source ends and the destination retains exactly one non-Copy execution obligation
+
+#### Scenario: Reject duplicate execution use
+
+- **WHEN** source attempts to drive or drop an Execution after it was moved into a prior drive
+- **THEN** ordinary ownership reports use-after-move and publishes no second activation obligation
+
+#### Scenario: Retain an internal loan across parking
+
+- **WHEN** an activated execution creates a loan into a value it owns, parks, and later resumes
+- **THEN** the loan keeps a stable logical referent and dormant cleanup ends it before cleaning the owned referent
+
+#### Scenario: Retain an owned Shared handle across parking
+
+- **WHEN** a Running Execution owns a `Shared<T>` handle and parks without an active Shared access borrow
+- **THEN** the Dormant Execution retains the same strong handle obligation and later resume preserves it without granting thread transfer
+
+#### Scenario: Reject parking with active Shared access
+
+- **WHEN** direct or transitively reached external park occurs while a `Shared.with` or `Shared.withMut` access borrow is live
+- **THEN** ownership reports the canonical local-shared-access diagnostic and creates no suspended frame or dormant execution state
+
+#### Scenario: Reject an external loan at construction
+
+- **WHEN** an Effect or endpoint passed toward Execution construction retains a caller lexical or provider loan
+- **THEN** ownership preserves the loan cause and the Detached obligation is unsatisfied before erasure
+
+#### Scenario: Reject a completion result borrowing package state
+
+- **WHEN** `A` would contain a loan into the body environment, continuation frames, endpoint, or combined package
+- **THEN** ownership rejects the escaping result before construction or drive can erase it
+
+#### Scenario: Reject thread transfer
+
+- **WHEN** a future or unsafe-adjacent operation attempts to transfer an Execution across local execution domains without a parallel-memory contract
+- **THEN** the canonical local-affinity fact prevents the transfer and no atomic semantics are implied
+
+### Requirement: Execution construction and drive have consuming cleanup matrices
+
+Ownership SHALL model `executionFromAllocation` as one all-or-nothing consuming transition over the
+Allocation, body, endpoint state, and endpoint callback. It SHALL model `drive` as consuming the
+Execution, affine branch state, and both take-once callbacks, with exactly one callback receiving
+the branch state. Completion SHALL transfer `A`, clean the unused suspension callback and remaining
+package values, and discharge the Execution obligation. Suspension SHALL clean the unused
+completion callback and transfer the same Execution obligation through `onSuspend`. Dropping an
+Initial or returned Execution SHALL clean all live values exactly once in dependency-safe order.
+
+#### Scenario: Consume initializer inputs
+
+- **WHEN** a valid initializer executes
+- **THEN** Allocation, body, endpoint state, and endpoint callback sources end and one Initial Execution owns all corresponding obligations
+
+#### Scenario: Complete through one branch
+
+- **WHEN** drive completes
+- **THEN** the completion callback receives the sole branch state and `A`, the suspension callback is cleaned once, and no Execution obligation remains
+
+#### Scenario: Suspend through one branch
+
+- **WHEN** drive externally parks
+- **THEN** the suspension callback receives the sole branch state and same Execution obligation, while the completion callback is cleaned once
+
+#### Scenario: Clean a never-driven body
+
+- **WHEN** an Initial Execution owning affine captures is dropped
+- **THEN** every capture and endpoint value is cleaned once before the package Allocation and no callback obligation is invoked as control flow
+
+#### Scenario: Preserve no-unwind trap semantics
+
+- **WHEN** execution-stack growth or an illegal intrinsic state traps
+- **THEN** ownership publishes no promised cleanup or recoverable failure beyond Silk's language-wide no-unwind contract
+
+### Requirement: Parking and wake retain exact generation obligations
+
+Ownership SHALL create one affine Wake obligation per park generation and transfer it to the
+registration callback. It SHALL retain returned `G`, endpoint state `O`, reusable endpoint callback
+`R`, and live frame values in the Dormant Execution. Wake consumption or drop SHALL discharge the
+Wake obligation once. Resumption SHALL clean `G` immediately before source continuation; dormant
+destruction SHALL cancel first and then clean `G`, endpoint, body, and frames in dependency order.
+Notification SHALL borrow `O` and `R` under a transient retain; reentrant destruction MUST defer
+their cleanup until that borrow ends. An internal loan SHALL end before its owned referent on every
+destroy path.
+
+#### Scenario: Transfer Wake into registration state
+
+- **WHEN** park invokes registration and the callback stores Wake in source state
+- **THEN** the callback source ends, source state owns the sole Wake obligation, and the Execution retains exactly one `G`
+
+#### Scenario: Consume Wake once
+
+- **WHEN** source calls `Intrinsic.wake(move wake)`
+- **THEN** the binding ends and no second live Wake obligation exists for that generation
+
+#### Scenario: Resume cleanup order
+
+- **WHEN** an Eligible execution is driven through the saved park continuation
+- **THEN** ownership cleans `G` once, ends any loans held by `G`, and only then continues source after park
+
+#### Scenario: Dormant cleanup order
+
+- **WHEN** a Dormant execution is dropped while Wake remains external
+- **THEN** cancellation precedes endpoint/frame cleanup, internal loans end before referents, and only inert Allocation authority remains with Wake
+
+#### Scenario: Protect endpoint borrows during reentrant destruction
+
+- **WHEN** endpoint invocation borrows `O` and reentrant source destroys the Execution
+- **THEN** ownership records deferred cleanup and does not end the endpoint borrow or clean `O` or `R` until invocation returns

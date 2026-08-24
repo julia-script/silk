@@ -862,19 +862,27 @@ this guarantee.
 
 Coroutine frame headers, resume discriminants, step results, driver loops, target function
 references, and execution-stack layouts SHALL remain backend-private and unreachable from Silk
-source. A compiled program whose reachable MIR contains no suspension operation MUST NOT emit or
-link those forms, a coroutine-frame or execution-stack path, or a complete-versus-pending branch,
-and its established synchronous entry and Effect-call artifact shape SHALL remain unchanged.
+source. A compiled program whose reachable MIR contains no suspension operation and no explicit
+Execution construction MUST NOT emit or link those forms, a coroutine-frame or execution-stack
+path, an Execution package/drive path, or a complete-versus-pending branch, and its established
+synchronous entry and Effect-call artifact shape SHALL remain unchanged. Explicitly constructing a
+non-suspending Execution SHALL retain its purpose-bound erased-body package and drive lifecycle while
+omitting suspension frames, dormant continuation, Wake, notification, and atomic support.
 
 #### Scenario: Inspect a non-suspending native artifact
 
-- **WHEN** a closed synchronous Effect program is compiled to native release bitcode
-- **THEN** structural inspection finds its established direct Effect calls and no suspension driver, coroutine frame, resume dispatch, execution-stack helper, or pending branch
+- **WHEN** a closed synchronous Effect program with no explicit Execution construction is compiled to native release bitcode
+- **THEN** structural inspection finds its established direct Effect calls and no suspension driver, coroutine frame, resume dispatch, execution-stack helper, Execution package, drive path, or pending branch
 
 #### Scenario: Inspect a non-suspending Wasm artifact
 
-- **WHEN** the same closed synchronous Effect program is compiled to direct WebAssembly
-- **THEN** structural and linkage inspection finds no suspension table, driver, coroutine-frame path, execution-stack helper, or pending branch
+- **WHEN** the same closed synchronous Effect program with no explicit Execution construction is compiled to direct WebAssembly
+- **THEN** structural and linkage inspection finds no suspension table, driver, coroutine-frame path, execution-stack helper, Execution package, drive path, or pending branch
+
+#### Scenario: Preserve explicit non-suspending ownership
+
+- **WHEN** a statically non-suspending body is explicitly constructed as an Execution
+- **THEN** structural inspection finds the owned erased-body package and drive lifecycle but no nested runner, dormant continuation, Wake, notification, or atomic support
 
 ### Requirement: Backends realize finite Effect composites without allocation
 
@@ -975,3 +983,72 @@ Fatal traps SHALL retain the existing no-unwind behavior, and strong cycles SHAL
 
 - **WHEN** external handles to a local shared cycle are dropped on native and Wasm
 - **THEN** neither backend synthesizes tracing, weak release, or cycle collection
+
+### Requirement: Native and Wasm realize verified independent execution
+
+Native and direct-Wasm backends SHALL lower only validated independent-execution MIR and SHALL
+realize execution-owned continuation storage, exact package plans, logical drive/resume dispatch,
+nested transfer, external park, fixed endpoint notification, cancellation, DestroyPending, and
+cleanup. Both backends SHALL keep Execution and Wake local and use no mandatory atomic operation in
+the initial model. Continuation-stack exhaustion and illegal states SHALL trap under the no-unwind
+contract. Backend runtime helpers, labels, physical state tags, field offsets, and segment policies
+SHALL remain private and deterministic.
+
+#### Scenario: Resume non-LIFO on native
+
+- **WHEN** validated MIR wakes and drives two parked executions in reverse suspension order
+- **THEN** native resumes each sole continuation with evaluator-equivalent results and ordered cleanup
+
+#### Scenario: Resume non-LIFO on direct Wasm
+
+- **WHEN** the same validated MIR is emitted to direct Wasm
+- **THEN** Wasm resumes the same continuations and agrees with evaluation and native on outcomes and ownership events
+
+#### Scenario: Keep local wake non-atomic
+
+- **WHEN** a local-only execution and Wake program is inspected on native and Wasm
+- **THEN** neither artifact introduces thread transfer, mandatory atomic instructions, or a work-stealing runtime
+
+#### Scenario: Trap before callbacks
+
+- **WHEN** validated test-only state reaches a Dormant/Notifying drive or stack exhaustion trap
+- **THEN** both backends trap before invoking completion or suspension callbacks and promise no unwinding cleanup
+
+#### Scenario: Preserve backend determinism
+
+- **WHEN** equivalent validated plans are emitted repeatedly
+- **THEN** runtime helper selection, resume labels, package-layout references, and artifacts are byte-identical for each target
+
+### Requirement: Backend artifacts expose independent-execution pay-for-use evidence
+
+Native and direct-Wasm inspection SHALL report deterministic structural presence or absence of
+direct lowering, nested suspension runtime, explicit owner/package support, dormant continuation
+support, wake-control support, notification support, and atomic/thread support for each complete
+specialization. Evidence SHALL follow static reachability and explicit construction rather than
+runtime branch outcomes or source actor names. The evidence MUST NOT prescribe byte counts,
+instruction counts, field offsets, or a stable runtime ABI.
+
+#### Scenario: Omit all suspension support
+
+- **WHEN** a complete artifact reaches no suspension and constructs no Execution
+- **THEN** inspection reports direct lowering and absence of every suspension and execution runtime slice
+
+#### Scenario: Retain only nested suspension support
+
+- **WHEN** a complete artifact reaches nested transfer but no explicit Execution or park
+- **THEN** inspection reports the nested runner and absence of package, dormant owner, Wake, notification, and atomic support
+
+#### Scenario: Retain explicit ownership without Wake
+
+- **WHEN** an artifact constructs a statically non-parking Execution
+- **THEN** inspection reports exact package and drive support while reporting no wake-control or external-park support
+
+#### Scenario: Retain external parking statically
+
+- **WHEN** an explicit Execution specialization can reach park on any path
+- **THEN** inspection reports independent continuation, wake-control, and notification support even when the observed test path completes without parking
+
+#### Scenario: Keep the local tier non-atomic
+
+- **WHEN** all reachable Execution and Wake values remain in one local execution domain
+- **THEN** inspection reports no atomic or cross-thread runtime support
