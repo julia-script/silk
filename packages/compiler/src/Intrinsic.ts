@@ -174,8 +174,8 @@ const consumer = (family: string, operation: string): string => {
       ? 'silk/execution.make'
       : 'silk/execution.drive'
   if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
-  if (family === 'Storage') return 'silk/core.allocate'
-  if (family === 'Host') return 'silk/core.writeAll'
+  if (family === 'Storage') return 'silk/allocator.allocate'
+  if (family === 'Host') return 'silk/standard_streams.writeAll'
   if (family === 'Os') return osConsumer(operation)
   if (family === 'Place') return 'language:place-replacement'
   return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`

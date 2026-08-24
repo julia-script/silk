@@ -14,7 +14,7 @@
 //! # Examples
 //! ## Parse and render one signed integer
 //! ```silk
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
@@ -27,12 +27,12 @@
 //! import silk.string as String
 //!
 //! effect fn convert() -> i32
-//! ! Core.OutOfMemoryError {
-//!   let mut allocator = Core.make()
+//! ! Allocator.OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorService()
 //!   let parsed = Format.signedValue("-42")
 //!     |> Result.unwrapOr<i64, Format.ParseError>(0)
 //!   let rendering = Format.signedText(parsed)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let rendered = run rendering
 //!   let text = String.view(&rendered)
 //!   if text == "-42" {} else {
@@ -42,7 +42,7 @@
 //!     |> i64.toI32
 //! }
 //!
-//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -64,8 +64,8 @@
 // need to prepend. Parsing accumulates *negatively* for signed text, so `i64.MIN` — whose magnitude
 // has no positive counterpart — parses like any other value instead of being a special case.
 
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.i16 as i16
 import silk.i32 as i32
 import silk.i64 as i64

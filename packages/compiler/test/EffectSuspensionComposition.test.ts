@@ -99,7 +99,7 @@ pub fn main() -> i32 {
         assert.isFalse(
           runner.providers.some(
             (provider) =>
-              provider.capability.module === 'silk/core' &&
+              provider.capability.module === 'silk/allocator' &&
               provider.capability.name === 'Allocator',
           ),
         )

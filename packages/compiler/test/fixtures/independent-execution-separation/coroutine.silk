@@ -1,5 +1,5 @@
 // Compiler fixture: alternate owner pressure evidence, not a canonical Coroutine API.
-import silk.core as Core
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -116,17 +116,17 @@ fn consumeLate(selected: Empty | Yielded) -> () {
   }
 }
 
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let port = run Shared.make<PortState>(PortState {
     slot: Empty {},
     ready: 0,
     notifications: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
   let bodyPort = Shared.clone<PortState>(&port)
   let endpoint = Shared.clone<PortState>(&port)
   let execution = run Execution.make(body(move bodyPort), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {}, order: 0, result: 0 }
   run drive(move execution, &mut owner)
   run resume(&port, &mut owner)
@@ -140,11 +140,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
     slot: Empty {},
     ready: 0,
     notifications: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
   let cancelledBodyPort = Shared.clone<PortState>(&cancelledPort)
   let cancelledEndpoint = Shared.clone<PortState>(&cancelledPort)
   let cancelled = run Execution.make(body(move cancelledBodyPort), move cancelledEndpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut cancelledOwner = Owner { slot: Empty {}, order: 0, result: 0 }
   run drive(move cancelled, &mut cancelledOwner)
   let dormant = Intrinsic.replace(cancelledOwner.slot, Empty {})
@@ -161,5 +161,5 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   return result
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -100 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

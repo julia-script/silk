@@ -207,20 +207,20 @@ const quotaSourceFor = (bytecode: ReadonlyArray<number>, quota: number): string 
   const generated = sourceFor(bytecode).source
   const withAllocator = replaceExactlyOnce(
     generated,
-    'import silk.logging { length as logLength }',
-    `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    'import silk.logger { length as logLength }',
+    `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
-import silk.logging { length as logLength }
+import silk.logger { length as logLength }
 
 struct QuotaAllocator { remaining: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }
@@ -229,7 +229,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }`,
   )
   return replaceExactlyOnce(
     withAllocator,
-    '  let mut allocator = SystemAllocator.make()',
+    '  let mut allocator = Allocator.systemAllocatorService()',
     `  let mut allocator = QuotaAllocator { remaining: ${quota} }`,
   )
 }
@@ -490,7 +490,7 @@ it.effect(
           `${id}: ${JSON.stringify({ stderr: run.stderr, signal: run.signal, error: run.error?.message })}`,
         )
         if (quota === allocationCount) assert.strictEqual(run.stderr, '')
-        else assert.strictEqual(run.stderr, 'Error: silk/core.OutOfMemoryError\n')
+        else assert.strictEqual(run.stderr, 'Error: silk/allocator.OutOfMemoryError\n')
       }
     }),
   180_000,

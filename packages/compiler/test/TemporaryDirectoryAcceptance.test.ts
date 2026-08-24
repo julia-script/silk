@@ -46,7 +46,7 @@ effect fn failingWork() -> i32 ! Sentinel { fail Sentinel { code: 7 } }
 /// Reads the failure's own payload back, so what is asserted is *which* failure survived.
 effect fn recoverSentinel(error: Sentinel) -> i32 { return error.code }`
 
-const epilogue = `import silk.core { OutOfMemoryError }
+const epilogue = `import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError }
 import silk.result { Result }
 pub fn main() -> i32 {
@@ -66,8 +66,9 @@ pub fn main() -> i32 {
  * The whole lifecycle against a real confined root. Each numbered return is one acceptance
  * criterion, so a native exit status names which one failed rather than merely that one did.
  */
-const nativeSource = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nativeSource = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
@@ -75,7 +76,7 @@ import silk.u8 as u8
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
@@ -120,14 +121,15 @@ ${epilogue}`
  * directory, and the primitive underneath removes exactly one *empty* directory — so the two-pass
  * walk is the part that has to be right, and this is it running on a real filesystem.
  */
-const nativeTreeSource = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nativeTreeSource = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
   let removed = run Intrinsic.bindRequirementMut(
@@ -145,8 +147,9 @@ ${epilogue}`
  * and the values the arm reloads are read again at the arm's join. Both a populated tree and a live
  * neighbour are needed — two bare scopes released in sequence do not reach it.
  */
-const nativeManySource = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nativeManySource = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
@@ -154,7 +157,7 @@ import silk.u8 as u8
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
@@ -196,14 +199,15 @@ ${epilogue}`
  * back through the output buffer, and a buffer too small creates nothing and reports the capacity
  * it needs. The retry counter is what proves the second half.
  */
-const evaluatorSource = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const evaluatorSource = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
   let scope = run Intrinsic.bindRequirementMut(

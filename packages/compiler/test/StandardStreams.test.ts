@@ -16,12 +16,12 @@ const encoder = new TextEncoder()
 const outputRoot = mkdtempSync(join(tmpdir(), 'silk-standard-streams-'))
 afterAll(() => rmSync(outputRoot, { recursive: true, force: true }))
 
-const source = `import silk.core as StandardStream
-import silk.core { NativeStandardStreams }
-import silk.core { StreamWriteError }
+const source = `import silk.standard_streams as StandardStream
+import silk.standard_streams { NativeStandardStreams }
+import silk.standard_streams { StreamWriteError }
 import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
-  let mut native = NativeStandardStreams.native()
+  let mut native = StandardStream.nativeStandardStreamService()
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
   let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("row\\n")), &mut native)
@@ -197,9 +197,9 @@ it.effect('replaces the host provider with a pure source in-memory implementatio
   Effect.gen(function* () {
     const replaced = yield* Analysis.ofSourceRealized(
       'standard-streams/memory',
-      encoder.encode(`import silk.core as StandardStream
-import silk.core { StandardStreams }
-import silk.core { StreamWriteError }
+      encoder.encode(`import silk.standard_streams as StandardStream
+import silk.standard_streams { StandardStreams }
+import silk.standard_streams { StreamWriteError }
 import silk.effect as Effect
 struct MemoryStreams { writes: i32 }
 effect fn record(

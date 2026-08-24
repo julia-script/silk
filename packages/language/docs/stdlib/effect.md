@@ -139,11 +139,11 @@ Public declarations: 26.
 pub effect fn log(message: string) -> () ! LogError ? &mut Logger
 ```
 
-Sends one complete message at `LogLevel.info()` through the required mutable [`Logger`](./logging.md#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572).
+Sends one complete message at `Logger.info()` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
 
 ### Details
 
-The logger decides where the message goes. Logging may fail with [`LogError`](./logging.md#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72), and this wrapper
+The logger decides where the message goes. Logging may fail with [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72), and this wrapper
 neither buffers nor recovers that failure. Use [`logAt`](#declaration-73696c6b2f6566666563743a3a6c6f674174) when the level is not Info.
 
 <a id="declaration-73696c6b2f6566666563743a3a6c6f674174"></a>
@@ -154,12 +154,12 @@ neither buffers nor recovers that failure. Use [`logAt`](#declaration-73696c6b2f
 pub effect fn logAt(level: LogLevel, message: string) -> () ! LogError ? &mut Logger
 ```
 
-Sends one complete message at `level` through the required mutable [`Logger`](./logging.md#declaration-73696c6b2f6c6f6767696e673a3a4c6f67676572).
+Sends one complete message at `level` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
 
 ### Details
 
 The message is one logging event rather than a fragment. The provider controls formatting and
-destination; its [`LogError`](./logging.md#declaration-73696c6b2f6c6f6767696e673a3a4c6f674572726f72) propagates unchanged.
+destination; its [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72) propagates unchanged.
 
 <a id="declaration-73696c6b2f6566666563743a3a726573756c74"></a>
 

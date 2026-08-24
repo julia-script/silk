@@ -20,9 +20,10 @@ pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 const successSource = `pub struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { return () }`
 
-const cleanupSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const cleanupSource = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 pub struct SomeError { storage: Allocation }
@@ -30,7 +31,7 @@ impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
 pub effect fn main() -> () ! SomeError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -46,9 +47,10 @@ pub effect fn main() -> () ! SomeError {
   return ()
 }`
 
-const evaluateFailureSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const evaluateFailureSource = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 pub struct SomeError {}
@@ -58,7 +60,7 @@ impl Drop for Guard {
 }
 effect fn stop() -> never ! SomeError { fail SomeError {} }
 pub effect fn main() -> () ! SomeError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let guard = Guard { storage: move storage }

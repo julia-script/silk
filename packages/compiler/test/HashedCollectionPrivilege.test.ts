@@ -27,29 +27,31 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
 /** A program that inserts, grows, looks up and removes, so the whole map is lowered, not a corner. */
-const usingAMap = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const usingAMap = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.i32 as i32
+import silk.hash as Hash
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
-  let mut map = make<Word, i32>(HashKey.seed(12345))
+  let mut allocator = Allocator.systemAllocatorService()
+  let mut map = make<Word, i32>(Hash.seed(12345))
   let mut key = 0
   while key < 20 {
-    let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key)
+    let previous = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key)
       |> Effect.provideMut(&mut allocator)
     drop previous
     key = key + 1
   }
-  let taken = remove<Word, i32>(&mut map, HashKey.word(3))
+  let taken = remove<Word, i32>(&mut map, Hash.word(3))
   let removed = Option.unwrapOr<i32>(move taken, -1)
   if removed != 3 { return 1 }
-  if !contains<Word, i32>(&map, HashKey.word(4)) { return 2 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(4)), -1)
+  if !contains<Word, i32>(&map, Hash.word(4)) { return 2 }
+  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(4)), -1)
   if held != 4 { return 3 }
   return 42
 }
@@ -155,8 +157,10 @@ it.effect('treats HashKey as an ordinary interface rather than by its spelling',
     // spelling `HashKey`, this program and the one above would not agree.
     const snapshot = yield* analyzed(
       'hashed-privilege/renamed',
-      `import silk.hash { HashKey }
+      `import silk.hash as Hash
+import silk.hash { HashKey }
 import silk.u64 as u64
+import silk.hash as Hash
 import silk.hash { HashSeed }
 
 interface Whatever {
@@ -167,16 +171,16 @@ interface Whatever {
 struct Tag { value: u64 }
 
 fn tagEquals(left: &Tag, right: &Tag) -> bool { return left.value == right.value }
-fn tagHash(value: &Tag, seed: &HashSeed) -> u64 { return HashKey.mix(seed, value.value) }
+fn tagHash(value: &Tag, seed: &HashSeed) -> u64 { return Hash.mix(seed, value.value) }
 
 impl Whatever for Tag { equals: Tag.tagEquals hash: Tag.tagHash }
 
 fn hashOf<T: Whatever>(value: T, seed: HashSeed) -> u64 { return Whatever.hash(&value, &seed) }
 
 pub fn main() -> i32 {
-  let seed = HashKey.seed(12345)
-  let mine = hashOf<Tag>(Tag { value: 20 }, HashKey.seed(12345))
-  let stock = HashKey.mix(&seed, u64.toU64(20))
+  let seed = Hash.seed(12345)
+  let mine = hashOf<Tag>(Tag { value: 20 }, Hash.seed(12345))
+  let stock = Hash.mix(&seed, u64.toU64(20))
   if mine != stock { return 1 }
   return 42
 }`,

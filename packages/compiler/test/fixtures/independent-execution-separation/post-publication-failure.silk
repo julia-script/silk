@@ -1,5 +1,5 @@
 // Compiler fixture: waiter insertion failure does not damage a published task.
-import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.layout { Layout }
@@ -60,7 +60,7 @@ effect fn joinOrAwait(fiber: &Fiber) -> i32 ! OutOfMemoryError {
 effect fn waiterFailed(error: OutOfMemoryError) -> i32 { return 7 }
 
 effect fn program() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let deferred = run Shared.make<Deferred>(Deferred { task: Empty {}, waiters: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let fiber = Fiber { deferred: Shared.clone(&deferred) }

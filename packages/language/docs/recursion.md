@@ -88,7 +88,8 @@ the weight:
 
 ```silk
 import silk.box { Box, make as boxMake, into as boxInto }
-import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 
@@ -162,7 +163,7 @@ fn length(chain: Chain) -> i32 {
 }
 
 effect fn measure() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build(4096) |> Effect.provideMut(&mut allocator)
   let counted = length(move built)
   if counted == 4096 { return 0 }
@@ -182,7 +183,8 @@ bounded by the stack:
 
 ```silk
 import silk.box { Box, make as boxMake, get as boxGet }
-import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 
@@ -227,7 +229,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn measure() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build(64) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
   drop built

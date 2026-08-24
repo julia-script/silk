@@ -15,16 +15,17 @@ export const scannerSource = readFileSync(
 const quotaScannerSource = (quota: number): string =>
   scannerSource
     .replace(
-      'let mut allocator = SystemAllocator.make()',
+      'let mut allocator = Allocator.systemAllocatorService()',
       `let mut allocator = QuotaAllocator {remaining: ${quota}}`,
     )
     .replace(
       `struct U8 {
   value: i32
 }`,
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator {
@@ -37,7 +38,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
     fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut inner)
   let allocation = run pending

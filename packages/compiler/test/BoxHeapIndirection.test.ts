@@ -25,9 +25,10 @@ const counts = (
  * the whole change exists to make expressible, and the shape whose release is invisible to every
  * other check the compiler has.
  */
-const tree = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const tree = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet }
@@ -91,7 +92,7 @@ effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn sum() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
   drop built
@@ -159,14 +160,15 @@ it.effect('carries the same release count through the Wasm backend under both pr
  * borrow, exclusive borrow, and a consuming move. `into` empties the box before handing the value
  * out, so the hook that still runs on the emptied box drops nothing and the storage releases once.
  */
-const accessors = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const accessors = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut boxed = run boxMake<i32>(20) |> Effect.provideMut(&mut allocator)
 
   let borrowed = boxGet<i32>(&boxed)
@@ -217,14 +219,15 @@ it.effect('borrows, mutates, and consumes a boxed value without unsafe code', ()
  * value's own hook first, then the box's storage. This is the case `RawBufferCleanup` would
  * abandon if the box did not drop its element.
  */
-const nested = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nested = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = vectorMake<i32>()
   let first = run vectorAppend<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
   let boxed = run boxMake<Vector<i32>>(move values) |> Effect.provideMut(&mut allocator)
@@ -267,9 +270,10 @@ it.effect('releases an owning value held inside a box', () =>
  * Depth is consumed by the runtime call stack rather than by the cleanup plan, so a long chain
  * releases every link. The plan itself stays one hook call wide however long the chain is.
  */
-const chain = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const chain = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.box { Box, make as boxMake, into as boxInto }
 
@@ -293,7 +297,7 @@ effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run extend(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 42

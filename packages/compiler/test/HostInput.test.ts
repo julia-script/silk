@@ -22,8 +22,8 @@ const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
  * fixed working directory, so a caller reaches the complete service without a host boundary.
  */
 const scriptedProvider = `import silk.bytes { Bytes }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.host_input { HostInput }
 import silk.host_input { HostInputError }
 import silk.option { Option }
@@ -189,14 +189,15 @@ it.effect('returns the command-line arguments in the order the process received 
   Effect.gen(function* () {
     const self = yield* snapshot(
       scriptedSource(`import silk.bytes { Bytes }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = scripted(usize.add(0, 3))
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
@@ -229,13 +230,14 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('reports an argument past the end and an unset variable as absence, not failure', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      scriptedSource(`import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = scripted(usize.ONE)
   let past = run Effect.provideMut(
     Effect.provideMut(argument(usize.add(0, 9)), &mut allocator),
@@ -270,14 +272,15 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('keeps a value that is not valid UTF-8 readable as its exact bytes', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      scriptedSource(`import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = scripted(usize.ONE)
   let found = run Effect.provideMut(
     Effect.provideMut(variableNamed("PATH"), &mut allocator),
@@ -313,7 +316,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
 it.effect('routes an in-source provider error into the typed failure channel', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      scriptedSource(`import silk.core { OutOfMemoryError }
+      scriptedSource(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
@@ -333,15 +336,16 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
   }),
 )
 
-const nativeProgram = nativeSource(`import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nativeProgram = nativeSource(`import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
@@ -410,15 +414,16 @@ it.effect('copies a value longer than the provider buffer completely', () =>
   Effect.gen(function* () {
     const long = Object.freeze(Array.from({ length: 300 }, (_, index) => (index % 251) + 1))
     const self = yield* snapshot(
-      nativeSource(`import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      nativeSource(`import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = OsHostInput.make()
   let found = run Effect.provideMut(
     Effect.provideMut(argument(usize.ZERO), &mut allocator),
@@ -534,15 +539,16 @@ it.effect(
       // The exit status is derived from the arguments the process actually received, so a shim that
       // dropped `argc` and `argv` could not produce it.
       const source = nativeSource(`import silk.bytes { Bytes }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 4) { return 1 }

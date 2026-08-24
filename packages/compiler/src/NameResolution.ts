@@ -369,6 +369,29 @@ export const lookup = (
     ? Object.freeze({ _tag: 'Unavailable', spelling })
     : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
+/**
+ * A nominal declaration doubles as its module's scope only when its name matches the module's
+ * basename — case-insensitively, ignoring underscores, so `hash_map` names `HashMap`. Returns the
+ * module it scopes, or undefined for every other declaration.
+ */
+export const scopedModule = (
+  declaration: DeclarationFacts.MemberFact,
+): string | undefined => {
+  if (
+    declaration._tag !== 'StructDeclaration' &&
+    declaration._tag !== 'ServiceDeclaration' &&
+    declaration._tag !== 'InterfaceDeclaration'
+  )
+    return undefined
+  if (declaration.canonical._tag !== 'Canonical') return undefined
+  const module = declaration.canonical.id.module
+  const basename = module.slice(module.lastIndexOf('/') + 1)
+  return basename.replaceAll('_', '').toLowerCase() ===
+    declaration.canonical.id.name.replaceAll('_', '').toLowerCase()
+    ? module
+    : undefined
+}
+
 export const lookupQualified = (
   scope: ModuleScope,
   index: DeclarationIndex.Index,
@@ -383,11 +406,17 @@ export const lookupQualified = (
     qualifier._tag === 'Missing'
   )
     return qualifier
-  if (qualifier._tag !== 'Namespace')
+  const module =
+    qualifier._tag === 'Namespace'
+      ? qualifier.module
+      : qualifier._tag === 'Resolved'
+        ? scopedModule(qualifier.declaration)
+        : undefined
+  if (module === undefined)
     return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
-  const declaration = canonicalDeclaration(index, qualifier.module, member)
+  const declaration = canonicalDeclaration(index, module, member)
   if (declaration === undefined) {
-    const diagnostic = Diagnostic.unknownImportedMember(qualifier.module, member, token.span)
+    const diagnostic = Diagnostic.unknownImportedMember(module, member, token.span)
     return Object.freeze({
       _tag: 'Unavailable',
       spelling: member,
@@ -395,7 +424,7 @@ export const lookupQualified = (
     })
   }
   if (declaration.visibility === 'Private') {
-    const diagnostic = Diagnostic.inaccessibleImportedMember(qualifier.module, member, token.span)
+    const diagnostic = Diagnostic.inaccessibleImportedMember(module, member, token.span)
     return Object.freeze({
       _tag: 'Inaccessible',
       spelling: member,

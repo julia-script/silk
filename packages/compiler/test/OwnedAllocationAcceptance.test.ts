@@ -167,7 +167,7 @@ pub fn main() -> i32 {
 
 it.effect('initializes one caller-funded local-shared core in evaluator and Wasm parity', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn construct() -> i32 ! OutOfMemoryError {
   let layout = Intrinsic.sharedLayout<i32>()
@@ -273,7 +273,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('clones, accesses sequentially, and cleans one local-shared payload exactly once', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn selected(value: &mut i32) -> i32 { return 21 }
 fn conflict() -> i32 { return 0 }
@@ -449,7 +449,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('relates a callback-borrow escape to its local-shared access boundary', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 struct Pair { first: i32 second: i32 }
 fn deferred(value: &mut Pair) -> Effect<i32> {
   return effect { return value.first }
@@ -622,7 +622,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('keeps an outer local-shared access active while nested access selects conflict', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn selected(value: &mut i32) -> i32 { return 0 }
 fn conflict() -> i32 { return 21 }
@@ -710,7 +710,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('cleans acyclic nested local-shared cores from payload to allocation', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Outer { inner: Intrinsic.SharedCore<i32> }
 effect fn construct() -> i32 ! OutOfMemoryError {
@@ -767,7 +767,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('cleans every core in an acyclic recursive local-shared chain', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Empty {}
 struct Node { next: Intrinsic.SharedCore<Node> | Empty }
@@ -827,7 +827,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('leaks the specified strong cycle without manufacturing cleanup authority', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Empty {}
 struct Bomb {}
@@ -886,7 +886,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('discharges local-shared obligations across two typed-failure frames', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 struct Problem {}
 effect fn failInner(core: Intrinsic.SharedCore<i32>) -> i32 ! Problem {
@@ -935,8 +935,8 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('leaves the payload cleanup obligation with source when allocation is exhausted', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { storage: Allocation }
@@ -986,7 +986,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('transports exact local-shared allocation provenance through an ordinary helper', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { OutOfMemoryError }
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn forward(allocation: Allocation) -> Allocation { return move allocation }
 effect fn construct() -> i32 ! OutOfMemoryError {
@@ -1013,12 +1013,12 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
 
 it.effect('proves exact local-shared provenance through the selected allocator provider', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    const source = ascii(`import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let recipe = Allocator.allocate(Intrinsic.sharedLayout<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let allocation = run recipe
@@ -1044,14 +1044,14 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
 
 /** The accepted shape every negative below deviates from in exactly one way. */
-const guarded = (body: string): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const guarded = (body: string): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -1075,7 +1075,7 @@ it.effect('rejects every prohibited allocation shape before lowering', () =>
     const cases: ReadonlyArray<readonly [string, string, string]> = [
       [
         'local-shared-layout-provenance-mismatch',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn store() -> i32 ! OutOfMemoryError {
   let layout = Intrinsic.sharedLayout<i64>()
@@ -1092,7 +1092,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-ordinary-layout',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn store() -> i32 ! OutOfMemoryError {
@@ -1110,7 +1110,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-helper-provenance-mismatch',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn forward(allocation: Allocation) -> Allocation { return move allocation }
 effect fn store() -> i32 ! OutOfMemoryError {
@@ -1129,7 +1129,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-conditional-helper-provenance-mismatch',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 fn choose(flag: bool, wrong: Allocation, right: Allocation) -> Allocation {
   if flag {
@@ -1157,7 +1157,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-provider-forges-provenance',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 service Forge {
@@ -1186,7 +1186,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-same-spelling-layout',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 fn sharedLayout() -> Layout { return Layout.of<i32>() }
@@ -1205,7 +1205,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-outside-unsafe',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn store() -> i32 ! OutOfMemoryError {
   let layout = Intrinsic.sharedLayout<i32>()
@@ -1220,7 +1220,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-reuses-consumed-allocation',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn store() -> i32 ! OutOfMemoryError {
   let layout = Intrinsic.sharedLayout<i32>()
@@ -1238,7 +1238,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'local-shared-reuses-consumed-payload',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn store() -> i32 ! OutOfMemoryError {
   let blockLayout = Intrinsic.sharedLayout<Allocation>()
@@ -1258,13 +1258,13 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'raw-storage-outside-unsafe',
-        `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+        `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -1294,7 +1294,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
       ],
       [
         'foreign-allocator-conformance',
-        `import silk.core { Allocator }
+        `import silk.allocator { Allocator }
 struct TestAllocator { remaining: i32 }
 impl Allocator for TestAllocator { allocate: Foreign.allocate }
 pub fn main() -> i32 { return 0 }`,

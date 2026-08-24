@@ -97,9 +97,10 @@ const saturation = 250
  * The harness is ordinary Silk calling the same public API a user program would, comparing with
  * ordinary exact `string` equality — the equality this issue must leave alone.
  */
-const program = (cases: ReadonlyArray<Case>): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const program = (cases: ReadonlyArray<Case>): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
@@ -153,7 +154,7 @@ effect fn checkFrom(
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let data = ${literal(cases.flatMap(encode))}
   let mut offset = usize.ZERO
   let mut remaining = usize.add(0, ${cases.length})

@@ -30,7 +30,7 @@ Extract work under [`withMut`](#declaration-73696c6b2f7368617265643a3a776974684d
 ### Share and update one local value
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -46,17 +46,17 @@ fn increment(value: &mut Counter) -> i32 {
 fn read(value: &Counter) -> i32 { return value.value }
 
 effect fn useCell() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let creating = make<Counter>(Counter { value: 20 })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let cell = run creating
   let alias = clone<Counter>(&cell)
   let updated = withMut<Counter, i32>(&alias, increment)
   return with<Counter, i32>(&cell, read)
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

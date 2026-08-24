@@ -107,9 +107,10 @@ pub fn main() -> i32 {
  * not need, and the absent arm answers with the fallback instead. Three allocations, three
  * releases, no leak and no double drop.
  */
-const moveOnly = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnly = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.option { Option }
@@ -135,7 +136,7 @@ effect fn acquire() -> Allocation ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let first = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let second = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let third = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)

@@ -1,0 +1,92 @@
+//! Foundational allocation service used by higher standard-library actors.
+//!
+//! # When to use
+//! Provide [`Allocator`] to operations that may create owned storage, normally with
+//! [`SystemAllocator`].
+//!
+//! # Details
+//! [`Allocator`] is an ordinary source-declared service. Its requirement remains in an Effect
+//! until a caller supplies a provider, so tests and applications can replace the process-backed
+//! implementation lexically. Allocation failure is typed as [`OutOfMemoryError`].
+//!
+//! # Examples
+//! ## Provide the process allocator
+//! ```silk
+//! import silk.allocator { Allocator }
+//!
+//! import silk.bytes as Bytes
+//!
+//! import silk.effect as Effect
+//!
+//! import silk.usize as usize
+//!
+//! effect fn copyMessage() -> i32
+//! ! Allocator.OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorService()
+//!   let source = b"Silk"
+//!   let copying = Bytes.copy(&source)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let bytes = run copying
+//!   return Bytes.length(&bytes)
+//!     |> usize.toI32
+//! }
+//!
+//! effect fn recoverAllocation(error: Allocator.OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(copyMessage(), recoverAllocation)
+//! }
+//! ```
+
+import silk.layout { Layout as LayoutValue }
+
+/// A failure that reports that an allocator cannot satisfy a storage request.
+pub struct OutOfMemoryError {}
+
+/// Fails immediately with `OutOfMemoryError`.
+///
+/// # When to use
+///
+/// Use this function to translate a checked size failure into the standard allocation failure.
+pub effect fn outOfMemory() -> never ! OutOfMemoryError {
+  fail OutOfMemoryError {}
+}
+
+/// A mutable service that acquires owned storage described by a layout.
+pub service Allocator {
+  /// Acquires one allocation for `layout`, or fails without returning partial storage.
+  effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
+}
+
+/// A process-backed provider for [`Allocator`].
+pub struct SystemAllocator {}
+
+/// Creates a process-backed allocator provider without allocating storage.
+pub fn systemAllocatorService() -> SystemAllocator {
+  return SystemAllocator {}
+}
+
+effect fn storageRefused(error: Intrinsic.StorageFailure) -> Allocation ! OutOfMemoryError {
+  drop error
+  fail OutOfMemoryError {}
+}
+
+effect fn rawSystemAllocate(
+  self: &mut SystemAllocator,
+  layout: LayoutValue
+) -> Allocation ! Intrinsic.StorageFailure {
+  return run Intrinsic.systemAllocationAcquire(move layout)
+}
+
+effect fn systemAllocate(self: &mut SystemAllocator, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
+  return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
+    rawSystemAllocate(move self, move layout),
+    storageRefused
+  )
+}
+
+impl Allocator for SystemAllocator {
+  allocate: SystemAllocator.systemAllocate
+}

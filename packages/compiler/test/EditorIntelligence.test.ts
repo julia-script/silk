@@ -43,15 +43,14 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
       )
-      const binding = occurrenceAt(snapshot, source, 'allocator')
-      const actor = occurrenceAt(snapshot, source, 'SystemAllocator', 1)
-      const operation = occurrenceAt(snapshot, source, 'make')
+      const binding = occurrenceAt(snapshot, source, 'allocator', 2)
+      const actor = occurrenceAt(snapshot, source, 'Allocator', 2)
+      const operation = occurrenceAt(snapshot, source, 'systemAllocatorService')
       assert.strictEqual(binding?.role, 'Declaration')
       assert.strictEqual(actor?.role, 'Actor')
       assert.strictEqual(operation?.role, 'Value')
       assert.isDefined(binding?.declaration)
       assert.strictEqual(actor?.resolution._tag, 'Available')
-      assert.isDefined(actor?.declaration)
       assert.isDefined(operation?.declaration)
       assert.strictEqual(
         binding === undefined
@@ -60,16 +59,10 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
         'let mut allocator: SystemAllocator',
       )
       assert.strictEqual(
-        actor === undefined
-          ? undefined
-          : Analysis.occurrencePresentation(snapshot, 'main', actor)?.text,
-        'pub struct SystemAllocator',
-      )
-      assert.strictEqual(
         operation === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', operation)?.text,
-        'pub fn make() -> SystemAllocator',
+        'pub fn systemAllocatorService() -> SystemAllocator',
       )
       return undefined
     }),
@@ -339,34 +332,32 @@ pub fn main() -> i32 {
 
 it.effect('completes and navigates the source-defined logging surface', () => {
   const source = `import silk.effect as Effect
-import silk.logging { InMemoryLogger }
-import silk.logging { LogError }
-import silk.logging { LogLevel }
-import silk.logging { StdoutLogger }
-import silk.logging { Logger }
+import silk.logger { LogError }
+import silk.logger { LogLevel }
+import silk.logger { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {
-  return run Effect.logAt(LogLevel.warning(), "ready")
+  return run Effect.logAt(Logger.warning(), "ready")
 }
 effect fn direct() -> () ! LogError ? &mut Logger {
-  return run Logger.log(LogLevel.info(), "direct")
+  return run Logger.log(Logger.info(), "direct")
 }
 pub fn main() -> i32 {
-  let memory = InMemoryLogger.memory()
-  let output = StdoutLogger.stdout()
+  let memory = Logger.inMemoryService()
+  let output = Logger.stdoutService()
   return 42
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const logger = occurrenceAt(snapshot, source, 'Logger', 3)
       assert.strictEqual(logger?.role, 'Type')
-      assert.strictEqual(logger?.declaration?.module, 'silk/logging')
+      assert.strictEqual(logger?.declaration?.module, 'silk/logger')
 
       for (const [spelling, module, ordinal] of [
         ['logAt', 'silk/effect', 0],
-        ['log(', 'silk/logging', 0],
-        ['warning', 'silk/logging', 0],
-        ['memory', 'silk/logging', 1],
-        ['stdout', 'silk/logging', 0],
+        ['log(', 'silk/logger', 0],
+        ['warning', 'silk/logger', 0],
+        ['inMemoryService', 'silk/logger', 0],
+        ['stdoutService', 'silk/logger', 0],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.isDefined(occurrence, spelling)
@@ -401,10 +392,10 @@ pub fn main() -> i32 {
 
       for (const [prefix, expected] of [
         ['Effect.', ['log', 'logAt']],
-        ['Logger.', ['log']],
-        ['LogLevel.', ['trace', 'debug', 'info', 'warning', 'error']],
-        ['InMemoryLogger.', ['memory', 'memoryFailAt', 'length', 'messageByteAt']],
-        ['StdoutLogger.', ['stdout']],
+        [
+          'Logger.',
+          ['log', 'trace', 'warning', 'inMemoryService', 'stdoutService', 'length', 'levelAt'],
+        ],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
@@ -418,8 +409,8 @@ pub fn main() -> i32 {
 })
 
 it.effect('completes and navigates the portable Path and FileSystem surface', () => {
-  const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+  const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError, FileSystem, Path, exists, resolve }
 effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
   let info = run FileSystem.stat(path)
@@ -428,8 +419,8 @@ effect fn inspect(path: &Path) -> bool ! FileError ? &mut FileSystem {
 effect fn locate(base: &Path) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
   return run resolve(base, "child")
 }
-effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run Path.root() }
-fn code(error: &FileError) -> i32 { return FileError.operationCode(error.operation) }
+effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run FileSystem.root() }
+fn code(error: &FileError) -> i32 { return FileSystem.operationCode(error.operation) }
 pub fn main() -> i32 { return 42 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
@@ -479,13 +470,18 @@ pub fn main() -> i32 { return 42 }`
             'createDirectory',
             'removeFile',
             'removeDirectory',
+            'make',
+            'root',
+            'join',
+            'resolve',
+            'isRoot',
+            'name',
+            'parent',
+            'error',
+            'errorWithCode',
+            'providerCode',
           ],
         ],
-        [
-          'Path.',
-          ['make', 'root', 'join', 'joinUtf8', 'resolve', 'view', 'isRoot', 'name', 'parent'],
-        ],
-        ['FileError.', ['error', 'errorWithCode', 'providerCode']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
@@ -562,11 +558,12 @@ it.effect(
   () =>
     Analysis.ofSourceRealized(
       'main',
-      encoder.encode(`import silk.core { SystemAllocator }
+      encoder.encode(`import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 struct Pair { left: i32 }
 fn pick() -> i32 {
   let pair = Pair { left: 1 }
-  let allocator = SystemAllocator.make()
+  let allocator = Allocator.systemAllocatorService()
   return pair.left
 }`),
     ).pipe(
@@ -832,7 +829,8 @@ pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
 })
 
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
-  const root = `import silk.box { Box }
+  const root = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
 import types.Models as Schema { Box as Selected }
 struct Selected {}
 struct Problem {}
@@ -863,7 +861,7 @@ pub struct Other {}`
         'Shared',
         [
           Object.freeze({
-            capability: Type.nominal('silk/core', 'Allocator'),
+            capability: Type.nominal('silk/allocator', 'Allocator'),
             role: 'Heap',
             access: 'Exclusive' as const,
           }),
@@ -882,7 +880,7 @@ pub struct Other {}`
         Presentation.genericArgument(
           Type.requirementRowArgument([
             {
-              capability: Type.nominal('silk/core', 'Allocator'),
+              capability: Type.nominal('silk/allocator', 'Allocator'),
               role: 'Heap',
               access: 'Exclusive',
             },
@@ -893,7 +891,7 @@ pub struct Other {}`
         '? &mut Allocator at Heap',
       )
       const union = Type.union(
-        Object.freeze([problem, Type.nominal('silk/core', 'OutOfMemoryError')]),
+        Object.freeze([problem, Type.nominal('silk/allocator', 'OutOfMemoryError')]),
       )
       assert.strictEqual(
         union._tag === 'Normalized' ? Presentation.type(union.type, 'main', scope) : undefined,
@@ -905,11 +903,12 @@ pub struct Other {}`
 })
 
 it.effect('keeps recovered Unicode-adjacent occurrence indexes compact and deterministic', () => {
-  const source = `import silk.core { SystemAllocator }
+  const source = `import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 // π🙂
 struct Problem {}
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }
 fn damaged( -> {`
@@ -921,7 +920,9 @@ fn damaged( -> {`
     assert.deepEqual(secondIndex, firstIndex)
     assert.strictEqual(firstIndex?.prefixMaximumEnd.length, firstIndex?.occurrences.length)
 
-    const byteOffset = encoder.encode(source.slice(0, source.indexOf('allocator'))).length
+    const byteOffset = encoder.encode(
+      source.slice(0, source.indexOf('let mut allocator') + 'let mut '.length),
+    ).length
     const occurrence = Analysis.semanticOccurrenceAt(first, 'main', byteOffset)
     assert.strictEqual(occurrence?.role, 'Declaration')
     assert.isDefined(occurrence?.declaration)

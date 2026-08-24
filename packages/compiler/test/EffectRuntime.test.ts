@@ -213,7 +213,7 @@ const retryMapSource = `${retrySource.replace(
   'let handled = retrying() |> Effect.catchAll(recover) |> Effect.map(i32.add(39))',
 )}`
 const outOfMemoryErrorSource = `import silk.effect as Effect
-import silk.core { OutOfMemoryError }
+import silk.allocator { OutOfMemoryError }
 
 effect fn exhaust() -> i32 ! OutOfMemoryError {
   fail OutOfMemoryError {}
@@ -253,9 +253,10 @@ pub fn main() -> i32 {
   let result = run forwarded
   return result.value
 }`
-const droppedHigherOrderEffectSource = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const droppedHigherOrderEffectSource = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Payload { storage: Allocation }
@@ -267,7 +268,7 @@ fn discard(self: once Effect<Payload>) -> () {
   return ()
 }
 pub effect fn main() -> () ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let payload = Payload { storage: move storage }
@@ -416,7 +417,7 @@ it.effect(
       const layout = Analysis.layoutOf(logical)
       const oom =
         layout._tag === 'Available'
-          ? Projections.callingShapeOf(logical, Type.nominal('silk/core', 'OutOfMemoryError'))
+          ? Projections.callingShapeOf(logical, Type.nominal('silk/allocator', 'OutOfMemoryError'))
           : undefined
       assert.strictEqual(oom?.lanes.length, 0)
       const evaluated = Analysis.evaluate(logical)

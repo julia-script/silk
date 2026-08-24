@@ -61,8 +61,8 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
  * of and a `match` arm is an expression rather than a statement, so a loop that walks ownership
  * down a chain has to swap a sentinel into the place it takes from.
  */
-const prelude = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+const prelude = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet, into as boxInto }
 
@@ -144,7 +144,7 @@ effect fn build(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 }
 `
 
-const program = (body: string, depth: number): string => `import silk.core { OutOfMemoryError }
+const program = (body: string, depth: number): string => `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${prelude}
 ${body}
@@ -156,11 +156,12 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(${depth}), recover) }`
 /** Recursive traversal, then an iterative teardown so only the walk can exhaust the stack. */
 const walk = (depth: number): string =>
   program(
-    `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
   let released = drain(move built)
@@ -173,11 +174,12 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
 /** Iterative throughout: build, unlink, release. Nothing here recurses. */
 const drain = (depth: number): string =>
   program(
-    `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let released = drain(move built)
   if released == depth { return 0 }
@@ -193,11 +195,12 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
  */
 const dropped = (depth: number): string =>
   program(
-    `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 0
@@ -213,9 +216,10 @@ effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
  * Recovering the `OutOfMemoryError` is the point: at a shallow depth this returns 1, having unwound
  * cleanly. Deep, the unwinding is what dies.
  */
-const failedBuild = (depth: number): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const failedBuild = (depth: number): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${prelude}
@@ -224,7 +228,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

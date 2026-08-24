@@ -1,0 +1,93 @@
+//! Complete-message standard-output and standard-error writes through a replaceable service.
+//!
+//! # When to use
+//! Use [`StandardStreams`] for complete byte messages to stdout or stderr; structured logging
+//! belongs in `silk.logger`.
+//!
+//! # Details
+//! [`StandardStreams`] is an ordinary source-declared service. Its requirement remains in an
+//! Effect until a caller supplies a provider, so tests and applications can replace the
+//! process-backed implementation lexically. Stream failure is typed as [`StreamWriteError`].
+//!
+//! # Examples
+//! ## Write one complete standard-output message
+//! ```silk
+//! import silk.effect as Effect
+//!
+//! import silk.standard_streams { StandardStreams }
+//!
+//! effect fn writeMessage() -> ()
+//! ! StandardStreams.StreamWriteError {
+//!   let mut streams = StandardStreams.nativeStandardStreamService()
+//!   return run StandardStreams.send(StandardStreams.stdout(), b"Silk\n")
+//!     |> Effect.provideMut<StandardStreams>(&mut streams)
+//! }
+//!
+//! effect fn ignoreWriteFailure(error: StandardStreams.StreamWriteError) -> () {
+//!   return ()
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
+//!   return 42
+//! }
+//! ```
+
+/// A failure to commit one complete standard-stream message.
+pub struct StreamWriteError {}
+
+/// A mutable service that writes complete messages to standard output or standard error.
+pub service StandardStreams {
+  /// Writes a complete immutable byte sequence to the selected standard-stream destination.
+  ///
+  /// # Gotchas
+  ///
+  /// A failure means that the service did not commit the complete message.
+  effect fn writeAll(
+    destination: bool,
+    bytes: &[u8]
+  ) -> () ! StreamWriteError ? &mut StandardStreams
+}
+
+/// A process-backed provider for [`StandardStreams`].
+pub struct NativeStandardStreams {}
+
+/// Returns the destination value that selects process standard output.
+pub fn stdout() -> bool {
+  return false
+}
+
+/// Returns the destination value that selects process standard error.
+pub fn stderr() -> bool {
+  return true
+}
+
+/// Creates a process-backed standard-stream provider.
+pub fn nativeStandardStreamService() -> NativeStandardStreams {
+  return NativeStandardStreams {}
+}
+
+effect fn nativeWriteAll(
+  self: &NativeStandardStreams,
+  destination: bool,
+  bytes: &[u8]
+) -> () ! StreamWriteError {
+  return run Intrinsic.standardStreamWrite(destination, bytes)
+}
+
+impl StandardStreams for NativeStandardStreams {
+  writeAll: NativeStandardStreams.nativeWriteAll
+}
+
+/// Writes one complete immutable byte sequence to a selected standard stream.
+///
+/// # Details
+///
+/// The returned Effect requires a mutable [`StandardStreams`] provider. Use [`stdout`] or
+/// [`stderr`] for `destination`.
+pub effect fn send(
+  destination: bool,
+  bytes: &[u8]
+) -> () ! StreamWriteError ? &mut StandardStreams {
+  return run StandardStreams.writeAll(move destination, bytes)
+}

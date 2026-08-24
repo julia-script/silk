@@ -7,15 +7,16 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** Copy reads the same initialized slot twice without consuming it; take still works after. */
-const copyRead = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const copyRead = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -36,9 +37,10 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 /** Slot and shared-buffer copies preserve the active member across distinct union payload shapes. */
-const unionCopyRead = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const unionCopyRead = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
@@ -69,7 +71,7 @@ fn observed(input: EmptyEvent | Left | Right) -> i32 {
 }
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[EmptyEvent | Left | Right; 3]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -179,16 +181,17 @@ it.effect(
 )
 
 /** Copying a non-Copy element is rejected when the concrete instantiation is verified. */
-const nonCopy = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const nonCopy = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 struct Guard { storage: Allocation }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[Guard; 1]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

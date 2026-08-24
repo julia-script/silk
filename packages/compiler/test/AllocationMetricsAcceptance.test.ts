@@ -11,9 +11,10 @@ const ascii = (value: string): Uint8Array =>
  * acquires into it, and publishes a snapshot through a shared borrow. No compiler phase knows the
  * metrics type, and the provider uses no privilege unavailable to any other Silk program.
  */
-const provider = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const provider = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.metrics {
@@ -48,15 +49,16 @@ fn published(self: &CountingAllocator) -> AllocationMetrics {
  * Three acquires and one recorded release. The live count is the difference the standard library
  * computes, and reading it twice leaves the provider's own value where it is.
  */
-const counted = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const counted = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
-    inner: SystemAllocator.make(),
+    inner: Allocator.systemAllocatorService(),
     metrics: zeroedMetrics()
   }
   let firstLayout = Layout.of<[i32; 2]>()
@@ -133,15 +135,16 @@ it.effect(
  * the busiest moment put it, including once the program is back to zero live allocations and
  * once a later acquire comes in below the peak.
  */
-const peakSurvivesDrops = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const peakSurvivesDrops = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
-    inner: SystemAllocator.make(),
+    inner: Allocator.systemAllocatorService(),
     metrics: zeroedMetrics()
   }
   let firstLayout = Layout.of<[i32; 2]>()
@@ -209,13 +212,14 @@ it.effect(
  * loads it: nothing from `silk/metrics` reaches the module closure or MIR, and the program
  * allocates exactly what it asked for and nothing more.
  */
-const unmetered = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const unmetered = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let block = run pending

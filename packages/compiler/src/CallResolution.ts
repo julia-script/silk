@@ -159,6 +159,16 @@ export function analyzeArguments(
       qualifier.declaration._tag === 'ServiceDeclaration'
     ) {
       target = serviceOperation(qualifier.declaration, memberSpelling)
+      const scoped = NameResolution.scopedModule(qualifier.declaration)
+      if (target === undefined && scoped !== undefined) {
+        const member = DeclarationFacts.lookup(resolution.index, scoped, memberSpelling)
+        target =
+          member._tag === 'Resolved' &&
+          member.declaration._tag === 'FunctionDeclaration' &&
+          member.declaration.visibility === 'Public'
+            ? member.declaration
+            : undefined
+      }
     } else if (
       qualifier._tag === 'Resolved' &&
       qualifier.declaration._tag === 'InterfaceDeclaration'
@@ -171,13 +181,15 @@ export function analyzeArguments(
         memberSpelling,
         memberToken,
       )
+      const scoped =
+        NameResolution.scopedModule(qualifier.declaration) ??
+        (qualifier.declaration.canonical._tag === 'Canonical' &&
+        serviceOperation(qualifier.declaration, memberSpelling) !== undefined
+          ? qualifier.declaration.canonical.id.module
+          : undefined)
       if (bound?._tag === 'BoundOperation') boundParameters = bound.reference.parameters
-      else if (qualifier.declaration.canonical._tag === 'Canonical') {
-        const member = DeclarationFacts.lookup(
-          resolution.index,
-          qualifier.declaration.canonical.id.module,
-          memberSpelling,
-        )
+      else if (scoped !== undefined) {
+        const member = DeclarationFacts.lookup(resolution.index, scoped, memberSpelling)
         target =
           member._tag === 'Resolved' &&
           member.declaration._tag === 'FunctionDeclaration' &&
@@ -187,17 +199,17 @@ export function analyzeArguments(
       }
     } else if (
       qualifier._tag === 'Resolved' &&
-      (qualifier.declaration._tag === 'StructDeclaration' ||
-        qualifier.declaration._tag === 'InterfaceDeclaration') &&
-      qualifier.declaration.canonical._tag === 'Canonical'
+      qualifier.declaration._tag === 'StructDeclaration' &&
+      NameResolution.scopedModule(qualifier.declaration) !== undefined
     ) {
-      // A nominal type doubles as an actor: `Vector.length(...)` names a public function of the
-      // module that declares `Vector`. The call itself already resolves that way, but arguments are
-      // analyzed first, and without the same lookup they get no expected types — which reads to a
-      // borrow argument as "no borrow is wanted here" and rejects it as an invalid borrow position.
+      // A nominal type doubles as the scope of the module it names: `Vector.length(...)` names a
+      // public function of `silk/vector` because `Vector` matches that module's basename. The call
+      // itself already resolves that way, but arguments are analyzed first, and without the same
+      // lookup they get no expected types — which reads to a borrow argument as "no borrow is
+      // wanted here" and rejects it as an invalid borrow position.
       const member = DeclarationFacts.lookup(
         resolution.index,
-        qualifier.declaration.canonical.id.module,
+        NameResolution.scopedModule(qualifier.declaration) ?? '',
         memberSpelling,
       )
       target =
@@ -1494,7 +1506,7 @@ export const callableTypeOfReference = (
 }
 
 export const serviceOperation = (
-  service: DeclarationFacts.ServiceFact,
+  service: DeclarationFacts.ContractFact,
   spelling_: string,
 ): DeclarationFacts.ServiceOperationFact | undefined =>
   service.operations.find(

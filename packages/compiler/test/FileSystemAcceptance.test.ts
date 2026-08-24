@@ -10,9 +10,10 @@ const exampleSource = readFileSync(
   'utf8',
 )
 
-const portableProvider = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const portableProvider = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.usize as usize
@@ -193,7 +194,7 @@ fn checksum(values: &[u8]) -> i32 {
 }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut fs = MemoryFileSystem {
     contents: emptyContents(),
     fileExists: false,
@@ -248,8 +249,9 @@ pub fn main() -> i32 {
 
 it.effect('constructs and resolves normalized provider-absolute Paths', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    const source = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.filesystem { Path, isRoot, make, name, parent, resolve, root, view }
@@ -263,7 +265,7 @@ fn matchesParent(possible: Option<Path>, expected: string) -> bool {
 }
 
 effect fn check() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let canonicalRoot = run root() |> Effect.provideMut(&mut allocator)
   if isRoot(&canonicalRoot) == false { return 3 }
   if name(&canonicalRoot) != "" { return 4 }
@@ -319,26 +321,27 @@ pub fn main() -> i32 {
 )
 
 it.effect('rejects malformed paths and lexical root escape before service provision', () => {
-  const source = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  const source = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError, joinUtf8, make, resolve }
 
 effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let path = run make(value) |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn resolveEscape() -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let escaped = run resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let invalid = run joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
   return false
@@ -381,9 +384,10 @@ pub fn main() -> i32 {
 })
 
 it.effect('preserves Path allocation failure without publishing partial owned storage', () => {
-  const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.filesystem { FileError }
 import silk.layout { Layout }
@@ -394,7 +398,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
 }
 
@@ -451,8 +455,8 @@ it.effect(
   'retains unprovided FileSystem and Allocator requirements instead of selecting ambient services',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+      const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.filesystem { FileError, FileSystem, root }
 pub effect fn main() -> i32 ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator {
   let path = run root()

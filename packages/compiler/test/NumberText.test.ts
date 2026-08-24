@@ -106,8 +106,8 @@ interface Check {
 const textCheck = (name: string, spelling: string, value: string, expected: string): Check => ({
   name,
   effectful: true,
-  declaration: `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+  declaration: `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 effect fn ${name}() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let text = run ${spelling}.toText(${value})
   if sameText(&text, "${expected}") { return 0 }
@@ -176,9 +176,10 @@ const programOf = (checks: ReadonlyArray<Check>): string => {
   if outcome${position} != 0 { return ${position + 1} }`,
     )
     .join('\n')
-  return `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  return `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 ${prelude}
 ${checks.map((check) => check.declaration).join('\n\n')}
@@ -189,7 +190,7 @@ ${body}
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let checking = firstFailure() |> Effect.provideMut(&mut allocator)
   return run checking
 }
@@ -360,9 +361,10 @@ it.effect('reports which byte stopped a read and which values do not fit', () =>
  * write before, because both numbers in it are runtime values. Allocation is balanced, so composing
  * a message leaves nothing behind.
  */
-const messageProgram = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const messageProgram = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.i32 as i32
 import silk.usize as usize
@@ -397,7 +399,7 @@ effect fn compose() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let composing = compose() |> Effect.provideMut(&mut allocator)
   return run composing
 }
@@ -435,9 +437,10 @@ it.effect('composes a diagnostic message from runtime values and releases every 
  * Requirement 6. Rendering allocates, so it must be able to say it could not: an allocator that
  * refuses hands the caller the ordinary `OutOfMemoryError` typed failure rather than a partial string.
  */
-const exhaustedProgram = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const exhaustedProgram = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.i32 as i32
 import silk.layout { Layout }
@@ -446,7 +449,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }
@@ -501,8 +504,8 @@ it('declares the same rendering and reading pair on every integer module', () =>
   assert.strictEqual(spellings.length, 10)
   for (const spelling of spellings) {
     const source = sourceText(spelling)
-    assert.include(source, 'import silk.core { Allocator }')
-    assert.include(source, 'import silk.core { OutOfMemoryError }')
+    assert.include(source, 'import silk.allocator { Allocator }')
+    assert.include(source, 'import silk.allocator { OutOfMemoryError }')
     assert.include(source, 'import silk.string { String }')
     assert.include(
       source,

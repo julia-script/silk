@@ -37,16 +37,17 @@ const run = (label: string, text: string) =>
   })
 
 // Whole-member binding on a source-defined Layout value from Layout.repeat's union.
-const layoutExtract = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const layoutExtract = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.layout { LayoutOverflow }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let element = Layout.of<i32>()
   let plan = Layout.repeat(move element, 3)
   let layout = match move plan {
@@ -72,15 +73,16 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`
 
 // Whole-member binding on an affine member (move it out of the union).
-const affineExtract = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const affineExtract = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Empty {}
 struct Full { storage: Allocation }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

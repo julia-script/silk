@@ -57,7 +57,8 @@ const agrees = (outcome: { bootstrap: unknown; direct: unknown }, expected: numb
   assert.strictEqual(outcome.direct, expected, 'direct WebAssembly')
 }
 
-const mapImports = `import silk.hash { HashKey, HashSeed, Word }
+const mapImports = `import silk.hash as Hash
+import silk.hash { HashKey, HashSeed, Word }
 import silk.i32 as i32
 import silk.hash_map {
   HashMap,
@@ -79,13 +80,14 @@ import silk.usize as usize`
 
 /** Wraps a body in the allocator the collections require and the recovery an `OutOfMemoryError` needs. */
 const program = (imports: string, body: string): string =>
-  `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 ${imports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 ${body}
 }
 
@@ -101,22 +103,22 @@ it.effect('inserts, looks up, and removes on both engines', () =>
       'hashed-collections/insert-lookup-remove',
       program(
         mapImports,
-        `  let mut map = make<Word, i32>(HashKey.seed(12345))
-  let first = run insert<Word, i32>(&mut map, HashKey.word(7), 20) |> Effect.provideMut(&mut allocator)
-  let second = run insert<Word, i32>(&mut map, HashKey.word(9), 22) |> Effect.provideMut(&mut allocator)
+        `  let mut map = make<Word, i32>(Hash.seed(12345))
+  let first = run insert<Word, i32>(&mut map, Hash.word(7), 20) |> Effect.provideMut(&mut allocator)
+  let second = run insert<Word, i32>(&mut map, Hash.word(9), 22) |> Effect.provideMut(&mut allocator)
   drop first
   drop second
   if length<Word, i32>(&map) != 2 { return 1 }
-  if !contains<Word, i32>(&map, HashKey.word(7)) { return 2 }
-  if contains<Word, i32>(&map, HashKey.word(11)) { return 3 }
-  let taken = remove<Word, i32>(&mut map, HashKey.word(7))
+  if !contains<Word, i32>(&map, Hash.word(7)) { return 2 }
+  if contains<Word, i32>(&map, Hash.word(11)) { return 3 }
+  let taken = remove<Word, i32>(&mut map, Hash.word(7))
   let removed = Option.unwrapOr<i32>(move taken, 0)
   if length<Word, i32>(&map) != 1 { return 4 }
-  if contains<Word, i32>(&map, HashKey.word(7)) { return 5 }
-  let missing = remove<Word, i32>(&mut map, HashKey.word(7))
+  if contains<Word, i32>(&map, Hash.word(7)) { return 5 }
+  let missing = remove<Word, i32>(&mut map, Hash.word(7))
   let absent = Option.unwrapOr<i32>(move missing, 0)
   if absent != 0 { return 6 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(9)), 0)
+  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(9)), 0)
   return removed + held`,
       ),
     )
@@ -132,16 +134,16 @@ it.effect('reaches one entry from two equivalent keys, and replaces rather than 
       'hashed-collections/equivalent-keys',
       program(
         mapImports,
-        `  let mut map = make<Word, i32>(HashKey.seed(7))
-  let first = run insert<Word, i32>(&mut map, HashKey.word(3), 11) |> Effect.provideMut(&mut allocator)
+        `  let mut map = make<Word, i32>(Hash.seed(7))
+  let first = run insert<Word, i32>(&mut map, Hash.word(3), 11) |> Effect.provideMut(&mut allocator)
   drop first
   // A second key equivalent to the first finds the entry the first placed.
-  if !contains<Word, i32>(&map, HashKey.word(3)) { return 1 }
-  let second = run insert<Word, i32>(&mut map, HashKey.word(3), 31) |> Effect.provideMut(&mut allocator)
+  if !contains<Word, i32>(&map, Hash.word(3)) { return 1 }
+  let second = run insert<Word, i32>(&mut map, Hash.word(3), 31) |> Effect.provideMut(&mut allocator)
   let replaced = Option.unwrapOr<i32>(move second, 0)
   if length<Word, i32>(&map) != 1 { return 2 }
   if replaced != 11 { return 3 }
-  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(3)), 0)
+  let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(3)), 0)
   if held != 31 { return 4 }
   return replaced + held`,
       ),
@@ -159,10 +161,10 @@ it.effect('keeps every entry across the growth that rehomes them', () =>
       'hashed-collections/growth',
       program(
         mapImports,
-        `  let mut map = make<Word, i32>(HashKey.seed(4242))
+        `  let mut map = make<Word, i32>(Hash.seed(4242))
   let mut key = 0
   while key < 40 {
-    let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key * 3)
+    let previous = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key * 3)
       |> Effect.provideMut(&mut allocator)
     drop previous
     key = key + 1
@@ -172,7 +174,7 @@ it.effect('keeps every entry across the growth that rehomes them', () =>
   let mut probe = 0
   let mut total = 0
   while probe < 40 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(probe))), -1)
+    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe * 3 { return 3 }
     total = total + found
     probe = probe + 1
@@ -192,10 +194,12 @@ it.effect('leaves the map intact when the growth allocation fails', () =>
     // that needs growth, and it fails; every entry placed before it must still answer at its key.
     const value = yield* evaluatedValue(
       'hashed-collections/failed-growth',
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
+import silk.hash as Hash
 import silk.hash { HashKey }
 import silk.hash { Word }
 import silk.hash_map { HashMap }
@@ -222,7 +226,7 @@ effect fn allocate(self: &mut Budget, layout: Layout) -> Allocation ! OutOfMemor
 impl Allocator for Budget { allocate: Budget.allocate }
 
 effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemoryError ? &mut Allocator {
-  let previous = run insert<Word, i32>(move map, HashKey.word(6), 106)
+  let previous = run insert<Word, i32>(move map, Hash.word(6), 106)
   drop previous
   return 0
 }
@@ -230,11 +234,11 @@ effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemoryError ? &mut Al
 effect fn noRoom(error: OutOfMemoryError) -> i32 { return 1 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Budget { inner: SystemAllocator.make(), remaining: 2 }
-  let mut map = make<Word, i32>(HashKey.seed(5))
+  let mut allocator = Budget { inner: Allocator.systemAllocatorService(), remaining: 2 }
+  let mut map = make<Word, i32>(Hash.seed(5))
   let mut key = 0
   while key < 6 {
-    let previous = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(key)), key + 100)
+    let previous = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(key)), key + 100)
       |> Effect.provideMut(&mut allocator)
     drop previous
     key = key + 1
@@ -245,11 +249,11 @@ effect fn build() -> i32 ! OutOfMemoryError {
   // The map is exactly as it was: the same entries, the same length, the same bucket count.
   if length<Word, i32>(&map) != 6 { return 4 }
   if bucketCount<Word, i32>(&map) != 8 { return 5 }
-  if contains<Word, i32>(&map, HashKey.word(6)) { return 6 }
+  if contains<Word, i32>(&map, Hash.word(6)) { return 6 }
   let mut probe = 0
   let mut total = 0
   while probe < 6 {
-    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(probe))), -1)
+    let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(probe))), -1)
     if found != probe + 100 { return 7 }
     total = total + found
     probe = probe + 1
@@ -277,12 +281,12 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
       'hashed-collections/tombstones',
       program(
         mapImports,
-        `  let mut map = make<Word, i32>(HashKey.seed(31))
+        `  let mut map = make<Word, i32>(Hash.seed(31))
   let mut round = 0
   while round < 6 {
     let mut key = 0
     while key < 6 {
-      let placed = run insert<Word, i32>(&mut map, HashKey.word(i32.toU64(round * 6 + key)), round * 6 + key)
+      let placed = run insert<Word, i32>(&mut map, Hash.word(i32.toU64(round * 6 + key)), round * 6 + key)
         |> Effect.provideMut(&mut allocator)
       drop placed
       key = key + 1
@@ -290,7 +294,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
     // Every key of this round must be present while the previous rounds' marks are still there.
     let mut check = 0
     while check < 6 {
-      let found = Option.unwrapOr<i32>(get<Word, i32>(&map, HashKey.word(i32.toU64(round * 6 + check))), -1)
+      let found = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(i32.toU64(round * 6 + check))), -1)
       if found != round * 6 + check { return 1 }
       check = check + 1
     }
@@ -298,7 +302,7 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
     // Empty it again, leaving six fresh marks for the next round to probe across.
     let mut gone = 0
     while gone < 6 {
-      let taken = remove<Word, i32>(&mut map, HashKey.word(i32.toU64(round * 6 + gone)))
+      let taken = remove<Word, i32>(&mut map, Hash.word(i32.toU64(round * 6 + gone)))
       let removed = Option.unwrapOr<i32>(move taken, -1)
       if removed != round * 6 + gone { return 3 }
       gone = gone + 1
@@ -313,7 +317,8 @@ it.effect('keeps probing through the marks a removal leaves behind', () =>
   }),
 )
 
-const setImports = `import silk.hash { HashKey, HashSeed, Word }
+const setImports = `import silk.hash as Hash
+import silk.hash { HashKey, HashSeed, Word }
 import silk.u64 as u64
 import silk.hash_set {
   HashSet,
@@ -336,25 +341,25 @@ it.effect(
         'hashed-collections/set',
         program(
           setImports,
-          `  let mut seen = make<Word>(HashKey.seed(99))
-  let first = run insert<Word>(&mut seen, HashKey.word(7)) |> Effect.provideMut(&mut allocator)
-  let second = run insert<Word>(&mut seen, HashKey.word(9)) |> Effect.provideMut(&mut allocator)
-  let again = run insert<Word>(&mut seen, HashKey.word(7)) |> Effect.provideMut(&mut allocator)
+          `  let mut seen = make<Word>(Hash.seed(99))
+  let first = run insert<Word>(&mut seen, Hash.word(7)) |> Effect.provideMut(&mut allocator)
+  let second = run insert<Word>(&mut seen, Hash.word(9)) |> Effect.provideMut(&mut allocator)
+  let again = run insert<Word>(&mut seen, Hash.word(7)) |> Effect.provideMut(&mut allocator)
   if first { return 1 }
   if second { return 2 }
   // The duplicate reports that the element was already held, and the set does not grow.
   if !again { return 3 }
   if length<Word>(&seen) != 2 { return 4 }
-  if !contains<Word>(&seen, HashKey.word(9)) { return 5 }
-  let taken = remove<Word>(&mut seen, HashKey.word(9))
+  if !contains<Word>(&seen, Hash.word(9)) { return 5 }
+  let taken = remove<Word>(&mut seen, Hash.word(9))
   let gone = match move taken {
     Some<Word> { value } => u64.toI32(value.value)
     None {} => 0
   }
   if gone != 9 { return 6 }
-  if contains<Word>(&seen, HashKey.word(9)) { return 7 }
+  if contains<Word>(&seen, Hash.word(9)) { return 7 }
   if length<Word>(&seen) != 1 { return 8 }
-  if !contains<Word>(&seen, HashKey.word(7)) { return 9 }
+  if !contains<Word>(&seen, Hash.word(7)) { return 9 }
   return gone * 4 + 6`,
         ),
       )
@@ -368,17 +373,19 @@ it.effect('refuses a key type that has no HashKey witness', () =>
     // hash and no equivalence, and the instantiation is reported rather than accepted.
     const snapshot = yield* analyzed(
       'hashed-collections/no-witness',
-      `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
+import silk.hash as Hash
 import silk.hash { HashKey }
 ${mapImports}
 
 struct Unhashed { tag: i32 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
-  let mut map = make<Unhashed, i32>(HashKey.seed(1))
+  let mut allocator = Allocator.systemAllocatorService()
+  let mut map = make<Unhashed, i32>(Hash.seed(1))
   let placed = run insert<Unhashed, i32>(&mut map, Unhashed { tag: 1 }, 2)
     |> Effect.provideMut(&mut allocator)
   drop placed

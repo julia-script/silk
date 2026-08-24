@@ -213,9 +213,10 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const consuming = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { value: i32 storage: Allocation }
@@ -230,7 +231,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -306,9 +307,10 @@ it.effect('executes stored Effects with exact runner, rows, access, and ownershi
 
 type CleanupExit = 'unrun' | 'failure'
 
-const cleanupProgram = (exit: CleanupExit): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const cleanupProgram = (exit: CleanupExit): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Problem { code: i32 }
@@ -326,7 +328,7 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   fail Problem { code: result }
 }
 effect fn build() -> i32 ! Problem | OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
@@ -389,9 +391,10 @@ it.effect('cleans unrun and failing stored Effect environments exactly once', ()
   }),
 )
 
-const suspending = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const suspending = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard { tag: i32 storage: Allocation }
@@ -414,7 +417,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 

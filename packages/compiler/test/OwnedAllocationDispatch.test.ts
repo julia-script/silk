@@ -7,8 +7,8 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 /** A user-authored allocator that always refuses, exercising the failure half of dispatch. */
-const refusing = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+const refusing = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
@@ -35,15 +35,16 @@ pub fn main() -> i32 {
 }`
 
 /** A user-authored allocator that hands out real system blocks, exercising the success half. */
-const delegating = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const delegating = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { tag: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut inner)
   let block = run recipe
   return move block
@@ -129,9 +130,10 @@ it.effect('dispatches provision through user allocator witnesses on the evaluato
 
 const ordinalProgram = (
   providers: readonly [string, string],
-): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct ExhaustedAllocator { tag: i32 }
@@ -143,7 +145,7 @@ effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut good = SystemAllocator.make()
+  let mut good = Allocator.systemAllocatorService()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let first = Layout.of<[i32; 2]>()
   let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut ${providers[0]})
@@ -208,9 +210,10 @@ it.effect('sweeps allocation failure ordinals with atomic rejection and unchange
   }),
 )
 
-const countedQuota = (quota: number): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const countedQuota = (quota: number): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct QuotaAllocator { remaining: i32 }
@@ -218,7 +221,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run recipe
   return move block
@@ -286,16 +289,17 @@ it.effect('runs a counted quota allocator identically on the evaluator and Wasm'
   }),
 )
 
-const forwardedProvider = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const forwardedProvider = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct CountingAllocator { hits: i32 }
 
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   self.hits = self.hits + 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block

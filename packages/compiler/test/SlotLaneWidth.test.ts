@@ -39,16 +39,17 @@ const cases: ReadonlyArray<Case> = [
   { element: 'f64', neighbour: 1, first: '-7.0', second: '11.0', expected: 108 },
 ]
 
-const program = (entry: Case): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const program = (entry: Case): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.${entry.element} as ${entry.element}
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[${entry.element}; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -99,16 +100,17 @@ for (const entry of cases) {
 }
 
 /** The reproduction as issue #114 states it: two `7u8` in one word, taken back and summed. */
-const reported = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const reported = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u8 as u8
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

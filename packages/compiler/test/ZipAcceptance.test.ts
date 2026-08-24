@@ -19,9 +19,10 @@ const ascii = (value: string): Uint8Array =>
  * the trace of acquire/release events spells out the execution order unambiguously, and an operand
  * that never ran contributes no events at all.
  */
-const prelude = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const prelude = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.effect { Pair, Triple }
@@ -33,7 +34,7 @@ struct FixedClock { storage: Allocation }
 impl Clock for FixedClock {}
 
 effect fn openClock() -> FixedClock ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

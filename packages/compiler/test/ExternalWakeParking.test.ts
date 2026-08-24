@@ -152,8 +152,8 @@ const assertNativeDriveAdmissionBeforeCallbacks = (
   }
 }
 
-const source = `import silk.core as Core
-import silk.core { Allocator }
+const source = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.layout { Layout }
@@ -195,18 +195,18 @@ effect fn parked(storage: Allocation, state: Shared.Shared<WaiterState>) -> () {
   return ()
 }
 fn ready(state: &()) -> () { return () }
-effect fn program() -> () ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let guardStorage = run Allocator.allocate(Layout.of<i32>())
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let state = run Shared.make<WaiterState>(WaiterState { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let execution = run Execution.make(parked(move guardStorage, move state), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   drop execution
   return ()
 }
-effect fn recover(error: Core.OutOfMemoryError) -> () { return () }
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
 it.effect('seals Wake and lowers ordinary-source park and wake through verified MIR', () =>
@@ -306,8 +306,8 @@ it.effect('evaluates a latched park through an execution-owned root and later ow
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'external-wake-parking/evaluator-resume',
-      new TextEncoder().encode(`import silk.core as Core
-import silk.core { Allocator }
+      new TextEncoder().encode(`import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 struct Empty {}
@@ -344,17 +344,17 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
 effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run driveOnce(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run finish(move selected, &mut owner)
   return owner.result
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       'wasm32-unknown-unknown',
     )
@@ -690,8 +690,8 @@ it.effect('cancels a latched Wake when onSuspend destroys the execution', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'independent-execution/latched-on-suspend-destroy',
-      new TextEncoder().encode(`import silk.core as Core
-import silk.core { Allocator }
+      new TextEncoder().encode(`import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -716,20 +716,20 @@ fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
 effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, suspend)
 }
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&readyState)
   let execution = run Execution.make(body(), move endpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut state = ()
   run driveOnce(move execution, &mut state)
   let called = Shared.withMut(&readyState, readReady)
   drop readyState
   return 42 + called * 1000
 }
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       'wasm32-unknown-unknown',
     )
@@ -1098,8 +1098,8 @@ pub fn main() -> i32 { return 42 }`),
 it.effect('retains represented callable registration guards in ExecutionPark cleanup facts', () =>
   Effect.gen(function* () {
     const module = 'external-wake-parking/callable-guard'
-    const source = `import silk.core as Core
-import silk.core { Allocator }
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.layout { Layout }
@@ -1115,16 +1115,16 @@ effect fn parked(holder: Allocation) -> () {
   return ()
 }
 fn ready(state: &()) -> () { return () }
-effect fn program() -> () ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let holder = run Allocator.allocate(Layout.of<i32>())
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let execution = run Execution.make(parked(move holder), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   drop execution
   return ()
 }
-effect fn recover(error: Core.OutOfMemoryError) -> () { return () }
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
     const snapshot = yield* Analysis.ofSourceRealized(module, new TextEncoder().encode(source))
     const capture = snapshot.ownership

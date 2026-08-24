@@ -16,9 +16,10 @@ const ascii = (value: string): Uint8Array =>
  * block, so acquiring and releasing it are both events, and the position of the finalizer's own
  * events relative to the protected Effect's local cleanup is what pins the LIFO order.
  */
-const prelude = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const prelude = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Problem { code: i32 }
@@ -26,7 +27,7 @@ struct Problem { code: i32 }
 struct Clock { storage: Allocation }
 
 effect fn openClock() -> Clock ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

@@ -1,11 +1,12 @@
 /** Shared acceptance programs for compiler-owned editor intelligence. */
-export const allocatorSource = `import silk.core { SystemAllocator }
+export const allocatorSource = `import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return 0
 }`
 
-export const effectHandlerSource = `import silk.core { OutOfMemoryError }
+export const effectHandlerSource = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
@@ -32,9 +33,10 @@ export const nestedBindingSource = `pub fn main() -> i32 {
   return value
 }`
 
-export const recoveredMemberSource = `import silk.core { SystemAllocator }
+export const recoveredMemberSource = `import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return Effect.
 }`

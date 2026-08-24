@@ -18,7 +18,7 @@ selects one. Child standard input is closed. `ChildProcess.execute` blocks until
 owns complete stdout and stderr captures in [`ProcessOutcome`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65). A nonzero exit is outcome data.
 
 [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) is reserved for failing to spawn, wait, or capture; it carries a stable
-portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) when
+portable reason and may retain a provider code. Execution also reports [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72) when
 captured output cannot be owned.
 
 ## Gotchas
@@ -35,7 +35,7 @@ import silk.bytes as Bytes
 
 import silk.child_process as Process
 
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -46,8 +46,8 @@ import silk.option as Option
 struct Completed {}
 
 effect fn execute(self: &mut Completed, request: &Process.ProcessRequest) -> Process.ProcessOutcome
-! Process.ProcessError | Core.OutOfMemoryError
-? &mut Core.Allocator {
+! Process.ProcessError | Allocator.OutOfMemoryError
+? &mut Allocator {
   return Process.exited(7, Bytes.make(), Bytes.make())
 }
 
@@ -56,23 +56,23 @@ impl Process.ChildProcess for Completed {
 }
 
 effect fn program() -> i32
-! Path.FileError | Core.OutOfMemoryError | Process.ProcessError {
-  let mut allocator = Core.make()
+! Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut provider = Completed {}
   let path = run Path.make("/tool")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let request = run Process.request(&path)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let outcome = run Process.submit(&request)
     |> Effect.provideMut<Process.ChildProcess>(&mut provider)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   return match move Process.exitCode(&outcome) {
     Option.Some<i32> {value} => 35 + value
     Option.None {} => 1
   }
 }
 
-effect fn recover(error: Path.FileError | Core.OutOfMemoryError | Process.ProcessError) -> i32 {
+effect fn recover(error: Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError) -> i32 {
   return 0
 }
 
@@ -577,7 +577,7 @@ A portable blocking child-process service with complete output capture.
 complete standard-output and standard-error captures. A nonzero exit code is outcome data.
 
 A start, wait, or capture failure produces [`ProcessError`](#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72). Owning either capture can also
-produce [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72). The operation needs exclusive provider and allocator requirements.
+produce [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72). The operation needs exclusive provider and allocator requirements.
 
 <a id="declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f636573733a3a6f7065726174696f6e3a65786563757465"></a>
 

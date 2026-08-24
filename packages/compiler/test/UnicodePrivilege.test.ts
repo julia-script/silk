@@ -98,14 +98,15 @@ const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
     ),
   )
 
-const normalizing = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const normalizing = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc, normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let composed = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
   if view(&composed) == "\\u{1e14}" {} else { return 1 }
   let decomposed = run normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)
