@@ -367,9 +367,9 @@ const semanticFingerprint = (snapshot: Analysis.Snapshot) =>
         : 'unavailable',
   }))
 
-const mirStructureFingerprint = (snapshot: Analysis.Snapshot) =>
-  Analysis.loweredMir(snapshot)
-    .functions.map((fn) => ({
+const mirStructureFingerprint = (mir: Mir.Module) =>
+  mir.functions
+    .map((fn) => ({
       target: normalizeSpelling(`${fn.id.module}.${fn.id.name}`),
       parameters: fn.parameterCount,
       locals: fn.localTypes.map((type) => normalizeSpelling(Type.encode(Mir.semanticType(type)))),
@@ -382,21 +382,27 @@ it.effect('proves the ordinary and renamed local-shared pressure witnesses', () 
   Effect.gen(function* () {
     const ordinary = yield* realized('pressure/local-shared-slp1', canonical)
     const spellingIndependent = yield* realized('pressure/local-shared-slp1-renamed', renamed)
+    const ordinaryMir = Analysis.loweredMir(ordinary)
+    const spellingIndependentMir = Analysis.loweredMir(spellingIndependent)
 
-    for (const snapshot of [ordinary, spellingIndependent]) {
+    for (const [snapshot, mir] of [
+      [ordinary, ordinaryMir],
+      [spellingIndependent, spellingIndependentMir],
+    ] as const) {
+      const diagnostics = Analysis.diagnostics(snapshot)
       assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        diagnostics.map((diagnostic) => diagnostic.code),
         [],
-        JSON.stringify(Analysis.diagnostics(snapshot)),
+        JSON.stringify(diagnostics),
       )
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      assert.deepEqual(MirVerification.verify(mir), [])
       assert.strictEqual(completed(snapshot).result.value, 42n)
     }
 
     assert.deepEqual(semanticFingerprint(spellingIndependent), semanticFingerprint(ordinary))
     assert.deepEqual(
-      mirStructureFingerprint(spellingIndependent),
-      mirStructureFingerprint(ordinary),
+      mirStructureFingerprint(spellingIndependentMir),
+      mirStructureFingerprint(ordinaryMir),
     )
     assert.deepEqual(
       Intrinsic.inventory()
@@ -1153,80 +1159,99 @@ it.effect(
   60_000,
 )
 
-it.effect(
-  'keeps every pressure-policy actor spelling neutral',
-  () =>
-    Effect.gen(function* () {
-      const fixtures = [
-        { name: 'scheduler-deferred', source: independentExecution, result: 42n },
-        { name: 'timer', source: timerOwner, result: 42n },
-        { name: 'coroutine', source: alternateOwner, result: 123n },
-        { name: 'ready-owner', source: selectiveReady, result: 22n },
-      ] as const
-      for (const fixture of fixtures) {
-        const sourceId = `pressure/actor-neutral-${fixture.name}`
-        const ordinary = yield* realized(sourceId, fixture.source)
-        const renamedPolicy = yield* realized(sourceId, renameIndependentPolicy(fixture.source))
-        for (const snapshot of [ordinary, renamedPolicy]) {
-          assert.deepEqual(
-            Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-            [],
-            `${fixture.name}: ${JSON.stringify(Analysis.diagnostics(snapshot))}`,
-          )
-          assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-          assert.strictEqual(completed(snapshot).result.value, fixture.result)
-        }
-        assert.deepEqual(semanticFingerprint(renamedPolicy), semanticFingerprint(ordinary))
-        assert.deepEqual(mirStructureFingerprint(renamedPolicy), mirStructureFingerprint(ordinary))
-        const ordinaryWasm = yield* runWasm(ordinary)
-        const renamedWasm = yield* runWasm(renamedPolicy)
-        assert.strictEqual(renamedWasm.result, ordinaryWasm.result)
-        assert.deepEqual(
-          emittedRuntimeInventory(renamedWasm.artifact),
-          emittedRuntimeInventory(ordinaryWasm.artifact),
-        )
+const actorNeutralFixtures = [
+  { name: 'scheduler-deferred', source: independentExecution, result: 42n },
+  { name: 'timer', source: timerOwner, result: 42n },
+  { name: 'coroutine', source: alternateOwner, result: 123n },
+  { name: 'ready-owner', source: selectiveReady, result: 22n },
+] as const
 
-        const ordinaryNative = yield* Analysis.ofSourceRealized(
-          `${sourceId}-native`,
-          encoder.encode(fixture.source),
-          'aarch64-apple-darwin',
-        )
-        const renamedNative = yield* Analysis.ofSourceRealized(
-          `${sourceId}-native`,
-          encoder.encode(renameIndependentPolicy(fixture.source)),
-          'aarch64-apple-darwin',
-        )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(ordinaryNative)), [])
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(renamedNative)), [])
-        assert.deepEqual(
-          emittedRuntimeInventory(yield* Analysis.codegen(renamedNative, { mode: 'release' })),
-          emittedRuntimeInventory(yield* Analysis.codegen(ordinaryNative, { mode: 'release' })),
-        )
-      }
-      assert.isFalse(
-        Intrinsic.inventory().some((entry) =>
-          /Scheduler|Deferred|Timer|Coroutine|TaskStore|ReadyInbox|Reactor|Allocator|WorkRegistry|SignalQueue|EventLoop|ChannelState/.test(
-            `${entry.operation}.${entry.consumer}`,
-          ),
-        ),
-      )
-      const privilegedPhases = [
-        '../src/NameResolution.ts',
-        '../src/Type.ts',
-        '../src/ExecutableOrigin.ts',
-        '../src/LowerExpression.ts',
-        '../src/LowerBuiltin.ts',
-        '../src/MirVerification.ts',
-        '../src/Intrinsic.ts',
-      ] as const
-      for (const phase of privilegedPhases) {
-        const source = readFileSync(new URL(phase, import.meta.url), 'utf8')
-        assert.notMatch(
-          source,
-          /silk\/core\.(?:OutOfMemoryError|Allocator|SystemAllocator)|\b(?:outOfMemoryError|systemAllocator)\b/,
-          phase,
-        )
-      }
-    }),
-  60_000,
-)
+const verifyActorNeutralFixture = Effect.fnUntraced(function* (
+  fixture: (typeof actorNeutralFixtures)[number],
+) {
+  const sourceId = `pressure/actor-neutral-${fixture.name}`
+  const renamedSource = renameIndependentPolicy(fixture.source)
+  const ordinary = yield* realized(sourceId, fixture.source)
+  const renamedPolicy = yield* realized(sourceId, renamedSource)
+  const ordinaryMir = Analysis.loweredMir(ordinary)
+  const renamedMir = Analysis.loweredMir(renamedPolicy)
+  for (const [snapshot, mir] of [
+    [ordinary, ordinaryMir],
+    [renamedPolicy, renamedMir],
+  ] as const) {
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+      `${fixture.name}: ${JSON.stringify(diagnostics)}`,
+    )
+    assert.deepEqual(MirVerification.verify(mir), [])
+    assert.strictEqual(completed(snapshot).result.value, fixture.result)
+  }
+  assert.deepEqual(semanticFingerprint(renamedPolicy), semanticFingerprint(ordinary))
+  assert.deepEqual(mirStructureFingerprint(renamedMir), mirStructureFingerprint(ordinaryMir))
+
+  const ordinaryWasm = yield* runWasm(ordinary)
+  const renamedWasm = yield* runWasm(renamedPolicy)
+  assert.strictEqual(renamedWasm.result, ordinaryWasm.result)
+  assert.deepEqual(
+    emittedRuntimeInventory(renamedWasm.artifact),
+    emittedRuntimeInventory(ordinaryWasm.artifact),
+  )
+
+  const ordinaryNative = yield* Analysis.ofSourceRealized(
+    `${sourceId}-native`,
+    encoder.encode(fixture.source),
+    'aarch64-apple-darwin',
+  )
+  const renamedNative = yield* Analysis.ofSourceRealized(
+    `${sourceId}-native`,
+    encoder.encode(renamedSource),
+    'aarch64-apple-darwin',
+  )
+  const ordinaryNativeMir = Analysis.loweredMir(ordinaryNative)
+  const renamedNativeMir = Analysis.loweredMir(renamedNative)
+  assert.deepEqual(MirVerification.verify(ordinaryNativeMir), [])
+  assert.deepEqual(MirVerification.verify(renamedNativeMir), [])
+  const ordinaryNativeArtifact = yield* Analysis.codegen(ordinaryNative, { mode: 'release' })
+  const renamedNativeArtifact = yield* Analysis.codegen(renamedNative, { mode: 'release' })
+  assert.deepEqual(
+    emittedRuntimeInventory(renamedNativeArtifact),
+    emittedRuntimeInventory(ordinaryNativeArtifact),
+  )
+})
+
+for (const fixture of actorNeutralFixtures) {
+  it.effect(
+    `keeps the ${fixture.name} pressure-policy actor spelling neutral`,
+    () => verifyActorNeutralFixture(fixture),
+    60_000,
+  )
+}
+
+it('keeps pressure-policy spellings out of the compiler privilege inventory', () => {
+  assert.isFalse(
+    Intrinsic.inventory().some((entry) =>
+      /Scheduler|Deferred|Timer|Coroutine|TaskStore|ReadyInbox|Reactor|Allocator|WorkRegistry|SignalQueue|EventLoop|ChannelState/.test(
+        `${entry.operation}.${entry.consumer}`,
+      ),
+    ),
+  )
+  const privilegedPhases = [
+    '../src/NameResolution.ts',
+    '../src/Type.ts',
+    '../src/ExecutableOrigin.ts',
+    '../src/LowerExpression.ts',
+    '../src/LowerBuiltin.ts',
+    '../src/MirVerification.ts',
+    '../src/Intrinsic.ts',
+  ] as const
+  for (const phase of privilegedPhases) {
+    const source = readFileSync(new URL(phase, import.meta.url), 'utf8')
+    assert.notMatch(
+      source,
+      /silk\/core\.(?:OutOfMemoryError|Allocator|SystemAllocator)|\b(?:outOfMemoryError|systemAllocator)\b/,
+      phase,
+    )
+  }
+})

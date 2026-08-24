@@ -2,9 +2,10 @@
 
 Status: **pressure evidence only; not a canonical concurrency API**
 
-Implementation handoff is parked on the post-conformance full-suite actor-neutrality test timeout.
-The witness passes focused, and no semantic finding remains open, but the bounded gate contract
-forbids another repair in this resume. Exact attempts are recorded in `implementation-report.md`.
+The gate-only resume closed the post-conformance actor-neutrality timeout by assigning each of the
+four independent fixtures its own test boundary and reusing every analysis/MIR/artifact once. The
+full compiler parallel context now passes without raising a timeout or reducing evidence. Exact
+attempts are recorded in `implementation-report.md`.
 
 The fixtures under `examples/language-pressure/independent-execution-separation` demonstrate that
 ordinary Silk source can assemble owners around the sealed Execution/Wake substrate. Names such as

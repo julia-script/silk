@@ -1,6 +1,6 @@
 # Implementation report: prove-independent-execution-separation
 
-Status: **PARKED — POST-CONFORMANCE TEST TIMEOUT**
+Status: **GATE RESUME — FULL COMPILER GREEN, REPOSITORY GATES PENDING**
 
 ## Implemented pressure surface
 
@@ -146,6 +146,23 @@ The post-conformance sequence exhausted the resumed repair budget and is parked:
 `pnpm check` and `pnpm release:candidate` were not run after conformance because the required test
 gate did not pass. No second conformance review or additional repair pass was started.
 
+## Gate-only resume
+
+The fresh gate-only resume localized the timeout to four independent actor-neutral fixtures sharing
+one 60-second test deadline. Under full-suite load their aggregate exceeded the deadline even though
+each fixture remained individually cheap. The existing file now gives each fixture its own test
+boundary while preserving the same semantic, normalized MIR, evaluator, direct-Wasm, native
+artifact, and inventory assertions. Each snapshot, lowered MIR, renamed source, and emitted artifact
+is materialized once per target. The compiler-phase spelling inventory is a separate synchronous
+test and no timeout was raised.
+
+- Focused `LocalSharedPressure.test.ts`: **PASS**, 18/18 tests in 40.12s. The four actor-neutral
+  cases completed in 4.313s, 5.696s, 3.281s, and 4.147s.
+- Exact full compiler context, `pnpm --filter @silk-effect/compiler test:parallel`: **PASS**, 220
+  files and 2,150 tests in 201.36s.
+
+This is gate-resume root-cause fix 1/3. The mandated full repository gate sequence is pending.
+
 ## Scope and privilege dispositions
 
 - Scheduler, Fiber, Deferred, Timer, Coroutine, reactor, queue, and cancellation-policy names stay
@@ -162,8 +179,7 @@ gate did not pass. No second conformance review or additional repair pass was st
 
 ## Task state and handoff
 
-OpenSpec tasks remain **21/21 complete** based on the implemented artifacts and the initial green
-gate sequence. The parent-owned single three-lens conformance pass is complete and all verified
-Critical/High findings are closed in its one consolidated fix pass. Final handoff is **PARKED** on
-the post-conformance full-suite actor-neutrality timeout described above; the remaining post-gates
-were not run.
+OpenSpec tasks remain **21/21 complete**. The parent-owned single three-lens conformance pass is
+complete and all verified Critical/High findings are closed in its one consolidated fix pass. The
+fresh gate-only resume has closed the full-suite timeout and is awaiting its full repository gate
+sequence; no second conformance pass was run.
