@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs'
 import * as Transcendental from '../../src/Transcendental.js'
 import { floatMathPrograms } from './floatMath.js'
+import { renameIndependentPolicy } from './independentPolicyRename.js'
 import {
   auditAllocatorSuspension,
   mixedServiceProviderSuspension,
@@ -1594,10 +1595,9 @@ pub fn main() -> i32 {
   // folded from OwnedAllocationAcceptance.test.ts: caller-funded shared-core initialization.
   {
     name: 'local-shared-control-block-allocation',
-    source: `import silk.core { OutOfMemoryError }
-import silk.effect as Effect
+    source: `import silk.effect as Effect
 
-effect fn construct() -> i32 ! OutOfMemoryError {
+effect fn construct() -> i32 ! Intrinsic.StorageFailure {
   let layout = Intrinsic.sharedLayout<i32>()
   let allocation = run Intrinsic.systemAllocationAcquire(move layout)
   unsafe {
@@ -1607,20 +1607,19 @@ effect fn construct() -> i32 ! OutOfMemoryError {
   return 42
 }
 
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: Intrinsic.StorageFailure) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'local-shared-lifecycle-operations',
-    source: `import silk.core { OutOfMemoryError }
-import silk.effect as Effect
+    source: `import silk.effect as Effect
 
 fn selected(value: &mut i32) -> i32 { return 21 }
 fn conflict() -> i32 { return 0 }
 
-effect fn construct() -> i32 ! OutOfMemoryError {
+effect fn construct() -> i32 ! Intrinsic.StorageFailure {
   let layout = Intrinsic.sharedLayout<i32>()
   let allocation = run Intrinsic.systemAllocationAcquire(move layout)
   unsafe {
@@ -1634,7 +1633,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
   }
 }
 
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: Intrinsic.StorageFailure) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -1673,13 +1672,12 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
   },
   {
     name: 'local-shared-recursive-cleanup',
-    source: `import silk.core { OutOfMemoryError }
-import silk.effect as Effect
+    source: `import silk.effect as Effect
 
 struct Empty {}
 struct Node { next: Intrinsic.SharedCore<Node> | Empty }
 
-effect fn construct() -> i32 ! OutOfMemoryError {
+effect fn construct() -> i32 ! Intrinsic.StorageFailure {
   let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
   let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
   let thirdAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
@@ -1701,7 +1699,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
   }
 }
 
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: Intrinsic.StorageFailure) -> i32 { return 0 }
 
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2237,6 +2235,18 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
       expected: { _tag: 'Completes', result: program.result },
     }),
   ),
+  ...[
+    { name: 'connected-owner', source: 'main', result: 42 },
+    { name: 'timer', source: 'timer', result: 42 },
+    { name: 'coroutine', source: 'coroutine', result: 123 },
+    { name: 'selective-ready', source: 'selective-ready', result: 22 },
+  ].map(
+    (program): CorpusProgram => ({
+      name: `independent-execution-separation-renamed-${program.name}`,
+      source: renameIndependentPolicy(independentExecutionPressure(program.source)),
+      expected: { _tag: 'Completes', result: program.result },
+    }),
+  ),
   ...([0, 4] as const).map(
     (ordinal): CorpusProgram => ({
       name: `independent-execution-separation-construction-failure-${ordinal}`,
@@ -2381,7 +2391,7 @@ effect fn failInner(core: Intrinsic.SharedCore<i32>) -> i32 ! Problem {
   let inner = Intrinsic.sharedClone<i32>(&core)
   fail Problem {}
 }
-effect fn construct() -> i32 ! Problem | OutOfMemoryError {
+effect fn construct() -> i32 ! Problem | Intrinsic.StorageFailure {
   let allocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<i32>())
   unsafe {
     let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
@@ -2389,7 +2399,7 @@ effect fn construct() -> i32 ! Problem | OutOfMemoryError {
     return run failInner(move transferred)
   }
 }
-effect fn recover(error: Problem | OutOfMemoryError) -> i32 { return 42 }
+effect fn recover(error: Problem | Intrinsic.StorageFailure) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -2434,7 +2444,7 @@ fn nested(value: &mut i32, core: Intrinsic.SharedCore<i32>) -> i32 {
   let cleanupCore = Intrinsic.sharedClone<i32>(&core)
   return Intrinsic.sharedWithMut<i32, i32>(&core, unused(move cleanupCore), conflict) + 21
 }
-effect fn construct() -> i32 ! OutOfMemoryError {
+effect fn construct() -> i32 ! Intrinsic.StorageFailure {
   let allocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<i32>())
   unsafe {
     let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
@@ -2444,7 +2454,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
     return result
   }
 }
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: Intrinsic.StorageFailure) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -2463,7 +2473,7 @@ fn link(value: &mut Node, next: Intrinsic.SharedCore<Node>) -> i32 {
   return 0
 }
 fn conflict() -> i32 { return 0 }
-effect fn construct() -> i32 ! OutOfMemoryError {
+effect fn construct() -> i32 ! Intrinsic.StorageFailure {
   let firstAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
   let secondAllocation = run Intrinsic.systemAllocationAcquire(Intrinsic.sharedLayout<Node>())
   unsafe {
@@ -2485,7 +2495,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
     return firstLink + secondLink + 42
   }
 }
-effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+effect fn recover(error: Intrinsic.StorageFailure) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },

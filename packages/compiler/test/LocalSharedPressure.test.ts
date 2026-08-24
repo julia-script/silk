@@ -11,6 +11,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Type from '../src/Type.js'
+import { renameIndependentPolicy } from './support/independentPolicyRename.js'
 import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
 
@@ -324,30 +325,6 @@ const renamePairs = [
   ['StoragePolicy', 'Allocator'],
   ['HeapProvider', 'SystemAllocator'],
 ] as const
-
-const independentRenamePairs = renamePairs.slice(34, -4)
-
-const renameIndependentPolicy = (source: string): string => {
-  const policyRenamed = independentRenamePairs.reduce(
-    (renamed, [replacement, original]) =>
-      renamed.replace(new RegExp(`\\b${original}\\b`, 'g'), replacement),
-    source,
-  )
-  return policyRenamed
-    .replaceAll('import silk.execution as Execution', 'import silk.execution as ExecutionFacade')
-    .replace(/\bExecution\./g, 'ExecutionFacade.')
-    .replaceAll('import silk.core as Core', 'import silk.core as Platform')
-    .replace(/\bCore\b/g, 'Platform')
-    .replace(/import silk\.core \{([^}]*)\}/g, (declaration) =>
-      declaration
-        .replace(/\bAllocator\b/g, '__SOURCE_ALLOCATOR__ as StoragePolicy')
-        .replace(/\bSystemAllocator\b/g, '__SOURCE_SYSTEM_ALLOCATOR__ as HeapProvider'),
-    )
-    .replace(/(?<!\.)\bAllocator\b/g, 'StoragePolicy')
-    .replace(/(?<!\.)\bSystemAllocator\b/g, 'HeapProvider')
-    .replaceAll('__SOURCE_ALLOCATOR__', 'Allocator')
-    .replaceAll('__SOURCE_SYSTEM_ALLOCATOR__', 'SystemAllocator')
-}
 
 const normalizeSpelling = (value: string): string => {
   const moduleNormalized = value.replaceAll(

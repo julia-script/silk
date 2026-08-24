@@ -5,10 +5,11 @@ import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as Type from '../src/Type.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import * as Projections from './support/projections.js'
 
 const ascii = (value: string): Uint8Array =>
-  Uint8Array.from(value, (character) => character.charCodeAt(0))
+  Uint8Array.from(ordinaryStorageSource(value), (character) => character.charCodeAt(0))
 
 const ordinaryUse = `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect

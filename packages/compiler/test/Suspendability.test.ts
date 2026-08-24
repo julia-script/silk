@@ -8,12 +8,13 @@ import * as Instances from '../src/Instances.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
+import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 import * as Projections from './support/projections.js'
 
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('suspendability/main', encoder.encode(source))
+  Analysis.ofSourceRealized('suspendability/main', encoder.encode(ordinaryStorageSource(source)))
 
 const key = (instance: Instances.InstanceKey): string =>
   `${instance.declaration.module}.${instance.declaration.name}<${instance.typeArguments

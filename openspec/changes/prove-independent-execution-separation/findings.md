@@ -12,8 +12,8 @@ compiler privilege and make no API-selection decision.
 | Guarantee | Evidence | Observation |
 | --- | --- | --- |
 | Initial ownership | `first-activation.silk`; connected-owner construction quota sweep | Construction transfers two distinct exact Effect representations into homogeneous Initial Execution values without starting either body. The owner selects the second value first, and dropping the never-started first value invokes no callback. Every fallible construction ordinal completes before task publication. |
-| Task-specific push readiness | `main.silk`; `selective-ready.silk` | A fixed endpoint publishes only its pre-reserved task identity after Wake consumption and after Shared access ends. Waking task 2 among three parked tasks does not inspect unrelated dormant Executions; an eligible task may be destroyed and its queued identity consumed as a stale tombstone. |
-| Recoverable package admission | connected-owner construction quota sweep; `post-publication-failure.silk` | Shared cells, result state, reservations, and exact Execution packages are admitted before publication. Allocation refusal remains an ordinary typed failure with balanced cleanup and publishes no partial task. A later waiter allocation failure begins no park and leaves an already-published Initial task valid. |
+| Task-specific push readiness | `main.silk`; `selective-ready.silk`; `timer.silk` | A fixed endpoint publishes only its pre-reserved task identity after Wake consumption and after Shared access ends. Waking task 2 among three parked tasks does not inspect unrelated dormant Executions; an eligible task may be destroyed and its queued identity consumed as a stale tombstone. The connected timer child notifies its Scheduler-shaped outer owner, while cancellation cascades through both waits and a late timer Wake cannot publish or redrive the outer task. |
+| Recoverable package admission | connected-owner construction quota sweep; `post-publication-failure.silk` | Shared cells, result state, reservations, and exact Execution packages are admitted before publication. Allocation refusal remains an ordinary typed failure with balanced cleanup and publishes no partial task. A real Deferred/Fiber waiter-insertion failure after publication begins no registration, retention, relinquishment, or park transition and leaves the already-published Initial task valid. |
 
 These observations select deferred first activation, push readiness, and recoverable package
 admission. They reject the smaller eager-start/owner-sweep/fatal-package model: eager start removes
@@ -25,16 +25,25 @@ fallback or compatibility implementation of that rejected model remains.
 
 The semantic, HIR, MIR, evaluator, native, and direct-Wasm implementation paths contain no checks
 for pressure-actor spellings. External parking is derived from the closed `ExecutionPark` builtin
-operation identity in `ExecutableOrigin.ts`; Execution and Wake types are sealed Intrinsic
-identities. Internal names such as `CoroutineFrame` describe compiler representation and do not
-recognize a source declaration.
+operation identity in `ExecutableOrigin.ts`; Execution, Wake, and the primitive storage-refusal
+type are sealed Intrinsic identities. `silk/core.OutOfMemoryError`, `Allocator`, and
+`SystemAllocator` are ordinary source policy and are absent from compiler selection logic.
+Internal names such as `CoroutineFrame` describe compiler representation and do not recognize a
+source declaration.
 
-The connected Scheduler/Deferred, timer/reactor, bounded alternate-owner, and selective-ready
-fixtures were each renamed through the landed local-shared normalization harness. Semantic facts,
-normalized MIR, evaluator results, direct-Wasm results, and intrinsic inventory remained equivalent.
-The pay-for-use matrix separately demonstrates that Shared capture selects `LocalExecution` but no
+The connected Scheduler/Deferred, timer/reactor, bounded alternate-owner, selective-ready,
+allocator/provider, and safe Execution-wrapper fixtures were renamed through one shared
+normalization harness. Semantic facts, complete normalized MIR transition/authority evidence,
+evaluator and direct-Wasm outcomes, direct-Wasm/native structured inventories, and designated native
+outcomes remained equivalent. The pay-for-use matrix separately inspects emitted artifacts for all
+seven configurations and demonstrates that Shared capture selects `LocalExecution` but no
 independent package, while a statically park-capable body retains its external tier even when its
 executed branch is direct.
+
+Dormant cleanup probes expose source-visible body, frame, registration-guard, endpoint/port,
+late-Wake, and final-package release order. Construction failure probes expose rollback order.
+Evaluator keeps the exact cheap-tier transition trace, while direct Wasm and designated native
+cases prove the target-specific lifecycle outcomes.
 
 ## Explicitly deferred boundaries
 
@@ -46,4 +55,3 @@ executed branch is direct.
   complete entries rejected and synthesizes no root owner.
 - Structured concurrency, interruption propagation, fairness, parallel scheduling, and worker
   memory policy remain separate directions.
-

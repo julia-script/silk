@@ -1,6 +1,6 @@
 # Implementation report: prove-independent-execution-separation
 
-Status: **READY FOR CONFORMANCE**
+Status: **POST-CONFORMANCE GATES PENDING**
 
 ## Implemented pressure surface
 
@@ -50,6 +50,44 @@ The fresh resume used two of its three distinct root-cause repairs:
 
 No hard-gate failure required the remaining repair slot.
 
+## Single conformance pass dispositions
+
+The parent-owned language/SLP, OpenSpec/task, and architecture/minimal-privilege lenses completed
+exactly once. The single consolidated fix pass accepted and closed all seven verified findings:
+
+1. **Critical — recursive Wasm cleanup authority alias.** Package authority now remains in a
+   stable local distinct from the recursive frame cursor. A nested aggregate/union dormant package
+   proves exact body, frame, guard, endpoint, package, and late-Wake reclamation without using freed
+   storage.
+2. **High — shallow timer witness.** The timer fixture now has a Scheduler-shaped outer Execution,
+   a detached timer-owned child, an explicit outer result owner, fallible pre-park preparation,
+   sibling progress, child-to-owner readiness, and cascading cancellation of both waits. Its late
+   timer Wake consumes without publication or redrive in evaluator, Wasm, and the native corpus.
+3. **High — unrelated post-publication allocation.** The failure now occurs while inserting a real
+   Deferred/Fiber join waiter through its declared allocation channel. It emits no register,
+   retain, relinquish, or park transition and leaves the published Initial task valid.
+4. **High — MIR-only pay-for-use evidence.** All seven configurations now compare deterministic
+   structured direct-Wasm and native linkage/runtime inventories for runners, packages, drive,
+   dormant continuation, Wake, notification, and thread/atomic support. Owner drive remains
+   NonParking; no byte, offset, or instruction count is asserted.
+5. **High — incomplete actor-neutrality witness.** Scheduler, Deferred, timer, Coroutine,
+   allocator/provider, and safe Execution-wrapper spellings are renamed together. Normalized
+   semantic and MIR evidence, evaluator/Wasm results, emitted target inventories, and designated
+   native outcomes remain equivalent. A machine-falsifiable compiler-phase source inventory rejects
+   those actor spellings.
+6. **High — ordinary allocation-policy privilege.** The compiler no longer recognizes
+   `silk/core.OutOfMemoryError`, `Allocator`, or `SystemAllocator` to select storage acquisition.
+   The primitive reports sealed `Intrinsic.StorageFailure`; ordinary `silk/core` source translates
+   it into public allocation policy. Direct primitive fixtures use the sealed failure or an
+   ordinary source adapter, and unused canonical identities were removed.
+7. **High — incomplete cleanup/rollback observability.** Source-observable probes now distinguish
+   body, frame, registration guard, endpoint/port, late Wake, final package authority, and
+   construction rollback ordering. This witness exposed and fixed a second Wasm ownership error:
+   after activation, continuation frames—not the obsolete body environment—own captured body
+   values, so dormant cancellation no longer double-drops them.
+
+No second conformance review was run.
+
 ## Focused verification
 
 - `pnpm exec vitest run packages/compiler/test/ExternalWakeParking.test.ts packages/compiler/test/LocalSharedPressure.test.ts`
@@ -59,6 +97,9 @@ No hard-gate failure required the remaining repair slot.
 - Timer evaluation records the exact success and cancellation transition sequences. It also proves
   sibling progress before reactor polling, polling before endpoint notification, balanced
   allocation release, evaluator result `42`, and direct-Wasm result `42`.
+- After the consolidated pass, `LocalSharedPressure.test.ts` passed **14/14** in 35.21s; the
+  storage-policy migration suite passed **147/147**; and the native differential corpus, including
+  four renamed-policy executions, passed **1/1** in 139.87s.
 - `pnpm --filter @silk-effect/compiler documentation:policy` — **PASS**, 46 modules and no
   violations.
 - `pnpm --filter @silk-effect/compiler documentation:check` — **PASS**.
@@ -81,12 +122,16 @@ There were no gate retries and no pre-existing red gate. A first documentation-e
 before the formal gate sequence lacked `packages/doctest/dist/bin.js`; building the declared
 doctest package resolved that mechanical prerequisite, after which all 54 examples passed.
 
+The required single post-conformance hard-gate sequence has not started. Its exact results will be
+recorded here in order after the consolidated source/test migration is committed.
+
 ## Scope and privilege dispositions
 
 - Scheduler, Fiber, Deferred, Timer, Coroutine, reactor, queue, and cancellation-policy names stay
   confined to pressure fixtures and findings. They are not canonical APIs or compiler identities.
-- The compiler recognizes only sealed Intrinsic Execution/Wake identities. The source-name
-  inventory and renamed fixtures found no pressure-actor spelling privilege.
+- The compiler recognizes only sealed Intrinsic Execution, Wake, and StorageFailure identities.
+  The source-name inventory and renamed fixtures found no pressure-actor or allocation-policy
+  spelling privilege.
 - Shared capture alone retains `LocalExecution`; it does not select independent packages. A
   statically external-park-capable body keeps its external tier even when its executed branch is
   direct, while the owner-side driver remains NonParking.
@@ -96,5 +141,6 @@ doctest package resolved that mechanical prerequisite, after which all 54 exampl
 
 ## Task state and handoff
 
-OpenSpec tasks are **21/21 complete**. The work is ready for the parent-owned single three-lens
-conformance pass. This worker did not start a conformance pass.
+OpenSpec tasks are **21/21 complete**. The parent-owned single three-lens conformance pass is
+complete, all verified Critical/High findings are closed in its one consolidated fix pass, and the
+required post-conformance gates remain pending.
