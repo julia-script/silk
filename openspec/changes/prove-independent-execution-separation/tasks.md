@@ -1,11 +1,11 @@
 ## 1. Connected Ordinary-Source Owners
 
-- [ ] 1.1 Build a companion test-local Scheduler-shaped owner from the landed SLP-0002 local-shared
+- [x] 1.1 Build a companion test-local Scheduler-shaped owner from the landed SLP-0002 local-shared
       pressure actors, with distinct Shared TaskStore and ReadyInbox, pre-reserved task/ready slots,
       fixed endpoint state, and removal-before-drive; keep the prerequisite witness independently
       runnable and verify no Shared access spans drive or external callback invocation and no strong
       ownership cycle exists.
-- [ ] 1.2 Implement deferred first activation from two distinct exact Effect body representations
+- [x] 1.2 Implement deferred first activation from two distinct exact Effect body representations
       erased into homogeneous `Execution<TaskOutput>` values in one owner store; verify owner-selected
       activation and never-started cleanup without callbacks.
 - [ ] 1.3 Implement a one-consumer Deferred-shaped waiter/producer program over Shared state and Wake;
@@ -18,7 +18,7 @@
       Wake no-op behavior, no outer readiness publication, and no legal redrive.
 - [ ] 1.6 Implement a bounded Coroutine-shaped shared port with two yields, completion, and drop while
       yielded; verify it reuses the same Execution/Wake lifecycle with no Scheduler-specific facts.
-- [ ] 1.7 Park several homogeneous tasks, wake exactly one, and verify its pre-reserved identity is
+- [x] 1.7 Park several homogeneous tasks, wake exactly one, and verify its pre-reserved identity is
       published and selected without inspecting or scanning unrelated dormant executions.
 - [ ] 1.8 Reject scheduling a nested-join child that retains Scheduler or Allocator requirements;
       verify the closed/Detached diagnostic preserves the provider cause, no inheritance occurs, and
@@ -37,7 +37,7 @@
 - [ ] 2.3 Inspect park, Wake consumption, endpoint notification, and ready-identity publication;
       verify no allocator access or failure edge exists and unknown callbacks run only after Shared
       access ends.
-- [ ] 2.4 Add queued-ready then eligible-destroy coverage; verify source consumes a stale identity or
+- [x] 2.4 Add queued-ready then eligible-destroy coverage; verify source consumes a stale identity or
       tombstone without accessing freed Execution storage or invoking compiler policy.
 
 ## 3. Pay-for-Use and Privilege Gates

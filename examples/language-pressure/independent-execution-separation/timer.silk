@@ -1,0 +1,139 @@
+// Test-local same-thread timer pressure witness. This is not a canonical Timer or Scheduler API.
+import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.layout { Layout }
+import silk.shared as Shared
+
+struct Empty {}
+struct Armed { wake: Intrinsic.Wake }
+struct TimerReactor { slot: Empty | Armed fires: i32 }
+struct TimerGuard { reactor: Shared.Shared<TimerReactor> }
+
+fn install(self: &mut TimerReactor, wake: Intrinsic.Wake) -> () {
+  let previous = Intrinsic.replace(self.slot, Armed { wake: move wake })
+  drop previous
+  return ()
+}
+fn extract(self: &mut TimerReactor) -> Empty | Armed {
+  self.fires = self.fires + 1
+  return Intrinsic.replace(self.slot, Empty {})
+}
+fn register(wake: Intrinsic.Wake, reactor: Shared.Shared<TimerReactor>) -> TimerGuard {
+  let installed = Shared.withMut(&reactor, install(move wake))
+  return TimerGuard { reactor: move reactor }
+}
+effect fn sleep(reactor: Shared.Shared<TimerReactor>) -> i32 {
+  let registration = register(move reactor)
+  run Execution.park(move registration)
+  return 40
+}
+fn poll(reactor: &Shared.Shared<TimerReactor>) -> () {
+  let selected = Shared.withMut(reactor, extract)
+  return match move selected {
+    Empty {} => ()
+    Armed { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+struct ReadyState { notifications: i32 }
+fn markReady(self: &mut ReadyState) -> () {
+  self.notifications = self.notifications + 1
+  return ()
+}
+fn ready(state: &Shared.Shared<ReadyState>) -> () {
+  return Shared.withMut(state, markReady)
+}
+fn readReady(self: &ReadyState) -> i32 { return self.notifications }
+
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Driver { slot: Empty | Stored result: i32 sibling: i32 }
+fn complete(driver: &mut Driver, result: i32) -> () { driver.result = result return () }
+fn suspend(driver: &mut Driver, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(driver.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+effect fn drive(execution: Intrinsic.Execution<i32>, driver: &mut Driver) -> () {
+  return run Execution.drive(move execution, move driver, complete, suspend)
+}
+effect fn driveStored(selected: Empty | Stored, driver: &mut Driver) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move driver)
+  }
+}
+fn progressSibling(driver: &mut Driver) -> () { driver.sibling = 2 return () }
+
+effect fn successfulTimer() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  // Reactor state and the exact Execution package are both fallible preparation before park.
+  let reactor = run Shared.make<TimerReactor>(TimerReactor { slot: Empty {}, fires: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let readiness = run Shared.make<ReadyState>(ReadyState { notifications: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let bodyReactor = Shared.clone<TimerReactor>(&reactor)
+  let endpoint = Shared.clone<ReadyState>(&readiness)
+  let execution = run Execution.make(sleep(move bodyReactor), move endpoint, ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut driver = Driver { slot: Empty {}, result: 0, sibling: 0 }
+  run drive(move execution, &mut driver)
+  progressSibling(&mut driver)
+  poll(&reactor)
+  let selected = Intrinsic.replace(driver.slot, Empty {})
+  run driveStored(move selected, &mut driver)
+  let notifications = Shared.with<ReadyState, i32>(&readiness, readReady)
+  drop readiness
+  drop reactor
+  if notifications != 1 { return -10 }
+  return driver.result + driver.sibling
+}
+
+effect fn cancelledTimer() -> i32 ! OutOfMemoryError {
+  let mut allocator = SystemAllocator.make()
+  let reactor = run Shared.make<TimerReactor>(TimerReactor { slot: Empty {}, fires: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let readiness = run Shared.make<ReadyState>(ReadyState { notifications: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let bodyReactor = Shared.clone<TimerReactor>(&reactor)
+  let endpoint = Shared.clone<ReadyState>(&readiness)
+  let execution = run Execution.make(sleep(move bodyReactor), move endpoint, ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut driver = Driver { slot: Empty {}, result: 0, sibling: 0 }
+  run drive(move execution, &mut driver)
+  let dormant = Intrinsic.replace(driver.slot, Empty {})
+  drop dormant
+  poll(&reactor)
+  let notifications = Shared.with<ReadyState, i32>(&readiness, readReady)
+  drop readiness
+  drop reactor
+  return notifications
+}
+
+struct ExhaustedAllocator {}
+effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  drop layout
+  fail OutOfMemoryError {}
+}
+impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }
+
+effect fn failedPreparation() -> i32 ! OutOfMemoryError {
+  let mut allocator = ExhaustedAllocator {}
+  let reactor = run Shared.make<TimerReactor>(TimerReactor { slot: Empty {}, fires: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  drop reactor
+  return 1
+}
+effect fn preparationFailed(error: OutOfMemoryError) -> i32 { return 7 }
+effect fn recover(error: OutOfMemoryError) -> i32 { return -100 }
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let success = run successfulTimer()
+  let cancelled = run cancelledTimer()
+  let preparation = run Effect.catchAll(failedPreparation(), preparationFailed)
+  if cancelled != 0 { return -20 }
+  if preparation != 7 { return -30 }
+  return success
+}
+
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

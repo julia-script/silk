@@ -1,0 +1,171 @@
+// Test-local push-readiness witness. The owner never scans dormant Execution values.
+import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+struct Empty {}
+struct Waiting { wake: Intrinsic.Wake }
+struct Condition { slot: Empty | Waiting }
+struct Guard { condition: Shared.Shared<Condition> }
+
+fn install(self: &mut Condition, wake: Intrinsic.Wake) -> () {
+  let previous = Intrinsic.replace(self.slot, Waiting { wake: move wake })
+  drop previous
+  return ()
+}
+fn extract(self: &mut Condition) -> Empty | Waiting {
+  return Intrinsic.replace(self.slot, Empty {})
+}
+fn register(wake: Intrinsic.Wake, condition: Shared.Shared<Condition>) -> Guard {
+  let installed = Shared.withMut(&condition, install(move wake))
+  return Guard { condition: move condition }
+}
+effect fn body(condition: Shared.Shared<Condition>, value: i32) -> i32 {
+  let registration = register(move condition)
+  run Execution.park(move registration)
+  return value
+}
+fn signal(condition: &Shared.Shared<Condition>) -> () {
+  let selected = Shared.withMut(condition, extract)
+  return match move selected {
+    Empty {} => ()
+    Waiting { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+struct Inbox { first: i32 second: i32 length: i32 taken: i32 }
+fn push(self: &mut Inbox, identity: i32) -> () {
+  if self.length == 0 { self.first = identity }
+  if self.length == 1 { self.second = identity }
+  self.length = self.length + 1
+  return ()
+}
+fn takeReady(self: &mut Inbox) -> i32 {
+  let mut result = self.first
+  if self.taken == 1 { result = self.second }
+  self.taken = self.taken + 1
+  return result
+}
+struct Endpoint { inbox: Shared.Shared<Inbox> identity: i32 }
+fn ready(endpoint: &Endpoint) -> () {
+  let identity = endpoint.identity
+  return Shared.withMut(&endpoint.inbox, push(identity))
+}
+
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Tasks {
+  first: Empty | Stored
+  second: Empty | Stored
+  third: Empty | Stored
+  result: i32
+}
+fn put(self: &mut Tasks, identity: i32, execution: Intrinsic.Execution<i32>) -> () {
+  if identity == 1 {
+    let previous = Intrinsic.replace(self.first, Stored { execution: move execution })
+    drop previous
+    return ()
+  }
+  if identity == 2 {
+    let previous = Intrinsic.replace(self.second, Stored { execution: move execution })
+    drop previous
+    return ()
+  }
+  let previous = Intrinsic.replace(self.third, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn take(self: &mut Tasks, identity: i32) -> Empty | Stored {
+  if identity == 1 { return Intrinsic.replace(self.first, Empty {}) }
+  if identity == 2 { return Intrinsic.replace(self.second, Empty {}) }
+  return Intrinsic.replace(self.third, Empty {})
+}
+fn record(self: &mut Tasks, value: i32) -> () { self.result = value return () }
+fn readResult(self: &Tasks) -> i32 { return self.result }
+
+struct Branch { tasks: Shared.Shared<Tasks> identity: i32 }
+fn complete(branch: Branch, value: i32) -> () {
+  let Branch { tasks, identity } = move branch
+  let recorded = Shared.withMut(&tasks, record(value))
+  drop tasks
+  return ()
+}
+fn suspend(branch: Branch, execution: Intrinsic.Execution<i32>) -> () {
+  let Branch { tasks, identity } = move branch
+  let stored = Shared.withMut(&tasks, put(identity, move execution))
+  drop tasks
+  return ()
+}
+effect fn drive(execution: Intrinsic.Execution<i32>, branch: Branch) -> () {
+  return run Execution.drive(move execution, move branch, complete, suspend)
+}
+effect fn driveSelected(selected: Empty | Stored, branch: Branch) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run drive(move execution, move branch)
+  }
+}
+effect fn driveIdentity(tasks: &Shared.Shared<Tasks>, identity: i32) -> () {
+  // Removal happens under the short Shared access; drive starts only after it has ended.
+  let selected = Shared.withMut(tasks, take(identity))
+  let branch = Branch { tasks: Shared.clone<Tasks>(tasks), identity: identity }
+  return run driveSelected(move selected, move branch)
+}
+
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let inbox = run Shared.make<Inbox>(Inbox { first: 0, second: 0, length: 0, taken: 0 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let tasks = run Shared.make<Tasks>(Tasks {
+    first: Empty {}, second: Empty {}, third: Empty {}, result: 0
+  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let firstCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let secondCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let thirdCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+
+  let firstBody = Shared.clone<Condition>(&firstCondition)
+  let secondBody = Shared.clone<Condition>(&secondCondition)
+  let thirdBody = Shared.clone<Condition>(&thirdCondition)
+  let firstEndpoint = Endpoint { inbox: Shared.clone<Inbox>(&inbox), identity: 1 }
+  let secondEndpoint = Endpoint { inbox: Shared.clone<Inbox>(&inbox), identity: 2 }
+  let thirdEndpoint = Endpoint { inbox: Shared.clone<Inbox>(&inbox), identity: 3 }
+  let first = run Execution.make(body(move firstBody, 11), move firstEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let second = run Execution.make(body(move secondBody, 22), move secondEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let third = run Execution.make(body(move thirdBody, 33), move thirdEndpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+
+  let firstBranch = Branch { tasks: Shared.clone<Tasks>(&tasks), identity: 1 }
+  let secondBranch = Branch { tasks: Shared.clone<Tasks>(&tasks), identity: 2 }
+  let thirdBranch = Branch { tasks: Shared.clone<Tasks>(&tasks), identity: 3 }
+  run drive(move first, move firstBranch)
+  run drive(move second, move secondBranch)
+  run drive(move third, move thirdBranch)
+
+  // Exactly task 2 publishes readiness. Task 1 and task 3 remain untouched.
+  signal(&secondCondition)
+  let selectedIdentity = Shared.withMut<Inbox, i32>(&inbox, takeReady)
+  run driveIdentity(&tasks, selectedIdentity)
+
+  // Queue task 3, destroy its Eligible handle before selection, then consume the stale id.
+  signal(&thirdCondition)
+  let eligible = Shared.withMut(&tasks, take(3))
+  drop eligible
+  let staleIdentity = Shared.withMut<Inbox, i32>(&inbox, takeReady)
+  run driveIdentity(&tasks, staleIdentity)
+
+  let result = Shared.with<Tasks, i32>(&tasks, readResult)
+  drop firstCondition
+  drop secondCondition
+  drop thirdCondition
+  drop tasks
+  drop inbox
+  return result
+}
+
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

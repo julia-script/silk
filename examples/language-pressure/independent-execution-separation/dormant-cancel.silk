@@ -1,0 +1,75 @@
+// Minimal regression for cancellation after onSuspend has returned and before a retained Wake.
+import silk.core as Core
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+
+struct Empty {}
+struct Armed { wake: Intrinsic.Wake }
+struct State { slot: Empty | Armed ready: i32 }
+struct Guard {}
+
+fn install(self: &mut State, wake: Intrinsic.Wake) -> () {
+  let previous = Intrinsic.replace(self.slot, Armed { wake: move wake })
+  drop previous
+  return ()
+}
+fn take(self: &mut State) -> Empty | Armed {
+  return Intrinsic.replace(self.slot, Empty {})
+}
+fn mark(self: &mut State) -> () { self.ready = self.ready + 1 return () }
+fn read(self: &State) -> i32 { return self.ready }
+
+fn register(wake: Intrinsic.Wake, state: Shared.Shared<State>) -> Guard {
+  let installed = Shared.withMut(&state, install(move wake))
+  drop state
+  return Guard {}
+}
+effect fn body(state: Shared.Shared<State>) -> i32 {
+  let registrationState = Shared.clone<State>(&state)
+  let registration = register(move registrationState)
+  run Execution.park(move registration)
+  drop state
+  return 1
+}
+fn ready(state: &Shared.Shared<State>) -> () { return Shared.withMut(state, mark) }
+
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored }
+fn complete(owner: &mut Owner, value: i32) -> () { return () }
+fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+fn signal(selected: Empty | Armed) -> () {
+  return match move selected {
+    Empty {} => ()
+    Armed { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let state = run Shared.make<State>(State { slot: Empty {}, ready: 0 })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let bodyState = Shared.clone<State>(&state)
+  let endpoint = Shared.clone<State>(&state)
+  let execution = run Execution.make(body(move bodyState), move endpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut owner = Owner { slot: Empty {} }
+  run drive(move execution, &mut owner)
+  let dormant = Intrinsic.replace(owner.slot, Empty {})
+  drop dormant
+  let retained = Shared.withMut(&state, take)
+  signal(move retained)
+  let observed = Shared.with<State, i32>(&state, read)
+  drop owner
+  drop state
+  return observed
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }
