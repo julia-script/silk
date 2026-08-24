@@ -2182,6 +2182,32 @@ const renamedLocalSharedPressure = readFileSync(
   ),
   'utf8',
 )
+const independentExecutionPressure = (name: string): string =>
+  readFileSync(
+    new URL(
+      `../../../../examples/language-pressure/independent-execution-separation/${name}.silk`,
+      import.meta.url,
+    ),
+    'utf8',
+  )
+const independentExecutionConstructionFailure = (ordinal: 0 | 4): string => {
+  const source = independentExecutionPressure('main')
+  const allocator = ordinal === 0 ? 'inboxAllocator' : 'producerAllocator'
+  return source
+    .replace(
+      'import silk.shared as Shared',
+      `import silk.shared as Shared
+import silk.core { Allocator, OutOfMemoryError }
+import silk.layout { Layout }
+struct ExhaustedAllocator {}
+effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  drop layout
+  fail OutOfMemoryError {}
+}
+impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }`,
+    )
+    .replace(`let mut ${allocator} = Core.make()`, `let mut ${allocator} = ExhaustedAllocator {}`)
+}
 const localSharedPressureFailure = (ordinal: 0 | 1): string =>
   localSharedPressure.replace(
     ordinal === 0
@@ -2194,6 +2220,30 @@ const localSharedPressureFailure = (ordinal: 0 | 1): string =>
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  ...[
+    { name: 'connected-owner', result: 42 },
+    { name: 'first-activation', result: 20 },
+    { name: 'coroutine', result: 123 },
+    { name: 'dormant-cancel', result: 0 },
+    { name: 'post-publication-failure', result: 42 },
+    { name: 'selective-ready', result: 22 },
+    { name: 'timer', result: 42 },
+  ].map(
+    (program): CorpusProgram => ({
+      name: `independent-execution-separation-${program.name}`,
+      source: independentExecutionPressure(
+        program.name === 'connected-owner' ? 'main' : program.name,
+      ),
+      expected: { _tag: 'Completes', result: program.result },
+    }),
+  ),
+  ...([0, 4] as const).map(
+    (ordinal): CorpusProgram => ({
+      name: `independent-execution-separation-construction-failure-${ordinal}`,
+      source: independentExecutionConstructionFailure(ordinal),
+      expected: { _tag: 'Completes', result: -100 },
+    }),
+  ),
   {
     name: 'independent-execution-non-lifo',
     source: independentExecutionNonLifo,

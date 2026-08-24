@@ -20,13 +20,13 @@
       yielded; verify it reuses the same Execution/Wake lifecycle with no Scheduler-specific facts.
 - [x] 1.7 Park several homogeneous tasks, wake exactly one, and verify its pre-reserved identity is
       published and selected without inspecting or scanning unrelated dormant executions.
-- [ ] 1.8 Reject scheduling a nested-join child that retains Scheduler or Allocator requirements;
+- [x] 1.8 Reject scheduling a nested-join child that retains Scheduler or Allocator requirements;
       verify the closed/Detached diagnostic preserves the provider cause, no inheritance occurs, and
       the acyclic ReadyInbox-only endpoint topology still reaches final release.
 
 ## 2. Publication and Allocation Evidence
 
-- [ ] 2.1 Implement task reservation rollback so all fallible Shared, result, queue, and exact
+- [x] 2.1 Implement task reservation rollback so all fallible Shared, result, queue, and exact
       package allocations finish before observational publication; verify success publishes one
       complete Initial task and failure publishes none.
 - [ ] 2.2 Extend the landed local-shared failure-quota harness to sweep every exercised
@@ -34,7 +34,7 @@
       designated corpus; verify each prior affine value and Allocation is cleaned once and
       subsequent runs remain deterministic; separately fail post-publication waiter allocation and
       verify no park begins and existing tasks remain valid.
-- [ ] 2.3 Inspect park, Wake consumption, endpoint notification, and ready-identity publication;
+- [x] 2.3 Inspect park, Wake consumption, endpoint notification, and ready-identity publication;
       verify no allocator access or failure edge exists and unknown callbacks run only after Shared
       access ends.
 - [x] 2.4 Add queued-ready then eligible-destroy coverage; verify source consumes a stale identity or
@@ -42,13 +42,13 @@
 
 ## 3. Pay-for-Use and Privilege Gates
 
-- [ ] 3.1 Add minimal ordinary-direct, ordinary-nested-only, explicit-direct, explicit-nested-only,
+- [x] 3.1 Add minimal ordinary-direct, ordinary-nested-only, explicit-direct, explicit-nested-only,
       and explicit-external-park programs plus ordinary direct/nested variants that capture a local
       Shared handle, and inspect normalized MIR/runtime-slice inventories; verify Shared capture
       publishes `LocalExecution` without selecting independent Execution machinery, each
       configuration includes only its static suspension and ownership machinery, and explicit
       nested-only execution completes through one drive with no Wake/notification state.
-- [ ] 3.2 Verify a dynamically direct path inside a statically park-capable Execution retains the
+- [x] 3.2 Verify a dynamically direct path inside a statically park-capable Execution retains the
       external tier while owner-side drive code remains NonParking; assert structural identities,
       not byte, timing, or instruction counts.
 - [ ] 3.3 Rename every Scheduler-shaped, Deferred-shaped, timer-shaped, Coroutine-shaped, allocator,
@@ -69,7 +69,7 @@
 
 ## 4. Boundary and Verification Gates
 
-- [ ] 4.1 Add the unowned park-capable complete-entry boundary fixture and verify its stable diagnostic
+- [x] 4.1 Add the unowned park-capable complete-entry boundary fixture and verify its stable diagnostic
       code/span is distinct from service requirements and no SLP-0003 implicit owner is synthesized.
 - [ ] 4.2 Extend the existing local-shared pressure test harness with companion connected
       Execution/Wake programs and add target-specific cases to the designated native differential

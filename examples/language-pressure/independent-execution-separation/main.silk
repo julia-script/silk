@@ -200,7 +200,11 @@ fn taskCompleted(self: &TaskStore) -> i32 { return self.completed }
 fn notificationCount(self: &ReadyInbox) -> i32 { return self.length - 2 }
 
 effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+  let mut inboxAllocator = Core.make()
+  let mut tasksAllocator = Core.make()
+  let mut resultAllocator = Core.make()
+  let mut waiterAllocator = Core.make()
+  let mut producerAllocator = Core.make()
   let inbox = run Shared.make<ReadyInbox>(ReadyInbox {
     first: 0,
     second: 0,
@@ -208,18 +212,18 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     length: 0,
     taken: 0,
     notifications: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Core.Allocator>(&mut inboxAllocator)
   let tasks = run Shared.make<TaskStore>(TaskStore {
     first: Empty {},
     second: Empty {},
     completed: 0,
     result: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Core.Allocator>(&mut tasksAllocator)
   let result = run Shared.make<ResultState>(ResultState {
     readiness: Empty {},
     done: false,
     value: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Core.Allocator>(&mut resultAllocator)
 
   let waiterEndpoint = ReadyEndpoint {
     inbox: Shared.clone<ReadyInbox>(&inbox),
@@ -235,12 +239,12 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     awaitResult(move waiterState),
     move waiterEndpoint,
     publishEndpoint,
-  ) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  ) |> Effect.provideMut<Core.Allocator>(&mut waiterAllocator)
   let producer = run Execution.make(
     produceResult(move producerState),
     move producerEndpoint,
     publishEndpoint,
-  ) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  ) |> Effect.provideMut<Core.Allocator>(&mut producerAllocator)
 
   // Both exact packages exist before either homogeneous Initial task becomes observable.
   let publishedWaiter = Shared.withMut(&tasks, storeFirst(move waiter))

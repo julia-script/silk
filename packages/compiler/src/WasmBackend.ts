@@ -1766,7 +1766,8 @@ const makeOperationContext = (
         }
         case 'WakeCleanup': {
           const value = currentValues.at(0)
-          if (value === undefined) throw new RangeError('Wasm Wake cleanup lost its package pointer')
+          if (value === undefined)
+            throw new RangeError('Wasm Wake cleanup lost its package pointer')
           return Object.freeze({
             before: Object.freeze([
               ...value,
@@ -4230,6 +4231,10 @@ const emitBeginLoanOperation = (
   } else {
     const rootType = layout.types.at(operation.root.ordinal)
     const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
+    const borrowedRoot = rootType?._tag === 'EffectBorrow'
+    const borrowedPointer = borrowedRoot
+      ? layout.borrowPointers.get(operation.root.ordinal)
+      : undefined
     if (rootSemantic !== undefined && SilkType.isSlice(rootSemantic)) {
       const [selector, ...suffixSelectors] = operation.selectors
       const [base, length] = slots(operation.root)
@@ -4325,12 +4330,22 @@ const emitBeginLoanOperation = (
     }
     const planned = memory?.frame.roots.get(operation.root.ordinal)
     const [address, length] = slots(operation.destination)
-    if (
-      rootSemantic === undefined ||
-      address === undefined ||
-      (!SilkType.isReference(rootSemantic) && planned === undefined)
-    ) {
+    if (rootSemantic === undefined || address === undefined) {
       throw new RangeError('Wasm borrow formation lost its frame root or address lane')
+    }
+    let rootAddress: ReadonlyArray<Instr.Instr>
+    if (borrowedRoot) {
+      if (borrowedPointer === undefined) {
+        throw new RangeError('Wasm borrow formation lost its inherited borrow pointer')
+      }
+      rootAddress = [Instr.localGet(borrowedPointer)]
+    } else if (SilkType.isReference(rootSemantic)) {
+      rootAddress = [Instr.localGet(scalar(operation.root))]
+    } else {
+      if (planned === undefined) {
+        throw new RangeError('Wasm borrow formation lost its address-taken frame root')
+      }
+      rootAddress = [...materializeRoot(operation.root), ...frameAddress(planned.offset)]
     }
     const instructions: Array<Instr.Instr> = []
     for (const offset of dynamicOffsets) {
@@ -4342,9 +4357,7 @@ const emitBeginLoanOperation = (
       )
     }
     instructions.push(
-      ...(SilkType.isReference(rootSemantic)
-        ? [Instr.localGet(scalar(operation.root))]
-        : [...materializeRoot(operation.root), ...frameAddress(planned?.offset ?? 0)]),
+      ...rootAddress,
       ...(staticOffset === 0 ? [] : [Instr.i32Const(staticOffset), Instr.op('i32.add')]),
     )
     for (const offset of dynamicOffsets) {
