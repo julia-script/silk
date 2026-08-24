@@ -19,6 +19,7 @@ import type {
   DeclarationFact,
   ExpressionFact,
   ExpressionResult,
+  InferredProviderSelector,
   SemanticType,
   TypeArgumentFact,
 } from './Elaboration.js'
@@ -732,6 +733,7 @@ export const contractSpecializationSites = (
 export interface ConstraintSolveResult {
   readonly substitution: Type.Substitution
   readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+  readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
@@ -751,6 +753,7 @@ export const solveCallableConstraints = (
 ): ConstraintSolveResult => {
   const substitution = new Map(initial)
   const evidence: Array<Constraint.ConstraintEvidence> = []
+  const inferredProviderSelectors: Array<InferredProviderSelector> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const givens = caller?.constraintContracts ?? Object.freeze([])
   const checked = constraints.flatMap((constraint, ordinal) =>
@@ -838,11 +841,15 @@ export const solveCallableConstraints = (
     }
     if (selectedArgument === undefined) {
       const parameter = group.at(0)?.constraint.selected.expression
-      if (parameter?._tag === 'RowParameter')
+      if (parameter?._tag === 'RowParameter') {
+        inferredProviderSelectors.push(
+          Object.freeze({ parameter: parameter.parameter, selected: solved.member }),
+        )
         substitution.set(
           Type.key(parameter.parameter),
           Type.requirementRowArgument([solved.member]),
         )
+      }
     }
     for (const selectedEvidence of solved.evidence) {
       const solvedWanted = wanted.find(
@@ -863,6 +870,7 @@ export const solveCallableConstraints = (
   return Object.freeze({
     substitution,
     evidence: Object.freeze(evidence),
+    inferredProviderSelectors: Object.freeze(inferredProviderSelectors),
     diagnostics: Object.freeze(diagnostics),
   })
 }
@@ -955,6 +963,7 @@ export const analyzeCallContract = (
         typeArguments: Object.freeze([]),
         substitution: new Map(),
         evidence: Object.freeze([]),
+        inferredProviderSelectors: Object.freeze([]),
       }),
       diagnostics: Object.freeze([]),
     })
@@ -1198,6 +1207,7 @@ export const analyzeCallContract = (
     substitution = inferred
   }
   let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
+  let inferredProviderSelectors: ReadonlyArray<InferredProviderSelector> = Object.freeze([])
   if (resolution !== undefined && contract.constraints.length > 0) {
     const solved = solveCallableConstraints(
       contract.constraints,
@@ -1209,6 +1219,7 @@ export const analyzeCallContract = (
     )
     substitution = solved.substitution
     evidence = solved.evidence
+    inferredProviderSelectors = solved.inferredProviderSelectors
     const firstConstraintDiagnostic = solved.diagnostics.at(0)
     if (firstConstraintDiagnostic !== undefined)
       return Object.freeze({
@@ -1311,6 +1322,7 @@ export const analyzeCallContract = (
       typeArguments,
       substitution,
       evidence,
+      inferredProviderSelectors,
     }),
     diagnostics: Object.freeze([]),
   })
@@ -2231,6 +2243,7 @@ export const finishCallableApplication = (
     schema?.substitution ?? section?.substitution ?? [],
   )
   let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
+  let inferredProviderSelectors: ReadonlyArray<InferredProviderSelector> = Object.freeze([])
   let valid =
     callable !== undefined &&
     (node.kind === 'PipelineExpression' ? isAvailableSyntax(node) : hasAvailableCallSyntax(node))
@@ -2388,6 +2401,7 @@ export const finishCallableApplication = (
     inferred.clear()
     for (const [identity, argument] of solved.substitution) inferred.set(identity, argument)
     evidence = Object.freeze([...(schema?.evidence ?? []), ...solved.evidence])
+    inferredProviderSelectors = solved.inferredProviderSelectors
     diagnostics.push(...solved.diagnostics)
     if (solved.diagnostics.length > 0) valid = false
   }
@@ -2559,6 +2573,7 @@ export const finishCallableApplication = (
       mode: callable?.mode ?? 'Shared',
       ...(callable === undefined ? {} : { contract: callable }),
       substitution: inferred,
+      inferredProviderSelectors,
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,
       syntax: node,

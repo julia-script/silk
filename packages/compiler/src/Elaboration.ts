@@ -723,6 +723,7 @@ export interface CallableApplyExpressionFact {
   readonly contract?: Type.Callable
   /** Generic evidence learned from the newly supplied callable arguments. */
   readonly substitution: Type.Substitution
+  readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
   readonly provenance:
     | { readonly _tag: 'DirectCallableApplication' }
     | {
@@ -933,6 +934,12 @@ export interface TypeArgumentFact {
   readonly requirementRole?: Type.Requirement['role']
 }
 
+/** One omitted provider-selector binder and the concrete service selected for it. */
+export interface InferredProviderSelector {
+  readonly parameter: Type.Parameter
+  readonly selected: Type.Requirement
+}
+
 /** Why a call contract cannot be established. */
 export type UnavailableCallContractReason =
   | { readonly _tag: 'UnavailableCallSyntax'; readonly syntax: SyntaxTree.Node }
@@ -954,6 +961,7 @@ export type CallContractFact =
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly substitution: Type.Substitution
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
     }
   | {
       readonly _tag: 'ArityMismatch'

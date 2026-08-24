@@ -922,6 +922,7 @@ console.log(
         typeArguments: [],
         substitution: {},
         evidence: [],
+        inferredProviderSelectors: [],
       },
       callType: { _tag: 'Available', type: 'i32' },
       callTargetOrdinal: 0,

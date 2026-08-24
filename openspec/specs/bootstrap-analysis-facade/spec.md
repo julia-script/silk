@@ -6,6 +6,31 @@ compilation request answering queries for sources, syntax, imports, declarations
 types, contracts, HIR facts, evaluation, and merged diagnostics — the exclusive consumer surface
 for tooling, so tools can grow without reimplementing Silk semantics.
 ## Requirements
+
+### Requirement: Editor facts retain proved implementations and inferred provider selectors
+
+The facade SHALL answer the valid endpoint-visible service and interface conformances implemented
+by a concrete nominal hover subject through the compiler's conformance-proof authority. It SHALL
+also expose each omitted provider-selector argument that provider selection successfully resolves,
+including the selected substituted requirement and its exact call-site insertion position.
+Tooling MUST NOT reconstruct either answer from syntax, declaration names, or requirement rows.
+Results SHALL be scope-presented, deduplicated, deterministically ordered, and absent for invalid,
+ambiguous, inaccessible, open, explicitly selected, or conditionally unproved cases.
+
+#### Scenario: Query implemented contracts
+
+- **WHEN** hover selects a concrete provider with two proved visible conformances
+- **THEN** the facade returns both distinct contracts in deterministic scope-aware presentation order
+
+#### Scenario: Query one inferred provider selector
+
+- **WHEN** a generic provision call omits its selector and provider selection resolves one service
+- **THEN** the facade returns that substituted service at the opening-parenthesis insertion point
+
+#### Scenario: Keep explicit and rejected selectors silent
+
+- **WHEN** the selector is explicit or provider selection is unresolved, ambiguous, or invalid
+- **THEN** the facade returns no provider-selector hint fact for that call
 ### Requirement: Project views are queryable but not directly realizable
 
 The analysis facade SHALL distinguish a single-root frontend snapshot from a project-analysis root

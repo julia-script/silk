@@ -168,13 +168,13 @@ pub fn main() -> i32 {
     }
     assert.strictEqual(
       hoverText('allocator'),
-      '```silk\nlet mut allocator: SystemAllocator\n```',
+      '```silk\nlet mut allocator: SystemAllocator\n```\n\n**Implements**\n\n- `Core.Allocator`',
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.strictEqual(hoverText('Core'), '```silk\nimport silk/core as Core\n```')
     assert.strictEqual(
       hoverText('make'),
-      '```silk\npub fn make() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.',
+      '```silk\npub fn make() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Core.Allocator`',
     )
   }),
 )
@@ -311,6 +311,72 @@ pub fn main() -> i32 {
           paddingRight: false,
         },
       ],
+    )
+  }),
+)
+
+it.effect('renders proved hover contracts and inferred provider selectors', () =>
+  Effect.gen(function* () {
+    const source = `import silk.core as Core
+import silk.effect as Effect
+
+pub effect fn main() -> () ! Core.StreamWriteError {
+  let mut streams = Core.native()
+  // π🙂 keeps the selector position on UTF-16 coordinates
+  return run Core.send(Core.stdout(), b"Hello\\n")
+    |> Effect.provideMut(&mut streams)
+}`
+    const { document, snapshot } = yield* open(source)
+    const hover = Document.hover(document, snapshot, positionOf(source, 'streams'))
+    assert.deepEqual(hover?.contents, {
+      kind: 'markdown',
+      value:
+        '```silk\nlet mut streams: NativeStandardStreams\n```\n\n**Implements**\n\n- `Core.StandardStreams`',
+    })
+
+    const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
+    const bindingEnd = source.indexOf('streams') + 'streams'.length
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, source.length),
+      }),
+      [
+        {
+          position: positionAt(source, bindingEnd),
+          label: ': NativeStandardStreams',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+        {
+          position: positionAt(source, selectorOffset),
+          label: '<Core.StandardStreams>',
+          kind: 1,
+          paddingLeft: false,
+          paddingRight: false,
+        },
+      ],
+    )
+  }),
+)
+
+it.effect('does not duplicate an explicitly written provider selector', () =>
+  Effect.gen(function* () {
+    const source = `import silk.core as Core
+import silk.effect as Effect
+pub effect fn main() -> () ! Core.StreamWriteError {
+  let mut streams = Core.native()
+  return run Core.send(Core.stdout(), b"ok\\n")
+    |> Effect.provideMut<Core.StandardStreams>(&mut streams)
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, source.length),
+      }).map((hint) => hint.label),
+      [': NativeStandardStreams'],
     )
   }),
 )

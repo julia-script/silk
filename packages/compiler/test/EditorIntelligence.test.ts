@@ -557,6 +557,174 @@ it.effect('presents canonical string in hover, inlay hints, and semantic occurre
   )
 })
 
+it.effect('publishes proved hover contracts and inferred provider-selector hints', () => {
+  const source = `import silk.core as Core
+import silk.effect as Effect
+
+fn inspect(value: Core.NativeStandardStreams) -> () { return () }
+
+pub effect fn main() -> () ! Core.StreamWriteError {
+  let mut streams = Core.native()
+  return run Core.send(Core.stdout(), b"Hello, world!\\n")
+    |> Effect.provideMut(&mut streams)
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const contractsAt = (spelling: string, occurrence = 0) => {
+        let offset = -1
+        for (let index = 0; index <= occurrence; index += 1)
+          offset = source.indexOf(spelling, offset + 1)
+        return (
+          Analysis.hoverSubjectAt(snapshot, 'main', offset)?.implementedContracts.map(
+            (contract) => contract.text,
+          ) ?? []
+        )
+      }
+
+      assert.deepEqual(contractsAt('NativeStandardStreams'), ['Core.StandardStreams'])
+      assert.deepEqual(contractsAt('native'), ['Core.StandardStreams'])
+      assert.deepEqual(contractsAt('streams', 1), ['Core.StandardStreams'])
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(
+          snapshot,
+          'main',
+          source.indexOf('native()') + 'native'.length,
+        )?.implementedContracts.map((contract) => contract.text) ?? [],
+        ['Core.StandardStreams'],
+      )
+
+      const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
+      const selectors = hints.filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
+      assert.strictEqual(selectors.length, 1)
+      assert.strictEqual(selectors.at(0)?.presentation.text, 'Core.StandardStreams')
+      assert.strictEqual(
+        selectors.at(0)?.span.start,
+        source.indexOf('provideMut(') + 'provideMut'.length,
+      )
+      assert.deepEqual(
+        Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length),
+        hints,
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('omits explicit provider selectors while retaining binding hints', () => {
+  const source = `import silk.core as Core
+import silk.effect as Effect
+
+pub effect fn main() -> () ! Core.StreamWriteError {
+  let mut streams = Core.native()
+  return run Core.send(Core.stdout(), b"ok\\n")
+    |> Effect.provideMut<Core.StandardStreams>(&mut streams)
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
+      assert.deepEqual(
+        hints.map((hint) => hint._tag),
+        ['BindingTypeHint'],
+      )
+      assert.strictEqual(hints.at(0)?.presentation.text, 'NativeStandardStreams')
+      return undefined
+    }),
+  )
+})
+
+it.effect('sorts multiple hover contracts and proves conditional applications', () => {
+  const source = `service Beta {}
+service Alpha {}
+struct Provider {}
+impl Beta for Provider {}
+impl Alpha for Provider {}
+
+interface Eligible {}
+service Wrapped {}
+struct Good {}
+struct Bad {}
+impl Eligible for Good {}
+struct Box<T> { value: T }
+impl<T: Eligible> Wrapped for Box<T> {}
+
+fn provider() -> Provider { return Provider {} }
+fn good() -> Box<Good> { return Box<Good> { value: Good {} } }
+fn bad() -> Box<Bad> { return Box<Bad> { value: Bad {} } }
+pub fn main() -> i32 { return 0 }`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const contractsAt = (spelling: string) =>
+        Analysis.hoverSubjectAt(
+          snapshot,
+          'main',
+          source.indexOf(spelling),
+        )?.implementedContracts.map((contract) => contract.text) ?? []
+
+      assert.deepEqual(contractsAt('Provider'), ['Alpha', 'Beta'])
+      assert.deepEqual(contractsAt('provider()'), ['Alpha', 'Beta'])
+      assert.deepEqual(contractsAt('good()'), ['Wrapped'])
+      assert.deepEqual(contractsAt('bad()'), [])
+      return undefined
+    }),
+  )
+})
+
+it.effect('hints user-defined provider-selection combinators without name checks', () => {
+  const source = `service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
+
+effect fn read() -> i32 ? &mut Clock { return 42 }
+
+effect fn bind<?S, A, P, E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+where &mut P provides S from R {
+  return run Intrinsic.bindRequirementMut<S>(move self, provider)
+}
+
+pub fn main() -> i32 {
+  let mut clock = FixedClock {}
+  return run bind(read(), &mut clock)
+}`
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+    Effect.map((snapshot) => {
+      const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
+      const selector = hints.find((hint) => hint._tag === 'ProviderSelectorTypeHint')
+      assert.strictEqual(selector?.presentation.text, 'Clock')
+      assert.strictEqual(selector?.span.start, source.indexOf('bind(read') + 'bind'.length)
+      return undefined
+    }),
+  )
+})
+
+it.effect('excludes conformances whose contract endpoint is private', () => {
+  const root = `import lib as Lib
+pub fn main() -> i32 {
+  let provider = Lib.make()
+  return 0
+}`
+  const library = `service Hidden {}
+pub struct Provider {}
+impl Hidden for Provider {}
+pub fn make() -> Provider { return Provider {} }`
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    Effect.map((snapshot) => {
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('make'))?.implementedContracts,
+        [],
+      )
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('provider'))?.implementedContracts,
+        [],
+      )
+      return undefined
+    }),
+  )
+})
+
 it.effect(
   'retains exact semantic tokens for calls, constructors, initializers, and projections',
   () =>
@@ -833,6 +1001,7 @@ pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
 
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
   const root = `import silk.box { Box }
+import silk.core as Core
 import types.Models as Schema { Box as Selected }
 struct Selected {}
 struct Problem {}
@@ -856,6 +1025,11 @@ pub struct Other {}`
       assert.strictEqual(Presentation.type(box, 'main', scope), 'Schema.Box<i32>')
       assert.strictEqual(Presentation.type(other, 'main', scope), 'Schema.Other')
       assert.strictEqual(Presentation.type(box, 'detached'), 'types/Models.Box<i32>')
+      assert.strictEqual(
+        Presentation.scopedNominal(Type.nominal('silk/core', 'Allocator'), 'main', scope).text,
+        'Core.Allocator',
+      )
+      assert.strictEqual(Presentation.scopedNominal(box, 'main', scope).text, 'Schema.Box<i32>')
 
       const effect = Type.effect(
         Type.reference('Exclusive', box),
