@@ -416,7 +416,10 @@ it.effect(
       const layout = Analysis.layoutOf(logical)
       const oom =
         layout._tag === 'Available'
-          ? Projections.callingShapeOf(logical, Type.outOfMemoryError)
+          ? Projections.callingShapeOf(
+              logical,
+              Type.nominal('silk/core', 'OutOfMemoryError'),
+            )
           : undefined
       assert.strictEqual(oom?.lanes.length, 0)
       const evaluated = Analysis.evaluate(logical)

@@ -3179,7 +3179,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             destination?._tag !== 'Nominal' ||
             !SilkType.equals(destination.type, SilkType.allocation) ||
             !SilkType.equals(operation.type.type, SilkType.allocation) ||
-            !SilkType.equals(operation.failure, SilkType.outOfMemoryError) ||
+            !SilkType.equals(operation.failure, SilkType.storageFailure) ||
             expectedFailure === undefined ||
             !SilkType.equals(expectedFailure, operation.failure) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
@@ -3191,7 +3191,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail:
-                  'allocation does not preserve Layout, Allocation, or OutOfMemoryError contracts',
+                  'allocation does not preserve Layout, Allocation, or sealed storage-failure contracts',
               }),
             )
         }

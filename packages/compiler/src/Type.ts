@@ -23,7 +23,11 @@ export interface Nominal {
   readonly name: string
   readonly arguments: ReadonlyArray<GenericArgument>
   /** Compiler-minted provenance for sealed nominal identities unavailable to source declarations. */
-  readonly sealed?: 'Intrinsic.SharedCore' | 'Intrinsic.Execution' | 'Intrinsic.Wake'
+  readonly sealed?:
+    | 'Intrinsic.SharedCore'
+    | 'Intrinsic.Execution'
+    | 'Intrinsic.Wake'
+    | 'Intrinsic.StorageFailure'
 }
 
 /** One declaration-owned generic type parameter. Names are provenance, not identity. */
@@ -457,6 +461,15 @@ const sealedWake = (): Nominal =>
     sealed: 'Intrinsic.Wake',
   })
 
+const sealedStorageFailure = (): Nominal =>
+  Object.freeze({
+    _tag: 'NominalType',
+    module: 'Intrinsic',
+    name: 'StorageFailure',
+    arguments: Object.freeze([]),
+    sealed: 'Intrinsic.StorageFailure',
+  })
+
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
   self: Nominal,
@@ -468,15 +481,13 @@ export const specializeNominal = (
       ? sealedExecution(arguments_)
       : self.sealed === 'Intrinsic.Wake'
         ? sealedWake()
-        : nominal(self.module, self.name, arguments_)
+        : self.sealed === 'Intrinsic.StorageFailure'
+          ? sealedStorageFailure()
+          : nominal(self.module, self.name, arguments_)
 
-/** Canonical allocation-free failure used by every allocator implementation. */
-export const outOfMemoryError: Nominal = nominal('silk/core', 'OutOfMemoryError')
 export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
 export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
-/** The implementation-erased allocation capability requested by allocation Effects. */
-export const allocator: Nominal = nominal('silk/core', 'Allocator')
 /** Explicit host capability for complete stdout and stderr byte writes. */
 export const standardStreams: Nominal = nominal('silk/core', 'StandardStreams')
 /** Allocation-free typed failure returned when a host cannot commit a complete write. */
@@ -489,8 +500,6 @@ export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
 /** Compiler-sealed zero-operation property proving that values duplicate without user code. */
 export const copyCapability: Nominal = nominal('silk/core', 'Copy')
-/** The nominal system-backed implementation of the Allocator capability. */
-export const systemAllocator: Nominal = nominal('silk/core', 'SystemAllocator')
 /** The canonical empty success value used by effect-free cleanup operations. */
 export const unit: Nominal = nominal('silk/core', 'Unit')
 /** Compiler-checked typed raw storage owned independently from its allocator provider. */
@@ -503,6 +512,8 @@ export const sharedCore = (element: Type): Nominal => sealedSharedCore([element]
 export const execution = (result: Type): Nominal => sealedExecution([result])
 /** Opaque affine readiness authority for one local Execution park generation. */
 export const wake: Nominal = sealedWake()
+/** Sealed host-storage refusal carried only by the primitive allocation boundary. */
+export const storageFailure: Nominal = sealedStorageFailure()
 /** Canonical recoverable success and failure members shipped by silk/option. */
 export const some = (element: Type): Nominal => nominal('silk/option', 'Some', [element])
 export const none: Nominal = nominal('silk/option', 'None')
@@ -613,6 +624,7 @@ export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   ['Intrinsic.SharedCore', sealedSharedCore([])],
   ['Intrinsic.Execution', sealedExecution([])],
   ['Intrinsic.Wake', sealedWake()],
+  ['Intrinsic.StorageFailure', sealedStorageFailure()],
 ])
 
 /** Returns the compiler-known generic arity of an intrinsic nominal actor. */

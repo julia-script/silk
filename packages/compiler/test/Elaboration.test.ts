@@ -752,7 +752,9 @@ pub fn main() -> i32 { return 0 }`,
     const providerType = system.functions.at(0)?.bindings.at(0)?.inferredType
     assert.strictEqual(providerType?._tag, 'Available')
     if (providerType?._tag === 'Available')
-      assert.isTrue(Type.equals(providerType.type, Type.systemAllocator))
+      assert.isTrue(
+        Type.equals(providerType.type, Type.nominal('silk/core', 'SystemAllocator')),
+      )
 
     const custom = yield* analyzeWithStdlib(
       'allocation://custom-provider',

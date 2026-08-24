@@ -863,7 +863,7 @@ pub struct Other {}`
         'Shared',
         [
           Object.freeze({
-            capability: Type.allocator,
+            capability: Type.nominal('silk/core', 'Allocator'),
             role: 'Heap',
             access: 'Exclusive' as const,
           }),
@@ -881,14 +881,20 @@ pub struct Other {}`
       assert.strictEqual(
         Presentation.genericArgument(
           Type.requirementRowArgument([
-            { capability: Type.allocator, role: 'Heap', access: 'Exclusive' },
+            {
+              capability: Type.nominal('silk/core', 'Allocator'),
+              role: 'Heap',
+              access: 'Exclusive',
+            },
           ]),
           'main',
           scope,
         ),
         '? &mut Allocator at Heap',
       )
-      const union = Type.union(Object.freeze([problem, Type.outOfMemoryError]))
+      const union = Type.union(
+        Object.freeze([problem, Type.nominal('silk/core', 'OutOfMemoryError')]),
+      )
       assert.strictEqual(
         union._tag === 'Normalized' ? Presentation.type(union.type, 'main', scope) : undefined,
         'Problem | OutOfMemoryError',
