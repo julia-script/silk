@@ -358,6 +358,76 @@ pub effect fn main() -> () ! Core.StreamWriteError {
         },
       ],
     )
+    assert.deepEqual(
+      Document.inlayHints(document, snapshot, {
+        start: { line: 0, character: 0 },
+        end: positionAt(source, selectorOffset),
+      }).map((hint) => hint.label),
+      [': NativeStandardStreams'],
+    )
+    const selectorRange = {
+      start: positionAt(source, selectorOffset),
+      end: positionAt(source, selectorOffset + 1),
+    }
+    const clipped = Document.inlayHints(document, snapshot, selectorRange)
+    assert.deepEqual(Document.inlayHints(document, snapshot, selectorRange), clipped)
+    assert.deepEqual(
+      clipped.map((hint) => hint.label),
+      ['<Core.StandardStreams>'],
+    )
+  }),
+)
+
+it.effect('preserves hover Markdown across contract subjects and recovered source', () =>
+  Effect.gen(function* () {
+    const source = `service Beta {}
+service Alpha {}
+struct Provider {}
+impl Beta for Provider {}
+impl Alpha for Provider {}
+
+/// Constructs a provider.
+fn make() -> Provider { return Provider {} }
+
+pub fn main() -> i32 {
+  let provider = make()
+  return 0
+}
+
+pub fn broken() -> i32 { return missing() }`
+    const { document, snapshot } = yield* open(source)
+    assert.isAbove(Document.diagnostics(document, snapshot, () => undefined).length, 0)
+    const markdownAt = (spelling: string, occurrence = 0) => {
+      const contents = Document.hover(
+        document,
+        snapshot,
+        positionOf(source, spelling, occurrence),
+      )?.contents
+      return typeof contents === 'object' && 'value' in contents ? contents.value : undefined
+    }
+    const implementations = '**Implements**\n\n- `Alpha`\n- `Beta`'
+
+    assert.strictEqual(
+      markdownAt('Provider'),
+      `\`\`\`silk\nstruct Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('Provider', 3),
+      `\`\`\`silk\nstruct Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('make'),
+      `\`\`\`silk\nfn make() -> Provider\n\`\`\`\n\nConstructs a provider.\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('make', 1),
+      `\`\`\`silk\nfn make() -> Provider\n\`\`\`\n\nConstructs a provider.\n\n${implementations}`,
+    )
+    assert.strictEqual(
+      markdownAt('provider', 1),
+      `\`\`\`silk\nlet provider: Provider\n\`\`\`\n\n${implementations}`,
+    )
+    assert.strictEqual(markdownAt('0'), '```silk\ni32\n```')
   }),
 )
 

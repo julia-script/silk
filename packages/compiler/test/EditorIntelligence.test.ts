@@ -601,9 +601,132 @@ pub effect fn main() -> () ! Core.StreamWriteError {
         selectors.at(0)?.span.start,
         source.indexOf('provideMut(') + 'provideMut'.length,
       )
+      const selectorOffset = source.indexOf('provideMut(') + 'provideMut'.length
+      assert.deepEqual(
+        Analysis.typeHints(snapshot, 'main', 0, selectorOffset).filter(
+          (hint) => hint._tag === 'ProviderSelectorTypeHint',
+        ),
+        [],
+      )
+      assert.deepEqual(
+        Analysis.typeHints(snapshot, 'main', selectorOffset, selectorOffset + 1)
+          .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
+          .map((hint) => hint.presentation.text),
+        ['Core.StandardStreams'],
+      )
       assert.deepEqual(
         Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length),
         hints,
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('presents selected imports and shared and owned provider selectors', () => {
+  const selectedImportSource = `import silk.core { StandardStreams }
+import silk.core as Core
+import silk.effect as Effect
+
+pub effect fn main() -> () ! Core.StreamWriteError {
+  let mut streams = Core.native()
+  return run Core.send(Core.stdout(), b"selected\\n")
+    |> Effect.provideMut(&mut streams)
+}`
+  const accessFormsSource = `import silk.effect as Effect
+
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
+effect fn read() -> i32 ? &Clock { return 42 }
+
+pub fn main() -> i32 {
+  let sharedClock = FixedClock {}
+  let shared = read() |> Effect.provide(&sharedClock)
+  drop shared
+  let ownedClock = FixedClock {}
+  let owned = read() |> Effect.bindRequirementOwned(move ownedClock)
+  return run owned
+}`
+  return Effect.all([
+    Analysis.ofSource('main', encoder.encode(selectedImportSource)),
+    Analysis.ofSource('main', encoder.encode(accessFormsSource)),
+  ]).pipe(
+    Effect.map(([selectedImport, accessForms]) => {
+      assert.deepEqual(Analysis.diagnostics(selectedImport), [])
+      assert.deepEqual(
+        Analysis.typeHints(selectedImport, 'main', 0, encoder.encode(selectedImportSource).length)
+          .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
+          .map((hint) => hint.presentation.text),
+        ['StandardStreams'],
+      )
+
+      assert.deepEqual(Analysis.diagnostics(accessForms), [])
+      assert.deepEqual(
+        Analysis.typeHints(accessForms, 'main', 0, encoder.encode(accessFormsSource).length)
+          .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
+          .map((hint) => hint.presentation.text),
+        ['Clock', 'Clock'],
+      )
+      return undefined
+    }),
+  )
+})
+
+it.effect('omits ambiguous and invalid selectors while preserving recovered facts', () => {
+  const ambiguousSource = `import silk.effect as Effect
+service Alpha {}
+service Beta {}
+struct Provider {}
+impl Alpha for Provider {}
+impl Beta for Provider {}
+effect fn work() -> i32 ? &Alpha | &Beta { return 42 }
+pub fn main() -> i32 {
+  let provider = Provider {}
+  let recipe = work() |> Effect.provide(&provider)
+  return 0
+}`
+  const recoveredSource = `import silk.effect as Effect
+service Clock {}
+struct FixedClock {}
+impl Clock for FixedClock {}
+effect fn read() -> i32 ? &Clock { return 42 }
+pub fn main() -> i32 {
+  let clock = FixedClock {}
+  let valid = read() |> Effect.provide(&clock)
+  let invalid = read() |> Effect.provide(&missing)
+  return Effect.
+}`
+  return Effect.all([
+    Analysis.ofSource('main', encoder.encode(ambiguousSource)),
+    Analysis.ofSource('main', encoder.encode(recoveredSource)),
+  ]).pipe(
+    Effect.map(([ambiguous, recovered]) => {
+      assert.include(
+        Analysis.diagnostics(ambiguous).map((diagnostic) => diagnostic.code),
+        'SEM0125',
+      )
+      assert.deepEqual(
+        Analysis.typeHints(ambiguous, 'main', 0, encoder.encode(ambiguousSource).length).filter(
+          (hint) => hint._tag === 'ProviderSelectorTypeHint',
+        ),
+        [],
+      )
+
+      assert.isAbove(Analysis.diagnostics(recovered).length, 0)
+      assert.deepEqual(
+        Analysis.typeHints(recovered, 'main', 0, encoder.encode(recoveredSource).length)
+          .filter((hint) => hint._tag === 'ProviderSelectorTypeHint')
+          .map((hint) => hint.presentation.text),
+        ['Clock'],
+      )
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(
+          recovered,
+          'main',
+          recoveredSource.indexOf('FixedClock'),
+        )?.implementedContracts.map((contract) => contract.text),
+        ['Clock'],
       )
       return undefined
     }),
@@ -664,6 +787,44 @@ pub fn main() -> i32 { return 0 }`
       assert.deepEqual(contractsAt('provider()'), ['Alpha', 'Beta'])
       assert.deepEqual(contractsAt('good()'), ['Wrapped'])
       assert.deepEqual(contractsAt('bad()'), [])
+      return undefined
+    }),
+  )
+})
+
+it.effect('qualifies same-spelled contracts and excludes invalid conformances', () => {
+  const qualifiedSource = `import contracts as Other
+service Contract {}
+struct Provider {}
+impl Contract for Provider {}
+impl Other.Contract for Provider {}
+pub fn main() -> Provider { return Provider {} }`
+  const contracts = `pub service Contract {}`
+  const invalidSource = `service Broken { fn value() -> i32 }
+struct Provider {}
+impl Broken for Provider {}
+pub fn main() -> Provider { return Provider {} }`
+  return Effect.all([
+    Analysis.make({ root: SourceFile.make('main', encoder.encode(qualifiedSource)) }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['contracts', encoder.encode(contracts)]]))),
+    ),
+    Analysis.ofSource('main', encoder.encode(invalidSource)),
+  ]).pipe(
+    Effect.map(([qualified, invalid]) => {
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(
+          qualified,
+          'main',
+          qualifiedSource.indexOf('Provider'),
+        )?.implementedContracts.map((contract) => contract.text),
+        ['Other.Contract', 'Contract'],
+      )
+      assert.isAbove(Analysis.diagnostics(invalid).length, 0)
+      assert.deepEqual(
+        Analysis.hoverSubjectAt(invalid, 'main', invalidSource.indexOf('Provider'))
+          ?.implementedContracts,
+        [],
+      )
       return undefined
     }),
   )

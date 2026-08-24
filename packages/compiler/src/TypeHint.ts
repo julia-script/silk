@@ -97,7 +97,7 @@ export const make = (
           leftParenthesis.span.start,
           leftParenthesis.span.start,
         )
-        if (span === undefined || span.start < start || span.end > end) return
+        if (span === undefined || span.start < start || span.start >= end) return
         const key = `${span.sourceId}:${span.start}`
         const group = selectorGroups.get(key) ?? Object.freeze({ span, selectors: new Map() })
         for (const selector of selectors) {
