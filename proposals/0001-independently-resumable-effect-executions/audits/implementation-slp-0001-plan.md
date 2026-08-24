@@ -187,3 +187,10 @@ test exceeded its 60-second timeout under parallel-suite load despite passing fo
 This is a new distinct test-cost cause after budget exhaustion, so `pnpm check` and release
 candidate did not run. A fresh bounded gate-only resume will target that named timeout without a
 second conformance review.
+
+Layer 5 gate-resume checkpoint `c7769fe` removes the parallel timeout without raising deadlines or
+reducing evidence. Actor-neutral evidence is split into four existing-file tests, each snapshot,
+MIR, renamed source, and artifact is reused once, and compiler spelling inventory is isolated as a
+synchronous check. Focused pressure verification passes 18/18 and the exact compiler parallel
+context passes 220 files/2,150 tests. Fresh gate-resume repair usage is 1/3; the full mandated gates
+are running.
