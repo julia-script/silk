@@ -715,18 +715,34 @@ function* executeFunction(
         package_.state = 'Destroyed'
         traceExecution(package_, owner.ticket, 'Cancel', provenance.span)
         const guard = package_.guard
+        const bodyTransferred = state.executionMachines.has(owner.ticket)
         const machineCleanup = yield* cleanupExecutionMachine(
           owner.ticket,
           provenance,
           localOrdinal,
-          new Set([package_.body, package_.endpoint, package_.callback]),
+          packageValueSet([
+            package_.endpoint,
+            package_.callback,
+            ...(guard === undefined ? [] : [guard.value]),
+          ]),
         )
         if (machineCleanup !== undefined) return machineCleanup
-        if (guard !== undefined) delete package_.guard
+        if (guard !== undefined) {
+          const released = yield* releaseThroughPlan(
+            guard.cleanup,
+            guard.value,
+            provenance,
+            localOrdinal,
+          )
+          if (released !== undefined) return released
+          delete package_.guard
+        }
         for (const retained of [
           Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
           Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
-          Object.freeze({ value: package_.body, cleanup: package_.bodyCleanup }),
+          ...(bodyTransferred
+            ? []
+            : [Object.freeze({ value: package_.body, cleanup: package_.bodyCleanup })]),
         ]) {
           const blocked = yield* releaseThroughPlan(
             retained.cleanup,
@@ -1531,33 +1547,58 @@ function* executeFunction(
     const machine = state.executionMachines.get(ticket)
     if (machine === undefined) return undefined
     state.executionMachines.delete(ticket)
-    const activations = new Map<number, ActivationRecord>()
-    for (const current of machine.stack) activations.set(current.frame, current)
+    const activations = new Map<
+      number,
+      { readonly activation: ActivationRecord; readonly state?: Mir.CoroutineFrameState }
+    >()
+    for (const current of machine.stack)
+      activations.set(current.frame, Object.freeze({ activation: current }))
     const collectTransfer = (transfer: TransferContext | undefined): void => {
       if (transfer === undefined) return
       for (const pending of transfer.pending)
-        activations.set(pending.activation.frame, pending.activation)
+        activations.set(
+          pending.activation.frame,
+          Object.freeze({
+            activation: pending.activation,
+            ...(pending.state === undefined ? {} : { state: pending.state }),
+          }),
+        )
       collectTransfer(transfer.parent)
     }
     collectTransfer(machine.transfer)
-    for (const current of activations.values()) {
+    for (const retained of activations.values()) {
+      const current = retained.activation
       const frame = current.coroutineFrame
-      if (frame === undefined) continue
       const owner = program.functions.find(
         (candidate) =>
           Instances.keyText(candidate.instance) === Instances.keyText(current.instance),
       )
+      const pendingPoint = owner?.suspension?.frame?.states.find(
+        (candidate) =>
+          current.pendingCall !== undefined &&
+          candidate.point.sourceId === current.pendingCall.span.sourceId &&
+          candidate.point.spanStart === current.pendingCall.span.start &&
+          candidate.point.spanEnd === current.pendingCall.span.end,
+      )?.point
+      const point = frame?.point ?? retained.state?.point ?? pendingPoint
+      if (point === undefined) continue
       const frameState = owner?.suspension?.frame?.states.find(
         (candidate) =>
-          candidate.point.sourceId === frame.point.sourceId &&
-          candidate.point.spanStart === frame.point.spanStart &&
-          candidate.point.spanEnd === frame.point.spanEnd &&
-          candidate.point.ordinal === frame.point.ordinal,
+          candidate.point.sourceId === point.sourceId &&
+          candidate.point.spanStart === point.spanStart &&
+          candidate.point.spanEnd === point.spanEnd &&
+          candidate.point.ordinal === point.ordinal,
       )
       for (const slot of frameState?.slots ?? []) {
         if (slot.access._tag !== 'AffineTransfer') continue
         const stored = current.locals.get(slot.local.ordinal)?.value
-        if (stored === undefined || packageValues.has(stored)) continue
+        const transferredGuard =
+          owner !== undefined &&
+          MirVerification.operations(owner).some(
+            (operation) =>
+              operation._tag === 'ExecutionPark' && operation.guard.ordinal === slot.local.ordinal,
+          )
+        if (stored === undefined || transferredGuard || packageValues.has(stored)) continue
         const blocked = yield* releaseThroughPlan(
           slot.access.cleanup,
           stored,
@@ -1566,22 +1607,57 @@ function* executeFunction(
         )
         if (blocked !== undefined) return blocked
       }
-      state.executionStackBytes -= frame.bytes
-      trace.push(
-        Object.freeze({
-          _tag: 'CoroutineFrameComplete',
-          function: current.function,
-          point: frame.point,
-          ticket: frame.ticket,
-          span: suspensionSpan(program, frame.point),
-        }),
-      )
-      delete current.coroutineFrame
+      if (frame !== undefined) state.executionStackBytes -= frame.bytes
+      if (frame !== undefined) {
+        trace.push(
+          Object.freeze({
+            _tag: 'CoroutineFrameComplete',
+            function: current.function,
+            point,
+            ticket: frame.ticket,
+            span: suspensionSpan(program, point),
+          }),
+        )
+        delete current.coroutineFrame
+      }
     }
     const package_ = BootstrapStorage.execution(state.allocations, ticket)
     if (package_ === undefined) throw new RangeError('Execution machine cleanup lost its package')
     traceExecution(package_, ticket, 'Cleanup', provenance.span)
     return undefined
+  }
+
+  const packageValueSet = (roots: ReadonlyArray<Value>): ReadonlySet<Value> => {
+    const values = new Set<Value>()
+    const visit = (value: Value): void => {
+      if (values.has(value)) return
+      values.add(value)
+      switch (value._tag) {
+        case 'AggregateValue':
+          for (const field of value.fields) visit(field.value)
+          return
+        case 'ArrayValue':
+          for (const element of value.elements) visit(element)
+          return
+        case 'UnionValue':
+        case 'EffectOutcomeValue':
+          visit(value.payload)
+          return
+        case 'EffectValue':
+          for (const capture of value.captures) visit(capture)
+          return
+        case 'EffectCompositeValue':
+          visit(value.effect)
+          return
+        case 'CallableValue':
+          for (const capture of value.captures) visit(capture.value)
+          return
+        default:
+          return
+      }
+    }
+    for (const root of roots) visit(root)
+    return values
   }
 
   const invokeStoredCallable = function* (
@@ -1684,18 +1760,34 @@ function* executeFunction(
       return undefined
     }
     const guard = package_.guard
+    const bodyTransferred = state.executionMachines.has(ticket)
     const machineCleanup = yield* cleanupExecutionMachine(
       ticket,
       provenance,
       localOrdinal,
-      new Set([package_.body, package_.endpoint, package_.callback]),
+      packageValueSet([
+        package_.endpoint,
+        package_.callback,
+        ...(guard === undefined ? [] : [guard.value]),
+      ]),
     )
     if (machineCleanup !== undefined) return machineCleanup
-    if (guard !== undefined) delete package_.guard
+    if (guard !== undefined) {
+      const released = yield* releaseThroughPlan(
+        guard.cleanup,
+        guard.value,
+        provenance,
+        localOrdinal,
+      )
+      if (released !== undefined) return released
+      delete package_.guard
+    }
     for (const retained of [
       Object.freeze({ value: package_.callback, cleanup: package_.callbackCleanup }),
       Object.freeze({ value: package_.endpoint, cleanup: package_.endpointCleanup }),
-      Object.freeze({ value: package_.body, cleanup: package_.bodyCleanup }),
+      ...(bodyTransferred
+        ? []
+        : [Object.freeze({ value: package_.body, cleanup: package_.bodyCleanup })]),
     ]) {
       const blocked = yield* releaseThroughPlan(
         retained.cleanup,

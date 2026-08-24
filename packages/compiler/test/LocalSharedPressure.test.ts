@@ -583,7 +583,7 @@ it.effect('reuses the Execution and Wake lifecycle from a bounded alternate owne
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
+      ['drop@impl#1', 'drop@impl#0', 'drop@impl#2'],
       JSON.stringify(Analysis.diagnostics(snapshot)),
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
@@ -640,8 +640,40 @@ it.effect('suppresses a retained Wake after post-suspension Dormant destruction'
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    assert.strictEqual(completed(snapshot).result.value, 0n)
-    assert.strictEqual((yield* runWasm(snapshot)).result, 0)
+    const evaluated = completed(snapshot)
+    assert.deepEqual(
+      evaluated.trace.flatMap((event) =>
+        event._tag === 'Call' && event.target.name.startsWith('drop@impl')
+          ? [event.target.name]
+          : [],
+      ),
+      ['drop@impl#1', 'drop@impl#0', 'drop@impl#2'],
+    )
+    assert.strictEqual(evaluated.result.value, 111n)
+    assert.deepEqual(
+      evaluated.trace
+        .filter((event) => event._tag === 'ExecutionTransition')
+        .map((event) => event.event),
+      [
+        'Initialize',
+        'Drive',
+        'Register',
+        'RetainGuard',
+        'Relinquish',
+        'Cancel',
+        'Cleanup',
+        'Release',
+      ],
+    )
+    const allocationEvents = evaluated.trace.filter(
+      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
+    )
+    assert.strictEqual(
+      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
+      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
+      JSON.stringify(allocationEvents),
+    )
+    assert.strictEqual((yield* runWasm(snapshot)).result, 111)
   }),
 )
 

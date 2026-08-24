@@ -6,8 +6,16 @@ import silk.shared as Shared
 
 struct Empty {}
 struct Armed { wake: Intrinsic.Wake }
-struct State { slot: Empty | Armed ready: i32 }
-struct Guard {}
+struct State {
+  slot: Empty | Armed
+  ready: i32
+  guardDrops: i32
+  frameDrops: i32
+  endpointDrops: i32
+}
+struct Guard { state: Shared.Shared<State> }
+struct FrameToken { state: Shared.Shared<State> }
+struct Endpoint { state: Shared.Shared<State> }
 
 fn install(self: &mut State, wake: Intrinsic.Wake) -> () {
   let previous = Intrinsic.replace(self.slot, Armed { wake: move wake })
@@ -18,21 +26,47 @@ fn take(self: &mut State) -> Empty | Armed {
   return Intrinsic.replace(self.slot, Empty {})
 }
 fn mark(self: &mut State) -> () { self.ready = self.ready + 1 return () }
-fn read(self: &State) -> i32 { return self.ready }
+fn markGuard(self: &mut State) -> () { self.guardDrops = self.guardDrops + 1 return () }
+fn markFrame(self: &mut State) -> () { self.frameDrops = self.frameDrops + 1 return () }
+fn markEndpoint(self: &mut State) -> () { self.endpointDrops = self.endpointDrops + 1 return () }
+fn read(self: &State) -> i32 {
+  return self.ready * 1000 + self.guardDrops * 100 + self.frameDrops * 10 + self.endpointDrops
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let recorded = Shared.withMut(&self.state, markGuard)
+    return ()
+  }
+}
+impl Drop for FrameToken {
+  fn drop(self: &mut FrameToken) -> () {
+    let recorded = Shared.withMut(&self.state, markFrame)
+    return ()
+  }
+}
+impl Drop for Endpoint {
+  fn drop(self: &mut Endpoint) -> () {
+    let recorded = Shared.withMut(&self.state, markEndpoint)
+    return ()
+  }
+}
 
 fn register(wake: Intrinsic.Wake, state: Shared.Shared<State>) -> Guard {
   let installed = Shared.withMut(&state, install(move wake))
-  drop state
-  return Guard {}
+  return Guard { state: move state }
 }
 effect fn body(state: Shared.Shared<State>) -> i32 {
+  let frameState = Shared.clone<State>(&state)
+  let frame = FrameToken { state: move frameState }
   let registrationState = Shared.clone<State>(&state)
   let registration = register(move registrationState)
   run Execution.park(move registration)
+  drop frame
   drop state
   return 1
 }
-fn ready(state: &Shared.Shared<State>) -> () { return Shared.withMut(state, mark) }
+fn ready(endpoint: &Endpoint) -> () { return Shared.withMut(&endpoint.state, mark) }
 
 struct Stored { execution: Intrinsic.Execution<i32> }
 struct Owner { slot: Empty | Stored }
@@ -54,10 +88,17 @@ fn signal(selected: Empty | Armed) -> () {
 
 effect fn program() -> i32 ! Core.OutOfMemoryError {
   let mut allocator = Core.make()
-  let state = run Shared.make<State>(State { slot: Empty {}, ready: 0 })
+  let state = run Shared.make<State>(State {
+    slot: Empty {},
+    ready: 0,
+    guardDrops: 0,
+    frameDrops: 0,
+    endpointDrops: 0
+  })
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   let bodyState = Shared.clone<State>(&state)
-  let endpoint = Shared.clone<State>(&state)
+  let endpointState = Shared.clone<State>(&state)
+  let endpoint = Endpoint { state: move endpointState }
   let execution = run Execution.make(body(move bodyState), move endpoint, ready)
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {} }
