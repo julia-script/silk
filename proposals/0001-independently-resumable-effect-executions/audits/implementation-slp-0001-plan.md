@@ -90,3 +90,8 @@ Layer 4 checkpoint `7373f5a` adds the composed target-neutral transition actor, 
 ExternalPark reachability on the sealed `ExecutionPark` operation identity, and retains evaluator
 machine stacks across park, notification, eligibility, guard cleanup, resume, and completion.
 Focused verification is 33/33; OpenSpec progress is 2/15.
+
+Layer 4 checkpoint `34a9922` completes externally parked Wasm resume, readiness-callback
+reconstruction, evaluator-to-Wasm later-owner transfer, and a non-LIFO-safe fixed-slot coroutine
+frame freelist. Focused verification is 27/27 with compiler TypeScript and targeted Biome green;
+native parity and cancellation/two-root matrices remain.
