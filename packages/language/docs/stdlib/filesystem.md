@@ -32,15 +32,15 @@ the bytes were validated as UTF-8; [`view`](#declaration-73696c6b2f66696c6573797
 ### Construct and inspect a portable path
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
 import silk.filesystem as FileSystem
 
 effect fn example() -> i32
-! FileSystem.FileError | Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! FileSystem.FileError | Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let path = run FileSystem.make("/workspace")
     |> Effect.provideMut(&mut allocator)
   if FileSystem.name(&path) == "workspace" {
@@ -49,7 +49,7 @@ effect fn example() -> i32
   return 0
 }
 
-effect fn recover(error: FileSystem.FileError | Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: FileSystem.FileError | Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 
@@ -553,7 +553,7 @@ Copies UTF-8 text into an owned, normalized provider-absolute [`Path`](#declarat
 
 The text must begin with `/`. Root is valid; every other path must have nonempty components and
 no trailing slash, NUL, `.` component, or `..` component. Invalid input fails with
-`FileError(pathOperation(), invalidPath())`; copying can fail with [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72).
+`FileError(pathOperation(), invalidPath())`; copying can fail with [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72).
 
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a66726f6d4279746573"></a>
 
@@ -719,15 +719,15 @@ create-or-truncate writes, and deterministic listing order described here.
 #### Write a file after creating its parents
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.filesystem as FileSystem
 
 import silk.usize as usize
 
 pub effect fn store(path: &FileSystem.Path, contents: &[u8]) -> usize
-! FileSystem.FileError | Core.OutOfMemoryError
-? &mut FileSystem.FileSystem | &mut Core.Allocator {
+! FileSystem.FileError | Allocator.OutOfMemoryError
+? &mut FileSystem.FileSystem | &mut Allocator {
   let written = run FileSystem.writeFileWithParents(path, contents)
   return contents.length
 }

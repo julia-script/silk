@@ -6,7 +6,7 @@ Provider-owned allocation counters that can be published as ordinary copyable da
 
 ## When to use
 
-Embed [`AllocationMetrics`](#declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d657472696373) in a custom [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) provider when tests or diagnostics need
+Embed [`AllocationMetrics`](#declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d657472696373) in a custom [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72) provider when tests or diagnostics need
 acquisition, release, current-live, or peak-live counts. Code that never imports this module
 pays no instrumentation cost.
 

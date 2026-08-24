@@ -22,9 +22,10 @@ pub fn main() -> i32 {
   return observe(move success) + observe(move failure)
 }`
 
-const affinePayload = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const affinePayload = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure, succeed }
@@ -52,7 +53,7 @@ fn observe(result: Result<Token, i32>) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let storage = run Intrinsic.bindRequirementMut(Allocator.allocate(move layout), &mut allocator)
   let token = Token { storage: move storage }
@@ -94,9 +95,10 @@ pub fn main() -> i32 {
   return first + second
 }`
 
-const reifiedRequirement = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const reifiedRequirement = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.result { Result, Success, Failure }
@@ -111,7 +113,7 @@ effect fn attempt() -> Result<Allocation, OutOfMemoryError> ? &mut Allocator {
 }
 
 effect fn build() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let completed = run Intrinsic.bindRequirementMut(attempt(), &mut allocator)
   return match move completed {
     Result<Allocation, OutOfMemoryError> { value: outcome } => match move outcome {

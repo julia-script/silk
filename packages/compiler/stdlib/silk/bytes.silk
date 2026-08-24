@@ -14,22 +14,22 @@
 //! ```silk
 //! import silk.bytes as Bytes
 //!
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
 //! import silk.u8 as u8
 //!
 //! effect fn build() -> i32
-//! ! Core.OutOfMemoryError {
-//!   let mut allocator = Core.make()
+//! ! Allocator.OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorService()
 //!   let source = b"AB"
 //!   let copying = Bytes.copy(&source)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let mut bytes = run copying
 //!   let suffix = b"C"
 //!   let appending = Bytes.append(&mut bytes, &suffix)
-//!     |> Effect.provideMut<Core.Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let appended = run appending
 //!   let mut writable = Bytes.asMutSlice(&mut bytes)
 //!   writable[1] = u8.toU8(48)
@@ -37,7 +37,7 @@
 //!   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 //! }
 //!
-//! effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+//! effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -46,8 +46,8 @@
 //! }
 //! ```
 
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.u8 as u8
 import silk.usize as usize
 import silk.vector {

@@ -93,8 +93,9 @@ pub fn main() -> i32 { return toI32(byteLength(unsafe fromUtf8Unchecked(b"silk")
   }),
 )
 
-const owned = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const owned = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string {
   copy,
@@ -105,7 +106,7 @@ import silk.string {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let copying = copy("h\\u{e9}") |> Effect.provideMut(&mut allocator)
   let mut value = run copying
   let appending = append(&mut value, " \\u{1f642}") |> Effect.provideMut(&mut allocator)
@@ -146,9 +147,10 @@ it.effect('copies, appends, views, and drops owned String through ordinary Bytes
   }),
 )
 
-const appendRollback = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const appendRollback = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.string { String, copy, append, view, ownedByteLength }
@@ -158,7 +160,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

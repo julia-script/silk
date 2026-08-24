@@ -1,5 +1,5 @@
 // Compiler fixture: push readiness without scanning dormant Execution values.
-import silk.core as Core
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -112,19 +112,19 @@ effect fn driveIdentity(tasks: &Shared.Shared<Tasks>, identity: i32) -> () {
   return run driveSelected(move selected, move branch)
 }
 
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let inbox = run Shared.make<Inbox>(Inbox { first: 0, second: 0, length: 0, taken: 0 })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let tasks = run Shared.make<Tasks>(Tasks {
     first: Empty {}, second: Empty {}, third: Empty {}, result: 0
-  }) |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
   let firstCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let secondCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let thirdCondition = run Shared.make<Condition>(Condition { slot: Empty {} })
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
 
   let firstBody = Shared.clone<Condition>(&firstCondition)
   let secondBody = Shared.clone<Condition>(&secondCondition)
@@ -133,11 +133,11 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   let secondEndpoint = Endpoint { inbox: Shared.clone<Inbox>(&inbox), identity: 2 }
   let thirdEndpoint = Endpoint { inbox: Shared.clone<Inbox>(&inbox), identity: 3 }
   let first = run Execution.make(body(move firstBody, 11), move firstEndpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Execution.make(body(move secondBody, 22), move secondEndpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let third = run Execution.make(body(move thirdBody, 33), move thirdEndpoint, ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
 
   let firstBranch = Branch { tasks: Shared.clone<Tasks>(&tasks), identity: 1 }
   let secondBranch = Branch { tasks: Shared.clone<Tasks>(&tasks), identity: 2 }
@@ -167,5 +167,5 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   return result
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -100 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }

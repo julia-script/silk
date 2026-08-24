@@ -141,9 +141,10 @@ pub fn main() -> i32 {
   return (run completed(0)) + (run completed(1)) + (run completed(2))
 }`
 
-const cleanupPreamble = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const cleanupPreamble = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
 import silk.effect as Effect
 struct Selected { code: i32 }
@@ -158,7 +159,7 @@ impl Drop for Guard {
   }
 }
 effect fn makeGuard(value: i32) -> Guard ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -389,7 +390,7 @@ pub fn main() -> i32 {
 
 it.effect('releases an owned handler captured by a stored direct intrinsic', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.core { OutOfMemoryError }
+    const self = yield* analyze(`import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${cleanupPreamble}
 effect fn direct() -> i32 ! OutOfMemoryError {
@@ -2279,7 +2280,7 @@ it.effect('releases catch-owned handlers and live owners once before recovery', 
     for (const [name, body, expected, recovery] of [
       [
         'success-bypass',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
@@ -2293,7 +2294,7 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
       ],
       [
         'residual-propagation',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | OutOfMemoryError {
   let guard = run makeGuard(1)
@@ -2306,7 +2307,7 @@ pub fn main() -> i32 { return run Effect.catchAll(layer(), recoverTop) }`,
       ],
       [
         'handler-failure',
-        `import silk.core { OutOfMemoryError }
+        `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 effect fn layer() -> i32 ! Residual | HandlerProblem | OutOfMemoryError {
   let guard = run makeGuard(1)

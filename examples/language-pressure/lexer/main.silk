@@ -1,6 +1,6 @@
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String }
 import silk.u8 as u8
@@ -638,7 +638,7 @@ effect fn check(source: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
 }
 
 pub effect fn main() -> () ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let source = b"pub fn main() -> i32 { return 42 }\n"
   return run check(source) |> Effect.provideMut(&mut allocator)

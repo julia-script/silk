@@ -20,7 +20,7 @@
 //! ```silk
 //! import silk.bytes as Bytes
 //!
-//! import silk.core as Core
+//! import silk.allocator { Allocator }
 //!
 //! import silk.effect as Effect
 //!
@@ -38,20 +38,20 @@
 //! }
 //!
 //! effect fn argument(self: &mut FixedInput, index: usize) -> Option.Option<Bytes.Bytes>
-//! ! Host.HostInputError | Core.OutOfMemoryError
-//! ? &mut Core.Allocator {
+//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
 //! effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option.Option<Bytes.Bytes>
-//! ! Host.HostInputError | Core.OutOfMemoryError
-//! ? &mut Core.Allocator {
+//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
 //! effect fn workingDirectory(self: &mut FixedInput) -> Bytes.Bytes
-//! ! Host.HostInputError | Core.OutOfMemoryError
-//! ? &mut Core.Allocator {
+//! ! Host.HostInputError | Allocator.OutOfMemoryError
+//! ? &mut Allocator {
 //!   fail Host.inputFailure()
 //! }
 //!
@@ -91,8 +91,8 @@
 // fallible view for the common case; it never replaces or discards the bytes.
 
 import silk.bytes { Bytes }
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.option { None, Option, Some }
 import silk.result { Result }
 import silk.string { InvalidUtf8, fromUtf8 as stringFromUtf8, utf8Bytes as stringUtf8Bytes }

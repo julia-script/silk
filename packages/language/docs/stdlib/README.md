@@ -6,12 +6,12 @@ The compiler-shipped modules and their complete public documentation.
 
 | Module | Import namespace | Public declarations | Summary |
 | --- | --- | ---: | --- |
+| [`silk/allocator`](./allocator.md) | `Allocator` | 5 | Foundational allocation service used by higher standard-library actors. |
 | [`silk/bool`](./bool.md) | `bool` | 3 | Named primitive Boolean equality and negation operations. |
 | [`silk/box`](./box.md) | `Box` | 7 | One owned heap indirection for recursive data and values whose storage must have a stable size. |
 | [`silk/bytes`](./bytes.md) | `Bytes` | 8 | Owned arbitrary bytes for file contents, process output, and other encoding-neutral data. |
 | [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
-| [`silk/core`](./core.md) | `Allocator` | 12 | Foundational allocation and standard-output services used by higher standard-library actors. |
 | [`silk/effect`](./effect.md) | `Effect` | 26 | Builds lazy computations by transforming success, recovering typed failure, supplying services, and controlling sequencing and cleanup. |
 | [`silk/execution`](./execution.md) | `Execution` | 3 | Independently owned, caller-funded lazy computations with explicit external parking. |
 | [`silk/f32`](./f32.md) | `f32` | 50 | IEEE binary32 values with deterministic representation, classification, and math operations. |
@@ -28,7 +28,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/i8`](./i8.md) | `i8` | 60 | Eight-bit signed integers for compact values, byte-level formats, and narrow arithmetic. |
 | [`silk/isize`](./isize.md) | `isize` | 60 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
 | [`silk/layout`](./layout.md) | `Layout` | 6 | Checked size-and-alignment descriptions used to request storage from an allocator. |
-| [`silk/logging`](./logging.md) | `Logger` | 20 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
+| [`silk/logger`](./logger.md) | `Logger` | 20 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 6 | Provider-owned allocation counters that can be published as ordinary copyable data. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 2 | Shared compile-time addition witness for generic algorithms over primitive integers. |
 | [`silk/option`](./option.md) | `Option` | 8 | Optional owned values that distinguish presence from absence without a failure channel. |
@@ -43,6 +43,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |
+| [`silk/standard_streams`](./standard-streams.md) | `StandardStreams` | 7 | Complete-message standard-output and standard-error writes through a replaceable service. |
 | [`silk/string`](./string.md) | `String` | 22 | Valid UTF-8 text, including owned storage, byte validation, and scalar-by-scalar traversal. |
 | [`silk/u16`](./u16.md) | `u16` | 57 | Sixteen-bit unsigned integers with explicit arithmetic and conversion failure policies. |
 | [`silk/u32`](./u32.md) | `u32` | 57 | Thirty-two-bit unsigned integers for fixed-width counts, masks, and binary fields. |

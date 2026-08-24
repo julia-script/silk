@@ -91,9 +91,10 @@ const emit = Effect.fnUntraced(function* (
 })
 
 /** A guard whose `Drop` hook runs before its owned `Allocation` field releases. */
-const dropHook = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const dropHook = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Guard {
@@ -106,7 +107,7 @@ impl Drop for Guard {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -125,9 +126,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
  * shape the duplicate names in #130 appeared in: many reclaim contexts in one function, several
  * of them asking for the same name.
  */
-const unionCleanup = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const unionCleanup = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet }
@@ -185,7 +187,7 @@ effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn sum() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
   drop built

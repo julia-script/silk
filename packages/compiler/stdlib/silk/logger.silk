@@ -21,25 +21,25 @@
 //! ```silk
 //! import silk.effect as Effect
 //!
-//! import silk.logging as Logging
+//! import silk.logger { Logger }
 //!
 //! import silk.usize as usize
 //!
 //! effect fn program() -> i32
-//! ! Logging.LogError {
-//!   let mut logger = Logging.memory()
-//!   let logged = run Effect.logAt(Logging.warning(), "cache miss")
+//! ! Logger.LogError {
+//!   let mut logger = Logger.inMemoryService()
+//!   let logged = run Effect.logAt(Logger.warning(), "cache miss")
 //!     |> Effect.provideMut(&mut logger)
-//!   if Logging.length(&logger) != usize.ONE {
+//!   if Logger.length(&logger) != usize.ONE {
 //!     return 1
 //!   }
-//!   if Logging.levelCode(Logging.levelAt(&logger, usize.ZERO)) != 3 {
+//!   if Logger.levelCode(Logger.levelAt(&logger, usize.ZERO)) != 3 {
 //!     return 2
 //!   }
 //!   return 42
 //! }
 //!
-//! effect fn recover(error: Logging.LogError) -> i32 {
+//! effect fn recover(error: Logger.LogError) -> i32 {
 //!   return 0
 //! }
 //!
@@ -49,13 +49,14 @@
 //! ```
 
 import silk.bool as bool
-import silk.core {
-  NativeStandardStreams,
-  StreamWriteError,
-  send
-}
 import silk.i32 as i32
 import silk.result { Failure, Result, Success }
+import silk.standard_streams {
+  NativeStandardStreams,
+  StreamWriteError,
+  nativeStandardStreamService as nativeStreams,
+  send
+}
 import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u8 as u8
 import silk.usize as usize
@@ -143,7 +144,7 @@ pub struct StdoutLogger {}
 ///
 /// The caller must include a newline in `message` when line separation is required. A standard-
 /// output write failure becomes a provider-defined [`LogError`].
-pub fn stdout() -> StdoutLogger { return StdoutLogger {} }
+pub fn stdoutService() -> StdoutLogger { return StdoutLogger {} }
 
 effect fn writeStdoutCounted(
   streams: &mut NativeStandardStreams,
@@ -158,7 +159,7 @@ effect fn writeStdout(
   level: LogLevel,
   message: string
 ) -> () ! LogError {
-  let mut streams = NativeStandardStreams.native()
+  let mut streams = nativeStreams()
   let bytes = stringUtf8Bytes(message)
   let completed = run Intrinsic.effectResult(writeStdoutCounted(&mut streams, bytes))
   return match move completed {
@@ -220,7 +221,7 @@ fn emptyMessages() -> [i32; 64] {
 ///
 /// A call fails when eight events are already committed. A call also fails when its bytes exceed
 /// the remaining 64-byte total. Neither failure commits the event.
-pub fn memory() -> InMemoryLogger {
+pub fn inMemoryService() -> InMemoryLogger {
   return InMemoryLogger {
     levels: emptyLevels(),
     offsets: emptyIndexes(),
@@ -239,9 +240,10 @@ pub fn memory() -> InMemoryLogger {
 /// # Details
 ///
 /// The configured attempt increases [`attempts`] but does not increase [`length`] or consume
-/// message capacity. Other attempts retain the eight-event and 64-byte limits of [`memory`].
-pub fn memoryFailAt(failAt: usize) -> InMemoryLogger {
-  let mut logger = memory()
+/// message capacity. Other attempts retain the eight-event and 64-byte limits of
+/// [`inMemoryService`].
+pub fn inMemoryServiceFailAt(failAt: usize) -> InMemoryLogger {
+  let mut logger = inMemoryService()
   logger.failEnabled = true
   logger.failAt = failAt
   return move logger

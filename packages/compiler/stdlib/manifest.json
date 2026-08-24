@@ -1,5 +1,16 @@
 [
   {
+    "module": "silk/allocator",
+    "path": "silk/allocator.silk",
+    "layer": "portable",
+    "namespace": "Allocator",
+    "aliases": [
+      "AllocationFailure",
+      "OutOfMemoryError",
+      "SystemAllocator"
+    ]
+  },
+  {
     "module": "silk/bool",
     "path": "silk/bool.silk",
     "layer": "portable",
@@ -36,21 +47,6 @@
       "ProcessReason",
       "ProcessRequest",
       "Signaled"
-    ]
-  },
-  {
-    "module": "silk/core",
-    "path": "silk/core.silk",
-    "layer": "portable",
-    "namespace": "Allocator",
-    "aliases": [
-      "AllocationFailure",
-      "NativeStandardStreams",
-      "OutOfMemoryError",
-      "StandardStream",
-      "StandardStreams",
-      "StreamWriteError",
-      "SystemAllocator"
     ]
   },
   {
@@ -98,14 +94,21 @@
     "path": "silk/format.silk",
     "layer": "portable",
     "namespace": "Format",
-    "aliases": ["NotANumber", "OutOfRange", "ParseError"]
+    "aliases": [
+      "NotANumber",
+      "OutOfRange",
+      "ParseError"
+    ]
   },
   {
     "module": "silk/hash",
     "path": "silk/hash.silk",
     "layer": "portable",
     "namespace": "HashKey",
-    "aliases": ["HashSeed", "Word"]
+    "aliases": [
+      "HashSeed",
+      "Word"
+    ]
   },
   {
     "module": "silk/hash_map",
@@ -124,7 +127,9 @@
     "path": "silk/host_input.silk",
     "layer": "portable",
     "namespace": "HostInput",
-    "aliases": ["HostInputError"]
+    "aliases": [
+      "HostInputError"
+    ]
   },
   {
     "module": "silk/i16",
@@ -161,14 +166,22 @@
     "path": "silk/layout.silk",
     "layer": "portable",
     "namespace": "Layout",
-    "aliases": ["InvalidAlignment", "LayoutOverflow"]
+    "aliases": [
+      "InvalidAlignment",
+      "LayoutOverflow"
+    ]
   },
   {
-    "module": "silk/logging",
-    "path": "silk/logging.silk",
+    "module": "silk/logger",
+    "path": "silk/logger.silk",
     "layer": "portable",
     "namespace": "Logger",
-    "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
+    "aliases": [
+      "InMemoryLogger",
+      "LogError",
+      "LogLevel",
+      "StdoutLogger"
+    ]
   },
   {
     "module": "silk/metrics",
@@ -187,41 +200,61 @@
     "path": "silk/option.silk",
     "layer": "portable",
     "namespace": "Option",
-    "aliases": ["None", "Some"]
+    "aliases": [
+      "None",
+      "Some"
+    ]
   },
   {
     "module": "silk/order",
     "path": "silk/order.silk",
     "layer": "portable",
     "namespace": "Order",
-    "aliases": ["Ordering", "Less", "Equal", "Greater"]
+    "aliases": [
+      "Ordering",
+      "Less",
+      "Equal",
+      "Greater"
+    ]
   },
   {
     "module": "silk/os_child_process",
     "path": "silk/os_child_process.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "Evaluator",
+      "LLVM"
+    ],
     "namespace": "OsChildProcess"
   },
   {
     "module": "silk/os_filesystem",
     "path": "silk/os_filesystem.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "Evaluator",
+      "LLVM"
+    ],
     "namespace": "OsFileSystem"
   },
   {
     "module": "silk/os_host_input",
     "path": "silk/os_host_input.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "Evaluator",
+      "LLVM"
+    ],
     "namespace": "OsHostInput"
   },
   {
     "module": "silk/os_standard_input",
     "path": "silk/os_standard_input.silk",
     "layer": "target-provider",
-    "providerTargets": ["Evaluator", "LLVM"],
+    "providerTargets": [
+      "Evaluator",
+      "LLVM"
+    ],
     "namespace": "OsStandardInput"
   },
   {
@@ -229,7 +262,9 @@
     "path": "silk/random.silk",
     "layer": "portable",
     "namespace": "Random",
-    "aliases": ["Xoshiro256StarStar"]
+    "aliases": [
+      "Xoshiro256StarStar"
+    ]
   },
   {
     "module": "silk/raw_buffer",
@@ -260,14 +295,34 @@
     "path": "silk/standard_input.silk",
     "layer": "portable",
     "namespace": "StandardInput",
-    "aliases": ["EndOfInput", "Filled", "ReadOutcome", "StreamReadError"]
+    "aliases": [
+      "EndOfInput",
+      "Filled",
+      "ReadOutcome",
+      "StreamReadError"
+    ]
+  },
+  {
+    "module": "silk/standard_streams",
+    "path": "silk/standard_streams.silk",
+    "layer": "portable",
+    "namespace": "StandardStreams",
+    "aliases": [
+      "NativeStandardStreams",
+      "StandardStream",
+      "StreamWriteError"
+    ]
   },
   {
     "module": "silk/string",
     "path": "silk/string.silk",
     "layer": "portable",
     "namespace": "String",
-    "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
+    "aliases": [
+      "InvalidUtf8",
+      "ScalarCursor",
+      "ScalarStep"
+    ]
   },
   {
     "module": "silk/u16",
@@ -304,7 +359,10 @@
     "path": "silk/unicode_tables.silk",
     "layer": "portable",
     "namespace": "UnicodeTables",
-    "aliases": ["Decomposition", "PairRecord"]
+    "aliases": [
+      "Decomposition",
+      "PairRecord"
+    ]
   },
   {
     "module": "silk/usize",

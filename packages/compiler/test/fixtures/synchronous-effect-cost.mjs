@@ -199,7 +199,7 @@ pub fn main() -> i32 {
     pair: 'affine',
     kind: 'baseline',
     expected: 42,
-    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+    source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 
@@ -207,7 +207,7 @@ struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
 effect fn produce() -> Payload ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -225,7 +225,7 @@ pub fn main() -> i32 { return run program() |> Effect.catchAll(recover) }`,
     pair: 'affine',
     kind: 'effect',
     expected: 42,
-    source: `import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+    source: `import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 
@@ -233,7 +233,7 @@ struct Payload { storage: Allocation value: i32 }
 impl Drop for Payload { fn drop(self: &mut Payload) -> () { return () } }
 fn consume(payload: Payload) -> i32 { return payload.value }
 effect fn produce() -> Payload ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)

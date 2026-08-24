@@ -567,7 +567,7 @@ it('keeps requirement union joins and exact membership separate from key differe
 it('renormalizes requirement collisions introduced by substitution', () => {
   const owner = { module: 'work', name: 'provide' }
   const capability = Type.parameter(owner, 0, 'P')
-  const logger = Type.nominal('silk/logging', 'Logger')
+  const logger = Type.nominal('silk/logger', 'Logger')
   const contract = Type.effect('never', [], 'Shared', [
     { capability, role: 'Default', access: 'Shared' },
     { capability: logger, role: 'Default', access: 'Exclusive' },
@@ -878,7 +878,7 @@ it('keeps failure and fixed-role requirement member parameters domain-specific',
       members: [q],
     })
 
-  const logger = Type.nominal('silk/logging', 'Logger')
+  const logger = Type.nominal('silk/logger', 'Logger')
   const concreteRequirement = RowAlgebra.substitute(requirementPolicy, requirement, {
     row: () => undefined,
     member: (member) => ({
@@ -919,7 +919,7 @@ it('keys callable contracts and branded constraint evidence without source locat
   const owner = { module: 'work', name: 'provide' }
   const selectedParameter = Type.parameter(owner, 0, 'S', 'RequirementRow')
   const providerParameter = Type.parameter(owner, 1, 'P')
-  const logger = Type.nominal('silk/logging', 'Logger')
+  const logger = Type.nominal('silk/logger', 'Logger')
   const clock = Type.nominal('work', 'Clock')
   const loggerRequirement: Type.Requirement = {
     capability: logger,

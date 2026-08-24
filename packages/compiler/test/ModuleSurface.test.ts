@@ -192,7 +192,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
       Type.RequirementMemberShape
     >(sourceParameter)
     const wanted = Constraint.providerSelection('Exclusive', providerParameter, selected, source)
-    const logger = Type.nominal('silk/logging', 'Logger')
+    const logger = Type.nominal('silk/logger', 'Logger')
     const provider = Type.nominal('surface/Logger', 'Provider')
     const requirement: Type.Requirement = {
       capability: logger,

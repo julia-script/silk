@@ -12,7 +12,7 @@ Use [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) for the i
 
 ## Details
 
-Construction obtains one combined package from the selected `Core.Allocator`
+Construction obtains one combined package from the selected `Allocator`
 and does not start the Effect. The body representation, continuation, and fixed readiness
 endpoint remain private. A nested `Effect.suspend` transfers execution
 immediately. In contrast, [`park`](#declaration-73696c6b2f657865637574696f6e3a3a7061726b) relinquishes the Execution until one Wake makes it eligible.
@@ -34,7 +34,7 @@ Public declarations: 3.
 ## `make`
 
 ```silk
-pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! Core.OutOfMemoryError ? &mut Core.Allocator
+pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! Allocator.OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates one combined package and transfers the lazy body and fixed endpoint into it.
@@ -43,7 +43,7 @@ Allocates one combined package and transfers the lazy body and fixed endpoint in
 
 The returned Execution is `Initial`. The body does not start during this call. Allocation refusal
 produces no Execution and leaves every input under ordinary Effect cleanup. Later private stack
-growth is a fatal trap and is not a `Core.OutOfMemoryError`.
+growth is a fatal trap and is not a `Allocator.OutOfMemoryError`.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6472697665"></a>
 

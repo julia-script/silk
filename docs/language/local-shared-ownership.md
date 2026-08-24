@@ -14,7 +14,8 @@ This small program creates one shared counter. It updates the value through one 
 value through a second owner.
 
 ```silk
-import silk.core { Allocator, OutOfMemoryError, SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
 import silk.effect as Effect
 import silk.shared as Shared
 
@@ -26,7 +27,7 @@ fn increment(counter: &mut Counter) -> i32 {
 fn read(counter: &Counter) -> i32 { return counter.value }
 
 effect fn useCounter() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 
   // make allocates the Counter. clone adds an owner without copying the Counter.
   let counter = run Shared.make<Counter>(Counter { value: 41 })
@@ -54,8 +55,8 @@ The exact public signatures are:
 
 ```silk,ignore
 effect fn make<T>(value: T) -> Shared<T>
-! Core.OutOfMemoryError
-? &mut Core.Allocator
+! Allocator.OutOfMemoryError
+? &mut Allocator
 
 fn clone<T>(self: &Shared<T>) -> Shared<T>
 fn with<T, A>(self: &Shared<T>, use: once fn(&T) -> A) -> A
@@ -67,8 +68,8 @@ fn withMut<T, A>(self: &Shared<T>, use: once fn(&mut T) -> A) -> A
 **Status:** Confirmed
 
 `Shared.make` transfers one value into a target-sized control block obtained through the selected
-`Core.Allocator`. Successful construction returns one strong handle. Allocation refusal returns
-`Core.OutOfMemoryError`, produces no handle, and leaves the value under ordinary Effect cleanup.
+`Allocator`. Successful construction returns one strong handle. Allocation refusal returns
+`Allocator.OutOfMemoryError`, produces no handle, and leaves the value under ordinary Effect cleanup.
 
 `Shared.clone`, `Shared.with`, and `Shared.withMut` allocate nothing themselves and carry no
 allocator requirement.

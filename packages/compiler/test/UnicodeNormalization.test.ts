@@ -49,14 +49,15 @@ const onEveryEngine = (name: string, source: string, expected: number) =>
  * The scenario at `openspec/specs/bootstrap-string/spec.md:113-115`, which had no path to equality
  * before this module existed: the two spellings are unequal, and normalizing makes them equal.
  */
-const spelledTwoWays = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const spelledTwoWays = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let precomposed = "\\u{e9}"
   let decomposed = "e\\u{301}"
 
@@ -95,14 +96,15 @@ it.effect(
  * views reproduces it with no Unicode in the program — so it is reported separately rather than
  * worked around silently here.
  */
-const comparedDirectly = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const comparedDirectly = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
   let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
   if view(&left) == view(&right) {} else { return 1 }
@@ -128,14 +130,15 @@ it.effect(
   120_000,
 )
 
-const decomposing = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const decomposing = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view, ownedByteLength }
 import silk.unicode { normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 
   // A precomposed scalar becomes its base plus its combining mark.
   let simple = run normalizeNfd("\\u{e9}") |> Effect.provideMut(&mut allocator)
@@ -168,14 +171,15 @@ it.effect(
   120_000,
 )
 
-const composing = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const composing = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 
   // Recomposition puts a decomposed sequence back together.
   let simple = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
@@ -304,9 +308,10 @@ pub fn main() -> i32 {
  * Normalization allocates, so it declares that it allocates. A caller with no memory to give gets
  * the existing typed failure back rather than a partial result.
  */
-const allocationFailure = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const allocationFailure = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.string { String, view }
@@ -317,7 +322,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

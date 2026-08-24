@@ -420,9 +420,10 @@ it.effect('keeps typed-failure releases on stored Effect propagation paths', () 
   Effect.gen(function* () {
     const { module } = yield* lowerStored(
       'stored-effect-mir/failure-cleanup',
-      `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { value: i32 }
@@ -431,7 +432,7 @@ fn consume(token: Token) -> i32 { return token.value }
 effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 1 }
   let deferred = Deferred { operation: effect { return consume(move token) } }
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let allocation = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
   return 42
 }

@@ -395,9 +395,10 @@ pub fn main() -> i32 {
   return (run deferred.operation) + (run deferred.operation)
 }`
 
-const consuming = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const consuming = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Token { value: i32 storage: Allocation }
@@ -412,7 +413,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -583,9 +584,10 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   const cleanupCycles = (
     exit: Exclude<CleanupExit, 'success'>,
     count: number,
-  ): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  ): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface()}
@@ -606,7 +608,7 @@ effect fn drive() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   return total
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1
@@ -645,15 +647,16 @@ pub fn main() -> i32 {
     const recoverValue = exit === 'success' ? 0 : 42
     const construct = exit === 'success' ? 'succeeding(move guard)' : 'failing(move guard)'
     const runLine = exit === 'unrun' ? 'return 42' : 'return run deferred.operation'
-    return `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    return `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface(kind)}
 effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
 effect fn build() -> i32 ! ${failures} {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let guard = Guard { tag: ${tag}, storage: move storage }
   let deferred = defer(${construct})
@@ -744,9 +747,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
     240_000,
   )
 
-  const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  const suspendingProgram = (kind: DropKind = 'poison'): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface(kind)}
@@ -762,7 +766,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run deferred.operation
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -916,9 +920,10 @@ pub fn main() -> i32 {
    * this is the missing-cleanup control: 80 holds must use more pages than 8, or the flat-heap
    * comparison below cannot see a leaked capture.
    */
-  const leakHolds = (count: number): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  const leakHolds = (count: number): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
@@ -927,13 +932,14 @@ effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return 42
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   return run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
-  const suspendCycles = (count: number): string => `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  const suspendCycles = (count: number): string => `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 ${cleanupSurface()}
@@ -953,7 +959,7 @@ effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return ${Array.from({ length: count }, (_, index) => `value${index}`).join(' + ')}
 }
 pub fn main() -> i32 {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1

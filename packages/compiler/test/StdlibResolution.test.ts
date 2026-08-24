@@ -27,7 +27,7 @@ it('keeps the generated manifest ordered and byte-identical to canonical Silk fi
   )
   assert.include(
     Stdlib.manifest.map((entry) => entry.module),
-    'silk/logging',
+    'silk/logger',
   )
   for (const entry of Stdlib.manifest) {
     assert.strictEqual(entry.path, `${entry.module}.silk`)
@@ -278,10 +278,10 @@ it.effect('resolves standard-library imports without vendoring source', () =>
     assert.deepEqual(
       Analysis.modules(snapshot).map((module) => module.name),
       [
+        'silk/allocator',
         'silk/bool',
         'silk/bytes',
         'silk/char',
-        'silk/core',
         'silk/f32',
         'silk/f64',
         'silk/format',

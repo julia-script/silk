@@ -1,6 +1,6 @@
 // Compiler fixture for SLP-0001 separation. The actor names are pressure vocabulary,
 // not canonical standard-library API.
-import silk.core as Core
+import silk.allocator { Allocator }
 import silk.effect as Effect
 import silk.execution as Execution
 import silk.shared as Shared
@@ -327,12 +327,12 @@ fn fork(
   }
 }
 
-effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
-  let mut inboxAllocator = Core.make()
-  let mut tasksAllocator = Core.make()
-  let mut resultAllocator = Core.make()
-  let mut waiterAllocator = Core.make()
-  let mut producerAllocator = Core.make()
+effect fn runWitness() -> i32 ! Allocator.OutOfMemoryError {
+  let mut inboxAllocator = Allocator.systemAllocatorService()
+  let mut tasksAllocator = Allocator.systemAllocatorService()
+  let mut resultAllocator = Allocator.systemAllocatorService()
+  let mut waiterAllocator = Allocator.systemAllocatorService()
+  let mut producerAllocator = Allocator.systemAllocatorService()
   let inbox = run Shared.make<ReadyInbox>(ReadyInbox {
     first: 0,
     second: 0,
@@ -340,16 +340,16 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     length: 0,
     taken: 0,
     notifications: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut inboxAllocator)
+  }) |> Effect.provideMut<Allocator>(&mut inboxAllocator)
   let tasks = run Shared.make<TaskStore>(TaskStore {
     first: Empty {},
     second: Empty {},
     completed: 0,
     result: 0,
-  }) |> Effect.provideMut<Core.Allocator>(&mut tasksAllocator)
+  }) |> Effect.provideMut<Allocator>(&mut tasksAllocator)
   let resultState = run Shared.make<DeferredState>(DeferredState {
     phase: DeferredPending { waiter: Empty {} },
-  }) |> Effect.provideMut<Core.Allocator>(&mut resultAllocator)
+  }) |> Effect.provideMut<Allocator>(&mut resultAllocator)
   let result = Deferred { state: move resultState }
 
   let waiterEndpoint = ReadyEndpoint {
@@ -367,14 +367,14 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
     move closedProducer,
     move producerEndpoint,
     publishEndpoint,
-  ) |> Effect.provideMut<Core.Allocator>(&mut producerAllocator)
+  ) |> Effect.provideMut<Allocator>(&mut producerAllocator)
   let prepared = fork(move result, move producerTask)
   let PreparedFiber { fiber, task: producer } = move prepared
   let waiter = run Execution.make(
     joinTask(move fiber),
     move waiterEndpoint,
     publishEndpoint,
-  ) |> Effect.provideMut<Core.Allocator>(&mut waiterAllocator)
+  ) |> Effect.provideMut<Allocator>(&mut waiterAllocator)
 
   // Both exact packages exist before either homogeneous Initial task becomes observable.
   let publishedWaiter = Shared.withMut(&tasks, storeFirst(move waiter))
@@ -399,7 +399,7 @@ effect fn runWitness() -> i32 ! Core.OutOfMemoryError {
   return value
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -100 }
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return -100 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(runWitness(), recover)

@@ -16,15 +16,16 @@ const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-vector-sort-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
 const program = (body: string): string =>
-  `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 ${body}
 }
 
@@ -166,14 +167,15 @@ it.effect('sorts every integer width the standard library witnesses', () =>
   Effect.gen(function* () {
     const value = yield* evaluatedValue(
       'vector-sort/widths',
-      `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.vector { Vector, make, append, sort, get, length }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut narrow = make<u8>()
   let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
   let n1 = run append<u8>(&mut narrow, 2) |> Effect.provideMut(&mut allocator)
@@ -316,8 +318,9 @@ it.effect(
  * `tag` the comparison never reads, so the arrangement of the equal elements is visible in the
  * result.
  */
-const stableUserOrder = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const stableUserOrder = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.order { Order }
@@ -335,7 +338,7 @@ fn itemLess(left: &Item, right: &Item) -> bool {
 impl Order for Item { lessThan: Item.itemLess }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut items = make<Item>()
   let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
   let b = run append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
@@ -370,9 +373,10 @@ it.effect('keeps equal elements of a user type in their input order', () =>
  * the comparison, the index permutation, or the final bulk move may duplicate or lose one, so the
  * acquire and release counts have to agree exactly.
  */
-const moveOnlyElements = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyElements = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.usize as usize
 import silk.order { Order }
@@ -396,7 +400,7 @@ effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut items = make<Tracked>()
   let first = run hold(3) |> Effect.provideMut(&mut allocator)
   let a = run append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)

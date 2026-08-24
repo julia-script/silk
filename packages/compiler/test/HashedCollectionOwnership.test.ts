@@ -46,10 +46,11 @@ const describe = (outcome: unknown): string =>
  * equivalence compares the same tag — so two keys are equivalent exactly when they hash alike, which
  * is what `HashKey` requires of a witness.
  */
-const owners = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+const owners = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.i32 as i32
 import silk.layout { Layout }
+import silk.hash as Hash
 import silk.hash { HashKey, HashSeed }
 import silk.hash_map { HashMap, contains, insert, length, make, remove }
 import silk.option { Option, Some, None }
@@ -67,7 +68,7 @@ struct Held {
 fn handleEquals(left: &Handle, right: &Handle) -> bool { return left.tag == right.tag }
 
 fn handleHash(value: &Handle, seed: &HashSeed) -> u64 {
-  return HashKey.mix(seed, i32.toU64(value.tag))
+  return Hash.mix(seed, i32.toU64(value.tag))
 }
 
 impl HashKey for Handle { equals: Handle.handleEquals hash: Handle.handleHash }
@@ -98,13 +99,14 @@ fn release(tag: i32, storage: Allocation) -> i32 {
 }`
 
 const program = (body: string): string =>
-  `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 ${owners}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
 ${body}
 }
 
@@ -181,7 +183,7 @@ it.effect('releases every owned key and value when a non-empty map is dropped', 
     // anything the program wrote released them.
     const outcome = yield* owned(
       'hashed-ownership/drop-non-empty',
-      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
   let mut index = 0
   while index < 3 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)
@@ -208,7 +210,7 @@ it.effect('releases the replaced value and the replaced key when an overwrite la
     // back and did not release would leave five.
     const outcome = yield* owned(
       'hashed-ownership/overwrite',
-      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
   let firstKey = run handle(7) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(11) |> Effect.provideMut(&mut allocator)
   let none = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
@@ -238,7 +240,7 @@ it.effect('transfers a removed value out and releases the key the map held', () 
     // Three keys — two stored, one probing — two values, two buffers: seven acquisitions.
     const outcome = yield* owned(
       'hashed-ownership/remove',
-      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
   let firstKey = run handle(4) |> Effect.provideMut(&mut allocator)
   let firstValue = run held(20) |> Effect.provideMut(&mut allocator)
   let noFirst = run insert<Handle, Held>(&mut map, move firstKey, move firstValue)
@@ -273,7 +275,7 @@ it.effect('releases every owned key and value carried through a growth', () =>
     // Ten keys, ten values, and two buffers for each of the tables of eight and sixteen: twenty-four.
     const outcome = yield* owned(
       'hashed-ownership/growth',
-      program(`  let mut map = make<Handle, Held>(HashKey.seed(3))
+      program(`  let mut map = make<Handle, Held>(Hash.seed(3))
   let mut index = 0
   while index < 10 {
     let key = run handle(index) |> Effect.provideMut(&mut allocator)

@@ -53,7 +53,8 @@ const acceptedSources = Object.freeze([
       return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
     }),
   `import silk.bool as bool
-import silk.core { SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.i32 as i32
 import silk.layout { Layout }
 import silk.usize as usize
@@ -87,13 +88,14 @@ pub fn main() -> i32 {
   let layout = Layout.of<i32>()
   let repeated = Layout.repeat(move layout, 2)
   let made = Layout.make(4, 4)
-  let allocator = SystemAllocator.make()
+  let allocator = Allocator.systemAllocatorService()
   let unit = ()
   return i00
 }`,
-  `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+  `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
@@ -101,7 +103,7 @@ import silk.slot as Slot
 fn useShared(value: &mut i32) -> i32 { return 42 }
 fn conflictShared() -> i32 { return 0 }
 effect fn storage() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
   let allocation = run recipe
@@ -138,7 +140,7 @@ effect fn storage() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(storage(), recover) }`,
-  `import silk.core { Allocator, OutOfMemoryError }
+  `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.execution as Execution
 fn ready(state: &()) -> () { return () }
 fn complete(state: (), value: i32) -> () { return () }
@@ -219,7 +221,7 @@ fn inspectCatch() -> once Effect<i32> {
   return Intrinsic.catchFailure<CatalogProblem>(catalogRisky(), catalogRecover)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.core { Allocator, OutOfMemoryError }
+  `import silk.allocator { Allocator, OutOfMemoryError }
 struct SuspendProblem {}
 service SuspendClock {}
 effect fn suspendDirect(
@@ -228,12 +230,12 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.core as StandardStream
-import silk.core { NativeStandardStreams }
-import silk.core { StreamWriteError }
+  `import silk.standard_streams as StandardStream
+import silk.standard_streams { NativeStandardStreams }
+import silk.standard_streams { StreamWriteError }
 import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
-  let mut native = NativeStandardStreams.native()
+  let mut native = StandardStream.nativeStandardStreamService()
   let stdout = StandardStream.stdout()
   let stderr = StandardStream.stderr()
   let first = run Effect.provideMut(StandardStream.send(stdout, b"out"), &mut native)

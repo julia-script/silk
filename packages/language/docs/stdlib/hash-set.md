@@ -32,7 +32,7 @@ move-only elements without taking them out.
 ### Insert one unique element and remove it
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -45,11 +45,11 @@ import silk.option as Option
 import silk.u64 as u64
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let mut set = HashSet.make<Hash.Word>(Hash.seed(17))
   let inserting = HashSet.insert<Hash.Word>(&mut set, Hash.word(42))
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let existed = run inserting
   if existed || !HashSet.contains<Hash.Word>(&set, Hash.word(42)) {
     return 0
@@ -59,7 +59,7 @@ effect fn build() -> i32
   return u64.toI32(removed.value)
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

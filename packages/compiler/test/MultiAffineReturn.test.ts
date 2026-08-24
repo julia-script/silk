@@ -15,9 +15,10 @@ const ascii = (value: string): Uint8Array =>
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-multi-affine-return-'))
 afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
 
-const allocated = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const allocated = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.usize as usize
@@ -101,7 +102,7 @@ fn observe(returned: Returned) -> i32 {
 }
 
 effect fn execute() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let pending = build() |> Effect.provideMut(&mut allocator)
   let returned = run pending
   return observe(move returned)

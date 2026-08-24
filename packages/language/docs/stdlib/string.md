@@ -49,7 +49,7 @@ pub fn main() -> i32 {
 ```silk
 import silk.char as char
 
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -66,13 +66,13 @@ fn scalarCode(step: String.ScalarStep) -> i32 {
 }
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let copying = String.copy("é")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut text = run copying
   let appending = String.append(&mut text, "!")
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let appended = run appending
   let stepped = String.nextScalar(String.view(&text), String.scalarCursor())
   let mapped = Option.map<String.ScalarStep, i32>(move stepped, scalarCode)
@@ -80,7 +80,7 @@ effect fn build() -> i32
   return scalar - 191
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

@@ -120,11 +120,11 @@
 // Effect into Result data and binds one typed requirement; everything here is ordinary Silk.
 
 import silk.bool as bool
-import silk.logging { LogError, LogLevel, Logger }
+import silk.logger { LogError, LogLevel, Logger }
 import silk.result { Result, Success, Failure }
 import silk.usize as usize
 
-/// Sends one complete message at `LogLevel.info()` through the required mutable [`Logger`].
+/// Sends one complete message at `Logger.info()` through the required mutable [`Logger`].
 ///
 /// # Details
 ///
@@ -133,7 +133,7 @@ import silk.usize as usize
 pub effect fn log(
   message: string
 ) -> () ! LogError ? &mut Logger {
-  return run Logger.log(LogLevel.info(), message)
+  return run Logger.log(Logger.info(), message)
 }
 
 /// Sends one complete message at `level` through the required mutable [`Logger`].

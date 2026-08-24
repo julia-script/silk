@@ -27,9 +27,9 @@ still stored in it; a container must clear initialized `Slot` values before rele
 ### Initialize and read a raw byte buffer
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
-import silk.core {Allocator}
+import silk.allocator {Allocator}
 
 import silk.effect as Effect
 
@@ -40,8 +40,8 @@ import silk.raw_buffer as RawBuffer
 import silk.u8 as u8
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let acquiring = Allocator.allocate(Layout.of<[u8; 3]>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let allocation = run acquiring
@@ -54,7 +54,7 @@ effect fn build() -> i32
   return 0
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

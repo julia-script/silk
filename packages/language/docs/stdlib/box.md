@@ -28,15 +28,15 @@ Ordinary recursive destruction uses the call stack. For a very deep chain, consu
 ```silk
 import silk.box as Box
 
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
 effect fn build() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let creating = Box.make<i32>(42)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let boxed = run creating
   let borrowed = Box.get<i32>(&boxed)
   if borrowed[0] != 42 {
@@ -45,7 +45,7 @@ effect fn build() -> i32
   return Box.into<i32>(move boxed)
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

@@ -528,8 +528,8 @@ pub fn main() -> i32 { return 42 }`)
     }),
 )
 
-const suspendingAllocator = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
+const suspendingAllocator = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.layout { Layout }
 role SharedAudit
@@ -550,7 +550,7 @@ impl Allocator for SuspendingAllocator { allocate: SuspendingAllocator.allocate 
 
 it.effect('keeps shared non-default Allocator demands out of private coroutine storage', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.core { Allocator }
+    const self = yield* snapshot(`import silk.allocator { Allocator }
 import silk.effect as Effect
 ${suspendingAllocator}
 
@@ -574,7 +574,7 @@ pub fn main() -> i32 {
 
 it.effect('allows ordinary allocator implementations to suspend', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.core { Allocator }
+    const self = yield* snapshot(`import silk.allocator { Allocator }
 import silk.effect as Effect
 ${suspendingAllocator}
 

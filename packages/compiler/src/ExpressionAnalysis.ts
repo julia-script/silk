@@ -4875,7 +4875,9 @@ export function analyzeExpression(
     }
     if (
       qualifierLookup._tag === 'Resolved' &&
-      qualifierLookup.declaration._tag === 'ServiceDeclaration'
+      qualifierLookup.declaration._tag === 'ServiceDeclaration' &&
+      (serviceOperation(qualifierLookup.declaration, member) !== undefined ||
+        NameResolution.scopedModule(qualifierLookup.declaration) === undefined)
     ) {
       const operation = serviceOperation(qualifierLookup.declaration, member)
       const diagnostic =
@@ -4951,17 +4953,33 @@ export function analyzeExpression(
     if (
       qualifierLookup._tag === 'Resolved' &&
       (qualifierLookup.declaration._tag === 'StructDeclaration' ||
+        qualifierLookup.declaration._tag === 'ServiceDeclaration' ||
         qualifierLookup.declaration._tag === 'InterfaceDeclaration') &&
       qualifierLookup.declaration.canonical._tag === 'Canonical'
     ) {
-      const actorModule = qualifierLookup.declaration.canonical.id.module
-      const memberLookup = DeclarationFacts.lookup(resolution.index, actorModule, member)
-      const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
+      // A member resolves through the declaring module only when the type names its own module
+      // (`Logger.info()` in logger.silk), or when an interface's own operation is invoked without
+      // a bound in scope (`HashKey.hash(...)`). Any other member is unknown.
+      const actorModule =
+        NameResolution.scopedModule(qualifierLookup.declaration) ??
+        (qualifierLookup.declaration._tag === 'InterfaceDeclaration' &&
+        serviceOperation(qualifierLookup.declaration, member) !== undefined
+          ? qualifierLookup.declaration.canonical.id.module
+          : undefined)
+      const memberLookup =
+        actorModule === undefined
+          ? undefined
+          : DeclarationFacts.lookup(resolution.index, actorModule, member)
+      const candidate = memberLookup?._tag === 'Resolved' ? memberLookup.declaration : undefined
       const diagnostic =
         candidate === undefined
           ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
           : candidate.visibility === 'Private'
-            ? Diagnostic.inaccessibleImportedMember(actorModule, member, memberToken.span)
+            ? Diagnostic.inaccessibleImportedMember(
+                actorModule ?? qualifier,
+                member,
+                memberToken.span,
+              )
             : undefined
       const reference: CallReferenceFact =
         candidate !== undefined && candidate.visibility === 'Public'

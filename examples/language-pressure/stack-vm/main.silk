@@ -1,14 +1,14 @@
-import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
-import silk.logging { InMemoryLogger }
-import silk.logging { LogError }
-import silk.logging { Logger }
+import silk.logger { InMemoryLogger }
+import silk.logger { LogError }
+import silk.logger { Logger }
 import silk.u8 as u8
 import silk.usize as usize
 import silk.vector { Vector, make, append, get, length }
-import silk.logging { length as logLength }
+import silk.logger { length as logLength }
 
 const opcodeHalt: u8 = 0
 const opcodePush: u8 = 1
@@ -308,8 +308,8 @@ effect fn logVerified(value: ()) -> () ! LogError ? &mut Logger {
 }
 
 pub effect fn main() -> () ! OutOfMemoryError | LogError {
-  let mut allocator = SystemAllocator.make()
-  let mut logger = InMemoryLogger.memory()
+  let mut allocator = Allocator.systemAllocatorService()
+  let mut logger = Logger.inMemoryService()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let bytecode = b"\x01\x00\x06\x06\x01\x63\x01\x06\x01\x07\x04\x00"
   let completed = run execute(bytecode)

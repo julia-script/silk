@@ -355,7 +355,7 @@ it.effect('navigates standard-library definitions to the analyzed toolchain sour
 it.effect('navigates Effect.suspend to its shipped Silk declaration', () =>
   Effect.gen(function* () {
     const root = project()
-    const source = `import silk.core { Allocator, OutOfMemoryError }
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect as Effect
 
 pub effect fn delayed() -> i32 ! OutOfMemoryError ? &mut Allocator {

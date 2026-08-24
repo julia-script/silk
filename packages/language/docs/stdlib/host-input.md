@@ -15,7 +15,7 @@ lossless pass-through.
 Arguments include the program name at index zero and retain host order. A missing argument index
 or unset variable is [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4e6f6e65), while [`HostInputError`](#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72) means the provider could not answer.
 Returned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values are independently owned, so lookup operations also carry explicit
-[`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72) and [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) channels.
+[`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72) and [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72) channels.
 
 The service is read-only and never mutates environment variables or the process working
 directory. No ambient global is consulted after a provider is supplied.
@@ -27,7 +27,7 @@ directory. No ambient global is consulted after a provider is supplied.
 ```silk
 import silk.bytes as Bytes
 
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -45,20 +45,20 @@ effect fn argumentCount(self: &mut FixedInput) -> usize
 }
 
 effect fn argument(self: &mut FixedInput, index: usize) -> Option.Option<Bytes.Bytes>
-! Host.HostInputError | Core.OutOfMemoryError
-? &mut Core.Allocator {
+! Host.HostInputError | Allocator.OutOfMemoryError
+? &mut Allocator {
   fail Host.inputFailure()
 }
 
 effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option.Option<Bytes.Bytes>
-! Host.HostInputError | Core.OutOfMemoryError
-? &mut Core.Allocator {
+! Host.HostInputError | Allocator.OutOfMemoryError
+? &mut Allocator {
   fail Host.inputFailure()
 }
 
 effect fn workingDirectory(self: &mut FixedInput) -> Bytes.Bytes
-! Host.HostInputError | Core.OutOfMemoryError
-? &mut Core.Allocator {
+! Host.HostInputError | Allocator.OutOfMemoryError
+? &mut Allocator {
   fail Host.inputFailure()
 }
 
@@ -131,7 +131,7 @@ rather than typed failures, because absence is an ordinary answer; only a host t
 answer at all is `HostInputError`.
 
 Returned byte values are independently owned. Operations that return bytes therefore require an
-exclusive [`Allocator`](./core.md#declaration-73696c6b2f636f72653a3a416c6c6f6361746f72) and can also fail with [`OutOfMemoryError`](./core.md#declaration-73696c6b2f636f72653a3a4f75744f664d656d6f72794572726f72).
+exclusive [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72) and can also fail with [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723a3a4f75744f664d656d6f72794572726f72).
 
 <a id="declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075743a3a6f7065726174696f6e3a617267756d656e74436f756e74"></a>
 

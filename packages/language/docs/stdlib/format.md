@@ -22,7 +22,7 @@ parsing accepts `-0`; unsigned parsing rejects any sign.
 ### Parse and render one signed integer
 
 ```silk
-import silk.core as Core
+import silk.allocator { Allocator }
 
 import silk.effect as Effect
 
@@ -35,12 +35,12 @@ import silk.result as Result
 import silk.string as String
 
 effect fn convert() -> i32
-! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
+! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
   let parsed = Format.signedValue("-42")
     |> Result.unwrapOr<i64, Format.ParseError>(0)
   let rendering = Format.signedText(parsed)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let rendered = run rendering
   let text = String.view(&rendered)
   if text == "-42" {} else {
@@ -50,7 +50,7 @@ effect fn convert() -> i32
     |> i64.toI32
 }
 
-effect fn recover(error: Core.OutOfMemoryError) -> i32 {
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
   return 0
 }
 

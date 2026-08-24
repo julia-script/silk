@@ -10,15 +10,16 @@ const ascii = (value: string): Uint8Array =>
  * evaluator's allocation trace: an owner that outlived the run holding it shows up as an acquire
  * with no matching release, and one released twice traps instead of completing.
  */
-const provider = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const provider = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 struct Clock { storage: Allocation }
 
 effect fn openClock() -> Clock ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -46,7 +47,7 @@ effect fn holding<A, E>(self: once Effect<A ! E>, held: once Clock) -> A ! E {
 }`
 
 /** The specialized row really can fail, and the failing execution still releases the owner. */
-const failingRun = `import silk.core { OutOfMemoryError }
+const failingRun = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${generic}
 
@@ -62,7 +63,7 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 7 }
 pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 /** The same body on the succeeding path, where the release is never in doubt. */
-const succeedingRun = `import silk.core { OutOfMemoryError }
+const succeedingRun = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 ${generic}
 

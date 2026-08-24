@@ -26,13 +26,14 @@ const watOperationNames = (wat: string): ReadonlyArray<string> =>
  * The first useful owned sequence written entirely in Silk: six appends force two geometric
  * growths (0 -> 4 -> 8) with element migration, then checked reads observe both ends.
  */
-const growth = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const growth = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -119,13 +120,14 @@ it.effect(
   60_000,
 )
 
-const lexicalViews = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const lexicalViews = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { make, append, asSlice, asMutSlice }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let empty = asSlice<i32>(&values)
   if empty.length == 0 {} else { return 1 }
@@ -173,9 +175,10 @@ it.effect(
   60_000,
 )
 
-const failedGrowth = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const failedGrowth = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length, capacity }
@@ -185,7 +188,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block
@@ -256,8 +259,9 @@ it.effect(
   60_000,
 )
 
-const elementReleaseOrder = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const elementReleaseOrder = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, capacity }
 
@@ -275,7 +279,7 @@ impl Drop for Entry {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 3, marker: make<i32>() }
   let pending0 = append<Entry>(&mut values, move entry0) |> Effect.provideMut(&mut allocator)
@@ -331,8 +335,9 @@ it.effect('drops initialized elements in order before releasing vector storage',
   }),
 )
 
-const transferredEarlyDrop = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const transferredEarlyDrop = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append }
 
@@ -355,7 +360,7 @@ fn consume(values: Vector<Entry>) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 11, marker: make<i32>() }
   let pending0 = append<Entry>(&mut values, move entry0) |> Effect.provideMut(&mut allocator)
@@ -409,14 +414,15 @@ it.effect('transfers vector ownership and drops it early on the evaluator and Wa
 
 it.effect('reads a zero-sized Copy element through a shared vector on the evaluator and Wasm', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    const source = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, get }
 struct Marker {}
 impl Copy for Marker {}
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Marker>()
   let pending = append<Marker>(&mut values, Marker {}) |> Effect.provideMut(&mut allocator)
   let appended = run pending
@@ -446,8 +452,9 @@ it.effect(
   'reads all-Copy structural-union elements through a shared vector on the evaluator and Wasm',
   () =>
     Effect.gen(function* () {
-      const source = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+      const source = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.u8 as u8
 import silk.vector { Vector, make, append, get }
@@ -465,7 +472,7 @@ fn observe(event: Step | Diagnostic) -> i32 {
   }
 }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut events = make<Step | Diagnostic>()
   let step = Step { value: 7 }
   let diagnostic = Diagnostic { marker: 3, value: 11 }
@@ -504,9 +511,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('rejects a shared vector read when one union member is move-only', () =>
   Effect.gen(function* () {
-    const source = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+    const source = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get }
@@ -514,7 +522,7 @@ struct Guard { storage: Allocation }
 struct Marker { value: i32 }
 fn guarded(storage: Allocation) -> Guard | Marker { return Guard { storage: move storage } }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 1]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let mut events = make<Guard | Marker>()
@@ -575,15 +583,16 @@ const recordedValues = (
       : [],
   )
 
-const popShrinks = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const popShrinks = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
 import silk.vector { Vector, make, append, get, length, capacity, pop }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -614,7 +623,7 @@ it.effect(
   60_000,
 )
 
-const popEmpty = `import silk.core { OutOfMemoryError }
+const popEmpty = `import silk.allocator { OutOfMemoryError }
 import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
@@ -642,9 +651,10 @@ it.effect(
   60_000,
 )
 
-const removeShifts = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const removeShifts = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, remove }
 
@@ -654,7 +664,7 @@ effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let s0 = run (seed(&mut values, 10) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 11) |> Effect.provideMut(&mut allocator))
@@ -680,9 +690,10 @@ it.effect(
   60_000,
 )
 
-const clearKeepsCapacity = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const clearKeepsCapacity = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, length, capacity, clear }
 
@@ -692,7 +703,7 @@ effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let s0 = run (seed(&mut values, 10) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 11) |> Effect.provideMut(&mut allocator))
@@ -725,9 +736,10 @@ it.effect(
   60_000,
 )
 
-const setDropsOldElement = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const setDropsOldElement = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, length, set }
 
@@ -751,7 +763,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -776,9 +788,10 @@ it.effect(
   60_000,
 )
 
-const truncateReleasesTail = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const truncateReleasesTail = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, length, capacity, truncate }
 
@@ -802,7 +815,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -828,9 +841,10 @@ it.effect(
   60_000,
 )
 
-const moveOnlyRoundTrip = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyRoundTrip = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.option { None }
 import silk.option { Some }
@@ -864,7 +878,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -904,9 +918,10 @@ it.effect(
   60_000,
 )
 
-const failedReserve = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const failedReserve = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length, capacity, reserve }
@@ -916,7 +931,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block
@@ -974,8 +989,9 @@ it.effect(
 // owner with frame bytes nothing had written yet, so the element the append went on to store
 // was all-zero. Only the appends that grow reach an effect call while holding the element, which
 // is why index 0 and the index that triggers the next growth were the ones that read back zero.
-const moveOnlyElementZero = `import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyElementZero = `import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice }
 
@@ -985,7 +1001,7 @@ struct Entry {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let entry = Entry { value: 42, marker: make<i32>() }
   let pending = append<Entry>(&mut values, move entry) |> Effect.provideMut(&mut allocator)
@@ -1004,9 +1020,10 @@ it.effect(
   60_000,
 )
 
-const moveOnlyAppendSequence = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyAppendSequence = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length }
 
@@ -1022,7 +1039,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
@@ -1047,9 +1064,10 @@ it.effect(
 
 // Five appends cross both growths (0 -> 4 -> 8), so two of them hold the element across the
 // allocating effect call rather than one.
-const moveOnlyGrowthSequence = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyGrowthSequence = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length, capacity }
 
@@ -1065,7 +1083,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
@@ -1095,9 +1113,10 @@ it.effect(
 
 // Any move-only field reaches the same path, so the element type is pinned with Bytes rather
 // than a nested Vector.
-const moveOnlyBytesField = `import silk.core { Allocator }
-import silk.core { OutOfMemoryError }
-import silk.core { SystemAllocator }
+const moveOnlyBytesField = `import silk.allocator { Allocator }
+import silk.allocator { OutOfMemoryError }
+import silk.allocator { Allocator }
+import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector, make, append, asSlice, length }
 import silk.bytes { Bytes, make as bytesMake }
@@ -1114,7 +1133,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 20) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 22) |> Effect.provideMut(&mut allocator))
