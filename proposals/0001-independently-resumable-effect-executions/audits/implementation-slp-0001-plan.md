@@ -100,3 +100,8 @@ Layer 4 checkpoint `83798f7` adds native construction, drive, park, wake, frame/
 and external status-2 relay. The designated evaluator/native differential case is 42/42, and Wasm
 reverse-order root isolation is repaired by clearing transient transfer state. Cancellation,
 DestroyPending, exact multi-package dispatch, and reactor evidence remain.
+
+Layer 4 checkpoint `1545bcb` completes the evaluator, Wasm, and native transition/cleanup matrix,
+including exact multi-package dispatch, local reactor polling, repeated generations, Eligible drop,
+reentrant destroy, typed failure, and non-LIFO roots. Focused verification is 41/41 and the full
+native differential corpus passes; OpenSpec progress is 12/15 before formal gates.
