@@ -29,6 +29,15 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 
+const runCompiled = (
+  path: string,
+  nativeEnvironment: Readonly<Record<string, string>> | undefined,
+) =>
+  spawnSync(path, [], {
+    encoding: 'utf8',
+    ...(nativeEnvironment === undefined ? {} : { env: { ...process.env, ...nativeEnvironment } }),
+  })
+
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-driver-native-acceptance-'))
 afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
@@ -80,7 +89,7 @@ it.effect(
 
         if (program.expected._tag === 'Completes') {
           assert.strictEqual(interpreted._tag, 'Completed', program.name)
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
+          const run = runCompiled(outcome.path, program.nativeEnvironment)
           const nativeStatus = run.status === null ? null : BigInt(run.status)
           // POSIX exposes only the low unsigned byte of a process exit value.
           const interpretedStatus =
@@ -96,7 +105,7 @@ it.effect(
         }
 
         if (program.expected._tag === 'Trap') {
-          const run = spawnSync(outcome.path, [], { encoding: 'utf8' })
+          const run = runCompiled(outcome.path, program.nativeEnvironment)
           assert.strictEqual(
             run.signal !== null || (run.status !== null && run.status !== 0),
             true,

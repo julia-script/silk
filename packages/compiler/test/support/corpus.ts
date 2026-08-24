@@ -67,6 +67,7 @@ ${transcendentalVectors
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
+  readonly nativeEnvironment?: Readonly<Record<string, string>>
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -162,6 +163,123 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
   run driveOnce(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run driveStored(move selected, &mut owner)
+  return 0
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
+/** Attempts to drive a Dormant execution reentrantly while its fixed endpoint is being notified. */
+export const independentExecutionIllegalNotifyingDrive = `import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+struct Empty {}
+struct Stored { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: Empty | Stored }
+struct Guard {}
+fn register(wake: Intrinsic.Wake) -> Guard {
+  Intrinsic.wake(move wake)
+  return Guard {}
+}
+effect fn body() -> i32 {
+  run Execution.park(register)
+  return 42
+}
+fn install(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
+  drop previous
+  return ()
+}
+fn take(owner: &mut Owner) -> Empty | Stored {
+  return Intrinsic.replace(owner.slot, Empty {})
+}
+fn reentrantComplete(state: &mut (), result: i32) -> () { return () }
+fn reentrantSuspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn reenter(selected: Empty | Stored, state: &mut ()) -> () {
+  return match move selected {
+    Empty {} => ()
+    Stored { execution } => run Execution.drive(
+      move execution,
+      move state,
+      reentrantComplete,
+      reentrantSuspend
+    )
+  }
+}
+fn ready(owner: &Shared.Shared<Owner>) -> () {
+  let selected = Shared.withMut(owner, take)
+  let mut state = ()
+  run reenter(move selected, &mut state)
+  return ()
+}
+fn complete(state: &mut (), result: i32) -> () { return () }
+fn suspend(
+  state: &mut (),
+  execution: Intrinsic.Execution<i32>,
+  owner: Shared.Shared<Owner>
+) -> () {
+  let installing = install(move execution)
+  Shared.withMut(&owner, move installing)
+  drop owner
+  return ()
+}
+effect fn driveOnce<
+  S: once fn(&mut (), Intrinsic.Execution<i32>) -> () + Intrinsic.NonParking
+>(
+  execution: Intrinsic.Execution<i32>,
+  state: &mut (),
+  onSuspend: S
+) -> () {
+  return run Execution.drive(move execution, move state, complete, move onSuspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let owner = run Shared.make<Owner>(Owner { slot: Empty {} })
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let endpoint = Shared.clone(&owner)
+  let suspensionOwner = Shared.clone(&owner)
+  let onSuspend = suspend(move suspensionOwner)
+  let execution = run Execution.make(body(), move endpoint, ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  let mut state = ()
+  run driveOnce(move execution, &mut state, move onSuspend)
+  drop owner
+  return 0
+}
+effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+
+/** Builds a logical continuation frame so a configured private-stack limit can reject its push. */
+export const independentExecutionStackExhaustion = `import silk.core as Core
+import silk.core { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+struct State { completed: i32 }
+effect fn count(value: i32) -> i32 {
+  if value == 0 { return 42 }
+  let next = run Effect.suspend(effect { return value - 1 })
+  return run count(next)
+}
+effect fn body() -> i32 { return run count(10000) }
+fn ready(state: &()) -> () { return () }
+fn complete(state: &mut State, value: i32) -> () { state.completed = 1 return () }
+fn suspend(state: &mut State, execution: Intrinsic.Execution<i32>) -> () {
+  drop execution
+  return ()
+}
+effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut State) -> () {
+  return run Execution.drive(move execution, move state, complete, suspend)
+}
+effect fn program() -> i32 ! Core.OutOfMemoryError {
+  let mut allocator = Core.make()
+  let mut state = State { completed: 0 }
+  let execution = run Execution.make(body(), (), ready)
+    |> Effect.provideMut<Core.Allocator>(&mut allocator)
+  run driveOnce(move execution, &mut state)
   return 0
 }
 effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
@@ -2262,6 +2380,17 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'independent-execution-illegal-dormant-drive',
     source: independentExecutionIllegalDormantDrive,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'independent-execution-illegal-notifying-drive',
+    source: independentExecutionIllegalNotifyingDrive,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'independent-execution-stack-exhaustion',
+    source: independentExecutionStackExhaustion,
+    nativeEnvironment: { SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES: '1' },
     expected: { _tag: 'Trap' },
   },
   {

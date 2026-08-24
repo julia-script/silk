@@ -12,6 +12,7 @@ import * as Type from '../src/Type.js'
 import {
   independentExecutionEligibleDrop,
   independentExecutionIllegalDormantDrive,
+  independentExecutionIllegalNotifyingDrive,
   independentExecutionLateCancelledWake,
   independentExecutionLocalReactor,
   independentExecutionMultiplePackages,
@@ -19,6 +20,7 @@ import {
   independentExecutionParkedTypedFailure,
   independentExecutionReentrantDestroy,
   independentExecutionRepeatedGenerations,
+  independentExecutionStackExhaustion,
 } from './support/corpus.js'
 
 const replaceMirOperation = (
@@ -359,47 +361,47 @@ it.effect('traps a Dormant owner drive before invoking either outcome callback',
   }),
 )
 
+it.effect('traps a Notifying reentrant drive before invoking either outcome callback', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'independent-execution/illegal-notifying-drive',
+      new TextEncoder().encode(independentExecutionIllegalNotifyingDrive),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Trap')
+    if (evaluated._tag !== 'Trap') return
+    assert.strictEqual(evaluated.reason, 'Execution drive entered an illegal lifecycle state')
+    assert.isFalse(
+      evaluated.trace.some(
+        (event) =>
+          event._tag === 'Call' &&
+          (event.target.name === 'reentrantComplete' || event.target.name === 'reentrantSuspend'),
+      ),
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => number)(), WebAssembly.RuntimeError)
+  }),
+)
+
 it.effect('traps independent-root stack exhaustion before the completion callback', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'independent-execution/stack-exhaustion',
-      new TextEncoder().encode(`import silk.core as Core
-import silk.core { Allocator }
-import silk.effect as Effect
-import silk.execution as Execution
-struct State { completed: i32 }
-effect fn count(value: i32) -> i32 {
-  if value == 0 { return 42 }
-  let next = run Effect.suspend(effect { return value - 1 })
-  return run count(next)
-}
-effect fn body() -> i32 { return run count(10000) }
-fn ready(state: &()) -> () { return () }
-fn complete(state: &mut State, value: i32) -> () { state.completed = 1 return () }
-fn suspend(state: &mut State, execution: Intrinsic.Execution<i32>) -> () {
-  drop execution
-  return ()
-}
-effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut State) -> () {
-  return run Execution.drive(move execution, move state, complete, suspend)
-}
-effect fn program() -> i32 ! Core.OutOfMemoryError {
-  let mut allocator = Core.make()
-  let mut state = State { completed: 0 }
-  let execution = run Execution.make(body(), (), ready)
-    |> Effect.provideMut<Core.Allocator>(&mut allocator)
-  run driveOnce(move execution, &mut state)
-  return state.completed
-}
-effect fn recover(error: Core.OutOfMemoryError) -> i32 { return -2 }
-pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      new TextEncoder().encode(independentExecutionStackExhaustion),
       'wasm32-unknown-unknown',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot, { maxExecutionStackBytes: 1 })
     assert.strictEqual(evaluated._tag, 'Trap')
-    if (evaluated._tag === 'Trap')
+    if (evaluated._tag === 'Trap') {
       assert.strictEqual(evaluated.reason, 'private execution stack exhausted')
+      assert.isFalse(
+        evaluated.trace.some((event) => event._tag === 'Call' && event.target.name === 'complete'),
+      )
+    }
     const artifact = yield* Analysis.codegenWasm(snapshot, {
       mode: 'release',
       privateExecutionStackPages: 1,
