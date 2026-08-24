@@ -7,11 +7,13 @@ import type * as LlvmError from '@silk-effect/llvm/LlvmError'
 import type * as Value from '@silk-effect/llvm/Value'
 import * as Effect from 'effect/Effect'
 import { suspensionPointKey } from './Backend.js'
+import * as CoroutineFrame from './CoroutineFrame.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as Hir from './Hir.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
+import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeCall from './NativeCall.js'
@@ -472,6 +474,69 @@ const releaseAllocation = Effect.fnUntraced(function* (
   )
 })
 
+interface StoredEndpoints {
+  readonly callback?: ReadonlyArray<Value.Input>
+  readonly endpoint?: ReadonlyArray<Value.Input>
+}
+
+const loadStoredEndpoints = Effect.fnUntraced(function* (
+  context: NativeAggregate.Context,
+  package_: ExecutionPackage.Plan,
+  base: Value.Input,
+  tag: string,
+): Effect.fn.Return<StoredEndpoints, LlvmError.LlvmError> {
+  const callbackOffset = componentOffset(package_, 'EndpointCallback')
+  const endpointOffset = componentOffset(package_, 'EndpointState')
+  return Object.freeze({
+    ...(callbackOffset === undefined
+      ? {}
+      : {
+          callback: yield* loadPackageValue(
+            context,
+            base,
+            package_.specialization.callback,
+            callbackOffset,
+            `${tag}_callback_load`,
+          ),
+        }),
+    ...(endpointOffset === undefined
+      ? {}
+      : {
+          endpoint: yield* loadPackageValue(
+            context,
+            base,
+            package_.specialization.endpoint,
+            endpointOffset,
+            `${tag}_endpoint_load`,
+          ),
+        }),
+  })
+})
+
+const dropStoredEndpoints = Effect.fnUntraced(function* (
+  context: NativeAggregate.Context,
+  package_: ExecutionPackage.Plan,
+  endpoints: StoredEndpoints,
+  tag: string,
+) {
+  const cleanup = package_.cleanup
+  if (cleanup === undefined) throw new RangeError('LLVM execution drop lost package metadata')
+  if (endpoints.callback !== undefined)
+    yield* NativeAggregate.dropThroughPlan(
+      context,
+      cleanup.callback,
+      endpoints.callback,
+      `${tag}_callback`,
+    )
+  if (endpoints.endpoint !== undefined)
+    yield* NativeAggregate.dropThroughPlan(
+      context,
+      cleanup.endpoint,
+      endpoints.endpoint,
+      `${tag}_endpoint`,
+    )
+})
+
 const dropStoredPackage = Effect.fnUntraced(function* (
   context: NativeAggregate.Context,
   package_: ExecutionPackage.Plan,
@@ -485,6 +550,13 @@ const dropStoredPackage = Effect.fnUntraced(function* (
 ) {
   const cleanup = package_.cleanup
   if (cleanup === undefined) throw new RangeError('LLVM execution drop lost package metadata')
+  if (options.endpoints)
+    yield* dropStoredEndpoints(
+      context,
+      package_,
+      yield* loadStoredEndpoints(context, package_, base, tag),
+      tag,
+    )
   if (options.body) {
     const offset = componentOffset(package_, 'BodyEnvironment')
     if (offset === undefined) throw new RangeError('LLVM execution drop lost body storage')
@@ -500,36 +572,6 @@ const dropStoredPackage = Effect.fnUntraced(function* (
       ),
       `${tag}_body`,
     )
-  }
-  if (options.endpoints) {
-    const callbackOffset = componentOffset(package_, 'EndpointCallback')
-    if (callbackOffset !== undefined)
-      yield* NativeAggregate.dropThroughPlan(
-        context,
-        cleanup.callback,
-        yield* loadPackageValue(
-          context,
-          base,
-          package_.specialization.callback,
-          callbackOffset,
-          `${tag}_callback_load`,
-        ),
-        `${tag}_callback`,
-      )
-    const endpointOffset = componentOffset(package_, 'EndpointState')
-    if (endpointOffset !== undefined)
-      yield* NativeAggregate.dropThroughPlan(
-        context,
-        cleanup.endpoint,
-        yield* loadPackageValue(
-          context,
-          base,
-          package_.specialization.endpoint,
-          endpointOffset,
-          `${tag}_endpoint_load`,
-        ),
-        `${tag}_endpoint`,
-      )
   }
   if (options.allocation) {
     const allocationOffset = componentOffset(package_, 'AllocationAuthority')
@@ -566,131 +608,157 @@ const dropFrames = Effect.fnUntraced(function* (
   if (coroutineFramePop === undefined || usizeType === undefined)
     throw new RangeError('LLVM execution frame cleanup lost runtime support')
   const headStorage = yield* FunctionBody.alloca(body, pointer, `${tag}_head_slot`)
-  yield* FunctionBody.store(
-    body,
-    yield* FunctionBody.load(
-      body,
-      pointer,
-      yield* NativeLanePointer.lanePointer(
-        lanePointers,
-        body,
-        base,
-        continuationOffset,
-        `${tag}_saved_head_ptr`,
-      ),
-      `${tag}_saved_head`,
-    ),
-    headStorage,
-  )
-  const loop = yield* LlvmBlock.make(body, `${tag}_frame_loop`)
-  const finish = yield* LlvmBlock.make(body, `${tag}_frame_finish`)
-  yield* FunctionBody.branch(body, loop)
-  yield* LlvmBlock.setInsertionPoint(body, loop)
-  const head = yield* FunctionBody.load(body, pointer, headStorage, `${tag}_head`)
-  const address = yield* FunctionBody.cast(body, 'ptrtoint', head, usizeType, `${tag}_head_address`)
-  const present = yield* LlvmBlock.make(body, `${tag}_frame_present`)
-  yield* FunctionBody.conditionalBranch(
-    body,
-    yield* FunctionBody.integerCompare(
-      body,
-      'eq',
-      address,
-      yield* Constant.integerUnsigned(builder, usizeType, 0n),
-      `${tag}_frames_done`,
-    ),
-    finish,
-    present,
-  )
-  yield* LlvmBlock.setInsertionPoint(body, present)
-  const next = yield* FunctionBody.load(body, pointer, head, `${tag}_next`)
-  const resume = yield* FunctionBody.load(
+  const originalHead = yield* FunctionBody.load(
     body,
     pointer,
     yield* NativeLanePointer.lanePointer(
       lanePointers,
       body,
-      head,
-      program.layout.target.pointerSize,
-      `${tag}_resume_ptr`,
+      base,
+      continuationOffset,
+      `${tag}_saved_head_ptr`,
     ),
-    `${tag}_resume`,
+    `${tag}_saved_head`,
   )
-  const resumeAddress = yield* FunctionBody.cast(
-    body,
-    'ptrtoint',
-    resume,
-    usizeType,
-    `${tag}_resume_address`,
-  )
-  const released = yield* LlvmBlock.make(body, `${tag}_frame_released`)
-  let otherwise = present
-  for (const [ordinal, generated] of [...context.resumeThunks.values()].entries()) {
-    const selected = yield* LlvmBlock.make(body, `${tag}_frame_${ordinal}`)
-    const following = yield* LlvmBlock.make(body, `${tag}_frame_${ordinal}_otherwise`)
-    if (otherwise !== present) yield* LlvmBlock.setInsertionPoint(body, otherwise)
-    const target = yield* Constant.fromGlobal(
-      builder,
-      yield* FunctionActor.global(builder, generated.handle),
+  const resetHead = Effect.fnUntraced(function* () {
+    yield* FunctionBody.store(body, originalHead, headStorage)
+  })
+  const dropPass = Effect.fnUntraced(function* (kind: 'values' | 'guards', release: boolean) {
+    const loop = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_loop`)
+    const finish = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_finish`)
+    yield* FunctionBody.branch(body, loop)
+    yield* LlvmBlock.setInsertionPoint(body, loop)
+    const head = yield* FunctionBody.load(body, pointer, headStorage, `${tag}_${kind}_head`)
+    const address = yield* FunctionBody.cast(
+      body,
+      'ptrtoint',
+      head,
+      usizeType,
+      `${tag}_${kind}_head_address`,
     )
+    const present = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_present`)
     yield* FunctionBody.conditionalBranch(
       body,
       yield* FunctionBody.integerCompare(
         body,
         'eq',
-        resumeAddress,
-        yield* FunctionBody.cast(
-          body,
-          'ptrtoint',
-          target,
-          usizeType,
-          `${tag}_target_${ordinal}_address`,
-        ),
-        `${tag}_frame_${ordinal}_matches`,
+        address,
+        yield* Constant.integerUnsigned(builder, usizeType, 0n),
+        `${tag}_${kind}_frames_done`,
       ),
-      selected,
-      following,
+      finish,
+      present,
     )
-    yield* LlvmBlock.setInsertionPoint(body, selected)
-    for (const field of generated.layout.payload) {
-      if (field.access._tag !== 'AffineTransfer') continue
-      const values: Array<Value.Input> = []
-      const packed = NativeType.packLanes(
-        program.layout.target,
-        NativeType.lanesFor(context.types, field.type),
-        field.offset,
+    yield* LlvmBlock.setInsertionPoint(body, present)
+    const next = yield* FunctionBody.load(body, pointer, head, `${tag}_${kind}_next`)
+    const resume = yield* FunctionBody.load(
+      body,
+      pointer,
+      yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        head,
+        program.layout.target.pointerSize,
+        `${tag}_${kind}_resume_ptr`,
+      ),
+      `${tag}_${kind}_resume`,
+    )
+    const resumeAddress = yield* FunctionBody.cast(
+      body,
+      'ptrtoint',
+      resume,
+      usizeType,
+      `${tag}_${kind}_resume_address`,
+    )
+    const released = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_released`)
+    let otherwise = present
+    for (const [ordinal, generated] of [...context.resumeThunks.values()].entries()) {
+      const selected = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_${ordinal}`)
+      const following = yield* LlvmBlock.make(body, `${tag}_${kind}_frame_${ordinal}_otherwise`)
+      if (otherwise !== present) yield* LlvmBlock.setInsertionPoint(body, otherwise)
+      const target = yield* Constant.fromGlobal(
+        builder,
+        yield* FunctionActor.global(builder, generated.handle),
       )
-      for (const [laneOrdinal, lane] of packed.entries.entries())
-        values.push(
-          yield* FunctionBody.load(
+      yield* FunctionBody.conditionalBranch(
+        body,
+        yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          resumeAddress,
+          yield* FunctionBody.cast(
             body,
-            NativeType.laneType(context.types, lane.lane),
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              head,
-              lane.offset,
-              `${tag}_frame_${ordinal}_${laneOrdinal}_ptr`,
-            ),
-            `${tag}_frame_${ordinal}_${laneOrdinal}`,
+            'ptrtoint',
+            target,
+            usizeType,
+            `${tag}_${kind}_target_${ordinal}_address`,
           ),
-        )
-      yield* NativeAggregate.dropThroughPlan(
-        context,
-        field.access.cleanup,
-        Object.freeze(values),
-        `${tag}_frame_${ordinal}_slot${field.slot}`,
+          `${tag}_${kind}_frame_${ordinal}_matches`,
+        ),
+        selected,
+        following,
       )
+      yield* LlvmBlock.setInsertionPoint(body, selected)
+      const owner = program.functions.find((fn) =>
+        Mir.matchesInstanceKey(fn, generated.layout.point.owner),
+      )
+      if (owner === undefined) throw new RangeError('LLVM execution frame cleanup lost its owner')
+      for (const field of CoroutineFrame.cleanupPayload(owner, generated.layout)[kind]) {
+        const values: Array<Value.Input> = []
+        const packed = NativeType.packLanes(
+          program.layout.target,
+          NativeType.lanesFor(context.types, field.type),
+          field.offset,
+        )
+        for (const [laneOrdinal, lane] of packed.entries.entries())
+          values.push(
+            yield* FunctionBody.load(
+              body,
+              NativeType.laneType(context.types, lane.lane),
+              yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                head,
+                lane.offset,
+                `${tag}_${kind}_frame_${ordinal}_${laneOrdinal}_ptr`,
+              ),
+              `${tag}_${kind}_frame_${ordinal}_${laneOrdinal}`,
+            ),
+          )
+        yield* NativeAggregate.dropThroughPlan(
+          context,
+          field.access.cleanup,
+          Object.freeze(values),
+          `${tag}_${kind}_frame_${ordinal}_slot${field.slot}`,
+        )
+      }
+      yield* FunctionBody.branch(body, released)
+      otherwise = following
     }
-    yield* FunctionBody.branch(body, released)
-    otherwise = following
-  }
-  yield* LlvmBlock.setInsertionPoint(body, otherwise)
-  yield* FunctionBody.unreachable(body)
-  yield* LlvmBlock.setInsertionPoint(body, released)
-  yield* FunctionBody.callDirect(body, coroutineFramePop, [head], `${tag}_frame_pop`)
-  yield* FunctionBody.store(body, next, headStorage)
-  yield* FunctionBody.branch(body, loop)
-  yield* LlvmBlock.setInsertionPoint(body, finish)
+    yield* LlvmBlock.setInsertionPoint(body, otherwise)
+    yield* FunctionBody.unreachable(body)
+    yield* LlvmBlock.setInsertionPoint(body, released)
+    if (release)
+      yield* FunctionBody.callDirect(body, coroutineFramePop, [head], `${tag}_${kind}_frame_pop`)
+    yield* FunctionBody.store(body, next, headStorage)
+    yield* FunctionBody.branch(body, loop)
+    yield* LlvmBlock.setInsertionPoint(body, finish)
+  })
+  yield* resetHead()
+  yield* dropPass('values', false)
+  yield* resetHead()
+  yield* dropPass('guards', true)
+})
+
+const dropActivatedPackage = Effect.fnUntraced(function* (
+  context: NativeAggregate.Context,
+  package_: ExecutionPackage.Plan,
+  base: Value.Input,
+  tag: string,
+) {
+  const endpoints = yield* loadStoredEndpoints(context, package_, base, tag)
+  yield* dropFrames(context, package_, base, tag)
+  yield* dropStoredEndpoints(context, package_, endpoints, tag)
 })
 
 const selectPackage = Effect.fnUntraced(function* (
@@ -967,14 +1035,7 @@ export const dropExecution = Effect.fnUntraced(function* (
         ),
         statePointer,
       )
-      yield* dropStoredPackage(
-        context,
-        package_,
-        base,
-        { body: false, endpoints: true, allocation: false },
-        `${tag}_inactive`,
-      )
-      yield* dropFrames(context, package_, base, `${tag}_inactive`)
+      yield* dropActivatedPackage(context, package_, base, `${tag}_inactive`)
       const releaseAllocationBlock = yield* LlvmBlock.make(body, `${tag}_release_allocation`)
       const retainAllocationBlock = yield* LlvmBlock.make(body, `${tag}_retain_allocation`)
       yield* FunctionBody.conditionalBranch(
@@ -2170,14 +2231,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             yield* Constant.integerUnsigned(builder, usizeType, 6n),
             statePointer,
           )
-          yield* dropStoredPackage(
-            context.cleanup,
-            package_,
-            base,
-            { body: false, endpoints: true, allocation: false },
-            `drive${operation.destination.ordinal}_destroyed_after_suspend`,
-          )
-          yield* dropFrames(
+          yield* dropActivatedPackage(
             context.cleanup,
             package_,
             base,
@@ -2283,17 +2337,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             eligibleAfterNotify,
           )
           yield* LlvmBlock.setInsertionPoint(body, destroyedAfterNotify)
-          yield* dropFrames(
+          yield* dropActivatedPackage(
             context.cleanup,
             package_,
             base,
             `drive${operation.destination.ordinal}_destroyed_after_notify`,
           )
-          yield* releasePackage(
+          yield* releaseAllocation(
             context,
             package_,
             base,
-            `drive${operation.destination.ordinal}_destroyed_after_notify`,
+            `drive${operation.destination.ordinal}_destroyed_after_notify_allocation`,
           )
           yield* FunctionBody.branch(body, following)
           yield* LlvmBlock.setInsertionPoint(body, eligibleAfterNotify)
@@ -2449,17 +2503,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           eligibleBlock,
         )
         yield* LlvmBlock.setInsertionPoint(body, destroyed)
-        yield* dropFrames(
+        yield* dropActivatedPackage(
           context.cleanup,
           package_,
           base,
           `wake${operation.destination.ordinal}_destroy`,
         )
-        yield* releasePackage(
+        yield* releaseAllocation(
           context,
           package_,
           base,
-          `wake${operation.destination.ordinal}_destroy`,
+          `wake${operation.destination.ordinal}_destroy_allocation`,
         )
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, eligibleBlock)

@@ -13,6 +13,7 @@ struct State {
   guardDrops: i32
   frameDrops: i32
   endpointDrops: i32
+  cleanupOrder: i32
 }
 struct Guard { state: Shared.Shared<State> }
 struct BodyToken { state: Shared.Shared<State> }
@@ -28,11 +29,28 @@ fn take(self: &mut State) -> Empty | Armed {
   return Intrinsic.replace(self.slot, Empty {})
 }
 fn mark(self: &mut State) -> () { self.ready = self.ready + 1 return () }
-fn markBody(self: &mut State) -> () { self.bodyDrops = self.bodyDrops + 1 return () }
-fn markGuard(self: &mut State) -> () { self.guardDrops = self.guardDrops + 1 return () }
-fn markFrame(self: &mut State) -> () { self.frameDrops = self.frameDrops + 1 return () }
-fn markEndpoint(self: &mut State) -> () { self.endpointDrops = self.endpointDrops + 1 return () }
+fn markBody(self: &mut State) -> () {
+  self.bodyDrops = self.bodyDrops + 1
+  self.cleanupOrder = self.cleanupOrder * 10 + 1
+  return ()
+}
+fn markFrame(self: &mut State) -> () {
+  self.frameDrops = self.frameDrops + 1
+  self.cleanupOrder = self.cleanupOrder * 10 + 2
+  return ()
+}
+fn markGuard(self: &mut State) -> () {
+  self.guardDrops = self.guardDrops + 1
+  self.cleanupOrder = self.cleanupOrder * 10 + 3
+  return ()
+}
+fn markEndpoint(self: &mut State) -> () {
+  self.endpointDrops = self.endpointDrops + 1
+  self.cleanupOrder = self.cleanupOrder * 10 + 4
+  return ()
+}
 fn read(self: &State) -> i32 {
+  if self.cleanupOrder != 1234 { return -self.cleanupOrder }
   return self.ready * 10000 + self.bodyDrops * 1000 + self.guardDrops * 100 + self.frameDrops * 10 + self.endpointDrops
 }
 
@@ -104,7 +122,8 @@ effect fn program() -> i32 ! Core.OutOfMemoryError {
     bodyDrops: 0,
     guardDrops: 0,
     frameDrops: 0,
-    endpointDrops: 0
+    endpointDrops: 0,
+    cleanupOrder: 0
   })
     |> Effect.provideMut<Core.Allocator>(&mut allocator)
   let bodyState = Shared.clone<State>(&state)

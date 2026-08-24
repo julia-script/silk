@@ -155,6 +155,37 @@ export const stateLayout = (
     )
     ?.states.find((state) => pointKey(state.point) === pointKey(point))
 
+type AffinePayloadField = Mir.CoroutineFramePayloadField & {
+  readonly access: Extract<Mir.CoroutineFrameAccess, { readonly _tag: 'AffineTransfer' }>
+}
+
+const isAffinePayloadField = (field: Mir.CoroutineFramePayloadField): field is AffinePayloadField =>
+  field.access._tag === 'AffineTransfer'
+
+/** Separates park guards from retained values so guards clean after every frame they may reference. */
+export const cleanupPayload = (
+  fn: Mir.MirFunction,
+  layout: Mir.CoroutineFrameTargetStateLayout,
+): {
+  readonly values: ReadonlyArray<AffinePayloadField>
+  readonly guards: ReadonlyArray<AffinePayloadField>
+} => {
+  const parkGuards = new Set(
+    (fn.suspension?.regions ?? []).flatMap((region) =>
+      region._tag === 'RunSuspendableEffectRegion' &&
+      pointKey(region.point) === pointKey(layout.point) &&
+      region.operation._tag === 'ExecutionPark'
+        ? [region.operation.guard.ordinal]
+        : [],
+    ),
+  )
+  const fields = layout.payload.filter(isAffinePayloadField)
+  return Object.freeze({
+    values: Object.freeze(fields.filter((field) => !parkGuards.has(field.local.ordinal))),
+    guards: Object.freeze(fields.filter((field) => parkGuards.has(field.local.ordinal))),
+  })
+}
+
 /** Attaches physical target plans without changing target-neutral frame descriptors. */
 export const apply = (program: Mir.Module): Mir.Module => {
   const coroutineFrames = plan(program)
