@@ -178,3 +178,12 @@ sealed-storage ordinary-policy migration suite passes 147/147, and the designate
 differential corpus passes with four renamed-policy outcomes. The report records all seven verified
 findings and their dispositions, with no second conformance review. The single formal
 post-conformance hard-gate sequence is now running.
+
+Layer 5's post-conformance run parked at `390c7fd` after the final 3/3 repair slot reconciled the
+sealed-storage formatted/generated surfaces. All seven Critical/High conformance findings are
+fixed; focused pressure 14/14, storage migration 147/147, native differential 1/1, and intrinsic
+catalog 9/9 pass. The final full test attempt passed 2,145/2,146 assertions but the actor-neutrality
+test exceeded its 60-second timeout under parallel-suite load despite passing focused in 35.21s.
+This is a new distinct test-cost cause after budget exhaustion, so `pnpm check` and release
+candidate did not run. A fresh bounded gate-only resume will target that named timeout without a
+second conformance review.
