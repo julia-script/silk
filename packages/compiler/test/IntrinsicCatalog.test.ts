@@ -445,6 +445,34 @@ it('keeps catalog ordering stable across fresh reads', () => {
   assert.deepEqual(second, first)
 })
 
+it('indexes every actor and operation without changing catalog identity', () => {
+  for (const actor of Intrinsic.all()) {
+    assert.strictEqual(Intrinsic.findActor(actor.spelling), actor)
+    for (const operation of actor.operations) {
+      assert.strictEqual(Intrinsic.findOperation(actor.spelling, operation.spelling), operation)
+      assert.strictEqual(Intrinsic.findOperationById(operation.id), operation)
+    }
+  }
+  for (const scalar of Scalar.all())
+    for (const operation of scalar.operations) {
+      const resolved = Intrinsic.findOperation(scalar.spelling, operation.spelling)
+      assert.notStrictEqual(resolved, undefined)
+      if (resolved !== undefined)
+        assert.strictEqual(resolved, Intrinsic.findOperation('Intrinsic', resolved.spelling))
+    }
+  assert.strictEqual(Intrinsic.findActor('Missing'), undefined)
+  assert.strictEqual(Intrinsic.findOperation('Intrinsic', 'missing'), undefined)
+  assert.strictEqual(Intrinsic.findOperation('missing', 'add'), undefined)
+  assert.strictEqual(
+    Intrinsic.findOperationById({
+      _tag: 'IntrinsicOperationId',
+      actor: 'Intrinsic',
+      name: 'missing',
+    }),
+    undefined,
+  )
+})
+
 it('matches the checked intrinsic inventory and records every unsafe invariant', () => {
   const fixture: unknown = JSON.parse(
     readFileSync(new URL('./fixtures/intrinsic-inventory.json', import.meta.url), 'utf8'),
