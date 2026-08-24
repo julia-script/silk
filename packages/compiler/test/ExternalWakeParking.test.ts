@@ -97,6 +97,8 @@ const llvmIndentedBlock = (ir: string, label: RegExp): string => {
   return match?.at(1) ?? ''
 }
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 const assertTrapOnlyBlock = (block: string): void => {
   assert.match(block, /call void @llvm\.trap\(\)/)
   assert.match(block, /unreachable/)
@@ -104,14 +106,50 @@ const assertTrapOnlyBlock = (block: string): void => {
   assert.notMatch(block, /on_(?:complete|suspend)/)
 }
 
-const assertNativeDriveAdmissionBeforeCallbacks = (ir: string): void => {
-  const admission = ir.search(
-    /br i1 %drive\d+_valid, label %drive\d+_accepted, label %drive\d+_rejected/,
+const assertNativeDriveAdmissionBeforeCallbacks = (
+  artifact: {
+    readonly ir: string
+    readonly symbols: ReadonlyArray<{
+      readonly declaration: { readonly name: string }
+      readonly symbol: string
+    }>
+  },
+  callbackNames: ReadonlyArray<string>,
+): void => {
+  const callbackSymbols = callbackNames.map((name) => {
+    const matching = artifact.symbols.filter((entry) => entry.declaration.name === name)
+    assert.lengthOf(matching, 1, `expected one native symbol for callback ${name}`)
+    const symbol = matching.at(0)?.symbol
+    assert.isDefined(symbol)
+    return symbol ?? ''
+  })
+  const functions = [...artifact.ir.matchAll(/^define [^{]+\{[\s\S]*?^}/gm)].map(
+    (match) => match[0],
   )
-  assert.isAtLeast(admission, 0)
-  const callback = ir.search(/drive\d+_on_(?:complete|suspend)/)
-  assert.strictEqual(callback < 0 || admission < callback, true)
-  assertTrapOnlyBlock(llvmIndentedBlock(ir, /drive\d+_rejected/))
+  for (const symbol of callbackSymbols) {
+    const callPattern = new RegExp(`\\bcall void @${escapeRegExp(symbol)}\\(`, 'g')
+    const callers = functions.filter((fn) => {
+      callPattern.lastIndex = 0
+      return callPattern.test(fn)
+    })
+    assert.isNotEmpty(callers, `missing native call to callback @${symbol}`)
+    for (const fn of callers) {
+      callPattern.lastIndex = 0
+      for (const call of fn.matchAll(callPattern)) {
+        const callIndex = call.index
+        assert.isDefined(callIndex)
+        const admissions = [
+          ...fn.matchAll(
+            /br i1 %drive\d+_valid, label %drive\d+_accepted, label %(drive\d+_rejected)/g,
+          ),
+        ].filter((match) => match.index < (callIndex ?? 0))
+        assert.isNotEmpty(admissions, `callback @${symbol} is reachable before drive admission`)
+        const rejectedLabel = admissions.at(-1)?.at(1)
+        assert.isDefined(rejectedLabel)
+        assertTrapOnlyBlock(llvmIndentedBlock(fn, new RegExp(escapeRegExp(rejectedLabel ?? ''))))
+      }
+    }
+  }
 }
 
 const source = `import silk.core as Core
@@ -404,7 +442,7 @@ it.effect('traps a Dormant owner drive before invoking either outcome callback',
     )
     assert.deepEqual(Analysis.diagnostics(native), [])
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact.ir)
+    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact, ['complete', 'suspend'])
   }),
 )
 
@@ -444,7 +482,10 @@ it.effect('traps a Notifying reentrant drive before invoking either outcome call
     )
     assert.deepEqual(Analysis.diagnostics(native), [])
     const nativeArtifact = yield* Analysis.codegen(native, { mode: 'release' })
-    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact.ir)
+    assertNativeDriveAdmissionBeforeCallbacks(nativeArtifact, [
+      'reentrantComplete',
+      'reentrantSuspend',
+    ])
   }),
 )
 
