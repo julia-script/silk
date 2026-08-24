@@ -860,27 +860,36 @@ pub fn main() -> i32 {
   )
 })
 
-it.effect('excludes conformances whose contract endpoint is private', () => {
+it.effect('excludes conformances whose provider or contract endpoint is private', () => {
   const root = `import lib as Lib
 pub fn main() -> i32 {
   let provider = Lib.make()
   return 0
 }`
-  const library = `service Hidden {}
+  const privateContractLibrary = `service Hidden {}
 pub struct Provider {}
 impl Hidden for Provider {}
 pub fn make() -> Provider { return Provider {} }`
-  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
-    Effect.map((snapshot) => {
-      assert.deepEqual(
-        Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('make'))?.implementedContracts,
-        [],
-      )
-      assert.deepEqual(
-        Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('provider'))?.implementedContracts,
-        [],
-      )
+  const privateProviderLibrary = `pub service Visible {}
+struct Provider {}
+impl Visible for Provider {}
+pub fn make() -> Provider { return Provider {} }`
+  const analyze = (library: string) =>
+    Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
+    )
+  return Effect.all([analyze(privateContractLibrary), analyze(privateProviderLibrary)]).pipe(
+    Effect.map((snapshots) => {
+      for (const snapshot of snapshots) {
+        assert.deepEqual(
+          Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('make'))?.implementedContracts,
+          [],
+        )
+        assert.deepEqual(
+          Analysis.hoverSubjectAt(snapshot, 'main', root.indexOf('provider'))?.implementedContracts,
+          [],
+        )
+      }
       return undefined
     }),
   )

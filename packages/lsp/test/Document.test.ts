@@ -383,6 +383,7 @@ it.effect('preserves hover Markdown across contract subjects and recovered sourc
     const source = `service Beta {}
 service Alpha {}
 struct Provider {}
+struct Plain {}
 impl Beta for Provider {}
 impl Alpha for Provider {}
 
@@ -391,6 +392,7 @@ fn make() -> Provider { return Provider {} }
 
 pub fn main() -> i32 {
   let provider = make()
+  let plain = Plain {}
   return 0
 }
 
@@ -427,6 +429,7 @@ pub fn broken() -> i32 { return missing() }`
       markdownAt('provider', 1),
       `\`\`\`silk\nlet provider: Provider\n\`\`\`\n\n${implementations}`,
     )
+    assert.strictEqual(markdownAt('plain'), '```silk\nlet plain: Plain\n```')
     assert.strictEqual(markdownAt('0'), '```silk\ni32\n```')
   }),
 )
