@@ -32,14 +32,18 @@ const verdictText = (verdict: Verdict): string => {
   }
 }
 
-const siteText = (site: BindingSite): string =>
-  site._tag === 'Parameter'
-    ? `p${site.parameter.ordinal}`
-    : site._tag === 'Let'
-      ? `b${site.binding.ordinal}`
-      : site._tag === 'Pattern'
-        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
-        : `t${site.owner.span.start}.${site.owner.ordinal}`
+const siteText = (site: BindingSite): string => {
+  if (site._tag === 'Parameter') {
+    return `p${site.parameter.ordinal}`
+  }
+  if (site._tag === 'Let') {
+    return `b${site.binding.ordinal}`
+  }
+  if (site._tag === 'Pattern') {
+    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+  }
+  return `t${site.owner.span.start}.${site.owner.ordinal}`
+}
 
 const cleanupText = (cleanup: CleanupPlan.CleanupPlan): string => {
   if (cleanup._tag === 'NoCleanup') return `none:${Type.encode(cleanup.type)}`
@@ -106,18 +110,24 @@ export const encode = (self: ModuleOwnership): string =>
     ...self.functions.flatMap((fn) => [
       `fn ${identityLabel(fn.declaration)} ${verdictText(fn.verdict)}`,
       ...fn.bindings.map((binding) => {
-        const category =
-          binding.category._tag === 'Copyable'
-            ? 'copyable'
-            : binding.category._tag === 'Unavailable'
-              ? 'unavailable'
-              : `move-only ${Type.encode(binding.category.type)}`
+        let category: string
+        if (binding.category._tag === 'Copyable') {
+          category = 'copyable'
+        } else if (binding.category._tag === 'Unavailable') {
+          category = 'unavailable'
+        } else {
+          category = `move-only ${Type.encode(binding.category.type)}`
+        }
         return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} affinity=${ExecutionAffinity.encode(binding.executionAffinity)} obligations=${LocalSharedOwnership.encode(binding.localSharedObligations)} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
       }),
-      ...fn.loans.map(
-        (loan) =>
-          `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${loan.origin === 'SliceReborrow' ? `reborrow parent=${loan.parent === undefined ? '?' : siteText(loan.parent)} suspended=${loan.suspendsParent}` : loan.origin === 'ReturnedView' ? 'returned-view' : 'array'} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`,
-      ),
+      ...fn.loans.map((loan) => {
+        let origin = 'array'
+        if (loan.origin === 'SliceReborrow') {
+          const parent = loan.parent === undefined ? '?' : siteText(loan.parent)
+          origin = `reborrow parent=${parent} suspended=${loan.suspendsParent}`
+        } else if (loan.origin === 'ReturnedView') origin = 'returned-view'
+        return `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${origin} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`
+      }),
       ...fn.borrowedReplacements.map(
         (replacement) =>
           `  borrowed-replace p${replacement.root.ordinal} region=${replacement.region.ordinal} type=${Type.encode(replacement.type)} cleanup=${cleanupText(replacement.displacedCleanup)} ${spanText(replacement.span)}`,
@@ -127,32 +137,41 @@ export const encode = (self: ModuleOwnership): string =>
           `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} affinity=${ExecutionAffinity.encode(callable.executionAffinity)} obligations=${LocalSharedOwnership.encode(callable.localSharedObligations)} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${ExecutionAffinity.encode(slot.executionAffinity)}:${LocalSharedOwnership.encode(slot.localSharedObligations)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
       ),
       ...fn.exits.map((exit) => {
-        const label = (() => {
-          switch (exit.kind) {
-            case 'Return':
-              return 'return'
-            case 'ArmEnd':
-              return `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
-            case 'LoopFallthrough':
-              return `loop${exit.target?.ordinal ?? '?'} fallthrough`
-            case 'Break':
-              return `break loop${exit.target?.ordinal ?? '?'}`
-            case 'Continue':
-              return `continue loop${exit.target?.ordinal ?? '?'}`
-            case 'Propagation':
-              return 'propagation'
-          }
-        })()
+        let label: string
+        switch (exit.kind) {
+          case 'Return':
+            label = 'return'
+            break
+          case 'ScopeEnd':
+            label = 'scope-end'
+            break
+          case 'ArmEnd':
+            label = `arm-end ${exit.arm === 'Otherwise' ? 'otherwise' : 'taken'}`
+            break
+          case 'LoopFallthrough':
+            label = `loop${exit.target?.ordinal ?? '?'} fallthrough`
+            break
+          case 'Break':
+            label = `break loop${exit.target?.ordinal ?? '?'}`
+            break
+          case 'Continue':
+            label = `continue loop${exit.target?.ordinal ?? '?'}`
+            break
+          case 'Propagation':
+            label = 'propagation'
+            break
+        }
         const loanEnds = exit.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'
-        return exit.releases.length === 0
-          ? `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds} releases none`
-          : [
-              `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
-              ...exit.releases.map(
-                (release) =>
-                  `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
-              ),
-            ].join('\n')
+        if (exit.releases.length === 0) {
+          return `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds} releases none`
+        }
+        return [
+          `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
+          ...exit.releases.map(
+            (release) =>
+              `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
+          ),
+        ].join('\n')
       }),
       ...fn.fixedPoints.map(
         (point) =>
@@ -161,10 +180,12 @@ export const encode = (self: ModuleOwnership): string =>
       ...fn.matches.map((match) =>
         [
           `  match ${match.access.toLowerCase()} ${spanText(match.span)}`,
-          ...match.arms.map(
-            (arm) =>
-              `    arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`,
-          ),
+          ...match.arms.map((arm) => {
+            let member = 'unknown'
+            if (arm.universal) member = '_'
+            else if (arm.member !== undefined) member = Match.encodeIdentity(arm.member)
+            return `    arm #${arm.id.ordinal} ${member} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`
+          }),
         ].join('\n'),
       ),
     ]),

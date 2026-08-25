@@ -609,22 +609,19 @@ it.effect(
         Object.freeze({
           ...authority,
           edges: Object.freeze(
-            authority.edges.map((edge) =>
-              edge === registerEdge
-                ? edge.after.wake === undefined
-                  ? edge
-                  : Object.freeze({
-                      ...edge,
-                      after: Object.freeze({
-                        ...edge.after,
-                        wake: Object.freeze({
-                          ...edge.after.wake,
-                          generation: edge.after.wake.generation + 1,
-                        }),
-                      }),
-                    })
-                : edge,
-            ),
+            authority.edges.map((edge) => {
+              if (edge !== registerEdge || edge.after.wake === undefined) return edge
+              return Object.freeze({
+                ...edge,
+                after: Object.freeze({
+                  ...edge.after,
+                  wake: Object.freeze({
+                    ...edge.after.wake,
+                    generation: edge.after.wake.generation + 1,
+                  }),
+                }),
+              })
+            }),
           ),
         }),
         Object.freeze({

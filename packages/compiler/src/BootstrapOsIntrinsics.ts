@@ -357,12 +357,14 @@ export const execute = (
         if (output === undefined) throw new RangeError('OS lookup omitted its output buffer')
         const selector = arguments_.at(0)
         if (selector === undefined) throw new RangeError('OS lookup omitted its subject')
-        const result =
-          name === 'osHostArgument'
-            ? input.argument(Number(readInteger(selector, 'usize').value))
-            : name === 'osHostVariable'
-              ? input.variable(byteView(selector))
-              : input.workingDirectory()
+        let result: HostInput.Lookup
+        if (name === 'osHostArgument') {
+          result = input.argument(Number(readInteger(selector, 'usize').value))
+        } else if (name === 'osHostVariable') {
+          result = input.variable(byteView(selector))
+        } else {
+          result = input.workingDirectory()
+        }
         if (result._tag !== 'Present') {
           // Absence is the not-found reason, which the provider reads as an ordinary answer;
           // any other reason is a host that could not answer at all.
@@ -539,24 +541,32 @@ export const execute = (
           }
           break
         }
-        const command =
-          name === 'osDirectoryCreate' || name === 'osFileRemove' || name === 'osDirectoryRemove'
-            ? (() => {
-                const root = arguments_.at(0)
-                const path = arguments_.at(1)
-                if (root === undefined || path === undefined)
-                  throw new RangeError('OS command omitted paths')
-                return invoke(() =>
-                  name === 'osDirectoryCreate'
-                    ? host.directoryCreate(byteView(root), byteView(path))
-                    : name === 'osFileRemove'
-                      ? host.fileRemove(byteView(root), byteView(path))
-                      : host.directoryRemove(byteView(root), byteView(path)),
-                )
-              })()
-            : name === 'osHandleClose'
-              ? invoke(() => host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput)))
-              : undefined
+        let command:
+          | ReturnType<typeof host.directoryCreate>
+          | ReturnType<typeof host.fileRemove>
+          | ReturnType<typeof host.directoryRemove>
+          | ReturnType<typeof host.handleClose>
+          | OsFileSystemHost.Failure
+          | undefined
+        if (
+          name === 'osDirectoryCreate' ||
+          name === 'osFileRemove' ||
+          name === 'osDirectoryRemove'
+        ) {
+          const root = arguments_.at(0)
+          const path = arguments_.at(1)
+          if (root === undefined || path === undefined)
+            throw new RangeError('OS command omitted paths')
+          if (name === 'osDirectoryCreate') {
+            command = invoke(() => host.directoryCreate(byteView(root), byteView(path)))
+          } else if (name === 'osFileRemove') {
+            command = invoke(() => host.fileRemove(byteView(root), byteView(path)))
+          } else {
+            command = invoke(() => host.directoryRemove(byteView(root), byteView(path)))
+          }
+        } else if (name === 'osHandleClose') {
+          command = invoke(() => host.handleClose(hostHandle(arguments_.at(0) ?? reasonOutput)))
+        }
         if (command === undefined) throw new RangeError(`Unknown OS intrinsic ${name}`)
         if (command._tag === 'Failure') {
           status(command)

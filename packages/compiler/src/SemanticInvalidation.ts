@@ -92,8 +92,15 @@ const reasonOrder: ReadonlyArray<Reason> = Object.freeze([
   'SurfaceChange',
 ])
 
-const compareName = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareName = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 const importInput = (module: ModuleClosure.Module): string =>
   module.imports
@@ -291,7 +298,12 @@ export const make = (input: Input): SemanticInvalidation => {
       previousModule === undefined
     ) {
       addReason(module, 'Fresh')
-    } else {
+    }
+    if (
+      input.previous !== undefined &&
+      revision?._tag !== 'Fresh' &&
+      previousModule !== undefined
+    ) {
       if (input.current.environment !== input.previous.environment)
         addReason(module, 'EnvironmentChange')
       if (revision?._tag !== 'Reused') addReason(module, 'LocalChange')

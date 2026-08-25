@@ -72,12 +72,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const f32 = usesScalar('f32') ? yield* LlvmType.float(builder) : i32
   const f64 = usesScalar('f64') ? yield* LlvmType.double(builder) : i32
   const usizeLayout = Layout.entry(program.layout, 'usize')
-  const usizeType =
-    usizeLayout?.representation._tag === 'UnsignedInteger'
-      ? yield* LlvmType.integer(builder, usizeLayout.representation.bits)
-      : suspensionEnabled
-        ? yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
-        : undefined
+  let usizeType: LlvmType.Type | undefined
+  if (usizeLayout?.representation._tag === 'UnsignedInteger') {
+    usizeType = yield* LlvmType.integer(builder, usizeLayout.representation.bits)
+  } else if (suspensionEnabled) {
+    usizeType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
+  } else {
+    usizeType = undefined
+  }
   const integerTypes = new Map<number, LlvmType.Type>([[32, i32]])
   if (usizeLayout?.representation._tag === 'UnsignedInteger' && usizeType !== undefined) {
     integerTypes.set(usizeLayout.representation.bits, usizeType)
@@ -272,14 +274,16 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         ? 'OpenOut'
         : 'Direct'
     const singleResultLane = resultLanes.at(0)
-    const resultType =
-      abi === 'OpenOut'
-        ? i32
-        : resultLanes.length === 0
-          ? (voidType ?? (yield* LlvmType.voidType(builder)))
-          : resultLanes.length === 1 && singleResultLane !== undefined
-            ? laneType(singleResultLane)
-            : yield* LlvmType.structure(builder, resultLanes.map(laneType))
+    let resultType: LlvmType.Type
+    if (abi === 'OpenOut') {
+      resultType = i32
+    } else if (resultLanes.length === 0) {
+      resultType = voidType ?? (yield* LlvmType.voidType(builder))
+    } else if (resultLanes.length === 1 && singleResultLane !== undefined) {
+      resultType = laneType(singleResultLane)
+    } else {
+      resultType = yield* LlvmType.structure(builder, resultLanes.map(laneType))
+    }
     const parameters = operation.arguments.flatMap((argument) => {
       const type = program.functions
         .find((fn) => MirVerification.operations(fn).includes(operation))

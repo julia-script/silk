@@ -519,13 +519,13 @@ it('answers scripted input and reports host failures at the memory boundary', ()
   assert.deepEqual(failing.provider.argumentCount(), { _tag: 'Count', count: 0 })
 })
 
-const clang =
-  process.env.SILK_TEST_CLANG ??
-  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
-    ? '/opt/homebrew/opt/llvm/bin/clang'
-    : existsSync('/usr/local/opt/llvm/bin/clang')
-      ? '/usr/local/opt/llvm/bin/clang'
-      : 'clang')
+const defaultClang = (): string => {
+  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
+  if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
+  return 'clang'
+}
+
+const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
 
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-host-input-'))
 afterAll(() => {

@@ -64,7 +64,14 @@ export const isDeclarationToken = (kind: Token.TokenKind): boolean =>
 
 /** Resolves a valid eager marker using the operation arity to disambiguate `-`. */
 export const declaration = (kind: Token.TokenKind, arity: number): Eligible | undefined => {
-  const selected = arity === 1 ? prefix(kind) : arity === 2 ? infix(kind)?.operator : undefined
+  let selected: Prefix | Infix | undefined
+  if (arity === 1) {
+    selected = prefix(kind)
+  } else if (arity === 2) {
+    selected = infix(kind)?.operator
+  } else {
+    selected = undefined
+  }
   return selected === undefined || isShortCircuit(selected) ? undefined : selected
 }
 
@@ -209,8 +216,15 @@ export const prefix = (kind: Token.TokenKind): Prefix | undefined => {
 export const infix = (kind: Token.TokenKind): InfixInfo | undefined => infixByToken[kind]
 
 /** Returns the canonical source spelling of one prefix operator. */
-export const prefixSpelling = (self: Prefix): string =>
-  self === 'Negate' ? '-' : self === 'Not' ? '!' : '~'
+export const prefixSpelling = (self: Prefix): string => {
+  if (self === 'Negate') {
+    return '-'
+  }
+  if (self === 'Not') {
+    return '!'
+  }
+  return '~'
+}
 
 /** Returns the canonical source spelling of one eager operator. */
 export const spelling = (self: Eligible): string => {
@@ -278,15 +292,11 @@ export const target = (
   }
   const selected = Scalar.find(equalityActor)
   const operation = operationByOperator[self]
-  return Object.freeze({
-    actor:
-      self === 'Not'
-        ? Scalar.boolean.spelling
-        : selected === undefined || !declaresOperation(selected, operation)
-          ? Scalar.defaultInteger.spelling
-          : equalityActor,
-    operation,
-  })
+  let actor = equalityActor
+  if (self === 'Not') actor = Scalar.boolean.spelling
+  else if (selected === undefined || !declaresOperation(selected, operation))
+    actor = Scalar.defaultInteger.spelling
+  return Object.freeze({ actor, operation })
 }
 
 /** The binding power of prefix operators. */

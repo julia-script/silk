@@ -117,45 +117,47 @@ export const lowerInstance = (
   }
 
   const contract = fn.contract
-  const parameterTypes =
-    contract._tag === 'Contract'
-      ? instance.specialization.parameters.flatMap((specialized, ordinal) => {
-          const type = contract.parameters.at(ordinal) ?? specialized
-          if (Type.isEffect(specialized)) {
-            const identity = Instances.parameterEffectIdentity(fn, instance.key, ordinal)
-            const effectValue =
-              identity === undefined ? undefined : effectValueByIdentity(layout, identity)
-            return effectValue === undefined ? [] : [effectValue]
-          }
-          if (
-            Type.isRepresented(specialized) &&
-            Type.isCallable(specialized.contract) &&
-            Type.isExactRepresentationArgument(specialized.representation.argument) &&
-            Type.isCallableIdentityArgument(specialized.representation.argument.identity)
-          ) {
-            const callable = callableValueByIdentity(
-              layout,
-              specialized.representation.argument.identity,
-              specialized.contract,
-            )
-            return callable === undefined ? [] : [callable]
-          }
-          if (Type.isCallable(specialized)) {
-            const identity = Instances.parameterCallableIdentity(fn, instance.key, ordinal)
-            const callable =
-              identity === undefined
-                ? undefined
-                : callableValueByIdentity(layout, identity, specialized)
-            return callable === undefined ? [] : [callable]
-          }
-          const lowered =
-            storedCallableValueType(layout, specialized) ??
-            storedEffectValueType(layout, specialized) ??
-            representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
-            mirType(type, instance.substitution, layout)
-          return lowered === undefined ? [] : [lowered]
-        })
-      : Array.from({ length: fn.declaration.parameterCount }, () => i32)
+  let parameterTypes: Mir.Type[]
+  if (contract._tag === 'Contract') {
+    parameterTypes = instance.specialization.parameters.flatMap((specialized, ordinal) => {
+      const type = contract.parameters.at(ordinal) ?? specialized
+      if (Type.isEffect(specialized)) {
+        const identity = Instances.parameterEffectIdentity(fn, instance.key, ordinal)
+        const effectValue =
+          identity === undefined ? undefined : effectValueByIdentity(layout, identity)
+        return effectValue === undefined ? [] : [effectValue]
+      }
+      if (
+        Type.isRepresented(specialized) &&
+        Type.isCallable(specialized.contract) &&
+        Type.isExactRepresentationArgument(specialized.representation.argument) &&
+        Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+      ) {
+        const callable = callableValueByIdentity(
+          layout,
+          specialized.representation.argument.identity,
+          specialized.contract,
+        )
+        return callable === undefined ? [] : [callable]
+      }
+      if (Type.isCallable(specialized)) {
+        const identity = Instances.parameterCallableIdentity(fn, instance.key, ordinal)
+        const callable =
+          identity === undefined
+            ? undefined
+            : callableValueByIdentity(layout, identity, specialized)
+        return callable === undefined ? [] : [callable]
+      }
+      const lowered =
+        storedCallableValueType(layout, specialized) ??
+        storedEffectValueType(layout, specialized) ??
+        representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
+        mirType(type, instance.substitution, layout)
+      return lowered === undefined ? [] : [lowered]
+    })
+  } else {
+    parameterTypes = Array.from({ length: fn.declaration.parameterCount }, () => i32)
+  }
   const effectOutcome =
     contract._tag === 'Contract' && contract.functionKind === 'Effect'
       ? Type.effectWithRows(

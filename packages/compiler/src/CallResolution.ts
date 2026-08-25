@@ -119,12 +119,11 @@ export function analyzeArguments(
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
     const local = lookupDeclaration(declarations, name)
-    target =
-      resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration'
-        ? resolved.declaration
-        : local._tag === 'Resolved'
-          ? local.declaration
-          : undefined
+    if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
+      target = resolved.declaration
+    } else if (local._tag === 'Resolved') {
+      target = local.declaration
+    }
   } else if (first !== undefined && second !== undefined) {
     const qualifierSpelling = spelling(source, first)
     const memberSpelling = spelling(source, second)
@@ -237,29 +236,29 @@ export function analyzeArguments(
     callTypeArguments?.explicit === true && explicitTypes !== undefined
       ? TypeInference.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
-  const expectedTypes = Object.freeze(
-    boundParameters.length > 0
-      ? boundParameters
-      : builtinParameters.length > 0
-        ? builtinParameters
-            .slice(
-              isSectionArity(builtinParameters.length, argumentNodes.length)
-                ? builtinParameters.length - argumentNodes.length
-                : 0,
-            )
-            .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
-        : (target?.parameters ?? [])
-            .slice(
-              target !== undefined && isSectionArity(target.parameters.length, argumentNodes.length)
-                ? target.parameters.length - argumentNodes.length
-                : 0,
-            )
-            .map((parameter) =>
-              parameter.declaredType._tag === 'Resolved'
-                ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
-                : undefined,
-            ),
-  )
+  let selectedParameters: ReadonlyArray<SemanticType | undefined>
+  if (boundParameters.length > 0) selectedParameters = boundParameters
+  else if (builtinParameters.length > 0) {
+    const offset = isSectionArity(builtinParameters.length, argumentNodes.length)
+      ? builtinParameters.length - argumentNodes.length
+      : 0
+    selectedParameters = builtinParameters
+      .slice(offset)
+      .map((parameter) => Type.substitute(parameter, builtinSubstitution ?? new Map()))
+  } else {
+    const offset =
+      target !== undefined && isSectionArity(target.parameters.length, argumentNodes.length)
+        ? target.parameters.length - argumentNodes.length
+        : 0
+    selectedParameters = (target?.parameters ?? [])
+      .slice(offset)
+      .map((parameter) =>
+        parameter.declaredType._tag === 'Resolved'
+          ? Type.substitute(parameter.declaredType.type, substitution ?? new Map())
+          : undefined,
+      )
+  }
+  const expectedTypes = Object.freeze(selectedParameters)
   return analyzeArgumentNodes(
     source,
     call,
@@ -399,13 +398,17 @@ export const analyzeCallTypeArguments = (
       raw.fact,
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )
-    const invalidBorrow =
+    let invalidBorrow: Diagnostic.Diagnostic | undefined
+    if (
       resolved.fact._tag === 'Resolved' &&
       (Type.isReference(resolved.fact.type)
         ? Type.containsPositionRestrictedBorrow(resolved.fact.type.target)
         : Type.containsPositionRestrictedBorrow(resolved.fact.type))
-        ? Diagnostic.borrowedViewTypePosition('type argument', node.span)
-        : undefined
+    ) {
+      invalidBorrow = Diagnostic.borrowedViewTypePosition('type argument', node.span)
+    } else {
+      invalidBorrow = undefined
+    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'TypeArgument' as const,
@@ -460,26 +463,30 @@ export const isSectionArity = (expectedCount: number, actualCount: number): bool
 
 export type SourceCallable = DeclarationFact | DeclarationFacts.ServiceOperationFact
 
-export const sourceCallable = (reference: CallReferenceFact): SourceCallable | undefined =>
-  reference._tag === 'Resolved'
-    ? reference.declaration
-    : reference._tag === 'ResolvedServiceOperation'
-      ? reference.operation
-      : undefined
+export const sourceCallable = (reference: CallReferenceFact): SourceCallable | undefined => {
+  if (reference._tag === 'Resolved') {
+    return reference.declaration
+  }
+  if (reference._tag === 'ResolvedServiceOperation') {
+    return reference.operation
+  }
+  return undefined
+}
 
 export const resolvedCallableContract = (
   reference: CallReferenceFact,
 ): CallableContract.CallableContract | undefined => {
   if (reference._tag === 'ResolvedIntrinsicContract') return reference.contract
   const callable = sourceCallable(reference)
-  return callable === undefined
-    ? undefined
-    : DeclarationFacts.callableContract(
-        callable,
-        reference._tag === 'ResolvedServiceOperation'
-          ? reference.service.typeParameters
-          : Object.freeze([]),
-      )
+  if (callable === undefined) {
+    return undefined
+  }
+  return DeclarationFacts.callableContract(
+    callable,
+    reference._tag === 'ResolvedServiceOperation'
+      ? reference.service.typeParameters
+      : Object.freeze([]),
+  )
 }
 
 export const callArityDiagnostic = (
@@ -500,32 +507,28 @@ export const callArityDiagnostic = (
 ): Diagnostic.Diagnostic => {
   if (expectedCount === 1 && actualCount === 0)
     return Diagnostic.redundantUnaryEmptyCall(reference.spelling, span)
-  return Diagnostic.wrongCallArity(
-    reference._tag === 'ResolvedBuiltin'
-      ? Object.freeze({
-          _tag: 'BuiltinTarget',
-          actor: reference.actor,
-          operation: reference.operation,
-        })
-      : reference._tag === 'ResolvedIntrinsicContract'
-        ? Object.freeze({
-            _tag: 'BuiltinTarget',
-            actor: 'Intrinsic',
-            operation: reference.intrinsic.spelling,
-          })
-        : reference._tag === 'ResolvedBoundOperation'
-          ? Object.freeze({
-              _tag: 'BuiltinTarget',
-              actor: reference.capability.name,
-              operation: reference.operation,
-            })
-          : reference._tag === 'Resolved'
-            ? reference.declaration.id
-            : reference.operation.id,
-    expectedCount,
-    actualCount,
-    span,
-  )
+  let target: Parameters<typeof Diagnostic.wrongCallArity>[0]
+  if (reference._tag === 'ResolvedBuiltin') {
+    target = Object.freeze({
+      _tag: 'BuiltinTarget',
+      actor: reference.actor,
+      operation: reference.operation,
+    })
+  } else if (reference._tag === 'ResolvedIntrinsicContract') {
+    target = Object.freeze({
+      _tag: 'BuiltinTarget',
+      actor: 'Intrinsic',
+      operation: reference.intrinsic.spelling,
+    })
+  } else if (reference._tag === 'ResolvedBoundOperation') {
+    target = Object.freeze({
+      _tag: 'BuiltinTarget',
+      actor: reference.capability.name,
+      operation: reference.operation,
+    })
+  } else if (reference._tag === 'Resolved') target = reference.declaration.id
+  else target = reference.operation.id
+  return Diagnostic.wrongCallArity(target, expectedCount, actualCount, span)
 }
 
 /** One value argument paired with the parameter type it must determine. */
@@ -1269,21 +1272,24 @@ export const analyzeCallContract = (
       !typesCompatible(suppliedValue, expectedValue) &&
       !contextualIntegerCompatible(argument.expression, expectedValue)
     ) {
-      const mismatch =
-        Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)
-          ? Diagnostic.incompatibleCallableSignature(
-              Type.encode(expectedValue),
-              Type.encode(suppliedValue),
-              argument.syntax.span,
-            )
-          : Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)
-            ? Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
-            : (unionConversionDiagnostic(suppliedValue, expectedValue, argument.syntax.span) ??
-              Diagnostic.argumentTypeMismatch(
-                Type.encode(expectedValue),
-                Type.encode(suppliedValue),
-                argument.syntax.span,
-              ))
+      let mismatch: Diagnostic.Diagnostic
+      if (Type.isCallable(expectedValue) && Type.isCallable(suppliedValue)) {
+        mismatch = Diagnostic.incompatibleCallableSignature(
+          Type.encode(expectedValue),
+          Type.encode(suppliedValue),
+          argument.syntax.span,
+        )
+      } else if (Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)) {
+        mismatch = Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
+      } else {
+        mismatch =
+          unionConversionDiagnostic(suppliedValue, expectedValue, argument.syntax.span) ??
+          Diagnostic.argumentTypeMismatch(
+            Type.encode(expectedValue),
+            Type.encode(suppliedValue),
+            argument.syntax.span,
+          )
+      }
       return Object.freeze({
         mappings,
         fact: Object.freeze({
@@ -1664,12 +1670,14 @@ export const resolvedFunctionReference = (
     const name = spelling(source, first)
     const resolved = NameResolution.lookup(resolution.scope, resolution.index, name)
     const local = lookupDeclaration(declarations, name)
-    const declaration =
-      resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration'
-        ? resolved.declaration
-        : local._tag === 'Resolved'
-          ? local.declaration
-          : undefined
+    let declaration: DeclarationFacts.DeclarationFact | undefined
+    if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
+      declaration = resolved.declaration
+    } else if (local._tag === 'Resolved') {
+      declaration = local.declaration
+    } else {
+      declaration = undefined
+    }
     return declaration === undefined
       ? undefined
       : Object.freeze({
@@ -1698,22 +1706,23 @@ export const resolvedFunctionReference = (
         })
     }
     const signature = builtinSignature(qualifier, member)
-    return signature === undefined
-      ? undefined
-      : Object.freeze({
-          _tag: 'ResolvedBuiltin',
-          spelling: `${qualifier}.${member}`,
-          token: second,
-          actor: qualifier,
-          operation: signature.operation,
-          intrinsic: signature.id,
-          parameters: signature.parameters,
-          result: signature.result,
-          unsafe: signature.unsafe === true,
-          ...(signature.returnedBorrowParameter === undefined
-            ? {}
-            : { returnedBorrowParameter: signature.returnedBorrowParameter }),
-        })
+    if (signature === undefined) {
+      return undefined
+    }
+    return Object.freeze({
+      _tag: 'ResolvedBuiltin',
+      spelling: `${qualifier}.${member}`,
+      token: second,
+      actor: qualifier,
+      operation: signature.operation,
+      intrinsic: signature.id,
+      parameters: signature.parameters,
+      result: signature.result,
+      unsafe: signature.unsafe === true,
+      ...(signature.returnedBorrowParameter === undefined
+        ? {}
+        : { returnedBorrowParameter: signature.returnedBorrowParameter }),
+    })
   }
   if (qualifierLookup._tag !== 'Namespace') return undefined
   const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
@@ -1748,12 +1757,22 @@ export const analyzeFunctionItem = (
     const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
     if (qualifierLookup._tag !== 'Namespace') return undefined
     const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
-    const diagnostic =
-      memberLookup._tag !== 'Resolved'
-        ? Diagnostic.unknownImportedMember(qualifierLookup.module, member, memberToken.span)
-        : memberLookup.declaration.visibility !== 'Public'
-          ? Diagnostic.inaccessibleImportedMember(qualifierLookup.module, member, memberToken.span)
-          : undefined
+    let diagnostic: Diagnostic.Diagnostic | undefined
+    if (memberLookup._tag !== 'Resolved') {
+      diagnostic = Diagnostic.unknownImportedMember(
+        qualifierLookup.module,
+        member,
+        memberToken.span,
+      )
+    } else if (memberLookup.declaration.visibility !== 'Public') {
+      diagnostic = Diagnostic.inaccessibleImportedMember(
+        qualifierLookup.module,
+        member,
+        memberToken.span,
+      )
+    } else {
+      diagnostic = undefined
+    }
     if (diagnostic === undefined) return undefined
     const missing: CallReferenceFact = Object.freeze({
       _tag: 'Missing',
@@ -2251,14 +2270,18 @@ export const finishCallableApplication = (
   resolution?: ResolutionContext,
   caller?: DeclarationFact,
 ): ExpressionResult => {
-  const callable =
-    callee.type !== undefined && Type.isCallable(callee.type)
-      ? callee.type
-      : callee.type !== undefined &&
-          Type.isRepresented(callee.type) &&
-          Type.isCallable(callee.type.contract)
-        ? callee.type.contract
-        : undefined
+  let callable: Type.Callable | undefined
+  if (callee.type !== undefined && Type.isCallable(callee.type)) {
+    callable = callee.type
+  } else if (
+    callee.type !== undefined &&
+    Type.isRepresented(callee.type) &&
+    Type.isCallable(callee.type.contract)
+  ) {
+    callable = callee.type.contract
+  } else {
+    callable = undefined
+  }
   const diagnostics: Array<Diagnostic.Diagnostic> = [
     ...callee.diagnostics,
     ...argumentsResult.diagnostics,
@@ -2364,10 +2387,11 @@ export const finishCallableApplication = (
     valid = false
   }
   const completeUnsafeInvocation =
-    callable?.unsafe === true &&
+    callable !== undefined &&
+    callable.unsafe === true &&
     stagedSection === undefined &&
     callable.parameters.length === argumentsResult.facts.length
-  if (completeUnsafeInvocation) {
+  if (completeUnsafeInvocation && callable !== undefined) {
     const diagnostic = unsafeCallDiagnostic(true, Type.encode(callable), node, resolution)
     if (diagnostic !== undefined) {
       diagnostics.push(diagnostic)
@@ -2385,21 +2409,25 @@ export const finishCallableApplication = (
       }
       if (!TypeInference.infer(expected, argument.type.type, inferred)) {
         const rowFailure = TypeInference.rowInferenceFailure(expected, argument.type.type)
-        diagnostics.push(
-          rowFailure !== undefined
-            ? Diagnostic.contractRowInference(rowFailure, argument.syntax.span)
-            : Type.isCallable(expected) && Type.isCallable(argument.type.type)
-              ? Diagnostic.incompatibleCallableSignature(
-                  Type.encode(expected),
-                  Type.encode(argument.type.type),
-                  argument.syntax.span,
-                )
-              : Diagnostic.argumentTypeMismatch(
-                  Type.encode(expected),
-                  Type.encode(argument.type.type),
-                  argument.syntax.span,
-                ),
-        )
+        if (rowFailure !== undefined) {
+          diagnostics.push(Diagnostic.contractRowInference(rowFailure, argument.syntax.span))
+        } else if (Type.isCallable(expected) && Type.isCallable(argument.type.type)) {
+          diagnostics.push(
+            Diagnostic.incompatibleCallableSignature(
+              Type.encode(expected),
+              Type.encode(argument.type.type),
+              argument.syntax.span,
+            ),
+          )
+        } else {
+          diagnostics.push(
+            Diagnostic.argumentTypeMismatch(
+              Type.encode(expected),
+              Type.encode(argument.type.type),
+              argument.syntax.span,
+            ),
+          )
+        }
         valid = false
         continue
       }

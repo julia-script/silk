@@ -98,14 +98,15 @@ pub fn main() -> i32 { return run Effect.catchAll(work(), recover) }`
 
 const allocationEvents = (
   run: ReturnType<typeof Analysis.evaluate>,
-): ReadonlyArray<'AllocationAcquire' | 'AllocationRelease'> =>
-  run._tag === 'Completed'
-    ? run.trace.flatMap((event) =>
-        event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
-          ? [event._tag]
-          : [],
-      )
-    : []
+): ReadonlyArray<'AllocationAcquire' | 'AllocationRelease'> => {
+  if (run._tag !== 'Completed') return []
+  return run.trace.flatMap((event) => {
+    if (event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease') {
+      return [event._tag]
+    }
+    return []
+  })
+}
 
 const accept = (
   name: string,

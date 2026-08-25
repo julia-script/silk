@@ -35,22 +35,30 @@ const installedVersion = (name: string): string =>
     readFileSync(resolve(compilerCliPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
   ).version
 
+const installedPackageRoot = (name: string): string =>
+  realpathSync(resolve(compilerCliPackageRoot, `node_modules/${name}`))
+
+const installedDependencyNames = (parent: string): ReadonlyArray<string> =>
+  Object.keys(
+    JSON.parse(readFileSync(resolve(installedPackageRoot(parent), 'package.json'), 'utf8'))
+      .dependencies ?? {},
+  ).sort()
+
 const installedDependencyVersion = (parent: string, name: string): string =>
-  JSON.parse(
-    readFileSync(
-      resolve(
-        realpathSync(resolve(compilerCliPackageRoot, `node_modules/${parent}`)),
-        `../${name}/package.json`,
-      ),
-      'utf8',
-    ),
-  ).version
+  JSON.parse(readFileSync(resolve(installedPackageRoot(parent), `../${name}/package.json`), 'utf8'))
+    .version
+
+const effectDependencyOverrides = installedDependencyNames('effect').map(
+  (name) => `  '${name}': ${installedDependencyVersion('effect', name)}`,
+)
 
 const consumerWorkspace = (configuration = ''): string =>
-  `overrides:\n  'uuid': ${installedDependencyVersion('effect', 'uuid')}\n${configuration}`
+  `overrides:\n${effectDependencyOverrides.join('\n')}\n${configuration}`
 
 test('consumer workspaces pin Effect transitive ranges to installed versions', () => {
-  expect(consumerWorkspace()).toContain(`  'uuid': ${installedDependencyVersion('effect', 'uuid')}`)
+  const workspace = consumerWorkspace()
+  for (const override of effectDependencyOverrides) expect(workspace).toContain(override)
+  expect(effectDependencyOverrides).toHaveLength(installedDependencyNames('effect').length)
 })
 
 const installConsumer = (cwd: string): void => {

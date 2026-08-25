@@ -161,35 +161,35 @@ export const relinquish = (self: State): Result => {
     return violation(self, 'Relinquish', 'IllegalPredecessor')
   const returned = WakeCell.suspensionReturned(self.wake)
   if (returned._tag === 'WakeCellViolation') return violation(self, 'Relinquish', 'WakeAuthority')
-  const execution =
-    returned.state.phase === 'Notifying'
-      ? 'Notifying'
-      : returned.state.phase === 'Released'
-        ? 'Released'
-        : returned.state.phase === 'Cancelled'
-          ? 'Destroyed'
-          : 'Dormant'
-  return edge(
-    returned.state.phase === 'Notifying'
-      ? 'Notify'
-      : returned.state.phase === 'Released'
-        ? 'Release'
-        : 'Relinquish',
-    self,
-    state(self.identity, execution, returned.state),
-  )
+  let execution: 'Dormant' | 'Notifying' | 'Released' | 'Destroyed'
+  if (returned.state.phase === 'Notifying') {
+    execution = 'Notifying'
+  } else if (returned.state.phase === 'Released') {
+    execution = 'Released'
+  } else if (returned.state.phase === 'Cancelled') {
+    execution = 'Destroyed'
+  } else {
+    execution = 'Dormant'
+  }
+  let operation: Event
+  if (returned.state.phase === 'Notifying') operation = 'Notify'
+  else if (returned.state.phase === 'Released') operation = 'Release'
+  else operation = 'Relinquish'
+  return edge(operation, self, state(self.identity, execution, returned.state))
 }
 
 /** Consumes the generation's Wake as readiness only. */
-export const wake = (self: State): Result =>
-  self.wake === undefined
-    ? violation(self, 'Wake', 'IllegalPredecessor')
-    : transitionedWake(
-        self,
-        'Wake',
-        WakeCell.consumeWake(self.wake),
-        self.wake.phase === 'Dormant' ? 'Notifying' : self.execution,
-      )
+export const wake = (self: State): Result => {
+  if (self.wake === undefined) {
+    return violation(self, 'Wake', 'IllegalPredecessor')
+  }
+  return transitionedWake(
+    self,
+    'Wake',
+    WakeCell.consumeWake(self.wake),
+    self.wake.phase === 'Dormant' ? 'Notifying' : self.execution,
+  )
+}
 
 /** Ends endpoint invocation; reentrant destruction never publishes Eligible. */
 export const notificationReturned = (self: State): Result => {
@@ -238,19 +238,27 @@ export const cancel = (self: State): Result => {
   if (destroyed._tag === 'WakeCellViolation') return violation(self, 'Cancel', 'WakeAuthority')
   const pending = destroyed.state.phase === 'DestroyPending'
   const released = destroyed.state.phase === 'Released'
+  if (pending) {
+    return edge(
+      'Cancel',
+      self,
+      state(self.identity, 'DestroyPending', destroyed.state),
+      Object.freeze([]),
+    )
+  }
+  if (released) {
+    return edge(
+      'Release',
+      self,
+      state(self.identity, 'Released', destroyed.state),
+      Object.freeze(['Guard', 'Body', 'Endpoint', 'Callback', 'Allocation']),
+    )
+  }
   return edge(
-    pending ? 'Cancel' : released ? 'Release' : 'Cancel',
+    'Cancel',
     self,
-    state(
-      self.identity,
-      pending ? 'DestroyPending' : released ? 'Released' : 'Destroyed',
-      destroyed.state,
-    ),
-    pending
-      ? Object.freeze([])
-      : released
-        ? Object.freeze(['Guard', 'Body', 'Endpoint', 'Callback', 'Allocation'])
-        : Object.freeze(['Guard', 'Body', 'Endpoint', 'Callback']),
+    state(self.identity, 'Destroyed', destroyed.state),
+    Object.freeze(['Guard', 'Body', 'Endpoint', 'Callback']),
   )
 }
 

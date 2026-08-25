@@ -55,8 +55,11 @@ const exhaustive = (value: never): never => {
   throw new RangeError(`Unknown module-surface fact: ${String(value)}`)
 }
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
 
 type SerializedRecord = Readonly<Record<string, unknown>>
 
@@ -413,15 +416,20 @@ const encodeSubstitution = (value: Type.Substitution): ReadonlyArray<unknown> =>
 const genericArgumentMatchesKind = (
   argument: Type.GenericArgument,
   kind: Type.ParameterKind,
-): boolean =>
-  Type.isUnavailableGenericArgument(argument)
-    ? argument.expectedKind === kind
-    : kind === 'Value'
-      ? Type.isTypeArgument(argument)
-      : kind === 'RequirementRow'
-        ? Type.isRequirementRowArgument(argument)
-        : Type.isRepresentationArgument(argument) &&
-          Type.representationArgumentKind(argument) === kind
+): boolean => {
+  if (Type.isUnavailableGenericArgument(argument)) return argument.expectedKind === kind
+  switch (kind) {
+    case 'Value':
+      return Type.isTypeArgument(argument)
+    case 'RequirementRow':
+      return Type.isRequirementRowArgument(argument)
+    default:
+      return (
+        Type.isRepresentationArgument(argument) &&
+        Type.representationArgumentKind(argument) === kind
+      )
+  }
+}
 
 const decodeSubstitution = (
   value: unknown,
@@ -477,25 +485,31 @@ const parametersInRequirementRow = (row: Type.RequirementsRow): ReadonlyArray<Ty
 const constraintParameters = (
   value: ContractConstraint.Constraint,
 ): ReadonlyArray<Type.Parameter> => {
-  const parameters = (() => {
-    switch (value._tag) {
-      case 'NominalMemberConstraint':
-        return [...Type.parameters(value.selected), ...parametersInFailureRow(value.source)]
-      case 'FailureSubsetConstraint':
-        return [...parametersInFailureRow(value.selected), ...parametersInFailureRow(value.source)]
-      case 'RequirementSubsetConstraint':
-        return [
-          ...parametersInRequirementRow(value.selected),
-          ...parametersInRequirementRow(value.source),
-        ]
-      case 'ProviderSelectionConstraint':
-        return [
-          ...Type.parameters(value.provider),
-          ...parametersInRequirementRow(value.selected),
-          ...parametersInRequirementRow(value.source),
-        ]
-    }
-  })()
+  let parameters: ReadonlyArray<Type.Parameter>
+  switch (value._tag) {
+    case 'NominalMemberConstraint':
+      parameters = [...Type.parameters(value.selected), ...parametersInFailureRow(value.source)]
+      break
+    case 'FailureSubsetConstraint':
+      parameters = [
+        ...parametersInFailureRow(value.selected),
+        ...parametersInFailureRow(value.source),
+      ]
+      break
+    case 'RequirementSubsetConstraint':
+      parameters = [
+        ...parametersInRequirementRow(value.selected),
+        ...parametersInRequirementRow(value.source),
+      ]
+      break
+    case 'ProviderSelectionConstraint':
+      parameters = [
+        ...Type.parameters(value.provider),
+        ...parametersInRequirementRow(value.selected),
+        ...parametersInRequirementRow(value.source),
+      ]
+      break
+  }
   return Object.freeze(
     [...new Map(parameters.map((parameter) => [Type.key(parameter), parameter])).values()].sort(
       Type.compare,
@@ -578,6 +592,77 @@ function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecor
   return { tag: 'TypeArgument', type: encodeTypeNode(value) }
 }
 
+function decodeCallableTarget(value: unknown): Type.CallableIdentityArgument['target'] {
+  const target = serializedRecord(value, 'callable target')
+  const targetTag = serializedString(target._tag, 'callable target tag')
+  switch (targetTag) {
+    case 'Declaration':
+      return Object.freeze({
+        _tag: 'Declaration',
+        module: serializedString(target.module, 'callable target module'),
+        name: serializedString(target.name, 'callable target name'),
+      })
+    case 'Builtin': {
+      const operation = serializedString(target.operation, 'callable target operation')
+      if (!Type.isBuiltinOperation(operation))
+        throw new InvalidModuleSurfaceEncoding(`unknown callable target operation ${operation}`)
+      const intrinsic = serializedRecord(target.intrinsic, 'callable target intrinsic')
+      return Object.freeze({
+        _tag: 'Builtin',
+        actor: serializedString(target.actor, 'callable target actor'),
+        operation,
+        intrinsic: Object.freeze({
+          actor: serializedString(intrinsic.actor, 'intrinsic actor'),
+          name: serializedString(intrinsic.name, 'intrinsic name'),
+        }),
+      })
+    }
+    default:
+      throw new InvalidModuleSurfaceEncoding(`unknown callable target ${targetTag}`)
+  }
+}
+
+function decodeCallableEnvironment(value: unknown): Type.CallableEnvironmentIdentity | undefined {
+  if (value === undefined) return undefined
+  const current = serializedRecord(value, 'callable environment')
+  if (serializedTag(current, 'callable environment') !== 'CallableEnvironment')
+    throw new InvalidModuleSurfaceEncoding('callable environment has the wrong tag')
+  const site = serializedRecord(current.site, 'callable environment site')
+  const siteTag = serializedString(site._tag, 'callable environment site tag')
+  let decodedSite: Type.CallableEnvironmentSite
+  switch (siteTag) {
+    case 'DeclaredCallableEnvironmentSite': {
+      const declaration = serializedRecord(site.declaration, 'callable environment declaration')
+      decodedSite = Object.freeze({
+        _tag: 'DeclaredCallableEnvironmentSite',
+        declaration: Object.freeze({
+          module: serializedString(declaration.module, 'environment module'),
+          name: serializedString(declaration.name, 'environment name'),
+        }),
+        ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
+      })
+      break
+    }
+    case 'RecoveredCallableEnvironmentSite':
+      decodedSite = Object.freeze({
+        _tag: 'RecoveredCallableEnvironmentSite',
+        functionOrdinal: serializedNonNegativeInteger(
+          site.functionOrdinal,
+          'environment function ordinal',
+        ),
+        ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
+      })
+      break
+    default:
+      throw new InvalidModuleSurfaceEncoding(`unknown callable environment site ${siteTag}`)
+  }
+  return Object.freeze({
+    _tag: 'CallableEnvironmentIdentity',
+    site: decodedSite,
+    owner: decodeExecutableOwner(current.owner),
+  })
+}
+
 function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
   const encoded = serializedRecord(value, 'generic argument')
   switch (serializedTag(encoded, 'generic argument')) {
@@ -589,83 +674,8 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
         encoded.owner === undefined ? undefined : decodeExecutableOwner(encoded.owner),
       )
     case 'CallableIdentityArgument': {
-      const target = serializedRecord(encoded.target, 'callable target')
-      const targetTag = serializedString(target._tag, 'callable target tag')
-      const decodedTarget: Type.CallableIdentityArgument['target'] =
-        targetTag === 'Declaration'
-          ? Object.freeze({
-              _tag: 'Declaration',
-              module: serializedString(target.module, 'callable target module'),
-              name: serializedString(target.name, 'callable target name'),
-            })
-          : targetTag === 'Builtin'
-            ? Object.freeze({
-                _tag: 'Builtin',
-                actor: serializedString(target.actor, 'callable target actor'),
-                operation: (() => {
-                  const operation = serializedString(target.operation, 'callable target operation')
-                  if (!Type.isBuiltinOperation(operation))
-                    throw new InvalidModuleSurfaceEncoding(
-                      `unknown callable target operation ${operation}`,
-                    )
-                  return operation
-                })(),
-                intrinsic: (() => {
-                  const intrinsic = serializedRecord(target.intrinsic, 'callable target intrinsic')
-                  return Object.freeze({
-                    actor: serializedString(intrinsic.actor, 'intrinsic actor'),
-                    name: serializedString(intrinsic.name, 'intrinsic name'),
-                  })
-                })(),
-              })
-            : (() => {
-                throw new InvalidModuleSurfaceEncoding(`unknown callable target ${targetTag}`)
-              })()
-      const environment =
-        encoded.environment === undefined
-          ? undefined
-          : (() => {
-              const current = serializedRecord(encoded.environment, 'callable environment')
-              if (serializedTag(current, 'callable environment') !== 'CallableEnvironment')
-                throw new InvalidModuleSurfaceEncoding('callable environment has the wrong tag')
-              const site = serializedRecord(current.site, 'callable environment site')
-              const siteTag = serializedString(site._tag, 'callable environment site tag')
-              const decodedSite: Type.CallableEnvironmentSite =
-                siteTag === 'DeclaredCallableEnvironmentSite'
-                  ? Object.freeze({
-                      _tag: 'DeclaredCallableEnvironmentSite',
-                      declaration: (() => {
-                        const declaration = serializedRecord(
-                          site.declaration,
-                          'callable environment declaration',
-                        )
-                        return Object.freeze({
-                          module: serializedString(declaration.module, 'environment module'),
-                          name: serializedString(declaration.name, 'environment name'),
-                        })
-                      })(),
-                      ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
-                    })
-                  : siteTag === 'RecoveredCallableEnvironmentSite'
-                    ? Object.freeze({
-                        _tag: 'RecoveredCallableEnvironmentSite',
-                        functionOrdinal: serializedNonNegativeInteger(
-                          site.functionOrdinal,
-                          'environment function ordinal',
-                        ),
-                        ordinal: serializedNonNegativeInteger(site.ordinal, 'environment ordinal'),
-                      })
-                    : (() => {
-                        throw new InvalidModuleSurfaceEncoding(
-                          `unknown callable environment site ${siteTag}`,
-                        )
-                      })()
-              return Object.freeze({
-                _tag: 'CallableEnvironmentIdentity' as const,
-                site: decodedSite,
-                owner: decodeExecutableOwner(current.owner),
-              })
-            })()
+      const decodedTarget = decodeCallableTarget(encoded.target)
+      const environment = decodeCallableEnvironment(encoded.environment)
       return Type.callableIdentityArgument(
         serializedString(encoded.identity, 'callable identity'),
         decodedTarget,
@@ -686,16 +696,14 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
       const family = serializedRecord(encoded.family, 'opaque family')
       if (serializedString(family._tag, 'opaque family tag') !== 'OpaqueFamilyKey')
         throw new InvalidModuleSurfaceEncoding('opaque family has the wrong tag')
+      const producer = serializedRecord(family.producer, 'opaque family producer')
       return Type.opaqueRepresentationArgument(
         Object.freeze({
           _tag: 'OpaqueFamilyKey',
-          producer: (() => {
-            const producer = serializedRecord(family.producer, 'opaque family producer')
-            return Object.freeze({
-              module: serializedString(producer.module, 'opaque producer module'),
-              name: serializedString(producer.name, 'opaque producer name'),
-            })
-          })(),
+          producer: Object.freeze({
+            module: serializedString(producer.module, 'opaque producer module'),
+            name: serializedString(producer.name, 'opaque producer name'),
+          }),
           binderOrdinal: serializedNonNegativeInteger(
             family.binderOrdinal,
             'opaque binder ordinal',
@@ -909,6 +917,63 @@ const callableSchemaMatches = (
   )
 }
 
+function decodeCallableSchemaNode(value: unknown): Type.CallableSchema {
+  const current = serializedRecord(value, 'callable schema')
+  if (serializedTag(current, 'callable schema') !== 'CallableSchema')
+    throw new InvalidModuleSurfaceEncoding('callable schema has the wrong tag')
+  const contract = decodeCallableContract(current.contract)
+  const binders = Object.freeze(
+    serializedArray(current.binders, 'schema binders').map(decodeParameter),
+  )
+  const constraints = Object.freeze(
+    serializedArray(current.constraints, 'schema constraints').map(decodeConstraintNode),
+  )
+  const evidence = Object.freeze(
+    serializedArray(current.evidence, 'schema evidence').map(decodeConstraintEvidenceNode),
+  )
+  const contractKey = serializedString(current.contractKey, 'schema contract key')
+  const constraintKeys = Object.freeze(
+    serializedArray(current.constraintKeys, 'schema constraint keys').map((key_) =>
+      serializedString(key_, 'schema constraint key'),
+    ),
+  )
+  const evidenceKeys = Object.freeze(
+    serializedArray(current.evidenceKeys, 'schema evidence keys').map((key_) =>
+      serializedString(key_, 'schema evidence key'),
+    ),
+  )
+  if (contractKey !== CallableContract.key(contract))
+    throw new InvalidModuleSurfaceEncoding('callable schema has inconsistent contract branding')
+  if (
+    !sameKeys(binders.map(Type.key), contract.binders.map(Type.key)) ||
+    !sameKeys(
+      constraints.map(ContractConstraint.key),
+      contract.constraints.map(ContractConstraint.key),
+    )
+  )
+    throw new InvalidModuleSurfaceEncoding('callable schema disagrees with its branded contract')
+  if (!sameKeys(constraintKeys, constraints.map(ContractConstraint.key)))
+    throw new InvalidModuleSurfaceEncoding('callable schema has inconsistent constraint branding')
+  if (!sameKeys(evidenceKeys, evidence.map(ContractConstraint.evidenceKey)))
+    throw new InvalidModuleSurfaceEncoding('callable schema has inconsistent evidence branding')
+  const substitution = decodeSubstitution(
+    current.substitution,
+    contract.binders,
+    'callable schema substitution',
+  )
+  return Object.freeze({
+    contract,
+    binders,
+    constraints,
+    evidence,
+    substitution,
+    contractKey,
+    constraintKeys,
+    evidenceKeys,
+    origins: Object.freeze([]),
+  })
+}
+
 function decodeTypeNode(value: unknown): Type.Type {
   const encoded = serializedRecord(value, 'type')
   switch (serializedTag(encoded, 'type')) {
@@ -952,76 +1017,7 @@ function decodeTypeNode(value: unknown): Type.Type {
       )
       const result = decodeTypeNode(encoded.result)
       const schema =
-        encoded.schema === undefined
-          ? undefined
-          : (() => {
-              const current = serializedRecord(encoded.schema, 'callable schema')
-              if (serializedTag(current, 'callable schema') !== 'CallableSchema')
-                throw new InvalidModuleSurfaceEncoding('callable schema has the wrong tag')
-              const contract = decodeCallableContract(current.contract)
-              const binders = Object.freeze(
-                serializedArray(current.binders, 'schema binders').map(decodeParameter),
-              )
-              const constraints = Object.freeze(
-                serializedArray(current.constraints, 'schema constraints').map(
-                  decodeConstraintNode,
-                ),
-              )
-              const evidence = Object.freeze(
-                serializedArray(current.evidence, 'schema evidence').map(
-                  decodeConstraintEvidenceNode,
-                ),
-              )
-              const contractKey = serializedString(current.contractKey, 'schema contract key')
-              const constraintKeys = Object.freeze(
-                serializedArray(current.constraintKeys, 'schema constraint keys').map((key_) =>
-                  serializedString(key_, 'schema constraint key'),
-                ),
-              )
-              const evidenceKeys = Object.freeze(
-                serializedArray(current.evidenceKeys, 'schema evidence keys').map((key_) =>
-                  serializedString(key_, 'schema evidence key'),
-                ),
-              )
-              if (contractKey !== CallableContract.key(contract))
-                throw new InvalidModuleSurfaceEncoding(
-                  'callable schema has inconsistent contract branding',
-                )
-              if (
-                !sameKeys(binders.map(Type.key), contract.binders.map(Type.key)) ||
-                !sameKeys(
-                  constraints.map(ContractConstraint.key),
-                  contract.constraints.map(ContractConstraint.key),
-                )
-              )
-                throw new InvalidModuleSurfaceEncoding(
-                  'callable schema disagrees with its branded contract',
-                )
-              if (!sameKeys(constraintKeys, constraints.map(ContractConstraint.key)))
-                throw new InvalidModuleSurfaceEncoding(
-                  'callable schema has inconsistent constraint branding',
-                )
-              if (!sameKeys(evidenceKeys, evidence.map(ContractConstraint.evidenceKey)))
-                throw new InvalidModuleSurfaceEncoding(
-                  'callable schema has inconsistent evidence branding',
-                )
-              const substitution = decodeSubstitution(
-                current.substitution,
-                contract.binders,
-                'callable schema substitution',
-              )
-              return Object.freeze({
-                contract,
-                binders,
-                constraints,
-                evidence,
-                substitution,
-                contractKey,
-                constraintKeys,
-                evidenceKeys,
-                origins: Object.freeze([]),
-              })
-            })()
+        encoded.schema === undefined ? undefined : decodeCallableSchemaNode(encoded.schema)
       if (schema !== undefined && !callableSchemaMatches(parameters, result, schema))
         throw new InvalidModuleSurfaceEncoding(
           'callable signature disagrees with its specialized schema contract',
@@ -1151,6 +1147,29 @@ function encodeWitnessIdentityNode(value: ContractConstraint.WitnessIdentity): S
   }
 }
 
+function decodeWitnessOriginNode(
+  origin: SerializedRecord,
+  originTag: string,
+): ContractConstraint.WitnessIdentity['origin'] {
+  switch (originTag) {
+    case 'SourceWitness':
+      return Object.freeze({
+        _tag: 'SourceWitness',
+        declaration: Object.freeze({
+          module: serializedString(origin.module, 'witness module'),
+          name: serializedString(origin.name, 'witness name'),
+        }),
+      })
+    case 'IntrinsicWitness':
+      return Object.freeze({
+        _tag: 'IntrinsicWitness',
+        operation: serializedString(origin.operation, 'witness operation'),
+      })
+    default:
+      throw new InvalidModuleSurfaceEncoding(`unknown witness origin ${originTag}`)
+  }
+}
+
 function decodeWitnessIdentityNode(value: unknown): ContractConstraint.WitnessIdentity {
   const encoded = serializedRecord(value, 'witness identity')
   if (serializedTag(encoded, 'witness identity') !== 'WitnessIdentity')
@@ -1163,23 +1182,7 @@ function decodeWitnessIdentityNode(value: unknown): ContractConstraint.WitnessId
   if (typeArguments.some((argument) => !Type.isRuntimeConcreteGenericArgument(argument)))
     throw new InvalidModuleSurfaceEncoding('witness identity retains an open runtime argument')
   return Object.freeze({
-    origin:
-      originTag === 'SourceWitness'
-        ? Object.freeze({
-            _tag: 'SourceWitness' as const,
-            declaration: Object.freeze({
-              module: serializedString(origin.module, 'witness module'),
-              name: serializedString(origin.name, 'witness name'),
-            }),
-          })
-        : originTag === 'IntrinsicWitness'
-          ? Object.freeze({
-              _tag: 'IntrinsicWitness' as const,
-              operation: serializedString(origin.operation, 'witness operation'),
-            })
-          : (() => {
-              throw new InvalidModuleSurfaceEncoding(`unknown witness origin ${originTag}`)
-            })(),
+    origin: decodeWitnessOriginNode(origin, originTag),
     typeArguments,
   })
 }

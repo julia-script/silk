@@ -80,8 +80,11 @@ export const fast: FastMath = Object.freeze({
  * @category fast math
  * @since 0.0.0
  */
-export const make = (input: Input = false): FastMath =>
-  input === true ? fast : input === false ? none : Object.freeze({ ...none, ...input })
+export const make = (input: Input = false): FastMath => {
+  if (input === true) return fast
+  if (input === false) return none
+  return Object.freeze({ ...none, ...input })
+}
 
 /**
  * Overlays normalized flags on an existing setting without mutating either input.

@@ -46,12 +46,15 @@ export type SemanticType = Type.Type
 /** Resolves one retained requirement-role fact to its semantic identity when available. */
 export const requirementRoleIdentity = (
   role: RequirementRoleFact,
-): Type.Requirement['role'] | undefined =>
-  role._tag === 'DefaultRole'
-    ? RequirementRow.defaultRole
-    : role._tag === 'ResolvedRole'
-      ? role.role
-      : undefined
+): Type.Requirement['role'] | undefined => {
+  if (role._tag === 'DefaultRole') {
+    return RequirementRow.defaultRole
+  }
+  if (role._tag === 'ResolvedRole') {
+    return role.role
+  }
+  return undefined
+}
 
 /** A deterministic declaration identity local to one analyzed source snapshot. */
 export interface DeclarationId {

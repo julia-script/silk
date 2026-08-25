@@ -296,10 +296,15 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(ProvisionalMir.verify(forward), [])
     assert.deepEqual(ProvisionalMir.verify(reversed), [])
+    const compareIdentities = (left: string, right: string): number => {
+      if (left < right) return -1
+      if (left > right) return 1
+      return 0
+    }
     const classifications = (module_: ProvisionalMir.Module) =>
       module_.executions
         .map((execution) => [execution.key.identity, execution.classification] as const)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => compareIdentities(left, right))
     assert.deepEqual(classifications(forward), classifications(reversed))
     assert.isAtLeast(
       outcomes(forward).filter((outcome) => outcome._tag === 'RunSuspendableEffect').length,

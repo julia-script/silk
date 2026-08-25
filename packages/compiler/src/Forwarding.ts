@@ -181,12 +181,14 @@ export const staticallyForwardedCallableRecipe = (
       (statement) =>
         statement._tag === 'Bind' && statement.binding.ordinal === current.binding.ordinal,
     )
-    const stored =
-      owner === fn.owner.function
-        ? fn.callableRecipes.get(current.binding.ordinal)
-        : localBinding?._tag === 'Bind'
-          ? localBinding.initializer
-          : undefined
+    let stored: Hir.Expression | undefined
+    if (owner === fn.owner.function) {
+      stored = fn.callableRecipes.get(current.binding.ordinal)
+    } else if (localBinding?._tag === 'Bind') {
+      stored = localBinding.initializer
+    } else {
+      stored = undefined
+    }
     return stored === undefined
       ? undefined
       : staticallyForwardedCallableRecipe(fn, stored, owner, arguments_, resolving)
@@ -259,12 +261,14 @@ export const inlineForwardedEffectResult = (
   const call = fn.call(expression.span)
   const parameter = call?.effectResultParameter
   const protected_ = parameter === undefined ? undefined : expression.arguments.at(parameter)
-  const recipeBinding =
-    protected_?._tag === 'BindingReference'
-      ? protected_.binding.ordinal
-      : protected_?._tag === 'Move' && protected_.subject._tag === 'BindingReference'
-        ? protected_.subject.binding.ordinal
-        : undefined
+  let recipeBinding: number | undefined
+  if (protected_?._tag === 'BindingReference') {
+    recipeBinding = protected_.binding.ordinal
+  } else if (protected_?._tag === 'Move' && protected_.subject._tag === 'BindingReference') {
+    recipeBinding = protected_.subject.binding.ordinal
+  } else {
+    recipeBinding = undefined
+  }
   const type = fn.semantic(expression.type)
   return protected_ === undefined ||
     recipeBinding === undefined ||
@@ -349,12 +353,16 @@ export const inlineForwardedRequirement = (
   const call = fn.call(expression.span)
   const section =
     expression._tag === 'CallableApply' ? callableRecipe(fn, expression.callee) : undefined
-  const declaration =
-    expression._tag === 'EffectConstruct'
-      ? expression.target
-      : section?.target._tag === 'DeclarationCallableTarget'
-        ? section.target.declaration
-        : undefined
+  let declaration:
+    | Extract<Hir.Expression, { readonly _tag: 'EffectConstruct' }>['target']
+    | undefined
+  if (expression._tag === 'EffectConstruct') {
+    declaration = expression.target
+  } else if (section?.target._tag === 'DeclarationCallableTarget') {
+    declaration = section.target.declaration
+  } else {
+    declaration = undefined
+  }
   const candidates =
     declaration === undefined
       ? []
@@ -378,33 +386,36 @@ export const inlineForwardedRequirement = (
       ? arguments_
       : undefined
   })()
-  let target =
-    call !== undefined
-      ? fn.instances.find(
-          (instance) => Instances.keyText(instance.key) === Instances.keyText(call.target),
-        )
-      : inferredArguments === undefined
-        ? undefined
-        : (candidates
-            .filter((candidate) => {
-              const explicit = candidate.key.typeArguments.filter(
-                (argument) => !Type.isHiddenIdentityArgument(argument),
-              )
-              return (
-                explicit.length === inferredArguments.length &&
-                explicit.every(
-                  (argument, ordinal) =>
-                    Type.genericArgumentKey(argument) ===
-                    Type.genericArgumentKey(inferredArguments.at(ordinal) ?? argument),
-                )
-              )
-            })
-            .sort(
-              (left, right) =>
-                right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
-                left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+  let target: Instances.Instance | undefined
+  if (call !== undefined) {
+    target = fn.instances.find(
+      (instance) => Instances.keyText(instance.key) === Instances.keyText(call.target),
+    )
+  } else if (inferredArguments === undefined) {
+    target = undefined
+  } else {
+    target =
+      candidates
+        .filter((candidate) => {
+          const explicit = candidate.key.typeArguments.filter(
+            (argument) => !Type.isHiddenIdentityArgument(argument),
+          )
+          return (
+            explicit.length === inferredArguments.length &&
+            explicit.every(
+              (argument, ordinal) =>
+                Type.genericArgumentKey(argument) ===
+                Type.genericArgumentKey(inferredArguments.at(ordinal) ?? argument),
             )
-            .at(0) ?? (candidates.length === 1 ? candidates.at(0) : undefined))
+          )
+        })
+        .sort(
+          (left, right) =>
+            right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
+            left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+        )
+        .at(0) ?? (candidates.length === 1 ? candidates.at(0) : undefined)
+  }
   let resolved =
     target === undefined ? undefined : forwardedRequirementBinding(target, fn.instances, fn.calls)
   if (resolved !== undefined) target = resolved.instance
@@ -493,9 +504,10 @@ export const inlineForwardedRequirement = (
       provider: Object.freeze({
         ...(borrowedProvider?.root._tag === 'BindingSliceRoot'
           ? { binding: borrowedProvider.root.binding }
-          : borrowedProvider?.root._tag === 'ParameterSliceRoot'
-            ? { parameter: borrowedProvider.root.parameter }
-            : {}),
+          : {}),
+        ...(borrowedProvider?.root._tag === 'ParameterSliceRoot'
+          ? { parameter: borrowedProvider.root.parameter }
+          : {}),
         capability,
         selected: Type.requirementRowArgument([selected]).row,
         evidence: forwarded.provider.evidence,

@@ -89,13 +89,18 @@ const literalPatterns: ReadonlyArray<GrammarPattern> = LiteralForm.forms.map((fo
   const delimiter = quote.repeat(form.delimiterWidth)
   const byte = form.category === 'Bytes'
   const character = form.category === 'Character'
-  const width = character ? 'single' : form.delimiterWidth === 3 ? 'triple' : 'double'
+  let width = 'double'
+  if (character) width = 'single'
+  else if (form.delimiterWidth === 3) width = 'triple'
   const raw = form.escapePolicy === 'Raw'
   const begin = form.modifier.length === 0 ? `(${delimiter})` : `(${form.modifier})(${delimiter})`
   const delimiterCapture = form.modifier.length === 0 ? '1' : '2'
   const guard = raw ? '' : '(?<!\\\\)(?:\\\\\\\\)*'
+  let modifier = ''
+  if (byte) modifier = '.byte'
+  else if (raw) modifier = '.raw'
   return {
-    name: `string.quoted.${width}${byte ? '.byte' : raw ? '.raw' : ''}.silk`,
+    name: `string.quoted.${width}${modifier}.silk`,
     begin,
     end: form.delimiterWidth === 3 ? `${guard}(${delimiter})` : `${guard}(${quote})|$`,
     beginCaptures: {

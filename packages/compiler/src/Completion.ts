@@ -92,6 +92,49 @@ const declarationIdentity = (
     id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
   })
 
+const declarationKind = (
+  declaration: DeclarationFacts.MemberFact,
+  aggregateKind: 'Type' | 'Constructor',
+): Kind => {
+  switch (declaration._tag) {
+    case 'FunctionDeclaration':
+      return 'Function'
+    case 'ConstantDeclaration':
+      return 'Constant'
+    case 'ServiceDeclaration':
+    case 'InterfaceDeclaration':
+    case 'RoleDeclaration':
+    case 'EnumDeclaration':
+      return 'Type'
+    case 'StructDeclaration':
+      return aggregateKind
+  }
+}
+
+const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentation.Presentation => {
+  switch (declaration._tag) {
+    case 'FunctionDeclaration':
+      return PresentationRenderer.functionDeclaration(declaration)
+    case 'ConstantDeclaration':
+      return PresentationRenderer.constantDeclaration(declaration)
+    case 'ServiceDeclaration':
+    case 'InterfaceDeclaration':
+      return PresentationRenderer.serviceDeclaration(declaration)
+    case 'RoleDeclaration':
+      return PresentationRenderer.roleDeclaration(declaration)
+    case 'EnumDeclaration':
+      return PresentationRenderer.enumDeclaration(declaration)
+    case 'StructDeclaration':
+      return PresentationRenderer.structDeclaration(declaration)
+  }
+}
+
+const compareText = (left: string, right: string): number => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
 const semantic = (identity: SemanticOccurrence.Identity): CandidateIdentity =>
   Object.freeze({ _tag: 'SemanticCandidate', identity })
 
@@ -263,37 +306,20 @@ const namespaceCandidates = (
   module: string,
 ): ReadonlyArray<Candidate> =>
   (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
-    (declaration) =>
-      declaration.visibility !== 'Public' || declaration.name._tag !== 'Present'
-        ? []
-        : [
-            candidate({
-              identity: semantic(declarationIdentity(declaration)),
-              kind:
-                declaration._tag === 'FunctionDeclaration'
-                  ? 'Function'
-                  : declaration._tag === 'ConstantDeclaration'
-                    ? 'Constant'
-                    : declaration._tag === 'RoleDeclaration'
-                      ? 'Type'
-                      : 'Type',
-              label: declaration.name.spelling,
-              detail:
-                declaration._tag === 'FunctionDeclaration'
-                  ? PresentationRenderer.functionDeclaration(declaration)
-                  : declaration._tag === 'ConstantDeclaration'
-                    ? PresentationRenderer.constantDeclaration(declaration)
-                    : declaration._tag === 'ServiceDeclaration' ||
-                        declaration._tag === 'InterfaceDeclaration'
-                      ? PresentationRenderer.serviceDeclaration(declaration)
-                      : declaration._tag === 'RoleDeclaration'
-                        ? PresentationRenderer.roleDeclaration(declaration)
-                        : declaration._tag === 'EnumDeclaration'
-                          ? PresentationRenderer.enumDeclaration(declaration)
-                          : PresentationRenderer.structDeclaration(declaration),
-              sortGroup: 0,
-            }),
-          ],
+    (declaration) => {
+      if (declaration.visibility !== 'Public' || declaration.name._tag !== 'Present') {
+        return []
+      }
+      return [
+        candidate({
+          identity: semantic(declarationIdentity(declaration)),
+          kind: declarationKind(declaration, 'Type'),
+          label: declaration.name.spelling,
+          detail: declarationDetail(declaration),
+          sortGroup: 0,
+        }),
+      ]
+    },
   )
 
 interface ValueLookup {
@@ -425,12 +451,7 @@ const typeCandidates = (
           identity: semantic(declarationIdentity(declaration)),
           kind: 'Type',
           label: declaration.name.spelling,
-          detail:
-            declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
-              ? PresentationRenderer.serviceDeclaration(declaration)
-              : declaration._tag === 'EnumDeclaration'
-                ? PresentationRenderer.enumDeclaration(declaration)
-                : PresentationRenderer.structDeclaration(declaration),
+          detail: declarationDetail(declaration),
           sortGroup: 0,
         }),
       )
@@ -460,12 +481,7 @@ const typeCandidates = (
         identity: semantic(declarationIdentity(declaration)),
         kind: 'Type',
         label: binding.spelling,
-        detail:
-          declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
-            ? PresentationRenderer.serviceDeclaration(declaration)
-            : declaration._tag === 'EnumDeclaration'
-              ? PresentationRenderer.enumDeclaration(declaration)
-              : PresentationRenderer.structDeclaration(declaration),
+        detail: declarationDetail(declaration),
         sortGroup: 2,
       }),
     )
@@ -528,31 +544,9 @@ const expressionCandidates = (
       candidates.push(
         candidate({
           identity: semantic(declarationIdentity(declaration)),
-          kind:
-            declaration._tag === 'FunctionDeclaration'
-              ? 'Function'
-              : declaration._tag === 'ConstantDeclaration'
-                ? 'Constant'
-                : declaration._tag === 'ServiceDeclaration' ||
-                    declaration._tag === 'InterfaceDeclaration'
-                  ? 'Type'
-                  : declaration._tag === 'RoleDeclaration' || declaration._tag === 'EnumDeclaration'
-                    ? 'Type'
-                    : 'Constructor',
+          kind: declarationKind(declaration, 'Constructor'),
           label: declaration.name.spelling,
-          detail:
-            declaration._tag === 'FunctionDeclaration'
-              ? PresentationRenderer.functionDeclaration(declaration)
-              : declaration._tag === 'ConstantDeclaration'
-                ? PresentationRenderer.constantDeclaration(declaration)
-                : declaration._tag === 'ServiceDeclaration' ||
-                    declaration._tag === 'InterfaceDeclaration'
-                  ? PresentationRenderer.serviceDeclaration(declaration)
-                  : declaration._tag === 'RoleDeclaration'
-                    ? PresentationRenderer.roleDeclaration(declaration)
-                    : declaration._tag === 'EnumDeclaration'
-                      ? PresentationRenderer.enumDeclaration(declaration)
-                      : PresentationRenderer.structDeclaration(declaration),
+          detail: declarationDetail(declaration),
           sortGroup: 2,
         }),
       )
@@ -563,31 +557,9 @@ const expressionCandidates = (
       candidates.push(
         candidate({
           identity: semantic(declarationIdentity(declaration)),
-          kind:
-            declaration._tag === 'FunctionDeclaration'
-              ? 'Function'
-              : declaration._tag === 'ConstantDeclaration'
-                ? 'Constant'
-                : declaration._tag === 'ServiceDeclaration' ||
-                    declaration._tag === 'InterfaceDeclaration'
-                  ? 'Type'
-                  : declaration._tag === 'RoleDeclaration' || declaration._tag === 'EnumDeclaration'
-                    ? 'Type'
-                    : 'Constructor',
+          kind: declarationKind(declaration, 'Constructor'),
           label: binding.spelling,
-          detail:
-            declaration._tag === 'FunctionDeclaration'
-              ? PresentationRenderer.functionDeclaration(declaration)
-              : declaration._tag === 'ConstantDeclaration'
-                ? PresentationRenderer.constantDeclaration(declaration)
-                : declaration._tag === 'ServiceDeclaration' ||
-                    declaration._tag === 'InterfaceDeclaration'
-                  ? PresentationRenderer.serviceDeclaration(declaration)
-                  : declaration._tag === 'RoleDeclaration'
-                    ? PresentationRenderer.roleDeclaration(declaration)
-                    : declaration._tag === 'EnumDeclaration'
-                      ? PresentationRenderer.enumDeclaration(declaration)
-                      : PresentationRenderer.structDeclaration(declaration),
+          detail: declarationDetail(declaration),
           sortGroup: 3,
         }),
       )
@@ -648,8 +620,8 @@ const stable = (inputs: ReadonlyArray<Candidate>): ReadonlyArray<Candidate> => {
     [...unique.values()].sort(
       (left, right) =>
         left.sortGroup - right.sortGroup ||
-        (left.kind < right.kind ? -1 : left.kind > right.kind ? 1 : 0) ||
-        (left.label < right.label ? -1 : left.label > right.label ? 1 : 0),
+        compareText(left.kind, right.kind) ||
+        compareText(left.label, right.label),
     ),
   )
 }
@@ -762,16 +734,15 @@ export const complete = (options: {
         ]),
       })
     }
+    let state: 'Ambiguous' | 'Missing' | 'Unavailable'
+    if (lookup?._tag === 'Conflict') state = 'Ambiguous'
+    else if (lookup?._tag === 'Missing' || lookup === undefined) state = 'Missing'
+    else state = 'Unavailable'
     return Object.freeze({
       _tag: 'CompletionResult',
       context: Object.freeze({
         _tag: 'ValueMemberContext',
-        state:
-          lookup?._tag === 'Conflict'
-            ? 'Ambiguous'
-            : lookup?._tag === 'Missing' || lookup === undefined
-              ? 'Missing'
-              : 'Unavailable',
+        state,
       }),
       replacement: replacement.span,
       candidates: Object.freeze([]),

@@ -129,7 +129,15 @@ export const providerMatchKey = (self: ProviderMatch): string =>
 const substitutionKey = (self: Type.Substitution): string =>
   Canonical.array(
     [...self.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => {
+        if (left < right) {
+          return -1
+        }
+        if (left > right) {
+          return 1
+        }
+        return 0
+      })
       .map(([parameter, argument]) =>
         Canonical.record('SubstitutionEntry', [parameter, Type.genericArgumentKey(argument)]),
       ),

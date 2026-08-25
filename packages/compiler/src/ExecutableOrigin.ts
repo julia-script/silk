@@ -63,15 +63,19 @@ export const reachableIntrinsics = (
                     : undefined
                 })()
               : undefined
-          const operation =
-            expression._tag === 'BuiltinCall'
-              ? expression.intrinsic
-              : expression._tag === 'EffectCatch'
-                ? expression.intrinsic
-                : (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
-                    expression.target._tag === 'BuiltinCallableTarget'
-                  ? expression.target.intrinsic
-                  : selected
+          let operation: Intrinsic.OperationId | undefined
+          if (expression._tag === 'BuiltinCall') {
+            operation = expression.intrinsic
+          } else if (expression._tag === 'EffectCatch') {
+            operation = expression.intrinsic
+          } else if (
+            (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
+            expression.target._tag === 'BuiltinCallableTarget'
+          ) {
+            operation = expression.target.intrinsic
+          } else {
+            operation = selected
+          }
           if (operation === undefined) continue
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
@@ -326,14 +330,15 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Match') {
       return [
         ...callTargets(expression.scrutinee, index, substitution),
-        ...expression.arms.flatMap((arm) =>
-          arm.reachable
-            ? [
-                ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
-                ...callTargets(arm.result, index, substitution),
-              ]
-            : [],
-        ),
+        ...expression.arms.flatMap((arm) => {
+          if (arm.reachable) {
+            return [
+              ...(arm.guard === undefined ? [] : callTargets(arm.guard, index, substitution)),
+              ...callTargets(arm.result, index, substitution),
+            ]
+          }
+          return []
+        }),
       ]
     }
     if (expression._tag === 'EffectBlock') {
@@ -427,11 +432,12 @@ export const make = (operations: Operations) => {
         return [
           ...own,
           ...walk(expression.scrutinee),
-          ...expression.arms.flatMap((arm) =>
-            arm.reachable
-              ? [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
-              : [],
-          ),
+          ...expression.arms.flatMap((arm) => {
+            if (arm.reachable) {
+              return [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+            }
+            return []
+          }),
         ]
       }
       return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
@@ -454,12 +460,21 @@ export const make = (operations: Operations) => {
     substitution: Type.Substitution,
   ): ReadonlyArray<CallTarget> => {
     const walk = (expression: Hir.Expression): ReadonlyArray<CallTarget> => {
-      const bound =
-        expression._tag === 'BuiltinCall'
-          ? expression.interfaceOperation
-          : expression._tag === 'BoundOperationCall'
-            ? expression
-            : undefined
+      let bound:
+        | {
+            readonly capability: Type.Nominal
+            readonly provider: Type.Type
+            readonly operation: string
+            readonly contract: DeclarationFacts.InterfaceOperationApplicationFact
+          }
+        | undefined
+      if (expression._tag === 'BuiltinCall') {
+        bound = expression.interfaceOperation
+      } else if (expression._tag === 'BoundOperationCall') {
+        bound = expression
+      } else {
+        bound = undefined
+      }
       const capability =
         bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
       const provider =
@@ -477,32 +492,35 @@ export const make = (operations: Operations) => {
           : witnessDependencyCallTargets(index, provider, capability)
       // A conditional witness is generic in its header's binders, so the target carries the arguments
       // this specialization proved rather than reaching code through an unsubstituted declaration.
-      const own =
-        target === undefined && dependencies.length === 0
-          ? []
-          : [
-              ...dependencies,
-              ...(target === undefined
-                ? []
-                : [
-                    Object.freeze({
-                      declaration: target.implementation,
-                      typeArguments: target.typeArguments,
-                      ...(target.structuralProvider === undefined
-                        ? {}
-                        : { structuralProvider: target.structuralProvider }),
-                    }),
-                  ]),
-            ]
+      let own: CallTarget[]
+      if (target === undefined && dependencies.length === 0) {
+        own = []
+      } else {
+        own = [
+          ...dependencies,
+          ...(target === undefined
+            ? []
+            : [
+                Object.freeze({
+                  declaration: target.implementation,
+                  typeArguments: target.typeArguments,
+                  ...(target.structuralProvider === undefined
+                    ? {}
+                    : { structuralProvider: target.structuralProvider }),
+                }),
+              ]),
+        ]
+      }
       if (expression._tag === 'Match') {
         return [
           ...own,
           ...walk(expression.scrutinee),
-          ...expression.arms.flatMap((arm) =>
-            arm.reachable
-              ? [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
-              : [],
-          ),
+          ...expression.arms.flatMap((arm) => {
+            if (arm.reachable) {
+              return [...(arm.guard === undefined ? [] : walk(arm.guard)), ...walk(arm.result)]
+            }
+            return []
+          }),
         ]
       }
       return [...own, ...Hir.expressionChildren(expression).flatMap(walk)]
@@ -1481,17 +1499,18 @@ export const make = (operations: Operations) => {
                         resolving: new Set<string>(),
                       })
                     : undefined
-                return type_ === undefined
-                  ? []
-                  : [
-                      Object.freeze({
-                        ordinal: capture.ordinal,
-                        parameterOrdinal: capture.parameterOrdinal,
-                        access: capture.access,
-                        type: type_,
-                        ...(callableIdentity === undefined ? {} : { callableIdentity }),
-                      }),
-                    ]
+                if (type_ === undefined) {
+                  return []
+                }
+                return [
+                  Object.freeze({
+                    ordinal: capture.ordinal,
+                    parameterOrdinal: capture.parameterOrdinal,
+                    access: capture.access,
+                    type: type_,
+                    ...(callableIdentity === undefined ? {} : { callableIdentity }),
+                  }),
+                ]
               }),
             ),
             type,
@@ -1554,7 +1573,13 @@ export const make = (operations: Operations) => {
           .sort((left, right) => {
             const leftKey = `${left.parameter ?? -1}\0${Type.key(left.capability)}\0${left.role}`
             const rightKey = `${right.parameter ?? -1}\0${Type.key(right.capability)}\0${right.role}`
-            return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+            if (leftKey < rightKey) {
+              return -1
+            }
+            if (leftKey > rightKey) {
+              return 1
+            }
+            return 0
           })
         const captures = block.captures.flatMap((capture, ordinal) => {
           const source = capture.binding === undefined ? 'Parameter' : 'Binding'
@@ -1563,66 +1588,97 @@ export const make = (operations: Operations) => {
             sourceOrdinal === undefined || source === 'Parameter'
               ? undefined
               : bindings.get(sourceOrdinal)
-          const sourceType =
-            sourceOrdinal === undefined
-              ? undefined
-              : source === 'Parameter'
-                ? instance.function.contract._tag === 'Contract'
-                  ? instance.function.contract.parameters.at(sourceOrdinal)
-                  : undefined
-                : initializer === undefined || initializer._tag === 'Unavailable'
-                  ? undefined
-                  : initializer.type
+          let sourceType: Type.Type | undefined
+          if (sourceOrdinal === undefined) {
+            sourceType = undefined
+          } else if (source === 'Parameter') {
+            if (instance.function.contract._tag === 'Contract') {
+              sourceType = instance.function.contract.parameters.at(sourceOrdinal)
+            } else {
+              sourceType = undefined
+            }
+          } else if (initializer === undefined || initializer._tag === 'Unavailable') {
+            sourceType = undefined
+          } else {
+            sourceType = initializer.type
+          }
           if (sourceOrdinal === undefined || sourceType === undefined) return []
           const specialized = specializeInstanceType(sourceType, instance.key, [
             instance.substitution,
           ])
           if (!Type.isRuntimeConcrete(specialized)) return []
-          const capturedEffectIdentity = Type.isEffect(specialized)
-            ? source === 'Parameter'
-              ? parameterEffectIdentity(instance.function, instance.key, sourceOrdinal)
-              : initializer === undefined
-                ? undefined
-                : effectOriginOf(initializer, context)
-            : undefined
-          const capturedCallableIdentity = Type.isCallable(specialized)
-            ? source === 'Parameter'
-              ? parameterCallableIdentity(instance.function, instance.key, sourceOrdinal)
-              : initializer === undefined
-                ? undefined
-                : callableOriginOf(initializer, context)
-            : undefined
-          const providedRequirement =
-            source === 'Parameter'
-              ? (providedRequirements.find(
-                  (requirement) => requirement.parameter === sourceOrdinal,
-                ) ??
-                instance.specialization.evidence
-                  .flatMap((evidence) => {
-                    if (
-                      evidence._tag !== 'RequirementSelection' ||
-                      !Type.isNominal(evidence.selected.capability)
-                    )
-                      return []
-                    const providerMatches = Type.isReference(specialized)
-                      ? Type.equals(specialized.target, evidence.provider) &&
-                        specialized.access === evidence.providerMode
-                      : evidence.providerMode === 'Take' &&
-                        Type.equals(specialized, evidence.provider)
-                    return providerMatches
-                      ? [
-                          Object.freeze({
-                            parameter: sourceOrdinal,
-                            capability: evidence.selected.capability,
-                            role: evidence.selected.role,
-                            requirementAccess: evidence.selected.access,
-                            providerAccess: evidence.providerMode,
-                          }),
-                        ]
-                      : []
-                  })
-                  .at(0))
-              : undefined
+          let capturedEffectIdentity: string | undefined
+          if (Type.isEffect(specialized)) {
+            if (source === 'Parameter') {
+              capturedEffectIdentity = parameterEffectIdentity(
+                instance.function,
+                instance.key,
+                sourceOrdinal,
+              )
+            } else if (initializer === undefined) {
+              capturedEffectIdentity = undefined
+            } else {
+              capturedEffectIdentity = effectOriginOf(initializer, context)
+            }
+          } else {
+            capturedEffectIdentity = undefined
+          }
+          let capturedCallableIdentity: Type.CallableIdentityArgument | undefined
+          if (Type.isCallable(specialized)) {
+            if (source === 'Parameter') {
+              capturedCallableIdentity = parameterCallableIdentity(
+                instance.function,
+                instance.key,
+                sourceOrdinal,
+              )
+            } else if (initializer === undefined) {
+              capturedCallableIdentity = undefined
+            } else {
+              capturedCallableIdentity = callableOriginOf(initializer, context)
+            }
+          } else {
+            capturedCallableIdentity = undefined
+          }
+          let providedRequirement:
+            | Readonly<{
+                parameter: number | undefined
+                capability: Type.Nominal
+                role: string
+                requirementAccess: Type.Requirement['access']
+                providerAccess: 'Take' | 'Exclusive' | 'Shared'
+              }>
+            | undefined
+          if (source === 'Parameter') {
+            providedRequirement =
+              providedRequirements.find((requirement) => requirement.parameter === sourceOrdinal) ??
+              instance.specialization.evidence
+                .flatMap((evidence) => {
+                  if (
+                    evidence._tag !== 'RequirementSelection' ||
+                    !Type.isNominal(evidence.selected.capability)
+                  )
+                    return []
+                  const providerMatches = Type.isReference(specialized)
+                    ? Type.equals(specialized.target, evidence.provider) &&
+                      specialized.access === evidence.providerMode
+                    : evidence.providerMode === 'Take' &&
+                      Type.equals(specialized, evidence.provider)
+                  return providerMatches
+                    ? [
+                        Object.freeze({
+                          parameter: sourceOrdinal,
+                          capability: evidence.selected.capability,
+                          role: evidence.selected.role,
+                          requirementAccess: evidence.selected.access,
+                          providerAccess: evidence.providerMode,
+                        }),
+                      ]
+                    : []
+                })
+                .at(0)
+          } else {
+            providedRequirement = undefined
+          }
           return [
             Object.freeze({
               ordinal,
@@ -1768,11 +1824,14 @@ export const make = (operations: Operations) => {
               ConformanceProof.copyType(index, capture.type))
           return copy ? Object.freeze({ ...capture, access: 'Copy' as const }) : capture
         })
-        const access = captures.some((capture) => capture.access === 'Take')
-          ? 'Take'
-          : captures.some((capture) => capture.access === 'Exclusive')
-            ? 'Exclusive'
-            : 'Shared'
+        let access: 'Take' | 'Exclusive' | 'Shared'
+        if (captures.some((capture) => capture.access === 'Take')) {
+          access = 'Take'
+        } else if (captures.some((capture) => capture.access === 'Exclusive')) {
+          access = 'Exclusive'
+        } else {
+          access = 'Shared'
+        }
         if (
           access === effect.type.access &&
           captures.every((capture, ordinal) => capture === effect.captures.at(ordinal))
@@ -1951,11 +2010,13 @@ export const make = (operations: Operations) => {
             target === undefined || targetFn === undefined
               ? undefined
               : resultEffectIdentity(targetFn, target, results, index)
-          return identity !== undefined
-            ? Object.freeze([effectNode(identity)])
-            : target === undefined
-              ? []
-              : Object.freeze([instanceNode(target)])
+          if (identity !== undefined) {
+            return Object.freeze([effectNode(identity)])
+          }
+          if (target === undefined) {
+            return []
+          }
+          return Object.freeze([instanceNode(target)])
         }
         if (expression._tag === 'ServiceEffectConstruct') {
           const service = Type.substitute(expression.service, instance.substitution)
@@ -1979,12 +2040,14 @@ export const make = (operations: Operations) => {
               evidence.selected.role === expression.role &&
               (expression.access === 'Shared' || evidence.selected.access === 'Exclusive'),
           )
-          const witness =
-            selected !== undefined
-              ? requirementBindingWitness(selected, instance.substitution, index)
-              : selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)
-                ? ConformanceProof.witness(index, selectedEvidence.provider, service)
-                : undefined
+          let witness: DeclarationFacts.ConformanceWitness | undefined
+          if (selected !== undefined) {
+            witness = requirementBindingWitness(selected, instance.substitution, index)
+          } else if (selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)) {
+            witness = ConformanceProof.witness(index, selectedEvidence.provider, service)
+          } else {
+            witness = undefined
+          }
           const operation =
             witness?._tag !== 'SourceConformanceWitness'
               ? undefined
@@ -2170,16 +2233,18 @@ export const make = (operations: Operations) => {
             binding.witness._tag === 'SourceConformanceWitness'
               ? ConformanceProof.witnessOperation(binding.witness, serviceCall.operation)
               : undefined
-          const target =
-            operation === undefined
-              ? undefined
-              : discoveredTarget({
-                  declaration: operation,
-                  typeArguments:
-                    binding.witness._tag === 'SourceConformanceWitness'
-                      ? binding.witness.typeArguments
-                      : Object.freeze([]),
-                })
+          let target: Instances.InstanceKey | undefined
+          if (operation === undefined) {
+            target = undefined
+          } else {
+            target = discoveredTarget({
+              declaration: operation,
+              typeArguments:
+                binding.witness._tag === 'SourceConformanceWitness'
+                  ? binding.witness.typeArguments
+                  : Object.freeze([]),
+            })
+          }
           if (target !== undefined) addDependency(binding.execution, executionNodeForKey(target))
         }
         for (const target of dependencies.get(node) ?? []) pending.push(target)

@@ -271,12 +271,14 @@ export const analyzeStatements = (
       throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
     }
     context.diagnostics.push(...initializer.diagnostics)
-    const access: Match.Access =
-      initializer.fact._tag === 'Move'
-        ? 'Move'
-        : initializer.fact._tag === 'Borrow'
-          ? initializer.fact.access
-          : 'Copy'
+    let access: Match.Access
+    if (initializer.fact._tag === 'Move') {
+      access = 'Move'
+    } else if (initializer.fact._tag === 'Borrow') {
+      access = initializer.fact.access
+    } else {
+      access = 'Copy'
+    }
     const subject =
       initializer.fact._tag === 'Move' || initializer.fact._tag === 'Borrow'
         ? initializer.fact.subject
@@ -311,19 +313,25 @@ export const analyzeStatements = (
       subject.type._tag === 'Available'
         ? enumFactByType(context.resolution.index, subject.type.type)
         : undefined
-    const members =
-      subject.type._tag !== 'Available'
-        ? []
-        : subjectEnum === undefined
-          ? Match.membersOf(subject.type.type)
-          : Match.enumMembersOf(subjectEnum)
-    const member =
-      pattern.fact._tag === 'EnumMemberPattern'
-        ? pattern.fact.coverage
-        : (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
-            pattern.fact.member !== undefined
-          ? Match.structuralMember(pattern.fact.member)
-          : undefined
+    let members: ReadonlyArray<Match.CoverageIdentity>
+    if (subject.type._tag !== 'Available') {
+      members = []
+    } else if (subjectEnum === undefined) {
+      members = Match.membersOf(subject.type.type)
+    } else {
+      members = Match.enumMembersOf(subjectEnum)
+    }
+    let member: Match.CoverageIdentity | undefined
+    if (pattern.fact._tag === 'EnumMemberPattern') {
+      member = pattern.fact.coverage
+    } else if (
+      (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
+      pattern.fact.member !== undefined
+    ) {
+      member = Match.structuralMember(pattern.fact.member)
+    } else {
+      member = undefined
+    }
     if (
       subjectEnum === undefined &&
       member?._tag === 'StructuralTypeMember' &&
@@ -401,13 +409,15 @@ export const analyzeStatements = (
     )
     const chained = SyntaxTree.directNode(element, 'ConditionalStatement')
     const otherwiseArm = arms.at(1)
-    const otherwise = analyzePath(branchEntry, () =>
-      chained !== undefined
-        ? [analyzeConditional(chained, armScope, armLoopStack)]
-        : otherwiseArm === undefined
-          ? []
-          : analyzeStatements(context, otherwiseArm, armScope, armLoopStack),
-    )
+    const otherwise = analyzePath(branchEntry, () => {
+      if (chained !== undefined) {
+        return [analyzeConditional(chained, armScope, armLoopStack)]
+      }
+      if (otherwiseArm === undefined) {
+        return []
+      }
+      return analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+    })
     const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
     const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
     mergeCallableWrites(
@@ -447,15 +457,18 @@ export const analyzeStatements = (
       SyntaxTree.directNode(element, 'ConditionalStatement') ??
       SyntaxTree.directNode(element, 'PatternConditionalStatement')
     const otherwiseArm = arms.at(1)
-    const otherwise = analyzePath(branchEntry, () =>
-      chained?.kind === 'PatternConditionalStatement'
-        ? [analyzePatternConditional(chained, armScope, armLoopStack)]
-        : chained !== undefined
-          ? [analyzeConditional(chained, armScope, armLoopStack)]
-          : otherwiseArm === undefined
-            ? []
-            : analyzeStatements(context, otherwiseArm, armScope, armLoopStack),
-    )
+    const otherwise = analyzePath(branchEntry, () => {
+      if (chained?.kind === 'PatternConditionalStatement') {
+        return [analyzePatternConditional(chained, armScope, armLoopStack)]
+      }
+      if (chained !== undefined) {
+        return [analyzeConditional(chained, armScope, armLoopStack)]
+      }
+      if (otherwiseArm === undefined) {
+        return []
+      }
+      return analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+    })
     const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
     const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
     mergeCallableWrites(
@@ -583,14 +596,18 @@ export const analyzeStatements = (
             ),
           )
       } else if (selection.pattern._tag !== 'UnavailablePattern' && !selection.irrefutable) {
-        const selected =
-          selection.pattern._tag === 'EnumMemberPattern'
-            ? selection.pattern.coverage
-            : (selection.pattern._tag === 'NominalPattern' ||
-                  selection.pattern._tag === 'TypePattern') &&
-                selection.pattern.member !== undefined
-              ? Match.structuralMember(selection.pattern.member)
-              : undefined
+        let selected: Match.CoverageIdentity | undefined
+        if (selection.pattern._tag === 'EnumMemberPattern') {
+          selected = selection.pattern.coverage
+        } else if (
+          (selection.pattern._tag === 'NominalPattern' ||
+            selection.pattern._tag === 'TypePattern') &&
+          selection.pattern.member !== undefined
+        ) {
+          selected = Match.structuralMember(selection.pattern.member)
+        } else {
+          selected = undefined
+        }
         context.diagnostics.push(
           Diagnostic.refutableLetPattern(
             selection.subject.type._tag === 'Available'

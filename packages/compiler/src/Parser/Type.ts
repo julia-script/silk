@@ -1,5 +1,5 @@
 import * as Diagnostic from '../Diagnostic.js'
-import type { NodeResult, State } from '../internal/ParseState.js'
+import type { ElementsResult, NodeResult, State } from '../internal/ParseState.js'
 import {
   addDiagnostic,
   consumeTrivia,
@@ -28,16 +28,15 @@ export const parseTypePath = (
     preserveFieldStart &&
     nextSignificantKind(initial) === 'Identifier' &&
     peek(initial, 1) === 'Colon'
-  const first = fieldStartsHere
-    ? (() => {
-        const leading = consumeTrivia(initial)
-        const missing = missingToken(leading.state, 'Identifier')
-        return Object.freeze({
-          state: addDiagnostic(leading.state, Diagnostic.missingToken('Identifier', missing.span)),
-          elements: Object.freeze([...leading.elements, missing]),
-        })
-      })()
-    : expect(initial, 'Identifier', ['Dot', ...following])
+  let first: ElementsResult
+  if (fieldStartsHere) {
+    const leading = consumeTrivia(initial)
+    const missing = missingToken(leading.state, 'Identifier')
+    first = Object.freeze({
+      state: addDiagnostic(leading.state, Diagnostic.missingToken('Identifier', missing.span)),
+      elements: Object.freeze([...leading.elements, missing]),
+    })
+  } else first = expect(initial, 'Identifier', ['Dot', ...following])
   let state = first.state
   let children: ReadonlyArray<SyntaxTree.Element> = first.elements
   if (!fieldStartsHere && nextSignificantKind(state) === 'Dot') {
@@ -354,17 +353,15 @@ export const parseTypePrimary = (
         : undefined
     if (nextSignificantKind(mut?.state ?? ampersand.state) !== 'LeftBracket') {
       const subject = parseTypePrimary(mut?.state ?? ampersand.state, ['At', ...following])
-      const role =
-        nextSignificantKind(subject.state) === 'At'
-          ? (() => {
-              const at = expect(subject.state, 'At', ['Identifier', ...following])
-              const name = expect(at.state, 'Identifier', following)
-              return Object.freeze({
-                state: name.state,
-                elements: [...at.elements, ...name.elements],
-              })
-            })()
-          : undefined
+      let role: ElementsResult | undefined
+      if (nextSignificantKind(subject.state) === 'At') {
+        const at = expect(subject.state, 'At', ['Identifier', ...following])
+        const name = expect(at.state, 'Identifier', following)
+        role = Object.freeze({
+          state: name.state,
+          elements: [...at.elements, ...name.elements],
+        })
+      }
       return Object.freeze({
         state: role?.state ?? subject.state,
         node: syntaxNode(role?.state ?? subject.state, 'ReferenceType', [
@@ -507,13 +504,12 @@ export const parseRequirement = (
       ? expect(ampersand.state, 'MutKeyword', ['Identifier', ...following])
       : undefined
   const capability = parseTypePrimary(mut?.state ?? ampersand.state, following)
-  const role = hasContextualSpelling(capability.state, 'at')
-    ? (() => {
-        const at = expect(capability.state, 'Identifier', ['Identifier', ...following])
-        const path = parseTypePath(at.state, following)
-        return Object.freeze({ state: path.state, elements: [...at.elements, path.node] })
-      })()
-    : undefined
+  let role: ElementsResult | undefined
+  if (hasContextualSpelling(capability.state, 'at')) {
+    const at = expect(capability.state, 'Identifier', ['Identifier', ...following])
+    const path = parseTypePath(at.state, following)
+    role = Object.freeze({ state: path.state, elements: [...at.elements, path.node] })
+  }
   return Object.freeze({
     state: role?.state ?? capability.state,
     node: syntaxNode(role?.state ?? capability.state, 'Requirement', [
@@ -531,12 +527,15 @@ export const parseRequirementRow = (
 ): NodeResult => {
   const memberStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Ampersand', 'Identifier'])
   const question = expect(initial, 'Question', [...memberStarts, ...following])
-  const parseMember = (state: State): NodeResult =>
-    nextSignificantKind(state) === 'Ampersand'
-      ? parseRequirement(state, ['Pipe', ...following])
-      : isRowWithoutStart(state)
-        ? parseType(state, ['Pipe', ...following])
-        : parseTypePath(state, ['Pipe', ...following])
+  const parseMember = (state: State): NodeResult => {
+    if (nextSignificantKind(state) === 'Ampersand') {
+      return parseRequirement(state, ['Pipe', ...following])
+    }
+    if (isRowWithoutStart(state)) {
+      return parseType(state, ['Pipe', ...following])
+    }
+    return parseTypePath(state, ['Pipe', ...following])
+  }
   let member = parseMember(question.state)
   let state = member.state
   let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([

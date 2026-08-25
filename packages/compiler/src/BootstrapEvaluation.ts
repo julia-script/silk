@@ -152,18 +152,20 @@ const floatingUnary = (
   if (operation === 'Negate')
     return floatValue(self.type, self.bits ^ (1n << BigInt(bits.width - 1)))
   if (operation === 'Sqrt') return floatValue(self.type, FloatingPoint.squareRoot(bits).bits)
-  const result =
-    operation === 'IsNaN'
-      ? FloatingPoint.isNotANumber(bits)
-      : operation === 'IsInfinite'
-        ? FloatingPoint.isInfinite(bits)
-        : operation === 'IsFinite'
-          ? FloatingPoint.isFiniteNumber(bits)
-          : operation === 'IsNormal'
-            ? FloatingPoint.isNormal(bits)
-            : operation === 'IsSubnormal'
-              ? FloatingPoint.isSubnormal(bits)
-              : FloatingPoint.isSignNegative(bits)
+  let result: boolean
+  if (operation === 'IsNaN') {
+    result = FloatingPoint.isNotANumber(bits)
+  } else if (operation === 'IsInfinite') {
+    result = FloatingPoint.isInfinite(bits)
+  } else if (operation === 'IsFinite') {
+    result = FloatingPoint.isFiniteNumber(bits)
+  } else if (operation === 'IsNormal') {
+    result = FloatingPoint.isNormal(bits)
+  } else if (operation === 'IsSubnormal') {
+    result = FloatingPoint.isSubnormal(bits)
+  } else {
+    result = FloatingPoint.isSignNegative(bits)
+  }
   return integerValue('i32', result ? 1 : 0)
 }
 
@@ -184,18 +186,20 @@ const floatingBinary = (
     operation === 'GreaterThan' ||
     operation === 'GreaterOrEqual'
   ) {
-    const result =
-      operation === 'Equals'
-        ? leftNumber === rightNumber
-        : operation === 'NotEquals'
-          ? leftNumber !== rightNumber
-          : operation === 'LessThan'
-            ? leftNumber < rightNumber
-            : operation === 'LessOrEqual'
-              ? leftNumber <= rightNumber
-              : operation === 'GreaterThan'
-                ? leftNumber > rightNumber
-                : leftNumber >= rightNumber
+    let result: boolean
+    if (operation === 'Equals') {
+      result = leftNumber === rightNumber
+    } else if (operation === 'NotEquals') {
+      result = leftNumber !== rightNumber
+    } else if (operation === 'LessThan') {
+      result = leftNumber < rightNumber
+    } else if (operation === 'LessOrEqual') {
+      result = leftNumber <= rightNumber
+    } else if (operation === 'GreaterThan') {
+      result = leftNumber > rightNumber
+    } else {
+      result = leftNumber >= rightNumber
+    }
     return integerValue('i32', result ? 1 : 0)
   }
   if (operation === 'TotalOrder')
@@ -203,16 +207,18 @@ const floatingBinary = (
       'i32',
       FloatingPoint.totalOrderKey(leftBits) <= FloatingPoint.totalOrderKey(rightBits) ? 1 : 0,
     )
-  const result =
-    operation === 'Add'
-      ? leftNumber + rightNumber
-      : operation === 'Subtract'
-        ? leftNumber - rightNumber
-        : operation === 'Multiply'
-          ? leftNumber * rightNumber
-          : operation === 'Divide'
-            ? leftNumber / rightNumber
-            : leftNumber % rightNumber
+  let result: number
+  if (operation === 'Add') {
+    result = leftNumber + rightNumber
+  } else if (operation === 'Subtract') {
+    result = leftNumber - rightNumber
+  } else if (operation === 'Multiply') {
+    result = leftNumber * rightNumber
+  } else if (operation === 'Divide') {
+    result = leftNumber / rightNumber
+  } else {
+    result = leftNumber % rightNumber
+  }
   const encoded = FloatingPoint.fromNumber(result, leftBits.width)
   return floatValue(left.type, encoded.bits)
 }
@@ -1220,33 +1226,31 @@ function* executeFunction(
       const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
       const width = Scalar.bits(scalar, pointerBits)
       const raw = BigInt(subject.value)
-      const exact =
-        operation === 'BitNot'
-          ? scalar.signedness === 'Signed'
-            ? BigInt.asIntN(width, ~raw)
-            : BigInt.asUintN(width, ~raw)
-          : -raw
+      let exact: bigint
+      if (operation === 'BitNot') {
+        if (scalar.signedness === 'Signed') {
+          exact = BigInt.asIntN(width, ~raw)
+        } else {
+          exact = BigInt.asUintN(width, ~raw)
+        }
+      } else {
+        exact = -raw
+      }
       const range = Scalar.range(scalar, pointerBits)
       if (operation === 'Negate' && (exact < range.minimum || exact > range.maximum)) {
         return blockedStep({ _tag: 'Trap', function: fn.id, reason: 'arithmetic overflow', span })
       }
-      return Object.freeze({
-        _tag: 'Value',
-        value: integerValue(
-          scalar.spelling,
-          operation === 'WrappingNegate'
-            ? scalar.signedness === 'Signed'
-              ? BigInt.asIntN(width, exact)
-              : BigInt.asUintN(width, exact)
-            : operation === 'SaturatingNegate'
-              ? exact > range.maximum
-                ? range.maximum
-                : exact < range.minimum
-                  ? range.minimum
-                  : exact
-              : exact,
-        ),
-      })
+      let value = exact
+      if (operation === 'WrappingNegate') {
+        value =
+          scalar.signedness === 'Signed'
+            ? BigInt.asIntN(width, exact)
+            : BigInt.asUintN(width, exact)
+      } else if (operation === 'SaturatingNegate') {
+        if (exact > range.maximum) value = range.maximum
+        else if (exact < range.minimum) value = range.minimum
+      }
+      return Object.freeze({ _tag: 'Value', value: integerValue(scalar.spelling, value) })
     }
     if (Mir.isBinaryOperator(operation)) {
       const leftValue = arguments_.at(0)
@@ -1475,18 +1479,16 @@ function* executeFunction(
       _tag: 'AggregateValue',
       type: Type.osHandle,
       fields: Object.freeze(
-        entry.representation.fields.map((field) =>
-          Object.freeze({
-            field: field.id,
-            value:
-              field.name === '$identity'
-                ? integerValue('usize', BigInt(handle.identity))
-                : integerValue(
-                    'i32',
-                    field.name === '$kind' ? (handle.kind === 'File' ? 0 : 1) : 1,
-                  ),
-          }),
-        ),
+        entry.representation.fields.map((field) => {
+          if (field.name === '$identity') {
+            return Object.freeze({
+              field: field.id,
+              value: integerValue('usize', BigInt(handle.identity)),
+            })
+          }
+          const value = field.name === '$kind' && handle.kind === 'File' ? 0 : 1
+          return Object.freeze({ field: field.id, value: integerValue('i32', value) })
+        }),
       ),
     })
   }
@@ -1820,12 +1822,14 @@ function* executeFunction(
       })
     }
 
-    const regionSpan =
-      region._tag === 'ConditionalRegion' || region._tag === 'LoopRegion'
-        ? region.provenance.span
-        : region._tag === 'OperationRegion'
-          ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
-          : (region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span)
+    let regionSpan: SourceSpan.SourceSpan
+    if (region._tag === 'ConditionalRegion' || region._tag === 'LoopRegion') {
+      regionSpan = region.provenance.span
+    } else if (region._tag === 'OperationRegion') {
+      regionSpan = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
+    } else {
+      regionSpan = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
+    }
     trace.push(
       Object.freeze({
         _tag: 'RegionEntry',
@@ -1922,20 +1926,24 @@ function* executeFunction(
               scrutinee._tag === 'EnumValue'
                 ? Match.enumMember(scrutinee.enum, scrutinee.member)
                 : undefined
-            const activeMember =
-              activeIdentity !== undefined
-                ? activeIdentity.type
-                : scrutinee._tag === 'UnionValue'
-                  ? scrutinee.member
-                  : scrutinee._tag === 'AggregateValue'
-                    ? scrutinee.type
-                    : Mir.semanticType(operation.scrutineeType)
-            const payload =
-              scrutinee._tag === 'UnionValue'
-                ? scrutinee.payload
-                : scrutinee._tag === 'AggregateValue'
-                  ? scrutinee
-                  : scrutinee
+            let activeMember: Type.Type
+            if (activeIdentity !== undefined) {
+              activeMember = activeIdentity.type
+            } else if (scrutinee._tag === 'UnionValue') {
+              activeMember = scrutinee.member
+            } else if (scrutinee._tag === 'AggregateValue') {
+              activeMember = scrutinee.type
+            } else {
+              activeMember = Mir.semanticType(operation.scrutineeType)
+            }
+            let payload: Value
+            if (scrutinee._tag === 'UnionValue') {
+              payload = scrutinee.payload
+            } else if (scrutinee._tag === 'AggregateValue') {
+              payload = scrutinee
+            } else {
+              payload = scrutinee
+            }
             if (activeMember === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed matching a scalar value')
             }
@@ -2063,16 +2071,12 @@ function* executeFunction(
               const integer = typeof semantic === 'string' && Scalar.isIntegerSpelling(semantic)
               const floating = typeof semantic === 'string' && Scalar.isFloatSpelling(semantic)
               const character = typeof semantic === 'string' && Scalar.isCharacterSpelling(semantic)
-              write(operation.destination, {
-                value: floating
-                  ? floatValue(semantic, BigInt(operation.value))
-                  : integer
-                    ? integerValue(semantic, BigInt(operation.value))
-                    : character
-                      ? characterValue(Number(operation.value))
-                      : integerValue('i32', Number(operation.value)),
-                fromCall: false,
-              })
+              let value: Value
+              if (floating) value = floatValue(semantic, BigInt(operation.value))
+              else if (integer) value = integerValue(semantic, BigInt(operation.value))
+              else if (character) value = characterValue(Number(operation.value))
+              else value = integerValue('i32', Number(operation.value))
+              write(operation.destination, { value, fromCall: false })
             }
             break
           case 'StaticView': {
@@ -2329,20 +2333,24 @@ function* executeFunction(
           }
           case 'ConvertUnion': {
             const source = read(operation.source).value
-            const mapping =
-              operation.conversion === 'Inject'
-                ? operation.mappings.at(0)
-                : source._tag === 'UnionValue'
-                  ? operation.mappings.find((candidate) =>
-                      Type.equals(candidate.source, source.member),
-                    )
-                  : undefined
-            const payload =
-              operation.conversion === 'Inject'
-                ? source
-                : operation.conversion === 'Widen' && source._tag === 'UnionValue'
-                  ? source.payload
-                  : undefined
+            let mapping: (typeof operation.mappings)[number] | undefined
+            if (operation.conversion === 'Inject') {
+              mapping = operation.mappings.at(0)
+            } else if (source._tag === 'UnionValue') {
+              mapping = operation.mappings.find((candidate) =>
+                Type.equals(candidate.source, source.member),
+              )
+            } else {
+              mapping = undefined
+            }
+            let payload: Value | undefined
+            if (operation.conversion === 'Inject') {
+              payload = source
+            } else if (operation.conversion === 'Widen' && source._tag === 'UnionValue') {
+              payload = source.payload
+            } else {
+              payload = undefined
+            }
             if (mapping === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed an invalid logical union conversion')
             }
@@ -2908,25 +2916,23 @@ function* executeFunction(
                 operation.wake.ordinal,
               )
               if (notified !== undefined) return notified
-            } else {
-              if (consumed.after.wake.allocation === 'Released') {
-                if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
-                  return blockedStep({
-                    _tag: 'Trap',
-                    function: fn.id,
-                    reason: 'Late cancelled Wake consumed reclaim authority twice',
-                    span: operation.provenance.span,
-                  })
-                trace.push(
-                  Object.freeze({
-                    _tag: 'AllocationRelease',
-                    function: fn.id,
-                    ticket: wakeValue.ticket,
-                    span: operation.provenance.span,
-                  }),
-                )
-                traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
-              }
+            } else if (consumed.after.wake.allocation === 'Released') {
+              if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Late cancelled Wake consumed reclaim authority twice',
+                  span: operation.provenance.span,
+                })
+              trace.push(
+                Object.freeze({
+                  _tag: 'AllocationRelease',
+                  function: fn.id,
+                  ticket: wakeValue.ticket,
+                  span: operation.provenance.span,
+                }),
+              )
+              traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
             }
             write(operation.destination, {
               value: Object.freeze({
@@ -3337,17 +3343,15 @@ function* executeFunction(
             // destination behave as if the elements travelled through an intermediate buffer.
             const moved: Array<Value> = []
             for (let index = 0; index < count; index += 1) {
-              const selected =
-                source._tag === 'StaticViewValue'
-                  ? (() => {
-                      const byte = source.bytes.at(index)
-                      return byte === undefined ? undefined : integerValue('u8', BigInt(byte))
-                    })()
-                  : sourceStorage === undefined
-                    ? backing?._tag === 'ArrayValue'
-                      ? backing.elements.at(source.base + index)
-                      : undefined
-                    : sourceStorage.values.get(String(source.base + index))
+              let selected: Value | undefined
+              if (source._tag === 'StaticViewValue') {
+                const byte = source.bytes.at(index)
+                selected = byte === undefined ? undefined : integerValue('u8', BigInt(byte))
+              } else if (sourceStorage !== undefined) {
+                selected = sourceStorage.values.get(String(source.base + index))
+              } else if (backing?._tag === 'ArrayValue') {
+                selected = backing.elements.at(source.base + index)
+              }
               if (selected === undefined) {
                 return blockedStep({
                   _tag: 'Trap',
@@ -3605,20 +3609,22 @@ function* executeFunction(
             if (Scalar.isCharacterSpelling(semantic)) {
               const left = readCharacter(operation.left).value
               const right = readCharacter(operation.right).value
-              const result =
-                operation.operator === 'Equals'
-                  ? left === right
-                  : operation.operator === 'NotEquals'
-                    ? left !== right
-                    : operation.operator === 'LessThan'
-                      ? left < right
-                      : operation.operator === 'LessOrEqual'
-                        ? left <= right
-                        : operation.operator === 'GreaterThan'
-                          ? left > right
-                          : operation.operator === 'GreaterOrEqual'
-                            ? left >= right
-                            : undefined
+              let result: boolean | undefined
+              if (operation.operator === 'Equals') {
+                result = left === right
+              } else if (operation.operator === 'NotEquals') {
+                result = left !== right
+              } else if (operation.operator === 'LessThan') {
+                result = left < right
+              } else if (operation.operator === 'LessOrEqual') {
+                result = left <= right
+              } else if (operation.operator === 'GreaterThan') {
+                result = left > right
+              } else if (operation.operator === 'GreaterOrEqual') {
+                result = left >= right
+              } else {
+                result = undefined
+              }
               if (result === undefined)
                 throw new RangeError('MIR verifier allowed a non-comparison char operation')
               write(operation.destination, {
@@ -4573,12 +4579,14 @@ function* executeFunction(
 
 const argumentSpanFallback = (fn: Mir.MirFunction): SourceSpan.SourceSpan => {
   const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
-  const span =
-    region?._tag === 'ConditionalRegion' || region?._tag === 'LoopRegion'
-      ? region.provenance.span
-      : region?._tag === 'OperationRegion'
-        ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
-        : (region?.releases.at(0)?.provenance.span ?? region?.outcome.provenance.span)
+  let span: SourceSpan.SourceSpan | undefined
+  if (region?._tag === 'ConditionalRegion' || region?._tag === 'LoopRegion') {
+    span = region.provenance.span
+  } else if (region?._tag === 'OperationRegion') {
+    span = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
+  } else {
+    span = region?.releases.at(0)?.provenance.span ?? region?.outcome.provenance.span
+  }
   if (span === undefined) {
     throw new RangeError(`Lowered function ${fn.id.name} has no regions`)
   }

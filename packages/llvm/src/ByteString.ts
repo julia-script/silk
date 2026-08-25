@@ -90,12 +90,11 @@ export const empty: ByteString = fromNumbers([])
  * @category byte strings
  * @since 0.0.0
  */
-export const coerce = (value: ByteString | Uint8Array | string): ByteString =>
-  typeof value === 'string'
-    ? fromString(value)
-    : value instanceof Uint8Array
-      ? fromUint8Array(value)
-      : value
+export const coerce = (value: ByteString | Uint8Array | string): ByteString => {
+  if (typeof value === 'string') return fromString(value)
+  if (value instanceof Uint8Array) return fromUint8Array(value)
+  return value
+}
 
 /**
  * Coerces an optional value into a byte string, mapping `undefined` to {@link empty}.

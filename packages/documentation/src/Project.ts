@@ -62,6 +62,42 @@ const declarationId = (module: string, member: DeclarationFacts.MemberFact): str
     ? `${member.canonical.id.module}::${member.canonical.id.name}`
     : `${module}::#${member.id.ordinal}`
 
+const linkTargetKind = (member: DeclarationFacts.MemberFact): Document.LinkTarget['kind'] => {
+  switch (member._tag) {
+    case 'FunctionDeclaration':
+      return 'Function'
+    case 'StructDeclaration':
+      return 'Struct'
+    case 'ServiceDeclaration':
+      return 'Service'
+    case 'InterfaceDeclaration':
+      return 'Interface'
+    case 'RoleDeclaration':
+      return 'Role'
+    default:
+      return 'Constant'
+  }
+}
+
+const itemKind = (member: DeclarationFacts.MemberFact): ItemKind => {
+  switch (member._tag) {
+    case 'FunctionDeclaration':
+      return 'Function'
+    case 'StructDeclaration':
+      return 'Struct'
+    case 'EnumDeclaration':
+      return 'Enum'
+    case 'ServiceDeclaration':
+      return 'Service'
+    case 'InterfaceDeclaration':
+      return 'Interface'
+    case 'RoleDeclaration':
+      return 'Role'
+    default:
+      return 'Constant'
+  }
+}
+
 const rangeOf = (node: SyntaxTree.Node): Document.SourceRange =>
   Object.freeze({
     sourceId: node.span.sourceId,
@@ -95,18 +131,7 @@ const targetOf = (
     id: declarationId(targetModule, lookup.declaration),
     module: targetModule,
     name: targetName,
-    kind:
-      lookup.declaration._tag === 'FunctionDeclaration'
-        ? 'Function'
-        : lookup.declaration._tag === 'StructDeclaration'
-          ? 'Struct'
-          : lookup.declaration._tag === 'ServiceDeclaration'
-            ? 'Service'
-            : lookup.declaration._tag === 'InterfaceDeclaration'
-              ? 'Interface'
-              : lookup.declaration._tag === 'RoleDeclaration'
-                ? 'Role'
-                : 'Constant',
+    kind: linkTargetKind(lookup.declaration),
   })
 }
 
@@ -242,6 +267,53 @@ const enumMemberItem = (parent: string, member: DeclarationFacts.EnumMemberFact)
   })
 }
 
+const memberPresentation = (member: DeclarationFacts.MemberFact) => {
+  switch (member._tag) {
+    case 'FunctionDeclaration':
+      return Presentation.functionDeclaration(member)
+    case 'StructDeclaration':
+      return Presentation.structDeclaration(member)
+    case 'EnumDeclaration':
+      return Presentation.enumDeclaration(member)
+    case 'ServiceDeclaration':
+    case 'InterfaceDeclaration':
+      return Presentation.serviceDeclaration(member)
+    case 'RoleDeclaration':
+      return Presentation.roleDeclaration(member)
+    case 'ConstantDeclaration':
+      return Presentation.constantDeclaration(member)
+  }
+}
+
+const ownedChildren = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  source: SourceFile.SourceFile,
+  id: string,
+  member: DeclarationFacts.MemberFact,
+  options: Options,
+): ReadonlyArray<Item> => {
+  switch (member._tag) {
+    case 'FunctionDeclaration':
+      return member.parameters.map((parameter) =>
+        parameterItem(snapshot, module, source, id, parameter),
+      )
+    case 'StructDeclaration':
+      return member.fields
+        .filter((field) => options.includePrivate === true || field.visibility === 'Public')
+        .map((field) => fieldItem(snapshot, module, source, id, field))
+    case 'EnumDeclaration':
+      return member.members.map((enumMember) => enumMemberItem(id, enumMember))
+    case 'ServiceDeclaration':
+    case 'InterfaceDeclaration':
+      return member.operations.map((operation) =>
+        serviceOperationItem(snapshot, module, source, id, operation),
+      )
+    default:
+      return []
+  }
+}
+
 const memberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
@@ -250,18 +322,7 @@ const memberItem = (
   options: Options,
 ): Item => {
   const id = declarationId(module, member)
-  const presentation =
-    member._tag === 'FunctionDeclaration'
-      ? Presentation.functionDeclaration(member)
-      : member._tag === 'StructDeclaration'
-        ? Presentation.structDeclaration(member)
-        : member._tag === 'EnumDeclaration'
-          ? Presentation.enumDeclaration(member)
-          : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
-            ? Presentation.serviceDeclaration(member)
-            : member._tag === 'RoleDeclaration'
-              ? Presentation.roleDeclaration(member)
-              : Presentation.constantDeclaration(member)
+  const presentation = memberPresentation(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -270,42 +331,16 @@ const memberItem = (
   const typeParameters = member.typeParameters.map((parameter, ordinal) =>
     typeParameterItem(snapshot, module, source, id, parameter, ordinal),
   )
-  const ownedChildren =
-    member._tag === 'FunctionDeclaration'
-      ? member.parameters.map((parameter) => parameterItem(snapshot, module, source, id, parameter))
-      : member._tag === 'StructDeclaration'
-        ? member.fields
-            .filter((field) => options.includePrivate === true || field.visibility === 'Public')
-            .map((field) => fieldItem(snapshot, module, source, id, field))
-        : member._tag === 'EnumDeclaration'
-          ? member.members.map((enumMember) => enumMemberItem(id, enumMember))
-          : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
-            ? member.operations.map((operation) =>
-                serviceOperationItem(snapshot, module, source, id, operation),
-              )
-            : []
+  const children = ownedChildren(snapshot, module, source, id, member, options)
   return Object.freeze({
     id,
-    kind:
-      member._tag === 'FunctionDeclaration'
-        ? 'Function'
-        : member._tag === 'StructDeclaration'
-          ? 'Struct'
-          : member._tag === 'EnumDeclaration'
-            ? 'Enum'
-            : member._tag === 'ServiceDeclaration'
-              ? 'Service'
-              : member._tag === 'InterfaceDeclaration'
-                ? 'Interface'
-                : member._tag === 'RoleDeclaration'
-                  ? 'Role'
-                  : 'Constant',
+    kind: itemKind(member),
     name: nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),
     source: rangeOf(member.syntax),
     ...(documentation === undefined ? {} : { documentation }),
-    children: Object.freeze([...typeParameters, ...ownedChildren]),
+    children: Object.freeze([...typeParameters, ...children]),
   })
 }
 

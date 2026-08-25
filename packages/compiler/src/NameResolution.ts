@@ -429,12 +429,14 @@ export const lookupQualified = (
       declaration: qualifier.declaration,
     })
   }
-  const module =
-    qualifier._tag === 'Namespace'
-      ? qualifier.module
-      : qualifier._tag === 'Resolved'
-        ? scopedModule(qualifier.declaration)
-        : undefined
+  let module: string | undefined
+  if (qualifier._tag === 'Namespace') {
+    module = qualifier.module
+  } else if (qualifier._tag === 'Resolved') {
+    module = scopedModule(qualifier.declaration)
+  } else {
+    module = undefined
+  }
   if (module === undefined)
     return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })
   const declaration = canonicalDeclaration(index, module, member)

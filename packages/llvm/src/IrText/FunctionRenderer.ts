@@ -41,12 +41,13 @@ export const renderVariable = (
 ): string => {
   const variable = state.variables[global.actorIndex]
   if (variable === undefined) throw new Error('missing variable')
-  const threadLocal =
-    variable.threadLocal === 'none'
-      ? ''
-      : variable.threadLocal === 'generaldynamic'
+  let threadLocal = ''
+  if (variable.threadLocal !== 'none') {
+    threadLocal =
+      variable.threadLocal === 'generaldynamic'
         ? 'thread_local '
         : `thread_local(${variable.threadLocal}) `
+  }
   const externallyInitialized = variable.externallyInitialized ? 'externally_initialized ' : ''
   const storage = variable.constant ? 'constant' : 'global'
   const value =

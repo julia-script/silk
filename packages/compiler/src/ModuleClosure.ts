@@ -100,6 +100,12 @@ const validateRequest = (request: CompilationRequest): void => {
     throw new RangeError(`Compilation request module identity ${request.root.id} is not canonical`)
 }
 
+const compareText = (left: string, right: string): number => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
 const sameBytes = (left: SourceFile.SourceFile, right: SourceFile.SourceFile): boolean => {
   const leftBytes = SourceFile.toUint8Array(left)
   const rightBytes = SourceFile.toUint8Array(right)
@@ -123,9 +129,9 @@ const canonicalRoots = (
     if (existing === undefined) byModule.set(root.id, root)
   }
   return Object.freeze(
-    [...byModule.values()].sort((left, right) =>
-      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
-    ),
+    [...byModule.values()].sort((left, right) => {
+      return compareText(left.id, right.id)
+    }),
   )
 }
 
@@ -378,9 +384,9 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   }
 
   const modules = Object.freeze(
-    [...loaded.values()].sort((left, right) =>
-      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-    ),
+    [...loaded.values()].sort((left, right) => {
+      return compareText(left.name, right.name)
+    }),
   )
 
   return Object.freeze({
@@ -392,7 +398,9 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     sources: new Map(modules.map((module) => [module.name, module.syntax.source])),
     resolutionFailures: Object.freeze(
       [...resolutions.entries()]
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .sort(([left], [right]) => {
+          return compareText(left, right)
+        })
         .flatMap(([, resolution]) => (resolution._tag === 'Failed' ? [resolution.error] : [])),
     ),
   })

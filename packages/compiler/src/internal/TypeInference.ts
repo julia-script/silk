@@ -9,6 +9,7 @@ import type {
   RequirementRowArgument,
   RequirementsRow,
   RowInferenceFailure,
+  SealedStaticProperty,
   Substitution,
   Type,
 } from '../Type.js'
@@ -591,12 +592,12 @@ export const prefixSubstitution = (
       (isCallable(substitutedRepresentationBound) || isEffect(substitutedRepresentationBound))
         ? substitutedRepresentationBound
         : undefined
-    const suppliedStaticProperties =
-      isRepresentationArgument(argument) && argument._tag === 'RepresentationParameterArgument'
-        ? argument.parameter.staticProperties
-        : isTypeArgument(argument) && isParameter(argument)
-          ? argument.staticProperties
-          : undefined
+    let suppliedStaticProperties: ReadonlyArray<SealedStaticProperty> | undefined
+    if (isRepresentationArgument(argument) && argument._tag === 'RepresentationParameterArgument') {
+      suppliedStaticProperties = argument.parameter.staticProperties
+    } else if (isTypeArgument(argument) && isParameter(argument)) {
+      suppliedStaticProperties = argument.staticProperties
+    }
     const preservesStaticProperties =
       suppliedStaticProperties === undefined ||
       parameter_.staticProperties.every((property) => suppliedStaticProperties.includes(property))

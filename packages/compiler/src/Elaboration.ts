@@ -1073,14 +1073,18 @@ export type AssignmentRootAccess =
 
 /** Classifies writable roots without conflating owned binding mutability with pointee access. */
 export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAccess => {
-  const type =
-    root._tag === 'ParameterDeclaration'
-      ? root.declaredType._tag === 'Resolved'
-        ? root.declaredType.type
-        : undefined
-      : root.inferredType._tag === 'Available'
-        ? root.inferredType.type
-        : undefined
+  let type: Type.Type | undefined
+  if (root._tag === 'ParameterDeclaration') {
+    if (root.declaredType._tag === 'Resolved') {
+      type = root.declaredType.type
+    } else {
+      type = undefined
+    }
+  } else if (root.inferredType._tag === 'Available') {
+    type = root.inferredType.type
+  } else {
+    type = undefined
+  }
   if (type !== undefined && (Type.isSlice(type) || Type.isReference(type))) {
     return type.access === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
   }
@@ -1254,14 +1258,18 @@ export const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
   _tag: 'Available',
   type: 'bool',
 })
-export const availableExpressionType = (type: SemanticType): ExpressionTypeFact =>
-  type === 'i32'
-    ? availableI32ExpressionType
-    : type === 'usize'
-      ? availableUsizeExpressionType
-      : type === 'bool'
-        ? availableBoolExpressionType
-        : Object.freeze({ _tag: 'Available', type })
+export const availableExpressionType = (type: SemanticType): ExpressionTypeFact => {
+  if (type === 'i32') {
+    return availableI32ExpressionType
+  }
+  if (type === 'usize') {
+    return availableUsizeExpressionType
+  }
+  if (type === 'bool') {
+    return availableBoolExpressionType
+  }
+  return Object.freeze({ _tag: 'Available', type })
+}
 export const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
 export const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
@@ -1445,13 +1453,14 @@ export const referencePath = (node: SyntaxTree.Node): ReferencePathFact => {
   const identifiers = callReferenceTokens(node)
   const member = identifiers.at(-1)
   const qualifier = identifiers.length > 1 ? identifiers.at(0) : undefined
-  return member === undefined
-    ? Object.freeze({ _tag: 'UnavailableReferencePath', syntax: node })
-    : Object.freeze({
-        _tag: 'ReferencePath',
-        ...(qualifier === undefined ? {} : { qualifier }),
-        member,
-      })
+  if (member === undefined) {
+    return Object.freeze({ _tag: 'UnavailableReferencePath', syntax: node })
+  }
+  return Object.freeze({
+    _tag: 'ReferencePath',
+    ...(qualifier === undefined ? {} : { qualifier }),
+    member,
+  })
 }
 
 export const pipelineInput = (node: SyntaxTree.Node): SyntaxTree.Node | undefined =>
@@ -1934,11 +1943,14 @@ export const elaborateModule = (input: Input): Result => {
               return capture.access
             }
             const semanticAccesses = captures.map(semanticCaptureAccess)
-            const access = semanticAccesses.some((capture) => capture === 'Take')
-              ? 'Take'
-              : semanticAccesses.some((capture) => capture === 'Exclusive')
-                ? 'Exclusive'
-                : 'Shared'
+            let access: 'Take' | 'Exclusive' | 'Shared'
+            if (semanticAccesses.some((capture) => capture === 'Take')) {
+              access = 'Take'
+            } else if (semanticAccesses.some((capture) => capture === 'Exclusive')) {
+              access = 'Exclusive'
+            } else {
+              access = 'Shared'
+            }
             const type = Type.effectWithRows(
               fact.declaration.returnType.type,
               fact.declaration.failureRow.row,

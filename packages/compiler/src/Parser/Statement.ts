@@ -367,6 +367,37 @@ export const blockTerminatesSyntactically = (
   return false
 }
 
+const parseBlockChild = (state: State): NodeResult => {
+  const kind = nextSignificantKind(state)
+  switch (kind) {
+    case 'LetKeyword':
+      if (startsPatternBindingStatement(state)) return parsePatternBindingStatement(state)
+      return parseBindingStatement(state)
+    case 'IfKeyword':
+      return parseConditionalStatement(state)
+    case 'WhileKeyword':
+      return parseWhileStatement(state)
+    case 'BreakKeyword':
+      return parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
+    case 'ContinueKeyword':
+      return parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
+    case 'ReturnKeyword':
+      return parseReturnStatement(state)
+    case 'FailKeyword':
+      return parseFailStatement(state)
+    case 'DropKeyword':
+      return parseDropStatement(state)
+    case 'Identifier':
+      if (startsAssignmentStatement(state)) return parseAssignmentStatement(state)
+      break
+    case 'UnsafeKeyword':
+      if (peek(state, 1) === 'LeftBrace') return parseUnsafeStatement(state)
+      break
+  }
+  if (startsBlockStatement(state)) return parseExpressionStatement(state)
+  return parseErrorStatement(state)
+}
+
 export function parseBlock(
   initial: State,
   requireReturn: boolean,
@@ -385,37 +416,10 @@ export function parseBlock(
   let state = leftBrace.state
   let children: ReadonlyArray<SyntaxTree.Element> = leftBrace.elements
 
-  let kind = nextSignificantKind(state)
   while (!endsBlock(state)) {
-    const statement =
-      kind === 'LetKeyword'
-        ? startsPatternBindingStatement(state)
-          ? parsePatternBindingStatement(state)
-          : parseBindingStatement(state)
-        : kind === 'IfKeyword'
-          ? parseConditionalStatement(state)
-          : kind === 'WhileKeyword'
-            ? parseWhileStatement(state)
-            : kind === 'BreakKeyword'
-              ? parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
-              : kind === 'ContinueKeyword'
-                ? parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
-                : kind === 'Identifier' && startsAssignmentStatement(state)
-                  ? parseAssignmentStatement(state)
-                  : kind === 'FailKeyword'
-                    ? parseFailStatement(state)
-                    : kind === 'DropKeyword'
-                      ? parseDropStatement(state)
-                      : kind === 'UnsafeKeyword' && peek(state, 1) === 'LeftBrace'
-                        ? parseUnsafeStatement(state)
-                        : kind === 'ReturnKeyword'
-                          ? parseReturnStatement(state)
-                          : startsBlockStatement(state)
-                            ? parseExpressionStatement(state)
-                            : parseErrorStatement(state)
+    const statement = parseBlockChild(state)
     children = Object.freeze([...children, statement.node])
     state = statement.state
-    kind = nextSignificantKind(state)
   }
 
   if ((requireReturn || implicitUnitReturn) && !blockTerminatesSyntactically(children)) {

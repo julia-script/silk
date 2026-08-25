@@ -49,19 +49,18 @@ const replaceSuspensionRegion = (
   Object.freeze({
     ...program,
     functions: Object.freeze(
-      program.functions.map((fn) =>
-        fn !== owner || fn.suspension === undefined
-          ? fn
-          : Object.freeze({
-              ...fn,
-              suspension: Object.freeze({
-                ...fn.suspension,
-                regions: Object.freeze(
-                  fn.suspension.regions.map((region) => (region === previous ? next : region)),
-                ),
-              }),
-            }),
-      ),
+      program.functions.map((fn) => {
+        if (fn !== owner || fn.suspension === undefined) return fn
+        return Object.freeze({
+          ...fn,
+          suspension: Object.freeze({
+            ...fn.suspension,
+            regions: Object.freeze(
+              fn.suspension.regions.map((region) => (region === previous ? next : region)),
+            ),
+          }),
+        })
+      }),
     ),
   })
 

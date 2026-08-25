@@ -72,23 +72,25 @@ export const concreteCleanup = (
       storedCallableValueType(fn.layout, concrete) ??
       storedEffectValueType(fn.layout, concrete) ??
       representedValueType(fn.layout, fn.opaqueRealizations, concrete, new Map())
-    return value?._tag === 'CallableValue'
-      ? value.storage?._tag === 'StoredCallableField'
-        ? CleanupPlan.realizedCallableCleanup(fn.index, value.storage.realization)
-        : callableLocalCleanup(fn, value)
-      : value?._tag === 'EffectValue'
-        ? effectLocalCleanup(fn, value, new Set())
-        : value?._tag === 'EffectComposite'
-          ? Object.freeze({
-              _tag: 'EffectCompositeCleanup' as const,
-              type: value.type,
-              alternatives: Object.freeze(
-                value.alternatives.map((alternative) =>
-                  effectLocalCleanup(fn, alternative, new Set()),
-                ),
-              ),
-            })
-          : undefined
+    if (value?._tag === 'CallableValue') {
+      if (value.storage?._tag === 'StoredCallableField') {
+        return CleanupPlan.realizedCallableCleanup(fn.index, value.storage.realization)
+      }
+      return callableLocalCleanup(fn, value)
+    }
+    if (value?._tag === 'EffectValue') {
+      return effectLocalCleanup(fn, value, new Set())
+    }
+    if (value?._tag === 'EffectComposite') {
+      return Object.freeze({
+        _tag: 'EffectCompositeCleanup' as const,
+        type: value.type,
+        alternatives: Object.freeze(
+          value.alternatives.map((alternative) => effectLocalCleanup(fn, alternative, new Set())),
+        ),
+      })
+    }
+    return undefined
   }
   const realized = resolveRepresented(specialized)
   if (realized !== undefined) return realized
@@ -130,12 +132,16 @@ export function effectLocalCleanup(
       effectValue.storage?.realization.cleanup.unrunLanes.includes(realizationOrdinal) ?? false
     if (effectValue.storage === undefined ? field.representation === 'Borrow' : !storedOwned)
       return []
-    const fieldCleanup =
-      callable === undefined
-        ? nested === undefined
-          ? concreteCleanup(fn, field.type)
-          : effectLocalCleanup(fn, nested, next)
-        : callableLocalCleanup(fn, callable)
+    let fieldCleanup: CleanupPlan.CleanupPlan
+    if (callable === undefined) {
+      if (nested === undefined) {
+        fieldCleanup = concreteCleanup(fn, field.type)
+      } else {
+        fieldCleanup = effectLocalCleanup(fn, nested, next)
+      }
+    } else {
+      fieldCleanup = callableLocalCleanup(fn, callable)
+    }
     return fieldCleanup._tag === 'NoCleanup' && effectValue.storage === undefined
       ? []
       : [
@@ -229,14 +235,16 @@ export const propagationReleases = (
     exit.releases.flatMap((release): ReadonlyArray<Mir.DropOperation> => {
       if (release.cleanup._tag === 'NoCleanup') return []
       const site = release.binding.site
-      const local =
-        site._tag === 'Let'
-          ? fn.bindingLocals.get(site.binding.ordinal)
-          : site._tag === 'Parameter'
-            ? fn.parameterLocals.get(site.parameter.ordinal)
-            : site._tag === 'Pattern'
-              ? fn.patternLocals.get(patternKey(site.binding))
-              : undefined
+      let local: Mir.LocalId | undefined
+      if (site._tag === 'Let') {
+        local = fn.bindingLocals.get(site.binding.ordinal)
+      } else if (site._tag === 'Parameter') {
+        local = fn.parameterLocals.get(site.parameter.ordinal)
+      } else if (site._tag === 'Pattern') {
+        local = fn.patternLocals.get(patternKey(site.binding))
+      } else {
+        local = undefined
+      }
       const localType = local === undefined ? undefined : fn.localTypes.at(local.ordinal)
       if (local === undefined || localType === undefined) return []
       return [
@@ -353,14 +361,16 @@ export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | un
   }
   for (const release of exit?.releases ?? []) {
     const site = release.binding.site
-    const dropped =
-      site._tag === 'Parameter'
-        ? fn.parameterLocals.get(site.parameter.ordinal)
-        : site._tag === 'Temporary'
-          ? undefined
-          : site._tag === 'Pattern'
-            ? fn.patternLocals.get(patternKey(site.binding))
-            : fn.bindingLocals.get(site.binding.ordinal)
+    let dropped: Mir.LocalId | undefined
+    if (site._tag === 'Parameter') {
+      dropped = fn.parameterLocals.get(site.parameter.ordinal)
+    } else if (site._tag === 'Temporary') {
+      dropped = undefined
+    } else if (site._tag === 'Pattern') {
+      dropped = fn.patternLocals.get(patternKey(site.binding))
+    } else {
+      dropped = fn.bindingLocals.get(site.binding.ordinal)
+    }
     if (dropped === undefined) continue
     const localType = fn.localTypes.at(dropped.ordinal)
     if (localType === undefined) continue

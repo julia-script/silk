@@ -10,20 +10,27 @@ export const compare = (
   operation: Mir.BinaryOperator,
   left: bigint,
   right: bigint,
-): boolean | undefined =>
-  operation === 'Equals'
-    ? left === right
-    : operation === 'NotEquals'
-      ? left !== right
-      : operation === 'LessThan'
-        ? left < right
-        : operation === 'LessOrEqual'
-          ? left <= right
-          : operation === 'GreaterThan'
-            ? left > right
-            : operation === 'GreaterOrEqual'
-              ? left >= right
-              : undefined
+): boolean | undefined => {
+  if (operation === 'Equals') {
+    return left === right
+  }
+  if (operation === 'NotEquals') {
+    return left !== right
+  }
+  if (operation === 'LessThan') {
+    return left < right
+  }
+  if (operation === 'LessOrEqual') {
+    return left <= right
+  }
+  if (operation === 'GreaterThan') {
+    return left > right
+  }
+  if (operation === 'GreaterOrEqual') {
+    return left >= right
+  }
+  return undefined
+}
 
 /** Evaluates one target-width integer binary operation for every bootstrap execution path. */
 export const integralBinary = (
@@ -56,36 +63,50 @@ export const integralBinary = (
     rotate === 0
       ? leftBits
       : BigInt.asUintN(width, (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)))
-  const exact =
-    operation === 'Add' || operation === 'WrappingAdd' || operation === 'SaturatingAdd'
-      ? left + right
-      : operation === 'Subtract' ||
-          operation === 'WrappingSubtract' ||
-          operation === 'SaturatingSubtract'
-        ? left - right
-        : operation === 'Multiply' ||
-            operation === 'WrappingMultiply' ||
-            operation === 'SaturatingMultiply'
-          ? left * right
-          : operation === 'Divide'
-            ? left / right
-            : operation === 'Remainder'
-              ? left % right
-              : operation === 'BitAnd'
-                ? fromBits(leftBits & rightBits)
-                : operation === 'BitOr'
-                  ? fromBits(leftBits | rightBits)
-                  : operation === 'BitXor'
-                    ? fromBits(leftBits ^ rightBits)
-                    : operation === 'ShiftLeft'
-                      ? fromBits(leftBits << right)
-                      : operation === 'ShiftRight'
-                        ? scalar.signedness === 'Signed'
-                          ? left >> right
-                          : fromBits(leftBits >> right)
-                        : operation === 'RotateLeft'
-                          ? fromBits(rotatedLeft)
-                          : fromBits(rotatedRight)
+  let exact: bigint
+  switch (operation) {
+    case 'Add':
+    case 'WrappingAdd':
+    case 'SaturatingAdd':
+      exact = left + right
+      break
+    case 'Subtract':
+    case 'WrappingSubtract':
+    case 'SaturatingSubtract':
+      exact = left - right
+      break
+    case 'Multiply':
+    case 'WrappingMultiply':
+    case 'SaturatingMultiply':
+      exact = left * right
+      break
+    case 'Divide':
+      exact = left / right
+      break
+    case 'Remainder':
+      exact = left % right
+      break
+    case 'BitAnd':
+      exact = fromBits(leftBits & rightBits)
+      break
+    case 'BitOr':
+      exact = fromBits(leftBits | rightBits)
+      break
+    case 'BitXor':
+      exact = fromBits(leftBits ^ rightBits)
+      break
+    case 'ShiftLeft':
+      exact = fromBits(leftBits << right)
+      break
+    case 'ShiftRight':
+      exact = scalar.signedness === 'Signed' ? left >> right : fromBits(leftBits >> right)
+      break
+    case 'RotateLeft':
+      exact = fromBits(rotatedLeft)
+      break
+    default:
+      exact = fromBits(rotatedRight)
+  }
   const range = Scalar.range(scalar, pointerBits)
   const wrapping =
     operation === 'WrappingAdd' ||
@@ -103,15 +124,10 @@ export const integralBinary = (
           ? 'arithmetic underflow'
           : 'arithmetic overflow',
     })
-  const value = wrapping
-    ? fromBits(exact)
-    : saturating
-      ? exact < range.minimum
-        ? range.minimum
-        : exact > range.maximum
-          ? range.maximum
-          : exact
-      : exact
+  let value = exact
+  if (wrapping) value = fromBits(exact)
+  if (saturating && exact < range.minimum) value = range.minimum
+  if (saturating && exact > range.maximum) value = range.maximum
   return Object.freeze({ _tag: 'Integer', type: scalar.spelling, value })
 }
 
@@ -120,17 +136,24 @@ export const checked = (
   operation: string,
   left: bigint,
   right: bigint | undefined,
-): bigint | undefined =>
-  operation.startsWith('CheckedConvertTo')
-    ? left
-    : operation === 'CheckedAdd' && right !== undefined
-      ? left + right
-      : operation === 'CheckedSubtract' && right !== undefined
-        ? left - right
-        : operation === 'CheckedMultiply' && right !== undefined
-          ? left * right
-          : operation === 'CheckedDivide' && right !== undefined && right !== 0n
-            ? left / right
-            : operation === 'CheckedRemainder' && right !== undefined && right !== 0n
-              ? left % right
-              : undefined
+): bigint | undefined => {
+  if (operation.startsWith('CheckedConvertTo')) {
+    return left
+  }
+  if (operation === 'CheckedAdd' && right !== undefined) {
+    return left + right
+  }
+  if (operation === 'CheckedSubtract' && right !== undefined) {
+    return left - right
+  }
+  if (operation === 'CheckedMultiply' && right !== undefined) {
+    return left * right
+  }
+  if (operation === 'CheckedDivide' && right !== undefined && right !== 0n) {
+    return left / right
+  }
+  if (operation === 'CheckedRemainder' && right !== undefined && right !== 0n) {
+    return left % right
+  }
+  return undefined
+}

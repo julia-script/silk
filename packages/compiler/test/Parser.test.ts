@@ -719,13 +719,10 @@ it('retains trivia between every concrete call element', () => {
   assert.notStrictEqual(argumentsList, undefined)
   if (argumentsList === undefined) return
   assert.deepEqual(
-    argumentsList.children.map((element) =>
-      SyntaxTree.isNode(element)
-        ? element.kind
-        : SyntaxTree.isToken(element)
-          ? element.kind
-          : `Missing(${element.expected})`,
-    ),
+    argumentsList.children.map((element) => {
+      if (SyntaxTree.isNode(element) || SyntaxTree.isToken(element)) return element.kind
+      return `Missing(${element.expected})`
+    }),
     [
       'Whitespace',
       'LineComment',
@@ -895,13 +892,10 @@ it('preserves sibling nested calls and their outer comma', () => {
   assert.notStrictEqual(outerArguments, undefined)
   if (outerArguments === undefined) return
   assert.deepEqual(
-    outerArguments.children.map((element) =>
-      SyntaxTree.isNode(element)
-        ? element.kind
-        : SyntaxTree.isToken(element)
-          ? element.kind
-          : `Missing(${element.expected})`,
-    ),
+    outerArguments.children.map((element) => {
+      if (SyntaxTree.isNode(element) || SyntaxTree.isToken(element)) return element.kind
+      return `Missing(${element.expected})`
+    }),
     ['LeftParenthesis', 'CallExpression', 'Comma', 'CallExpression', 'RightParenthesis'],
   )
   assert.deepEqual(result.parserDiagnostics, [])

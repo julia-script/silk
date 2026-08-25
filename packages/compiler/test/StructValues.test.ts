@@ -87,9 +87,10 @@ pub fn main() -> i32 { let pair = make() return pair.left }`),
     const calls =
       make === undefined
         ? []
-        : MirVerification.operations(make).flatMap((operation) =>
-            operation._tag === 'Call' ? [operation.target.name] : [],
-          )
+        : MirVerification.operations(make).flatMap((operation) => {
+            if (operation._tag === 'Call') return [operation.target.name]
+            return []
+          })
 
     assert.deepEqual(calls, ['right', 'left'])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
@@ -109,19 +110,24 @@ it.effect('plans canonical aggregate lanes and evaluates whole-value calls and p
     const shape = pair === undefined ? undefined : Layout.callingShape(layout.value, pair.type)
     assert.deepEqual(
       shape?.lanes.map((lane) =>
-        lane.path.map((selector) =>
-          selector._tag === 'ElementSelector'
-            ? `[${selector.index}]`
-            : selector._tag === 'FieldId'
-              ? selector.ordinal
-              : selector._tag === 'UnionTagSelector'
-                ? 'tag'
-                : selector._tag === 'UnionPayloadSelector'
-                  ? `payload:${selector.slot}`
-                  : selector._tag === 'SliceAddressSelector'
-                    ? 'address'
-                    : 'length',
-        ),
+        lane.path.map((selector) => {
+          switch (selector._tag) {
+            case 'ElementSelector':
+              return `[${selector.index}]`
+            case 'FieldId':
+              return selector.ordinal
+            case 'UnionTagSelector':
+              return 'tag'
+            case 'UnionPayloadSelector':
+              return `payload:${selector.slot}`
+            case 'SliceAddressSelector':
+              return 'address'
+            case 'SliceLengthSelector':
+              return 'length'
+            default:
+              return assert.fail('unexpected layout selector')
+          }
+        }),
       ),
       [[0], [1]],
     )

@@ -324,20 +324,22 @@ const representationsMayOverlap = (
  * instantiation satisfies both. Anything still open is therefore compared by coverage rather than
  * by key, and reports overlap.
  */
-const isOpenArgument = (self: Type.GenericArgument): boolean =>
-  Type.isUnavailableGenericArgument(self) ||
-  (Type.isTypeArgument(self)
-    ? Type.parameters(self).length > 0
-    : Type.isRepresentationParameterArgument(self)
-      ? true
-      : Type.isExactRepresentationArgument(self)
-        ? Type.parameters(self.contract).length > 0 || isOpenArgument(self.identity)
-        : Type.isCallableIdentityArgument(self)
-          ? self.typeArguments.some(isOpenArgument)
-          : Type.isRequirementRowArgument(self)
-            ? Type.requirementRowParameters(self).length > 0 ||
-              Type.requirementMembers(self).some((r) => Type.parameters(r.capability).length > 0)
-            : false)
+const isOpenArgument = (self: Type.GenericArgument): boolean => {
+  if (Type.isUnavailableGenericArgument(self)) return true
+  if (Type.isTypeArgument(self)) return Type.parameters(self).length > 0
+  if (Type.isRepresentationParameterArgument(self)) return true
+  if (Type.isExactRepresentationArgument(self)) {
+    return Type.parameters(self.contract).length > 0 || isOpenArgument(self.identity)
+  }
+  if (Type.isCallableIdentityArgument(self)) return self.typeArguments.some(isOpenArgument)
+  if (Type.isRequirementRowArgument(self)) {
+    return (
+      Type.requirementRowParameters(self).length > 0 ||
+      Type.requirementMembers(self).some((r) => Type.parameters(r.capability).length > 0)
+    )
+  }
+  return false
+}
 
 const unifyArgument = (
   left: Type.GenericArgument,

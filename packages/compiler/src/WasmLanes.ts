@@ -10,14 +10,12 @@ export const f32 = ValType.f32
 export const f64 = ValType.f64
 
 /** The zero instruction for one physical WebAssembly lane. */
-export const zeroConst = (type: ValType.ValType): Instr.Instr =>
-  type === i64
-    ? Instr.i64Const(0n)
-    : type === f32
-      ? Instr.f32Const(0)
-      : type === f64
-        ? Instr.f64Const(0)
-        : Instr.i32Const(0)
+export const zeroConst = (type: ValType.ValType): Instr.Instr => {
+  if (type === i64) return Instr.i64Const(0n)
+  if (type === f32) return Instr.f32Const(0)
+  if (type === f64) return Instr.f64Const(0)
+  return Instr.i32Const(0)
+}
 
 /**
  * The lanes one MIR type occupies, for locals, signatures, and suspension transfer slots alike.

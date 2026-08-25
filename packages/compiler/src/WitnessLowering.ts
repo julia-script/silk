@@ -228,12 +228,12 @@ export const sourceWitnessArguments = (
     }
     const actualReference = actual._tag === 'Reference' || actual._tag === 'Slice'
     const expectedReference = expected._tag === 'Reference' || expected._tag === 'Slice'
-    const sameTarget =
-      actual._tag === 'Reference' && expected._tag === 'Reference'
-        ? Type.equals(actual.type.target, expected.type.target)
-        : actual._tag === 'Slice' && expected._tag === 'Slice'
-          ? Type.equals(actual.type.element, expected.type.element)
-          : false
+    let sameTarget = false
+    if (actual._tag === 'Reference' && expected._tag === 'Reference') {
+      sameTarget = Type.equals(actual.type.target, expected.type.target)
+    } else if (actual._tag === 'Slice' && expected._tag === 'Slice') {
+      sameTarget = Type.equals(actual.type.element, expected.type.element)
+    }
     if (
       !actualReference ||
       !expectedReference ||

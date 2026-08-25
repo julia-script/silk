@@ -406,22 +406,28 @@ export function* execute(
     }
     case 'PropagateEffectFailure': {
       const source = read(operation.source).value
-      const sourceTag =
-        source._tag === 'UnionValue'
-          ? operation.sourceType._tag === 'Union'
-            ? operation.sourceType.type.members.findIndex((member) =>
-                Type.equals(member, source.member),
-              )
-            : -1
-          : source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal'
-            ? 0
-            : -1
-      const payload =
-        source._tag === 'UnionValue'
-          ? source.payload
-          : source._tag === 'AggregateValue'
-            ? source
-            : undefined
+      let sourceTag: number
+      if (source._tag === 'UnionValue') {
+        if (operation.sourceType._tag === 'Union') {
+          sourceTag = operation.sourceType.type.members.findIndex((member) =>
+            Type.equals(member, source.member),
+          )
+        } else {
+          sourceTag = -1
+        }
+      } else if (source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal') {
+        sourceTag = 0
+      } else {
+        sourceTag = -1
+      }
+      let payload: Value | undefined
+      if (source._tag === 'UnionValue') {
+        payload = source.payload
+      } else if (source._tag === 'AggregateValue') {
+        payload = source
+      } else {
+        payload = undefined
+      }
       const mapping = operation.tagMappings.find((candidate) => candidate.source === sourceTag)
       if (payload === undefined || mapping === undefined)
         throw new RangeError('MIR propagated failure has no canonical tag mapping')

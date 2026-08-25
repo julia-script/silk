@@ -104,12 +104,11 @@ const contains = (members: ReadonlyArray<CoverageIdentity>, member: CoverageIden
   members.some((candidate) => identityEquals(candidate, member))
 
 /** Returns the canonical structural exact-member set observed by a pattern decision. */
-export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> =>
-  Type.isUnion(type)
-    ? Object.freeze(type.members.map(structuralMember))
-    : Type.isNever(type)
-      ? Object.freeze([])
-      : Object.freeze([structuralMember(type)])
+export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> => {
+  if (Type.isUnion(type)) return Object.freeze(type.members.map(structuralMember))
+  if (Type.isNever(type)) return Object.freeze([])
+  return Object.freeze([structuralMember(type)])
+}
 
 /** Returns the canonical source-ordered member set of one scalar enum. */
 export const enumMembersOf = (
@@ -186,11 +185,9 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
       (row, effect) => RowAlgebra.union(Type.requirementRowPolicy(), row, effect.requirementRow),
       RowAlgebra.concrete(Type.requirementRowPolicy(), []),
     )
-    const access = effects.some((effect) => effect.access === 'Take')
-      ? 'Take'
-      : effects.some((effect) => effect.access === 'Exclusive')
-        ? 'Exclusive'
-        : 'Shared'
+    let access: Type.CallableMode = 'Shared'
+    if (effects.some((effect) => effect.access === 'Take')) access = 'Take'
+    else if (effects.some((effect) => effect.access === 'Exclusive')) access = 'Exclusive'
     return Object.freeze({
       _tag: 'Joined',
       type: Type.effectWithRows(success.type, failureRow, access, requirementRow),

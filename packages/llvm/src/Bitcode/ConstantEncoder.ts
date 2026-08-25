@@ -129,17 +129,13 @@ export const writeConstants = (
         }
         break
       }
-      case 'Special':
-        Bitstream.writeRecord(
-          block,
-          constant.kind === 'undef'
-            ? schema.undef
-            : constant.kind === 'poison'
-              ? schema.poison
-              : schema.nullValue,
-          [],
-        )
+      case 'Special': {
+        let record: Bitstream.Abbreviation = schema.nullValue
+        if (constant.kind === 'undef') record = schema.undef
+        else if (constant.kind === 'poison') record = schema.poison
+        Bitstream.writeRecord(block, record, [])
         break
+      }
       case 'Aggregate':
         Bitstream.writeRecord(block, schema.aggregate, [constant.elements.map(adapter.valueIndex)])
         break

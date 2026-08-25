@@ -20,6 +20,14 @@ const moduleName = 'owned-allocation-acceptance/main'
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
 
+const evaluationDescription = (evaluated: ReturnType<typeof Analysis.evaluate>): string => {
+  if (evaluated._tag !== 'Blocked') return evaluated._tag
+  if (evaluated.reason._tag === 'InvalidMir') {
+    return evaluated.reason.violations.map((violation) => violation.detail).join('\n')
+  }
+  return evaluated.reason._tag
+}
+
 const rewriteOperations = (
   self: Mir.Module,
   rewrite: (operation: Mir.Operation) => Mir.Operation,
@@ -31,26 +39,28 @@ const rewriteOperations = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map((region) =>
-              region._tag === 'OperationRegion'
-                ? Object.freeze({
-                    ...region,
-                    operations: Object.freeze(region.operations.map(rewrite)),
-                  })
-                : region._tag === 'CleanupRegion'
-                  ? Object.freeze({
-                      ...region,
-                      releases: Object.freeze(
-                        region.releases.map((release) => {
-                          const rewritten = rewrite(release)
-                          return rewritten._tag === 'Drop' || rewritten._tag === 'EndLoan'
-                            ? rewritten
-                            : release
-                        }),
-                      ),
-                    })
-                  : region,
-            ),
+            fn.regions.map((region) => {
+              if (region._tag === 'OperationRegion') {
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(region.operations.map(rewrite)),
+                })
+              }
+              if (region._tag === 'CleanupRegion') {
+                return Object.freeze({
+                  ...region,
+                  releases: Object.freeze(
+                    region.releases.map((release) => {
+                      const rewritten = rewrite(release)
+                      if (rewritten._tag === 'Drop' || rewritten._tag === 'EndLoan')
+                        return rewritten
+                      return release
+                    }),
+                  ),
+                })
+              }
+              return region
+            }),
           ),
         }),
       ),
@@ -150,15 +160,7 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      evaluated._tag === 'Blocked'
-        ? evaluated.reason._tag === 'InvalidMir'
-          ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
-          : evaluated.reason._tag
-        : evaluated._tag,
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', evaluationDescription(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(Projections.allocationTraceEventsOf(evaluated), [])
@@ -241,15 +243,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     assert.strictEqual(reusedViolation?.rule, 'InvalidLocalSharedOperation')
     assert.strictEqual(reusedViolation?.provenance?.span.sourceId, 'local-shared-allocation/native')
     const evaluated = Analysis.evaluate(native)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      evaluated._tag === 'Blocked'
-        ? evaluated.reason._tag === 'InvalidMir'
-          ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
-          : evaluated.reason._tag
-        : evaluated._tag,
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', evaluationDescription(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(
@@ -654,15 +648,7 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const evaluated = Analysis.evaluate(snapshot)
-    assert.strictEqual(
-      evaluated._tag,
-      'Completed',
-      evaluated._tag === 'Blocked'
-        ? evaluated.reason._tag === 'InvalidMir'
-          ? evaluated.reason.violations.map((violation) => violation.detail).join('\n')
-          : evaluated.reason._tag
-        : evaluated._tag,
-    )
+    assert.strictEqual(evaluated._tag, 'Completed', evaluationDescription(evaluated))
     if (evaluated._tag !== 'Completed') return
     assert.strictEqual(evaluated.result.value, 42n)
     assert.deepEqual(

@@ -187,6 +187,42 @@ const literalsOf = (text) => {
   return literals
 }
 
+/** Return expressions in a helper body, excluding `return` text inside literals and comments. */
+const returnedExpressionsOf = (body) => {
+  const expressions = []
+  let cursor = 0
+  while (cursor < body.length) {
+    const character = body[cursor]
+    if (character === "'" || character === '"' || character === '`') {
+      cursor = literalEnd(body, cursor)
+      continue
+    }
+    if (character === '/' && body[cursor + 1] === '/') {
+      const end = body.indexOf('\n', cursor + 2)
+      cursor = end === -1 ? body.length : end + 1
+      continue
+    }
+    if (character === '/' && body[cursor + 1] === '*') {
+      const end = body.indexOf('*/', cursor + 2)
+      cursor = end === -1 ? body.length : end + 2
+      continue
+    }
+    if (
+      body.startsWith('return', cursor) &&
+      !/[A-Za-z0-9_$]/.test(body[cursor - 1] ?? '') &&
+      !/[A-Za-z0-9_$]/.test(body[cursor + 'return'.length] ?? '')
+    ) {
+      const start = cursor + 'return'.length
+      const end = statementEnd(body, start)
+      expressions.push(body.slice(start, end))
+      cursor = end
+      continue
+    }
+    cursor += 1
+  }
+  return expressions
+}
+
 /**
  * Every complete template the message expression can produce, in source order.
  *
@@ -206,12 +242,7 @@ const templatesOf = (source, expression) => {
   const opening = source.indexOf(`const ${call[1]} = `)
   if (opening === -1) return []
   const body = source.slice(source.indexOf('=> {', opening), statementEnd(source, opening))
-  const templates = []
-  for (const returned of body.matchAll(/\breturn\s/g)) {
-    const start = (returned.index ?? 0) + returned[0].length
-    templates.push(...templatesOf(source, body.slice(start, statementEnd(body, start))))
-  }
-  return templates
+  return returnedExpressionsOf(body).flatMap((returned) => templatesOf(source, returned))
 }
 
 const diagnosticsPage = () => {

@@ -139,10 +139,18 @@ const failureCheck = (
   reason:
     | { readonly _tag: 'OutOfRange' }
     | { readonly _tag: 'NotANumber'; readonly offset: number },
-): Check => ({
-  name,
-  effectful: false,
-  declaration: `import silk.format { OutOfRange }
+): Check => {
+  let failure: string
+  if (reason._tag === 'OutOfRange') {
+    failure = 'isOutOfRange(move error)'
+  } else {
+    const offset = reason.offset === 0 ? 'usize.ZERO' : reason.offset
+    failure = `isNotANumberAt(move error, ${offset})`
+  }
+  return {
+    name,
+    effectful: false,
+    declaration: `import silk.format { OutOfRange }
 import silk.format { ParseError }
 import silk.result { Result }
 import silk.usize as usize
@@ -150,15 +158,12 @@ fn ${name}() -> i32 {
   return match move ${spelling}.parse("${text}") {
     Result<${spelling}, ParseError> { value: outcome } => match move outcome {
       Success<${spelling}> { value } => 1
-      Failure<ParseError> { error } => ${
-        reason._tag === 'OutOfRange'
-          ? 'isOutOfRange(move error)'
-          : `isNotANumberAt(move error, ${reason.offset === 0 ? 'usize.ZERO' : reason.offset})`
-      }
+      Failure<ParseError> { error } => ${failure}
     }
   }
 }`,
-})
+  }
+}
 
 /**
  * Assembles the checks into one program that returns the 1-based index of the first check that

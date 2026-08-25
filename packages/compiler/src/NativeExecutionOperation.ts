@@ -73,16 +73,11 @@ const MirMatches = (
   right: ReadonlyArray<SilkType.GenericArgument>,
 ): boolean =>
   left.length === right.length &&
-  left.every(
-    (argument, ordinal) =>
-      SilkType.genericArgumentKey(argument) ===
-      SilkType.genericArgumentKey(
-        right.at(ordinal) ??
-          (() => {
-            throw new RangeError('missing generic argument')
-          })(),
-      ),
-  )
+  left.every((argument, ordinal) => {
+    const candidate = right.at(ordinal)
+    if (candidate === undefined) throw new RangeError('missing generic argument')
+    return SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(candidate)
+  })
 
 const applyCallable = Effect.fnUntraced(function* (
   context: Context,
@@ -322,12 +317,14 @@ const notifyReady = Effect.fnUntraced(function* (
     identity?.environment === undefined
       ? undefined
       : Layout.callableEnvironmentByIdentity(context.program.layout, identity.environment)
-  const targetArguments =
-    identity === undefined
-      ? Object.freeze([])
-      : environment === undefined
-        ? identity.typeArguments
-        : Layout.callableTargetArguments(environment)
+  let targetArguments: ReadonlyArray<SilkType.GenericArgument>
+  if (identity === undefined) {
+    targetArguments = Object.freeze([])
+  } else if (environment === undefined) {
+    targetArguments = identity.typeArguments
+  } else {
+    targetArguments = Layout.callableTargetArguments(environment)
+  }
   const target =
     targetIdentity?._tag === 'DeclarationCallableTarget'
       ? context.declared.find(
@@ -1420,13 +1417,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         Object.freeze([]),
         `park${operation.destination.ordinal}_external`,
       )
-      yield* LlvmBlock.setInsertionPoint(
-        body,
-        context.suspension.resumeBlocks.get(suspensionPointKey(region.point)) ??
-          (() => {
-            throw new RangeError('LLVM park lost its verified resume label')
-          })(),
-      )
+      const resumeBlock = context.suspension.resumeBlocks.get(suspensionPointKey(region.point))
+      if (resumeBlock === undefined)
+        throw new RangeError('LLVM park lost its verified resume label')
+      yield* LlvmBlock.setInsertionPoint(body, resumeBlock)
       yield* NativeSuspension.restoreRelayPayload(
         context.suspension,
         region,

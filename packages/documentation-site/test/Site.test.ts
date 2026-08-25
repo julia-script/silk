@@ -14,7 +14,9 @@ const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const sourceFiles = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name)
-    return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith('.ts') ? [path] : []
+    if (entry.isDirectory()) return sourceFiles(path)
+    if (entry.name.endsWith('.ts')) return [path]
+    return []
   })
 
 /**

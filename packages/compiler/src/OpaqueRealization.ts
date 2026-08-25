@@ -256,11 +256,13 @@ const accessOf = (argument: Type.RepresentationArgument): Definition['access'] =
     argument._tag === 'RepresentationParameterArgument'
       ? argument.parameter.representationBound
       : argument.contract
-  return contract === undefined
-    ? 'Shared'
-    : Type.isCallable(contract)
-      ? contract.mode
-      : contract.access
+  if (contract === undefined) {
+    return 'Shared'
+  }
+  if (Type.isCallable(contract)) {
+    return contract.mode
+  }
+  return contract.access
 }
 
 const targetOf = (argument: Type.RepresentationArgument): Definition['target'] => {
@@ -269,21 +271,30 @@ const targetOf = (argument: Type.RepresentationArgument): Definition['target'] =
   throw new RangeError('An opaque realization cannot target another unresolved opaque family')
 }
 
-const argumentsOf = (argument: Type.RepresentationArgument): ReadonlyArray<Type.GenericArgument> =>
-  argument._tag === 'ExactRepresentationArgument' &&
-  Type.isCallableIdentityArgument(argument.identity)
-    ? argument.identity.typeArguments
-    : argument._tag === 'OpaqueRepresentationArgument'
-      ? argument.arguments
-      : Object.freeze([])
+const argumentsOf = (
+  argument: Type.RepresentationArgument,
+): ReadonlyArray<Type.GenericArgument> => {
+  if (
+    argument._tag === 'ExactRepresentationArgument' &&
+    Type.isCallableIdentityArgument(argument.identity)
+  ) {
+    return argument.identity.typeArguments
+  }
+  if (argument._tag === 'OpaqueRepresentationArgument') {
+    return argument.arguments
+  }
+  return Object.freeze([])
+}
 
 const constructionSite = (argument: Type.RepresentationArgument): string | undefined => {
   if (argument._tag !== 'ExactRepresentationArgument') return undefined
-  return Type.isCallableIdentityArgument(argument.identity)
-    ? argument.identity.environment === undefined
-      ? undefined
-      : Type.callableEnvironmentKey(argument.identity.environment)
-    : argument.identity.identity
+  if (Type.isCallableIdentityArgument(argument.identity)) {
+    if (argument.identity.environment === undefined) {
+      return undefined
+    }
+    return Type.callableEnvironmentKey(argument.identity.environment)
+  }
+  return argument.identity.identity
 }
 
 const constructionOf = (
@@ -520,9 +531,15 @@ export const analyze = (results: ReadonlyMap<string, Elaboration.Result>): Catal
   }
   for (const producer of pending) {
     const key = familyKey(producer.instance.family)
-    const alternatives = [...(resolved.get(key)?.entries() ?? [])].sort(([left], [right]) =>
-      left < right ? -1 : left > right ? 1 : 0,
-    )
+    const alternatives = [...(resolved.get(key)?.entries() ?? [])].sort(([left], [right]) => {
+      if (left < right) {
+        return -1
+      }
+      if (left > right) {
+        return 1
+      }
+      return 0
+    })
     if (alternatives.length > 1) {
       invalid.add(key)
       diagnostics.push(

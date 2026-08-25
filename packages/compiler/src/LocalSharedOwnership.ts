@@ -168,13 +168,13 @@ export const ofEnvironment = (
   }>,
 ): ObligationPlan =>
   product(
-    components.map((component) =>
-      component.access !== 'Take'
-        ? none
-        : component.type === undefined
-          ? unavailable(component.cause === undefined ? [] : [component.cause])
-          : ofType(index, component.type),
-    ),
+    components.map((component) => {
+      if (component.access !== 'Take') return none
+      if (component.type === undefined) {
+        return unavailable(component.cause === undefined ? [] : [component.cause])
+      }
+      return ofType(index, component.type)
+    }),
   )
 
 /** Counts a concrete plan; callers choose the active union case explicitly. */

@@ -208,8 +208,9 @@ const checkOffset = (
   addressType: ModuleState.AddressType,
   mnemonic: string,
 ): undefined => {
-  const value =
-    typeof offset === 'bigint' ? offset : Number.isInteger(offset) ? BigInt(offset) : undefined
+  let value: bigint | undefined
+  if (typeof offset === 'bigint') value = offset
+  else if (Number.isInteger(offset)) value = BigInt(offset)
   const bound = addressType === 'i64' ? 2n ** 64n - 1n : 0xffffffffn
   if (value === undefined || value < 0n || value > bound) {
     abort(

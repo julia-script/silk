@@ -95,14 +95,11 @@ export const select = (
   if (hostPlatform === undefined || hostArch === undefined) {
     return unavailable('Target.host', 'unspecified-host', 'host')
   }
-  const hostId =
-    hostPlatform === 'darwin' && hostArch === 'arm64'
-      ? aarch64AppleDarwin.id
-      : hostPlatform === 'linux' && hostArch === 'x64'
-        ? x8664UnknownLinuxGnu.id
-        : hostPlatform === 'linux' && hostArch === 'arm64'
-          ? aarch64UnknownLinuxGnu.id
-          : `${hostArch}-${hostPlatform}`
+  let hostId: string
+  if (hostPlatform === 'darwin' && hostArch === 'arm64') hostId = aarch64AppleDarwin.id
+  else if (hostPlatform === 'linux' && hostArch === 'x64') hostId = x8664UnknownLinuxGnu.id
+  else if (hostPlatform === 'linux' && hostArch === 'arm64') hostId = aarch64UnknownLinuxGnu.id
+  else hostId = `${hostArch}-${hostPlatform}`
   const found = native.find((candidate) => candidate.id === hostId)
   return found === undefined
     ? unavailable('Target.host', hostId, 'host')

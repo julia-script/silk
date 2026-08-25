@@ -89,13 +89,11 @@ it('provides no Unicode operation to any engine', () => {
 /** Every operation of every region of every lowered function, in one flat sequence. */
 const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
   module.functions.flatMap((lowered) =>
-    lowered.regions.flatMap((region) =>
-      region._tag === 'OperationRegion'
-        ? region.operations
-        : region._tag === 'CleanupRegion'
-          ? region.releases
-          : [],
-    ),
+    lowered.regions.flatMap((region) => {
+      if (region._tag === 'OperationRegion') return region.operations
+      if (region._tag === 'CleanupRegion') return region.releases
+      return []
+    }),
   )
 
 const normalizing = `import silk.allocator { OutOfMemoryError }

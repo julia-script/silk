@@ -170,14 +170,18 @@ const integerCase = (
     Scalar.conversionTarget(operation.code) ??
     Scalar.floatConversionTarget(operation.code) ??
     scalar
-  const invocation =
-    operation.code === 'BitNot'
-      ? `${scalar.spelling}.bitNot(${scalar.spelling}.bitNot(42))`
-      : operation.code === 'Negate' ||
-          operation.code === 'WrappingNegate' ||
-          operation.code === 'SaturatingNegate'
-        ? `${scalar.spelling}.${operation.spelling}(-42)`
-        : `${scalar.spelling}.${operation.spelling}(${integerArguments(operation)})`
+  let invocation: string
+  if (operation.code === 'BitNot') {
+    invocation = `${scalar.spelling}.bitNot(${scalar.spelling}.bitNot(42))`
+  } else if (
+    operation.code === 'Negate' ||
+    operation.code === 'WrappingNegate' ||
+    operation.code === 'SaturatingNegate'
+  ) {
+    invocation = `${scalar.spelling}.${operation.spelling}(-42)`
+  } else {
+    invocation = `${scalar.spelling}.${operation.spelling}(${integerArguments(operation)})`
+  }
   if (operation.result === 'Boolean')
     return `fn integerCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
   if (operation.result === 'OptionSelf' || operation.result === 'OptionTarget')

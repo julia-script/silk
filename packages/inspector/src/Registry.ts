@@ -319,19 +319,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
       }
       const matches = Analysis.ownershipMatchesOf(snapshot, snapshot.closure.rootModule)
       const loans = facts.functions.reduce((total, fn) => total + fn.loans.length, 0)
+      const summaryFacts: Array<Fact> = []
+      if (matches.length > 0) {
+        summaryFacts.push({ text: `${matches.length} match lifetime`, tone: 'symbol' })
+      }
+      if (loans > 0) summaryFacts.push({ text: `${loans} lexical loan`, tone: 'symbol' })
       return {
         rows: ownershipRows(facts),
-        facts:
-          matches.length === 0 && loans === 0
-            ? undefined
-            : [
-                ...(matches.length === 0
-                  ? []
-                  : [{ text: `${matches.length} match lifetime`, tone: 'symbol' as const }]),
-                ...(loans === 0
-                  ? []
-                  : [{ text: `${loans} lexical loan`, tone: 'symbol' as const }]),
-              ],
+        facts: summaryFacts.length === 0 ? undefined : summaryFacts,
         meta: `${facts.functions.length} fn${matches.length === 0 ? '' : ` · ${matches.length} match`}${loans === 0 ? '' : ` · ${loans} loan`}`,
       }
     },
@@ -373,22 +368,24 @@ export const views: ReadonlyArray<ViewDefinition> = [
         plan._tag === 'Available' ? plan.value : undefined,
         plan._tag === 'Available' ? undefined : plan.error.message,
       )
-      const facts: ReadonlyArray<Fact> =
-        target._tag === 'Resolved'
-          ? [
-              { text: target.target.id },
-              {
-                text: `${target.target.endianness} endian · ptr ${target.target.pointerSize} B`,
-                tone: 'muted',
-              },
-              ...(unions.length === 0
-                ? []
-                : [{ text: `${unions.length} sum layout`, tone: 'symbol' as const }]),
-              ...(slices.length === 0
-                ? []
-                : [{ text: `${slices.length} slice layout`, tone: 'symbol' as const }]),
-            ]
-          : [{ text: 'target unavailable', tone: 'warning' }]
+      const facts: Array<Fact> = []
+      if (target._tag === 'Resolved') {
+        facts.push(
+          { text: target.target.id },
+          {
+            text: `${target.target.endianness} endian · ptr ${target.target.pointerSize} B`,
+            tone: 'muted',
+          },
+        )
+        if (unions.length > 0) {
+          facts.push({ text: `${unions.length} sum layout`, tone: 'symbol' })
+        }
+        if (slices.length > 0) {
+          facts.push({ text: `${slices.length} slice layout`, tone: 'symbol' })
+        }
+      } else {
+        facts.push({ text: 'target unavailable', tone: 'warning' })
+      }
       return { rows, facts, meta: plan._tag === 'Available' ? `${plan.value.entries.length}` : '—' }
     },
   },
@@ -413,30 +410,22 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const normalization = Analysis.effectNormalizationOf(snapshot)
       const normalized = normalization.filter((verdict) => verdict._tag === 'Normalized')
       const rejected = normalization.length - normalized.length
+      const summaryFacts: Array<Fact> = []
+      if (matches.length > 0) {
+        summaryFacts.push({ text: `${matches.length} structured match`, tone: 'symbol' })
+      }
+      if (conversions.length > 0) {
+        summaryFacts.push({ text: `${conversions.length} ConvertUnion`, tone: 'symbol' })
+      }
+      if (normalized.length > 0) {
+        summaryFacts.push({ text: `${normalized.length} Effect normalization`, tone: 'symbol' })
+      }
+      if (rejected > 0) {
+        summaryFacts.push({ text: `${rejected} normalization guard`, tone: 'warning' })
+      }
       return {
         rows: mirRows(mir.value),
-        facts:
-          conversions.length === 0 && matches.length === 0 && normalization.length === 0
-            ? undefined
-            : [
-                ...(matches.length === 0
-                  ? []
-                  : [{ text: `${matches.length} structured match`, tone: 'symbol' as const }]),
-                ...(conversions.length === 0
-                  ? []
-                  : [{ text: `${conversions.length} ConvertUnion`, tone: 'symbol' as const }]),
-                ...(normalized.length === 0
-                  ? []
-                  : [
-                      {
-                        text: `${normalized.length} Effect normalization`,
-                        tone: 'symbol' as const,
-                      },
-                    ]),
-                ...(rejected === 0
-                  ? []
-                  : [{ text: `${rejected} normalization guard`, tone: 'warning' as const }]),
-              ],
+        facts: summaryFacts.length === 0 ? undefined : summaryFacts,
         meta: `${mir.value.functions.length} fn · ${regions} region${regions === 1 ? '' : 's'}${matches.length === 0 ? '' : ` · ${matches.length} match`}${conversions.length === 0 ? '' : ` · ${conversions.length} union`}${normalized.length === 0 ? '' : ` · ${normalized.length} normalized`}`,
       }
     },
@@ -452,27 +441,34 @@ export const views: ReadonlyArray<ViewDefinition> = [
     project: ({ evaluation }) => {
       const rows = evaluationRows(evaluation)
       if (evaluation === undefined) return { rows, meta: 'not run' }
-      const facts: ReadonlyArray<Fact> =
-        evaluation._tag === 'Completed'
-          ? [
-              { text: 'Completed', tone: 'ok' },
-              { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
-              { text: `${evaluation.trace.length} steps`, tone: 'muted' },
-            ]
-          : evaluation._tag === 'UnhandledFailure'
-            ? [
-                { text: 'Unhandled failure', tone: 'warning' },
-                { text: `${evaluation.identity} · tag ${evaluation.tag}`, tone: 'muted' },
-              ]
-            : evaluation._tag === 'Trap'
-              ? [
-                  { text: 'Fatal trap', tone: 'warning' },
-                  { text: evaluation.reason, tone: 'muted' },
-                ]
-              : [
-                  { text: 'Blocked', tone: 'warning' },
-                  { text: evaluation.reason._tag, tone: 'muted' },
-                ]
+      let facts: ReadonlyArray<Fact> = []
+      switch (evaluation._tag) {
+        case 'Completed':
+          facts = [
+            { text: 'Completed', tone: 'ok' },
+            { text: `${evaluation.entry.name}() → ${evaluation.result.value}` },
+            { text: `${evaluation.trace.length} steps`, tone: 'muted' },
+          ]
+          break
+        case 'UnhandledFailure':
+          facts = [
+            { text: 'Unhandled failure', tone: 'warning' },
+            { text: `${evaluation.identity} · tag ${evaluation.tag}`, tone: 'muted' },
+          ]
+          break
+        case 'Trap':
+          facts = [
+            { text: 'Fatal trap', tone: 'warning' },
+            { text: evaluation.reason, tone: 'muted' },
+          ]
+          break
+        case 'Blocked':
+          facts = [
+            { text: 'Blocked', tone: 'warning' },
+            { text: evaluation.reason._tag, tone: 'muted' },
+          ]
+          break
+      }
       return { rows, facts, meta: `${evaluation.trace.length} steps` }
     },
   },
@@ -504,59 +500,70 @@ export const views: ReadonlyArray<ViewDefinition> = [
         runnable && Analysis.mirOf(snapshot)._tag === 'Available'
           ? Analysis.evaluate(snapshot)
           : undefined
-      const expected =
-        interpreted === undefined
-          ? undefined
-          : interpreted._tag === 'Completed'
-            ? Number(interpreted.result.value)
-            : 'trap'
-      const observed =
-        execution === undefined
-          ? undefined
-          : execution._tag === 'Completed'
-            ? execution.value
-            : execution._tag === 'Trapped'
-              ? 'trap'
-              : 'failed'
+      let expected: number | 'trap' | undefined
+      if (interpreted === undefined) expected = undefined
+      else if (interpreted._tag === 'Completed') expected = Number(interpreted.result.value)
+      else expected = 'trap'
+
+      let observed: number | 'trap' | 'failed' | undefined
+      if (execution === undefined) observed = undefined
+      else if (execution._tag === 'Completed') observed = execution.value
+      else if (execution._tag === 'Trapped') observed = 'trap'
+      else observed = 'failed'
       const agrees = observed !== undefined && observed === expected
 
-      const executionRows: ReadonlyArray<RowModel> =
-        execution === undefined
-          ? []
-          : [
-              {
-                key: 'exec-head',
-                label: 'execution',
-                detail: agrees
-                  ? 'the backend and the interpreter agree'
-                  : 'the backend and the interpreter disagree',
-                head: true,
-                tone: agrees ? 'ok' : 'error',
-                dot: agrees ? 'ok' : 'error',
-              },
-              {
-                key: 'exec-wasm',
-                depth: 1,
-                label: 'silk_main()',
-                detail:
-                  execution._tag === 'Completed'
-                    ? `returned ${execution.value}`
-                    : execution._tag === 'Trapped'
-                      ? `trapped — ${execution.message}`
-                      : `instantiation failed — ${execution.message}`,
-              },
-              {
-                key: 'exec-interp',
-                depth: 1,
-                label: 'bootstrap interpreter',
-                detail:
-                  interpreted === undefined
-                    ? 'not run — MIR unavailable'
-                    : interpreted._tag === 'Completed'
-                      ? `returned ${interpreted.result.value}`
-                      : 'trapped',
-              },
-            ]
+      const executionRows: Array<RowModel> = []
+      if (execution !== undefined) {
+        let executionDetail: string
+        switch (execution._tag) {
+          case 'Completed':
+            executionDetail = `returned ${execution.value}`
+            break
+          case 'Trapped':
+            executionDetail = `trapped — ${execution.message}`
+            break
+          case 'Failed':
+            executionDetail = `instantiation failed — ${execution.message}`
+            break
+        }
+        let interpreterDetail = 'not run — MIR unavailable'
+        if (interpreted !== undefined) {
+          interpreterDetail =
+            interpreted._tag === 'Completed' ? `returned ${interpreted.result.value}` : 'trapped'
+        }
+        executionRows.push(
+          {
+            key: 'exec-head',
+            label: 'execution',
+            detail: agrees
+              ? 'the backend and the interpreter agree'
+              : 'the backend and the interpreter disagree',
+            head: true,
+            tone: agrees ? 'ok' : 'error',
+            dot: agrees ? 'ok' : 'error',
+          },
+          {
+            key: 'exec-wasm',
+            depth: 1,
+            label: 'silk_main()',
+            detail: executionDetail,
+          },
+          {
+            key: 'exec-interp',
+            depth: 1,
+            label: 'bootstrap interpreter',
+            detail: interpreterDetail,
+          },
+        )
+      }
+
+      const executionFacts: Array<Fact> = []
+      if (execution !== undefined) {
+        executionFacts.push({
+          text: agrees ? 'runs · agrees' : 'runs · disagrees',
+          tone: agrees ? 'ok' : 'warning',
+        })
+      }
 
       return {
         rows: [
@@ -577,14 +584,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
             text: `${artifact.backend} · ${bytes.length} B · ${mode}`,
             tone: 'muted',
           },
-          ...(execution === undefined
-            ? []
-            : [
-                {
-                  text: agrees ? 'runs · agrees' : 'runs · disagrees',
-                  tone: agrees ? 'ok' : 'warning',
-                } as Fact,
-              ]),
+          ...executionFacts,
         ],
         meta: `${bytes.length} B`,
       }
@@ -630,6 +630,14 @@ export const views: ReadonlyArray<ViewDefinition> = [
       const emission = backendEmission(snapshot, ToolchainPlan.codegenModeFor(profile))
       const countFor = (phase: string): number =>
         Analysis.diagnostics(snapshot).filter((diagnostic) => diagnostic.phase === phase).length
+
+      let backendOutputs = 'emission rejected'
+      if (emission._tag === 'Emitted') {
+        backendOutputs =
+          emission.artifact._tag === 'LlvmBitcodeArtifact'
+            ? `${emission.artifact.bitcode.length} bitcode bytes`
+            : `${emission.artifact.bytes.length} WebAssembly bytes`
+      }
 
       const phases = [
         {
@@ -696,12 +704,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         },
         {
           phase: 'backend',
-          outputs:
-            emission._tag === 'Emitted'
-              ? emission.artifact._tag === 'LlvmBitcodeArtifact'
-                ? `${emission.artifact.bitcode.length} bitcode bytes`
-                : `${emission.artifact.bytes.length} WebAssembly bytes`
-              : 'emission rejected',
+          outputs: backendOutputs,
           diagnostics: countFor('backend'),
         },
         { phase: 'native toolchain', outputs: 'object · shim · link', diagnostics: 0 },

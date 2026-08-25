@@ -245,13 +245,19 @@ const recipeOverloadIds: ReadonlySet<Id> = new Set([
  * @category intrinsics
  * @since 0.0.0
  */
+const catalogOverloads = (id: Id): CatalogEntry['overloads'] => {
+  if (recipeOverloadIds.has(id)) return 'recipe'
+  if (builtInIds.has(id)) return 'none'
+  return 'caller'
+}
+
 export const catalog: ReadonlyArray<CatalogEntry> = Object.freeze(
   inventory.map((id) =>
     Object.freeze({
       id,
       llvmName: `llvm.${id}`,
       signature: builtInIds.has(id) ? 'built-in' : 'explicit',
-      overloads: recipeOverloadIds.has(id) ? 'recipe' : builtInIds.has(id) ? 'none' : 'caller',
+      overloads: catalogOverloads(id),
       attributes: builtInAttributeIds.has(id) ? 'built-in' : 'explicit',
     }),
   ),
@@ -625,13 +631,11 @@ export const resolve = Effect.fn('Intrinsic.resolve')(function* (
   }
   const recipe = overloadedRecipes[id]
   const simple = simpleRecipes[id]
-  const signature =
-    options.signature ??
-    (recipe === undefined
-      ? simple === undefined
-        ? undefined
-        : yield* simple(builder)
-      : yield* recipe(builder, overloads))
+  let signature = options.signature
+  if (signature === undefined) {
+    if (recipe !== undefined) signature = yield* recipe(builder, overloads)
+    else if (simple !== undefined) signature = yield* simple(builder)
+  }
   if (signature === undefined) {
     return yield* Effect.fail(
       invalidInput({

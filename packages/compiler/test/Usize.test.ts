@@ -362,18 +362,16 @@ it.effect('rejects malformed usize target verdicts and MIR literals as verifier 
       ...program,
       functions: program.functions.map((fn) => ({
         ...fn,
-        regions: fn.regions.map((region) =>
-          region._tag === 'OperationRegion'
-            ? {
-                ...region,
-                operations: region.operations.map((operation) =>
-                  operation._tag === 'Literal' && operation.type._tag === 'usize'
-                    ? { ...operation, value: 4294967296n }
-                    : operation,
-                ),
-              }
-            : region,
-        ),
+        regions: fn.regions.map((region) => {
+          if (region._tag !== 'OperationRegion') return region
+          return {
+            ...region,
+            operations: region.operations.map((operation) => {
+              if (operation._tag !== 'Literal' || operation.type._tag !== 'usize') return operation
+              return { ...operation, value: 4294967296n }
+            }),
+          }
+        }),
       })),
     }
     assert.include(

@@ -48,27 +48,29 @@ const replaceDrop = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map((region) =>
-              region._tag === 'OperationRegion'
-                ? Object.freeze({
-                    ...region,
-                    operations: Object.freeze(
-                      region.operations.map((operation) =>
-                        operation === target ? replacement : operation,
-                      ),
+            fn.regions.map((region) => {
+              if (region._tag === 'OperationRegion') {
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation) =>
+                      operation === target ? replacement : operation,
                     ),
-                  })
-                : region._tag === 'CleanupRegion'
-                  ? Object.freeze({
-                      ...region,
-                      releases: Object.freeze(
-                        region.releases.map((operation) =>
-                          operation === target ? replacement : operation,
-                        ),
-                      ),
-                    })
-                  : region,
-            ),
+                  ),
+                })
+              }
+              if (region._tag === 'CleanupRegion') {
+                return Object.freeze({
+                  ...region,
+                  releases: Object.freeze(
+                    region.releases.map((operation) =>
+                      operation === target ? replacement : operation,
+                    ),
+                  ),
+                })
+              }
+              return region
+            }),
           ),
         }),
       ),
@@ -165,21 +167,20 @@ pub fn main() -> i32 {
         cleanup: Object.freeze({
           ...structCleanup,
           fields: Object.freeze(
-            structCleanup.fields.map((field) =>
-              field === outerField
-                ? Object.freeze({
-                    ...field,
-                    cleanup: Object.freeze({
-                      ...outer,
-                      slots: Object.freeze(
-                        outer.slots.map((slot) =>
-                          slot.cleanup === selected ? Object.freeze({ ...slot, cleanup }) : slot,
-                        ),
-                      ),
-                    }),
-                  })
-                : field,
-            ),
+            structCleanup.fields.map((field) => {
+              if (field !== outerField) return field
+              return Object.freeze({
+                ...field,
+                cleanup: Object.freeze({
+                  ...outer,
+                  slots: Object.freeze(
+                    outer.slots.map((slot) =>
+                      slot.cleanup === selected ? Object.freeze({ ...slot, cleanup }) : slot,
+                    ),
+                  ),
+                }),
+              })
+            }),
           ),
         }),
       })

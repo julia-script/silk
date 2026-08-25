@@ -1,4 +1,5 @@
 import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
+import type * as Diagnostic from './Diagnostic.js'
 import type {
   ArgumentFact,
   AssignmentRootFact,
@@ -66,13 +67,15 @@ export const hirReference = (
 }
 
 export const hirPatternSelection = (selection: PatternSelectionFact): Hir.PatternSelection => {
-  const member =
-    selection.pattern._tag === 'EnumMemberPattern'
-      ? selection.pattern.coverage
-      : (selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern') &&
-          selection.pattern.member !== undefined
-        ? Match.structuralMember(selection.pattern.member)
-        : undefined
+  let member: Match.CoverageIdentity | undefined
+  if (selection.pattern._tag === 'EnumMemberPattern') {
+    member = selection.pattern.coverage
+  } else if (
+    (selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern') &&
+    selection.pattern.member !== undefined
+  ) {
+    member = Match.structuralMember(selection.pattern.member)
+  }
   return Object.freeze({
     id: selection.id,
     arm: selection.arm,
@@ -378,21 +381,23 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       : Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
   if (fact._tag === 'StaticText') {
-    return fact.data === undefined
-      ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-      : fact.data.kind === 'Text'
-        ? Object.freeze({
-            _tag: 'StaticStringLiteral',
-            data: fact.data,
-            type: Type.string,
-            span: fact.syntax.span,
-          })
-        : Object.freeze({
-            _tag: 'StaticByteViewLiteral',
-            data: fact.data,
-            type: Type.slice('Shared', 'u8'),
-            span: fact.syntax.span,
-          })
+    if (fact.data === undefined) {
+      return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    }
+    if (fact.data.kind === 'Text') {
+      return Object.freeze({
+        _tag: 'StaticStringLiteral',
+        data: fact.data,
+        type: Type.string,
+        span: fact.syntax.span,
+      })
+    }
+    return Object.freeze({
+      _tag: 'StaticByteViewLiteral',
+      data: fact.data,
+      type: Type.slice('Shared', 'u8'),
+      span: fact.syntax.span,
+    })
   }
   if (fact._tag === 'Unit') {
     return Object.freeze({
@@ -651,13 +656,15 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       members: fact.members,
       arms: Object.freeze(
         fact.arms.map((arm) => {
-          const member =
-            arm.pattern._tag === 'EnumMemberPattern'
-              ? arm.pattern.coverage
-              : (arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
-                  arm.pattern.member !== undefined
-                ? Match.structuralMember(arm.pattern.member)
-                : undefined
+          let member: Match.CoverageIdentity | undefined
+          if (arm.pattern._tag === 'EnumMemberPattern') {
+            member = arm.pattern.coverage
+          } else if (
+            (arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
+            arm.pattern.member !== undefined
+          ) {
+            member = Match.structuralMember(arm.pattern.member)
+          }
           return Object.freeze({
             id: arm.id,
             ...(member === undefined ? {} : { member }),
@@ -861,27 +868,28 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
           : {}),
       })
     }
-    const root: Hir.SliceRoot =
-      fact.formation.root._tag === 'BindingRoot'
-        ? Object.freeze({
-            _tag: 'BindingSliceRoot',
-            binding: fact.formation.root.binding.id,
-          })
-        : fact.formation.root._tag === 'ParameterRoot'
-          ? Object.freeze({
-              _tag: 'ParameterSliceRoot',
-              parameter: fact.formation.root.parameter.id,
-            })
-          : fact.formation.root._tag === 'PatternRoot'
-            ? Object.freeze({
-                _tag: 'PatternSliceRoot',
-                binding: fact.formation.root.binding.id,
-              })
-            : Object.freeze({
-                _tag: 'TemporarySliceRoot',
-                owner: fact.formation.root.owner,
-                value: hirExpression(fact.formation.root.value),
-              })
+    let root: Hir.SliceRoot
+    switch (fact.formation.root._tag) {
+      case 'BindingRoot':
+        root = Object.freeze({ _tag: 'BindingSliceRoot', binding: fact.formation.root.binding.id })
+        break
+      case 'ParameterRoot':
+        root = Object.freeze({
+          _tag: 'ParameterSliceRoot',
+          parameter: fact.formation.root.parameter.id,
+        })
+        break
+      case 'PatternRoot':
+        root = Object.freeze({ _tag: 'PatternSliceRoot', binding: fact.formation.root.binding.id })
+        break
+      case 'TemporaryRoot':
+        root = Object.freeze({
+          _tag: 'TemporarySliceRoot',
+          owner: fact.formation.root.owner,
+          value: hirExpression(fact.formation.root.value),
+        })
+        break
+    }
     const selectors: Array<Hir.BorrowSelector> = []
     for (const selector of fact.formation.root.path) {
       if (selector._tag === 'Field') {
@@ -1284,12 +1292,12 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       ? Object.freeze({ ...call, _tag: 'EffectConstruct' as const, type: fact.type.type })
       : Object.freeze({ ...call, _tag: 'Call' as const })
   }
-  const cause =
-    fact.reference._tag === 'Missing' || fact.reference._tag === 'Ambiguous'
-      ? fact.reference.cause
-      : fact.contract._tag === 'Unavailable'
-        ? fact.contract.cause
-        : undefined
+  let cause: Diagnostic.Identity | undefined
+  if (fact.reference._tag === 'Missing' || fact.reference._tag === 'Ambiguous') {
+    cause = fact.reference.cause
+  } else if (fact.contract._tag === 'Unavailable') {
+    cause = fact.contract.cause
+  }
   return Object.freeze({
     _tag: 'Unavailable',
     span: fact.syntax.span,
@@ -1526,11 +1534,9 @@ export const hirAssignmentWritePlace = (
   root: AssignmentRootFact,
 ): Hir.WritePlace | undefined => {
   const access = assignmentRootAccess(root)
-  return access === 'ExclusiveBorrowed'
-    ? hirBorrowedWritePlace(fact, root)
-    : access === 'MutableOwned'
-      ? hirWritePlace(fact, root)
-      : undefined
+  if (access === 'ExclusiveBorrowed') return hirBorrowedWritePlace(fact, root)
+  if (access === 'MutableOwned') return hirWritePlace(fact, root)
+  return undefined
 }
 
 export const statementSpan = (statement: StatementFact): SourceSpan.SourceSpan =>

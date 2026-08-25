@@ -43,27 +43,20 @@ export const mirType = (
     layout === undefined ? undefined : Layout.entry(layout, specialized)?.representation
   if (Type.isNominal(specialized) && representation?._tag === 'ScalarEnum')
     return Object.freeze({ _tag: 'Enum', type: specialized, representation })
-  return typeof specialized === 'string'
-    ? Type.isBuiltin(specialized)
-      ? Object.freeze({ _tag: specialized })
-      : Type.isString(specialized)
-        ? Object.freeze({ _tag: 'String', type: specialized })
-        : Type.isNever(specialized)
-          ? Object.freeze({ _tag: 'Bottom', type: specialized })
-          : undefined
-    : Type.isNominal(specialized)
-      ? Object.freeze({ _tag: 'Nominal', type: specialized })
-      : Type.isFixedArray(specialized)
-        ? Object.freeze({ _tag: 'FixedArray', type: specialized })
-        : Type.isSlice(specialized)
-          ? Object.freeze({ _tag: 'Slice', type: specialized })
-          : Type.isReference(specialized)
-            ? Object.freeze({ _tag: 'Reference', type: specialized })
-            : Type.isUnion(specialized)
-              ? Object.freeze({ _tag: 'Union', type: specialized })
-              : Type.isEffect(specialized)
-                ? Object.freeze({ _tag: 'EffectOutcome', type: specialized })
-                : undefined
+  if (typeof specialized === 'string') {
+    if (Type.isBuiltin(specialized)) return Object.freeze({ _tag: specialized })
+    if (Type.isString(specialized)) return Object.freeze({ _tag: 'String', type: specialized })
+    if (Type.isNever(specialized)) return Object.freeze({ _tag: 'Bottom', type: specialized })
+    return undefined
+  }
+  if (Type.isNominal(specialized)) return Object.freeze({ _tag: 'Nominal', type: specialized })
+  if (Type.isFixedArray(specialized))
+    return Object.freeze({ _tag: 'FixedArray', type: specialized })
+  if (Type.isSlice(specialized)) return Object.freeze({ _tag: 'Slice', type: specialized })
+  if (Type.isReference(specialized)) return Object.freeze({ _tag: 'Reference', type: specialized })
+  if (Type.isUnion(specialized)) return Object.freeze({ _tag: 'Union', type: specialized })
+  if (Type.isEffect(specialized)) return Object.freeze({ _tag: 'EffectOutcome', type: specialized })
+  return undefined
 }
 
 export const local = (ordinal: number): Mir.LocalId => Object.freeze({ _tag: 'Local', ordinal })
@@ -192,30 +185,28 @@ const withLocalSharedDropPlans = (
       Object.freeze({
         ...fn,
         regions: Object.freeze(
-          fn.regions.map((region) =>
-            region._tag === 'OperationRegion'
-              ? Object.freeze({
-                  ...region,
-                  operations: Object.freeze(
-                    region.operations.map((operation) =>
-                      withLocalSharedDropPlan(layout, operation),
-                    ),
-                  ),
-                })
-              : region._tag === 'CleanupRegion'
-                ? Object.freeze({
-                    ...region,
-                    releases: Object.freeze(
-                      region.releases.map((release) => {
-                        const planned = withLocalSharedDropPlan(layout, release)
-                        return planned._tag === 'Drop' || planned._tag === 'EndLoan'
-                          ? planned
-                          : release
-                      }),
-                    ),
-                  })
-                : region,
-          ),
+          fn.regions.map((region) => {
+            if (region._tag === 'OperationRegion') {
+              return Object.freeze({
+                ...region,
+                operations: Object.freeze(
+                  region.operations.map((operation) => withLocalSharedDropPlan(layout, operation)),
+                ),
+              })
+            }
+            if (region._tag === 'CleanupRegion') {
+              return Object.freeze({
+                ...region,
+                releases: Object.freeze(
+                  region.releases.map((release) => {
+                    const planned = withLocalSharedDropPlan(layout, release)
+                    return planned._tag === 'Drop' || planned._tag === 'EndLoan' ? planned : release
+                  }),
+                ),
+              })
+            }
+            return region
+          }),
         ),
       }),
     ),
@@ -377,42 +368,44 @@ export const lowerProgram = (
   for (let ordinal = 0; ordinal < generatedRunners.length; ordinal += 1) {
     const generated = generatedRunners.at(ordinal)
     if (generated === undefined) continue
-    const runner =
-      generated._tag === 'BlockEffectRunner'
-        ? lowerEffectRunner(
-            generated,
-            ownership.get(generated.owner.key.declaration.module),
-            layout,
-            index,
-            discovery.instances,
-            discovery.calls,
-            effectResults,
-            generatedRunners,
-            opaqueRealizations,
-          )
-        : generated._tag === 'CatchEffectRunner'
-          ? lowerCatchEffectRunner(
-              generated,
-              ownership.get(generated.owner.key.declaration.module),
-              layout,
-              index,
-              discovery.instances,
-              discovery.calls,
-              effectResults,
-              generatedRunners,
-              opaqueRealizations,
-            )
-          : lowerWitnessEffectRunner(
-              generated,
-              ownership.get(generated.owner.key.declaration.module),
-              layout,
-              index,
-              discovery.instances,
-              discovery.calls,
-              effectResults,
-              generatedRunners,
-              opaqueRealizations,
-            )
+    let runner: Mir.MirFunction | undefined
+    if (generated._tag === 'BlockEffectRunner') {
+      runner = lowerEffectRunner(
+        generated,
+        ownership.get(generated.owner.key.declaration.module),
+        layout,
+        index,
+        discovery.instances,
+        discovery.calls,
+        effectResults,
+        generatedRunners,
+        opaqueRealizations,
+      )
+    } else if (generated._tag === 'CatchEffectRunner') {
+      runner = lowerCatchEffectRunner(
+        generated,
+        ownership.get(generated.owner.key.declaration.module),
+        layout,
+        index,
+        discovery.instances,
+        discovery.calls,
+        effectResults,
+        generatedRunners,
+        opaqueRealizations,
+      )
+    } else {
+      runner = lowerWitnessEffectRunner(
+        generated,
+        ownership.get(generated.owner.key.declaration.module),
+        layout,
+        index,
+        discovery.instances,
+        discovery.calls,
+        effectResults,
+        generatedRunners,
+        opaqueRealizations,
+      )
+    }
     if (runner !== undefined) loweredRunners.push(Object.freeze({ spec: generated, runner }))
   }
   // Lowering a provided parent can discover provided children after their open bases were already
@@ -501,13 +494,15 @@ export const lowerProgram = (
       )
       if (target === undefined) throw new RangeError('Unit entry lowering lost its target')
       const span = target.regions
-        .flatMap((region) =>
-          region._tag === 'OperationRegion'
-            ? region.operations.map((operation) => operation.provenance.span)
-            : region._tag === 'CleanupRegion'
-              ? region.releases.map((operation) => operation.provenance.span)
-              : [region.provenance.span],
-        )
+        .flatMap((region) => {
+          if (region._tag === 'OperationRegion') {
+            return region.operations.map((operation) => operation.provenance.span)
+          }
+          if (region._tag === 'CleanupRegion') {
+            return region.releases.map((operation) => operation.provenance.span)
+          }
+          return [region.provenance.span]
+        })
         .at(0)
       if (span === undefined) throw new RangeError('Unit entry lowering lost source provenance')
       const adapterId = unitEntryAdapterId(discovery.rootModule)
@@ -591,13 +586,15 @@ export const lowerProgram = (
       contractRow: Object.freeze(['generated:effect-entry']),
     })
     const span = target.regions
-      .flatMap((region) =>
-        region._tag === 'OperationRegion'
-          ? region.operations.map((operation) => operation.provenance.span)
-          : region._tag === 'CleanupRegion'
-            ? region.releases.map((operation) => operation.provenance.span)
-            : [region.provenance.span],
-      )
+      .flatMap((region) => {
+        if (region._tag === 'OperationRegion') {
+          return region.operations.map((operation) => operation.provenance.span)
+        }
+        if (region._tag === 'CleanupRegion') {
+          return region.releases.map((operation) => operation.provenance.span)
+        }
+        return [region.provenance.span]
+      })
       .at(0)
     if (span === undefined) throw new RangeError('Effect entry lowering lost source provenance')
     const failures = resolvedEntry.failures.map((failure, ordinal) =>

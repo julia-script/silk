@@ -1606,26 +1606,29 @@ export interface Violation {
   readonly detail: string
 }
 
-export const operationsOf = (region: Region): ReadonlyArray<Operation> =>
-  region._tag === 'OperationRegion'
-    ? region.operations
-    : region._tag === 'CleanupRegion'
-      ? region.releases
-      : []
+export const operationsOf = (region: Region): ReadonlyArray<Operation> => {
+  if (region._tag === 'OperationRegion') return region.operations
+  if (region._tag === 'CleanupRegion') return region.releases
+  return []
+}
 
-export const operationChildren = (operation: Operation): ReadonlyArray<Operation> =>
-  operation._tag === 'ShortCircuit'
-    ? operation.right.operations
-    : operation._tag === 'Match'
-      ? operation.arms.flatMap((arm) => [
-          ...(arm.guard?.operations ?? []),
-          ...arm.selected.operations,
-        ])
-      : operation._tag === 'RunEffect' ||
-          operation._tag === 'RunEffectValue' ||
-          operation._tag === 'RunStaticEffect'
-        ? [...(operation.failureLoanEnds ?? []), ...(operation.releases ?? [])]
-        : []
+export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
+  if (operation._tag === 'ShortCircuit') return operation.right.operations
+  if (operation._tag === 'Match') {
+    return operation.arms.flatMap((arm) => [
+      ...(arm.guard?.operations ?? []),
+      ...arm.selected.operations,
+    ])
+  }
+  if (
+    operation._tag === 'RunEffect' ||
+    operation._tag === 'RunEffectValue' ||
+    operation._tag === 'RunStaticEffect'
+  ) {
+    return [...(operation.failureLoanEnds ?? []), ...(operation.releases ?? [])]
+  }
+  return []
+}
 
 /** One operation and all structurally nested operations in deterministic source order. */
 export const operationTree = (operation: Operation): ReadonlyArray<Operation> => {

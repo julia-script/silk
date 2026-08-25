@@ -1213,8 +1213,15 @@ export const identityEquals = (self: Identity, other: Identity): boolean =>
   self.span.end === other.span.end &&
   self.ordinal === other.ordinal
 
-const compareStrings = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareStrings = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 /**
  * The single cross-phase ordering: module identity, primary span, code, then phase rank.
@@ -1277,8 +1284,12 @@ export const unterminatedStaticLiteral = (
   span: SourceSpan.SourceSpan,
   delimiter: '"' | "'" = '"',
 ): Diagnostic => {
-  const subject =
-    delimiter === "'" ? 'character' : `${delimiterWidth === 3 ? 'multiline ' : ''}static`
+  let subject: string
+  if (delimiter === "'") {
+    subject = 'character'
+  } else {
+    subject = `${delimiterWidth === 3 ? 'multiline ' : ''}static`
+  }
   return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'lexical',
@@ -1461,6 +1472,19 @@ export const missingToken = (expected: Token.TokenKind, span: SourceSpan.SourceS
     span,
   })
 
+const unexpectedTokensMessage = (
+  encountered: string,
+  context: ParserContext,
+  expectation: string | undefined,
+): string => {
+  if (context === 'syntax') {
+    if (expectation === undefined) return `Unexpected ${encountered}; expected valid syntax`
+    return `Unexpected ${encountered}; expected ${expectation}`
+  }
+  if (context === 'statement') return `Unexpected ${encountered} while parsing a statement`
+  return `Unexpected ${encountered} while parsing a ${context}`
+}
+
 /** Creates the diagnostic associated with one unexpected-token error node. */
 export const unexpectedTokens = (
   unexpected: ReadonlyArray<Token.TokenKind>,
@@ -1480,16 +1504,7 @@ export const unexpectedTokens = (
     phase: 'parser',
     code: unexpectedTokensCode,
     severity: 'error',
-    // Each branch is one complete template, so the generated diagnostic catalog pins every wording
-    // this code can report rather than a fragment with the choice buried in an interpolation.
-    message:
-      context === 'syntax'
-        ? expectation === undefined
-          ? `Unexpected ${encountered}; expected valid syntax`
-          : `Unexpected ${encountered}; expected ${expectation}`
-        : context === 'statement'
-          ? `Unexpected ${encountered} while parsing a statement`
-          : `Unexpected ${encountered} while parsing a ${context}`,
+    message: unexpectedTokensMessage(encountered, context, expectation),
     reason: Object.freeze({
       _tag: 'UnexpectedTokens',
       unexpected: Object.freeze([...unexpected]),
@@ -4257,29 +4272,35 @@ export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     span,
   })
 
+const localSharedAccessEscapeMessage = (kind: 'Callback' | 'Result' | 'Suspension'): string => {
+  if (kind === 'Suspension') {
+    return 'Local-shared access cannot suspend while its exclusive borrow is live'
+  }
+  if (kind === 'Callback') {
+    return 'Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live'
+  }
+  return 'Local-shared access callback cannot return a value that retains its exclusive borrow'
+}
+
 /** Relates one access-scoped escape to the sealed boundary that created the exclusive loan. */
 export const localSharedAccessEscape = (
   kind: 'Callback' | 'Result' | 'Suspension',
   span: SourceSpan.SourceSpan,
   boundary: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
+): Diagnostic => {
+  return Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
     code: localSharedAccessEscapeCode,
     severity: 'error',
-    message:
-      kind === 'Suspension'
-        ? 'Local-shared access cannot suspend while its exclusive borrow is live'
-        : kind === 'Callback'
-          ? 'Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live'
-          : 'Local-shared access callback cannot return a value that retains its exclusive borrow',
+    message: localSharedAccessEscapeMessage(kind),
     reason: Object.freeze({ _tag: 'LocalSharedAccessEscape', kind }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'local-shared access boundary', span: boundary }),
     ]),
   })
+}
 
 /** Creates the diagnostic for a uniquely resolved call with the wrong arity. */
 export const wrongCallArity = (

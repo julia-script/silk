@@ -598,12 +598,9 @@ export const aggregate = Effect.fn('Constant.aggregate')(function* (
         expected = Object.freeze(elementIndices.map(() => typeValue.child))
         kind = typeValue._tag === 'Array' ? 'array' : 'vector'
       } else {
-        const body =
-          typeValue._tag === 'Structure'
-            ? typeValue
-            : typeValue._tag === 'NamedStructure'
-              ? typeValue.body
-              : undefined
+        let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
+        if (typeValue._tag === 'Structure') body = typeValue
+        else if (typeValue._tag === 'NamedStructure') body = typeValue.body
         if (body === undefined || body.fields.length !== elementIndices.length) {
           return yield* Result.fail(
             invalidInput({
@@ -1144,12 +1141,9 @@ export const getElementPtr = Effect.fn('Constant.getElementPtr')(function* (
             current = aggregate.child
             continue
           }
-          const body =
-            aggregate._tag === 'Structure'
-              ? aggregate
-              : aggregate._tag === 'NamedStructure'
-                ? aggregate.body
-                : undefined
+          let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
+          if (aggregate._tag === 'Structure') body = aggregate
+          else if (aggregate._tag === 'NamedStructure') body = aggregate.body
           const field =
             body !== undefined &&
             indexValue._tag === 'Integer' &&

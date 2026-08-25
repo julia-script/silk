@@ -453,12 +453,12 @@ const hirEvidence = (
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
       .flatMap((expression) => {
-        const evidence =
-          expression._tag === 'EffectBindRequirement'
-            ? expression.provider.evidence
-            : expression._tag === 'EffectCatch'
-              ? expression.evidence
-              : Object.freeze([])
+        let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
+        if (expression._tag === 'EffectBindRequirement') {
+          evidence = expression.provider.evidence
+        } else if (expression._tag === 'EffectCatch') {
+          evidence = expression.evidence
+        }
         return evidence.map((proof) => Object.freeze({ evidence: proof, origin: expression.span }))
       }),
   )
@@ -519,13 +519,13 @@ export const specialize = (
   const evidence = Object.freeze(
     [
       ...new Map(concreteEvidence.map((proof) => [Constraint.evidenceKey(proof), proof])).values(),
-    ].sort((left, right) =>
-      Constraint.evidenceKey(left) < Constraint.evidenceKey(right)
-        ? -1
-        : Constraint.evidenceKey(left) > Constraint.evidenceKey(right)
-          ? 1
-          : 0,
-    ),
+    ].sort((left, right) => {
+      const leftKey = Constraint.evidenceKey(left)
+      const rightKey = Constraint.evidenceKey(right)
+      if (leftKey < rightKey) return -1
+      if (leftKey > rightKey) return 1
+      return 0
+    }),
   )
   return Object.freeze({
     _tag: 'ConcreteSpecialization',
@@ -546,15 +546,15 @@ export const requirementSelection = (
 ): Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> | undefined => {
   const wantedKeys = new Set(
     provider.evidence.flatMap((proof) => {
-      const wanted =
-        proof._tag === 'Assumed'
-          ? Constraint.substitute(
-              Constraint.substitute(proof.wanted, proof.substitution),
-              instance.substitution,
-            )
-          : proof._tag === 'RequirementSelection'
-            ? Constraint.substitute(proof.wanted, instance.substitution)
-            : undefined
+      let wanted: Constraint.Constraint | undefined
+      if (proof._tag === 'Assumed') {
+        wanted = Constraint.substitute(
+          Constraint.substitute(proof.wanted, proof.substitution),
+          instance.substitution,
+        )
+      } else if (proof._tag === 'RequirementSelection') {
+        wanted = Constraint.substitute(proof.wanted, instance.substitution)
+      }
       return wanted?._tag === 'ProviderSelectionConstraint' ? [Constraint.key(wanted)] : []
     }),
   )
@@ -755,7 +755,9 @@ type CallTarget = ExecutableOrigin.CallTarget
 const compareInstanceKeys = (left: InstanceKey, right: InstanceKey): number => {
   const leftText = keyText(left)
   const rightText = keyText(right)
-  return leftText < rightText ? -1 : leftText > rightText ? 1 : 0
+  if (leftText < rightText) return -1
+  if (leftText > rightText) return 1
+  return 0
 }
 
 const suspensionFact = (
@@ -889,7 +891,11 @@ export const discover = (
     `${item.cleanupReachable ? 'cleanup' : 'ordinary'}\u0001${keyText(item.key)}\u0001${[
       ...item.ancestors.entries(),
     ]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => {
+        if (left < right) return -1
+        if (left > right) return 1
+        return 0
+      })
       .map(
         ([declaration, ancestor]) =>
           `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,

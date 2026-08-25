@@ -33,12 +33,14 @@ const firstSubstitution = (value: unknown): ReadonlyArray<unknown> | undefined =
   return undefined
 }
 
-const replaceRecordField = (value: unknown, key: string, replacement: unknown): unknown =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? Object.fromEntries(
-        Object.entries(value).map(([field, entry]) => [field, field === key ? replacement : entry]),
-      )
-    : unreachable(`expected a record with ${key}`)
+const replaceRecordField = (value: unknown, key: string, replacement: unknown): unknown => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return unreachable(`expected a record with ${key}`)
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([field, entry]) => [field, field === key ? replacement : entry]),
+  )
+}
 
 const recordField = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

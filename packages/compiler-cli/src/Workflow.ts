@@ -205,13 +205,17 @@ const checkTarget = Effect.fnUntraced(function* (
   }
   const failures = Report.resolutionFailures(Analysis.resolutionFailures(analysis))
   if (failures.length > 0) yield* Console.error(`[${target.id}]\n${failures.join('\n')}`)
-  const status: ExitStatus =
-    failures.length > 0 ? 2 : Diagnostic.hasErrors(Analysis.diagnostics(analysis)) ? 1 : 0
+  let status: ExitStatus = 0
+  if (failures.length > 0) status = 2
+  else if (Diagnostic.hasErrors(Analysis.diagnostics(analysis))) status = 1
   return Object.freeze({ target, status })
 })
 
-const aggregateStatus = (statuses: ReadonlyArray<number>): ExitStatus =>
-  statuses.some((status) => status === 2) ? 2 : statuses.some((status) => status === 1) ? 1 : 0
+const aggregateStatus = (statuses: ReadonlyArray<number>): ExitStatus => {
+  if (statuses.some((status) => status === 2)) return 2
+  if (statuses.some((status) => status === 1)) return 1
+  return 0
+}
 
 /** Performs target-qualified analysis once per resolved selected target. */
 export const checkProject = Effect.fn('Workflow.checkProject')(function* (

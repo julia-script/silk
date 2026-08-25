@@ -204,12 +204,15 @@ const outcomeUses = (region: Mir.Region): ReadonlySet<number> => {
   return region.outcome._tag === 'Return' ? new Set([region.outcome.value.ordinal]) : new Set()
 }
 
-const regionOperations = (region: Mir.Region): ReadonlyArray<Mir.Operation> =>
-  region._tag === 'OperationRegion'
-    ? region.operations
-    : region._tag === 'CleanupRegion'
-      ? region.releases
-      : []
+const regionOperations = (region: Mir.Region): ReadonlyArray<Mir.Operation> => {
+  if (region._tag === 'OperationRegion') {
+    return region.operations
+  }
+  if (region._tag === 'CleanupRegion') {
+    return region.releases
+  }
+  return []
+}
 
 const transferSequence = (
   operations: ReadonlyArray<Mir.Operation>,
@@ -309,12 +312,14 @@ const borrowOf = (
   seen = new Set<number>(),
 ): Extract<Access, { readonly _tag: 'BorrowedDependency' }> => {
   const type = fn.localTypes.at(local.ordinal)
-  const access =
-    type?._tag === 'EffectBorrow'
-      ? type.access
-      : type?._tag === 'Reference' || type?._tag === 'Slice'
-        ? type.type.access
-        : 'Shared'
+  let access: Type.BorrowAccess
+  if (type?._tag === 'EffectBorrow') {
+    access = type.access
+  } else if (type?._tag === 'Reference' || type?._tag === 'Slice') {
+    access = type.type.access
+  } else {
+    access = 'Shared'
+  }
   if (seen.has(local.ordinal))
     return Object.freeze({
       _tag: 'BorrowedDependency',
@@ -372,15 +377,18 @@ const accessOf = (
   definitions: ReadonlyMap<number, Mir.Operation>,
   local: Mir.LocalId,
   type: Mir.Type,
-): Access =>
-  type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EffectBorrow'
-    ? borrowOf(fn, definitions, local)
-    : Mir.isCopy(program.layout, Mir.semanticType(type))
-      ? Object.freeze({ _tag: 'Copy' })
-      : Object.freeze({
-          _tag: 'AffineTransfer',
-          cleanup: CleanupPlan.cleanupPlan(index, Mir.semanticType(type)),
-        })
+): Access => {
+  if (type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EffectBorrow') {
+    return borrowOf(fn, definitions, local)
+  }
+  if (Mir.isCopy(program.layout, Mir.semanticType(type))) {
+    return Object.freeze({ _tag: 'Copy' })
+  }
+  return Object.freeze({
+    _tag: 'AffineTransfer',
+    cleanup: CleanupPlan.cleanupPlan(index, Mir.semanticType(type)),
+  })
+}
 
 const affinityOf = (
   index: DeclarationIndex.Index,
@@ -388,18 +396,20 @@ const affinityOf = (
   type: Mir.Type,
   access: Access,
 ): ExecutionAffinity.ExecutionAffinity => {
-  const retained =
-    type._tag === 'EffectValue'
-      ? ExecutionAffinity.ofEnvironment(
-          index,
-          type.environment.fields.map((field) => Object.freeze({ type: field.type })),
-        )
-      : type._tag === 'CallableValue' && type.environment !== undefined
-        ? ExecutionAffinity.ofEnvironment(
-            index,
-            type.environment.fields.map((field) => Object.freeze({ type: field.type })),
-          )
-        : ExecutionAffinity.ofType(index, Mir.semanticType(type))
+  let retained: ExecutionAffinity.ExecutionAffinity
+  if (type._tag === 'EffectValue') {
+    retained = ExecutionAffinity.ofEnvironment(
+      index,
+      type.environment.fields.map((field) => Object.freeze({ type: field.type })),
+    )
+  } else if (type._tag === 'CallableValue' && type.environment !== undefined) {
+    retained = ExecutionAffinity.ofEnvironment(
+      index,
+      type.environment.fields.map((field) => Object.freeze({ type: field.type })),
+    )
+  } else {
+    retained = ExecutionAffinity.ofType(index, Mir.semanticType(type))
+  }
   if (access._tag !== 'BorrowedDependency') return retained
   const root = fn.localTypes.at(access.root.ordinal)
   return root === undefined
@@ -410,22 +420,25 @@ const affinityOf = (
 const obligationsOf = (
   index: DeclarationIndex.Index,
   type: Mir.Type,
-): LocalSharedOwnership.ObligationPlan =>
-  type._tag === 'EffectValue'
-    ? LocalSharedOwnership.ofEnvironment(
-        index,
-        type.environment.fields.map((field) =>
-          Object.freeze({ access: field.access, type: field.type }),
-        ),
-      )
-    : type._tag === 'CallableValue' && type.environment !== undefined
-      ? LocalSharedOwnership.ofEnvironment(
-          index,
-          type.environment.fields.map((field) =>
-            Object.freeze({ access: field.access, type: field.type }),
-          ),
-        )
-      : LocalSharedOwnership.ofType(index, Mir.semanticType(type))
+): LocalSharedOwnership.ObligationPlan => {
+  if (type._tag === 'EffectValue') {
+    return LocalSharedOwnership.ofEnvironment(
+      index,
+      type.environment.fields.map((field) =>
+        Object.freeze({ access: field.access, type: field.type }),
+      ),
+    )
+  }
+  if (type._tag === 'CallableValue' && type.environment !== undefined) {
+    return LocalSharedOwnership.ofEnvironment(
+      index,
+      type.environment.fields.map((field) =>
+        Object.freeze({ access: field.access, type: field.type }),
+      ),
+    )
+  }
+  return LocalSharedOwnership.ofType(index, Mir.semanticType(type))
+}
 
 const planFor = (
   program: Mir.Module,
@@ -456,14 +469,18 @@ const planFor = (
             : accessOf(program, index, fn, definitions, local, type)
         const executionAffinity = affinityOf(index, fn, type, access)
         const localSharedObligations = obligationsOf(index, type)
-        const runtimeLanes =
-          type._tag === 'EffectValue'
-            ? Layout.effectEnvironmentLanes(program.layout, type.environment)
-            : type._tag === 'CallableValue'
-              ? type.environment === undefined
-                ? []
-                : Layout.callableEnvironmentLanes(program.layout, type.environment)
-              : (Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? [])
+        let runtimeLanes: ReturnType<typeof Layout.effectEnvironmentLanes>
+        if (type._tag === 'EffectValue') {
+          runtimeLanes = Layout.effectEnvironmentLanes(program.layout, type.environment)
+        } else if (type._tag === 'CallableValue') {
+          if (type.environment === undefined) {
+            runtimeLanes = []
+          } else {
+            runtimeLanes = Layout.callableEnvironmentLanes(program.layout, type.environment)
+          }
+        } else {
+          runtimeLanes = Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? []
+        }
         if (
           runtimeLanes.length === 0 &&
           executionAffinity._tag === 'Unrestricted' &&
@@ -601,12 +618,15 @@ export const plan = (
   })
 }
 
-const borrowText = (borrow: BorrowIdentity): string =>
-  borrow._tag === 'MirLoan'
-    ? `loan:${borrow.borrow.function.sourceId}:${borrow.borrow.callSpan.start}:${borrow.borrow.ordinal}`
-    : borrow._tag === 'BorrowedParameter'
-      ? `parameter:${borrow.parameterOrdinal}`
-      : `local:${borrow.local.ordinal}`
+const borrowText = (borrow: BorrowIdentity): string => {
+  if (borrow._tag === 'MirLoan') {
+    return `loan:${borrow.borrow.function.sourceId}:${borrow.borrow.callSpan.start}:${borrow.borrow.ordinal}`
+  }
+  if (borrow._tag === 'BorrowedParameter') {
+    return `parameter:${borrow.parameterOrdinal}`
+  }
+  return `local:${borrow.local.ordinal}`
+}
 
 /** Deterministic inspection encoding used by fresh-lowering tests. */
 export const encode = (self: Module): string =>
@@ -614,13 +634,15 @@ export const encode = (self: Module): string =>
     `suspension-ownership ${self.module}`,
     ...self.plans.flatMap((plan_) => [
       `plan ${Instances.keyText(plan_.function)}@${plan_.span.sourceId}:${plan_.span.start}:${plan_.point.ordinal} frame=${plan_.frame.toLowerCase()}`,
-      ...plan_.slots.map((slot) =>
-        slot.access._tag === 'Copy'
-          ? `  slot ${slot.ordinal} %${slot.local.ordinal} copy ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
-          : slot.access._tag === 'BorrowedDependency'
-            ? `  slot ${slot.ordinal} %${slot.local.ordinal} borrow:${slot.access.access.toLowerCase()} root=%${slot.access.root.ordinal} ${borrowText(slot.access.loan)} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
-            : `  slot ${slot.ordinal} %${slot.local.ordinal} move:${slot.access.cleanup._tag} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`,
-      ),
+      ...plan_.slots.map((slot) => {
+        if (slot.access._tag === 'Copy') {
+          return `  slot ${slot.ordinal} %${slot.local.ordinal} copy ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
+        }
+        if (slot.access._tag === 'BorrowedDependency') {
+          return `  slot ${slot.ordinal} %${slot.local.ordinal} borrow:${slot.access.access.toLowerCase()} root=%${slot.access.root.ordinal} ${borrowText(slot.access.loan)} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
+        }
+        return `  slot ${slot.ordinal} %${slot.local.ordinal} move:${slot.access.cleanup._tag} ${Type.encode(Mir.semanticType(slot.type))} affinity=${ExecutionAffinity.encode(slot.executionAffinity)} obligations=${LocalSharedOwnership.encode(slot.localSharedObligations)}`
+      }),
     ]),
     ...self.executionPackages.flatMap((plan_) => [
       `execution-package ${plan_.package.provenance} slots=${plan_.slots.length} allocation-releases=1 root=${plan_.logicalRoot.toLowerCase()} restore=${plan_.restoration.toLowerCase()} wake=${plan_.wakeControl.toLowerCase()} wake-allocation=${plan_.wakeAllocation.toLowerCase()}`,

@@ -489,20 +489,32 @@ export const analyzeEnumMember = (
     SourceSpan.make(source, qualifierToken.span.start, memberToken.span.end),
     () => node.span,
   )
-  const wrongEnum =
+  let wrongEnum: Diagnostic.Diagnostic | undefined
+  if (
     nominal !== undefined &&
     expected !== undefined &&
     expectedEnum?.canonical._tag === 'Canonical' &&
     !Type.equals(nominal, expected)
-      ? Diagnostic.wrongEnumMember(Type.encode(expected), Type.encode(nominal), memberPathSpan)
-      : nominal !== undefined && typeof expected === 'string' && Scalar.isIntegerSpelling(expected)
-        ? Diagnostic.enumIntegerMismatch(
-            Type.encode(nominal),
-            expected,
-            'EnumToInteger',
-            memberPathSpan,
-          )
-        : undefined
+  ) {
+    wrongEnum = Diagnostic.wrongEnumMember(
+      Type.encode(expected),
+      Type.encode(nominal),
+      memberPathSpan,
+    )
+  } else if (
+    nominal !== undefined &&
+    typeof expected === 'string' &&
+    Scalar.isIntegerSpelling(expected)
+  ) {
+    wrongEnum = Diagnostic.enumIntegerMismatch(
+      Type.encode(nominal),
+      expected,
+      'EnumToInteger',
+      memberPathSpan,
+    )
+  } else {
+    wrongEnum = undefined
+  }
   const unknown =
     member === undefined
       ? Diagnostic.unknownEnumMember(qualifier, memberName, memberToken.span)
@@ -553,27 +565,29 @@ const analyzeEnumValueCall = (
   if (operation === undefined) return undefined
   const argument = argumentsResult.facts.at(0)
   const actual = argument?.type._tag === 'Available' ? argument.type.type : undefined
-  const mismatch =
-    actual === undefined || Type.equals(actual, operation.parameter)
-      ? undefined
-      : enumFactByType(resolution.index, actual) !== undefined
-        ? Diagnostic.wrongEnumMember(
-            Type.encode(operation.parameter),
-            Type.encode(actual),
-            argument?.syntax.span ?? node.span,
-          )
-        : typeof actual === 'string' && Scalar.isIntegerSpelling(actual)
-          ? Diagnostic.enumIntegerMismatch(
-              Type.encode(operation.parameter),
-              actual,
-              'IntegerToEnum',
-              argument?.syntax.span ?? node.span,
-            )
-          : Diagnostic.argumentTypeMismatch(
-              Type.encode(operation.parameter),
-              Type.encode(actual),
-              argument?.syntax.span ?? node.span,
-            )
+  let mismatch: Diagnostic.Diagnostic | undefined
+  if (actual === undefined || Type.equals(actual, operation.parameter)) {
+    mismatch = undefined
+  } else if (enumFactByType(resolution.index, actual) !== undefined) {
+    mismatch = Diagnostic.wrongEnumMember(
+      Type.encode(operation.parameter),
+      Type.encode(actual),
+      argument?.syntax.span ?? node.span,
+    )
+  } else if (typeof actual === 'string' && Scalar.isIntegerSpelling(actual)) {
+    mismatch = Diagnostic.enumIntegerMismatch(
+      Type.encode(operation.parameter),
+      actual,
+      'IntegerToEnum',
+      argument?.syntax.span ?? node.span,
+    )
+  } else {
+    mismatch = Diagnostic.argumentTypeMismatch(
+      Type.encode(operation.parameter),
+      Type.encode(actual),
+      argument?.syntax.span ?? node.span,
+    )
+  }
   const arity =
     argumentsResult.facts.length === 1
       ? undefined
@@ -1008,14 +1022,17 @@ export const intrinsicStruct = (
     sourceId: type.module,
     ordinal,
   })
-  const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
-    ? Object.freeze([
-        Object.freeze(['bytes', 'usize'] as const),
-        Object.freeze(['alignment', 'usize'] as const),
-      ])
-    : Type.equals(type, Type.invalidAlignment)
-      ? Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
-      : Object.freeze([])
+  let fieldTypes: ReadonlyArray<readonly [string, Type.Type]>
+  if (Type.equals(type, Type.layout)) {
+    fieldTypes = Object.freeze([
+      Object.freeze(['bytes', 'usize'] as const),
+      Object.freeze(['alignment', 'usize'] as const),
+    ])
+  } else if (Type.equals(type, Type.invalidAlignment)) {
+    fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
+  } else {
+    fieldTypes = Object.freeze([])
+  }
   return Object.freeze({
     _tag: 'StructDeclaration',
     id,
@@ -1079,22 +1096,18 @@ export const resolveStructTarget = (
     const applied = analyzed.fact._tag === 'Applied' ? analyzed.fact : undefined
     const targetFact = applied?.target ?? analyzed.fact
     const path = targetFact._tag === 'Unresolved' ? targetFact.path : undefined
-    const base =
-      path === undefined
-        ? targetFact._tag === 'Resolved' && Type.isNominal(targetFact.type)
-          ? targetFact.type
-          : undefined
-        : (() => {
-            const candidate = NameResolution.resolveType(
-              nameResolution,
-              resolution.index,
-              source.id,
-              path,
-            ).fact
-            return candidate._tag === 'Resolved' && Type.isNominal(candidate.type)
-              ? candidate.type
-              : undefined
-          })()
+    let base: Type.Nominal | undefined
+    if (path === undefined) {
+      if (targetFact._tag === 'Resolved' && Type.isNominal(targetFact.type)) base = targetFact.type
+    } else {
+      const candidate = NameResolution.resolveType(
+        nameResolution,
+        resolution.index,
+        source.id,
+        path,
+      ).fact
+      if (candidate._tag === 'Resolved' && Type.isNominal(candidate.type)) base = candidate.type
+    }
     const candidate =
       base === undefined
         ? undefined
@@ -1741,12 +1754,14 @@ export const analyzeMatch = (
   const diagnostics: Array<Diagnostic.Diagnostic> = [...(scrutinee?.diagnostics ?? [])]
   const enumScrutinee =
     scrutinee?.type === undefined ? undefined : enumFactByType(resolution.index, scrutinee.type)
-  const members =
-    scrutinee?.type === undefined
-      ? undefined
-      : enumScrutinee === undefined
-        ? Match.membersOf(scrutinee.type)
-        : Match.enumMembersOf(enumScrutinee)
+  let members: readonly Match.CoverageIdentity[] | undefined
+  if (scrutinee?.type === undefined) {
+    members = undefined
+  } else if (enumScrutinee === undefined) {
+    members = Match.membersOf(scrutinee.type)
+  } else {
+    members = Match.enumMembersOf(enumScrutinee)
+  }
 
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
@@ -1865,16 +1880,10 @@ export const analyzeMatch = (
       !transition.reachable &&
       (members?.length ?? 0) > 0
     ) {
-      diagnostics.push(
-        Diagnostic.unreachableMatchArm(
-          pattern._tag === 'UniversalPattern'
-            ? '_'
-            : member === undefined
-              ? 'unknown'
-              : Match.encodeIdentity(member),
-          armNode.span,
-        ),
-      )
+      let identity = 'unknown'
+      if (pattern._tag === 'UniversalPattern') identity = '_'
+      else if (member !== undefined) identity = Match.encodeIdentity(member)
+      diagnostics.push(Diagnostic.unreachableMatchArm(identity, armNode.span))
     }
     if (!guarded) {
       if (pattern._tag === 'UniversalPattern' && wildcardArm === undefined)
@@ -2002,31 +2011,39 @@ export const analyzeMatch = (
       arm.guard.type._tag === 'Available' &&
       arm.guard.type.type !== 'bool',
   )
-  const joinedEffect =
-    joined._tag === 'Joined'
-      ? Type.isRepresented(joined.type)
-        ? Type.isEffect(joined.type.contract)
-          ? joined.type.contract
-          : undefined
-        : Type.isEffect(joined.type)
-          ? joined.type
-          : undefined
-      : undefined
-  const effectAlternatives =
-    joinedEffect === undefined
-      ? Object.freeze([])
-      : Object.freeze(
-          arms.flatMap((arm) => {
-            if (!arm.reachable) return []
-            const representation = representationOfExpression(arm.result)
-            return representation !== undefined &&
-              Type.isExactRepresentationArgument(representation) &&
-              Type.isEffectIdentityArgument(representation.identity) &&
-              Type.isEffect(representation.contract)
-              ? [representation]
-              : []
-          }),
-        )
+  let joinedEffect: Type.Effect | undefined
+  if (joined._tag === 'Joined') {
+    if (Type.isRepresented(joined.type)) {
+      if (Type.isEffect(joined.type.contract)) {
+        joinedEffect = joined.type.contract
+      } else {
+        joinedEffect = undefined
+      }
+    } else if (Type.isEffect(joined.type)) {
+      joinedEffect = joined.type
+    } else {
+      joinedEffect = undefined
+    }
+  } else {
+    joinedEffect = undefined
+  }
+  let effectAlternatives: readonly Type.ExactRepresentationArgument[]
+  if (joinedEffect === undefined) {
+    effectAlternatives = Object.freeze([])
+  } else {
+    effectAlternatives = Object.freeze(
+      arms.flatMap((arm) => {
+        if (!arm.reachable) return []
+        const representation = representationOfExpression(arm.result)
+        return representation !== undefined &&
+          Type.isExactRepresentationArgument(representation) &&
+          Type.isEffectIdentityArgument(representation.identity) &&
+          Type.isEffect(representation.contract)
+          ? [representation]
+          : []
+      }),
+    )
+  }
   const reachableEffectArms =
     joinedEffect === undefined ? 0 : arms.filter((arm) => arm.reachable).length
   const unavailableEffectComposite =
@@ -2045,7 +2062,8 @@ export const analyzeMatch = (
   )
   const erasesCallableIdentity = new Set(callableSites).size > 1
   if (erasesCallableIdentity) diagnostics.push(Diagnostic.callableIdentityErasure(node.span))
-  const type =
+  let type: ExpressionTypeFact
+  if (
     members !== undefined &&
     coverage.exhaustive &&
     arms.every(
@@ -2061,19 +2079,22 @@ export const analyzeMatch = (
     !unavailableEffectComposite &&
     !erasesCallableIdentity &&
     joined._tag === 'Joined'
-      ? availableExpressionType(
-          joinedEffect === undefined
-            ? joined.type
-            : Type.represented(
-                joinedEffect,
-                joinedEffect,
-                effectAlternatives.length === 1
-                  ? (effectAlternatives.at(0) ??
-                      Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives))
-                  : Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives),
-              ),
-        )
-      : unavailableExpressionType
+  ) {
+    type = availableExpressionType(
+      joinedEffect === undefined
+        ? joined.type
+        : Type.represented(
+            joinedEffect,
+            joinedEffect,
+            effectAlternatives.length === 1
+              ? (effectAlternatives.at(0) ??
+                  Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives))
+              : Type.compositeEffectRepresentationArgument(joinedEffect, effectAlternatives),
+          ),
+    )
+  } else {
+    type = unavailableExpressionType
+  }
   const fact: MatchExpressionFact = Object.freeze({
     _tag: 'Match',
     id,
@@ -2698,15 +2719,17 @@ export const analyzeStructLiteral = (
           if (parameter === undefined) return argument
           return inferredArguments.get(Type.key(parameter))?.argument ?? argument
         })
-  const unresolvedParameters =
-    struct === undefined || completedArguments === undefined
-      ? []
-      : struct.typeParameters.flatMap((parameter, ordinal) => {
-          const argument = completedArguments.at(ordinal)
-          return argument !== undefined && isOwnStructArgument(parameter.type, argument)
-            ? [parameter]
-            : []
-        })
+  let unresolvedParameters: DeclarationFacts.TypeParameterFact[]
+  if (struct === undefined || completedArguments === undefined) {
+    unresolvedParameters = []
+  } else {
+    unresolvedParameters = struct.typeParameters.flatMap((parameter, ordinal) => {
+      const argument = completedArguments.at(ordinal)
+      return argument !== undefined && isOwnStructArgument(parameter.type, argument)
+        ? [parameter]
+        : []
+    })
+  }
   for (const parameter of unresolvedParameters) {
     diagnostics.push(
       Diagnostic.uninferredTypeParameter(nominalLabel, parameter.type.name, parameter.syntax.span),
@@ -2728,17 +2751,15 @@ export const analyzeStructLiteral = (
       const parameterKey = Type.key(parameter.type)
       const argument = completedArguments?.at(ordinal)
       const origins = argumentOrigins.get(parameterKey) ?? Object.freeze([])
+      const unavailable = argument === undefined || isOwnStructArgument(parameter.type, argument)
+      let source: StructTypeArgumentFact['source']
+      if (unavailable) source = 'Unavailable'
+      else if (explicitArguments.has(parameterKey)) source = 'Explicit'
+      else source = 'Inferred'
       return Object.freeze({
         parameter: parameter.type,
-        ...(argument === undefined || isOwnStructArgument(parameter.type, argument)
-          ? {}
-          : { argument }),
-        source:
-          argument === undefined || isOwnStructArgument(parameter.type, argument)
-            ? ('Unavailable' as const)
-            : explicitArguments.has(parameterKey)
-              ? ('Explicit' as const)
-              : ('Inferred' as const),
+        ...(unavailable ? {} : { argument }),
+        source,
         origins,
       })
     }) ?? [],
@@ -2762,17 +2783,19 @@ export const analyzeStructLiteral = (
     }
   }
 
-  const fields =
-    struct === undefined
-      ? []
-      : struct.fields.flatMap((field) => {
-          if (field.name._tag !== 'Present') return []
-          const fieldName = field.name.spelling
-          const initializer = initializers.find(
-            (candidate) => candidate.name === fieldName && candidate.state._tag === 'Resolved',
-          )
-          return initializer === undefined ? [] : [{ field, initializer }]
-        })
+  let fields: { field: DeclarationFacts.FieldFact; initializer: StructInitializerFact }[]
+  if (struct === undefined) {
+    fields = []
+  } else {
+    fields = struct.fields.flatMap((field) => {
+      if (field.name._tag !== 'Present') return []
+      const fieldName = field.name.spelling
+      const initializer = initializers.find(
+        (candidate) => candidate.name === fieldName && candidate.state._tag === 'Resolved',
+      )
+      return initializer === undefined ? [] : [{ field, initializer }]
+    })
+  }
   const complete =
     struct !== undefined &&
     completedNominal !== undefined &&
@@ -2962,12 +2985,16 @@ export const analyzeIndexProjection = (
   }
   let bounds: BoundsFact = Object.freeze({ _tag: 'Unavailable' })
   if (array !== undefined && index.type === 'usize') {
-    const literal =
-      index.fact._tag === 'Integer' && index.fact.integer._tag === 'Available'
-        ? index.fact.integer.value <= BigInt(Number.MAX_SAFE_INTEGER)
-          ? Number(index.fact.integer.value)
-          : Number.POSITIVE_INFINITY
-        : undefined
+    let literal: number | undefined
+    if (index.fact._tag === 'Integer' && index.fact.integer._tag === 'Available') {
+      if (index.fact.integer.value <= BigInt(Number.MAX_SAFE_INTEGER)) {
+        literal = Number(index.fact.integer.value)
+      } else {
+        literal = Number.POSITIVE_INFINITY
+      }
+    } else {
+      literal = undefined
+    }
     if (literal === undefined) bounds = Object.freeze({ _tag: 'Runtime', length: array.length })
     else if (literal < 0 || literal >= array.length) {
       const diagnostic = Diagnostic.indexOutOfBounds(literal, array.length, indexNode.span)
@@ -3042,12 +3069,14 @@ export const analyzeProjection = (
     Type.isNominal(subject.type.target)
       ? subject.type
       : undefined
-  const nominal =
-    subject.type !== undefined && Type.isNominal(subject.type)
-      ? subject.type
-      : reference !== undefined && Type.isNominal(reference.target)
-        ? reference.target
-        : undefined
+  let nominal: Type.Nominal | undefined
+  if (subject.type !== undefined && Type.isNominal(subject.type)) {
+    nominal = subject.type
+  } else if (reference !== undefined && Type.isNominal(reference.target)) {
+    nominal = reference.target
+  } else {
+    nominal = undefined
+  }
   const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
   const borrowAccess =
     subject.fact._tag === 'IndexProjection' || subject.fact._tag === 'FieldProjection'
@@ -3684,36 +3713,42 @@ export function analyzeBuiltinCall(
           call,
           resolution,
         )
-  const missingDiagnostic =
-    actor === undefined
-      ? Diagnostic.unknownActor(actorSpelling, actorToken.span)
-      : signature === undefined
-        ? Diagnostic.unknownActorOperation(actorSpelling, operationSpelling, operationToken.span)
-        : undefined
-  const reference: CallReferenceFact =
-    signature !== undefined
-      ? Object.freeze({
-          _tag: 'ResolvedBuiltin',
-          spelling: `${actorSpelling}.${operationSpelling}`,
-          token: operationToken,
-          actor: actorSpelling,
-          operation: signature.operation,
-          intrinsic: signature.id,
-          parameters: instantiatedParameters,
-          result: instantiatedResult ?? signature.result,
-          unsafe: signature.unsafe === true,
-          ...(signature.returnedBorrowParameter === undefined
-            ? {}
-            : { returnedBorrowParameter: signature.returnedBorrowParameter }),
-        })
-      : Object.freeze({
-          _tag: 'Missing',
-          spelling: `${actorSpelling}.${operationSpelling}`,
-          token: actor === undefined ? actorToken : operationToken,
-          ...(missingDiagnostic === undefined
-            ? {}
-            : { cause: Diagnostic.identity(missingDiagnostic) }),
-        })
+  let missingDiagnostic: Diagnostic.Diagnostic | undefined
+  if (actor === undefined) {
+    missingDiagnostic = Diagnostic.unknownActor(actorSpelling, actorToken.span)
+  } else if (signature === undefined) {
+    missingDiagnostic = Diagnostic.unknownActorOperation(
+      actorSpelling,
+      operationSpelling,
+      operationToken.span,
+    )
+  } else {
+    missingDiagnostic = undefined
+  }
+  let reference: CallReferenceFact
+  if (signature !== undefined) {
+    reference = Object.freeze({
+      _tag: 'ResolvedBuiltin',
+      spelling: `${actorSpelling}.${operationSpelling}`,
+      token: operationToken,
+      actor: actorSpelling,
+      operation: signature.operation,
+      intrinsic: signature.id,
+      parameters: instantiatedParameters,
+      result: instantiatedResult ?? signature.result,
+      unsafe: signature.unsafe === true,
+      ...(signature.returnedBorrowParameter === undefined
+        ? {}
+        : { returnedBorrowParameter: signature.returnedBorrowParameter }),
+    })
+  } else {
+    reference = Object.freeze({
+      _tag: 'Missing',
+      spelling: `${actorSpelling}.${operationSpelling}`,
+      token: actor === undefined ? actorToken : operationToken,
+      ...(missingDiagnostic === undefined ? {} : { cause: Diagnostic.identity(missingDiagnostic) }),
+    })
+  }
   if (
     reference._tag === 'ResolvedBuiltin' &&
     declaredTypeParameters.length === 0 &&
@@ -3766,19 +3801,19 @@ export function analyzeBuiltinCall(
 export const builtinArgumentMappings = (
   reference: CallReferenceFact,
   argumentsList: ReadonlyArray<ArgumentFact>,
-): ReadonlyArray<BuiltinArgumentMappingFact> =>
-  reference._tag !== 'ResolvedBuiltin'
-    ? Object.freeze([])
-    : Object.freeze(
-        reference.parameters.flatMap(
-          (expected, ordinal): ReadonlyArray<BuiltinArgumentMappingFact> => {
-            const argument = argumentsList.at(ordinal)
-            return argument === undefined
-              ? []
-              : [Object.freeze({ _tag: 'BuiltinArgumentMapping', argument, ordinal, expected })]
-          },
-        ),
-      )
+): ReadonlyArray<BuiltinArgumentMappingFact> => {
+  if (reference._tag !== 'ResolvedBuiltin') {
+    return Object.freeze([])
+  }
+  return Object.freeze(
+    reference.parameters.flatMap((expected, ordinal): ReadonlyArray<BuiltinArgumentMappingFact> => {
+      const argument = argumentsList.at(ordinal)
+      return argument === undefined
+        ? []
+        : [Object.freeze({ _tag: 'BuiltinArgumentMapping', argument, ordinal, expected })]
+    }),
+  )
+}
 
 export const analyzeGroupedExpression = (
   source: SourceFile.SourceFile,
@@ -3921,19 +3956,20 @@ export const boundOperatorSelections = (
 ): ReadonlyArray<OperatorContractSelection> =>
   Object.freeze(
     declaration.typeParameters.flatMap((parameter) =>
-      parameter.bounds.flatMap((bound) =>
-        bound._tag !== 'ResolvedBound'
-          ? []
-          : bound.application.operations.flatMap((operation) => {
-              if (operation.declaration.operator?.operator !== operator) return []
-              const selected = operatorContractSelection(
-                bound.application.capability,
-                parameter.type,
-                operation,
-              )
-              return selected === undefined ? [] : [selected]
-            }),
-      ),
+      parameter.bounds.flatMap((bound) => {
+        if (bound._tag !== 'ResolvedBound') {
+          return []
+        }
+        return bound.application.operations.flatMap((operation) => {
+          if (operation.declaration.operator?.operator !== operator) return []
+          const selected = operatorContractSelection(
+            bound.application.capability,
+            parameter.type,
+            operation,
+          )
+          return selected === undefined ? [] : [selected]
+        })
+      }),
     ),
   )
 
@@ -4103,12 +4139,14 @@ export const analyzeOperatorExpression = (
         ? Operator.prefix(element.kind) !== undefined
         : Operator.infix(element.kind) !== undefined),
   )
-  const operator =
-    operatorToken === undefined
-      ? undefined
-      : node.kind === 'PrefixExpression'
-        ? Operator.prefix(operatorToken.kind)
-        : Operator.infix(operatorToken.kind)?.operator
+  let operator: Operator.Prefix | Operator.Infix | undefined
+  if (operatorToken === undefined) {
+    operator = undefined
+  } else if (node.kind === 'PrefixExpression') {
+    operator = Operator.prefix(operatorToken.kind)
+  } else {
+    operator = Operator.infix(operatorToken.kind)?.operator
+  }
   const operandNodes = node.children.filter(isExpressionNode)
   if (operator !== undefined && Operator.isShortCircuit(operator)) {
     return analyzeShortCircuitExpression(
@@ -4215,12 +4253,13 @@ export const analyzeOperatorExpression = (
       firstEnum !== undefined &&
       firstEnum.canonical._tag === 'Canonical'
     ) {
+      const equalityOperator = operator === 'Equals' ? 'Equals' : 'NotEquals'
       const reference: CallReferenceFact = Object.freeze({
         _tag: 'ResolvedEnumEquality',
         spelling: spelling(source, operatorToken),
         token: operatorToken,
         enum: firstEnum.canonical.id,
-        operator,
+        operator: equalityOperator,
       })
       return Object.freeze({
         fact: Object.freeze({
@@ -4245,22 +4284,25 @@ export const analyzeOperatorExpression = (
         type: 'bool',
       })
     }
-    const diagnostic = isOrdering
-      ? Diagnostic.enumOrdering(
-          firstEnum === undefined ? secondTypeText : firstTypeText,
-          spelling(source, operatorToken),
-          operatorToken.span,
-        )
-      : isEquality && firstEnum !== undefined && secondEnum !== undefined
-        ? Diagnostic.crossEnumEquality(firstTypeText, secondTypeText, operatorToken.span)
-        : isEquality
-          ? Diagnostic.enumIntegerMismatch(
-              firstEnum === undefined ? secondTypeText : firstTypeText,
-              firstEnum === undefined ? firstTypeText : secondTypeText,
-              firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
-              operatorToken.span,
-            )
-          : undefined
+    let diagnostic: Diagnostic.Diagnostic | undefined
+    if (isOrdering) {
+      diagnostic = Diagnostic.enumOrdering(
+        firstEnum === undefined ? secondTypeText : firstTypeText,
+        spelling(source, operatorToken),
+        operatorToken.span,
+      )
+    } else if (isEquality && firstEnum !== undefined && secondEnum !== undefined) {
+      diagnostic = Diagnostic.crossEnumEquality(firstTypeText, secondTypeText, operatorToken.span)
+    } else if (isEquality) {
+      diagnostic = Diagnostic.enumIntegerMismatch(
+        firstEnum === undefined ? secondTypeText : firstTypeText,
+        firstEnum === undefined ? firstTypeText : secondTypeText,
+        firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
+        operatorToken.span,
+      )
+    } else {
+      diagnostic = undefined
+    }
     if (diagnostic !== undefined) {
       const reference: CallReferenceFact = Object.freeze({
         _tag: 'Missing',
@@ -4349,12 +4391,14 @@ export const analyzeOperatorExpression = (
       type: undefined,
     })
   }
-  const selectedActor: Operator.Actor =
-    selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)
-      ? 'string'
-      : selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)
-        ? selectedFirstType.type
-        : Scalar.defaultInteger.spelling
+  let selectedActor: Operator.Actor
+  if (selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)) {
+    selectedActor = 'string'
+  } else if (selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)) {
+    selectedActor = selectedFirstType.type
+  } else {
+    selectedActor = Scalar.defaultInteger.spelling
+  }
   const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation, 'Primitive')
   if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
@@ -4525,8 +4569,15 @@ export const intrinsicEffectCaptureAccess = (
 
 export const strongestEffectAccess = (
   ...accesses: ReadonlyArray<Type.Effect['access']>
-): Type.Effect['access'] =>
-  accesses.includes('Take') ? 'Take' : accesses.includes('Exclusive') ? 'Exclusive' : 'Shared'
+): Type.Effect['access'] => {
+  if (accesses.includes('Take')) {
+    return 'Take'
+  }
+  if (accesses.includes('Exclusive')) {
+    return 'Exclusive'
+  }
+  return 'Shared'
+}
 
 export const intrinsicOperationTarget = (
   source: SourceFile.SourceFile,
@@ -4644,8 +4695,18 @@ export const effectCaptureFacts = (
   assumptions: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<EffectCaptureFact> => {
   const captures = new Map<string, EffectCaptureFact>()
-  const rank = (access: EffectCaptureFact['access']): number =>
-    access === 'Take' ? 3 : access === 'Exclusive' ? 2 : access === 'Shared' ? 1 : 0
+  const rank = (access: EffectCaptureFact['access']): number => {
+    if (access === 'Take') {
+      return 3
+    }
+    if (access === 'Exclusive') {
+      return 2
+    }
+    if (access === 'Shared') {
+      return 1
+    }
+    return 0
+  }
   const recordReference = (
     reference: BindingDeclarationFact | ParameterFact | undefined,
     requested: EffectCaptureFact['access'],
@@ -4662,12 +4723,14 @@ export const effectCaptureFacts = (
     }
   }
   const record = (fact: IdentifierExpressionFact, requested: EffectCaptureFact['access']): void => {
-    const reference =
-      fact.reference._tag === 'ResolvedBinding'
-        ? fact.reference.binding
-        : fact.reference._tag === 'Resolved'
-          ? fact.reference.parameter
-          : undefined
+    let reference: DeclarationFacts.ParameterFact | BindingDeclarationFact | undefined
+    if (fact.reference._tag === 'ResolvedBinding') {
+      reference = fact.reference.binding
+    } else if (fact.reference._tag === 'Resolved') {
+      reference = fact.reference.parameter
+    } else {
+      reference = undefined
+    }
     recordReference(
       reference,
       requested,
@@ -5061,10 +5124,14 @@ export function analyzeExpression(
         ? Diagnostic.invalidStaticLiteral(result.detail, node.span)
         : undefined
     const data = result?._tag === 'Decoded' ? result.data : undefined
-    const type =
-      data === undefined
-        ? unavailableExpressionType
-        : availableExpressionType(data.kind === 'Text' ? Type.string : Type.slice('Shared', 'u8'))
+    let type: ExpressionTypeFact
+    if (data === undefined) {
+      type = unavailableExpressionType
+    } else {
+      type = availableExpressionType(
+        data.kind === 'Text' ? Type.string : Type.slice('Shared', 'u8'),
+      )
+    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'StaticText',
@@ -5139,14 +5206,18 @@ export function analyzeExpression(
         ? undefined
         : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
     if (subject === undefined) throw new RangeError('Run expression requires one effect subject')
-    const effect =
-      subject.type !== undefined && Type.isEffect(subject.type)
-        ? subject.type
-        : subject.type !== undefined &&
-            Type.isRepresented(subject.type) &&
-            Type.isEffect(subject.type.contract)
-          ? subject.type.contract
-          : undefined
+    let effect: Type.Effect | undefined
+    if (subject.type !== undefined && Type.isEffect(subject.type)) {
+      effect = subject.type
+    } else if (
+      subject.type !== undefined &&
+      Type.isRepresented(subject.type) &&
+      Type.isEffect(subject.type.contract)
+    ) {
+      effect = subject.type.contract
+    } else {
+      effect = undefined
+    }
     const type =
       effect !== undefined ? availableExpressionType(effect.success) : unavailableExpressionType
     const allowed =
@@ -5433,21 +5504,23 @@ export function analyzeExpression(
         operation === undefined
           ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
           : undefined
-      const reference: CallReferenceFact =
-        operation === undefined
-          ? Object.freeze({
-              _tag: 'Missing',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-            })
-          : Object.freeze({
-              _tag: 'ResolvedServiceOperation',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              service: qualifierLookup.declaration,
-              operation,
-            })
+      let reference: CallReferenceFact
+      if (operation === undefined) {
+        reference = Object.freeze({
+          _tag: 'Missing',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+        })
+      } else {
+        reference = Object.freeze({
+          _tag: 'ResolvedServiceOperation',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          service: qualifierLookup.declaration,
+          operation,
+        })
+      }
       return finishDeclarationCall(
         node,
         reference,
@@ -5520,30 +5593,34 @@ export function analyzeExpression(
           ? undefined
           : DeclarationFacts.lookup(resolution.index, actorModule, member)
       const candidate = memberLookup?._tag === 'Resolved' ? memberLookup.declaration : undefined
-      const diagnostic =
-        candidate === undefined
-          ? Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
-          : candidate.visibility === 'Private'
-            ? Diagnostic.inaccessibleImportedMember(
-                actorModule ?? qualifier,
-                member,
-                memberToken.span,
-              )
-            : undefined
-      const reference: CallReferenceFact =
-        candidate !== undefined && candidate.visibility === 'Public'
-          ? Object.freeze({
-              _tag: 'Resolved',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              declaration: candidate,
-            })
-          : Object.freeze({
-              _tag: 'Missing',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-            })
+      let diagnostic: Diagnostic.Diagnostic | undefined
+      if (candidate === undefined) {
+        diagnostic = Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+      } else if (candidate.visibility === 'Private') {
+        diagnostic = Diagnostic.inaccessibleImportedMember(
+          actorModule ?? qualifier,
+          member,
+          memberToken.span,
+        )
+      } else {
+        diagnostic = undefined
+      }
+      let reference: CallReferenceFact
+      if (candidate !== undefined && candidate.visibility === 'Public') {
+        reference = Object.freeze({
+          _tag: 'Resolved',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          declaration: candidate,
+        })
+      } else {
+        reference = Object.freeze({
+          _tag: 'Missing',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+        })
+      }
       return finishDeclarationCall(
         node,
         reference,
@@ -5557,30 +5634,38 @@ export function analyzeExpression(
     if (qualifierLookup._tag === 'Namespace') {
       const memberLookup = DeclarationFacts.lookup(resolution.index, qualifierLookup.module, member)
       const candidate = memberLookup._tag === 'Resolved' ? memberLookup.declaration : undefined
-      const diagnostic =
-        candidate === undefined
-          ? Diagnostic.unknownImportedMember(qualifierLookup.module, member, memberToken.span)
-          : candidate.visibility === 'Private'
-            ? Diagnostic.inaccessibleImportedMember(
-                qualifierLookup.module,
-                member,
-                memberToken.span,
-              )
-            : undefined
-      const reference: CallReferenceFact =
-        candidate !== undefined && candidate.visibility === 'Public'
-          ? Object.freeze({
-              _tag: 'Resolved',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              declaration: candidate,
-            })
-          : Object.freeze({
-              _tag: 'Missing',
-              spelling: `${qualifier}.${member}`,
-              token: memberToken,
-              ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
-            })
+      let diagnostic: Diagnostic.Diagnostic | undefined
+      if (candidate === undefined) {
+        diagnostic = Diagnostic.unknownImportedMember(
+          qualifierLookup.module,
+          member,
+          memberToken.span,
+        )
+      } else if (candidate.visibility === 'Private') {
+        diagnostic = Diagnostic.inaccessibleImportedMember(
+          qualifierLookup.module,
+          member,
+          memberToken.span,
+        )
+      } else {
+        diagnostic = undefined
+      }
+      let reference: CallReferenceFact
+      if (candidate !== undefined && candidate.visibility === 'Public') {
+        reference = Object.freeze({
+          _tag: 'Resolved',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          declaration: candidate,
+        })
+      } else {
+        reference = Object.freeze({
+          _tag: 'Missing',
+          spelling: `${qualifier}.${member}`,
+          token: memberToken,
+          ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+        })
+      }
       return finishDeclarationCall(
         node,
         reference,
@@ -5595,21 +5680,20 @@ export function analyzeExpression(
       qualifierLookup._tag === 'Missing' || qualifierLookup._tag === 'Resolved'
         ? Diagnostic.unknownActor(qualifier, qualifierToken.span)
         : undefined
-    const inheritedCause =
-      qualifierLookup._tag === 'Unavailable'
-        ? qualifierLookup.cause
-        : qualifierLookup._tag === 'Conflict'
-          ? qualifierLookup.conflict.cause
-          : undefined
+    let inheritedCause: Diagnostic.Identity | undefined
+    if (qualifierLookup._tag === 'Unavailable') {
+      inheritedCause = qualifierLookup.cause
+    } else if (qualifierLookup._tag === 'Conflict') {
+      inheritedCause = qualifierLookup.conflict.cause
+    } else {
+      inheritedCause = undefined
+    }
+    const cause = diagnostic !== undefined ? Diagnostic.identity(diagnostic) : inheritedCause
     const reference: CallReferenceFact = Object.freeze({
       _tag: 'Missing',
       spelling: `${qualifier}.${member}`,
       token: qualifierToken,
-      ...(diagnostic !== undefined
-        ? { cause: Diagnostic.identity(diagnostic) }
-        : inheritedCause === undefined
-          ? {}
-          : { cause: inheritedCause }),
+      ...(cause === undefined ? {} : { cause }),
     })
     return finishDeclarationCall(
       node,
@@ -5653,65 +5737,66 @@ export function analyzeExpression(
   const tokenSpelling = spelling(source, token)
   const resolvedLookup = NameResolution.lookup(resolution.scope, resolution.index, tokenSpelling)
   const localLookup = lookupDeclaration(declarations, tokenSpelling)
-  const lookup: DeclarationFacts.DeclarationLookup =
-    resolvedLookup._tag === 'Conflict'
-      ? Object.freeze({
-          _tag: 'Ambiguous',
-          spelling: tokenSpelling,
-          declarations: Object.freeze(
-            resolvedLookup.conflict.bindings.flatMap((binding) => {
-              if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember')
-                return []
-              const declaration = DeclarationFacts.byCanonical(
-                resolution.index,
-                binding.declaration,
-              )
-              return declaration?._tag === 'FunctionDeclaration' ? [declaration] : []
-            }),
-          ),
-        })
-      : localLookup._tag === 'Ambiguous'
-        ? localLookup
-        : resolvedLookup._tag === 'Resolved' &&
-            resolvedLookup.declaration._tag === 'FunctionDeclaration'
-          ? Object.freeze({
-              _tag: 'Resolved',
-              spelling: tokenSpelling,
-              declaration: resolvedLookup.declaration,
-            })
-          : resolvedLookup._tag === 'Missing'
-            ? localLookup
-            : Object.freeze({ _tag: 'Missing', spelling: tokenSpelling })
+  let lookup: DeclarationFacts.DeclarationLookup
+  if (resolvedLookup._tag === 'Conflict') {
+    lookup = Object.freeze({
+      _tag: 'Ambiguous',
+      spelling: tokenSpelling,
+      declarations: Object.freeze(
+        resolvedLookup.conflict.bindings.flatMap((binding) => {
+          if (binding._tag !== 'LocalDeclaration' && binding._tag !== 'ImportedMember') return []
+          const declaration = DeclarationFacts.byCanonical(resolution.index, binding.declaration)
+          return declaration?._tag === 'FunctionDeclaration' ? [declaration] : []
+        }),
+      ),
+    })
+  } else if (localLookup._tag === 'Ambiguous') {
+    lookup = localLookup
+  } else if (
+    resolvedLookup._tag === 'Resolved' &&
+    resolvedLookup.declaration._tag === 'FunctionDeclaration'
+  ) {
+    lookup = Object.freeze({
+      _tag: 'Resolved',
+      spelling: tokenSpelling,
+      declaration: resolvedLookup.declaration,
+    })
+  } else if (resolvedLookup._tag === 'Missing') {
+    lookup = localLookup
+  } else {
+    lookup = Object.freeze({ _tag: 'Missing', spelling: tokenSpelling })
+  }
   const missingDiagnostic =
     lookup._tag === 'Missing' && resolvedLookup._tag !== 'Unavailable'
       ? Diagnostic.unknownFunction(tokenSpelling, token.span)
       : undefined
-  const reference: CallReferenceFact =
-    lookup._tag === 'Resolved'
-      ? Object.freeze({
-          _tag: 'Resolved',
-          spelling: tokenSpelling,
-          token,
-          declaration: lookup.declaration,
-        })
-      : lookup._tag === 'Ambiguous'
-        ? Object.freeze({
-            _tag: 'Ambiguous',
-            spelling: tokenSpelling,
-            token,
-            declarations: lookup.declarations,
-            ...(resolvedLookup._tag === 'Conflict' ? { cause: resolvedLookup.conflict.cause } : {}),
-          })
-        : Object.freeze({
-            _tag: 'Missing',
-            spelling: tokenSpelling,
-            token,
-            ...(missingDiagnostic !== undefined
-              ? { cause: Diagnostic.identity(missingDiagnostic) }
-              : resolvedLookup._tag === 'Unavailable' && resolvedLookup.cause !== undefined
-                ? { cause: resolvedLookup.cause }
-                : {}),
-          })
+  let reference: CallReferenceFact
+  if (lookup._tag === 'Resolved') {
+    reference = Object.freeze({
+      _tag: 'Resolved',
+      spelling: tokenSpelling,
+      token,
+      declaration: lookup.declaration,
+    })
+  } else if (lookup._tag === 'Ambiguous') {
+    reference = Object.freeze({
+      _tag: 'Ambiguous',
+      spelling: tokenSpelling,
+      token,
+      declarations: lookup.declarations,
+      ...(resolvedLookup._tag === 'Conflict' ? { cause: resolvedLookup.conflict.cause } : {}),
+    })
+  } else {
+    let cause: ReturnType<typeof Diagnostic.identity> | undefined
+    if (missingDiagnostic !== undefined) cause = Diagnostic.identity(missingDiagnostic)
+    else if (resolvedLookup._tag === 'Unavailable') cause = resolvedLookup.cause
+    reference = Object.freeze({
+      _tag: 'Missing',
+      spelling: tokenSpelling,
+      token,
+      ...(cause === undefined ? {} : { cause }),
+    })
+  }
   if (
     reference._tag === 'Resolved' &&
     isSectionArity(reference.declaration.parameters.length, argumentsResult.facts.length)
@@ -6007,10 +6092,13 @@ export const statementExpressionNode = (statement: SyntaxTree.Node): SyntaxTree.
 export const compareDiagnostics = (
   left: Diagnostic.Diagnostic,
   right: Diagnostic.Diagnostic,
-): number =>
-  left.span.start - right.span.start ||
-  left.span.end - right.span.end ||
-  (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
+): number => {
+  const spanOrder = left.span.start - right.span.start || left.span.end - right.span.end
+  if (spanOrder !== 0) return spanOrder
+  if (left.code < right.code) return -1
+  if (left.code > right.code) return 1
+  return 0
+}
 
 export interface FunctionAnalysis {
   readonly fact: FunctionFact

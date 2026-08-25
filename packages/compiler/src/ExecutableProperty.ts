@@ -38,8 +38,15 @@ const cause = (reason: Cause['reason'], path: ReadonlyArray<string>): Cause =>
 
 const causeKey = (self: Cause): string => `${self.reason}\0${self.path.join('\0')}`
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 const verdict = (causes: ReadonlyArray<Cause>): Verdict => {
   const distinct = [...new Map(causes.map((entry) => [causeKey(entry), entry])).values()].sort(
@@ -80,19 +87,20 @@ const nestedLoanCauses = (
       type.arguments,
     ) ?? new Map()
   const next = new Set(active).add(identity)
-  return declaration.fields.flatMap((field) =>
-    field.declaredType._tag === 'Resolved'
-      ? nestedLoanCauses(
-          index,
-          Type.substitute(field.declaredType.type, substitution),
-          [
-            ...path,
-            `${identity}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
-          ],
-          next,
-        )
-      : [cause('Unavailable', [...path, `${identity}.#${field.id.ordinal}`])],
-  )
+  return declaration.fields.flatMap((field) => {
+    if (field.declaredType._tag === 'Resolved') {
+      return nestedLoanCauses(
+        index,
+        Type.substitute(field.declaredType.type, substitution),
+        [
+          ...path,
+          `${identity}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
+        ],
+        next,
+      )
+    }
+    return [cause('Unavailable', [...path, `${identity}.#${field.id.ordinal}`])]
+  })
 }
 
 export interface EnvironmentCapture {
@@ -184,11 +192,14 @@ const representedSubjectsOfType = (
 ): ReadonlyArray<string> => {
   if (Type.isRepresented(type)) {
     const argument = type.representation.argument
-    const alternatives = Type.isExactRepresentationArgument(argument)
-      ? [argument]
-      : Type.isCompositeEffectRepresentationArgument(argument)
-        ? argument.alternatives
-        : []
+    let alternatives: readonly Type.ExactRepresentationArgument[]
+    if (Type.isExactRepresentationArgument(argument)) {
+      alternatives = [argument]
+    } else if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      alternatives = argument.alternatives
+    } else {
+      alternatives = []
+    }
     return Object.freeze(
       alternatives.flatMap((alternative) => {
         const identity = alternative.identity
@@ -306,12 +317,14 @@ export const derive = (
         direct: fact.detached,
         dependencies: Object.freeze(
           effect.captures.flatMap((capture) => {
-            const directTarget =
-              capture.effectIdentity !== undefined
-                ? `Effect:${capture.effectIdentity}`
-                : capture.callableIdentity === undefined
-                  ? undefined
-                  : callableSubjectOf(discovery, capture.callableIdentity)
+            let directTarget: string | undefined
+            if (capture.effectIdentity !== undefined) {
+              directTarget = `Effect:${capture.effectIdentity}`
+            } else if (capture.callableIdentity === undefined) {
+              directTarget = undefined
+            } else {
+              directTarget = callableSubjectOf(discovery, capture.callableIdentity)
+            }
             const targets = [
               ...(directTarget === undefined ? [] : [directTarget]),
               ...representedSubjectsOfType(discovery, index, capture.type),
@@ -468,12 +481,15 @@ const factOfExact = (
 
 const exactAlternatives = (
   argument: Type.GenericArgument,
-): ReadonlyArray<Type.ExactRepresentationArgument> =>
-  Type.isExactRepresentationArgument(argument)
-    ? Object.freeze([argument])
-    : Type.isCompositeEffectRepresentationArgument(argument)
-      ? argument.alternatives
-      : Object.freeze([])
+): ReadonlyArray<Type.ExactRepresentationArgument> => {
+  if (Type.isExactRepresentationArgument(argument)) {
+    return Object.freeze([argument])
+  }
+  if (Type.isCompositeEffectRepresentationArgument(argument)) {
+    return argument.alternatives
+  }
+  return Object.freeze([])
+}
 
 const nominalApplications = (type: Type.Type): ReadonlyArray<Type.Nominal> => {
   if (Type.isNominal(type))
@@ -527,26 +543,30 @@ export const violationDiagnostics = (
     if (alternatives.length === 0 && ordinary === undefined) return []
     const exactFacts = alternatives.map((alternative) => factOfExact(self, alternative, facts))
     return parameter.staticProperties.flatMap((property) => {
-      const ordinaryVerdict =
-        ordinary === undefined
-          ? undefined
-          : property === 'Intrinsic.Detached'
-            ? detachedOfType(index, ordinary)
-            : verdict([cause('Unavailable', [Type.encode(ordinary)])])
-      const failed =
-        ordinaryVerdict === undefined
-          ? exactFacts.flatMap((fact, factOrdinal) => {
-              const propertyVerdict =
-                property === 'Intrinsic.Detached' ? fact?.detached : fact?.nonParking
-              return propertyVerdict === undefined
-                ? [cause('Unavailable', [`alternative#${factOrdinal}`])]
-                : propertyVerdict._tag === 'Unsatisfied'
-                  ? propertyVerdict.causes
-                  : []
-            })
-          : ordinaryVerdict._tag === 'Unsatisfied'
-            ? ordinaryVerdict.causes
-            : []
+      let ordinaryVerdict: Verdict | undefined
+      if (ordinary === undefined) {
+        ordinaryVerdict = undefined
+      } else if (property === 'Intrinsic.Detached') {
+        ordinaryVerdict = detachedOfType(index, ordinary)
+      } else {
+        ordinaryVerdict = verdict([cause('Unavailable', [Type.encode(ordinary)])])
+      }
+      let failed: readonly Cause[]
+      if (ordinaryVerdict === undefined) {
+        failed = exactFacts.flatMap((fact, factOrdinal) => {
+          const propertyVerdict =
+            property === 'Intrinsic.Detached' ? fact?.detached : fact?.nonParking
+          if (propertyVerdict === undefined) {
+            return [cause('Unavailable', [`alternative#${factOrdinal}`])]
+          }
+          if (propertyVerdict._tag === 'Unsatisfied') return propertyVerdict.causes
+          return []
+        })
+      } else if (ordinaryVerdict._tag === 'Unsatisfied') {
+        failed = ordinaryVerdict.causes
+      } else {
+        failed = []
+      }
       return failed.length === 0
         ? []
         : [
@@ -573,24 +593,25 @@ export const violationDiagnostics = (
     instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)
-      .flatMap((expression) =>
-        expression._tag === 'Unavailable'
-          ? []
-          : nominalApplications(expression.type).flatMap((application) => {
-              const declaration = DeclarationFacts.byCanonical(index, {
-                _tag: 'CanonicalDeclarationId',
-                module: application.module,
-                name: application.name,
-              })
-              if (declaration === undefined || !('typeParameters' in declaration)) return []
-              return declaration.typeParameters.flatMap((parameter, ordinal) => {
-                const argument = application.arguments.at(ordinal)
-                return argument === undefined
-                  ? []
-                  : diagnosticsFor(parameter, argument, expression.span)
-              })
-            }),
-      ),
+      .flatMap((expression) => {
+        if (expression._tag === 'Unavailable') {
+          return []
+        }
+        return nominalApplications(expression.type).flatMap((application) => {
+          const declaration = DeclarationFacts.byCanonical(index, {
+            _tag: 'CanonicalDeclarationId',
+            module: application.module,
+            name: application.name,
+          })
+          if (declaration === undefined || !('typeParameters' in declaration)) return []
+          return declaration.typeParameters.flatMap((parameter, ordinal) => {
+            const argument = application.arguments.at(ordinal)
+            return argument === undefined
+              ? []
+              : diagnosticsFor(parameter, argument, expression.span)
+          })
+        })
+      }),
   )
   const distinct = new Map<string, Diagnostic.Diagnostic>()
   for (const diagnostic of [...functionApplications, ...nominalApplications_]) {

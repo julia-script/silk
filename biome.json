@@ -26,6 +26,9 @@
       "preset": "recommended",
       "correctness": {
         "useYield": "off"
+      },
+      "style": {
+        "noNestedTernary": "error"
       }
     }
   },

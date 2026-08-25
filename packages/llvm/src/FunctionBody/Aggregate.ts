@@ -50,12 +50,9 @@ const aggregatePath = (
         current = description.child
         continue
       }
-      const fields =
-        description._tag === 'Structure'
-          ? description.fields
-          : description._tag === 'NamedStructure'
-            ? description.body?.fields
-            : undefined
+      let fields: ReadonlyArray<number> | undefined
+      if (description._tag === 'Structure') fields = description.fields
+      else if (description._tag === 'NamedStructure') fields = description.body?.fields
       const field = fields?.[index]
       if (field === undefined) {
         return yield* Result.fail(

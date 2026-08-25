@@ -73,13 +73,15 @@ export const idOf = (self: SyntaxFile, element: SyntaxTree.Element): Option.Opti
 const isPrintable = (byte: number): boolean => byte >= 0x20 && byte <= 0x7e
 
 const escapeBytes = (bytes: Uint8Array): string =>
-  Array.from(bytes, (byte) =>
-    byte === 0x22 || byte === 0x5c
-      ? `\\${String.fromCharCode(byte)}`
-      : isPrintable(byte)
-        ? String.fromCharCode(byte)
-        : `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`,
-  ).join('')
+  Array.from(bytes, (byte) => {
+    if (byte === 0x22 || byte === 0x5c) {
+      return `\\${String.fromCharCode(byte)}`
+    }
+    if (isPrintable(byte)) {
+      return String.fromCharCode(byte)
+    }
+    return `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
+  }).join('')
 
 const sliceOf = (self: SyntaxFile, span: Token.Token['span']): string => {
   const bytes = Option.getOrThrowWith(

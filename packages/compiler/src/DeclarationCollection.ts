@@ -261,12 +261,14 @@ const analyzeAppliedRows = (
 ): AppliedRows => {
   const failureRowSyntax = SyntaxTree.directNode(list, 'FailureRow')
   const failureType = failureRowSyntax?.children.find(isDeclaredTypeNode)
-  const failureNodes =
-    failureType?.kind === 'UnionType'
-      ? failureType.children.filter(isDeclaredTypeNode)
-      : failureType === undefined
-        ? []
-        : [failureType]
+  let failureNodes: SyntaxTree.Node[]
+  if (failureType?.kind === 'UnionType') {
+    failureNodes = failureType.children.filter(isDeclaredTypeNode)
+  } else if (failureType === undefined) {
+    failureNodes = []
+  } else {
+    failureNodes = [failureType]
+  }
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
     const parameter = parameterAtTypePath(source, member, typeParameters)
@@ -391,12 +393,14 @@ export const analyzeDeclaredType = (
         diagnostics: Object.freeze([]),
       })
     }
-    const mode: Type.CallableMode =
-      SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined
-        ? 'Take'
-        : SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
-          ? 'Exclusive'
-          : 'Shared'
+    let mode: Type.CallableMode
+    if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
+      mode = 'Take'
+    } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
+      mode = 'Exclusive'
+    } else {
+      mode = 'Shared'
+    }
     const unsafe = SyntaxTree.directToken(syntax, 'UnsafeKeyword') !== undefined
     const analyzed = typeNodes.map((node) => analyzeDeclaredType(source, node, typeParameters))
     const result = analyzed.at(-1)
@@ -439,7 +443,7 @@ export const analyzeDeclaredType = (
         mode,
         parameters: Object.freeze(parameters.map((entry) => entry.fact)),
         result: resultFact,
-        spelling: `${unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : mode === 'Take' ? 'once ' : ''}fn(...)`,
+        spelling: `${unsafe ? 'unsafe ' : ''}${mode === 'Exclusive' ? 'mut ' : ''}${mode === 'Take' ? 'once ' : ''}fn(...)`,
         token,
         syntax,
         ...(cause === undefined ? {} : { cause }),
@@ -686,12 +690,14 @@ export const analyzeDeclaredType = (
   }
   if (syntax.kind === 'ExactRepresentationType') {
     const item = syntax.children.find(isDeclaredTypeNode)
-    const pathSyntax =
-      item === undefined
-        ? undefined
-        : item.kind === 'TypePath'
-          ? item
-          : SyntaxTree.directNode(item, 'TypePath')
+    let pathSyntax: SyntaxTree.Node | undefined
+    if (item === undefined) {
+      pathSyntax = undefined
+    } else if (item.kind === 'TypePath') {
+      pathSyntax = item
+    } else {
+      pathSyntax = SyntaxTree.directNode(item, 'TypePath')
+    }
     const keyword = SyntaxTree.directToken(syntax, 'Identifier')
     if (item === undefined || pathSyntax === undefined || keyword === undefined)
       return Object.freeze({
@@ -749,12 +755,14 @@ export const analyzeDeclaredType = (
       .filter((token) => token.kind === 'Identifier')
       .map((token) => spelling(source, token))
     if (pathSegments.length === 1 && pathSegments.at(0) === 'Effect') {
-      const access: Type.Effect['access'] =
-        SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined
-          ? 'Take'
-          : SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
-            ? 'Exclusive'
-            : 'Shared'
+      let access: Type.Effect['access']
+      if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
+        access = 'Take'
+      } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
+        access = 'Exclusive'
+      } else {
+        access = 'Shared'
+      }
       const {
         failures,
         requirements,
@@ -1144,10 +1152,13 @@ const collectFields = (
   return Object.freeze({ fields: Object.freeze(fields), diagnostics: Object.freeze(diagnostics) })
 }
 
-const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number =>
-  left.span.start - right.span.start ||
-  left.span.end - right.span.end ||
-  (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
+const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number => {
+  const spanOrder = left.span.start - right.span.start || left.span.end - right.span.end
+  if (spanOrder !== 0) return spanOrder
+  if (left.code < right.code) return -1
+  if (left.code > right.code) return 1
+  return 0
+}
 
 const collectTypeParameters = (
   source: SourceFile.SourceFile,
@@ -1212,12 +1223,14 @@ const collectTypeParameters = (
         ? `Intrinsic.${property}`
         : undefined
     }
-    const representationKind: Type.ParameterKind | undefined =
-      boundNode?.kind === 'CallableType'
-        ? 'CallableRepresentation'
-        : effectBound
-          ? 'EffectRepresentation'
-          : undefined
+    let representationKind: Type.ParameterKind | undefined
+    if (boundNode?.kind === 'CallableType') {
+      representationKind = 'CallableRepresentation'
+    } else if (effectBound) {
+      representationKind = 'EffectRepresentation'
+    } else {
+      representationKind = undefined
+    }
     const firstStaticProperty = boundNode === undefined ? undefined : staticPropertyOf(boundNode)
     const rawStaticProperties = (
       representationKind === undefined && firstStaticProperty !== undefined
@@ -1570,12 +1583,14 @@ const collectFailureRow = (
       diagnostics: Object.freeze([]),
     })
   const expression = collectRowExpression(source, declared, typeParameters, 'Failure')
-  const syntaxMembers =
-    declared.kind === 'UnionType'
-      ? declared.children.filter(isDeclaredTypeNode)
-      : isDeclaredTypeNode(declared)
-        ? Object.freeze([declared])
-        : Object.freeze([])
+  let syntaxMembers: readonly SyntaxTree.Node[]
+  if (declared.kind === 'UnionType') {
+    syntaxMembers = declared.children.filter(isDeclaredTypeNode)
+  } else if (isDeclaredTypeNode(declared)) {
+    syntaxMembers = Object.freeze([declared])
+  } else {
+    syntaxMembers = Object.freeze([])
+  }
   // The legacy member facts remain the single diagnostic owner while the row
   // expression is retained as the semantic shape. Reporting both would emit
   // the same kind/type error twice for one source member.
@@ -1791,15 +1806,14 @@ const collectConstraints = (
     const selected = collectRowExpression(source, selectedSyntax, typeParameters, 'Requirement')
     const sourceRow = collectRowExpression(source, sourceSyntax, typeParameters, 'Requirement')
     diagnostics.push(...provider.diagnostics, ...selected.diagnostics, ...sourceRow.diagnostics)
+    let mode: Type.CallableMode
+    if (providerSyntax.kind !== 'ReferenceType') mode = 'Take'
+    else if (SyntaxTree.directToken(providerSyntax, 'MutKeyword') === undefined) mode = 'Shared'
+    else mode = 'Exclusive'
     return [
       Object.freeze({
         _tag: 'ProviderConstraint',
-        mode:
-          providerSyntax.kind !== 'ReferenceType'
-            ? 'Take'
-            : SyntaxTree.directToken(providerSyntax, 'MutKeyword') === undefined
-              ? 'Shared'
-              : 'Exclusive',
+        mode,
         provider: provider.fact,
         selected: selected.fact,
         source: sourceRow.fact,
@@ -2510,14 +2524,16 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             ...constraints.diagnostics,
           )
           if (operatorSyntax !== undefined) {
-            const detail =
-              node.kind !== 'InterfaceDeclaration'
-                ? 'only interface operations may declare an operator'
-                : operationTypeParameters.facts.length > 0
-                  ? 'operator operations cannot declare operation-local type parameters'
-                  : selectedOperator === undefined
-                    ? `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
-                    : undefined
+            let detail: string | undefined
+            if (node.kind !== 'InterfaceDeclaration') {
+              detail = 'only interface operations may declare an operator'
+            } else if (operationTypeParameters.facts.length > 0) {
+              detail = 'operator operations cannot declare operation-local type parameters'
+            } else if (selectedOperator === undefined) {
+              detail = `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
+            } else {
+              detail = undefined
+            }
             if (detail !== undefined)
               diagnostics.push(Diagnostic.invalidOperatorContract(detail, operatorSyntax.span))
           }

@@ -887,14 +887,21 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         actual._tag === 'ConflictOrigin'
           ? actual.span
           : (allocation?.span ?? expression.span)
-      const description =
-        actual._tag === 'ConcreteOrigin'
-          ? Type.encode(actual.element)
-          : actual._tag === 'InvalidOrigin'
-            ? actual.description
-            : actual._tag === 'ConflictOrigin'
-              ? 'conflicting allocation provenance'
-              : 'unknown allocation provenance'
+      let description: string
+      switch (actual._tag) {
+        case 'ConcreteOrigin':
+          description = Type.encode(actual.element)
+          break
+        case 'InvalidOrigin':
+          description = actual.description
+          break
+        case 'ConflictOrigin':
+          description = 'conflicting allocation provenance'
+          break
+        default:
+          description = 'unknown allocation provenance'
+          break
+      }
       diagnostics.push(
         Diagnostic.localSharedLayoutMismatch(
           Type.encode(expected),
@@ -953,14 +960,21 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         continue
       }
       const span = originSpan(actual) ?? allocation?.span ?? expression.span
-      const description =
-        actual._tag === 'ExecutionOrigin'
-          ? actual.arguments.map(Type.genericArgumentKey).join(',')
-          : actual._tag === 'InvalidOrigin'
-            ? actual.description
-            : actual._tag === 'ConflictOrigin'
-              ? 'conflicting allocation provenance'
-              : 'unknown allocation provenance'
+      let description: string
+      switch (actual._tag) {
+        case 'ExecutionOrigin':
+          description = actual.arguments.map(Type.genericArgumentKey).join(',')
+          break
+        case 'InvalidOrigin':
+          description = actual.description
+          break
+        case 'ConflictOrigin':
+          description = 'conflicting allocation provenance'
+          break
+        default:
+          description = 'unknown allocation provenance'
+          break
+      }
       diagnostics.push(
         Diagnostic.executionLayoutMismatch(
           expected.map(Type.genericArgumentKey).join(','),

@@ -155,18 +155,16 @@ export const treeRows = (
 }
 
 /** Contract types are `Type.Type`, so a struct parameter or result is an object, not a string. */
-export const hirContract = (contract: Hir.ContractFact): string =>
-  contract._tag === 'Contract'
-    ? `${contract.functionKind === 'Effect' ? 'effect ' : ''}(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}${
-        contract.functionKind === 'Effect'
-          ? ` ! ${
-              contract.failureRow === undefined
-                ? 'empty'
-                : hirTypeText(Type.failureType(contract.failureRow))
-            }`
-          : ''
-      }`
-    : 'contract unavailable'
+export const hirContract = (contract: Hir.ContractFact): string => {
+  if (contract._tag !== 'Contract') return 'contract unavailable'
+
+  if (contract.functionKind !== 'Effect') {
+    return `(${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)}`
+  }
+  const failureText =
+    contract.failureRow === undefined ? 'empty' : hirTypeText(Type.failureType(contract.failureRow))
+  return `effect (${contract.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(contract.result)} ! ${failureText}`
+}
 
 const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   switch (declaration.canonical._tag) {
@@ -179,34 +177,38 @@ const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   }
 }
 
-const hirTypeText = (type: Type.Type): string =>
-  typeof type === 'string'
-    ? type
-    : type._tag === 'NominalType'
-      ? `${type.module}.${type.name}${
-          type.arguments.length === 0
-            ? ''
-            : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }`
-      : type._tag === 'TypeParameter'
-        ? type.name
-        : type._tag === 'FixedArrayType'
-          ? `Array<${hirTypeText(type.element)}, ${type.length}>`
-          : type._tag === 'SliceType'
-            ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
-            : type._tag === 'EffectType'
-              ? `Effect<${hirTypeText(type.success)}${
-                  Type.failureType(type) === 'never'
-                    ? ''
-                    : ` ! ${hirTypeText(Type.failureType(type))}`
-                }> ${type.access.toLowerCase()}`
-              : type._tag === 'CallableType'
-                ? `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
-                : type._tag === 'ReferenceType'
-                  ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-                  : type._tag === 'RepresentedType'
-                    ? Type.encode(type)
-                    : type.members.map(hirTypeText).join(' | ')
+const hirTypeText = (type: Type.Type): string => {
+  if (typeof type === 'string') return type
+
+  switch (type._tag) {
+    case 'NominalType': {
+      const argumentsText =
+        type.arguments.length === 0
+          ? ''
+          : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
+      return `${type.module}.${type.name}${argumentsText}`
+    }
+    case 'TypeParameter':
+      return type.name
+    case 'FixedArrayType':
+      return `Array<${hirTypeText(type.element)}, ${type.length}>`
+    case 'SliceType':
+      return `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
+    case 'EffectType': {
+      const failureType = Type.failureType(type)
+      const failureText = failureType === 'never' ? '' : ` ! ${hirTypeText(failureType)}`
+      return `Effect<${hirTypeText(type.success)}${failureText}> ${type.access.toLowerCase()}`
+    }
+    case 'CallableType':
+      return `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ReferenceType':
+      return `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
+    case 'RepresentedType':
+      return Type.encode(type)
+    case 'StructuralUnionType':
+      return type.members.map(hirTypeText).join(' | ')
+  }
+}
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -338,10 +340,13 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       expression(node.scrutinee, depth + 1, `${path}.scrutinee`)
       node.arms.forEach((arm) => {
         const armSpan = asSpan(arm.span)
+        let selection = 'unknown'
+        if (arm.universal) selection = '_'
+        else if (arm.member !== undefined) selection = Match.encodeIdentity(arm.member)
         rows.push({
           key: `${path}.arm${arm.id.ordinal}`,
           depth: depth + 1,
-          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)}`,
+          label: `arm #${arm.id.ordinal} ${selection}`,
           detail: `${arm.guard === undefined ? 'selected directly' : 'guarded'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · ${arm.before.map(Match.encodeIdentity).join(' | ') || 'empty'} → ${arm.after.map(Match.encodeIdentity).join(' | ') || 'empty'}`,
           span: armSpan,
         })
@@ -367,10 +372,14 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       return
     }
     if (node._tag === 'PatternBind') {
+      let selection = 'unknown'
+      if (node.selection.universal) selection = '_'
+      else if (node.selection.member !== undefined)
+        selection = Match.encodeIdentity(node.selection.member)
       rows.push({
         key: `${path}-pattern-bind-${span.start}`,
         depth,
-        label: `let pattern ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : Match.encodeIdentity(node.selection.member)}`,
+        label: `let pattern ${selection}`,
         detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
         span,
       })
@@ -394,10 +403,14 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       return
     }
     if (node._tag === 'IfLet') {
+      let selection = 'unknown'
+      if (node.selection.universal) selection = '_'
+      else if (node.selection.member !== undefined)
+        selection = Match.encodeIdentity(node.selection.member)
       rows.push({
         key: `${path}-if-let-${span.start}`,
         depth,
-        label: `if let ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : Match.encodeIdentity(node.selection.member)}`,
+        label: `if let ${selection}`,
         detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
         span,
       })
@@ -411,14 +424,18 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       return
     }
     if (node._tag === 'Write') {
-      const root =
-        node.place._tag === 'WritePlace'
-          ? node.place.root._tag === 'BindingWriteRoot'
+      let root: string
+      if (node.place._tag === 'WritePlace') {
+        root =
+          node.place.root._tag === 'BindingWriteRoot'
             ? `b${node.place.root.binding.ordinal}`
             : `p${node.place.root.parameter.ordinal}`
-          : node.place.root._tag === 'BindingSliceRoot'
+      } else {
+        root =
+          node.place.root._tag === 'BindingSliceRoot'
             ? `slice-b${node.place.root.binding.ordinal}`
             : `slice-p${node.place.root.parameter.ordinal}`
+      }
       rows.push({
         key: `${path}-write-${span.start}`,
         depth,

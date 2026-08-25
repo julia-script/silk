@@ -263,12 +263,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
 export const parse = Effect.fn('DataLayout.parse')(function* (
   input: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<DataLayout, LlvmError> {
-  const original =
-    typeof input === 'string'
-      ? ByteString.fromString(input)
-      : input instanceof Uint8Array
-        ? ByteString.fromUint8Array(input)
-        : input
+  const original = ByteString.coerce(input)
   return yield* Effect.try({
     try: () => parseUnsafe(original),
     catch: (cause) =>

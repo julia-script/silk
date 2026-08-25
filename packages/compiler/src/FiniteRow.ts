@@ -20,8 +20,15 @@ export interface FiniteRow<Member> {
   readonly members: ReadonlyArray<Member>
 }
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 /** Constructs a canonical row, merging every collision through the supplied domain policy. */
 export const make = <Member>(

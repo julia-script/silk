@@ -463,12 +463,12 @@ export function lowerExpressionInner(
           : undefined
       const directItem = expression.callee._tag === 'FunctionItem' ? expression.callee : undefined
       const call = fn.call(expression.span)
-      const directType =
-        directSection !== undefined
-          ? directCallableSectionValueType(fn, directSection, expression.substitution)
-          : directItem !== undefined
-            ? functionItemValueType(fn, directItem, expression.substitution)
-            : undefined
+      let directType: ReturnType<typeof directCallableSectionValueType>
+      if (directSection !== undefined) {
+        directType = directCallableSectionValueType(fn, directSection, expression.substitution)
+      } else if (directItem !== undefined) {
+        directType = functionItemValueType(fn, directItem, expression.substitution)
+      }
       const arguments_: Array<Mir.LocalId> = []
       const captures: Array<{
         readonly ordinal: number
@@ -695,12 +695,12 @@ export function lowerExpressionInner(
         readonly access: Type.CaptureAccess
       }> = []
       for (const [ordinal, capture] of expression.captures.entries()) {
-        const source =
-          capture.binding === undefined
-            ? capture.parameter === undefined
-              ? undefined
-              : fn.parameterLocals.get(capture.parameter.ordinal)
-            : fn.bindingLocals.get(capture.binding.ordinal)
+        let source: Mir.LocalId | undefined
+        if (capture.binding !== undefined) {
+          source = fn.bindingLocals.get(capture.binding.ordinal)
+        } else if (capture.parameter !== undefined) {
+          source = fn.parameterLocals.get(capture.parameter.ordinal)
+        }
         if (source === undefined) return undefined
         const access = type.environment.fields.at(ordinal)?.access
         if (access === undefined) return undefined
@@ -868,13 +868,15 @@ export function lowerExpressionInner(
             }),
           )
           endRunLoans(fn, expression.span)
-          const storedBinding =
-            expression.subject._tag === 'BindingReference'
-              ? expression.subject.binding.ordinal
-              : expression.subject._tag === 'Move' &&
-                  expression.subject.subject._tag === 'BindingReference'
-                ? expression.subject.subject.binding.ordinal
-                : undefined
+          let storedBinding: number | undefined
+          if (expression.subject._tag === 'BindingReference') {
+            storedBinding = expression.subject.binding.ordinal
+          } else if (
+            expression.subject._tag === 'Move' &&
+            expression.subject.subject._tag === 'BindingReference'
+          ) {
+            storedBinding = expression.subject.subject.binding.ordinal
+          }
           if (storedBinding !== undefined) {
             endLoans(fn, fn.effectLoanEnds.get(storedBinding) ?? [], expression.span)
             fn.effectLoanEnds.delete(storedBinding)
@@ -1624,14 +1626,21 @@ export function lowerExpressionInner(
         expression.root._tag === 'TemporarySliceRoot'
           ? lowerExpression(fn, expression.root.value)
           : undefined
-      const root =
-        expression.root._tag === 'BindingSliceRoot'
-          ? fn.bindingLocals.get(expression.root.binding.ordinal)
-          : expression.root._tag === 'ParameterSliceRoot'
-            ? local(expression.root.parameter.ordinal)
-            : expression.root._tag === 'PatternSliceRoot'
-              ? fn.patternLocals.get(patternKey(expression.root.binding))
-              : temporary?.result
+      let root: Mir.LocalId | undefined
+      switch (expression.root._tag) {
+        case 'BindingSliceRoot':
+          root = fn.bindingLocals.get(expression.root.binding.ordinal)
+          break
+        case 'ParameterSliceRoot':
+          root = local(expression.root.parameter.ordinal)
+          break
+        case 'PatternSliceRoot':
+          root = fn.patternLocals.get(patternKey(expression.root.binding))
+          break
+        case 'TemporarySliceRoot':
+          root = temporary?.result
+          break
+      }
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (
@@ -1678,14 +1687,21 @@ export function lowerExpressionInner(
         expression.root._tag === 'TemporarySliceRoot'
           ? lowerExpression(fn, expression.root.value)
           : undefined
-      const root =
-        expression.root._tag === 'BindingSliceRoot'
-          ? fn.bindingLocals.get(expression.root.binding.ordinal)
-          : expression.root._tag === 'ParameterSliceRoot'
-            ? local(expression.root.parameter.ordinal)
-            : expression.root._tag === 'PatternSliceRoot'
-              ? fn.patternLocals.get(patternKey(expression.root.binding))
-              : temporary?.result
+      let root: Mir.LocalId | undefined
+      switch (expression.root._tag) {
+        case 'BindingSliceRoot':
+          root = fn.bindingLocals.get(expression.root.binding.ordinal)
+          break
+        case 'ParameterSliceRoot':
+          root = local(expression.root.parameter.ordinal)
+          break
+        case 'PatternSliceRoot':
+          root = fn.patternLocals.get(patternKey(expression.root.binding))
+          break
+        case 'TemporarySliceRoot':
+          root = temporary?.result
+          break
+      }
       const sourceType = fn.type(expression.source)
       const type = fn.type(expression.type)
       if (root === undefined || sourceType === undefined || type?._tag !== 'Reference') {

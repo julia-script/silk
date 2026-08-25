@@ -45,10 +45,15 @@ export interface Input {
   readonly distribution?: ToolchainIntegrity.Graph
 }
 
-const compareCandidate = (left: Candidate, right: Candidate): number =>
-  (left.tier === right.tier ? 0 : left.tier === 'Project' ? -1 : 1) ||
-  left.module.localeCompare(right.module) ||
-  left.exported.ordinal - right.exported.ordinal
+const compareCandidate = (left: Candidate, right: Candidate): number => {
+  let tierOrder = 0
+  if (left.tier !== right.tier) tierOrder = left.tier === 'Project' ? -1 : 1
+  return (
+    tierOrder ||
+    left.module.localeCompare(right.module) ||
+    left.exported.ordinal - right.exported.ordinal
+  )
+}
 
 const sortedModules = (
   entries: Iterable<readonly [string, ModuleSummary.ModuleSummary]>,

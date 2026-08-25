@@ -76,6 +76,12 @@ export const canonicalize = (spans: Iterable<SourceSpan>): ReadonlyArray<SourceS
     [...new Map([...spans].map((span) => [key(span), span])).values()].sort((left, right) => {
       const leftKey = key(left)
       const rightKey = key(right)
-      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+      if (leftKey < rightKey) {
+        return -1
+      }
+      if (leftKey > rightKey) {
+        return 1
+      }
+      return 0
     }),
   )

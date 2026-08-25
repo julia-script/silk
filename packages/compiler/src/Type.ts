@@ -476,16 +476,20 @@ const sealedStorageFailure = (): Nominal =>
 export const specializeNominal = (
   self: Nominal,
   arguments_: ReadonlyArray<GenericArgument>,
-): Nominal =>
-  self.sealed === 'Intrinsic.SharedCore'
-    ? sealedSharedCore(arguments_)
-    : self.sealed === 'Intrinsic.Execution'
-      ? sealedExecution(arguments_)
-      : self.sealed === 'Intrinsic.Wake'
-        ? sealedWake()
-        : self.sealed === 'Intrinsic.StorageFailure'
-          ? sealedStorageFailure()
-          : nominal(self.module, self.name, arguments_)
+): Nominal => {
+  switch (self.sealed) {
+    case 'Intrinsic.SharedCore':
+      return sealedSharedCore(arguments_)
+    case 'Intrinsic.Execution':
+      return sealedExecution(arguments_)
+    case 'Intrinsic.Wake':
+      return sealedWake()
+    case 'Intrinsic.StorageFailure':
+      return sealedStorageFailure()
+    default:
+      return nominal(self.module, self.name, arguments_)
+  }
+}
 
 export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
@@ -730,10 +734,11 @@ export const effect = (
   requirements: ReadonlyArray<Requirement> = [],
   requirementParameters: ReadonlyArray<Parameter> = [],
 ): Effect => {
-  const failureLeaves = failures.flatMap(
-    (failure): ReadonlyArray<Type> =>
-      isNever(failure) ? [] : isUnion(failure) ? failure.members : [failure],
-  )
+  const failureLeaves = failures.flatMap((failure): ReadonlyArray<Type> => {
+    if (isNever(failure)) return []
+    if (isUnion(failure)) return failure.members
+    return [failure]
+  })
   const concreteFailures = failureLeaves.filter(
     (failure) => !(isParameter(failure) && failure.kind === 'Value'),
   )
@@ -1103,8 +1108,16 @@ export const parameterArgument = (self: Parameter): GenericArgument => {
 }
 
 /** Ranks access modes: Shared(0) < Exclusive(1) < Take(2). */
-export const accessRank = (access: CallableMode | Effect['access']): number =>
-  access === 'Shared' ? 0 : access === 'Exclusive' ? 1 : 2
+export const accessRank = (access: CallableMode | Effect['access']): number => {
+  switch (access) {
+    case 'Shared':
+      return 0
+    case 'Exclusive':
+      return 1
+    case 'Take':
+      return 2
+  }
+}
 
 /** True when the supplied access is at least as strong as the required one. */
 export const compareAccess = (
@@ -1126,17 +1139,9 @@ export const intersectRepresentationBounds = (
   left: RepresentationBound,
   right: RepresentationBound,
 ): RepresentationBound | undefined => {
-  if (left._tag !== right._tag) return undefined
-  const access =
-    accessRank(left._tag === 'CallableType' ? left.mode : left.access) <=
-    accessRank(right._tag === 'CallableType' ? right.mode : right.access)
-      ? left._tag === 'CallableType'
-        ? left.mode
-        : left.access
-      : right._tag === 'CallableType'
-        ? right.mode
-        : right.access
   if (left._tag === 'CallableType' && right._tag === 'CallableType') {
+    let access = right.mode
+    if (accessRank(left.mode) <= accessRank(right.mode)) access = left.mode
     const leftShape = callable(left.parameters, left.result, 'Shared', left.schema, left.unsafe)
     const rightShape = callable(
       right.parameters,
@@ -1150,6 +1155,8 @@ export const intersectRepresentationBounds = (
       : undefined
   }
   if (left._tag === 'EffectType' && right._tag === 'EffectType') {
+    let access = right.access
+    if (accessRank(left.access) <= accessRank(right.access)) access = left.access
     const leftShape = effectWithRows(left.success, left.failureRow, 'Shared', left.requirementRow)
     const rightShape = effectWithRows(
       right.success,
@@ -1171,26 +1178,31 @@ export const representationAdmissibility = (
 ): RepresentationAdmissibility => {
   if (contract._tag !== requiredBound._tag)
     return Object.freeze({ _tag: 'Unavailable', reason: 'representation kind mismatch' })
-  const structuralContract =
-    contract._tag === 'CallableType' && requiredBound._tag === 'CallableType'
-      ? callable(
-          contract.parameters,
-          contract.result,
-          requiredBound.mode,
-          contract.schema,
-          contract.unsafe,
-        )
-      : contract._tag === 'EffectType' && requiredBound._tag === 'EffectType'
-        ? effectWithRows(
-            contract.success,
-            contract.failureRow,
-            requiredBound.access,
-            contract.requirementRow,
-          )
-        : undefined
-  const requiredAccess =
-    requiredBound._tag === 'CallableType' ? requiredBound.mode : requiredBound.access
-  const actualAccess = contract._tag === 'CallableType' ? contract.mode : contract.access
+  let structuralContract: RepresentationBound | undefined
+  let requiredAccess: CallableMode | Effect['access']
+  let actualAccess: CallableMode | Effect['access']
+  if (contract._tag === 'CallableType' && requiredBound._tag === 'CallableType') {
+    structuralContract = callable(
+      contract.parameters,
+      contract.result,
+      requiredBound.mode,
+      contract.schema,
+      contract.unsafe,
+    )
+    requiredAccess = requiredBound.mode
+    actualAccess = contract.mode
+  } else if (contract._tag === 'EffectType' && requiredBound._tag === 'EffectType') {
+    structuralContract = effectWithRows(
+      contract.success,
+      contract.failureRow,
+      requiredBound.access,
+      contract.requirementRow,
+    )
+    requiredAccess = requiredBound.access
+    actualAccess = contract.access
+  } else {
+    return Object.freeze({ _tag: 'Unavailable', reason: 'representation kind mismatch' })
+  }
   return structuralContract !== undefined &&
     equals(structuralContract, requiredBound) &&
     compareAccess(requiredAccess, actualAccess)
@@ -1205,18 +1217,17 @@ export const represented = (
   argument: RepresentationArgument,
 ): Represented => {
   const admissibility = representationAdmissibility(contract, requiredBound)
+  let resolvedAdmissibility: RepresentationAdmissibility = admissibility
+  if (argument._tag === 'RepresentationParameterArgument' && admissibility._tag === 'Admitted') {
+    resolvedAdmissibility = Object.freeze({ _tag: 'Open' })
+  }
   return Object.freeze({
     _tag: 'RepresentedType',
     contract,
     representation: Object.freeze({
       requiredBound,
       argument,
-      admissibility:
-        argument._tag === 'RepresentationParameterArgument'
-          ? admissibility._tag === 'Admitted'
-            ? Object.freeze({ _tag: 'Open' as const })
-            : admissibility
-          : admissibility,
+      admissibility: resolvedAdmissibility,
     }),
   })
 }
@@ -1284,14 +1295,14 @@ export const isUnavailableGenericArgument = (
 /** Returns the callable/Effect generic kind carried by one representation argument. */
 export const representationArgumentKind = (
   self: RepresentationArgument,
-): 'CallableRepresentation' | 'EffectRepresentation' =>
-  self._tag === 'RepresentationParameterArgument'
-    ? self.parameter.kind === 'EffectRepresentation'
-      ? 'EffectRepresentation'
-      : 'CallableRepresentation'
-    : self.contract._tag === 'EffectType'
-      ? 'EffectRepresentation'
-      : 'CallableRepresentation'
+): 'CallableRepresentation' | 'EffectRepresentation' => {
+  if (self._tag === 'RepresentationParameterArgument') {
+    if (self.parameter.kind === 'EffectRepresentation') return 'EffectRepresentation'
+    return 'CallableRepresentation'
+  }
+  if (self.contract._tag === 'EffectType') return 'EffectRepresentation'
+  return 'CallableRepresentation'
+}
 
 const representationArgumentContract = (
   self: RepresentationArgument,
@@ -1356,75 +1367,79 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
-export const genericArgumentKey = (self: GenericArgument): string =>
-  isUnavailableGenericArgument(self)
-    ? `unavailable:${self.expectedKind}:${self.reason}`
-    : isRepresentationParameterArgument(self)
-      ? `representation-parameter:${key(self.parameter)}`
-      : isOpaqueRepresentationArgument(self)
-        ? Canonical.record('OpaqueRepresentation', [
-            opaqueFamilyKey(self.family),
-            Canonical.array(self.arguments.map(genericArgumentKey)),
-            key(self.contract),
-          ])
-        : isExactRepresentationArgument(self)
-          ? `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
-          : isCompositeEffectRepresentationArgument(self)
-            ? Canonical.record('CompositeEffectRepresentation', [
-                key(self.contract),
-                Canonical.array(self.alternatives.map(genericArgumentKey)),
-              ])
-            : isEffectIdentityArgument(self)
-              ? self.owner === undefined
-                ? `effect-identity:${self.identity}`
-                : `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
-              : isCallableIdentityArgument(self)
-                ? callableIdentityKey(self)
-                : isRequirementRowArgument(self)
-                  ? `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
-                  : key(self)
+export const genericArgumentKey = (self: GenericArgument): string => {
+  if (isUnavailableGenericArgument(self)) return `unavailable:${self.expectedKind}:${self.reason}`
+  if (isRepresentationParameterArgument(self))
+    return `representation-parameter:${key(self.parameter)}`
+  if (isOpaqueRepresentationArgument(self)) {
+    return Canonical.record('OpaqueRepresentation', [
+      opaqueFamilyKey(self.family),
+      Canonical.array(self.arguments.map(genericArgumentKey)),
+      key(self.contract),
+    ])
+  }
+  if (isExactRepresentationArgument(self))
+    return `exact-representation:${genericArgumentKey(self.identity)}:${key(self.contract)}`
+  if (isCompositeEffectRepresentationArgument(self)) {
+    return Canonical.record('CompositeEffectRepresentation', [
+      key(self.contract),
+      Canonical.array(self.alternatives.map(genericArgumentKey)),
+    ])
+  }
+  if (isEffectIdentityArgument(self)) {
+    if (self.owner === undefined) return `effect-identity:${self.identity}`
+    return `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+  }
+  if (isCallableIdentityArgument(self)) return callableIdentityKey(self)
+  if (isRequirementRowArgument(self))
+    return `requirement-row:${RowAlgebra.key(requirementRowPolicy(), self.row)}`
+  return key(self)
+}
 
 /** Encodes any erased generic argument for semantic presentation and artifact inspection. */
-export const encodeGenericArgument = (self: GenericArgument): string =>
-  isUnavailableGenericArgument(self)
-    ? `<unavailable ${self.expectedKind}: ${self.reason}>`
-    : isRepresentationParameterArgument(self)
-      ? self.parameter.name
-      : isOpaqueRepresentationArgument(self)
-        ? `some(${self.family.producer.module}.${self.family.producer.name}#${self.family.binderOrdinal})`
-        : isExactRepresentationArgument(self)
-          ? `typeof(${encodeRepresentationOrigin(self.identity)})`
-          : isCompositeEffectRepresentationArgument(self)
-            ? `oneof(${self.alternatives.map(encodeGenericArgument).join(', ')})`
-            : isEffectIdentityArgument(self)
-              ? `effect@${self.identity}`
-              : isCallableIdentityArgument(self)
-                ? `callable@${self.identity}`
-                : isRequirementRowArgument(self)
-                  ? `? ${RowAlgebra.encode(
-                      requirementRowPolicy(),
-                      self.row,
-                      (requirement) =>
-                        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
-                      (parameter_) => parameter_.name,
-                      (member) =>
-                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
-                    )}`
-                  : encode(self)
+export const encodeGenericArgument = (self: GenericArgument): string => {
+  if (isUnavailableGenericArgument(self))
+    return `<unavailable ${self.expectedKind}: ${self.reason}>`
+  if (isRepresentationParameterArgument(self)) return self.parameter.name
+  if (isOpaqueRepresentationArgument(self))
+    return `some(${self.family.producer.module}.${self.family.producer.name}#${self.family.binderOrdinal})`
+  if (isExactRepresentationArgument(self))
+    return `typeof(${encodeRepresentationOrigin(self.identity)})`
+  if (isCompositeEffectRepresentationArgument(self))
+    return `oneof(${self.alternatives.map(encodeGenericArgument).join(', ')})`
+  if (isEffectIdentityArgument(self)) return `effect@${self.identity}`
+  if (isCallableIdentityArgument(self)) return `callable@${self.identity}`
+  if (isRequirementRowArgument(self)) {
+    return `? ${RowAlgebra.encode(
+      requirementRowPolicy(),
+      self.row,
+      (requirement) =>
+        `${requirement.access === 'Exclusive' ? '&mut ' : '&'}${encode(requirement.capability)}${requirement.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(requirement.role)}`}`,
+      (parameter_) => parameter_.name,
+      (member) =>
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
+    )}`
+  }
+  return encode(self)
+}
 
 const encodeRepresentationOrigin = (
   self: EffectIdentityArgument | CallableIdentityArgument,
-): string =>
-  self._tag === 'EffectIdentityArgument'
-    ? self.identity
-    : `${
-        self.target._tag === 'Declaration'
-          ? `${self.target.module}.${self.target.name}`
-          : `${self.target.actor}.${self.target.operation}`
-      }${self.environment === undefined ? '' : `@${callableEnvironmentKey(self.environment)}`}`
+): string => {
+  if (self._tag === 'EffectIdentityArgument') return self.identity
+  let target: string
+  if (self.target._tag === 'Declaration') target = `${self.target.module}.${self.target.name}`
+  else target = `${self.target.actor}.${self.target.operation}`
+  const environment =
+    self.environment === undefined ? '' : `@${callableEnvironmentKey(self.environment)}`
+  return `${target}${environment}`
+}
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
 
 /** Compares any kinded generic arguments by canonical structural identity. */
 export const compareGenericArgument = (left: GenericArgument, right: GenericArgument): number =>
@@ -1610,14 +1625,11 @@ const genericArgumentRepresentationDivergence = (
   left: GenericArgument,
   right: GenericArgument,
 ): RepresentationDivergence | undefined => {
-  if (isRepresentationArgument(left) || isRepresentationArgument(right))
-    return isRepresentationArgument(left) &&
-      isRepresentationArgument(right) &&
-      equalsGenericArgument(left, right)
-      ? undefined
-      : isRepresentationArgument(left) && isRepresentationArgument(right)
-        ? Object.freeze({ left, right })
-        : undefined
+  if (isRepresentationArgument(left) || isRepresentationArgument(right)) {
+    if (!isRepresentationArgument(left) || !isRepresentationArgument(right)) return undefined
+    if (equalsGenericArgument(left, right)) return undefined
+    return Object.freeze({ left, right })
+  }
   if (isRequirementRowArgument(left) && isRequirementRowArgument(right)) {
     for (
       let ordinal = 0;
@@ -2122,6 +2134,17 @@ export const opaqueRepresentationArguments = (
 /** Orders semantic types by canonical identity. */
 export const compare = (left: Type, right: Type): number => compareText(key(left), key(right))
 
+const executableAccessPrefix = (access: CallableMode | Effect['access']): string => {
+  switch (access) {
+    case 'Exclusive':
+      return 'mut '
+    case 'Take':
+      return 'once '
+    case 'Shared':
+      return ''
+  }
+}
+
 /** Encodes one type for deterministic compiler facts and diagnostics. */
 export const encode = (self: Type): string => {
   if (typeof self === 'string') return self
@@ -2138,11 +2161,11 @@ export const encode = (self: Type): string => {
   if (isReference(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${encode(self.target)}`
   if (isCallable(self)) {
-    const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
+    const mode = executableAccessPrefix(self.mode)
     return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
   }
   if (isEffect(self)) {
-    const access = self.access === 'Exclusive' ? 'mut ' : self.access === 'Take' ? 'once ' : ''
+    const access = executableAccessPrefix(self.access)
     const failureMembers = RowAlgebra.encode(
       failureRowPolicy(),
       self.failureRow,
@@ -2725,77 +2748,75 @@ export const substitute = (self: Type, substitution: Substitution): Type => {
 export const substituteGenericArgument = (
   self: GenericArgument,
   substitution: Substitution,
-): GenericArgument =>
-  isUnavailableGenericArgument(self)
-    ? self
-    : isRepresentationParameterArgument(self)
-      ? (substitution.get(key(self.parameter)) ?? self)
-      : isOpaqueRepresentationArgument(self)
-        ? (() => {
-            const contract = substitute(self.contract, substitution)
-            if (!isCallable(contract) && !isEffect(contract)) return self
-            return opaqueRepresentationArgument(
-              self.family,
-              contract,
-              self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
-            )
-          })()
-        : isCompositeEffectRepresentationArgument(self)
-          ? (() => {
-              const contract = substitute(self.contract, substitution)
-              if (!isEffect(contract)) return self
-              const alternatives = self.alternatives.flatMap((alternative) => {
-                const specialized = substituteGenericArgument(alternative, substitution)
-                return isExactRepresentationArgument(specialized) &&
-                  isEffect(specialized.contract) &&
-                  isEffectIdentityArgument(specialized.identity)
-                  ? [specialized]
-                  : []
-              })
-              return alternatives.length === self.alternatives.length
-                ? compositeEffectRepresentationArgument(contract, alternatives)
-                : self
-            })()
-          : isExactRepresentationArgument(self)
-            ? (() => {
-                const contract = substitute(self.contract, substitution)
-                if (!isCallable(contract) && !isEffect(contract)) return self
-                const identity = substituteGenericArgument(self.identity, substitution)
-                return isCallableIdentityArgument(identity) || isEffectIdentityArgument(identity)
-                  ? exactRepresentationArgument(identity, contract)
-                  : self
-              })()
-            : isEffectIdentityArgument(self)
-              ? effectIdentityArgument(
-                  self.identity,
-                  self.owner === undefined
-                    ? undefined
-                    : {
-                        declaration: self.owner.declaration,
-                        typeArguments: self.owner.typeArguments.map((argument) =>
-                          substituteGenericArgument(argument, substitution),
-                        ),
-                      },
-                )
-              : isCallableIdentityArgument(self)
-                ? callableIdentityArgument(
-                    self.identity,
-                    self.target,
-                    self.typeArguments.map((argument) =>
-                      substituteGenericArgument(argument, substitution),
-                    ),
-                    self.environment === undefined
-                      ? undefined
-                      : callableEnvironmentIdentity(self.environment.site, {
-                          declaration: self.environment.owner.declaration,
-                          typeArguments: self.environment.owner.typeArguments.map((argument) =>
-                            substituteGenericArgument(argument, substitution),
-                          ),
-                        }),
-                  )
-                : isRequirementRowArgument(self)
-                  ? requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
-                  : substitute(self, substitution)
+): GenericArgument => {
+  if (isUnavailableGenericArgument(self)) return self
+  if (isRepresentationParameterArgument(self)) return substitution.get(key(self.parameter)) ?? self
+  if (isOpaqueRepresentationArgument(self)) {
+    const contract = substitute(self.contract, substitution)
+    if (!isCallable(contract) && !isEffect(contract)) return self
+    return opaqueRepresentationArgument(
+      self.family,
+      contract,
+      self.arguments.map((argument) => substituteGenericArgument(argument, substitution)),
+    )
+  }
+  if (isCompositeEffectRepresentationArgument(self)) {
+    const contract = substitute(self.contract, substitution)
+    if (!isEffect(contract)) return self
+    const alternatives = self.alternatives.flatMap((alternative) => {
+      const specialized = substituteGenericArgument(alternative, substitution)
+      if (
+        isExactRepresentationArgument(specialized) &&
+        isEffect(specialized.contract) &&
+        isEffectIdentityArgument(specialized.identity)
+      )
+        return [specialized]
+      return []
+    })
+    if (alternatives.length !== self.alternatives.length) return self
+    return compositeEffectRepresentationArgument(contract, alternatives)
+  }
+  if (isExactRepresentationArgument(self)) {
+    const contract = substitute(self.contract, substitution)
+    if (!isCallable(contract) && !isEffect(contract)) return self
+    const identity = substituteGenericArgument(self.identity, substitution)
+    if (!isCallableIdentityArgument(identity) && !isEffectIdentityArgument(identity)) return self
+    return exactRepresentationArgument(identity, contract)
+  }
+  if (isEffectIdentityArgument(self)) {
+    let owner: ExecutableSpecializationOwner | undefined
+    if (self.owner !== undefined) {
+      owner = {
+        declaration: self.owner.declaration,
+        typeArguments: self.owner.typeArguments.map((argument) =>
+          substituteGenericArgument(argument, substitution),
+        ),
+      }
+    }
+    return effectIdentityArgument(self.identity, owner)
+  }
+  if (isCallableIdentityArgument(self)) {
+    let environment: CallableEnvironmentIdentity | undefined
+    if (self.environment !== undefined) {
+      environment = callableEnvironmentIdentity(self.environment.site, {
+        declaration: self.environment.owner.declaration,
+        typeArguments: self.environment.owner.typeArguments.map((argument) =>
+          substituteGenericArgument(argument, substitution),
+        ),
+      })
+    }
+    return callableIdentityArgument(
+      self.identity,
+      self.target,
+      self.typeArguments.map((argument) => substituteGenericArgument(argument, substitution)),
+      environment,
+    )
+  }
+  if (isRequirementRowArgument(self)) {
+    return requirementRowArgumentFromRow(substituteRequirementsRow(self.row, substitution))
+  }
+  return substitute(self, substitution)
+}
 
 const sameExecutableOwnerDeclaration = (
   left: ExecutableSpecializationOwner,

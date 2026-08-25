@@ -122,6 +122,13 @@ export interface HighlightRange {
 
 const encoder = new TextEncoder()
 
+const utf8Width = (code: number): number => {
+  if (code <= 0x7f) return 1
+  if (code <= 0x7ff) return 2
+  if (code <= 0xffff) return 3
+  return 4
+}
+
 /** UTF-16 offset for every UTF-8 byte offset; bytes inside a character map to its start. */
 const byteToCharMap = (doc: string, byteLength: number): Uint32Array => {
   const map = new Uint32Array(byteLength + 1)
@@ -129,7 +136,7 @@ const byteToCharMap = (doc: string, byteLength: number): Uint32Array => {
   let char = 0
   for (const character of doc) {
     const code = character.codePointAt(0) ?? 0
-    const width = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4
+    const width = utf8Width(code)
     for (let index = 0; index < width; index++) map[byte + index] = char
     byte += width
     char += character.length
@@ -169,13 +176,18 @@ export const highlightRanges = (doc: string): ReadonlyArray<HighlightRange> => {
     const to = map === undefined ? token.span.end : (map[token.span.end] ?? 0)
     const text = doc.slice(from, to)
     if (token.kind === 'DocComment' || token.kind === 'ModuleDocComment') continue
-    const category =
+    let category = categories[token.kind]
+    if (
       (token.kind === 'Less' || token.kind === 'Greater') &&
       genericAngles.has(`${token.span.start}:${token.span.end}`)
-        ? typePunctuation
-        : token.kind === 'Identifier' && (text === 'i32' || text === 'bool' || text === 'never')
-          ? builtinType
-          : categories[token.kind]
+    ) {
+      category = typePunctuation
+    } else if (
+      token.kind === 'Identifier' &&
+      (text === 'i32' || text === 'bool' || text === 'never')
+    ) {
+      category = builtinType
+    }
     if (category === undefined) continue
     if (to > from) ranges.push({ from, to, category: category.name })
   }

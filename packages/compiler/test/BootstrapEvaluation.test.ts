@@ -259,18 +259,16 @@ pub fn main() -> i32 {
       ...original,
       functions: original.functions.map((fn) => ({
         ...fn,
-        regions: fn.regions.map((region) =>
-          region._tag !== 'OperationRegion'
-            ? region
-            : {
-                ...region,
-                operations: region.operations.flatMap<Mir.Operation>((operation) =>
-                  operation._tag === 'ApplyCallable'
-                    ? ([operation, operation] as const)
-                    : ([operation] as const),
-                ),
-              },
-        ),
+        regions: fn.regions.map((region) => {
+          if (region._tag !== 'OperationRegion') return region
+          return {
+            ...region,
+            operations: region.operations.flatMap<Mir.Operation>((operation) => {
+              if (operation._tag === 'ApplyCallable') return [operation, operation]
+              return [operation]
+            }),
+          }
+        }),
       })),
     }
 
@@ -734,34 +732,32 @@ pub fn main() -> i32 { return inspect(Token { value: 42 }) }`),
       ...original,
       functions: original.functions.map((fn) => ({
         ...fn,
-        regions: fn.regions.map((region) =>
-          region._tag !== 'OperationRegion'
-            ? region
-            : {
-                ...region,
-                operations: region.operations.map((operation) =>
-                  operation._tag !== 'Match'
-                    ? operation
-                    : {
-                        ...operation,
-                        access: 'Copy',
-                        arms: operation.arms.map((arm) => ({
-                          ...arm,
-                          bindings: arm.bindings.map((binding) => ({
-                            ...binding,
-                            access: 'Copy',
-                          })),
-                          selected: {
-                            ...arm.selected,
-                            access: 'Copy',
-                            cleanup: [],
-                            endBorrow: false,
-                          },
-                        })),
-                      },
-                ),
-              },
-        ),
+        regions: fn.regions.map((region) => {
+          if (region._tag !== 'OperationRegion') return region
+          return {
+            ...region,
+            operations: region.operations.map((operation) => {
+              if (operation._tag !== 'Match') return operation
+              return {
+                ...operation,
+                access: 'Copy',
+                arms: operation.arms.map((arm) => ({
+                  ...arm,
+                  bindings: arm.bindings.map((binding) => ({
+                    ...binding,
+                    access: 'Copy',
+                  })),
+                  selected: {
+                    ...arm.selected,
+                    access: 'Copy',
+                    cleanup: [],
+                    endBorrow: false,
+                  },
+                })),
+              }
+            }),
+          }
+        }),
       })),
     }
 

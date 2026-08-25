@@ -128,17 +128,16 @@ it.effect('rejects a mismatched transcendental MIR result before execution', () 
     if (transcendental?._tag !== 'FloatTranscendental') return
     const malformed: Mir.Module = {
       ...mir,
-      functions: mir.functions.map(
-        (fn): Mir.MirFunction =>
-          MirVerification.operations(fn).includes(transcendental)
-            ? {
-                ...fn,
-                localTypes: fn.localTypes.map((type, ordinal) =>
-                  ordinal === transcendental.destination.ordinal ? { _tag: 'f32' } : type,
-                ),
-              }
-            : fn,
-      ),
+      functions: mir.functions.map((fn): Mir.MirFunction => {
+        if (!MirVerification.operations(fn).includes(transcendental)) return fn
+        return {
+          ...fn,
+          localTypes: fn.localTypes.map((type, ordinal) => {
+            if (ordinal === transcendental.destination.ordinal) return { _tag: 'f32' }
+            return type
+          }),
+        }
+      }),
     }
     assert.include(
       MirVerification.verify(malformed).map((violation) => violation.rule),

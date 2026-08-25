@@ -49,11 +49,12 @@ const encodeSnapshot = (self) => {
     result: evaluated._tag === 'Completed' ? evaluated.result.value : evaluated._tag,
     allocations:
       evaluated._tag === 'Completed'
-        ? evaluated.trace.flatMap((event) =>
-            event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease'
-              ? [event._tag]
-              : [],
-          )
+        ? evaluated.trace.flatMap((event) => {
+            if (event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease') {
+              return [event._tag]
+            }
+            return []
+          })
         : [],
   }
 }

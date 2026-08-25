@@ -29,13 +29,13 @@ import * as Driver from './support/TestDriver.js'
  * and 128,000 respectively. Those numbers are evidence, not contract; nothing below asserts them.
  */
 
-const clang =
-  process.env.SILK_TEST_CLANG ??
-  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
-    ? '/opt/homebrew/opt/llvm/bin/clang'
-    : existsSync('/usr/local/opt/llvm/bin/clang')
-      ? '/usr/local/opt/llvm/bin/clang'
-      : 'clang')
+const defaultClang = (): string => {
+  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
+  if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
+  return 'clang'
+}
+
+const clang = process.env.SILK_TEST_CLANG ?? defaultClang()
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,

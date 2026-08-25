@@ -63,13 +63,11 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 /** Every operation of every region of every lowered function, in one flat sequence. */
 const operationsOf = (module: Mir.Module): ReadonlyArray<Mir.Operation> =>
   module.functions.flatMap((lowered) =>
-    lowered.regions.flatMap((region) =>
-      region._tag === 'OperationRegion'
-        ? region.operations
-        : region._tag === 'CleanupRegion'
-          ? region.releases
-          : [],
-    ),
+    lowered.regions.flatMap((region) => {
+      if (region._tag === 'OperationRegion') return region.operations
+      if (region._tag === 'CleanupRegion') return region.releases
+      return []
+    }),
   )
 
 /** A name that would betray a hash operation whatever it was called. */
