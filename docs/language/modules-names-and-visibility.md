@@ -444,8 +444,7 @@ corresponding local binding rules allow it.
 set available to diagnostics and tooling. A use through that spelling remains unavailable instead
 of producing a second misleading lookup result.
 
-**Evidence:** [collision decision](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
-[binding conflict diagnostics](../../openspec/specs/bootstrap-name-resolution/spec.md).
+**Evidence:** [binding conflict diagnostics](../../openspec/specs/bootstrap-name-resolution/spec.md).
 
 ### NAME-004 — Explicit aliases resolve imported-name collisions
 

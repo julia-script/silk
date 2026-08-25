@@ -59,9 +59,7 @@ malformed rather than reporting the complete Effect type as an undifferentiated 
 kind. The compiler may normalize a failure channel with internal set machinery, but no failure-row
 kind or value projection appears in source, semantic generic arguments, tooling, or runtime data.
 
-**Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[prototype syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
-[row representation](../../packages/compiler/src/Type.ts).
+**Evidence:** [row representation](../../packages/compiler/src/Type.ts).
 
 ## EFF-008 — An effect function declares the contract of its returned Effect
 
@@ -101,8 +99,7 @@ For a declaration `effect fn work(...) -> A ! E ? R`, calling `work(...)` produc
 mismatch required by EFF-002. A body that exceeds `E` or `R` is rejected under EFF-009. Merely
 calling an effect function is valid and produces no diagnostic.
 
-**Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+**Evidence:** [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [effect elaboration tests](../../packages/compiler/test/Elaboration.test.ts).
 
 ## EFF-009 — Declared failure and requirement channels are upper bounds
@@ -157,8 +154,7 @@ A declared failure or requirement that the body does not currently use is valid 
 compiler error. Language tooling may emit a non-blocking unused-contract warning and offer to narrow
 the declaration, but such a warning does not change compilation or the contract seen by callers.
 
-**Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[failure and run diagnostics](../../packages/compiler/test/Elaboration.test.ts).
+**Evidence:** [failure and run diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
 ## EFF-010 — Omitting the result annotation declares unit
 
@@ -209,8 +205,7 @@ direction: visibility and recursion do not change the meaning of an omitted chan
 function has one locally readable contract. Tooling may propose an explicit contract edit, but the
 language does not silently infer one.
 
-**Evidence:** [older inference direction](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[function grammar](../../packages/compiler/src/Parser.ts),
+**Evidence:** [function grammar](../../packages/compiler/src/Parser.ts),
 [declaration defaults](../../packages/compiler/src/DeclarationIndex.ts).
 
 ## EFF-012 — Ordinary failure types and generic requirement rows preserve a contract
@@ -260,8 +255,7 @@ typed-failure validity diagnostic. Supplying an argument of the wrong kind for `
 may be used in every ordinary type position. Generic requirement parameters remain the distinct
 `?R` kind.
 
-**Evidence:** [bootstrap type-system decision](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
-[row-preserving ownership tests](../../packages/compiler/test/Ownership.test.ts),
+**Evidence:** [row-preserving ownership tests](../../packages/compiler/test/Ownership.test.ts),
 [contract-row inference diagnostics](../../packages/compiler/src/Diagnostic.ts).
 
 ## EFF-013 — Compatible Effects may join across construction sites

@@ -106,7 +106,6 @@ types, type parameters, and structural unions, while `SEM0073` rejects payloads 
 lexical borrow out of scope.
 
 **Evidence:** [confirmed stabilization decision](README.md),
-[older nominal-only direction](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [current row validation](../../packages/compiler/test/DeclarationIndex.test.ts),
 [detachment diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
@@ -170,8 +169,7 @@ reports `SEM0064` at the payload and names the missing failure type.
 The `never` result of a valid `fail` is not a return-type mismatch and produces no diagnostic.
 
 **Evidence:** [ownership rules](ownership-and-borrowing.md),
-[effect-origin diagnostics](../../packages/compiler/test/Elaboration.test.ts),
-[failure-channel decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).
+[effect-origin diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
 ## FAIL-003 — `run` propagates permitted typed failures
 
@@ -235,8 +233,7 @@ or returning a fallible Effect produces no propagation diagnostic.
 
 **Evidence:** [Effect execution rules](effects-and-execution.md),
 [declared channel bounds](effect-contracts.md),
-[run propagation diagnostics](../../packages/compiler/test/Elaboration.test.ts),
-[failure propagation decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).
+[run propagation diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
 ## FAIL-004 — Recovery preserves every reachable success type
 
@@ -292,7 +289,6 @@ diagnostic code for this general mismatch is not yet assigned.
 handler success types and normalize the result to `A | B`.
 
 **Evidence:** [current recovery signatures](../../packages/compiler/stdlib/silk/effect.silk),
-[earlier union decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [selective recovery tests](../../packages/compiler/test/SelectiveCatch.test.ts).
 
 ## FAIL-005 — `catch<S>` recovers any selected nonempty subset
@@ -485,8 +481,7 @@ failure; stable diagnostic and process-status codes remain to be assigned.
 **Current compiler:** Aligned. Current Effect combinators and acceptance tests treat arithmetic
 traps as abnormal termination that bypasses typed handlers, finalizers, and Drop cleanup.
 
-**Evidence:** [failure and trap decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[trap boundary specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+**Evidence:** [trap boundary specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [finalization acceptance tests](../../packages/compiler/test/EnsuringAcceptance.test.ts).
 
 Typed-failure values, propagation, recovery, cleanup, diagnostic context, and the trap boundary are

@@ -100,9 +100,6 @@ raw non-owning pointer may be Copy, but copying that pointer neither copies nor 
 and suggests an explicit move when ownership transfer is valid. An invalid `impl Copy` reports
 `SEM0083` and identifies the first affine, cleanup-bearing, cyclic, or unavailable reason.
 
-**Evidence:** [prototype syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
-[ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md).
-
 ### OWN-002 — Ordinary reads copy Copy values and never consume an affine owner
 
 **Status:** Confirmed
@@ -235,8 +232,7 @@ partially-initialized state. Replace the complete field or aggregate directly in
 The root remains classified as a complete owner for recovery, so one invalid partial move does not
 cause misleading duplicate-cleanup or use-after-move diagnostics.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[struct-value tests](../../packages/compiler/test/StructValues.test.ts),
+**Evidence:** [struct-value tests](../../packages/compiler/test/StructValues.test.ts),
 [fixed-array tests](../../packages/compiler/test/FixedArraySemantics.test.ts).
 
 ### OWN-005 — Mutation requires one live mutable root owner
@@ -493,8 +489,7 @@ existing owner.
 **Diagnostics:** Moving through borrowed storage reports `OWN0012` for a borrowed slice element.
 Moving or dropping the root owner while a longer loan is active reports `OWN0011`.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[slice ownership tests](../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
+**Evidence:** [slice ownership tests](../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
 
 ### BORROW-004 — Call arguments borrow for the complete call
 
@@ -711,8 +706,7 @@ ownership escape diagnostic at the escaping use. Escape through a callable, Effe
 boundary reports that boundary's specific diagnostic rather than silently extending the owner's
 lifetime.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
+**Evidence:** [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
 
 ### BORROW-009 — Slice length is runtime information
@@ -780,8 +774,7 @@ source-binding move.
 Using the caller's binding after a valid transfer reports `OWN0001`. Borrow arguments use the
 BORROW-001 through BORROW-008 diagnostics instead.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[ownership tests](../../packages/compiler/test/Ownership.test.ts).
+**Evidence:** [ownership tests](../../packages/compiler/test/Ownership.test.ts).
 
 ### CALL-002 — An owned return transfers a value to the caller
 
@@ -908,8 +901,7 @@ affine scrutinee.
 reports `OWN0007`. An invalid borrowed scrutinee place reports `OWN0009`. Using a source after
 `match move` reports `OWN0001`.
 
-**Evidence:** [prototype syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
-[exhaustive matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
+**Evidence:** [exhaustive matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
 
 ### MATCH-002 — Pattern bindings inherit the selected match ownership
 
@@ -1504,8 +1496,7 @@ Replacement cleans the displaced value before the new value becomes the place's 
 the earlier consuming operation. A path that could duplicate or omit an obligation is rejected by
 the corresponding move, initialization, or control-flow ownership diagnostic.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[ownership specification](../../openspec/specs/bootstrap-ownership/spec.md),
+**Evidence:** [ownership specification](../../openspec/specs/bootstrap-ownership/spec.md),
 [ownership tests](../../packages/compiler/test/Ownership.test.ts).
 
 ### CLEANUP-002 — Structured exits clean every region they leave
@@ -1654,8 +1645,7 @@ language-level `defer`, `errdefer`, asynchronous exit hook, or dynamic finalizer
 produce the ordinary Effect boundary diagnostics. Automatic Drop cannot replace an in-flight typed
 failure.
 
-**Evidence:** [ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md),
-[typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context),
+**Evidence:** [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context),
 [finalization tests](../../packages/compiler/test/EnsuringAcceptance.test.ts).
 
 ### ALLOC-001 — An allocation is a self-contained affine owner
@@ -1804,12 +1794,9 @@ not derive from that parameter reports `SEM0092` at the expression and identifie
 source.
 
 **Current compiler:** Direct slice and nominal-reference returns implement this exactly-one
-contract, including direct calls, pipelines, and exact callable-section applications.
-
-**Conflicting artifact:** The original
-[ownership decision](../../wayfinder/bootstrap-language/issues/01-ownership-lifetimes-and-scoped-allocation.md)
-forbids every returned borrow. This rule instead adopts the conservative contract already
-implemented for slices.
+contract, including direct calls, pipelines, and exact callable-section applications. An earlier
+direction forbade every returned borrow; this rule instead adopts the conservative contract
+already implemented for slices.
 
 **Evidence:** [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [returned-view ownership tests](../../packages/compiler/test/RuntimeSliceOwnership.test.ts).

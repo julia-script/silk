@@ -28,8 +28,7 @@ site. Returning it from a body whose contract requires `A` produces `SEM0129`. I
 as an expression statement is the separate `SEM0087` boundary described under
 [statements and discarded values](statements-and-discarding.md).
 
-**Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md).
+**Evidence:** [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md).
 
 ## EFF-002 — An effect body returns its success value
 
@@ -93,8 +92,7 @@ fn deferred() -> Effect<i32> { return inner() }
 fn executed() -> i32 { return run inner() }
 ```
 
-**Evidence:** [explicit execution syntax](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
-[effect elaboration](../../packages/compiler/src/Elaboration.ts),
+**Evidence:** [effect elaboration](../../packages/compiler/src/Elaboration.ts),
 [return-contract regressions](../../packages/compiler/test/InterfaceBounds.test.ts),
 [MIR return verification](../../packages/compiler/src/Mir.ts).
 
@@ -195,8 +193,7 @@ Values retained by the deferred block follow the ordinary
 **Diagnostics:** This evaluation order is valid behavior, not a source restriction, so it has no
 diagnostic. Invalid captures receive the corresponding capture, borrow, move, or escape diagnostic.
 
-**Evidence:** [function-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[effect-block elaboration](../../packages/compiler/src/Elaboration.ts),
+**Evidence:** [effect-block elaboration](../../packages/compiler/src/Elaboration.ts),
 [effect-block lowering](../../packages/compiler/src/Lower.ts).
 
 ## EFF-006 — An ordinary function may run only a closed Effect
@@ -271,8 +268,7 @@ unhandled failure member. A nonempty residual requirement row reports `SEM0071` 
 every unsatisfied requirement member. When both channels remain open, the diagnostics must expose
 both rather than stopping after the first category.
 
-**Evidence:** [effect-contract decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+**Evidence:** [flow specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [run diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
 ## Related Effect rules
