@@ -201,8 +201,9 @@ effect fn program() -> () ! Allocator.OutOfMemoryError {
     |> Effect.provideMut<Allocator>(&mut allocator)
   let state = run Shared.make<WaiterState>(WaiterState { slot: Empty {} })
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let execution = run Execution.make(parked(move guardStorage, move state), (), ready)
+  let mut execution = run Execution.make(parked(move guardStorage, move state), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
+  Execution.notifyInitial(&mut execution)
   drop execution
   return ()
 }
@@ -347,8 +348,9 @@ effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let mut owner = Owner { slot: Empty {}, result: 0 }
-  let execution = run Execution.make(body(), (), ready)
+  let mut execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
+  Execution.notifyInitial(&mut execution)
   run driveOnce(move execution, &mut owner)
   let selected = Intrinsic.replace(owner.slot, Empty {})
   run finish(move selected, &mut owner)
@@ -368,6 +370,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       transitions.map((event) => event.event),
       [
         'Initialize',
+        'NotifyInitial',
         'Drive',
         'Register',
         'Latch',

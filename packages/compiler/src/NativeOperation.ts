@@ -89,6 +89,7 @@ export const emit = Effect.fnUntraced(function* (
       return yield* NativeLocalSharedOperation.emit(context.call, operation)
     case 'ExecutionFromAllocation':
     case 'ExecutionDrive':
+    case 'ExecutionNotifyInitial':
     case 'ExecutionWake':
     case 'ExecutionPark':
       return yield* NativeExecutionOperation.emit(context.execution, operation)

@@ -30,5 +30,7 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
   ) => FuncActor.Func
   readonly memory: WasmMemory.MemoryContext | undefined
   readonly executionPackageCleanups: ReadonlyMap<string, ExecutionPackageCleanup>
+  /** Runtime-recursive owner release for opaque Execution packages. */
+  readonly executionCleanup?: FuncActor.Func
   readonly suspensionRuntime?: SuspensionRuntime
 }

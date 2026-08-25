@@ -302,7 +302,7 @@ export const representedValueType = (
         candidate.callable.owner.declaration.name === definition.construction.producer.name &&
         sameArguments(
           candidate.callable.owner.typeArguments.filter(
-            (argument) => !Type.isHiddenIdentityArgument(argument),
+            (argument) => !Type.isHiddenExecutableArgument(argument),
           ),
           definition.construction.arguments,
         ) &&
@@ -332,7 +332,7 @@ export const representedValueType = (
         candidate.instance.declaration.name === definition.construction.producer.name &&
         sameArguments(
           candidate.instance.typeArguments.filter(
-            (argument) => !Type.isHiddenIdentityArgument(argument),
+            (argument) => !Type.isHiddenExecutableArgument(argument),
           ),
           definition.construction.arguments,
         ) &&

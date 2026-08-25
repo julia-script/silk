@@ -403,7 +403,11 @@ it.effect('normalizes requirements while passing only the selected alternative p
     const snapshot = yield* snapshotOf('effect-join/requirements', requirementSource)
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
-    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(
+      outcome._tag,
+      'Completed',
+      outcome._tag === 'Trap' ? outcome.reason : undefined,
+    )
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
     assert.strictEqual(yield* runWasm(snapshot, 'EffectJoin.requirements'), 42)
   }),

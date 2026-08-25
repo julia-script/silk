@@ -411,9 +411,11 @@ const matchesEffectIdentity = (
       candidate.owner.declaration.name === identity.owner.declaration.name &&
       sameArguments(
         candidate.owner.typeArguments.filter(
-          (argument) => !Type.isHiddenIdentityArgument(argument),
+          (argument) => !Type.isHiddenExecutableArgument(argument),
         ),
-        identity.owner.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
+        identity.owner.typeArguments.filter(
+          (argument) => !Type.isHiddenExecutableArgument(argument),
+        ),
       ))
   )
 }
@@ -580,7 +582,7 @@ export const violationDiagnostics = (
   }
   const functionApplications = self.instances.flatMap((instance) => {
     const visibleArguments = instance.key.typeArguments.filter(
-      (argument) => !Type.isHiddenIdentityArgument(argument),
+      (argument) => !Type.isHiddenExecutableArgument(argument),
     )
     return instance.function.declaration.typeParameters.flatMap((parameter, ordinal) => {
       const argument = visibleArguments.at(ordinal)

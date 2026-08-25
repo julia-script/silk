@@ -924,7 +924,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         continue
       const expected = Object.freeze(
         expression.typeArguments.map((argument) =>
-          Type.substituteGenericArgument(argument, instance.substitution),
+          Instances.concreteEffectRepresentationArgument(
+            instance.function,
+            instance.key,
+            Type.substituteGenericArgument(argument, instance.substitution),
+          ),
         ),
       )
       const allocation = expression.arguments.at(0)
@@ -937,11 +941,21 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
             })
           : originOf(allocation, instance, parameters, new Set([ownerKey(instance)]))
       const actual = resolve(unresolved)
+      const actualArguments =
+        actual._tag === 'ExecutionOrigin'
+          ? actual.arguments.map((argument) =>
+              Instances.concreteEffectRepresentationArgument(
+                instance.function,
+                instance.key,
+                argument,
+              ),
+            )
+          : Object.freeze([])
       if (
         actual._tag === 'ExecutionOrigin' &&
-        expected.length === actual.arguments.length &&
+        expected.length === actualArguments.length &&
         expected.every((argument, ordinal) => {
-          const other = actual.arguments.at(ordinal)
+          const other = actualArguments.at(ordinal)
           return (
             other !== undefined &&
             Type.genericArgumentKey(argument) === Type.genericArgumentKey(other)
@@ -953,7 +967,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
             _tag: 'ExecutionAllocationProvenanceFact',
             owner: ownerKey(instance),
             expression,
-            arguments: actual.arguments,
+            arguments: expected,
             span: actual.span,
           }),
         )

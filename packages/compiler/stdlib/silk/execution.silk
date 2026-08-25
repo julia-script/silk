@@ -53,7 +53,7 @@ pub effect fn make<
   return absurd<Intrinsic.Execution<A>>()
 }
 
-/// Drives one `Initial` or `Eligible` activation and transfers `branchState` to one outcome callback.
+/// Drives one `Initial`, `InitialReady`, or `Eligible` activation and transfers `branchState` to one outcome callback.
 ///
 /// # Details
 ///
@@ -81,6 +81,21 @@ pub effect fn drive<
     move onComplete,
     move onSuspend
   )
+}
+
+/// Notifies the fixed readiness endpoint for one `Initial` Execution exactly once.
+///
+/// # Details
+///
+/// This operation changes the package to `InitialReady` before it invokes the endpoint. It is
+/// synchronous, does not park, and does not run the body. A later [`drive`] starts the body.
+///
+/// # Gotchas
+///
+/// The Execution must still be `Initial`. Calling this operation again, or calling it after the
+/// Execution has been driven, parked, completed, or destroyed, is a fatal state trap.
+pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> () {
+  return Intrinsic.executionNotifyInitial<A>(execution)
 }
 
 /// Relinquishes the currently Running Execution until one external readiness signal arrives.

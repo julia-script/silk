@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import { unreachable } from './support/raise.js'
 
 /**
  * A hashed collection releases the move-only keys and values it owns exactly once — on removal, on
@@ -52,7 +53,7 @@ import silk.i32 as i32
 import silk.layout { Layout }
 import silk.hash as Hash
 import silk.hash { HashKey, HashSeed }
-import silk.hash_map { HashMap, contains, insert, length, make, remove }
+import silk.hash_map { HashMap, contains, insert, length, make, remove, withMut }
 import silk.option { Option, Some, None }
 
 struct Handle {
@@ -64,6 +65,14 @@ struct Held {
   tag: i32
   storage: Allocation
 }
+
+struct Empty {}
+
+struct Filled { payload: Held }
+
+struct Cell { slot: Empty | Filled }
+
+struct Capture { slot: Empty | Filled }
 
 fn handleEquals(left: &Handle, right: &Handle) -> bool { return left.tag == right.tag }
 
@@ -96,6 +105,12 @@ fn tagOf(value: Held) -> i32 {
 fn release(tag: i32, storage: Allocation) -> i32 {
   drop storage
   return tag
+}
+
+fn extractInto(cell: &mut Cell, output: &mut Capture) -> () {
+  let previous = Intrinsic.replace(cell.slot, Empty {})
+  output.slot = move previous
+  return ()
 }`
 
 const program = (body: string): string =>
@@ -113,6 +128,9 @@ ${body}
 effect fn recover(error: OutOfMemoryError) -> i32 { return 99 }
 
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+const codesOf = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+  Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
 
 const allocationEvents = (
   run: ReturnType<typeof Analysis.evaluate>,
@@ -175,6 +193,84 @@ const balanced = (
   assert.strictEqual(outcome.acquired, acquired, 'allocations acquired')
   assert.strictEqual(outcome.released, outcome.acquired, 'acquires equal releases')
 }
+
+it.effect('rejects a value borrow returned from the mutation callback', () =>
+  Effect.gen(function* () {
+    const source = `${owners}
+import silk.hash { Word }
+struct Box { value: i32 }
+fn expose(value: &mut Box) -> &mut Box { return move value }
+fn escaped(map: &mut HashMap<Word, Box>, key: Word) -> bool {
+  return withMut(move map, move key, expose)
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* analyzed('hashed-ownership/callback-escape', source)
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(codesOf(snapshot), ['SEM0052'])
+    const reason = (diagnostics.at(0) ?? unreachable('expected one diagnostic')).reason
+    assert.strictEqual(reason._tag, 'TypeArgumentInference')
+    if (reason._tag !== 'TypeArgumentInference') return
+    assert.strictEqual(reason.target, 'withMut')
+  }),
+)
+
+it.effect('rejects a callback that parks while holding the value borrow', () =>
+  Effect.gen(function* () {
+    const source = `${owners}
+import silk.execution as Execution
+import silk.hash { Word }
+struct Guard {}
+struct Box { value: i32 }
+fn register(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
+fn parking(value: &mut Box) -> () {
+  let parked = run Execution.park(register)
+  value.value = value.value
+  return ()
+}
+pub fn main() -> i32 {
+  let mut map = make<Word, Box>(Hash.seed(9))
+  let attempted = withMut(&mut map, Hash.word(1), parking)
+  drop attempted
+  return 0
+}
+`
+    const snapshot = yield* analyzed('hashed-ownership/callback-parking', source)
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(codesOf(snapshot), ['SEM0139'])
+    const reason = (diagnostics.at(0) ?? unreachable('expected one diagnostic')).reason
+    assert.strictEqual(reason._tag, 'UnsatisfiedExecutableProperty')
+    if (reason._tag !== 'UnsatisfiedExecutableProperty') return
+    assert.strictEqual(reason.property, 'Intrinsic.NonParking')
+  }),
+)
+
+it.effect('transfers a move-only value out through callback-scoped mutation', () =>
+  Effect.gen(function* () {
+    const outcome = yield* owned(
+      'hashed-ownership/callback-extraction',
+      program(`  let mut map = make<Handle, Cell>(Hash.seed(3))
+  let key = run handle(7) |> Effect.provideMut(&mut allocator)
+  let value = run held(42) |> Effect.provideMut(&mut allocator)
+  let cell = Cell { slot: Filled { payload: move value } }
+  let inserted = run insert<Handle, Cell>(&mut map, move key, move cell)
+    |> Effect.provideMut(&mut allocator)
+  drop inserted
+  let probe = run handle(7) |> Effect.provideMut(&mut allocator)
+  let mut captured = Capture { slot: Empty {} }
+  let found = withMut(&mut map, move probe, extractInto(&mut captured))
+  if !found { return 1 }
+  let answer = match move captured {
+    Capture { slot } => match move slot {
+      Empty {} => 0
+      Filled { payload } => tagOf(move payload)
+    }
+  }
+  if length<Handle, Cell>(&map) != 1 { return 2 }
+  return answer`),
+    )
+    balanced(outcome, 42, 5)
+  }),
+)
 
 it.effect('releases every owned key and value when a non-empty map is dropped', () =>
   Effect.gen(function* () {

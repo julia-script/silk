@@ -25,8 +25,9 @@ order, not insertion order.
 ## Gotchas
 
 Lookup and removal consume the probe key. [`get`](#declaration-73696c6b2f686173685f6d61703a3a676574), [`keyAt`](#declaration-73696c6b2f686173685f6d61703a3a6b65794174), and [`valueAt`](#declaration-73696c6b2f686173685f6d61703a3a76616c75654174) copy a complete
-stored entry and therefore require both stored key and value to be `Copy`; use [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665) to
-transfer a move-only value out. Equivalent keys must also obey the [`HashKey`](./hash.md#declaration-73696c6b2f686173683a3a486173684b6579) hash contract.
+stored entry and therefore require both stored key and value to be `Copy`; use [`withMut`](#declaration-73696c6b2f686173685f6d61703a3a776974684d7574) to
+update a move-only value in place or [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665) to transfer it out. Equivalent keys must also
+obey the [`HashKey`](./hash.md#declaration-73696c6b2f686173683a3a486173684b6579) hash contract.
 
 ## Examples
 
@@ -72,7 +73,7 @@ pub fn main() -> i32 {
 
 Import as `HashMap` with `import silk.hash_map`.
 
-Public declarations: 15.
+Public declarations: 16.
 
 <a id="declaration-73696c6b2f686173685f6d61703a3a456e747279"></a>
 
@@ -243,6 +244,26 @@ Returns the value held under a key equivalent to one probe key, or an absent val
 Reads a complete entry copy, so it answers only when both stored key and value types are `Copy`.
 Use [`indexOf`](#declaration-73696c6b2f686173685f6d61703a3a696e6465784f66) for a non-moving presence check and [`remove`](#declaration-73696c6b2f686173685f6d61703a3a72656d6f7665) to transfer a move-only value.
 This function consumes the probe key and does not change the map.
+
+<a id="declaration-73696c6b2f686173685f6d61703a3a776974684d7574"></a>
+
+## `withMut`
+
+```silk
+pub fn withMut<K, V, F>(self: &mut silk/hash_map.HashMap<K, V>, key: K, use: F) -> bool
+```
+
+Runs one take-once callback with exclusive access to an existing value.
+
+### Details
+
+Lookup and mutation allocate nothing and never grow the map. Returns `true` after running the
+callback exactly once for an equivalent key, or `false` without running it when the key is
+absent. The unit callback cannot return its value borrow, and a callback that may park is
+rejected.
+
+This function consumes the probe key but leaves the stored key, length, used count, and bucket
+count unchanged.
 
 <a id="declaration-73696c6b2f686173685f6d61703a3a72656d6f7665"></a>
 

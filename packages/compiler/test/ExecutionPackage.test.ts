@@ -296,7 +296,8 @@ effect fn packaged(state: &mut State) -> () ! Allocator.OutOfMemoryError ? &mut 
   let suspendStorage = run Allocator.allocate(move suspendLayout)
   let onComplete = complete(move completeStorage)
   let onSuspend = suspend(move suspendStorage)
-  let execution = run Execution.make(effect { return 42 }, (), ready)
+  let mut execution = run Execution.make(effect { return 42 }, (), ready)
+  Execution.notifyInitial(&mut execution)
   return run Execution.drive(move execution, move state, move onComplete, move onSuspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
@@ -319,6 +320,12 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
         .filter((operation) => operation._tag === 'ExecutionDrive'),
       1,
     )
+    assert.lengthOf(
+      snapshot.mir.value.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'ExecutionNotifyInitial'),
+      1,
+    )
     const evaluated = Analysis.evaluate(snapshot)
     assert.strictEqual(evaluated._tag, 'Completed')
     if (evaluated._tag !== 'Completed') return
@@ -332,6 +339,15 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
       evaluated.trace.filter((event) => event._tag === 'AllocationRelease'),
       3,
     )
+    const notified = evaluated.trace.findIndex(
+      (event) => event._tag === 'ExecutionTransition' && event.event === 'NotifyInitial',
+    )
+    const bodyStarted = evaluated.trace.findIndex(
+      (event) =>
+        event._tag === 'Call' && event.depth === 0 && event.caller.module === 'silk/execution',
+    )
+    assert.isAtLeast(notified, 0)
+    assert.isAbove(bodyStarted, notified)
     assert.isTrue(
       evaluated.trace.some(
         (event) =>
@@ -341,6 +357,97 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
     const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
     assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('publishes initial readiness exactly once before the body is driven', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/initial-readiness',
+      new TextEncoder().encode(`import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.shared as Shared
+struct Counter { value: i32 }
+fn increment(counter: &mut Counter) -> () {
+  counter.value = counter.value + 1
+  return ()
+}
+fn read(counter: &mut Counter) -> i32 { return counter.value }
+fn ready(counter: &Shared.Shared<Counter>) -> () {
+  return Shared.withMut(counter, increment)
+}
+effect fn packaged() -> i32 ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let counter = run Shared.make<Counter>(Counter { value: 0 })
+  let observed = Shared.clone<Counter>(&counter)
+  let mut execution = run Execution.make(effect { return 42 }, move counter, ready)
+  Execution.notifyInitial(&mut execution)
+  let result = Shared.withMut(&observed, read)
+  drop execution
+  drop observed
+  return result
+}
+effect fn program() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(snapshot.mir._tag, 'Available')
+    if (snapshot.mir._tag !== 'Available') return
+    assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
+    assert.lengthOf(
+      snapshot.mir.value.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'ExecutionNotifyInitial'),
+      1,
+    )
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag !== 'Completed') return
+    assert.strictEqual(evaluated.result._tag, 'IntegerValue')
+    if (evaluated.result._tag === 'IntegerValue') assert.strictEqual(evaluated.result.value, 1n)
+    assert.lengthOf(
+      evaluated.trace.filter((event) => event._tag === 'AllocationRelease'),
+      2,
+    )
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 1)
+  }),
+)
+
+it.effect('traps duplicate initial readiness before invoking the endpoint twice', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'execution-package/duplicate-initial-readiness',
+      new TextEncoder().encode(`import silk.allocator { Allocator }
+import silk.effect as Effect
+import silk.execution as Execution
+fn ready(state: &()) -> () { return () }
+effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
+  let mut execution = run Execution.make(effect { return () }, (), ready)
+  Execution.notifyInitial(&mut execution)
+  Execution.notifyInitial(&mut execution)
+  drop execution
+  return ()
+}
+effect fn program() -> () ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
+  return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
+pub fn main() -> () { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(Analysis.evaluate(snapshot)._tag, 'Trap')
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(artifact.bytes.slice()), {})
+    assert.throws(() => (instance.exports.silk_main as () => void)(), WebAssembly.RuntimeError)
   }),
 )
 

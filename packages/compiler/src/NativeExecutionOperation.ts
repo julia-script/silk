@@ -27,7 +27,12 @@ import * as SilkType from './Type.js'
 type Operation = Extract<
   LinearOperation,
   {
-    readonly _tag: 'ExecutionFromAllocation' | 'ExecutionDrive' | 'ExecutionWake' | 'ExecutionPark'
+    readonly _tag:
+      | 'ExecutionFromAllocation'
+      | 'ExecutionDrive'
+      | 'ExecutionWake'
+      | 'ExecutionPark'
+      | 'ExecutionNotifyInitial'
   }
 >
 
@@ -117,35 +122,64 @@ const storePackageValue = Effect.fnUntraced(function* (
     readonly offset: number
   }> = []
   let cursor = 0
+  const representation = SilkType.isRepresented(type) ? type.representation.argument : undefined
+  const identity =
+    representation !== undefined && SilkType.isExactRepresentationArgument(representation)
+      ? representation.identity
+      : undefined
   if (localType?._tag === 'CallableValue') {
-    for (const field of localType.environment?.fields ?? []) {
-      const lanes = Layout.callableFieldLanes(context.program.layout, field)
-      for (const lane of lanes) {
-        const value = values.at(cursor)
-        const offset =
-          field.representation === 'Borrow'
-            ? 0
-            : LayoutVerify.laneOffset(context.program.layout, field.type, lane.path)
-        if (value === undefined || offset === undefined)
-          throw new RangeError('LLVM execution package environment lost a lane')
-        placements.push(Object.freeze({ value, lane, offset: field.offset + offset }))
-        cursor += 1
-      }
+    for (const placement of localType.environment === undefined
+      ? []
+      : Layout.callableEnvironmentLanePlacements(
+          context.program.layout,
+          identity !== undefined &&
+            SilkType.isCallableIdentityArgument(identity) &&
+            identity.environment !== undefined
+            ? (Layout.callableEnvironmentByIdentity(context.program.layout, identity.environment) ??
+                localType.environment)
+            : localType.environment,
+        )) {
+      const value = values.at(cursor)
+      const laneOffset =
+        placement.root === undefined
+          ? 0
+          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
+      if (value === undefined || laneOffset === undefined)
+        throw new RangeError('LLVM execution package environment lost a lane')
+      placements.push(
+        Object.freeze({
+          value,
+          lane: placement.lane,
+          offset: placement.byteOffset + laneOffset,
+        }),
+      )
+      cursor += 1
     }
   } else if (localType?._tag === 'EffectValue') {
-    for (const field of localType.environment.fields) {
-      const lanes = Layout.effectFieldLanes(context.program.layout, field)
-      for (const lane of lanes) {
-        const value = values.at(cursor)
-        const offset =
-          field.representation === 'Borrow'
-            ? 0
-            : LayoutVerify.laneOffset(context.program.layout, field.type, lane.path)
-        if (value === undefined || offset === undefined)
-          throw new RangeError('LLVM execution package environment lost a lane')
-        placements.push(Object.freeze({ value, lane, offset: field.offset + offset }))
-        cursor += 1
-      }
+    for (const placement of Layout.effectEnvironmentLanePlacements(
+      context.program.layout,
+      identity !== undefined && SilkType.isEffectIdentityArgument(identity)
+        ? (Layout.effectEnvironmentByIdentity(
+            context.program.layout.effectEnvironments,
+            identity,
+          ) ?? localType.environment)
+        : localType.environment,
+    )) {
+      const value = values.at(cursor)
+      const laneOffset =
+        placement.root === undefined
+          ? 0
+          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
+      if (value === undefined || laneOffset === undefined)
+        throw new RangeError('LLVM execution package environment lost a lane')
+      placements.push(
+        Object.freeze({
+          value,
+          lane: placement.lane,
+          offset: placement.byteOffset + laneOffset,
+        }),
+      )
+      cursor += 1
     }
   } else {
     for (const lane of Layout.callingShape(context.program.layout, type)?.lanes ?? []) {
@@ -223,20 +257,7 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
       : undefined
   const environment =
     identity !== undefined && SilkType.isEffectIdentityArgument(identity)
-      ? context.program.layout.effectEnvironments.find(
-          (
-            candidate,
-          ): candidate is Extract<
-            Layout.EffectEnvironment,
-            { readonly _tag: 'EffectEnvironment' }
-          > =>
-            candidate._tag === 'EffectEnvironment' &&
-            Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
-            identity.owner !== undefined &&
-            candidate.instance.declaration.module === identity.owner.declaration.module &&
-            candidate.instance.declaration.name === identity.owner.declaration.name &&
-            MirMatches(candidate.instance.typeArguments, identity.owner.typeArguments),
-        )
+      ? Layout.effectEnvironmentByIdentity(context.program.layout.effectEnvironments, identity)
       : undefined
   const target =
     environment === undefined
@@ -263,31 +284,29 @@ const bodyOperands = Effect.fnUntraced(function* (
   const bodyOffset = componentOffset(package_, 'BodyEnvironment')
   if (bodyOffset === undefined) throw new RangeError('LLVM execution drive lost body storage')
   const values: Array<Value.Input> = []
-  for (const field of environment.fields) {
-    for (const [ordinal, lane] of Layout.effectFieldLanes(
-      context.program.layout,
-      field,
-    ).entries()) {
-      const offset =
-        field.representation === 'Borrow'
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, field.type, lane.path)
-      if (offset === undefined) throw new RangeError('LLVM execution body lost a capture lane')
-      values.push(
-        yield* FunctionBody.load(
+  for (const [ordinal, placement] of Layout.effectEnvironmentLanePlacements(
+    context.program.layout,
+    environment,
+  ).entries()) {
+    const laneOffset =
+      placement.root === undefined
+        ? 0
+        : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
+    if (laneOffset === undefined) throw new RangeError('LLVM execution body lost a capture lane')
+    values.push(
+      yield* FunctionBody.load(
+        context.body,
+        NativeType.laneType(context.types, placement.lane),
+        yield* NativeLanePointer.lanePointer(
+          context.lanePointers,
           context.body,
-          NativeType.laneType(context.types, lane),
-          yield* NativeLanePointer.lanePointer(
-            context.lanePointers,
-            context.body,
-            base,
-            bodyOffset + field.offset + offset,
-            `${tag}_${field.ordinal}_${ordinal}_ptr`,
-          ),
-          `${tag}_${field.ordinal}_${ordinal}`,
+          base,
+          bodyOffset + placement.byteOffset + laneOffset,
+          `${tag}_${ordinal}_ptr`,
         ),
-      )
-    }
+        `${tag}_${ordinal}`,
+      ),
+    )
   }
   return Object.freeze({ environment, target, values: Object.freeze(values) })
 })
@@ -334,9 +353,11 @@ const notifyReady = Effect.fnUntraced(function* (
             MirMatches(candidate.fn.instance.typeArguments, targetArguments),
         )
       : undefined
+  const callbackLayout = Layout.entry(context.program.layout, package_.specialization.callback)
+  const endpointLayout = Layout.entry(context.program.layout, package_.specialization.endpoint)
   if (
-    callbackOffset === undefined ||
-    endpointOffset === undefined ||
+    (callbackOffset === undefined && callbackLayout?.size !== 0) ||
+    (endpointOffset === undefined && endpointLayout?.size !== 0) ||
     identity === undefined ||
     target === undefined ||
     (identity.environment !== undefined && environment === undefined)
@@ -365,7 +386,7 @@ const notifyReady = Effect.fnUntraced(function* (
             context.lanePointers,
             context.body,
             base,
-            callbackOffset + field.offset + offset,
+            (callbackOffset ?? 0) + field.offset + offset,
             `${tag}_capture${field.parameterOrdinal}_${ordinal}_ptr`,
           ),
           `${tag}_capture${field.parameterOrdinal}_${ordinal}`,
@@ -384,7 +405,7 @@ const notifyReady = Effect.fnUntraced(function* (
         context.lanePointers,
         context.body,
         base,
-        endpointOffset,
+        endpointOffset ?? 0,
         `${tag}_endpoint`,
       ),
       ...captures
@@ -876,19 +897,31 @@ export const dropExecution = Effect.fnUntraced(function* (
       const initial = yield* LlvmBlock.make(body, `${tag}_initial`)
       const notInitial = yield* LlvmBlock.make(body, `${tag}_not_initial`)
       const done = yield* LlvmBlock.make(body, `${tag}_state_done`)
+      const unpublished = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        state,
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('Initial')),
+        ),
+        `${tag}_is_initial`,
+      )
+      const initialReady = yield* FunctionBody.integerCompare(
+        body,
+        'eq',
+        state,
+        yield* Constant.integerUnsigned(
+          builder,
+          usizeType,
+          BigInt(ExecutionTransition.tagOf('InitialReady')),
+        ),
+        `${tag}_is_initial_ready`,
+      )
       yield* FunctionBody.conditionalBranch(
         body,
-        yield* FunctionBody.integerCompare(
-          body,
-          'eq',
-          state,
-          yield* Constant.integerUnsigned(
-            builder,
-            usizeType,
-            BigInt(ExecutionTransition.tagOf('Initial')),
-          ),
-          `${tag}_is_initial`,
-        ),
+        yield* FunctionBody.binary(body, 'or', unpublished, initialReady, `${tag}_is_initial_any`),
         initial,
         notInitial,
       )
@@ -1486,7 +1519,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           packagePointer,
           `drive${operation.destination.ordinal}_direct_package`,
         )
-        const validState = yield* FunctionBody.integerCompare(
+        const unpublished = yield* FunctionBody.integerCompare(
           body,
           'eq',
           state,
@@ -1496,6 +1529,24 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             BigInt(ExecutionTransition.tagOf('Initial')),
           ),
           `drive${operation.destination.ordinal}_direct_initial`,
+        )
+        const initialReady = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          state,
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('InitialReady')),
+          ),
+          `drive${operation.destination.ordinal}_direct_initial_ready`,
+        )
+        const validState = yield* FunctionBody.binary(
+          body,
+          'or',
+          unpublished,
+          initialReady,
+          `drive${operation.destination.ordinal}_direct_ready`,
         )
         const validPackage = yield* FunctionBody.integerCompare(
           body,
@@ -1686,12 +1737,30 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           statePointer,
           `drive${operation.destination.ordinal}_state`,
         )
-        const initial = yield* FunctionBody.integerCompare(
+        const unpublished = yield* FunctionBody.integerCompare(
           body,
           'eq',
           state,
           yield* Constant.integerUnsigned(builder, usizeType, 0n),
           `drive${operation.destination.ordinal}_initial`,
+        )
+        const initialReady = yield* FunctionBody.integerCompare(
+          body,
+          'eq',
+          state,
+          yield* Constant.integerUnsigned(
+            builder,
+            usizeType,
+            BigInt(ExecutionTransition.tagOf('InitialReady')),
+          ),
+          `drive${operation.destination.ordinal}_initial_ready`,
+        )
+        const initial = yield* FunctionBody.binary(
+          body,
+          'or',
+          unpublished,
+          initialReady,
+          `drive${operation.destination.ordinal}_initial_any`,
         )
         const eligible = yield* FunctionBody.integerCompare(
           body,
@@ -2369,6 +2438,90 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `drive${operation.destination.ordinal}`,
         emitPackage,
       )
+      return
+    }
+    case 'ExecutionNotifyInitial': {
+      context.runtimeFeatures.add('ReadinessNotification')
+      const reference = NativeStorage.readLocal(storage, operation.execution).at(0)
+      if (reference === undefined)
+        throw new RangeError('LLVM initial readiness lost its Execution reference')
+      const baseAddress = yield* FunctionBody.load(
+        body,
+        usizeType,
+        reference,
+        `notify_initial${operation.destination.ordinal}_base_address`,
+      )
+      const base = yield* FunctionBody.cast(
+        body,
+        'inttoptr',
+        baseAddress,
+        context.pointer,
+        `notify_initial${operation.destination.ordinal}_base`,
+      )
+      yield* selectPackage(
+        context.cleanup,
+        base,
+        `notify_initial${operation.destination.ordinal}`,
+        (package_) =>
+          Effect.gen(function* () {
+            const statePointer = yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
+              base,
+              0,
+              `notify_initial${operation.destination.ordinal}_state_ptr`,
+            )
+            const current = yield* FunctionBody.load(
+              body,
+              usizeType,
+              statePointer,
+              `notify_initial${operation.destination.ordinal}_state`,
+            )
+            const accepted = yield* LlvmBlock.make(
+              body,
+              `notify_initial${operation.destination.ordinal}_accepted`,
+            )
+            const rejected = yield* LlvmBlock.make(
+              body,
+              `notify_initial${operation.destination.ordinal}_rejected`,
+            )
+            yield* FunctionBody.conditionalBranch(
+              body,
+              yield* FunctionBody.integerCompare(
+                body,
+                'eq',
+                current,
+                yield* Constant.integerUnsigned(
+                  builder,
+                  usizeType,
+                  BigInt(ExecutionTransition.tagOf('Initial')),
+                ),
+                `notify_initial${operation.destination.ordinal}_is_initial`,
+              ),
+              accepted,
+              rejected,
+            )
+            yield* LlvmBlock.setInsertionPoint(body, rejected)
+            yield* FunctionBody.unreachable(body)
+            yield* LlvmBlock.setInsertionPoint(body, accepted)
+            yield* FunctionBody.store(
+              body,
+              yield* Constant.integerUnsigned(
+                builder,
+                usizeType,
+                BigInt(ExecutionTransition.tagOf('InitialReady')),
+              ),
+              statePointer,
+            )
+            yield* notifyReady(
+              context,
+              package_,
+              base,
+              `notify_initial${operation.destination.ordinal}_ready`,
+            )
+          }),
+      )
+      storage.locals.set(operation.destination.ordinal, Object.freeze([]))
       return
     }
     case 'ExecutionWake': {

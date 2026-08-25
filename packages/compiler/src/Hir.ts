@@ -920,7 +920,12 @@ export interface HirFunction {
 
 /** The return statement's expression — every body ends in exactly one. */
 export const returned = (self: HirFunction): Expression => {
-  const last = self.statements.at(-1)
+  let statements = self.statements
+  let last = statements.at(-1)
+  while (last?._tag === 'Unsafe') {
+    statements = last.statements
+    last = statements.at(-1)
+  }
   if (last === undefined || last._tag !== 'Return') {
     throw new RangeError('HIR body must end in a return statement')
   }

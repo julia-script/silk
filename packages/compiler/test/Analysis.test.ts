@@ -1056,7 +1056,7 @@ pub fn main() -> i32 { return 42 }`,
     assert.strictEqual(fact.fact.initial, 'Initial')
     assert.strictEqual(
       ExecutionLifecycle.encode(fact.fact),
-      'Intrinsic.Execution<i32> affine=yes copy=no transfer=no affinity=LocalExecution initial=Initial states=Initial,Running,Dormant,Notifying,Eligible,Completed,Destroyed loans=Rejected/MayCrossParking/LoanBeforeReferent/Rejected shared=PreservedAcrossParking/RejectParking',
+      'Intrinsic.Execution<i32> affine=yes copy=no transfer=no affinity=LocalExecution initial=Initial states=Initial,InitialReady,Running,Dormant,Notifying,Eligible,Completed,Destroyed loans=Rejected/MayCrossParking/LoanBeforeReferent/Rejected shared=PreservedAcrossParking/RejectParking',
     )
     assert.deepEqual(ExecutionLifecycle.transition('Initial', 'Drive'), {
       _tag: 'Transition',

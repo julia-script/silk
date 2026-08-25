@@ -222,5 +222,5 @@ missing-result diagnostic.
 
 Exact process-report behavior is defined in
 [program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass
-will assign stable codes to invalid entry shapes. Default entry providers require a separate
-language proposal before they can become current semantics.
+will assign stable codes to invalid entry shapes. Default entry providers are not current
+semantics and require an explicit future specification.

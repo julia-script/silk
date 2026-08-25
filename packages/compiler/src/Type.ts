@@ -212,6 +212,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'ExecutionLayout',
   'ExecutionFromAllocation',
   'ExecutionDrive',
+  'ExecutionNotifyInitial',
   'ExecutionWake',
   'ExecutionPark',
   'EffectSuspend',
@@ -1322,6 +1323,15 @@ export const isHiddenIdentityArgument = (
   self: GenericArgument,
 ): self is EffectIdentityArgument | CallableIdentityArgument =>
   isEffectIdentityArgument(self) || isCallableIdentityArgument(self)
+
+/** Identifies executable representation evidence appended outside declaration type parameters. */
+export const isHiddenExecutableArgument = (
+  self: GenericArgument,
+): self is
+  | EffectIdentityArgument
+  | CallableIdentityArgument
+  | CompositeEffectRepresentationArgument =>
+  isHiddenIdentityArgument(self) || isCompositeEffectRepresentationArgument(self)
 
 export const isTypeArgument = (self: GenericArgument): self is OrdinaryType =>
   !isRequirementRowArgument(self) &&

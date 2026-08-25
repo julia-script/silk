@@ -72,7 +72,8 @@ import silk.hash_map {
   make,
   occupiedAt,
   remove,
-  valueAt
+  valueAt,
+  withMut
 }
 import silk.option { Option, Some, None }
 import silk.u64 as u64
@@ -120,6 +121,46 @@ it.effect('inserts, looks up, and removes on both engines', () =>
   if absent != 0 { return 6 }
   let held = Option.unwrapOr<i32>(get<Word, i32>(&map, Hash.word(9)), 0)
   return removed + held`,
+      ),
+    )
+    agrees(outcome, 42)
+  }),
+)
+
+it.effect('mutates only a present map value through one callback on both engines', () =>
+  Effect.gen(function* () {
+    const outcome = yield* twoEngineValue(
+      'hashed-collections/callback-mutation',
+      program(
+        `${mapImports}
+struct Counter { value: i32 calls: i32 }
+impl Copy for Counter {}
+fn addTwentyTwo(value: &mut Counter) -> () {
+  value.value = 42
+  value.calls = value.calls + 1
+  return ()
+}
+fn mustNotRun(value: &mut Counter) -> () {
+  let boom = 1 / 0
+  return ()
+}`,
+        `  let mut map = make<Word, Counter>(Hash.seed(17))
+  let initial = Counter { value: 20, calls: 0 }
+  let inserted = run insert<Word, Counter>(&mut map, Hash.word(7), move initial)
+    |> Effect.provideMut(&mut allocator)
+  drop inserted
+  if length<Word, Counter>(&map) != 1 { return 2 }
+  if bucketCount<Word, Counter>(&map) != 8 { return 3 }
+  let missing = withMut(&mut map, Hash.word(9), mustNotRun)
+  if missing { return 4 }
+  let changed = withMut(&mut map, Hash.word(7), addTwentyTwo)
+  if !changed { return 5 }
+  if length<Word, Counter>(&map) != 1 { return 6 }
+  if bucketCount<Word, Counter>(&map) != 8 { return 7 }
+  let fallback = Counter { value: 0, calls: 0 }
+  let held = Option.unwrapOr<Counter>(get<Word, Counter>(&map, Hash.word(7)), move fallback)
+  if held.calls != 1 { return 8 }
+  return held.value`,
       ),
     )
     agrees(outcome, 42)

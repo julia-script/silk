@@ -5,9 +5,9 @@ first activation, receive it back when it relinquishes control, and drive it aga
 readiness. This is explicit local execution ownership. It does not create a scheduler, fiber,
 thread, queue, timer, or implicit program-entry owner.
 
-These rules implement SLP-0001. They extend the nested-transfer model in
-[Effect suspension](effect-suspension.md); `Effect.suspend` remains stack-safe composition inside
-one activation, while `Execution.park` returns control to an owner outside the body.
+These rules extend the nested-transfer model in [Effect suspension](effect-suspension.md);
+`Effect.suspend` remains stack-safe composition inside one activation, while `Execution.park`
+returns control to an owner outside the body.
 
 ## Terms
 
@@ -73,12 +73,12 @@ property application. A package layout mismatch at the unsafe intrinsic boundary
 **Evidence:** [ordinary source implementation](../../packages/compiler/stdlib/silk/execution.silk),
 [package tests](../../packages/compiler/test/ExecutionPackage.test.ts).
 
-### EXEC-002 — The owner drives only Initial or Eligible executions
+### EXEC-002 — The owner drives only Initial, InitialReady, or Eligible executions
 
 **Status:** Confirmed
 
-`Execution.drive` consumes an `Initial` or `Eligible` Execution and transfers the supplied branch
-state to exactly one take-once outcome callback:
+`Execution.drive` consumes an `Initial`, `InitialReady`, or `Eligible` Execution and transfers the
+supplied branch state to exactly one take-once outcome callback:
 
 - completion invokes `onComplete(branchState, result)`;
 - relinquishment invokes `onSuspend(branchState, execution)`.
@@ -171,11 +171,33 @@ Schedulers, fibers, deferred values, timers, reactors, ready queues, fairness, c
 and structured concurrency are ordinary source concepts built over those primitives and
 [`Shared`](local-shared-ownership.md).
 
-**Boundary:** SLP-0001 provides explicit independently resumable local executions. It does not make
-a park-capable `main` implicitly owned; that is a separate language decision.
+**Boundary:** The explicit Execution API does not make a park-capable `main` implicitly owned;
+application entry still requires an explicit owner such as `LocalScheduler.execute`.
 
 **Diagnostics:** No Scheduler, Fiber, Deferred, Timer, or concurrency service requirement is
 inferred by `Execution.make`, `drive`, or `park`.
 
 **Evidence:** [minimal compiler privilege](runtime-and-standard-library.md#stdlib-001--public-standard-library-declarations-receive-no-compiler-privilege),
 [actor-neutrality pressure tests](../../packages/compiler/test/LocalSharedPressure.test.ts).
+
+### EXEC-007 — Initial readiness can be notified after owner publication
+
+**Status:** Confirmed
+
+`Execution.notifyInitial(&mut execution)` changes one `Initial` Execution to `InitialReady`, then
+synchronously invokes its fixed non-parking readiness endpoint. It does not start the body. A
+later `Execution.drive` starts the body through the same fresh path as a direct first drive.
+
+This operation lets an owner store an Execution before making it visible to its ready policy. The
+exclusive borrow keeps ownership in the store slot. Notification does not allocate, choose a
+queue, or create a Wake generation.
+
+**Boundary:** Initial notification succeeds exactly once. Calling `notifyInitial` on
+`InitialReady`, `Running`, `Dormant`, `Eligible`, or a terminal Execution is a fatal state trap.
+Dropping `InitialReady` performs the same unstarted-body cleanup as dropping `Initial`.
+
+**Diagnostics:** Ordinary borrow and ownership rules apply to the exclusive Execution reference.
+Lifecycle admission failure occurs at runtime as a fatal trap outside Effect failure channels.
+
+**Evidence:** [Execution package tests](../../packages/compiler/test/ExecutionPackage.test.ts),
+[lifecycle transition actor](../../packages/compiler/src/ExecutionTransition.ts).

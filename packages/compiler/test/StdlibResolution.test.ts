@@ -127,10 +127,19 @@ it('declares one discoverable namespace for every standard-library module', () =
   assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')
   assert.strictEqual(Stdlib.findNamespace('Effect')?.module, 'silk/effect')
   assert.strictEqual(Stdlib.findNamespace('Random')?.module, 'silk/random')
+  assert.strictEqual(Stdlib.findNamespace('Fiber')?.module, 'silk/fiber')
+  assert.strictEqual(Stdlib.findNamespace('LocalScheduler')?.module, 'silk/local_scheduler')
+  assert.strictEqual(Stdlib.findNamespace('Scheduler')?.module, 'silk/scheduler')
   assert.isDefined(Stdlib.find('silk/effect'))
   assert.isUndefined(Stdlib.find('silk/effects'))
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
   assert.deepEqual(Stdlib.find('silk/random')?.aliases, ['Xoshiro256StarStar'])
+  assert.includeMembers([...(Stdlib.find('silk/fiber')?.aliases ?? [])], ['Cancelled', 'Outcome'])
+  assert.deepEqual(Stdlib.find('silk/local_scheduler')?.aliases, ['Stalled'])
+  assert.includeMembers(
+    [...(Stdlib.find('silk/scheduler')?.aliases ?? [])],
+    ['PendingPublication', 'TaskId', 'TaskIdExhausted'],
+  )
 })
 
 const randomImporter = `import silk.random as Random

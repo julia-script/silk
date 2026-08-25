@@ -481,6 +481,20 @@ it('applies the Shared < Exclusive < Take order across compatibility and inferen
   }
 })
 
+it('widens Effect requirement rows only from fewer requirements to an allowed superset', () => {
+  const capability = Type.nominal('test', 'Capability')
+  const allowed = Type.effect('i32', [], 'Take', [
+    { capability, role: 'DefaultRole', access: 'Exclusive' },
+  ])
+  const closed = Type.effect('i32', [], 'Take')
+  const requiring = Type.effect('i32', [], 'Take', [
+    { capability, role: 'DefaultRole', access: 'Shared' },
+  ])
+
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(closed, allowed)))
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(requiring, closed)))
+})
+
 it('searches every nested type position including requirement capabilities', () => {
   const borrowed = Type.slice('Shared', 'u8')
   const capability = Type.nominal('test', 'Capability', [borrowed])

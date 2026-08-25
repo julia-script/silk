@@ -1,0 +1,153 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+
+struct WakeEmpty {}
+struct WakeArmed { wake: Intrinsic.Wake }
+struct RetainedWake { slot: WakeEmpty | WakeArmed }
+struct ParkGuard {}
+struct RetainedRootFailure {}
+
+fn retainedWakeInstalled() -> () { return () }
+fn retainedGuardReleased() -> () { return () }
+fn retainedRunRecovered() -> () { return () }
+fn staleRootTerminating() -> () { return () }
+fn staleRunReturned() -> () { return () }
+fn staleChildActivated() -> () { return () }
+fn freshStarted() -> () { return () }
+fn cancelledWakeConsumed() -> () { return () }
+fn currentChildActivated() -> () { return () }
+fn freshReturned() -> () { return () }
+fn resumedUnexpectedly() -> () { return () }
+
+impl Drop for ParkGuard {
+  fn drop(self: &mut ParkGuard) -> () {
+    retainedGuardReleased()
+    return ()
+  }
+}
+
+fn installWake(self: &mut RetainedWake, wake: Intrinsic.Wake) -> () {
+  let previous = Intrinsic.replace(self.slot, WakeArmed { wake: move wake })
+  drop previous
+  return ()
+}
+
+fn takeWake(self: &mut RetainedWake) -> WakeEmpty | WakeArmed {
+  return Intrinsic.replace(self.slot, WakeEmpty {})
+}
+
+fn retainWake(wake: Intrinsic.Wake, state: Shared.Shared<RetainedWake>) -> ParkGuard {
+  let installed = Shared.withMut(&state, installWake(move wake))
+  drop state
+  retainedWakeInstalled()
+  return ParkGuard {}
+}
+
+fn consumeRetainedWake(state: &Shared.Shared<RetainedWake>) -> () {
+  let selected = Shared.withMut(state, takeWake)
+  return match move selected {
+    WakeEmpty {} => ()
+    WakeArmed { wake } => Intrinsic.wake(move wake)
+  }
+}
+
+effect fn retainedWakeRoot(state: Shared.Shared<RetainedWake>) -> i32
+! RetainedRootFailure
+? &mut Scheduler.Scheduler {
+  let registration = retainWake(move state)
+  run Execution.park(move registration)
+  resumedUnexpectedly()
+  return -1
+}
+
+effect fn staleChild() -> i32 {
+  staleChildActivated()
+  return -2
+}
+
+effect fn staleReadyRoot() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+? &mut Scheduler.Scheduler {
+  let child = run Fiber.forkChild<i32, never>(staleChild())
+  drop child
+  staleRootTerminating()
+  return 1
+}
+
+effect fn currentChild() -> i32 {
+  currentChildActivated()
+  return 42
+}
+
+effect fn freshRoot(state: Shared.Shared<RetainedWake>) -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | Fiber.Cancelled
+? &mut Scheduler.Scheduler {
+  freshStarted()
+  consumeRetainedWake(&state)
+  cancelledWakeConsumed()
+  drop state
+  let child = run Fiber.forkChild<i32, never>(currentChild())
+  return run Fiber.join<i32, never>(move child)
+}
+
+effect fn recoverRetainedRun(
+  error: RetainedRootFailure | Allocator.OutOfMemoryError | LocalScheduler.Stalled,
+) -> i32 {
+  return match move error {
+    RetainedRootFailure {} => 0
+    Allocator.OutOfMemoryError {} => 0
+    LocalScheduler.Stalled {} => markRetainedRecovery()
+  }
+}
+
+fn markRetainedRecovery() -> i32 {
+  retainedRunRecovered()
+  return 1
+}
+
+effect fn scenario() -> i32
+! Allocator.OutOfMemoryError
+  | Scheduler.TaskIdExhausted
+  | Fiber.Cancelled
+  | LocalScheduler.Stalled {
+  let mut allocator = Allocator.systemAllocatorService()
+  let state = run Shared.make<RetainedWake>(RetainedWake { slot: WakeEmpty {} })
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let mut scheduler = LocalScheduler.make()
+
+  let firstState = Shared.clone<RetainedWake>(&state)
+  let retainedRecovered = run Effect.catchAll(
+    LocalScheduler.execute(&mut scheduler, retainedWakeRoot(move firstState)),
+    recoverRetainedRun,
+  )
+
+  let stale = run LocalScheduler.execute(&mut scheduler, staleReadyRoot())
+  staleRunReturned()
+
+  let freshState = Shared.clone<RetainedWake>(&state)
+  let fresh = run LocalScheduler.execute(&mut scheduler, freshRoot(move freshState))
+  freshReturned()
+
+  drop state
+  if retainedRecovered == 1 && stale == 1 && fresh == 42 { return 42 }
+  return -42
+}
+
+effect fn recoverScenario(
+  error: Allocator.OutOfMemoryError
+    | Scheduler.TaskIdExhausted
+    | Fiber.Cancelled
+    | LocalScheduler.Stalled,
+) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(scenario(), recoverScenario)
+}

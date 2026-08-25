@@ -5174,6 +5174,14 @@
       "identity": "ExecutionDrive"
     },
     {
+      "operation": "Intrinsic.executionNotifyInitial",
+      "signature": "fn Intrinsic.executionNotifyInitial<A>(execution: &mut Execution<A>) -> ()",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/execution.notifyInitial",
+      "identity": "ExecutionNotifyInitial"
+    },
+    {
       "operation": "Intrinsic.wake",
       "signature": "fn Intrinsic.wake(wake: Wake) -> ()",
       "unsafe": false,

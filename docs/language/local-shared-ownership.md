@@ -5,8 +5,8 @@ inside one local execution domain. `Shared<T>` is not a lexical borrow and is no
 ownership. Each handle is an affine strong obligation, and access is confined to a take-once
 callback.
 
-These rules implement SLP-0002 and supply the shared-state substrate used by SLP-0001's ordinary
-source schedulers, deferred values, and readiness inboxes.
+These rules supply the shared-state substrate used by ordinary-source schedulers, completion
+cells, and readiness queues.
 
 ## Share and update a counter
 

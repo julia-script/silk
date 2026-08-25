@@ -5,6 +5,7 @@ import * as Type from './Type.js'
 /** Target-neutral logical states; backends remain free to fuse their physical tags. */
 export type State =
   | 'Initial'
+  | 'InitialReady'
   | 'Running'
   | 'Dormant'
   | 'Notifying'
@@ -14,6 +15,7 @@ export type State =
 
 export type Event =
   | 'Drive'
+  | 'NotifyInitial'
   | 'Park'
   | 'BeginNotification'
   | 'FinishNotification'
@@ -53,6 +55,7 @@ export type FactResult =
 
 export const states: ReadonlyArray<State> = Object.freeze([
   'Initial',
+  'InitialReady',
   'Running',
   'Dormant',
   'Notifying',
@@ -96,12 +99,14 @@ export const ofType = (index: DeclarationIndex.Index, type: Type.Type): FactResu
 /** Applies the owner-neutral logical transition contract without selecting storage. */
 export const transition = (state: State, event: Event): Transition => {
   if (event === 'Drive') {
-    if (state === 'Initial' || state === 'Eligible')
+    if (state === 'Initial' || state === 'InitialReady' || state === 'Eligible')
       return Object.freeze({ _tag: 'Transition', state: 'Running' })
     if (state === 'Dormant' || state === 'Notifying')
       return Object.freeze({ _tag: 'FatalIntrinsicStateTrap', state, event })
     return Object.freeze({ _tag: 'OwnershipRejected', state, event })
   }
+  if (event === 'NotifyInitial' && state === 'Initial')
+    return Object.freeze({ _tag: 'Transition', state: 'InitialReady' })
   if (event === 'Park' && state === 'Running')
     return Object.freeze({ _tag: 'Transition', state: 'Dormant' })
   if (event === 'BeginNotification' && state === 'Dormant')
@@ -110,7 +115,10 @@ export const transition = (state: State, event: Event): Transition => {
     return Object.freeze({ _tag: 'Transition', state: 'Eligible' })
   if (event === 'Complete' && state === 'Running')
     return Object.freeze({ _tag: 'Transition', state: 'Completed' })
-  if (event === 'Drop' && (state === 'Initial' || state === 'Dormant' || state === 'Eligible'))
+  if (
+    event === 'Drop' &&
+    (state === 'Initial' || state === 'InitialReady' || state === 'Dormant' || state === 'Eligible')
+  )
     return Object.freeze({ _tag: 'Transition', state: 'Destroyed' })
   return Object.freeze({ _tag: 'OwnershipRejected', state, event })
 }

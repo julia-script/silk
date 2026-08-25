@@ -13,13 +13,14 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
 | [`silk/effect`](./effect.md) | `Effect` | 27 | Builds lazy computations by transforming success, recovering typed failure, supplying services, and controlling sequencing and cleanup. |
-| [`silk/execution`](./execution.md) | `Execution` | 3 | Independently owned, caller-funded lazy computations with explicit external parking. |
+| [`silk/execution`](./execution.md) | `Execution` | 4 | Independently owned, caller-funded lazy computations with explicit external parking. |
 | [`silk/f32`](./f32.md) | `f32` | 50 | IEEE binary32 values with deterministic representation, classification, and math operations. |
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
+| [`silk/fiber`](./fiber.md) | `Fiber` | 16 | Affine Fiber handles, typed outcomes, and one-observer completion. |
 | [`silk/filesystem`](./filesystem.md) | `FileSystem` | 58 | Portable normalized paths, whole-file operations, directory traversal, and explicit temp scopes. |
 | [`silk/format`](./format.md) | `Format` | 17 | Decimal rendering and complete-text parsing shared by every integer module. |
 | [`silk/hash`](./hash.md) | `HashKey` | 7 | Deterministic seeded hashing contracts for hash maps, hash sets, and user-defined key types. |
-| [`silk/hash_map`](./hash-map.md) | `HashMap` | 15 | Owned key-value storage with deterministic seeded hashing and open-addressed lookup. |
+| [`silk/hash_map`](./hash-map.md) | `HashMap` | 16 | Owned key-value storage with deterministic seeded hashing and open-addressed lookup. |
 | [`silk/hash_set`](./hash-set.md) | `HashSet` | 13 | Owned unique elements with deterministic seeded hashing and open-addressed membership lookup. |
 | [`silk/host_input`](./host-input.md) | `HostInput` | 10 | Explicit access to process arguments, environment values, and the working directory as bytes. |
 | [`silk/i16`](./i16.md) | `i16` | 60 | Sixteen-bit signed integers with explicit overflow, conversion, and text policies. |
@@ -28,6 +29,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/i8`](./i8.md) | `i8` | 60 | Eight-bit signed integers for compact values, byte-level formats, and narrow arithmetic. |
 | [`silk/isize`](./isize.md) | `isize` | 60 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
 | [`silk/layout`](./layout.md) | `Layout` | 6 | Checked size-and-alignment descriptions used to request storage from an allocator. |
+| [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
 | [`silk/logger`](./logger.md) | `Logger` | 20 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 6 | Provider-owned allocation counters that can be published as ordinary copyable data. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 2 | Shared compile-time addition witness for generic algorithms over primitive integers. |
@@ -40,6 +42,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/random`](./random.md) | `Random` | 7 | Provider-replaceable pseudorandom words, booleans, bounded values, and byte filling. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
+| [`silk/scheduler`](./scheduler.md) | `Scheduler` | 17 | Provider protocol for preparing and atomically publishing child Fibers. |
 | [`silk/shared`](./shared.md) | `Shared` | 5 | Explicitly allocated, single-threaded shared ownership with callback-scoped access. |
 | [`silk/slot`](./slot.md) | `Slot` | 4 | Explicit initialization-state transitions for one slot selected from raw storage. |
 | [`silk/standard_input`](./standard-input.md) | `StandardInput` | 11 | Portable blocking reads of raw standard-input bytes through an explicit provider. |

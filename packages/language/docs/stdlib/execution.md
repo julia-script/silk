@@ -27,7 +27,7 @@ until the Wake is consumed or dropped. [`drive`](#declaration-73696c6b2f65786563
 
 Import as `Execution` with `import silk.execution`.
 
-Public declarations: 3.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a6d616b65"></a>
 
@@ -53,7 +53,7 @@ growth is a fatal trap and is not a `Allocator.OutOfMemoryError`.
 pub effect fn drive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: D, onComplete: C, onSuspend: S) -> ()
 ```
 
-Drives one `Initial` or `Eligible` activation and transfers `branchState` to one outcome callback.
+Drives one `Initial`, `InitialReady`, or `Eligible` activation and transfers `branchState` to one outcome callback.
 
 ### Details
 
@@ -64,6 +64,26 @@ External parking relinquishes ownership until the fixed readiness endpoint repor
 ### Gotchas
 
 Driving a dormant, notifying, completed, or destroyed Execution is a fatal state trap.
+
+<a id="declaration-73696c6b2f657865637574696f6e3a3a6e6f74696679496e697469616c"></a>
+
+## `notifyInitial`
+
+```silk
+pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> ()
+```
+
+Notifies the fixed readiness endpoint for one `Initial` Execution exactly once.
+
+### Details
+
+This operation changes the package to `InitialReady` before it invokes the endpoint. It is
+synchronous, does not park, and does not run the body. A later [`drive`](#declaration-73696c6b2f657865637574696f6e3a3a6472697665) starts the body.
+
+### Gotchas
+
+The Execution must still be `Initial`. Calling this operation again, or calling it after the
+Execution has been driven, parked, completed, or destroyed, is a fatal state trap.
 
 <a id="declaration-73696c6b2f657865637574696f6e3a3a7061726b"></a>
 

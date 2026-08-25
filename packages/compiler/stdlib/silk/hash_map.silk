@@ -18,8 +18,9 @@
 //!
 //! # Gotchas
 //! Lookup and removal consume the probe key. [`get`], [`keyAt`], and [`valueAt`] copy a complete
-//! stored entry and therefore require both stored key and value to be `Copy`; use [`remove`] to
-//! transfer a move-only value out. Equivalent keys must also obey the [`HashKey`] hash contract.
+//! stored entry and therefore require both stored key and value to be `Copy`; use [`withMut`] to
+//! update a move-only value in place or [`remove`] to transfer it out. Equivalent keys must also
+//! obey the [`HashKey`] hash contract.
 //!
 //! # Examples
 //! ## Insert, read, and remove one value
@@ -619,6 +620,59 @@ pub fn get<K: HashKey + Copy, V: Copy>(self: &HashMap<K, V>, key: K) -> Option<V
     scanned = scanned + usize.ONE
   }
   return Option.none<V>()
+}
+
+/// Runs one take-once callback with exclusive access to an existing value.
+///
+/// # Details
+///
+/// Lookup and mutation allocate nothing and never grow the map. Returns `true` after running the
+/// callback exactly once for an equivalent key, or `false` without running it when the key is
+/// absent. The unit callback cannot return its value borrow, and a callback that may park is
+/// rejected.
+///
+/// This function consumes the probe key but leaves the stored key, length, used count, and bucket
+/// count unchanged.
+pub fn withMut<
+  K: HashKey,
+  V,
+  F: once fn(&mut V) -> () + Intrinsic.NonParking
+>(self: &mut HashMap<K, V>, key: K, use: F) -> bool {
+  if self.capacity == usize.ZERO {
+    return false
+  }
+  let hashed = HashKey.hash(&key, &self.seed)
+  let storage = Intrinsic.replace(self.storage, Unallocated<K, V> { anchor: [] })
+  let mut owned = openStorage<K, V>(move storage)
+  let mut found = self.capacity
+  let mut index = bucketOf(hashed, self.capacity)
+  let mut scanned = usize.ZERO
+  while scanned < self.capacity {
+    let seen = RawBuffer.view<u8>(&owned.states, usize.ZERO, self.capacity)
+    let state = seen[index]
+    if state == VACANT {
+      break
+    }
+    if state == OCCUPIED {
+      let held = RawBuffer.view<Entry<K, V>>(&owned.entries, index, usize.ONE)
+      if held[usize.ZERO].hash == hashed {
+        if (&held[usize.ZERO].key) == (&key) {
+          found = index
+          break
+        }
+      }
+    }
+    index = advance(index, self.capacity)
+    scanned = scanned + usize.ONE
+  }
+  if self.capacity <= found {
+    self.storage = move owned
+    return false
+  }
+  let mut held = RawBuffer.viewMut<Entry<K, V>>(&mut owned.entries, found, usize.ONE)
+  use(&mut held[usize.ZERO].value)
+  self.storage = move owned
+  return true
 }
 
 /// Removes the entry under a key equivalent to one probe key and answers with its value.

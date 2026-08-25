@@ -695,6 +695,7 @@ function* executeFunction(
         if (
           package_ === undefined ||
           (package_.state !== 'Initial' &&
+            package_.state !== 'InitialReady' &&
             package_.state !== 'Running' &&
             package_.state !== 'Dormant' &&
             package_.state !== 'Eligible' &&
@@ -2875,6 +2876,57 @@ function* executeFunction(
               true,
             )
             if (callback._tag !== 'Value') return callback
+            write(operation.destination, {
+              value: Object.freeze({
+                _tag: 'AggregateValue',
+                type: Type.unit,
+                fields: Object.freeze([]),
+              }),
+              fromCall: true,
+            })
+            break
+          }
+          case 'ExecutionNotifyInitial': {
+            const execution = referenced(operation.execution).value
+            if (execution._tag !== 'ExecutionValue')
+              throw new RangeError('MIR verifier allowed notifying a non-Execution value')
+            const package_ = BootstrapStorage.execution(state.allocations, execution.ticket)
+            const published =
+              package_ === undefined
+                ? undefined
+                : ExecutionTransition.notifyInitial(transitionState(package_, execution.ticket))
+            if (package_ === undefined || published?._tag !== 'ExecutionTransitionEdge')
+              return blockedStep({
+                _tag: 'Trap',
+                function: fn.id,
+                reason: 'Execution initial readiness was notified outside Initial state',
+                span: operation.provenance.span,
+              })
+            if (package_.callback._tag !== 'CallableValue')
+              throw new RangeError('Execution package lost its endpoint callback identity')
+            package_.state = 'InitialReady'
+            traceExecution(package_, execution.ticket, 'NotifyInitial', operation.provenance.span)
+            const endpointCell = -execution.ticket - 1
+            state.cells.set(cellKey(frame, endpointCell), {
+              value: package_.endpoint,
+              fromCall: false,
+            })
+            const notified = yield* invokeStoredCallable(
+              package_.callback,
+              Object.freeze([
+                Object.freeze({
+                  _tag: 'ReferenceValue' as const,
+                  frame,
+                  cell: endpointCell,
+                  selectors: Object.freeze([]),
+                  indexes: Object.freeze([]),
+                }),
+              ]),
+              operation.provenance.span,
+              false,
+            )
+            state.cells.delete(cellKey(frame, endpointCell))
+            if (notified._tag !== 'Value') return notified
             write(operation.destination, {
               value: Object.freeze({
                 _tag: 'AggregateValue',

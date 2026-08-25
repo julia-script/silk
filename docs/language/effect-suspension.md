@@ -71,11 +71,12 @@ concrete application reports the property obligation at the application and reta
 capture/provider or reachability path.
 
 `Intrinsic.Execution<A>` is an opaque affine, non-copyable, initially non-thread-transferable local
-identity. Its logical lifecycle is `Initial`, `Running`, `Dormant`, `Notifying`, `Eligible`,
-`Completed`, and `Destroyed`; these are semantic states, not a promised backend tag layout. The
-owner may drive only `Initial` or `Eligible`, and driving a dormant or notifying execution is a
-fatal intrinsic-state trap. Execution-internal stable loans may cross parking, but construction
-cannot retain caller loans and completion cannot return a loan into package-owned storage.
+identity. Its logical lifecycle is `Initial`, `InitialReady`, `Running`, `Dormant`, `Notifying`,
+`Eligible`, `Completed`, and `Destroyed`; these are semantic states, not a promised backend tag
+layout. The owner may drive only `Initial`, `InitialReady`, or `Eligible`, and driving a dormant or
+notifying execution is a fatal intrinsic-state trap. Execution-internal stable loans may cross
+parking, but construction cannot retain caller loans and completion cannot return a loan into
+package-owned storage.
 
 ## Independent execution and external parking
 
@@ -88,11 +89,13 @@ package owns the lazy body and its fixed readiness endpoint. Construction return
 Execution and does not start the body. Package allocation refusal is a typed construction failure.
 Later growth of the private execution stack is a fatal trap outside the typed failure channel.
 
-The owner calls `Execution.drive` for an `Initial` or `Eligible` activation. A nested
-`Effect.suspend` transfers directly to a child and can return during the same drive. `Execution.park`
-instead relinquishes the running Execution. Its registration callback receives one affine Wake for
-that parked generation. Signaling the Wake makes the Execution eligible and invokes its fixed
-readiness endpoint at most one time.
+The owner may call `Execution.notifyInitial` after storing an `Initial` Execution. This changes it
+to `InitialReady` and invokes the fixed readiness endpoint without starting the body. The owner
+calls `Execution.drive` for an `Initial`, `InitialReady`, or `Eligible` activation. A nested
+`Effect.suspend` transfers directly to a child and can return during the same drive.
+`Execution.park` instead relinquishes the running Execution. Its registration callback receives
+one affine Wake for that parked generation. Signaling the Wake makes the Execution eligible and
+invokes its fixed readiness endpoint at most one time.
 
 Dropping a dormant Execution cancels its Wake and cleans the suspended values exactly once. If an
 external owner still retains that Wake, the Wake keeps the complete inert package allocation alive.

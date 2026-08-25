@@ -885,6 +885,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = execution from ${localText(operation.allocation)} with ${localText(operation.body)}`
     case 'ExecutionDrive':
       return `${localText(operation.destination)} = drive ${localText(operation.execution)} with ${localText(operation.branch)}`
+    case 'ExecutionNotifyInitial':
+      return `${localText(operation.destination)} = notify initial ${localText(operation.execution)}`
     case 'ExecutionWake':
       return `${localText(operation.destination)} = wake ${localText(operation.wake)} · take`
     case 'ExecutionPark':

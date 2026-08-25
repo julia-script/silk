@@ -1,0 +1,1179 @@
+//! Deterministic single-threaded execution for structured Fibers.
+//!
+//! # When to use
+//! Use [`execute`] at an application entry point to run one lazy program that uses the
+//! `silk.scheduler.Scheduler` service.
+//!
+//! # Details
+//! Each call creates fresh task storage and a FIFO ready queue. The root is task zero and uses the
+//! same `Execution<()>` storage as every child. [`execute`] returns only after the root terminates.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.fiber as Fiber
+import silk.hash as Hash
+import silk.hash_map as HashMap
+import silk.option { None, Option, Some }
+import silk.result { Failure, Result, Success }
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+import silk.u64 as u64
+
+/// A reusable deterministic single-threaded Scheduler provider.
+///
+/// # Details
+///
+/// Each call to [`execute`] creates fresh task storage and readiness state.
+pub struct LocalScheduler {}
+
+/// Reports that no task is ready while the root is incomplete.
+///
+/// # Details
+///
+/// [`execute`] cancels and releases the incomplete task tree before it raises this error.
+pub struct Stalled {}
+
+/// Constructs a reusable local Scheduler value.
+pub fn make() -> LocalScheduler {
+  return LocalScheduler {}
+}
+
+struct NoLink {}
+struct TaskLink { identity: Scheduler.TaskId }
+impl Copy for NoLink {}
+impl Copy for TaskLink {}
+
+struct ReadyNode {
+  identity: Scheduler.TaskId
+  next: NoLink | ReadyNodeLink
+  enqueued: bool
+}
+
+struct ReadyNodeLink { node: Shared.Shared<ReadyNode> }
+struct ReadyQueue {
+  head: NoLink | ReadyNodeLink
+  tail: NoLink | ReadyNodeLink
+}
+
+struct ReadyEndpoint {
+  queue: Shared.Shared<ReadyQueue>
+  node: Shared.Shared<ReadyNode>
+}
+
+fn claimReady(node: &mut ReadyNode) -> bool {
+  if node.enqueued { return false }
+  node.enqueued = true
+  return true
+}
+
+fn linkReady(node: &mut ReadyNode, next: Shared.Shared<ReadyNode>) -> () {
+  let previous = Intrinsic.replace(node.next, ReadyNodeLink { node: move next })
+  drop previous
+  return ()
+}
+
+fn installFirst(queue: &mut ReadyQueue, node: Shared.Shared<ReadyNode>) -> () {
+  queue.head = ReadyNodeLink { node: move node }
+  return ()
+}
+
+fn installAfter(previous: Shared.Shared<ReadyNode>, node: Shared.Shared<ReadyNode>) -> () {
+  let installed = Shared.withMut(&previous, linkReady(move node))
+  drop previous
+  return ()
+}
+
+fn appendReady(queue: &mut ReadyQueue, node: Shared.Shared<ReadyNode>) -> () {
+  let accepted = Shared.withMut<ReadyNode, bool>(&node, claimReady)
+  if !accepted { drop node return () }
+  let retained = Shared.clone<ReadyNode>(&node)
+  let previous = Intrinsic.replace(queue.tail, ReadyNodeLink { node: move retained })
+  return match move previous {
+    NoLink {} => installFirst(move queue, move node)
+    ReadyNodeLink { node: tail } => installAfter(move tail, move node)
+  }
+}
+
+fn notifyReady(endpoint: &ReadyEndpoint) -> () {
+  let queue = Shared.clone<ReadyQueue>(&endpoint.queue)
+  let node = Shared.clone<ReadyNode>(&endpoint.node)
+  let appended = Shared.withMut(&queue, appendReady(move node))
+  drop queue
+  return ()
+}
+
+fn takeNext(node: &mut ReadyNode) -> NoLink | ReadyNodeLink {
+  return Intrinsic.replace(node.next, NoLink {})
+}
+
+fn clearTail(queue: &mut ReadyQueue) -> () {
+  let previous = Intrinsic.replace(queue.tail, NoLink {})
+  drop previous
+  return ()
+}
+
+fn advanceHead(queue: &mut ReadyQueue, next: NoLink | ReadyNodeLink) -> () {
+  return match move next {
+    NoLink {} => clearTail(move queue)
+    ReadyNodeLink { node } => installFirst(move queue, move node)
+  }
+}
+
+fn takeLinked(
+  queue: &mut ReadyQueue,
+  node: Shared.Shared<ReadyNode>,
+) -> NoLink | ReadyNodeLink {
+  let next = Shared.withMut(&node, takeNext)
+  advanceHead(move queue, move next)
+  return ReadyNodeLink { node: move node }
+}
+
+fn takeHead(queue: &mut ReadyQueue) -> NoLink | ReadyNodeLink {
+  let selected = Intrinsic.replace(queue.head, NoLink {})
+  return match move selected {
+    NoLink {} => NoLink {}
+    ReadyNodeLink { node } => takeLinked(move queue, move node)
+  }
+}
+
+fn releaseReady(node: &mut ReadyNode) -> Scheduler.TaskId {
+  node.enqueued = false
+  return node.identity
+}
+
+struct QueueEmpty {}
+struct ReadyIdentity { identity: Scheduler.TaskId }
+
+fn releaseSelected(node: Shared.Shared<ReadyNode>) -> ReadyIdentity {
+  let identity = Shared.withMut<ReadyNode, Scheduler.TaskId>(&node, releaseReady)
+  drop node
+  return ReadyIdentity { identity: identity }
+}
+
+fn takeReady(queue: &Shared.Shared<ReadyQueue>) -> QueueEmpty | ReadyIdentity {
+  let selected = Shared.withMut(queue, takeHead)
+  return match move selected {
+    NoLink {} => QueueEmpty {}
+    ReadyNodeLink { node } => releaseSelected(move node)
+  }
+}
+
+struct TaskIdSource { next: u64 exhausted: bool }
+struct Reserved { identity: Scheduler.TaskId }
+struct Refused {}
+
+fn reserveStep(source: &mut TaskIdSource) -> Reserved | Refused {
+  if source.exhausted { return Refused {} }
+  let selected = source.next
+  if selected == u64.MAX { source.exhausted = true } else { source.next = selected + 1 }
+  return Reserved { identity: Scheduler.TaskId { value: selected } }
+}
+
+effect fn exhausted() -> Scheduler.TaskId ! Scheduler.TaskIdExhausted {
+  fail Scheduler.TaskIdExhausted {}
+}
+
+effect fn reserve(source: &Shared.Shared<TaskIdSource>) -> Scheduler.TaskId
+! Scheduler.TaskIdExhausted {
+  let selected = Shared.withMut<TaskIdSource, Reserved | Refused>(source, reserveStep)
+  return match move selected {
+    Reserved { identity } => move identity
+    Refused {} => run exhausted()
+  }
+}
+
+struct SchedulerClient {
+  identity: Scheduler.TaskId
+  mailbox: Shared.Shared<Scheduler.TaskMailbox>
+  submission: Shared.Shared<Scheduler.SubmissionSlot>
+  response: Shared.Shared<Scheduler.PublicationResponse>
+  identities: Shared.Shared<TaskIdSource>
+  queue: Shared.Shared<ReadyQueue>
+}
+
+fn publishTaskResult<A, E>(
+  result: Result<A, E>,
+  producer: Fiber.CompletionProducer<A, E>,
+) -> () {
+  let Result<A, E> { value } = move result
+  return match move value {
+    Success<A> { value: success } => Fiber.completeSuccess<A, E>(move producer, move success)
+    Failure<E> { error } => Fiber.completeFailure<A, E>(move producer, move error)
+  }
+}
+
+effect fn runTask<A, E>(
+  body: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  client: SchedulerClient,
+  producer: Fiber.CompletionProducer<A, E>,
+) -> () {
+  let result = run Effect.bindRequirementOwned<Scheduler.Scheduler>(
+    Effect.result(move body),
+    move client,
+  )
+  publishTaskResult<A, E>(move result, move producer)
+  return ()
+}
+
+struct RootPending {}
+struct RootReady<A, E> { result: Result<A, E> }
+struct RootState<A, E> { phase: RootPending | RootReady<A, E> }
+struct RootTaskCompleted {}
+struct RootTaskNeverFailed {}
+
+fn storeRoot<A, E>(state: &mut RootState<A, E>, result: Result<A, E>) -> () {
+  let previous = Intrinsic.replace(state.phase, RootReady<A, E> { result: move result })
+  drop previous
+  return ()
+}
+
+fn takeRoot<A, E>(state: &mut RootState<A, E>) -> RootPending | RootReady<A, E> {
+  return Intrinsic.replace(state.phase, RootPending {})
+}
+
+struct RootExtraction<A, E> { phase: RootPending | RootReady<A, E> }
+
+fn extractRoot<A, E>(state: &mut RootState<A, E>, output: &mut RootExtraction<A, E>) -> () {
+  output.phase = Intrinsic.replace(state.phase, RootPending {})
+  return ()
+}
+
+effect fn runRoot<A, E>(
+  body: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  client: SchedulerClient,
+  state: Shared.Shared<RootState<A, E>>,
+  producer: Fiber.CompletionProducer<RootTaskCompleted, RootTaskNeverFailed>,
+) -> () {
+  let result = run Effect.bindRequirementOwned<Scheduler.Scheduler>(
+    Effect.result(move body),
+    move client,
+  )
+  let stored = Shared.withMut(&state, storeRoot<A, E>(move result))
+  drop state
+  Fiber.completeSuccess<RootTaskCompleted, RootTaskNeverFailed>(
+    move producer,
+    RootTaskCompleted {},
+  )
+  return ()
+}
+
+effect fn prepareChild<A, E>(
+  self: &mut SchedulerClient,
+  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+) -> Scheduler.PendingPublication<A, E>
+! OutOfMemoryError | Scheduler.TaskIdExhausted {
+  let identity = run reserve(&self.identities)
+  let mut allocator = Allocator.systemAllocatorService()
+  let prepared = run Fiber.prepare<A, E>() |> Effect.provideMut<Allocator>(&mut allocator)
+  let response = run Shared.make<Scheduler.PublicationResponse>(Scheduler.PublicationResponse {
+    phase: Scheduler.ResponseWaiting {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let childSubmission = run Shared.make<Scheduler.SubmissionSlot>(Scheduler.SubmissionSlot {
+    phase: Scheduler.NoSubmission {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mailboxResponse = Shared.clone<Scheduler.PublicationResponse>(&response)
+  let childMailbox = run Shared.make<Scheduler.TaskMailbox>(Scheduler.TaskMailbox {
+    request: Scheduler.NoRequest {},
+    response: move mailboxResponse,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let node = run Shared.make<ReadyNode>(ReadyNode {
+    identity: identity,
+    next: NoLink {},
+    enqueued: false,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let Fiber.PreparedFiber<A, E> { producer, canceller, fiber } = move prepared
+  let client = SchedulerClient {
+    identity: identity,
+    mailbox: Shared.clone<Scheduler.TaskMailbox>(&childMailbox),
+    submission: Shared.clone<Scheduler.SubmissionSlot>(&childSubmission),
+    response: move response,
+    identities: Shared.clone<TaskIdSource>(&self.identities),
+    queue: Shared.clone<ReadyQueue>(&self.queue),
+  }
+  let endpoint = ReadyEndpoint {
+    queue: Shared.clone<ReadyQueue>(&self.queue),
+    node: move node,
+  }
+  let execution = run Execution.make(
+    runTask<A, E>(move child, move client, move producer),
+    move endpoint,
+    notifyReady,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  let task = Scheduler.PreparedTask {
+    identity: identity,
+    parent: self.identity,
+    execution: move execution,
+    canceller: move canceller,
+    mailbox: move childMailbox,
+    submission: move childSubmission,
+  }
+  return Scheduler.pending<A, E>(
+    move fiber,
+    Shared.clone<Scheduler.TaskMailbox>(&self.mailbox),
+    Shared.clone<Scheduler.SubmissionSlot>(&self.submission),
+    Shared.clone<Scheduler.PublicationResponse>(&self.response),
+    move task,
+  )
+}
+
+impl Scheduler.Scheduler for SchedulerClient { prepare: SchedulerClient.prepareChild }
+
+struct Initial {}
+struct Running {}
+struct Dormant {}
+struct Eligible {}
+struct Completed {}
+struct NoExecution {}
+struct StoredExecution { execution: Intrinsic.Execution<()> }
+
+struct TaskEntry {
+  parent: NoLink | TaskLink
+  firstChild: NoLink | TaskLink
+  nextSibling: NoLink | TaskLink
+  cancellationNext: NoLink | TaskLink
+  phase: Initial | Running | Dormant | Eligible | Completed
+  execution: NoExecution | StoredExecution
+  canceller: Fiber.CompletionCanceller
+  mailbox: Shared.Shared<Scheduler.TaskMailbox>
+  submission: Shared.Shared<Scheduler.SubmissionSlot>
+}
+
+struct Driver {
+  tasks: HashMap.HashMap<Scheduler.TaskId, TaskEntry>
+  queue: Shared.Shared<ReadyQueue>
+  current: Scheduler.TaskId
+  cancellationHead: NoLink | TaskLink
+  rootComplete: bool
+}
+
+struct Extraction { slot: NoExecution | StoredExecution }
+
+fn extract(entry: &mut TaskEntry, output: &mut Extraction) -> () {
+  output.slot = Intrinsic.replace(entry.execution, NoExecution {})
+  entry.phase = Running {}
+  return ()
+}
+
+fn markEligible(entry: &mut TaskEntry) -> () {
+  entry.phase = Eligible {}
+  return ()
+}
+
+fn restore(entry: &mut TaskEntry, execution: Intrinsic.Execution<()>) -> () {
+  entry.execution = StoredExecution { execution: move execution }
+  entry.phase = Dormant {}
+  return ()
+}
+
+fn notifyStoredInitial(
+  entry: &mut TaskEntry,
+  execution: Intrinsic.Execution<()>,
+) -> () {
+  let mut selected = move execution
+  Execution.notifyInitial(&mut selected)
+  entry.execution = StoredExecution { execution: move selected }
+  entry.phase = Eligible {}
+  return ()
+}
+
+fn notifyInitialEntry(entry: &mut TaskEntry) -> () {
+  let selected = Intrinsic.replace(entry.execution, NoExecution {})
+  return match move selected {
+    NoExecution {} => missingInitialExecution()
+    StoredExecution { execution } => notifyStoredInitial(move entry, move execution)
+  }
+}
+
+fn missingInitialExecution() -> () {
+  let invalid = 1 / 0
+  return missingInitialExecution()
+}
+
+fn markCompleted(entry: &mut TaskEntry, result: ()) -> () {
+  drop result
+  entry.phase = Completed {}
+  return ()
+}
+
+struct ActivationState {
+  slot: NoExecution | StoredExecution
+  completed: bool
+}
+
+fn suspended(state: &mut ActivationState, execution: Intrinsic.Execution<()>) -> () {
+  state.slot = StoredExecution { execution: move execution }
+  return ()
+}
+
+fn completed(state: &mut ActivationState, result: ()) -> () {
+  drop result
+  state.completed = true
+  return ()
+}
+
+effect fn driveSelected(
+  selected: NoExecution | StoredExecution,
+  state: &mut ActivationState,
+) -> () {
+  return match move selected {
+    NoExecution {} => ()
+    StoredExecution { execution } => run Execution.drive(
+      move execution,
+      move state,
+      completed,
+      suspended,
+    )
+  }
+}
+
+fn takeRequest(
+  mailbox: &mut Scheduler.TaskMailbox,
+) -> Scheduler.NoRequest | Scheduler.PendingRequest {
+  return Intrinsic.replace(mailbox.request, Scheduler.NoRequest {})
+}
+
+fn takeSubmission(
+  slot: &mut Scheduler.SubmissionSlot,
+) -> Scheduler.NoSubmission | Scheduler.PendingSubmission {
+  return Intrinsic.replace(slot.phase, Scheduler.NoSubmission {})
+}
+
+struct NoMailbox {}
+struct MailboxHandle { value: Shared.Shared<Scheduler.TaskMailbox> }
+struct NoSubmissionHandle {}
+struct SubmissionHandle { value: Shared.Shared<Scheduler.SubmissionSlot> }
+struct EntryHandles {
+  mailbox: NoMailbox | MailboxHandle
+  submission: NoSubmissionHandle | SubmissionHandle
+}
+
+fn copyHandles(entry: &mut TaskEntry, output: &mut EntryHandles) -> () {
+  output.mailbox = MailboxHandle {
+    value: Shared.clone<Scheduler.TaskMailbox>(&entry.mailbox),
+  }
+  output.submission = SubmissionHandle {
+    value: Shared.clone<Scheduler.SubmissionSlot>(&entry.submission),
+  }
+  return ()
+}
+
+fn markPublished(response: &mut Scheduler.PublicationResponse) -> () {
+  response.phase = Scheduler.ResponsePublished {}
+  return ()
+}
+
+fn markRejected(response: &mut Scheduler.PublicationResponse) -> () {
+  response.phase = Scheduler.ResponseRejected {}
+  return ()
+}
+
+fn setFirstChild(entry: &mut TaskEntry, child: Scheduler.TaskId) -> () {
+  entry.firstChild = TaskLink { identity: child }
+  return ()
+}
+
+fn makeEntry(task: Scheduler.PreparedTask, sibling: NoLink | TaskLink) -> TaskEntry {
+  let Scheduler.PreparedTask {
+    identity,
+    parent,
+    execution,
+    canceller,
+    mailbox,
+    submission,
+  } = move task
+  return TaskEntry {
+    parent: TaskLink { identity: parent },
+    firstChild: NoLink {},
+    nextSibling: move sibling,
+    cancellationNext: NoLink {},
+    phase: Initial {},
+    execution: StoredExecution { execution: move execution },
+    canceller: move canceller,
+    mailbox: move mailbox,
+    submission: move submission,
+  }
+}
+
+struct LinkOutput { link: NoLink | TaskLink }
+fn copyFirstChild(entry: &mut TaskEntry, output: &mut LinkOutput) -> () {
+  output.link = entry.firstChild
+  return ()
+}
+
+effect fn adopt(
+  driver: &mut Driver,
+  parent: Scheduler.TaskId,
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  task: Scheduler.PreparedTask,
+) -> () {
+  let child = task.identity
+  let mut links = LinkOutput { link: NoLink {} }
+  let found = HashMap.withMut(&mut driver.tasks, parent, copyFirstChild(&mut links))
+  let LinkOutput { link } = move links
+  let entry = makeEntry(move task, move link)
+  let mut allocator = Allocator.systemAllocatorService()
+  let inserted = HashMap.insert<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, child, move entry)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let outcome = run Effect.result(move inserted)
+  return finishAdoption(
+    move driver,
+    parent,
+    child,
+    move wake,
+    move response,
+    move outcome,
+  )
+}
+
+fn finishAdoption(
+  driver: &mut Driver,
+  parent: Scheduler.TaskId,
+  child: Scheduler.TaskId,
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  outcome: Result<Option<TaskEntry>, OutOfMemoryError>,
+) -> () {
+  let Result<Option<TaskEntry>, OutOfMemoryError> { value } = move outcome
+  return match move value {
+    Success<Option<TaskEntry>> { value: previous } => finishAcceptedAdoption(
+      move driver,
+      parent,
+      child,
+      move wake,
+      move response,
+      move previous,
+    )
+    Failure<OutOfMemoryError> { error } => finishRejectedAdoption(
+      move response,
+      move wake,
+      move error,
+    )
+  }
+}
+
+fn finishAcceptedAdoption(
+  driver: &mut Driver,
+  parent: Scheduler.TaskId,
+  child: Scheduler.TaskId,
+  wake: Intrinsic.Wake,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  previous: Option<TaskEntry>,
+) -> () {
+  drop previous
+  let linked = HashMap.withMut(&mut driver.tasks, parent, setFirstChild(child))
+  let published = Shared.withMut(&response, markPublished)
+  Intrinsic.wake(move wake)
+  let notified = HashMap.withMut(&mut driver.tasks, child, notifyInitialEntry)
+  drop response
+  return ()
+}
+
+fn finishRejectedAdoption(
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  wake: Intrinsic.Wake,
+  error: OutOfMemoryError,
+) -> () {
+  drop error
+  let rejected = Shared.withMut(&response, markRejected)
+  drop response
+  Intrinsic.wake(move wake)
+  return ()
+}
+
+effect fn processPublication(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
+  let mut handles = EntryHandles {
+    mailbox: NoMailbox {},
+    submission: NoSubmissionHandle {},
+  }
+  let found = HashMap.withMut(&mut driver.tasks, identity, copyHandles(&mut handles))
+  if !found { drop handles return () }
+  let EntryHandles { mailbox: selectedMailbox, submission: selectedSubmission } = move handles
+  let mailbox = match move selectedMailbox {
+    NoMailbox {} => missingMailbox()
+    MailboxHandle { value } => move value
+  }
+  let submission = match move selectedSubmission {
+    NoSubmissionHandle {} => missingSubmission()
+    SubmissionHandle { value } => move value
+  }
+  let response = Shared.with<
+    Scheduler.TaskMailbox,
+    Shared.Shared<Scheduler.PublicationResponse>,
+  >(
+    &mailbox,
+    cloneResponse,
+  )
+  let request = Shared.withMut(&mailbox, takeRequest)
+  let phase = Shared.withMut(&submission, takeSubmission)
+  drop mailbox
+  drop submission
+  return match move request {
+    Scheduler.NoRequest {} => finishNoRequest(move response, move phase)
+    Scheduler.PendingRequest { wake } => match move phase {
+      Scheduler.NoSubmission {} => finishMissingSubmission(move response, move wake)
+      Scheduler.PendingSubmission { task } => run adopt(
+        move driver,
+        identity,
+        move wake,
+        move response,
+        move task,
+      )
+    }
+  }
+}
+
+fn cloneResponse(
+  mailbox: &Scheduler.TaskMailbox,
+) -> Shared.Shared<Scheduler.PublicationResponse> {
+  return Shared.clone<Scheduler.PublicationResponse>(&mailbox.response)
+}
+
+fn missingMailbox() -> Shared.Shared<Scheduler.TaskMailbox> {
+  let invalid = 1 / 0
+  return missingMailbox()
+}
+
+fn missingSubmission() -> Shared.Shared<Scheduler.SubmissionSlot> {
+  let invalid = 1 / 0
+  return missingSubmission()
+}
+
+fn finishNoRequest(
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  phase: Scheduler.NoSubmission | Scheduler.PendingSubmission,
+) -> () {
+  drop response
+  drop phase
+  return ()
+}
+
+fn finishMissingSubmission(
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  wake: Intrinsic.Wake,
+) -> () {
+  drop response
+  Intrinsic.wake(move wake)
+  return ()
+}
+
+struct CompletionAudit { completed: bool }
+fn phaseCompleted(entry: &mut TaskEntry, output: &mut CompletionAudit) -> () {
+  output.completed = match &entry.phase { Completed {} => true _ => false }
+  return ()
+}
+
+fn releaseEntry(entry: TaskEntry) -> () { drop entry return () }
+fn releaseRemoved(selected: Option<TaskEntry>) -> () {
+  return match move selected {
+    None {} => ()
+    Some<TaskEntry> { value } => releaseEntry(move value)
+  }
+}
+
+struct TaskLinks {
+  parent: NoLink | TaskLink
+  firstChild: NoLink | TaskLink
+  nextSibling: NoLink | TaskLink
+}
+
+fn copyTaskLinks(entry: &mut TaskEntry, output: &mut TaskLinks) -> () {
+  output.parent = entry.parent
+  output.firstChild = entry.firstChild
+  output.nextSibling = entry.nextSibling
+  return ()
+}
+
+fn readTaskLinks(
+  tasks: &mut HashMap.HashMap<Scheduler.TaskId, TaskEntry>,
+  identity: Scheduler.TaskId,
+  output: &mut TaskLinks,
+) -> bool {
+  return HashMap.withMut(move tasks, identity, copyTaskLinks(move output))
+}
+
+fn installCancellationLink(entry: &mut TaskEntry, next: NoLink | TaskLink) -> () {
+  entry.cancellationNext = move next
+  return ()
+}
+
+fn takeCancellationLink(entry: &mut TaskEntry, output: &mut LinkOutput) -> () {
+  output.link = Intrinsic.replace(entry.cancellationNext, NoLink {})
+  return ()
+}
+
+fn setFirstChildLink(entry: &mut TaskEntry, link: NoLink | TaskLink) -> () {
+  entry.firstChild = move link
+  return ()
+}
+
+fn setNextSiblingLink(entry: &mut TaskEntry, link: NoLink | TaskLink) -> () {
+  entry.nextSibling = move link
+  return ()
+}
+
+fn hasLink(link: NoLink | TaskLink) -> bool {
+  return match move link { NoLink {} => false TaskLink { identity } => true }
+}
+
+fn requireIdentity(link: NoLink | TaskLink) -> Scheduler.TaskId {
+  return match move link {
+    NoLink {} => missingIdentity()
+    TaskLink { identity } => identity
+  }
+}
+
+fn missingIdentity() -> Scheduler.TaskId {
+  let invalid = 1 / 0
+  return missingIdentity()
+}
+
+fn cancelEntry(entry: TaskEntry) -> () {
+  let TaskEntry {
+    parent,
+    firstChild,
+    nextSibling,
+    cancellationNext,
+    phase,
+    execution,
+    canceller,
+    mailbox,
+    submission,
+  } = move entry
+  Fiber.cancel(move canceller)
+  drop parent
+  drop firstChild
+  drop nextSibling
+  drop cancellationNext
+  drop phase
+  drop execution
+  drop mailbox
+  drop submission
+  return ()
+}
+
+fn cancelRemoved(selected: Option<TaskEntry>) -> () {
+  return match move selected {
+    None {} => ()
+    Some<TaskEntry> { value } => cancelEntry(move value)
+  }
+}
+
+fn finishCompletedTask(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
+  let mut links = TaskLinks {
+    parent: NoLink {},
+    firstChild: NoLink {},
+    nextSibling: NoLink {},
+  }
+  let found = readTaskLinks(&mut driver.tasks, identity, &mut links)
+  if !found { return () }
+
+  let mut child = links.firstChild
+  while hasLink(child) {
+    let childIdentity = requireIdentity(child)
+    let mut childLinks = TaskLinks {
+      parent: NoLink {},
+      firstChild: NoLink {},
+      nextSibling: NoLink {},
+    }
+    let childFound = readTaskLinks(
+      &mut driver.tasks,
+      childIdentity,
+      &mut childLinks,
+    )
+    if childFound {
+      child = childLinks.nextSibling
+      let nextWork = driver.cancellationHead
+      let linked = HashMap.withMut(
+        &mut driver.tasks,
+        childIdentity,
+        installCancellationLink(nextWork),
+      )
+      if linked { driver.cancellationHead = TaskLink { identity: childIdentity } }
+    } else {
+      child = NoLink {}
+    }
+  }
+
+  let parent = links.parent
+  if hasLink(parent) {
+    let parentIdentity = requireIdentity(parent)
+    let mut parentLinks = TaskLinks {
+      parent: NoLink {},
+      firstChild: NoLink {},
+      nextSibling: NoLink {},
+    }
+    let parentFound = readTaskLinks(
+      &mut driver.tasks,
+      parentIdentity,
+      &mut parentLinks,
+    )
+    if parentFound {
+      let mut current = parentLinks.firstChild
+      let mut previous = LinkOutput { link: NoLink {} }
+      let mut unlinked = false
+      while !unlinked && hasLink(current) {
+        let currentIdentity = requireIdentity(current)
+        let mut currentLinks = TaskLinks {
+          parent: NoLink {},
+          firstChild: NoLink {},
+          nextSibling: NoLink {},
+        }
+        let currentFound = readTaskLinks(
+          &mut driver.tasks,
+          currentIdentity,
+          &mut currentLinks,
+        )
+        if !currentFound {
+          unlinked = true
+        } else if currentIdentity.value == identity.value {
+          let nextSibling = currentLinks.nextSibling
+          let replaced = match previous.link {
+            NoLink {} => HashMap.withMut(
+              &mut driver.tasks,
+              parentIdentity,
+              setFirstChildLink(nextSibling),
+            )
+            TaskLink { identity: previousIdentity } => HashMap.withMut(
+              &mut driver.tasks,
+              previousIdentity,
+              setNextSiblingLink(nextSibling),
+            )
+          }
+          unlinked = true
+        } else {
+          previous.link = TaskLink { identity: currentIdentity }
+          current = currentLinks.nextSibling
+        }
+      }
+    }
+  }
+
+  let removed = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, identity)
+  releaseRemoved(move removed)
+  if identity.value == 0 { driver.rootComplete = true }
+
+  while hasLink(driver.cancellationHead) {
+    let selected = requireIdentity(driver.cancellationHead)
+    let mut selectedLinks = TaskLinks {
+      parent: NoLink {},
+      firstChild: NoLink {},
+      nextSibling: NoLink {},
+    }
+    let selectedFound = readTaskLinks(
+      &mut driver.tasks,
+      selected,
+      &mut selectedLinks,
+    )
+    if !selectedFound {
+      driver.cancellationHead = NoLink {}
+    } else {
+      let mut nextWork = LinkOutput { link: NoLink {} }
+      let popped = HashMap.withMut(
+        &mut driver.tasks,
+        selected,
+        takeCancellationLink(&mut nextWork),
+      )
+      driver.cancellationHead = nextWork.link
+      let mut descendant = selectedLinks.firstChild
+      while hasLink(descendant) {
+        let descendantIdentity = requireIdentity(descendant)
+        let mut descendantLinks = TaskLinks {
+          parent: NoLink {},
+          firstChild: NoLink {},
+          nextSibling: NoLink {},
+        }
+        let descendantFound = readTaskLinks(
+          &mut driver.tasks,
+          descendantIdentity,
+          &mut descendantLinks,
+        )
+        if descendantFound {
+          descendant = descendantLinks.nextSibling
+          let nextDescendant = driver.cancellationHead
+          let linked = HashMap.withMut(
+            &mut driver.tasks,
+            descendantIdentity,
+            installCancellationLink(nextDescendant),
+          )
+          if linked {
+            driver.cancellationHead = TaskLink { identity: descendantIdentity }
+          }
+        } else {
+          descendant = NoLink {}
+        }
+      }
+      let cancelled = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, selected)
+      cancelRemoved(move cancelled)
+    }
+  }
+  return ()
+}
+
+fn cancelTree(driver: &mut Driver, identity: Scheduler.TaskId) -> () {
+  let nextWork = driver.cancellationHead
+  let linked = HashMap.withMut(
+    &mut driver.tasks,
+    identity,
+    installCancellationLink(nextWork),
+  )
+  if linked { driver.cancellationHead = TaskLink { identity: identity } }
+
+  while hasLink(driver.cancellationHead) {
+    let selected = requireIdentity(driver.cancellationHead)
+    let mut selectedLinks = TaskLinks {
+      parent: NoLink {},
+      firstChild: NoLink {},
+      nextSibling: NoLink {},
+    }
+    let selectedFound = readTaskLinks(
+      &mut driver.tasks,
+      selected,
+      &mut selectedLinks,
+    )
+    if !selectedFound {
+      driver.cancellationHead = NoLink {}
+    } else {
+      let mut selectedWork = LinkOutput { link: NoLink {} }
+      let popped = HashMap.withMut(
+        &mut driver.tasks,
+        selected,
+        takeCancellationLink(&mut selectedWork),
+      )
+      driver.cancellationHead = selectedWork.link
+      let mut descendant = selectedLinks.firstChild
+      while hasLink(descendant) {
+        let descendantIdentity = requireIdentity(descendant)
+        let mut descendantLinks = TaskLinks {
+          parent: NoLink {},
+          firstChild: NoLink {},
+          nextSibling: NoLink {},
+        }
+        let descendantFound = readTaskLinks(
+          &mut driver.tasks,
+          descendantIdentity,
+          &mut descendantLinks,
+        )
+        if descendantFound {
+          descendant = descendantLinks.nextSibling
+          let nextDescendant = driver.cancellationHead
+          let linkedDescendant = HashMap.withMut(
+            &mut driver.tasks,
+            descendantIdentity,
+            installCancellationLink(nextDescendant),
+          )
+          if linkedDescendant {
+            driver.cancellationHead = TaskLink { identity: descendantIdentity }
+          }
+        } else {
+          descendant = NoLink {}
+        }
+      }
+      let cancelled = HashMap.remove<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, selected)
+      cancelRemoved(move cancelled)
+    }
+  }
+  return ()
+}
+
+effect fn driveIdentity(driver: &mut Driver, identity: Scheduler.TaskId) -> ()
+! OutOfMemoryError {
+  let eligible = HashMap.withMut(&mut driver.tasks, identity, markEligible)
+  if !eligible { return () }
+  let mut extraction = Extraction { slot: NoExecution {} }
+  let found = HashMap.withMut(&mut driver.tasks, identity, extract(&mut extraction))
+  if !found { drop extraction return () }
+  driver.current = identity
+  let Extraction { slot } = move extraction
+  let mut state = ActivationState { slot: NoExecution {}, completed: false }
+  run driveSelected(move slot, &mut state)
+  if state.completed {
+    let marked = HashMap.withMut(&mut driver.tasks, identity, markCompleted(()))
+  } else {
+    let ActivationState { slot: parked, completed: parkedComplete } = move state
+    let restored = match move parked {
+      NoExecution {} => false
+      StoredExecution { execution } => HashMap.withMut(
+        &mut driver.tasks,
+        identity,
+        restore(move execution),
+      )
+    }
+  }
+  let mut terminal = CompletionAudit { completed: false }
+  let inspected = HashMap.withMut(&mut driver.tasks, identity, phaseCompleted(&mut terminal))
+  return run finishDrive(move driver, identity, terminal.completed)
+}
+
+effect fn finishDrive(
+  driver: &mut Driver,
+  identity: Scheduler.TaskId,
+  terminal: bool,
+) -> () ! OutOfMemoryError {
+  if !terminal { return run processPublication(move driver, identity) }
+  let cleaned = finishCompletedTask(move driver, identity)
+  drop cleaned
+  return ()
+}
+
+effect fn stalledDriver(driver: Driver) -> Driver ! Stalled {
+  drop driver
+  fail Stalled {}
+}
+
+fn noReady() -> bool { return false }
+
+effect fn drivePresent(driver: &mut Driver, identity: Scheduler.TaskId) -> bool
+! OutOfMemoryError {
+  run driveIdentity(move driver, identity)
+  return true
+}
+
+effect fn driveReady(driver: &mut Driver, selected: QueueEmpty | ReadyIdentity) -> bool
+! OutOfMemoryError {
+  return match move selected {
+    QueueEmpty {} => noReady()
+    ReadyIdentity { identity } => run drivePresent(move driver, identity)
+  }
+}
+
+effect fn driveUntilRoot(driver: Driver) -> Driver
+! OutOfMemoryError | Stalled {
+  let mut owned = move driver
+  while !owned.rootComplete {
+    let selected = takeReady(&owned.queue)
+    let progressed = run driveReady(&mut owned, move selected)
+    if !progressed {
+      let cancelled = cancelTree(&mut owned, Scheduler.TaskId { value: 0 })
+      drop cancelled
+      return run stalledDriver(move owned)
+    }
+  }
+  return move owned
+}
+
+effect fn finishRoot<A, E>(selected: RootPending | RootReady<A, E>) -> A ! E {
+  return match move selected {
+    RootPending {} => missingRoot<A>()
+    RootReady<A, E> { result } => run finishRootResult<A, E>(move result)
+  }
+}
+
+effect fn finishRootResult<A, E>(result: Result<A, E>) -> A ! E {
+  let Result<A, E> { value } = move result
+  return match move value {
+    Success<A> { value: success } => move success
+    Failure<E> { error } => run raiseRoot<A, E>(move error)
+  }
+}
+
+effect fn raiseRoot<A, E>(error: E) -> A ! E { fail move error }
+fn missingRoot<A>() -> A { let invalid = 1 / 0 return missingRoot<A>() }
+
+/// Runs one lazy root program under this Scheduler and returns its typed outcome.
+///
+/// # Details
+///
+/// The root becomes task zero. This operation owns all per-run task storage, provides one distinct
+/// Scheduler client to each task, and dispatches ready tasks in FIFO order. Before it returns a
+/// root value or raises a typed error, it cancels every unfinished descendant and releases the
+/// run state. If the root is incomplete when no task is ready, it performs the same cleanup and
+/// raises [`Stalled`].
+pub effect fn execute<A, E>(
+  self: &mut LocalScheduler,
+  program: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+) -> A
+! E | OutOfMemoryError | Stalled {
+  let mut allocator = Allocator.systemAllocatorService()
+  let queue = run Shared.make<ReadyQueue>(ReadyQueue {
+    head: NoLink {},
+    tail: NoLink {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let identities = run Shared.make<TaskIdSource>(TaskIdSource {
+    next: 1,
+    exhausted: false,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let prepared = run Fiber.prepare<RootTaskCompleted, RootTaskNeverFailed>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let rootState = run Shared.make<RootState<A, E>>(RootState<A, E> {
+    phase: RootPending {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let response = run Shared.make<Scheduler.PublicationResponse>(Scheduler.PublicationResponse {
+    phase: Scheduler.ResponseWaiting {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let submission = run Shared.make<Scheduler.SubmissionSlot>(Scheduler.SubmissionSlot {
+    phase: Scheduler.NoSubmission {},
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mailboxResponse = Shared.clone<Scheduler.PublicationResponse>(&response)
+  let mailbox = run Shared.make<Scheduler.TaskMailbox>(Scheduler.TaskMailbox {
+    request: Scheduler.NoRequest {},
+    response: move mailboxResponse,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let root = Scheduler.TaskId { value: 0 }
+  let node = run Shared.make<ReadyNode>(ReadyNode {
+    identity: root,
+    next: NoLink {},
+    enqueued: false,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let Fiber.PreparedFiber<RootTaskCompleted, RootTaskNeverFailed> {
+    producer,
+    canceller,
+    fiber: rootFiber,
+  } = move prepared
+  drop rootFiber
+  let client = SchedulerClient {
+    identity: root,
+    mailbox: Shared.clone<Scheduler.TaskMailbox>(&mailbox),
+    submission: Shared.clone<Scheduler.SubmissionSlot>(&submission),
+    response: move response,
+    identities: move identities,
+    queue: Shared.clone<ReadyQueue>(&queue),
+  }
+  let endpoint = ReadyEndpoint {
+    queue: Shared.clone<ReadyQueue>(&queue),
+    node: move node,
+  }
+  let execution = run Execution.make(
+    runRoot<A, E>(
+      move program,
+      move client,
+      Shared.clone<RootState<A, E>>(&rootState),
+      move producer,
+    ),
+    move endpoint,
+    notifyReady,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  let entry = TaskEntry {
+    parent: NoLink {},
+    firstChild: NoLink {},
+    nextSibling: NoLink {},
+    cancellationNext: NoLink {},
+    phase: Initial {},
+    execution: StoredExecution { execution: move execution },
+    canceller: move canceller,
+    mailbox: move mailbox,
+    submission: move submission,
+  }
+  let mut driver = Driver {
+    tasks: HashMap.make<Scheduler.TaskId, TaskEntry>(Hash.seed(0)),
+    queue: move queue,
+    current: root,
+    cancellationHead: NoLink {},
+    rootComplete: false,
+  }
+  let inserted = run HashMap.insert<Scheduler.TaskId, TaskEntry>(
+    &mut driver.tasks,
+    root,
+    move entry,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop inserted
+  let notified = HashMap.withMut(&mut driver.tasks, root, notifyInitialEntry)
+  let completed = run driveUntilRoot(move driver)
+  drop completed
+  let mut extraction = RootExtraction<A, E> { phase: RootPending {} }
+  let extracted = Shared.withMut(&rootState, extractRoot<A, E>(&mut extraction))
+  let RootExtraction<A, E> { phase: selected } = move extraction
+  drop rootState
+  return run finishRoot<A, E>(move selected)
+}

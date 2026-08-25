@@ -638,10 +638,6 @@ pub fn main() -> i32 {
     const delayed = self.instances.instances.find(
       (instance) => instance.key.declaration.name === 'delayed',
     )
-    assert.isTrue(
-      delayed === undefined
-        ? false
-        : SuspensionMode.has(Instances.suspensionOf(self.instances, delayed.key), 'NestedTransfer'),
-    )
+    assert.isUndefined(delayed)
   }),
 )

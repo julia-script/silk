@@ -92,20 +92,16 @@ export const check = (source: Type.Type, target: Type.Type): Compatibility => {
       Type.equals(source.success, target.success) &&
       Type.equals(Type.failureType(source), Type.failureType(target))
     const compatibleRequirements =
-      Type.requirementMembers(source).length === Type.requirementMembers(target).length &&
-      Type.requirementMembers(source).every((requirement, index) => {
-        const expected = Type.requirementMembers(target).at(index)
-        return (
-          expected !== undefined &&
-          Type.equals(requirement.capability, expected.capability) &&
-          requirement.role === expected.role &&
-          Type.requirementSatisfies(expected, requirement)
-        )
-      }) &&
-      Type.requirementRowParameters(source).length ===
-        Type.requirementRowParameters(target).length &&
-      Type.requirementRowParameters(source).every((parameter, index) =>
-        Type.equals(parameter, Type.requirementRowParameters(target).at(index) ?? 'never'),
+      Type.requirementMembers(source).every((requirement) =>
+        Type.requirementMembers(target).some(
+          (expected) =>
+            Type.equals(requirement.capability, expected.capability) &&
+            requirement.role === expected.role &&
+            Type.requirementSatisfies(expected, requirement),
+        ),
+      ) &&
+      Type.requirementRowParameters(source).every((parameter) =>
+        Type.requirementRowParameters(target).some((expected) => Type.equals(parameter, expected)),
       )
     if (Type.compareAccess(target.access, source.access) && sameOutputs && compatibleRequirements)
       return Object.freeze({ _tag: 'EffectAccess', source, target })

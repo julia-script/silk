@@ -27,6 +27,7 @@ import type {} from './Forwarding.js'
 import {
   callableRecipe,
   delayedEffectState,
+  effectRecipe,
   inlineForwardedEffectResult,
   inlineForwardedRequirement,
   movedEffectRecipe,
@@ -340,10 +341,16 @@ export const lowerSequence = (
       forwardedRequirement === undefined
         ? undefined
         : fn.call(statement.initializer.span)?.resultEffect
+    const protectedRecipe =
+      forwardedRequirement === undefined
+        ? undefined
+        : effectRecipe(fn, forwardedRequirement.binding.protected)
     const forwardedRequirementNeedsRecipe =
       forwardedRequirement !== undefined &&
       (forwardedResultEffect === undefined ||
-        effectValueByIdentity(fn.layout, forwardedResultEffect) === undefined)
+        effectValueByIdentity(fn.layout, forwardedResultEffect) === undefined ||
+        protectedRecipe?._tag === 'ServiceEffectConstruct' ||
+        protectedRecipe !== forwardedRequirement.binding.protected)
     if (
       forwardedResult !== undefined ||
       forwardedRequirementNeedsRecipe ||
