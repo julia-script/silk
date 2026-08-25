@@ -27,6 +27,15 @@ it('verifies and deterministically inspects a complete external park generation'
   assert.notInclude(ExecutionTransition.encode(completed), 'offset')
 })
 
+it('publishes initial readiness exactly once before the first drive', () => {
+  const initial = ExecutionTransition.initialize(3, 9, true)
+  const ready = edge(ExecutionTransition.notifyInitial(initial)).after
+
+  assert.strictEqual(ready.execution, 'InitialReady')
+  assert.strictEqual(ExecutionTransition.notifyInitial(ready)._tag, 'ExecutionTransitionViolation')
+  assert.strictEqual(edge(ExecutionTransition.drive(ready)).after.execution, 'Running')
+})
+
 it('latches wake during registration and notifies only after relinquishment', () => {
   const running = edge(ExecutionTransition.drive(ExecutionTransition.initialize(0, 1, true))).after
   const registering = edge(ExecutionTransition.register(running)).after

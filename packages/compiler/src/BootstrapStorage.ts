@@ -17,7 +17,15 @@ export interface Allocation {
   }
   execution?: {
     readonly provenance: string
-    state: 'Initial' | 'Running' | 'Dormant' | 'Notifying' | 'Eligible' | 'Completed' | 'Destroyed'
+    state:
+      | 'Initial'
+      | 'InitialReady'
+      | 'Running'
+      | 'Dormant'
+      | 'Notifying'
+      | 'Eligible'
+      | 'Completed'
+      | 'Destroyed'
     readonly body: Value
     readonly endpoint: Value
     readonly callback: Value

@@ -989,6 +989,19 @@ const checkExpression = (
         )
       return
     }
+    case 'EffectResult':
+      // The intrinsic consumes its protected Effect exactly like its source-callable contract.
+      // Visiting the dedicated HIR operand prevents the runner's exit cleanup from releasing an
+      // affine environment that the reification operation already transferred to its runner.
+      checkExpression(
+        state,
+        live,
+        expression.protected,
+        argumentConsumes(expression.protected),
+        guard,
+        escaping,
+      )
+      return
     case 'EffectCatch':
       // The sealed primitive has the same owned operands as its ordinary callable contract.
       // Visiting both here preserves take-once use checking after elaboration replaces the call

@@ -176,7 +176,7 @@ const consumer = (family: string, operation: string): string => {
   if (family === 'Execution')
     return operation === 'layout' || operation === 'fromAllocation'
       ? 'silk/execution.make'
-      : 'silk/execution.drive'
+      : `silk/execution.${operation}`
   if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
   if (family === 'Storage') return 'silk/allocator.allocate'
   if (family === 'Host') return 'silk/standard_streams.writeAll'
@@ -409,6 +409,8 @@ const executionDriveTypeParameters = Object.freeze([
   completionCallback,
   suspensionCallback,
 ])
+const executionNotifyOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionNotifyInitial' })
+const notifiedResult = Type.parameter(executionNotifyOwner, 0, 'A')
 const representedCompletion = Type.represented(
   completionBound,
   completionBound,
@@ -1156,6 +1158,19 @@ const intrinsicOperations = Object.freeze([
       ]),
       result: 'Effect<()>',
       semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
+    }),
+    builtin({
+      actor: 'Execution',
+      name: 'notifyInitial',
+      operation: 'ExecutionNotifyInitial',
+      typeParameters: Object.freeze(['A']),
+      semanticTypeParameters: Object.freeze([notifiedResult]),
+      parameters: Object.freeze([valueParameter('execution', '&mut Execution<A>')]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', Type.execution(notifiedResult)),
+      ]),
+      result: '()',
+      semanticResult: Type.unit,
     }),
     builtin({
       actor: 'Wake',

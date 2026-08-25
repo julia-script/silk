@@ -18,6 +18,7 @@ export interface State {
 
 export type Event =
   | 'Initialize'
+  | 'NotifyInitial'
   | 'Drive'
   | 'Register'
   | 'RetainGuard'
@@ -110,7 +111,20 @@ export const initialize = (packageIdentity: number, root: number, readiness: boo
     readiness ? WakeCell.initial() : undefined,
   )
 
-/** Enters only Initial or Eligible and fatally rejects owner drive while progress is external. */
+/** Notifies initial readiness exactly once before endpoint invocation. */
+export const notifyInitial = (self: State): Result => {
+  const logical = ExecutionLifecycle.transition(
+    self.execution === 'DestroyPending' || self.execution === 'Released'
+      ? 'Destroyed'
+      : self.execution,
+    'NotifyInitial',
+  )
+  return logical._tag === 'Transition'
+    ? edge('NotifyInitial', self, state(self.identity, 'InitialReady', self.wake))
+    : violation(self, 'NotifyInitial', 'IllegalPredecessor')
+}
+
+/** Enters only Initial, InitialReady, or Eligible and rejects drive while progress is external. */
 export const drive = (self: State): Result => {
   const logical = ExecutionLifecycle.transition(
     self.execution === 'DestroyPending' || self.execution === 'Released'
@@ -223,6 +237,7 @@ export const cancel = (self: State): Result => {
   if (self.wake === undefined) {
     if (
       self.execution !== 'Initial' &&
+      self.execution !== 'InitialReady' &&
       self.execution !== 'Dormant' &&
       self.execution !== 'Eligible'
     )
@@ -284,7 +299,15 @@ const requiredEdge = (result: Result): Edge => {
 export const authority = (packageIdentity: number, root: number, readiness: boolean): Authority => {
   const initial = initialize(packageIdentity, root, readiness)
   const running = requiredEdge(drive(initial))
-  const edges: Array<Edge> = [running, requiredEdge(complete(running.after))]
+  const initialReady = requiredEdge(notifyInitial(initial))
+  const runningReady = requiredEdge(drive(initialReady.after))
+  const edges: Array<Edge> = [
+    running,
+    requiredEdge(complete(running.after)),
+    initialReady,
+    runningReady,
+    requiredEdge(complete(runningReady.after)),
+  ]
   if (readiness) {
     const registering = requiredEdge(register(running.after))
     const guarded = requiredEdge(retainGuard(registering.after))
@@ -354,6 +377,8 @@ export const tagOf = (execution: State['execution']): number => {
   switch (execution) {
     case 'Initial':
       return 0
+    case 'InitialReady':
+      return 9
     case 'Running':
       return 1
     case 'Dormant':

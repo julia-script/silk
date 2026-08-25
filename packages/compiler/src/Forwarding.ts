@@ -88,8 +88,8 @@ export const forwardedRequirementBinding = (
     )
     .sort(
       (left, right) =>
-        right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
-        left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+        right.key.typeArguments.filter(Type.isHiddenExecutableArgument).length -
+        left.key.typeArguments.filter(Type.isHiddenExecutableArgument).length,
     )
   const searchable =
     candidates.length === 0 && call !== undefined
@@ -398,7 +398,7 @@ export const inlineForwardedRequirement = (
       candidates
         .filter((candidate) => {
           const explicit = candidate.key.typeArguments.filter(
-            (argument) => !Type.isHiddenIdentityArgument(argument),
+            (argument) => !Type.isHiddenExecutableArgument(argument),
           )
           return (
             explicit.length === inferredArguments.length &&
@@ -411,8 +411,8 @@ export const inlineForwardedRequirement = (
         })
         .sort(
           (left, right) =>
-            right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
-            left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+            right.key.typeArguments.filter(Type.isHiddenExecutableArgument).length -
+            left.key.typeArguments.filter(Type.isHiddenExecutableArgument).length,
         )
         .at(0) ?? (candidates.length === 1 ? candidates.at(0) : undefined)
   }
@@ -427,8 +427,8 @@ export const inlineForwardedRequirement = (
       )
       .sort(
         (left, right) =>
-          right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
-          left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+          right.key.typeArguments.filter(Type.isHiddenExecutableArgument).length -
+          left.key.typeArguments.filter(Type.isHiddenExecutableArgument).length,
       )
       .at(0)
     if (candidate !== undefined) {
@@ -457,8 +457,8 @@ export const inlineForwardedRequirement = (
       .filter((candidate) => candidate !== target)
       .sort(
         (left, right) =>
-          right.key.typeArguments.filter(Type.isHiddenIdentityArgument).length -
-          left.key.typeArguments.filter(Type.isHiddenIdentityArgument).length,
+          right.key.typeArguments.filter(Type.isHiddenExecutableArgument).length -
+          left.key.typeArguments.filter(Type.isHiddenExecutableArgument).length,
       )) {
       const candidateResolved = forwardedRequirementBinding(candidate, fn.instances, fn.calls)
       const candidateForwarded = candidateResolved?.binding

@@ -259,6 +259,80 @@ export type EffectEnvironment =
       readonly reason: string
     }
 
+const sameExactOwner = (
+  left: Instances.InstanceKey,
+  right: Type.ExecutableSpecializationOwner,
+): boolean =>
+  left.declaration.module === right.declaration.module &&
+  left.declaration.name === right.declaration.name &&
+  left.typeArguments.length === right.typeArguments.length &&
+  left.typeArguments.every((argument, ordinal) => {
+    const expected = right.typeArguments.at(ordinal)
+    return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+  })
+
+const sameVisibleOwner = (
+  left: Instances.InstanceKey,
+  right: Type.ExecutableSpecializationOwner,
+): boolean => {
+  if (
+    left.declaration.module !== right.declaration.module ||
+    left.declaration.name !== right.declaration.name
+  )
+    return false
+  const leftVisible = left.typeArguments.filter(
+    (argument) => !Type.isHiddenExecutableArgument(argument),
+  )
+  const rightVisible = right.typeArguments.filter(
+    (argument) => !Type.isHiddenExecutableArgument(argument),
+  )
+  return (
+    leftVisible.length === rightVisible.length &&
+    leftVisible.every((argument, ordinal) => {
+      const expected = rightVisible.at(ordinal)
+      return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+    })
+  )
+}
+
+const effectInstanceByIdentity = (
+  discovery: Instances.Discovery,
+  identity: string,
+): Instances.EffectInstance | undefined => {
+  const exact = discovery.effects.filter((candidate) => candidate.identity === identity)
+  if (exact.length === 1) return exact.at(0)
+  const represented = discovery.effects.filter(
+    (candidate) => candidate.representationIdentity === identity,
+  )
+  return represented.length === 1 ? represented.at(0) : undefined
+}
+
+/** Resolves one exact represented Effect environment without arbitrary owner fallback. */
+export const effectEnvironmentByIdentity = (
+  environments: ReadonlyArray<EffectEnvironment>,
+  identity: Type.EffectIdentityArgument,
+): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined => {
+  const available = environments.filter(
+    (candidate): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+      candidate._tag === 'EffectEnvironment',
+  )
+  const concrete = available.filter(
+    (candidate) =>
+      Instances.effectIdentity(candidate.instance, candidate.site) === identity.identity ||
+      candidate.successEffectIdentity === identity.identity,
+  )
+  if (concrete.length === 1) return concrete.at(0)
+  const represented = available.filter(
+    (candidate) => Hir.effectRepresentationIdentity(candidate.site) === identity.identity,
+  )
+  const owner = identity.owner
+  if (owner === undefined) return represented.length === 1 ? represented.at(0) : undefined
+  const exact = represented.filter((candidate) => sameExactOwner(candidate.instance, owner))
+  if (exact.length === 1) return exact.at(0)
+  const visible = represented.filter((candidate) => sameVisibleOwner(candidate.instance, owner))
+  return visible.length === 1 ? visible.at(0) : undefined
+}
+
 export interface EffectEnvironmentField extends PlacedField {
   readonly source: 'Binding' | 'Parameter'
   readonly ordinal: number
@@ -698,13 +772,9 @@ export const catalog = (
     > = []
     for (const slot of slots) {
       const nestedEffect =
-        slot.effectIdentity === undefined
+        slot.effectIdentity === undefined || discovery === undefined
           ? undefined
-          : discovery?.effects.find(
-              (candidate) =>
-                candidate.identity === slot.effectIdentity ||
-                candidate.representationIdentity === slot.effectIdentity,
-            )
+          : effectInstanceByIdentity(discovery, slot.effectIdentity)
       const callableIdentity = slot.callableIdentity
       const nestedCallable =
         callableIdentity === undefined
@@ -1343,19 +1413,8 @@ export const catalog = (
     }
     if (Type.isEffect(type.contract) && Type.isEffectIdentityArgument(argument.identity)) {
       const identity = argument.identity
-      const effect = discovery?.effects.find(
-        (candidate) =>
-          (candidate.identity === identity.identity ||
-            candidate.representationIdentity === identity.identity) &&
-          (identity.owner === undefined ||
-            (candidate.owner.declaration.module === identity.owner.declaration.module &&
-              candidate.owner.declaration.name === identity.owner.declaration.name &&
-              candidate.owner.typeArguments.length === identity.owner.typeArguments.length &&
-              candidate.owner.typeArguments.every((value, ordinal) => {
-                const expected = identity.owner?.typeArguments.at(ordinal)
-                return expected !== undefined && Type.equalsGenericArgument(value, expected)
-              }))),
-      )
+      const effect =
+        discovery === undefined ? undefined : Instances.representedEffectOf(discovery, identity)
       const environment =
         effect === undefined
           ? undefined
@@ -1525,7 +1584,13 @@ export const catalog = (
   const referenced = new Map<string, DeclarationFacts.SemanticType>()
   const addReferenced = (type: DeclarationFacts.SemanticType): void => {
     if (!Type.isRuntimeConcrete(type)) return
-    referenced.set(Type.key(type), type)
+    const key = Type.key(type)
+    if (referenced.has(key)) return
+    referenced.set(key, type)
+    if (Type.isNominal(type)) {
+      for (const argument of type.arguments)
+        if (Type.isTypeArgument(argument)) addReferenced(argument)
+    }
     if (Type.isFixedArray(type)) addReferenced(type.element)
     if (Type.isSlice(type)) addReferenced(type.element)
     else if (Type.isReference(type)) addReferenced(type.target)
@@ -1533,6 +1598,10 @@ export const catalog = (
     if (Type.isEffect(type)) {
       addReferenced(type.success)
       for (const failure of Type.failureMembers(type)) addReferenced(failure)
+    }
+    if (Type.isRepresented(type) && Type.isEffect(type.contract)) {
+      addReferenced(type.contract.success)
+      for (const failure of Type.failureMembers(type.contract)) addReferenced(failure)
     }
   }
   for (const module of index.modules) {
@@ -1629,8 +1698,16 @@ export const catalog = (
       addPatternStatementTypes(statement)
     }
   }
-  for (const type of referenced.values()) {
-    if (!Type.isBuiltin(type)) layoutType(type)
+  for (const effect of discovery?.effects ?? []) addReferenced(effect.type)
+  let completedSize = -1
+  let referencedSize = -1
+  while (completedSize !== completed.size || referencedSize !== referenced.size) {
+    completedSize = completed.size
+    referencedSize = referenced.size
+    for (const entry of completed.values()) addReferenced(entry.type)
+    for (const type of referenced.values()) {
+      if (!Type.isBuiltin(type)) layoutType(type)
+    }
   }
 
   return Object.freeze({
@@ -1749,8 +1826,20 @@ const addExpressionTypes = (
     addStatementTypes(types, expression.statements, substitution)
   }
   if (expression._tag === 'Run') addExpressionTypes(types, expression.subject, substitution)
-  if (expression._tag === 'EffectBindRequirement')
+  if (expression._tag === 'EffectBindRequirement') {
     addExpressionTypes(types, expression.protected, substitution)
+    const provider = Type.substitute(expression.provider.providerType, substitution)
+    if (Type.isNominal(provider)) {
+      types.set(Type.key(provider), provider)
+      const reference = Type.reference(
+        expression.provider.selectionAccess === 'Take'
+          ? 'Exclusive'
+          : expression.provider.selectionAccess,
+        provider,
+      )
+      types.set(Type.key(reference), reference)
+    }
+  }
   if (expression._tag === 'EffectCatch') {
     types.set(Type.key('never'), 'never')
     addExpressionTypes(types, expression.protected, substitution)
@@ -2005,19 +2094,30 @@ const effectEnvironments = (
             break
           }
           const specialized = realized?.type ?? Type.substitute(type, instance.substitution)
+          const representedEffect =
+            Type.isRepresented(specialized) &&
+            Type.isEffect(specialized.contract) &&
+            Type.isExactRepresentationArgument(specialized.representation.argument) &&
+            Type.isEffectIdentityArgument(specialized.representation.argument.identity)
+          const parameterEffectRepresentation =
+            source === 'Parameter'
+              ? Instances.parameterEffectRepresentationArgument(
+                  instance.function,
+                  instance.key,
+                  ordinal,
+                )
+              : undefined
           const capturedEffectIdentity =
             realized?.effectIdentity ??
-            (Type.isEffect(specialized) && source === 'Parameter'
-              ? Instances.parameterEffectIdentity(instance.function, instance.key, ordinal)
+            ((Type.isEffect(specialized) || representedEffect) &&
+            parameterEffectRepresentation !== undefined &&
+            Type.isEffectIdentityArgument(parameterEffectRepresentation)
+              ? parameterEffectRepresentation.identity
               : undefined)
           const capturedEffectInstance =
             capturedEffectIdentity === undefined
               ? undefined
-              : discovery.effects.find(
-                  (candidate) =>
-                    candidate.identity === capturedEffectIdentity ||
-                    candidate.representationIdentity === capturedEffectIdentity,
-                )
+              : effectInstanceByIdentity(discovery, capturedEffectIdentity)
           const capturedEffectEnvironment =
             capturedEffectIdentity === undefined
               ? undefined
@@ -2036,6 +2136,40 @@ const effectEnvironments = (
                         Instances.effectIdentity(candidate.instance, candidate.site) ===
                           capturedEffectInstance.identity)),
                 )
+          const capturedCompositeRepresentation =
+            parameterEffectRepresentation !== undefined &&
+            Type.isCompositeEffectRepresentationArgument(parameterEffectRepresentation)
+              ? parameterEffectRepresentation
+              : undefined
+          const capturedCompositeEnvironments = capturedCompositeRepresentation?.alternatives.map(
+            (alternative) =>
+              Type.isEffectIdentityArgument(alternative.identity)
+                ? effectEnvironmentByIdentity(environments, alternative.identity)
+                : undefined,
+          )
+          const capturedCompositeLayout = capturedCompositeEnvironments?.every(
+            (
+              candidate,
+            ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+              candidate !== undefined,
+          )
+            ? (() => {
+                const payloadAlignment = capturedCompositeEnvironments.reduce(
+                  (maximum, candidate) => Math.max(maximum, candidate.alignment),
+                  1,
+                )
+                const payloadSize = capturedCompositeEnvironments.reduce(
+                  (maximum, candidate) => Math.max(maximum, candidate.size),
+                  0,
+                )
+                const alignment = Math.max(4, payloadAlignment)
+                const payloadOffset = alignUp(4, payloadAlignment)
+                return Object.freeze({
+                  size: alignUp(payloadOffset + payloadSize, alignment),
+                  alignment,
+                })
+              })()
+            : undefined
           const capturedCallableIdentity =
             realized?.callableIdentity ??
             (Type.isCallable(specialized) && source === 'Parameter'
@@ -2056,6 +2190,13 @@ const effectEnvironments = (
                 )
           const fieldType =
             capturedEffectEnvironment?.effect ??
+            (capturedCompositeRepresentation === undefined
+              ? undefined
+              : Type.represented(
+                  capturedCompositeRepresentation.contract,
+                  capturedCompositeRepresentation.contract,
+                  capturedCompositeRepresentation,
+                )) ??
             (capturedCallableEnvironment === undefined
               ? undefined
               : Object.freeze({
@@ -2082,7 +2223,9 @@ const effectEnvironments = (
           const valueLayout =
             borrowed || callable
               ? undefined
-              : (capturedEffectEnvironment ?? layouts.get(Type.key(fieldType)))
+              : (capturedEffectEnvironment ??
+                capturedCompositeLayout ??
+                layouts.get(Type.key(fieldType)))
           if (!borrowed && !callable && valueLayout === undefined) {
             unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
             break
@@ -2485,6 +2628,7 @@ export const plan = (
 ): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
+  for (const effect of discovery.effects) reached.set(Type.key(effect.type), effect.type)
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
@@ -2496,7 +2640,11 @@ export const plan = (
       )
         continue
       const arguments_ = expression.typeArguments.map((argument) =>
-        Type.substituteGenericArgument(argument, instance.substitution),
+        Instances.concreteEffectRepresentationArgument(
+          instance.function,
+          instance.key,
+          Type.substituteGenericArgument(argument, instance.substitution),
+        ),
       )
       for (const argument of [arguments_.at(0), arguments_.at(2)])
         if (argument !== undefined && Type.isTypeArgument(argument))
@@ -2544,6 +2692,10 @@ export const plan = (
     const candidate = resolve(type)
     if (candidate === undefined) return
     entries.set(key, candidate)
+    if (Type.isSharedCore(type)) {
+      const element = Type.typeArgumentAt(type, 0)
+      if (element !== undefined) add(element)
+    }
     if (
       Type.isRepresented(type) &&
       Type.isCompositeEffectRepresentationArgument(type.representation.argument)
@@ -2651,28 +2803,7 @@ export const plan = (
   ): { readonly size: number; readonly alignment: number } | undefined => {
     if (Type.isExactRepresentationArgument(argument)) {
       if (Type.isEffectIdentityArgument(argument.identity)) {
-        const owner = argument.identity.owner
-        const environment = effectPlans.find(
-          (
-            candidate,
-          ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
-            candidate._tag === 'EffectEnvironment' &&
-            (Instances.effectIdentity(candidate.instance, candidate.site) ===
-              argument.identity.identity ||
-              candidate.successEffectIdentity === argument.identity.identity ||
-              (Hir.effectRepresentationIdentity(candidate.site) === argument.identity.identity &&
-                owner !== undefined &&
-                candidate.instance.declaration.module === owner.declaration.module &&
-                candidate.instance.declaration.name === owner.declaration.name &&
-                candidate.instance.typeArguments.length === owner.typeArguments.length &&
-                candidate.instance.typeArguments.every((typeArgument, ordinal) => {
-                  const ownerArgument = owner.typeArguments.at(ordinal)
-                  return (
-                    ownerArgument !== undefined &&
-                    Type.genericArgumentKey(typeArgument) === Type.genericArgumentKey(ownerArgument)
-                  )
-                }))),
-        )
+        const environment = effectEnvironmentByIdentity(effectPlans, argument.identity)
         return environment === undefined
           ? undefined
           : Object.freeze({ size: environment.size, alignment: environment.alignment })
@@ -2737,7 +2868,11 @@ export const plan = (
       )
         continue
       const arguments_ = expression.typeArguments.map((argument) =>
-        Type.substituteGenericArgument(argument, instance.substitution),
+        Instances.concreteEffectRepresentationArgument(
+          instance.function,
+          instance.key,
+          Type.substituteGenericArgument(argument, instance.substitution),
+        ),
       )
       const result = arguments_.at(0)
       const bodyArgument = arguments_.at(1)
@@ -3066,21 +3201,7 @@ const shapeNode = (
         if (!Type.isEffectIdentityArgument(alternative.identity))
           throw new RangeError('Effect composite retained a non-Effect alternative')
         const identity = alternative.identity
-        const environment = context.effectEnvironments.find(
-          (
-            candidate,
-          ): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
-            candidate._tag === 'EffectEnvironment' &&
-            Hir.effectRepresentationIdentity(candidate.site) === identity.identity &&
-            identity.owner !== undefined &&
-            candidate.instance.declaration.module === identity.owner.declaration.module &&
-            candidate.instance.declaration.name === identity.owner.declaration.name &&
-            candidate.instance.typeArguments.length === identity.owner.typeArguments.length &&
-            candidate.instance.typeArguments.every((value, ordinal) => {
-              const expected = identity.owner?.typeArguments.at(ordinal)
-              return expected !== undefined && Type.equalsGenericArgument(value, expected)
-            }),
-        )
+        const environment = effectEnvironmentByIdentity(context.effectEnvironments, identity)
         if (environment === undefined)
           throw new RangeError('Effect composite alternative has no concrete environment')
         const fields = environment.fields.map((field) =>
@@ -3528,13 +3649,15 @@ export const callableEnvironmentByIdentity = (
 export const effectEnvironmentByFieldIdentity = (
   self: Plan,
   identity: string,
-): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined =>
-  self.effectEnvironments.find(
+): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined => {
+  const matches = self.effectEnvironments.filter(
     (candidate): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
       candidate._tag === 'EffectEnvironment' &&
       (Instances.effectIdentity(candidate.instance, candidate.site) === identity ||
         candidate.successEffectIdentity === identity),
   )
+  return matches.at(0)
+}
 
 /** Materializes the ABI lanes of one Effect environment capture field. */
 export const effectFieldLanes = (
@@ -3568,6 +3691,66 @@ export const effectFieldLanes = (
     return captured !== undefined ? effectEnvironmentLanes(self, captured) : Object.freeze([])
   }
   return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+}
+
+/** One scalar lane's storage root and byte base within an executable environment. */
+export interface EnvironmentLanePlacement {
+  readonly lane: CallingLane
+  readonly byteOffset: number
+  /** The ordinary value whose selector path supplies the remainder of the byte offset. */
+  readonly root?: DeclarationFacts.SemanticType
+}
+
+const ordinaryLanePlacements = (
+  self: Plan,
+  type: DeclarationFacts.SemanticType,
+  byteOffset: number,
+): ReadonlyArray<EnvironmentLanePlacement> =>
+  Object.freeze(
+    (callingShape(self, type)?.lanes ?? []).map((lane) =>
+      Object.freeze({ lane, byteOffset, root: type }),
+    ),
+  )
+
+/** Places every scalar lane stored by one hidden Effect environment. */
+export const effectEnvironmentLanePlacements = (
+  self: Plan,
+  environment: Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
+  byteOffset = 0,
+): ReadonlyArray<EnvironmentLanePlacement> =>
+  Object.freeze(
+    environment.fields.flatMap((field) => effectFieldLanePlacements(self, field, byteOffset)),
+  )
+
+/** Places every scalar lane stored by one Effect capture field. */
+export const effectFieldLanePlacements = (
+  self: Plan,
+  field: EffectEnvironmentField,
+  byteOffset = 0,
+): ReadonlyArray<EnvironmentLanePlacement> => {
+  const fieldOffset = byteOffset + field.offset
+  if (field.representation === 'Borrow') {
+    const [lane] = effectFieldLanes(self, field)
+    return lane === undefined
+      ? Object.freeze([])
+      : Object.freeze([Object.freeze({ lane, byteOffset: fieldOffset })])
+  }
+  if (field.callableIdentity !== undefined) {
+    const captured =
+      field.callableIdentity.environment === undefined
+        ? undefined
+        : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
+    return captured === undefined
+      ? Object.freeze([])
+      : callableEnvironmentLanePlacements(self, captured, fieldOffset)
+  }
+  if (field.effectIdentity !== undefined) {
+    const captured = effectEnvironmentByFieldIdentity(self, field.effectIdentity)
+    return captured === undefined
+      ? Object.freeze([])
+      : effectEnvironmentLanePlacements(self, captured, fieldOffset)
+  }
+  return ordinaryLanePlacements(self, field.type, fieldOffset)
 }
 
 /** Materializes the ABI lanes of one hidden Effect environment separately from its outcome. */
@@ -3630,6 +3813,38 @@ export const callableFieldLanes = (
       : callableEnvironmentLanes(self, environment)
   }
   return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+}
+
+/** Places every scalar lane stored by one hidden callable environment. */
+export const callableEnvironmentLanePlacements = (
+  self: Plan,
+  environment: Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
+  byteOffset = 0,
+): ReadonlyArray<EnvironmentLanePlacement> =>
+  Object.freeze(
+    environment.fields.flatMap((field) => callableFieldLanePlacements(self, field, byteOffset)),
+  )
+
+/** Places every scalar lane stored by one callable capture field. */
+export const callableFieldLanePlacements = (
+  self: Plan,
+  field: CallableEnvironmentField,
+  byteOffset = 0,
+): ReadonlyArray<EnvironmentLanePlacement> => {
+  const fieldOffset = byteOffset + field.offset
+  if (field.representation === 'Borrow') {
+    const [lane] = callableFieldLanes(self, field)
+    return lane === undefined
+      ? Object.freeze([])
+      : Object.freeze([Object.freeze({ lane, byteOffset: fieldOffset })])
+  }
+  if (field.callableIdentity?.environment !== undefined) {
+    const captured = callableEnvironmentByIdentity(self, field.callableIdentity.environment)
+    return captured === undefined
+      ? Object.freeze([])
+      : callableEnvironmentLanePlacements(self, captured, fieldOffset)
+  }
+  return ordinaryLanePlacements(self, field.type, fieldOffset)
 }
 
 /** The logical lane and byte range occupied by one capture in a specialized environment. */

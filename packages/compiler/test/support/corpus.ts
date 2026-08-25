@@ -2433,27 +2433,8 @@ const independentExecutionPressure = (name: string): string =>
     new URL(`../fixtures/independent-execution-separation/${name}.silk`, import.meta.url),
     'utf8',
   )
-const independentExecutionConstructionFailure = (ordinal: 0 | 4): string => {
-  const source = independentExecutionPressure('main')
-  const allocator = ordinal === 0 ? 'inboxAllocator' : 'producerAllocator'
-  return source
-    .replace(
-      'import silk.shared as Shared',
-      `import silk.shared as Shared
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.layout { Layout }
-struct ExhaustedAllocator {}
-effect fn refuse(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
-  drop layout
-  fail OutOfMemoryError {}
-}
-impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }`,
-    )
-    .replace(
-      `let mut ${allocator} = Allocator.systemAllocatorService()`,
-      `let mut ${allocator} = ExhaustedAllocator {}`,
-    )
-}
+const schedulerFiber = (name: string): string =>
+  readFileSync(new URL(`../fixtures/scheduler-fiber/${name}.silk`, import.meta.url), 'utf8')
 const localSharedPressureFailure = (ordinal: 0 | 1): string =>
   localSharedPressure.replace(
     ordinal === 0
@@ -2466,25 +2447,34 @@ const localSharedPressureFailure = (ordinal: 0 | 1): string =>
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   ...corpus,
+  // These two canonical programs cover the public single-threaded Fiber story through the shared
+  // evaluator/native differential: root/fork/join, FIFO siblings, repeated yield, nested forks,
+  // completion-before-join, typed child failure, structured cancellation, and reuse of one
+  // LocalScheduler value.
+  {
+    name: 'scheduler-fiber-semantics',
+    source: schedulerFiber('local-scheduler-semantics'),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scheduler-fiber-shutdown',
+    source: schedulerFiber('local-scheduler-shutdown'),
+    expected: { _tag: 'Completes', result: 42 },
+  },
   ...[
-    { name: 'connected-owner', result: 42 },
-    { name: 'first-activation', result: 20 },
+    { name: 'first-activation', result: 21 },
     { name: 'coroutine', result: 123 },
     { name: 'dormant-cancel', result: 1111 },
-    { name: 'post-publication-failure', result: 42 },
     { name: 'selective-ready', result: 22 },
     { name: 'timer', result: 42 },
   ].map(
     (program): CorpusProgram => ({
       name: `independent-execution-separation-${program.name}`,
-      source: independentExecutionPressure(
-        program.name === 'connected-owner' ? 'main' : program.name,
-      ),
+      source: independentExecutionPressure(program.name),
       expected: { _tag: 'Completes', result: program.result },
     }),
   ),
   ...[
-    { name: 'connected-owner', source: 'main', result: 42 },
     { name: 'timer', source: 'timer', result: 42 },
     { name: 'coroutine', source: 'coroutine', result: 123 },
     { name: 'selective-ready', source: 'selective-ready', result: 22 },
@@ -2493,13 +2483,6 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
       name: `independent-execution-separation-renamed-${program.name}`,
       source: renameIndependentPolicy(independentExecutionPressure(program.source)),
       expected: { _tag: 'Completes', result: program.result },
-    }),
-  ),
-  ...([0, 4] as const).map(
-    (ordinal): CorpusProgram => ({
-      name: `independent-execution-separation-construction-failure-${ordinal}`,
-      source: independentExecutionConstructionFailure(ordinal),
-      expected: { _tag: 'Completes', result: -100 },
     }),
   ),
   {

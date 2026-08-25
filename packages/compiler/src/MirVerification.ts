@@ -706,6 +706,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.onComplete,
         operation.onSuspend,
       ]
+    case 'ExecutionNotifyInitial':
+      return [operation.destination, operation.execution]
     case 'ExecutionWake':
       return [operation.destination, operation.wake]
     case 'ExecutionPark':
@@ -1504,6 +1506,8 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ...cleanupTypes(operation.completionCleanup),
         ...cleanupTypes(operation.suspensionCleanup),
       ]
+    case 'ExecutionNotifyInitial':
+      return [semanticType(operation.type)]
     case 'ExecutionWake':
       return [semanticType(operation.type), SilkType.wake]
     case 'ExecutionPark':
@@ -1712,6 +1716,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.allocation, operation.body, operation.endpoint, operation.callback]
     case 'ExecutionDrive':
       return [operation.execution, operation.branch, operation.onComplete, operation.onSuspend]
+    case 'ExecutionNotifyInitial':
+      return [operation.execution]
     case 'ExecutionWake':
       return [operation.wake]
     case 'ExecutionPark':
@@ -3674,6 +3680,31 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                 provenance: operation.provenance,
                 detail:
                   'Execution drive lost its affine Execution, branch state, or exact take-once outcome contracts',
+              }),
+            )
+        }
+        if (operation._tag === 'ExecutionNotifyInitial') {
+          const executionType = fn.localTypes.at(operation.execution.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          if (
+            executionType?._tag !== 'Reference' ||
+            executionType.type.access !== 'Exclusive' ||
+            !SilkType.isExecution(executionType.type.target) ||
+            operation.type._tag !== 'Nominal' ||
+            !SilkType.equals(operation.type.type, SilkType.unit) ||
+            destination?._tag !== 'Nominal' ||
+            !SilkType.equals(destination.type, SilkType.unit) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            operation.executionAccess !== 'Exclusive'
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidExecutionOperation',
+                function: fn.id,
+                region: region.id,
+                provenance: operation.provenance,
+                detail: 'initial readiness requires one exclusive Execution reference',
               }),
             )
         }

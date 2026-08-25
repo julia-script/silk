@@ -68,7 +68,10 @@ not belong in a language rule unless a program can observe them.
   depth, cross-engine parity, pay-for-use, and the boundary with future async execution.
 - [Independently resumable Effect executions](independent-execution.md) — explicit caller-funded
   Execution ownership, activation, external parking, Wake readiness, cancellation, cleanup, and the
-  ordinary-source scheduling boundary introduced by SLP-0001.
+  ordinary-source scheduling boundary.
+- [Single-threaded schedulers and Fibers](single-threaded-fibers.md) — explicit scheduler entry,
+  atomic child publication, affine observation, deterministic readiness, structured cancellation,
+  typed shutdown, and provider reuse.
 - [Effect contracts](effect-contracts.md) — success, failure, and requirement channels; declaration
   bounds; generic failure types and requirement rows; and finite compatible Effect joins.
 - [Requirements and services](requirements-and-services.md) — runtime-provided capabilities,
@@ -82,9 +85,9 @@ not belong in a language rule unless a program can observe them.
   standard sections, complete examples, symbol links, and ASD-STE100 writing rules.
 - [Ownership and borrowing](ownership-and-borrowing.md) — Copy and affine values, moves, borrows,
   mutation, captures, cleanup, allocation lifecycles, and returned views.
-- [Allocation-backed local shared ownership](local-shared-ownership.md) — SLP-0002 `Shared<T>`
-  construction, affine strong handles, callback-scoped access, conflict traps, exact last-handle
-  cleanup, and the explicit cycle and thread-transfer boundaries.
+- [Allocation-backed local shared ownership](local-shared-ownership.md) — `Shared<T>` construction,
+  affine strong handles, callback-scoped access, conflict traps, exact last-handle cleanup, and the
+  explicit cycle and thread-transfer boundaries.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
   contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
 - [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact

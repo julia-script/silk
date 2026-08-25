@@ -1,5 +1,6 @@
 import { cleanupForLocal, generated } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -194,24 +195,25 @@ export class FunctionLowering {
     return Type.substituteGenericArgument(argument, this.substitution)
   }
 
-  call(span: SourceSpan.SourceSpan): Instances.CallInstance | undefined {
-    const exact = this.calls.find(
+  call(
+    span: SourceSpan.SourceSpan,
+    implementation?: DeclarationFacts.CanonicalId,
+  ): Instances.CallInstance | undefined {
+    const exact = this.calls.filter(
       (call) =>
         Instances.keyText(call.owner) === Instances.keyText(this.owner.key) &&
         call.span.sourceId === span.sourceId &&
         call.span.start === span.start &&
         call.span.end === span.end,
     )
-    if (exact !== undefined || this.providedRequirements.length === 0) return exact
-    // A provided generated runner reuses the base Effect body's HIR and call sites but has a
-    // private synthesized InstanceKey that discovery never owns. Resolve its calls through the
-    // source owner whose body is being specialized; provider dispatch is represented separately.
-    const sameSite = this.calls.filter(
-      (call) =>
-        call.span.sourceId === span.sourceId &&
-        call.span.start === span.start &&
-        call.span.end === span.end,
-    )
-    return sameSite.length === 1 ? sameSite.at(0) : undefined
+    const selected =
+      implementation === undefined
+        ? exact
+        : exact.filter(
+            (call) =>
+              call.target.declaration.module === implementation.module &&
+              call.target.declaration.name === implementation.name,
+          )
+    return selected.length === 1 ? selected.at(0) : undefined
   }
 }

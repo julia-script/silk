@@ -6,6 +6,7 @@ import * as ExecutionPackage from './ExecutionPackage.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
+import * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
@@ -19,6 +20,14 @@ import {
   lowerInterfaceWitnessCall,
   lowerWitnessEffect,
 } from './WitnessLowering.js'
+
+const representedExecutionArgument = (
+  fn: FunctionLowering,
+  argument: Type.GenericArgument,
+): Type.Represented | undefined =>
+  Type.representedType(
+    Instances.concreteEffectRepresentationArgument(fn.owner.function, fn.owner.key, argument),
+  )
 
 export const lowerBuiltinExpression = (
   fn: FunctionLowering,
@@ -96,7 +105,7 @@ export const lowerBuiltinExpression = (
       !Type.isTypeArgument(executionEndpoint)
         ? undefined
         : (() => {
-            const body = Type.representedType(executionBody)
+            const body = representedExecutionArgument(fn, executionBody)
             const callback = Type.representedType(executionCallback)
             if (body === undefined || callback === undefined) return undefined
             return fn.layout.executionPackages.plans.find(
@@ -268,7 +277,8 @@ export const lowerBuiltinExpression = (
     const bodyArgument = arguments_.at(1)
     const endpointArgument = arguments_.at(2)
     const callbackArgument = arguments_.at(3)
-    const bodyType = bodyArgument === undefined ? undefined : Type.representedType(bodyArgument)
+    const bodyType =
+      bodyArgument === undefined ? undefined : representedExecutionArgument(fn, bodyArgument)
     const callbackType =
       callbackArgument === undefined ? undefined : Type.representedType(callbackArgument)
     const plan =
@@ -295,6 +305,9 @@ export const lowerBuiltinExpression = (
       allocationProvenance === undefined
         ? -1
         : fn.layout.localSharedAllocationProvenance.executionFacts.indexOf(allocationProvenance)
+    const concreteArguments = arguments_.map((argument) =>
+      Instances.concreteEffectRepresentationArgument(fn.owner.function, fn.owner.key, argument),
+    )
     if (
       allocation === undefined ||
       body === undefined ||
@@ -305,9 +318,9 @@ export const lowerBuiltinExpression = (
       plan === undefined ||
       allocationProvenance === undefined ||
       allocationFact < 0 ||
-      allocationProvenance.arguments.length !== arguments_.length ||
+      allocationProvenance.arguments.length !== concreteArguments.length ||
       !allocationProvenance.arguments.every((argument, ordinal) => {
-        const expected = arguments_.at(ordinal)
+        const expected = concreteArguments.at(ordinal)
         return (
           expected !== undefined &&
           Type.genericArgumentKey(argument) === Type.genericArgumentKey(expected)
@@ -768,6 +781,32 @@ export const lowerBuiltinExpression = (
         destination,
         wake,
         wakeAccess: 'Take' as const,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'ExecutionNotifyInitial') {
+    const [execution] = argumentLocals
+    const executionType = execution === undefined ? undefined : fn.localTypes.at(execution.ordinal)
+    const type = fn.type(expression.type)
+    if (
+      execution === undefined ||
+      executionType?._tag !== 'Reference' ||
+      executionType.type.access !== 'Exclusive' ||
+      !Type.isExecution(executionType.type.target) ||
+      type?._tag !== 'Nominal' ||
+      !Type.equals(type.type, Type.unit)
+    )
+      return undefined
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'ExecutionNotifyInitial' as const,
+        destination,
+        execution,
+        executionAccess: 'Exclusive' as const,
         type,
         provenance: authored(expression.span),
       }),

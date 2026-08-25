@@ -197,6 +197,166 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
   )
 })
 
+it.effect(
+  'links Scheduler and Fiber hovers to their canonical documented Silk declarations',
+  () => {
+    const source = `import silk.allocator as Allocator
+import silk.fiber as Fiber
+import silk.local_scheduler as LocalScheduler
+import silk.scheduler as Scheduler
+
+effect fn child() -> i32 ? &mut Scheduler.Scheduler { return 42 }
+
+effect fn prepareOnly() -> Scheduler.PendingPublication<i32, never>
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+? &mut Scheduler.Scheduler {
+  return run Scheduler.prepare<i32, never>(child())
+}
+
+effect fn program() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | Fiber.Cancelled
+? &mut Scheduler.Scheduler {
+  let childFiber = run Fiber.forkChild<i32, never>(child())
+  return run Fiber.join<i32, never>(move childFiber)
+}
+
+effect fn observe(fiber: Fiber.Fiber<i32, never>) -> Fiber.Outcome<i32, never> {
+  return run Fiber.await<i32, never>(move fiber)
+}
+
+fn inspectErrors(
+  exhausted: &Scheduler.TaskIdExhausted,
+  cancelled: &Fiber.Cancelled,
+  stalled: &LocalScheduler.Stalled,
+) -> () { return () }
+
+effect fn runProgram(scheduler: &mut LocalScheduler.LocalScheduler) -> i32
+! Allocator.OutOfMemoryError
+  | Scheduler.TaskIdExhausted
+  | Fiber.Cancelled
+  | LocalScheduler.Stalled {
+  return run LocalScheduler.execute(move scheduler, program())
+}
+
+pub fn main() -> i32 {
+  let scheduler = LocalScheduler.make()
+  drop scheduler
+  return 42
+}`
+    return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+      Effect.map((snapshot) => {
+        assert.deepEqual(Analysis.diagnostics(snapshot), [])
+
+        for (const [module, summary, declaration] of [
+          [
+            'silk/scheduler',
+            '//! Provider protocol for preparing and atomically publishing child Fibers.',
+            'pub service Scheduler',
+          ],
+          [
+            'silk/fiber',
+            '//! Affine Fiber handles, typed outcomes, and one-observer completion.',
+            'pub struct Fiber<A, E>',
+          ],
+          [
+            'silk/local_scheduler',
+            '//! Deterministic single-threaded execution for structured Fibers.',
+            'pub struct LocalScheduler',
+          ],
+        ] as const) {
+          const moduleDocumentation = documentationText(
+            snapshot,
+            Analysis.moduleDocumentation(snapshot, module),
+          )
+          assert.isTrue(moduleDocumentation?.startsWith(summary), module)
+          const canonical = Projections.syntaxOf(snapshot, module)?.source
+          assert.isDefined(canonical, module)
+          const canonicalText =
+            canonical === undefined ? '' : decoder.decode(SourceFile.toUint8Array(canonical))
+          assert.isTrue(canonicalText.startsWith(summary), module)
+          assert.include(canonicalText, declaration, module)
+        }
+
+        for (const [needle, offset, module, presentation, summary] of [
+          [
+            'Scheduler.prepare<i32',
+            'Scheduler.'.length,
+            'silk/scheduler',
+            'pub effect fn prepare<A, E>',
+            '/// Prepares one lazy child task through the active Scheduler provider.',
+          ],
+          [
+            'Scheduler.PendingPublication',
+            'Scheduler.'.length,
+            'silk/scheduler',
+            'pub struct PendingPublication<A, E>',
+            '/// A prepared child Fiber and the canonical data required for atomic publication.',
+          ],
+          [
+            'Scheduler.TaskIdExhausted',
+            'Scheduler.'.length,
+            'silk/scheduler',
+            'pub struct TaskIdExhausted',
+            '/// A typed failure that reports exhaustion of the task identity space.',
+          ],
+          [
+            'Fiber.forkChild',
+            'Fiber.'.length,
+            'silk/fiber',
+            'pub effect fn forkChild<A, E>',
+            '/// Prepares and atomically publishes one child task, then returns its affine Fiber.',
+          ],
+          [
+            'Fiber.Outcome',
+            'Fiber.'.length,
+            'silk/fiber',
+            'pub struct Outcome<A, E>',
+            '/// The three possible terminal observations of a Fiber.',
+          ],
+          [
+            'Fiber.Cancelled',
+            'Fiber.'.length,
+            'silk/fiber',
+            'pub struct Cancelled',
+            '/// A Fiber outcome that reports structured task cancellation.',
+          ],
+          [
+            'LocalScheduler.execute',
+            'LocalScheduler.'.length,
+            'silk/local_scheduler',
+            'pub effect fn execute<A, E>',
+            '/// Runs one lazy root program under this Scheduler and returns its typed outcome.',
+          ],
+          [
+            'LocalScheduler.Stalled',
+            'LocalScheduler.'.length,
+            'silk/local_scheduler',
+            'pub struct Stalled',
+            '/// Reports that no task is ready while the root is incomplete.',
+          ],
+        ] as const) {
+          const position = source.indexOf(needle) + offset
+          const occurrence = Analysis.semanticOccurrenceAt(snapshot, 'main', position)
+          assert.strictEqual(occurrence?.resolution._tag, 'Available', needle)
+          assert.strictEqual(occurrence?.declaration?.module, module, needle)
+          assert.strictEqual(occurrence?.declaration?.selectionSpan?.sourceId, module, needle)
+          assert.include(
+            Analysis.hoverSubjectAt(snapshot, 'main', position)?.presentation.text ?? '',
+            presentation,
+            needle,
+          )
+          const documentation = documentationText(
+            snapshot,
+            Analysis.documentationAt(snapshot, 'main', position),
+          )
+          assert.isTrue(documentation?.startsWith(summary), needle)
+        }
+        return undefined
+      }),
+    )
+  },
+)
+
 it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
   const source = `import silk.usize as usize
 import silk.vector { make, asSlice, asMutSlice }

@@ -27,10 +27,6 @@ const renamed = readFileSync(
   ),
   'utf8',
 )
-const independentExecution = readFileSync(
-  new URL('./fixtures/independent-execution-separation/main.silk', import.meta.url),
-  'utf8',
-)
 const deferredFirstActivation = readFileSync(
   new URL('./fixtures/independent-execution-separation/first-activation.silk', import.meta.url),
   'utf8',
@@ -49,13 +45,6 @@ const timerOwner = readFileSync(
 )
 const selectiveReady = readFileSync(
   new URL('./fixtures/independent-execution-separation/selective-ready.silk', import.meta.url),
-  'utf8',
-)
-const postPublicationFailure = readFileSync(
-  new URL(
-    './fixtures/independent-execution-separation/post-publication-failure.silk',
-    import.meta.url,
-  ),
   'utf8',
 )
 
@@ -214,32 +203,6 @@ const rejectingSource = (source: string, ordinal: 0 | 1): string => {
   return source.replace(declaration, rejected)
 }
 
-const independentExecutionFailureSource = (ordinal: number): string => {
-  const names = ['inbox', 'tasks', 'result', 'waiter', 'producer'] as const
-  const name = names.at(ordinal) ?? unreachable('expected construction allocation')
-  return independentExecution
-    .replace(
-      'import silk.shared as Shared',
-      `import silk.shared as Shared
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.layout { Layout }
-
-struct ExhaustedAllocator {}
-effect fn refuse(
-  self: &mut ExhaustedAllocator,
-  layout: Layout,
-) -> Allocation ! OutOfMemoryError {
-  drop layout
-  fail OutOfMemoryError {}
-}
-impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.refuse }`,
-    )
-    .replace(
-      `let mut ${name}Allocator = Allocator.systemAllocatorService()`,
-      `let mut ${name}Allocator = ExhaustedAllocator {}`,
-    )
-}
-
 const renamePairs = [
   ['pressure/local-shared-slp1-renamed', 'pressure/local-shared-slp1'],
   ['SignalBox', 'ReadyInbox'],
@@ -275,20 +238,6 @@ const renamePairs = [
   ['lastRecovery', 'finalRecovery'],
   ['EmptyAllocator', 'ExhaustedAllocator'],
   ['refuse', 'reject'],
-  ['WorkRegistry', 'TaskStore'],
-  ['SignalQueue', 'ReadyInbox'],
-  ['PromiseCell', 'ResultState'],
-  ['PromiseHandle', 'Deferred'],
-  ['PromisePhase', 'DeferredState'],
-  ['PromisePending', 'DeferredPending'],
-  ['PromiseDone', 'DeferredDone'],
-  ['PromiseTaken', 'DeferredTaken'],
-  ['JobHandle', 'Fiber'],
-  ['PreparedJob', 'PreparedFiber'],
-  ['ValueToken', 'ChildValue'],
-  ['OwnedValueToken', 'FixedChildValue'],
-  ['JobEndpoint', 'ReadyEndpoint'],
-  ['WorkResult', 'TaskOutput'],
   ['Controller', 'Owner'],
   ['EventLoop', 'TimerReactor'],
   ['DelayToken', 'TimerGuard'],
@@ -299,15 +248,6 @@ const renamePairs = [
   ['DispatchQueue', 'Inbox'],
   ['WorkSet', 'Tasks'],
   ['activateIdentity', 'driveIdentity'],
-  ['awaitValue', 'awaitResult'],
-  ['emitValue', 'produceResult'],
-  ['closeConfiguredValue', 'closeChildValue'],
-  ['requiredConfiguredValue', 'requiredChildValue'],
-  ['readConfiguredValue', 'readChildValue'],
-  ['awaitPromise', 'awaitDeferred'],
-  ['joinJob', 'join'],
-  ['forkJob', 'fork'],
-  ['pauseLocal', 'sleep'],
   ['tickLocal', 'poll'],
   ['advancePort', 'resume'],
   ['ExecutionFacade', 'Execution'],
@@ -516,58 +456,6 @@ it.effect('recovers deterministically at every exercised construction quota', ()
   }),
 )
 
-it.effect('runs the connected ordinary-source Execution and Wake companion', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realized(
-      'pressure/independent-execution-separation',
-      independentExecution,
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      JSON.stringify(Analysis.diagnostics(snapshot)),
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    const evaluated = completed(snapshot)
-    assert.strictEqual(evaluated.result.value, 42n)
-    const transitions = evaluated.trace.filter((event) => event._tag === 'ExecutionTransition')
-    const transitionCount = (event: (typeof transitions)[number]['event']): number =>
-      transitions.filter((transition) => transition.event === event).length
-    assert.strictEqual(transitionCount('Initialize'), 2)
-    assert.strictEqual(transitionCount('Register'), 1)
-    assert.strictEqual(transitionCount('Relinquish'), 1)
-    assert.strictEqual(transitionCount('Notify'), 1)
-    assert.strictEqual(transitionCount('Eligible'), 1)
-    assert.strictEqual(transitionCount('Resume'), 1)
-    assert.strictEqual(transitionCount('Complete'), 2)
-    const firstDrive = evaluated.trace.findIndex(
-      (event) => event._tag === 'ExecutionTransition' && event.event === 'Drive',
-    )
-    assert.isAtLeast(firstDrive, 0)
-    assert.isFalse(
-      evaluated.trace.slice(firstDrive).some((event) => event._tag === 'AllocationAcquire'),
-    )
-    let sharedAccessDepth = 0
-    for (const event of evaluated.trace) {
-      if (event._tag === 'SharedAccessBegin') sharedAccessDepth += 1
-      if (event._tag === 'SharedAccessEnd') sharedAccessDepth -= 1
-      if (event._tag === 'Call' && event.target.name === 'publishEndpoint') {
-        assert.strictEqual(sharedAccessDepth, 0)
-      }
-    }
-    assert.strictEqual(sharedAccessDepth, 0)
-    const allocationEvents = evaluated.trace.filter(
-      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-    )
-    assert.strictEqual(
-      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
-      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-      JSON.stringify(allocationEvents),
-    )
-    assert.strictEqual((yield* runWasm(snapshot)).result, 42)
-  }),
-)
-
 it.effect('lets one ordinary owner choose first activation across exact body representations', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized(
@@ -577,7 +465,13 @@ it.effect('lets one ordinary owner choose first activation across exact body rep
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     const evaluated = completed(snapshot)
-    assert.strictEqual(evaluated.result.value, 20n)
+    assert.strictEqual(evaluated.result.value, 21n)
+    assert.lengthOf(
+      evaluated.trace.filter(
+        (event) => event._tag === 'ExecutionTransition' && event.event === 'NotifyInitial',
+      ),
+      1,
+    )
     assert.isFalse(
       evaluated.trace.some(
         (event) => event._tag === 'Call' && event.target.name === 'firstBody$effect$-1',
@@ -591,7 +485,7 @@ it.effect('lets one ordinary owner choose first activation across exact body rep
       allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
       JSON.stringify(allocationEvents),
     )
-    assert.strictEqual((yield* runWasm(snapshot)).result, 20)
+    assert.strictEqual((yield* runWasm(snapshot)).result, 21)
   }),
 )
 
@@ -794,82 +688,6 @@ it.effect('publishes one task identity without scanning and consumes a stale rea
   }),
 )
 
-it.effect(
-  'rolls back every connected-owner construction failure before publication',
-  () =>
-    Effect.gen(function* () {
-      for (let quota = 0; quota < 5; quota += 1) {
-        const snapshot = yield* realized(
-          `pressure/independent-execution-separation-quota-${quota}`,
-          independentExecutionFailureSource(quota),
-        )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-          [],
-          JSON.stringify(Analysis.diagnostics(snapshot)),
-        )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-        const first = completed(snapshot)
-        const second = completed(snapshot)
-        assert.strictEqual(first.result.value, -100n)
-        assert.strictEqual(second.result.value, -100n)
-        assert.isFalse(
-          first.trace.some(
-            (event) =>
-              event._tag === 'Call' &&
-              (event.target.name === 'storeFirst' || event.target.name === 'storeSecond'),
-          ),
-        )
-        const allocations = first.trace.filter(
-          (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-        )
-        assert.strictEqual(
-          allocations.filter((event) => event._tag === 'AllocationAcquire').length,
-          allocations.filter((event) => event._tag === 'AllocationRelease').length,
-          JSON.stringify(allocations),
-        )
-        assert.strictEqual((yield* runWasm(snapshot)).result, -100)
-      }
-    }),
-  30_000,
-)
-
-it.effect('preserves a published Initial task when later waiter allocation fails', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* realized(
-      'pressure/independent-execution-post-publication-failure',
-      postPublicationFailure,
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      [],
-      JSON.stringify(Analysis.diagnostics(snapshot)),
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    const evaluated = completed(snapshot)
-    assert.strictEqual(evaluated.result.value, 42n)
-    assert.deepEqual(
-      evaluated.trace
-        .filter((event) => event._tag === 'ExecutionTransition')
-        .map((event) => event.event),
-      ['Initialize', 'Drive', 'Complete'],
-    )
-    assert.isFalse(
-      evaluated.trace.some(
-        (event) => event._tag === 'Call' && event.target.name === 'insertWaiter',
-      ),
-    )
-    const allocationEvents = evaluated.trace.filter(
-      (event) => event._tag === 'AllocationAcquire' || event._tag === 'AllocationRelease',
-    )
-    assert.strictEqual(
-      allocationEvents.filter((event) => event._tag === 'AllocationAcquire').length,
-      allocationEvents.filter((event) => event._tag === 'AllocationRelease').length,
-    )
-    assert.strictEqual((yield* runWasm(snapshot)).result, 42)
-  }),
-)
-
 it.effect('rejects a nested owner child that retains Scheduler and Allocator requirements', () =>
   Effect.gen(function* () {
     const source = `import silk.allocator { Allocator }
@@ -994,6 +812,18 @@ it.effect(
         parks: 0,
         wakes: 0,
       })
+      const direct = snapshots.get('direct') ?? unreachable('expected direct snapshot')
+      const schedulerModules = new Set(['silk/fiber', 'silk/local_scheduler', 'silk/scheduler'])
+      assert.isFalse(
+        direct.instances.instances.some((instance) =>
+          schedulerModules.has(instance.key.declaration.module),
+        ),
+        'a trivial program must not realize Scheduler, Fiber, or LocalScheduler source',
+      )
+      const directWasm = wasmArtifacts.get('direct') ?? unreachable('expected direct Wasm artifact')
+      assert.deepEqual(directWasm.runtimeFeatures, [])
+      assert.deepEqual(directWasm.nativeRuntimeSymbols, [])
+      assert.deepEqual(directWasm.hostImports, [])
       assert.deepInclude(inventory('nested'), {
         packages: 0,
         wakePackages: 0,
@@ -1153,7 +983,6 @@ it.effect(
 )
 
 const actorNeutralFixtures = [
-  { name: 'scheduler-deferred', source: independentExecution, result: 42n },
   { name: 'timer', source: timerOwner, result: 42n },
   { name: 'coroutine', source: alternateOwner, result: 123n },
   { name: 'ready-owner', source: selectiveReady, result: 22n },

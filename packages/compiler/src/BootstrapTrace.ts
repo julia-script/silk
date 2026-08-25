@@ -255,6 +255,7 @@ export interface ExecutionTraceEvent {
   readonly generation: number
   readonly event:
     | 'Initialize'
+    | 'NotifyInitial'
     | 'Drive'
     | 'Register'
     | 'Latch'

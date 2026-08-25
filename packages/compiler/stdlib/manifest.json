@@ -70,6 +70,21 @@
     "namespace": "f64"
   },
   {
+    "module": "silk/fiber",
+    "path": "silk/fiber.silk",
+    "layer": "portable",
+    "namespace": "Fiber",
+    "aliases": [
+      "Cancelled",
+      "CompletionCanceller",
+      "CompletionProducer",
+      "Failure",
+      "Outcome",
+      "PreparedFiber",
+      "Success"
+    ]
+  },
+  {
     "module": "silk/filesystem",
     "path": "silk/filesystem.silk",
     "layer": "portable",
@@ -156,6 +171,13 @@
     "aliases": ["InvalidAlignment", "LayoutOverflow"]
   },
   {
+    "module": "silk/local_scheduler",
+    "path": "silk/local_scheduler.silk",
+    "layer": "portable",
+    "namespace": "LocalScheduler",
+    "aliases": ["Stalled"]
+  },
+  {
     "module": "silk/logger",
     "path": "silk/logger.silk",
     "layer": "portable",
@@ -234,6 +256,13 @@
     "path": "silk/result.silk",
     "layer": "portable",
     "namespace": "Result"
+  },
+  {
+    "module": "silk/scheduler",
+    "path": "silk/scheduler.silk",
+    "layer": "portable",
+    "namespace": "Scheduler",
+    "aliases": ["PendingPublication", "TaskId", "TaskIdExhausted"]
   },
   {
     "module": "silk/shared",

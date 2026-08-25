@@ -1,0 +1,584 @@
+import silk.allocator as Allocator
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.fiber as Fiber
+import silk.result as Result
+import silk.scheduler as Scheduler
+import silk.shared as Shared
+
+struct Audit {
+  rootPreparations: i32
+  nestedPreparations: i32
+  publications: i32
+  rejections: i32
+  rejectedReleases: i32
+  result: i32
+}
+
+fn recordPreparation(self: &mut Audit, owner: Scheduler.TaskId) -> () {
+  if owner.value == 0 {
+    self.rootPreparations = self.rootPreparations + 1
+    return ()
+  }
+  self.nestedPreparations = self.nestedPreparations + 1
+  return ()
+}
+
+fn recordPublication(self: &mut Audit) -> () {
+  self.publications = self.publications + 1
+  return ()
+}
+
+fn recordRejection(self: &mut Audit) -> () {
+  self.rejections = self.rejections + 1
+  return ()
+}
+
+fn recordRejectedRelease(self: &mut Audit) -> () {
+  self.rejectedReleases = self.rejectedReleases + 1
+  return ()
+}
+
+fn recordResult(self: &mut Audit, value: i32) -> () {
+  self.result = value
+  return ()
+}
+
+fn rootForkReturned() -> () { return () }
+fn nestedBodyActivated() -> () { return () }
+fn nestedForkReturned() -> () { return () }
+fn closedBodyActivated() -> () { return () }
+fn rejectedBodyActivated() -> () { return () }
+fn rejectedTaskReleased() -> () { return () }
+fn rejectionObserved() -> () { return () }
+fn wrongRejectionFailure() -> () { return () }
+fn providerPreparationFinished() -> () { return () }
+
+struct TaskIdentitySource { next: u64 }
+
+fn reserveIdentity(self: &mut TaskIdentitySource) -> Scheduler.TaskId {
+  let selected = self.next
+  self.next = selected + 1
+  return Scheduler.TaskId { value: selected }
+}
+
+struct ExecutionEmpty {}
+struct ExecutionStored { execution: Intrinsic.Execution<()> }
+struct TaskRunState {
+  phase: ExecutionEmpty | ExecutionStored
+  completed: bool
+}
+
+struct RejectedLifetime {
+  identity: Scheduler.TaskId
+  audit: Shared.Shared<Audit>
+}
+
+impl Drop for RejectedLifetime {
+  fn drop(self: &mut RejectedLifetime) -> () {
+    if self.identity.value == 3 {
+      rejectedTaskReleased()
+      let recorded = Shared.withMut(&self.audit, recordRejectedRelease)
+    }
+    return ()
+  }
+}
+
+struct ClientEndpoints {
+  mailbox: Shared.Shared<Scheduler.TaskMailbox>
+  submission: Shared.Shared<Scheduler.SubmissionSlot>
+  response: Shared.Shared<Scheduler.PublicationResponse>
+}
+
+struct MailboxPair {
+  client: ClientEndpoints
+  driverMailbox: Shared.Shared<Scheduler.TaskMailbox>
+  driverSubmission: Shared.Shared<Scheduler.SubmissionSlot>
+}
+
+effect fn makeMailbox(audit: &Shared.Shared<Audit>) -> MailboxPair
+! Allocator.OutOfMemoryError
+? &mut Allocator.Allocator {
+  let response = run Shared.make<Scheduler.PublicationResponse>(Scheduler.PublicationResponse {
+    phase: Scheduler.ResponseWaiting {},
+  })
+  let submission = run Shared.make<Scheduler.SubmissionSlot>(Scheduler.SubmissionSlot {
+    phase: Scheduler.NoSubmission {},
+  })
+  let mailboxResponse = Shared.clone<Scheduler.PublicationResponse>(&response)
+  let mailbox = run Shared.make<Scheduler.TaskMailbox>(Scheduler.TaskMailbox {
+    request: Scheduler.NoRequest {},
+    response: move mailboxResponse,
+  })
+  return MailboxPair {
+    client: ClientEndpoints {
+      mailbox: Shared.clone<Scheduler.TaskMailbox>(&mailbox),
+      submission: Shared.clone<Scheduler.SubmissionSlot>(&submission),
+      response: move response,
+    },
+    driverMailbox: move mailbox,
+    driverSubmission: move submission,
+  }
+}
+
+struct RenamedDispatcher {
+  identity: Scheduler.TaskId
+  endpoints: ClientEndpoints
+  identities: Shared.Shared<TaskIdentitySource>
+  audit: Shared.Shared<Audit>
+}
+
+fn ready(endpoint: &()) -> () { return () }
+
+fn completeRun(self: &mut TaskRunState, output: ()) -> () {
+  drop output
+  self.completed = true
+  return ()
+}
+
+fn suspendRun(
+  self: &mut TaskRunState,
+  execution: Intrinsic.Execution<()>,
+) -> () {
+  let previous = Intrinsic.replace(
+    self.phase,
+    ExecutionStored { execution: move execution },
+  )
+  drop previous
+  return ()
+}
+
+fn takeExecution(self: &mut TaskRunState) -> ExecutionEmpty | ExecutionStored {
+  return Intrinsic.replace(self.phase, ExecutionEmpty {})
+}
+
+effect fn driveExecution(
+  execution: Intrinsic.Execution<()>,
+  state: &mut TaskRunState,
+) -> () {
+  return run Execution.drive(move execution, move state, completeRun, suspendRun)
+}
+
+effect fn driveStored(state: &mut TaskRunState) -> () {
+  let selected = Intrinsic.replace(state.phase, ExecutionEmpty {})
+  return match move selected {
+    ExecutionEmpty {} => ()
+    ExecutionStored { execution } => run driveExecution(move execution, move state)
+  }
+}
+
+fn completeChild<A, E>(
+  completed: Result.Result<A, E>,
+  producer: Fiber.CompletionProducer<A, E>,
+) -> () {
+  let Result.Result<A, E> { value } = move completed
+  return match move value {
+    Result.Success<A> { value: success } => Fiber.completeSuccess<A, E>(
+      move producer,
+      move success,
+    )
+    Result.Failure<E> { error } => Fiber.completeFailure<A, E>(move producer, move error)
+  }
+}
+
+effect fn runChild<A, E>(
+  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+  provider: RenamedDispatcher,
+  producer: Fiber.CompletionProducer<A, E>,
+  lifetime: RejectedLifetime,
+) -> () {
+  let bound = Effect.bindRequirementOwned<Scheduler.Scheduler>(move child, move provider)
+  let completed = run Effect.result(move bound)
+  drop lifetime
+  completeChild<A, E>(move completed, move producer)
+  return ()
+}
+
+effect fn prepare<A, E>(
+  self: &mut RenamedDispatcher,
+  child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
+) -> Scheduler.PendingPublication<A, E>
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted {
+  let owner = self.identity
+  let preparationRecorded = Shared.withMut(&self.audit, recordPreparation(owner))
+  let identity = Shared.withMut(&self.identities, reserveIdentity)
+  let mut allocator = Allocator.systemAllocatorService()
+  let preparedFiber = run Fiber.prepare<A, E>()
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let Fiber.PreparedFiber<A, E> { producer, canceller, fiber } = move preparedFiber
+  let childMailbox = run makeMailbox(&self.audit)
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let MailboxPair {
+    client: childEndpoints,
+    driverMailbox,
+    driverSubmission,
+  } = move childMailbox
+  let childProvider = RenamedDispatcher {
+    identity: identity,
+    endpoints: move childEndpoints,
+    identities: Shared.clone<TaskIdentitySource>(&self.identities),
+    audit: Shared.clone<Audit>(&self.audit),
+  }
+  let lifetime = RejectedLifetime {
+    identity: identity,
+    audit: Shared.clone<Audit>(&self.audit),
+  }
+  let execution = run Execution.make(
+    runChild<A, E>(move child, move childProvider, move producer, move lifetime),
+    (),
+    ready,
+  ) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let task = Scheduler.PreparedTask {
+    identity: identity,
+    parent: self.identity,
+    execution: move execution,
+    canceller: move canceller,
+    mailbox: move driverMailbox,
+    submission: move driverSubmission,
+  }
+  let pending = Scheduler.pending<A, E>(
+    move fiber,
+    Shared.clone<Scheduler.TaskMailbox>(&self.endpoints.mailbox),
+    Shared.clone<Scheduler.SubmissionSlot>(&self.endpoints.submission),
+    Shared.clone<Scheduler.PublicationResponse>(&self.endpoints.response),
+    move task,
+  )
+  providerPreparationFinished()
+  return move pending
+}
+
+impl Scheduler.Scheduler for RenamedDispatcher {
+  prepare: RenamedDispatcher.prepare
+}
+
+fn takeRequest(
+  self: &mut Scheduler.TaskMailbox,
+) -> Scheduler.NoRequest | Scheduler.PendingRequest {
+  return Intrinsic.replace(self.request, Scheduler.NoRequest {})
+}
+
+fn takeSubmission(
+  self: &mut Scheduler.SubmissionSlot,
+) -> Scheduler.NoSubmission | Scheduler.PendingSubmission {
+  return Intrinsic.replace(self.phase, Scheduler.NoSubmission {})
+}
+
+fn publishResponse(self: &mut Scheduler.PublicationResponse) -> () {
+  let previous = Intrinsic.replace(self.phase, Scheduler.ResponsePublished {})
+  drop previous
+  return ()
+}
+
+fn rejectResponse(self: &mut Scheduler.PublicationResponse) -> () {
+  let previous = Intrinsic.replace(self.phase, Scheduler.ResponseRejected {})
+  drop previous
+  return ()
+}
+
+fn responseHandle(
+  self: &Scheduler.TaskMailbox,
+) -> Shared.Shared<Scheduler.PublicationResponse> {
+  return Shared.clone<Scheduler.PublicationResponse>(&self.response)
+}
+
+fn selectPrepared(
+  request: Scheduler.NoRequest | Scheduler.PendingRequest,
+  submission: Scheduler.NoSubmission | Scheduler.PendingSubmission,
+) -> PreparedSelection {
+  return match move request {
+    Scheduler.NoRequest {} => missingPreparedSelection(move submission)
+    Scheduler.PendingRequest { wake } => match move submission {
+      Scheduler.NoSubmission {} => missingPreparedSelection(Scheduler.NoSubmission {})
+      Scheduler.PendingSubmission { task } => PreparedSelection {
+        task: move task,
+        wake: move wake,
+      }
+    }
+  }
+}
+
+struct PreparedSelection {
+  task: Scheduler.PreparedTask
+  wake: Intrinsic.Wake
+}
+
+fn missingPreparedSelection(
+  submission: Scheduler.NoSubmission | Scheduler.PendingSubmission,
+) -> PreparedSelection {
+  drop submission
+  return missingPreparedSelection(Scheduler.NoSubmission {})
+}
+
+fn finishAccepted(
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  audit: Shared.Shared<Audit>,
+  wake: Intrinsic.Wake,
+) -> () {
+  let published = Shared.withMut(&response, publishResponse)
+  let recorded = Shared.withMut(&audit, recordPublication)
+  drop response
+  drop audit
+  Intrinsic.wake(move wake)
+  return ()
+}
+
+fn acceptPrepared(
+  mailbox: &Shared.Shared<Scheduler.TaskMailbox>,
+  submission: &Shared.Shared<Scheduler.SubmissionSlot>,
+  audit: &Shared.Shared<Audit>,
+) -> Scheduler.PreparedTask {
+  let response = Shared.with<
+    Scheduler.TaskMailbox,
+    Shared.Shared<Scheduler.PublicationResponse>
+  >(
+    mailbox,
+    responseHandle,
+  )
+  let request = Shared.withMut(mailbox, takeRequest)
+  let prepared = Shared.withMut(submission, takeSubmission)
+  let PreparedSelection { task, wake } = move selectPrepared(move request, move prepared)
+  finishAccepted(move response, Shared.clone<Audit>(audit), move wake)
+  let mut ready = move task
+  Execution.notifyInitial(&mut ready.execution)
+  return move ready
+}
+
+fn finishRejected(
+  selected: PreparedSelection,
+  response: Shared.Shared<Scheduler.PublicationResponse>,
+  audit: Shared.Shared<Audit>,
+) -> () {
+  let PreparedSelection { task, wake } = move selected
+  drop task
+  let rejected = Shared.withMut(&response, rejectResponse)
+  let recorded = Shared.withMut(&audit, recordRejection)
+  drop response
+  drop audit
+  Intrinsic.wake(move wake)
+  return ()
+}
+
+fn rejectPrepared(
+  mailbox: &Shared.Shared<Scheduler.TaskMailbox>,
+  submission: &Shared.Shared<Scheduler.SubmissionSlot>,
+  audit: &Shared.Shared<Audit>,
+) -> () {
+  let response = Shared.with<
+    Scheduler.TaskMailbox,
+    Shared.Shared<Scheduler.PublicationResponse>
+  >(
+    mailbox,
+    responseHandle,
+  )
+  let request = Shared.withMut(mailbox, takeRequest)
+  let prepared = Shared.withMut(submission, takeSubmission)
+  let selected = selectPrepared(move request, move prepared)
+  finishRejected(move selected, move response, Shared.clone<Audit>(audit))
+  return ()
+}
+
+struct AdoptedTask {
+  identity: Scheduler.TaskId
+  runState: TaskRunState
+  mailbox: Shared.Shared<Scheduler.TaskMailbox>
+  submission: Shared.Shared<Scheduler.SubmissionSlot>
+  canceller: Fiber.CompletionCanceller
+}
+
+effect fn startPrepared(task: Scheduler.PreparedTask) -> AdoptedTask {
+  let Scheduler.PreparedTask {
+    identity,
+    parent,
+    execution,
+    mailbox,
+    submission,
+    canceller,
+  } = move task
+  drop parent
+  let mut runState = TaskRunState {
+    phase: ExecutionEmpty {},
+    completed: false,
+  }
+  run driveExecution(move execution, &mut runState)
+  return AdoptedTask {
+    identity: identity,
+    runState: move runState,
+    mailbox: move mailbox,
+    submission: move submission,
+    canceller: move canceller,
+  }
+}
+
+fn outcomeValue(outcome: Fiber.Outcome<i32, never>) -> i32 {
+  let Fiber.Outcome<i32, never> { value } = move outcome
+  return match move value {
+    Fiber.Success<i32> { value: success } => success
+    Fiber.Failure<never> { error } => move error
+    Fiber.Cancelled {} => -100
+  }
+}
+
+effect fn closedWork() -> i32 {
+  closedBodyActivated()
+  return 40
+}
+
+effect fn nestedWork() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+? &mut Scheduler.Scheduler {
+  nestedBodyActivated()
+  let child = run Fiber.forkChild<i32, never>(closedWork())
+  nestedForkReturned()
+  let outcome = run Fiber.await<i32, never>(move child)
+  return outcomeValue(move outcome) + 1
+}
+
+effect fn rejectedWork() -> i32 {
+  rejectedBodyActivated()
+  return 100
+}
+
+effect fn forkRejected() -> i32
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+? &mut Scheduler.Scheduler {
+  let child = run Fiber.forkChild<i32, never>(rejectedWork())
+  drop child
+  return -100
+}
+
+effect fn recoverRejected(
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+) -> i32 {
+  return match move error {
+    Allocator.OutOfMemoryError {} => observePublicationRejection()
+    Scheduler.TaskIdExhausted {} => observeWrongRejectionFailure()
+  }
+}
+
+fn observePublicationRejection() -> i32 {
+  rejectionObserved()
+  return 1
+}
+
+fn observeWrongRejectionFailure() -> i32 {
+  wrongRejectionFailure()
+  return -10
+}
+
+effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+? &mut Scheduler.Scheduler {
+  let child = run Fiber.forkChild<
+    i32,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+  >(nestedWork())
+  rootForkReturned()
+  let outcome = run Fiber.await<
+    i32,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+  >(move child)
+  let nested = match move outcome {
+    Fiber.Outcome<
+      i32,
+      Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+    > { value } => match move value {
+      Fiber.Success<i32> { value: success } => success
+      Fiber.Failure<Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted> { error } => -200
+      Fiber.Cancelled {} => -300
+    }
+  }
+  let rejected = run Effect.catchAll(forkRejected(), recoverRejected)
+  let stored = Shared.withMut(&audit, recordResult(nested + rejected))
+  drop audit
+  return ()
+}
+
+effect fn recoverRoot(
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+) -> () {
+  drop error
+  return ()
+}
+
+fn auditResult(self: &Audit) -> i32 {
+  if self.rootPreparations != 2 { return -1 }
+  if self.nestedPreparations != 1 { return -2 }
+  if self.publications != 2 { return -3 }
+  if self.rejections != 1 { return -4 }
+  if self.rejectedReleases != 1 { return -5 }
+  return self.result
+}
+
+effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
+  let audit = run Shared.make<Audit>(Audit {
+    rootPreparations: 0,
+    nestedPreparations: 0,
+    publications: 0,
+    rejections: 0,
+    rejectedReleases: 0,
+    result: 0,
+  }) |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let identities = run Shared.make<TaskIdentitySource>(TaskIdentitySource { next: 1 })
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let rootMailbox = run makeMailbox(&audit)
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  let MailboxPair {
+    client: rootEndpoints,
+    driverMailbox: rootDriverMailbox,
+    driverSubmission: rootDriverSubmission,
+  } = move rootMailbox
+  let rootProvider = RenamedDispatcher {
+    identity: Scheduler.TaskId { value: 0 },
+    endpoints: move rootEndpoints,
+    identities: move identities,
+    audit: Shared.clone<Audit>(&audit),
+  }
+  let mut rootState = TaskRunState {
+    phase: ExecutionEmpty {},
+    completed: false,
+  }
+  let rootProgram = Effect.catchAll(
+    rootWork(Shared.clone<Audit>(&audit)),
+    recoverRoot,
+  )
+  let root = Effect.bindRequirementOwned<Scheduler.Scheduler>(
+    move rootProgram,
+    move rootProvider,
+  )
+  let mut rootExecution = run Execution.make(move root, (), ready)
+    |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
+  Execution.notifyInitial(&mut rootExecution)
+
+  run driveExecution(move rootExecution, &mut rootState)
+  let nestedPrepared = acceptPrepared(&rootDriverMailbox, &rootDriverSubmission, &audit)
+  run driveStored(&mut rootState)
+  let mut nested = run startPrepared(move nestedPrepared)
+
+  let leafPrepared = acceptPrepared(&nested.mailbox, &nested.submission, &audit)
+  run driveStored(&mut nested.runState)
+  let leaf = run startPrepared(move leafPrepared)
+  run driveStored(&mut nested.runState)
+  run driveStored(&mut rootState)
+
+  rejectPrepared(&rootDriverMailbox, &rootDriverSubmission, &audit)
+  run driveStored(&mut rootState)
+
+  drop leaf
+  drop nested
+  drop rootState
+  drop rootDriverMailbox
+  drop rootDriverSubmission
+  let result = Shared.with<Audit, i32>(&audit, auditResult)
+  drop audit
+  return result
+}
+
+effect fn recover(error: Allocator.OutOfMemoryError) -> i32 {
+  drop error
+  return -99
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(scenario(), recover)
+}

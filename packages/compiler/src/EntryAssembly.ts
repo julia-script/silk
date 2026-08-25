@@ -121,11 +121,38 @@ export const lowerInstance = (
   if (contract._tag === 'Contract') {
     parameterTypes = instance.specialization.parameters.flatMap((specialized, ordinal) => {
       const type = contract.parameters.at(ordinal) ?? specialized
-      if (Type.isEffect(specialized)) {
-        const identity = Instances.parameterEffectIdentity(fn, instance.key, ordinal)
+      const representedEffect =
+        Type.isRepresented(specialized) &&
+        Type.isEffect(specialized.contract) &&
+        Type.isExactRepresentationArgument(specialized.representation.argument) &&
+        Type.isEffectIdentityArgument(specialized.representation.argument.identity)
+      if (Type.isEffect(specialized) || representedEffect) {
+        const representation = Instances.parameterEffectRepresentationArgument(
+          fn,
+          instance.key,
+          ordinal,
+        )
+        if (
+          Type.isEffect(specialized) &&
+          representation !== undefined &&
+          Type.isCompositeEffectRepresentationArgument(representation)
+        ) {
+          const composite = representedValueType(
+            layout,
+            opaqueRealizations,
+            Type.represented(specialized, specialized, representation),
+            instance.substitution,
+          )
+          if (composite !== undefined) return [composite]
+        }
+        const identity =
+          representation !== undefined && Type.isEffectIdentityArgument(representation)
+            ? representation.identity
+            : undefined
         const effectValue =
           identity === undefined ? undefined : effectValueByIdentity(layout, identity)
-        return effectValue === undefined ? [] : [effectValue]
+        if (effectValue !== undefined) return [effectValue]
+        if (Type.isEffect(specialized)) return []
       }
       if (
         Type.isRepresented(specialized) &&

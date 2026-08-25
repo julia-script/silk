@@ -553,6 +553,15 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Publishes one Initial package exactly once and invokes its fixed readiness endpoint. */
+      readonly _tag: 'ExecutionNotifyInitial'
+      readonly destination: LocalId
+      readonly execution: LocalId
+      readonly executionAccess: 'Exclusive'
+      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
+      readonly provenance: Provenance
+    }
+  | {
       /** Consumes the generation's sole affine Wake readiness authority. */
       readonly _tag: 'ExecutionWake'
       readonly destination: LocalId

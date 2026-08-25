@@ -375,17 +375,17 @@ const serviceResultEffectOf = (
       : undefined
   if (implementation === undefined || provider?.witness?._tag !== 'SourceConformanceWitness')
     return undefined
-  const identities = [
-    ...new Set(
-      Instances.matchingSpecialization(context.discovery, {
-        declaration: implementation,
-        typeArguments: provider.witness.typeArguments,
-      }).flatMap((candidate) =>
-        candidate.resultEffect === undefined ? [] : [candidate.resultEffect],
-      ),
-    ),
-  ]
-  return identities.length === 1 ? identities.at(0) : undefined
+  const selectedCalls = context.discovery.calls.filter(
+    (call) =>
+      Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&
+      call.target.declaration.module === implementation.module &&
+      call.target.declaration.name === implementation.name &&
+      call.span.sourceId === expression.span.sourceId &&
+      call.span.start === expression.span.start &&
+      call.span.end === expression.span.end,
+  )
+  const selectedCall = selectedCalls.length === 1 ? selectedCalls.at(0) : undefined
+  return selectedCall?.resultEffect
 }
 
 const effectIdentityOf = (

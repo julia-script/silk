@@ -26,6 +26,7 @@ import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 import {
   baseRunnerKey,
+  effectValueByIdentity,
   ensureProvidedRunner,
   instanceText,
   providerBindings,
@@ -1095,8 +1096,19 @@ export const lowerServiceEffectValue = (
   if (target === undefined) return undefined
   const loweredArguments = subject.arguments.map((argument) => lowerExpression(fn, argument))
   if (loweredArguments.some((argument) => argument === undefined)) return undefined
-  const typeArguments = provided.witness.typeArguments
-  const effectResult = fn.effectResults.get(instanceText(target, typeArguments))
+  const call = fn.call(subject.span, target)
+  if (
+    call === undefined ||
+    call.target.declaration.module !== target.module ||
+    call.target.declaration.name !== target.name
+  )
+    return undefined
+  const typeArguments = call?.target.typeArguments ?? provided.witness.typeArguments
+  const effectResult =
+    (call?.resultEffect === undefined
+      ? undefined
+      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+    fn.effectResults.get(instanceText(target, typeArguments))
   if (effectResult === undefined) return undefined
   const effect = fn.alloc(effectResult)
   fn.emit(

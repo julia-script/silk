@@ -121,6 +121,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'SharedFromAllocation':
     case 'ExecutionFromAllocation':
     case 'ExecutionDrive':
+    case 'ExecutionNotifyInitial':
     case 'ExecutionWake':
     case 'ExecutionPark':
     case 'SharedClone':
@@ -154,6 +155,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'ExecutionFromAllocation' ||
   operation._tag === 'ExecutionDrive' ||
+  operation._tag === 'ExecutionNotifyInitial' ||
   operation._tag === 'ExecutionWake' ||
   operation._tag === 'ExecutionPark' ||
   operation._tag === 'SharedClone' ||

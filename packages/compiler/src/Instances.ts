@@ -325,7 +325,7 @@ const keyOf = (
     const typeArguments = rawTypeArguments.map(carriedSectionArgument)
     const substitution = TypeInference.substitution(
       typeParameters,
-      typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
+      typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
     )
     if (substitution === undefined) {
       throw new RangeError('Instance key type arguments do not match declaration parameters')
@@ -646,7 +646,7 @@ const instanceSubstitution = (
 ): Type.Substitution | undefined =>
   TypeInference.substitution(
     fn.declaration.typeParameters.map((parameter) => parameter.type),
-    key.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
+    key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
   )
 
 const effectParameterOrdinals = (
@@ -663,16 +663,72 @@ const effectParameterOrdinals = (
       )
     : Object.freeze([])
 
-export const parameterEffectIdentity = (
+export const parameterEffectRepresentationArgument = (
   fn: Hir.HirFunction,
   key: InstanceKey,
   ordinal: number,
-): string | undefined => {
+): Type.EffectIdentityArgument | Type.CompositeEffectRepresentationArgument | undefined => {
   const substitution = instanceSubstitution(fn, key)
   if (substitution === undefined) return undefined
   const position = effectParameterOrdinals(fn, substitution).indexOf(ordinal)
   if (position < 0) return undefined
-  return key.typeArguments.filter(Type.isEffectIdentityArgument).at(position)?.identity
+  return key.typeArguments
+    .filter(
+      (
+        argument,
+      ): argument is Type.EffectIdentityArgument | Type.CompositeEffectRepresentationArgument =>
+        Type.isEffectIdentityArgument(argument) ||
+        Type.isCompositeEffectRepresentationArgument(argument),
+    )
+    .at(position)
+}
+
+export const parameterEffectIdentityArgument = (
+  fn: Hir.HirFunction,
+  key: InstanceKey,
+  ordinal: number,
+): Type.EffectIdentityArgument | undefined => {
+  const argument = parameterEffectRepresentationArgument(fn, key, ordinal)
+  return argument !== undefined && Type.isEffectIdentityArgument(argument) ? argument : undefined
+}
+
+export const parameterEffectIdentity = (
+  fn: Hir.HirFunction,
+  key: InstanceKey,
+  ordinal: number,
+): string | undefined => parameterEffectIdentityArgument(fn, key, ordinal)?.identity
+
+/** Replaces an owner-scoped represented Effect parameter with its concrete hidden identity. */
+export const concreteEffectRepresentationArgument = (
+  fn: Hir.HirFunction,
+  key: InstanceKey,
+  argument: Type.GenericArgument,
+): Type.GenericArgument => {
+  if (
+    !Type.isExactRepresentationArgument(argument) ||
+    !Type.isEffect(argument.contract) ||
+    !Type.isEffectIdentityArgument(argument.identity) ||
+    fn.contract._tag !== 'Contract'
+  )
+    return argument
+  const identities = fn.contract.parameters.flatMap((parameter, ordinal) => {
+    const substitution = instanceSubstitution(fn, key)
+    if (substitution === undefined) return []
+    const specialized = Type.substitute(parameter, substitution)
+    if (
+      !Type.isRepresented(specialized) ||
+      !Type.isEffect(specialized.contract) ||
+      !Type.isExactRepresentationArgument(specialized.representation.argument) ||
+      !Type.equalsGenericArgument(specialized.representation.argument, argument)
+    )
+      return []
+    const identity = parameterEffectIdentityArgument(fn, key, ordinal)
+    return identity === undefined ? [] : [identity]
+  })
+  const identity = identities.length === 1 ? identities.at(0) : undefined
+  return identity === undefined
+    ? argument
+    : Type.exactRepresentationArgument(identity, argument.contract)
 }
 
 const callableParameterOrdinals = (
@@ -744,6 +800,7 @@ const {
   effectParameterOrdinals,
   callableParameterOrdinals,
   parameterEffectIdentity,
+  parameterEffectRepresentationArgument,
   parameterCallableIdentity,
   effectIdentity,
   callableIdentity,
@@ -784,23 +841,59 @@ export const executionSuspensionOf = (self: Discovery, key: InstanceKey): Suspen
 export const effectSuspensionOf = (self: Discovery, identity: string): SuspensionMode.Summary =>
   suspensionFact(self, (subject) => subject._tag === 'Effect' && subject.identity === identity)
 
+const sameVisibleTypeArguments = (
+  left: ReadonlyArray<Type.GenericArgument>,
+  right: ReadonlyArray<Type.GenericArgument>,
+): boolean => {
+  const leftVisible = left.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+  const rightVisible = right.filter((argument) => !Type.isHiddenExecutableArgument(argument))
+  return (
+    leftVisible.length === rightVisible.length &&
+    leftVisible.every((argument, ordinal) => {
+      const expected = rightVisible.at(ordinal)
+      return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+    })
+  )
+}
+
+const sameExactOwner = (left: InstanceKey, right: Type.ExecutableSpecializationOwner): boolean =>
+  left.declaration.module === right.declaration.module &&
+  left.declaration.name === right.declaration.name &&
+  left.typeArguments.length === right.typeArguments.length &&
+  left.typeArguments.every((argument, ordinal) => {
+    const expected = right.typeArguments.at(ordinal)
+    return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+  })
+
 /** Resolves an owner-scoped source representation identity to its concrete hidden Effect. */
+export const representedEffectOf = (
+  self: Discovery,
+  identity: Type.EffectIdentityArgument,
+): EffectInstance | undefined => {
+  const concrete = self.effects.filter((effect) => effect.identity === identity.identity)
+  if (concrete.length === 1) return concrete.at(0)
+  const represented = self.effects.filter(
+    (effect) => effect.representationIdentity === identity.identity,
+  )
+  const owner = identity.owner
+  if (owner === undefined) return represented.length === 1 ? represented.at(0) : undefined
+  const exact = represented.filter((effect) => sameExactOwner(effect.owner, owner))
+  if (exact.length === 1) return exact.at(0)
+  const visible = represented.filter(
+    (effect) =>
+      effect.owner.declaration.module === owner.declaration.module &&
+      effect.owner.declaration.name === owner.declaration.name &&
+      sameVisibleTypeArguments(effect.owner.typeArguments, owner.typeArguments),
+  )
+  return visible.length === 1 ? visible.at(0) : undefined
+}
+
+/** Resolves the suspension summary of one owner-scoped represented Effect. */
 export const representedEffectSuspensionOf = (
   self: Discovery,
   identity: Type.EffectIdentityArgument,
 ): SuspensionMode.Summary => {
-  const selected = self.effects.find(
-    (effect) =>
-      effect.representationIdentity === identity.identity &&
-      (identity.owner === undefined ||
-        (effect.owner.declaration.module === identity.owner.declaration.module &&
-          effect.owner.declaration.name === identity.owner.declaration.name &&
-          effect.owner.typeArguments.length === identity.owner.typeArguments.length &&
-          effect.owner.typeArguments.every((argument, ordinal) => {
-            const expected = identity.owner?.typeArguments.at(ordinal)
-            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
-          }))),
-  )
+  const selected = representedEffectOf(self, identity)
   return selected?.suspension ?? effectSuspensionOf(self, identity.identity)
 }
 
@@ -838,6 +931,7 @@ export const discover = (
   const recorded = new Map<string, Instance>()
   const recordedCallables = new Map<string, CallableInstance>()
   const recordedCalls = new Map<string, CallInstance>()
+  const providerCalls = new Map<string, CallInstance>()
   const scannedContexts = new Set<string>()
   interface Ancestor {
     readonly key: InstanceKey
@@ -861,10 +955,10 @@ export const discover = (
     })
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
-      (argument) => !Type.isHiddenIdentityArgument(argument),
+      (argument) => !Type.isHiddenExecutableArgument(argument),
     )
     const rightVisible = right.typeArguments.filter(
-      (argument) => !Type.isHiddenIdentityArgument(argument),
+      (argument) => !Type.isHiddenExecutableArgument(argument),
     )
     return (
       leftVisible.length === rightVisible.length &&
@@ -887,6 +981,7 @@ export const discover = (
   const violations: Array<PolymorphicRecursion> = []
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
+  const recordedContexts = new Map<string, Map<string, WorkItem>>()
   const contextText = (item: WorkItem): string =>
     `${item.cleanupReachable ? 'cleanup' : 'ordinary'}\u0001${keyText(item.key)}\u0001${[
       ...item.ancestors.entries(),
@@ -901,212 +996,274 @@ export const discover = (
           `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
       )
       .join('\u0003')}`
-  while (pending.length > 0) {
-    const item = pending.shift()
-    if (item === undefined) continue
-    const context = contextText(item)
-    if (scannedContexts.has(context)) continue
-    scannedContexts.add(context)
-    const key = item.key
-    const fn = functionByKey(results, key)
-    if (fn === undefined) continue
-    const parameters = fn.declaration.typeParameters.map((parameter) => parameter.type)
-    const substitution = TypeInference.substitution(
-      parameters,
-      key.typeArguments.filter((argument) => !Type.isHiddenIdentityArgument(argument)),
-    )
-    if (substitution === undefined) continue
-    const specialization = specialize(fn, substitution, index)
-    if (specialization === undefined) {
-      specializationFailures.set(
-        keyText(key),
-        Object.freeze({
-          _tag: 'NonConcreteSpecialization',
-          key,
-          span: fn.declaration.syntax.span,
-        }),
+  let graph: ExecutableOrigin.SuspensionGraph | undefined
+  while (true) {
+    while (pending.length > 0) {
+      const item = pending.shift()
+      if (item === undefined) continue
+      const context = contextText(item)
+      if (scannedContexts.has(context)) continue
+      scannedContexts.add(context)
+      const key = item.key
+      const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
+      ownerContexts.set(context, item)
+      recordedContexts.set(keyText(key), ownerContexts)
+      const fn = functionByKey(results, key)
+      if (fn === undefined) continue
+      const parameters = fn.declaration.typeParameters.map((parameter) => parameter.type)
+      const substitution = TypeInference.substitution(
+        parameters,
+        key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
       )
-      continue
+      if (substitution === undefined) continue
+      const specialization = specialize(fn, substitution, index)
+      if (specialization === undefined) {
+        specializationFailures.set(
+          keyText(key),
+          Object.freeze({
+            _tag: 'NonConcreteSpecialization',
+            key,
+            span: fn.declaration.syntax.span,
+          }),
+        )
+        continue
+      }
+      if (!recorded.has(keyText(key))) {
+        const resultCallable = resultCallableIdentity(fn, key, results, index)
+        const resultEffect = resultEffectIdentity(fn, key, results, index)
+        recorded.set(
+          keyText(key),
+          Object.freeze({
+            _tag: 'Instance',
+            key,
+            function: fn,
+            substitution,
+            specialization,
+            effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
+            ...(resultCallable === undefined ? {} : { resultCallable }),
+            ...(resultEffect === undefined ? {} : { resultEffect }),
+          }),
+        )
+      }
+      for (const callable of concreteCallables(fn, key, substitution, results, index)) {
+        recordedCallables.set(callableIdentity(callable), callable)
+      }
+      const functionOwnership = ownership
+        ?.get(key.declaration.module)
+        ?.functions.find(
+          (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
+        )
+      // Deferred effect-body bindings publish only through exit releases, so the joined binding
+      // facts and the exit releases both feed hook reachability.
+      const cleanupHooks = [
+        ...Ownership.allBindings(functionOwnership).map((binding) => binding.cleanup),
+        ...(functionOwnership?.exits.flatMap((exit) =>
+          exit.releases.map((release) => release.cleanup),
+        ) ?? []),
+      ]
+        .map((cleanup) =>
+          CleanupPlan.specializeCleanup(cleanup, substitution, (type) =>
+            CleanupPlan.cleanupPlan(index, type),
+          ),
+        )
+        .flatMap((cleanup) => hookCalls(cleanup, index))
+      const calls = new Map<string, CallTarget>()
+      const directCalls = directCallInstances(fn, key, substitution, results, index)
+      const callableTargets = callableCallTargets(fn, key, substitution, results, index)
+      for (const call of directCalls) {
+        recordedCalls.set(
+          `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
+          call,
+        )
+      }
+      const cleanupTargets = [
+        ...slotDropHookTargets(fn, index, substitution),
+        ...cleanupHooks,
+        ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
+          ? entry.failures.flatMap((failure) =>
+              hookCalls(CleanupPlan.cleanupPlan(index, failure.type), index),
+            )
+          : []),
+      ]
+      const identityOfCall = Specialization.key
+      const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
+      const reachableCalls: ReadonlyArray<CallTarget> = [
+        ...bodyCallTargets(fn, index, substitution),
+        ...interfaceWitnessTargets(fn, index, substitution),
+        ...requirementBindingCallTargets(fn, substitution, index),
+        ...directCalls.map((call) => ({
+          declaration: call.target.declaration,
+          typeArguments: call.target.typeArguments,
+        })),
+        ...forwardedRequirementCallTargets(directCalls, results, index),
+        ...callableTargets,
+        ...forwardedRequirementTargets(callableTargets, results, index),
+        ...cleanupTargets,
+      ]
+      for (const call of reachableCalls) {
+        const identity = identityOfCall(call)
+        const existing = calls.get(identity)
+        // An ordinary edge must keep the recursion guard even when the same target is also reached
+        // through a proved dependency or conditional witness root. Conflicting provider evidence is
+        // equally unsafe: descent is granted only where this path has one unambiguous measure.
+        if (existing === undefined) {
+          calls.set(identity, call)
+          continue
+        }
+        const existingOrdinary = existing.structuralProvider === undefined
+        const callOrdinary = call.structuralProvider === undefined
+        if (existingOrdinary) continue
+        if (callOrdinary) {
+          calls.set(
+            identity,
+            Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+          )
+          continue
+        }
+        if (
+          existing.structuralProvider !== undefined &&
+          call.structuralProvider !== undefined &&
+          !Type.equals(existing.structuralProvider, call.structuralProvider)
+        )
+          calls.set(
+            identity,
+            Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
+          )
+      }
+      for (const call of calls.values()) {
+        const target = call.declaration
+        const targetFunction = results
+          .get(target.module)
+          ?.hir.functions.find(
+            (candidate) =>
+              candidate.declaration.canonical._tag === 'Canonical' &&
+              candidate.declaration.canonical.id.name === target.name,
+          )
+        if (targetFunction === undefined) continue
+        const targetArguments = call.typeArguments.map((argument) =>
+          Type.substituteGenericArgument(argument, substitution),
+        )
+        const targetKey = keyOf(
+          target,
+          targetFunction.contract,
+          targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
+          targetArguments,
+        )
+        const ancestor = item.ancestors.get(declarationText(targetKey))
+        const structurallyDescending =
+          call.structuralProvider !== undefined &&
+          ancestor?.structuralProvider !== undefined &&
+          Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
+        const terminalCallableSpecialization =
+          ancestor !== undefined &&
+          sameVisibleArguments(ancestor.key, targetKey) &&
+          targetKey.typeArguments.some(Type.isCallableIdentityArgument) &&
+          targetKey.typeArguments
+            .filter(Type.isHiddenIdentityArgument)
+            .every(
+              (argument) =>
+                Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
+            )
+        if (
+          ancestor !== undefined &&
+          !sameArguments(ancestor.key, targetKey) &&
+          !structurallyDescending &&
+          !terminalCallableSpecialization &&
+          !(
+            recorded.has(keyText(targetKey)) &&
+            (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
+          )
+        ) {
+          const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
+          if (!violationKeys.has(violationKey)) {
+            violationKeys.add(violationKey)
+            violations.push(
+              Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
+            )
+          }
+          continue
+        }
+        pending.push(
+          Object.freeze({
+            key: targetKey,
+            ancestors: new Map(item.ancestors).set(
+              declarationText(targetKey),
+              Object.freeze({
+                key: targetKey,
+                ...(call.structuralProvider === undefined
+                  ? {}
+                  : { structuralProvider: call.structuralProvider }),
+              }),
+            ),
+            cleanupReachable: item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)),
+          }),
+        )
+      }
     }
-    if (!recorded.has(keyText(key))) {
-      const resultCallable = resultCallableIdentity(fn, key, results, index)
-      const resultEffect = resultEffectIdentity(fn, key, results, index)
-      recorded.set(
-        keyText(key),
+
+    const currentInstances = Object.freeze([...recorded.values()])
+    const currentGraph = suspensionGraph(currentInstances, results, index)
+    providerCalls.clear()
+    for (const provided of currentGraph.providedTargets) {
+      const target = functionByKey(results, provided.target)
+      const resultEffect =
+        target === undefined
+          ? undefined
+          : resultEffectIdentity(target, provided.target, results, index)
+      providerCalls.set(
+        `${keyText(provided.owner)}\u0005${provided.span.sourceId}:${provided.span.start}:${provided.span.end}\u0005${keyText(provided.target)}`,
         Object.freeze({
-          _tag: 'Instance',
-          key,
-          function: fn,
-          substitution,
-          specialization,
-          effectSuccesses: effectSuccesses(fn, key, substitution, results, index),
-          ...(resultCallable === undefined ? {} : { resultCallable }),
+          _tag: 'CallInstance',
+          owner: provided.owner,
+          span: provided.span,
+          target: provided.target,
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )
     }
-    for (const callable of concreteCallables(fn, key, substitution, results, index)) {
-      recordedCallables.set(callableIdentity(callable), callable)
-    }
-    const functionOwnership = ownership
-      ?.get(key.declaration.module)
-      ?.functions.find(
-        (candidate) => candidate.declaration.id.ordinal === fn.declaration.id.ordinal,
-      )
-    // Deferred effect-body bindings publish only through exit releases, so the joined binding
-    // facts and the exit releases both feed hook reachability.
-    const cleanupHooks = [
-      ...Ownership.allBindings(functionOwnership).map((binding) => binding.cleanup),
-      ...(functionOwnership?.exits.flatMap((exit) =>
-        exit.releases.map((release) => release.cleanup),
-      ) ?? []),
-    ]
-      .map((cleanup) =>
-        CleanupPlan.specializeCleanup(cleanup, substitution, (type) =>
-          CleanupPlan.cleanupPlan(index, type),
-        ),
-      )
-      .flatMap((cleanup) => hookCalls(cleanup, index))
-    const calls = new Map<string, CallTarget>()
-    const directCalls = directCallInstances(fn, key, substitution, results, index)
-    const callableTargets = callableCallTargets(fn, key, substitution, results, index)
-    for (const call of directCalls) {
-      recordedCalls.set(
-        `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}`,
-        call,
-      )
-    }
-    const cleanupTargets = [
-      ...slotDropHookTargets(fn, index, substitution),
-      ...cleanupHooks,
-      ...(entry.kind === 'Effect' && keyText(key) === keyText(entry.key)
-        ? entry.failures.flatMap((failure) =>
-            hookCalls(CleanupPlan.cleanupPlan(index, failure.type), index),
-          )
-        : []),
-    ]
-    const identityOfCall = Specialization.key
-    const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
-    const reachableCalls: ReadonlyArray<CallTarget> = [
-      ...bodyCallTargets(fn, index, substitution),
-      ...interfaceWitnessTargets(fn, index, substitution),
-      ...requirementBindingCallTargets(fn, substitution, index),
-      ...directCalls.map((call) => ({
-        declaration: call.target.declaration,
-        typeArguments: call.target.typeArguments,
-      })),
-      ...forwardedRequirementCallTargets(directCalls, results, index),
-      ...callableTargets,
-      ...forwardedRequirementTargets(callableTargets, results, index),
-      ...cleanupTargets,
-    ]
-    for (const call of reachableCalls) {
-      const identity = identityOfCall(call)
-      const existing = calls.get(identity)
-      // An ordinary edge must keep the recursion guard even when the same target is also reached
-      // through a proved dependency or conditional witness root. Conflicting provider evidence is
-      // equally unsafe: descent is granted only where this path has one unambiguous measure.
-      if (existing === undefined) {
-        calls.set(identity, call)
-        continue
-      }
-      const existingOrdinary = existing.structuralProvider === undefined
-      const callOrdinary = call.structuralProvider === undefined
-      if (existingOrdinary) continue
-      if (callOrdinary) {
-        calls.set(
-          identity,
-          Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
-        )
-        continue
-      }
-      if (
-        existing.structuralProvider !== undefined &&
-        call.structuralProvider !== undefined &&
-        !Type.equals(existing.structuralProvider, call.structuralProvider)
-      )
-        calls.set(
-          identity,
-          Object.freeze({ declaration: call.declaration, typeArguments: call.typeArguments }),
-        )
-    }
-    for (const call of calls.values()) {
-      const target = call.declaration
-      const targetFunction = results
-        .get(target.module)
-        ?.hir.functions.find(
-          (candidate) =>
-            candidate.declaration.canonical._tag === 'Canonical' &&
-            candidate.declaration.canonical.id.name === target.name,
-        )
-      if (targetFunction === undefined) continue
-      const targetArguments = call.typeArguments.map((argument) =>
-        Type.substituteGenericArgument(argument, substitution),
-      )
-      const targetKey = keyOf(
-        target,
-        targetFunction.contract,
-        targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
-        targetArguments,
-      )
-      const ancestor = item.ancestors.get(declarationText(targetKey))
-      const structurallyDescending =
-        call.structuralProvider !== undefined &&
-        ancestor?.structuralProvider !== undefined &&
-        Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
-      const terminalCallableSpecialization =
-        ancestor !== undefined &&
-        sameVisibleArguments(ancestor.key, targetKey) &&
-        targetKey.typeArguments.some(Type.isCallableIdentityArgument) &&
-        targetKey.typeArguments
-          .filter(Type.isHiddenIdentityArgument)
-          .every(
-            (argument) =>
-              Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
-          )
-      if (
-        ancestor !== undefined &&
-        !sameArguments(ancestor.key, targetKey) &&
-        !structurallyDescending &&
-        !terminalCallableSpecialization &&
-        !(
-          recorded.has(keyText(targetKey)) &&
-          (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
-        )
-      ) {
-        const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
-        if (!violationKeys.has(violationKey)) {
-          violationKeys.add(violationKey)
-          violations.push(
-            Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
-          )
+    let scheduledProvided = false
+    for (const provided of currentGraph.providedTargets) {
+      for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
+        const ancestors = new Map(ownerContext.ancestors)
+        const declaration = declarationText(provided.target)
+        const ancestor = ancestors.get(declaration)
+        if (ancestor !== undefined && !sameArguments(ancestor.key, provided.target)) {
+          const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
+          if (!violationKeys.has(violationKey)) {
+            violationKeys.add(violationKey)
+            violations.push(
+              Object.freeze({
+                _tag: 'PolymorphicRecursion',
+                caller: provided.owner,
+                target: provided.target,
+              }),
+            )
+          }
+          continue
         }
-        continue
+        ancestors.set(declaration, Object.freeze({ key: provided.target }))
+        const item = Object.freeze({
+          key: provided.target,
+          ancestors,
+          cleanupReachable: ownerContext.cleanupReachable,
+        })
+        if (scannedContexts.has(contextText(item))) continue
+        pending.push(item)
+        scheduledProvided = true
       }
-      pending.push(
-        Object.freeze({
-          key: targetKey,
-          ancestors: new Map(item.ancestors).set(
-            declarationText(targetKey),
-            Object.freeze({
-              key: targetKey,
-              ...(call.structuralProvider === undefined
-                ? {}
-                : { structuralProvider: call.structuralProvider }),
-            }),
-          ),
-          cleanupReachable: item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)),
-        }),
-      )
+    }
+    if (!scheduledProvided) {
+      graph = currentGraph
+      break
     }
   }
 
   const instances = Object.freeze([...recorded.values()])
-  const graph = suspensionGraph(instances, results, index)
-  const summaries = ExecutableOrigin.suspensionSummaries(graph)
+  const finalGraph = graph ?? suspensionGraph(instances, results, index)
+  const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
     summaries.get(node) ?? SuspensionMode.direct
-  const callInstances = Object.freeze([...recordedCalls.values()])
+  const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
     rootModule,
@@ -1145,7 +1302,7 @@ export const discover = (
             }),
           ])
         }),
-      ...[...graph.effectIdentities].sort().map(
+      ...[...finalGraph.effectIdentities].sort().map(
         (identity): SuspensionFact =>
           Object.freeze({
             _tag: 'SuspensionFact',

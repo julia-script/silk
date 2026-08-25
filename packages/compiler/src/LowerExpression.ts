@@ -760,8 +760,9 @@ export function lowerExpressionInner(
         if (
           resultRecipe !== undefined &&
           inlineForwardedRequirement(fn, resultRecipe) !== undefined
-        )
+        ) {
           return lowerEffectExecution(fn, resultRecipe, expression.type, expression.span)
+        }
         if (
           resultRecipe?._tag === 'CallableApply' &&
           !Type.isEffect(fn.semantic(expression.type)) &&
@@ -901,8 +902,9 @@ export function lowerExpressionInner(
           if (result !== undefined) endRunLoans(fn, expression.span)
           return result
         }
-        if (recipe?._tag === 'EffectBindRequirement')
+        if (recipe?._tag === 'EffectBindRequirement') {
           return lowerEffectExecution(fn, recipe, expression.type, expression.span)
+        }
         if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectSuspend') {
           const deferred = recipe.arguments.at(0)
           return deferred === undefined

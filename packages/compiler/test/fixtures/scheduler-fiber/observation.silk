@@ -1,0 +1,234 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect as Effect
+import silk.execution as Execution
+import silk.fiber as Fiber
+
+struct Problem { code: i32 }
+
+fn outcomeCode(outcome: Fiber.Outcome<i32, Problem>) -> i32 {
+  let Fiber.Outcome<i32, Problem> { value } = move outcome
+  return match move value {
+    Fiber.Success<i32> { value: success } => move success
+    Fiber.Failure<Problem> { error } => error.code
+    Fiber.Cancelled {} => 3
+  }
+}
+
+effect fn joinFailure(error: Problem | Fiber.Cancelled) -> i32 {
+  return match move error {
+    Problem { code } => code
+    Fiber.Cancelled {} => -1
+  }
+}
+
+effect fn joinCancellation(error: Problem | Fiber.Cancelled) -> i32 {
+  return match move error {
+    Problem { code } => 0 - code
+    Fiber.Cancelled {} => 6
+  }
+}
+
+effect fn observePending(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+  let outcome = run Fiber.await<i32, Problem>(move fiber)
+  return outcomeCode(move outcome)
+}
+
+effect fn joinAsFailureCode(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+  return run Effect.catchAll(Fiber.join<i32, Problem>(move fiber), joinFailure)
+}
+
+effect fn joinAsCancellationCode(fiber: Fiber.Fiber<i32, Problem>) -> i32 {
+  return run Effect.catchAll(Fiber.join<i32, Problem>(move fiber), joinCancellation)
+}
+
+struct NoExecution {}
+struct StoredExecution { execution: Intrinsic.Execution<i32> }
+struct Owner { slot: NoExecution | StoredExecution result: i32 }
+
+fn ready(state: &()) -> () { return () }
+
+fn complete(self: &mut Owner, result: i32) -> () {
+  self.result = result
+  return ()
+}
+
+fn suspend(self: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
+  let previous = Intrinsic.replace(
+    self.slot,
+    StoredExecution { execution: move execution },
+  )
+  drop previous
+  return ()
+}
+
+effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
+  return run Execution.drive(move execution, move owner, complete, suspend)
+}
+
+effect fn resume(owner: &mut Owner) -> () {
+  let selected = Intrinsic.replace(owner.slot, NoExecution {})
+  return match move selected {
+    NoExecution {} => ()
+    StoredExecution { execution } => run drive(move execution, move owner)
+  }
+}
+
+fn constructionComplete() -> () { return () }
+
+effect fn scenario() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorService()
+
+  let immediateSuccess = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let immediateFailure = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let immediateCancellation = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinedSuccess = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinedFailure = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinedCancellation = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let pending = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let pendingCancellation = run Fiber.prepare<i32, Problem>()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: successProducer,
+    canceller: successCanceller,
+    fiber: successFiber,
+  } = move immediateSuccess
+  Fiber.completeSuccess<i32, Problem>(move successProducer, 1)
+  Fiber.cancel(move successCanceller)
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: failureProducer,
+    canceller: failureCanceller,
+    fiber: failureFiber,
+  } = move immediateFailure
+  Fiber.completeFailure<i32, Problem>(move failureProducer, Problem { code: 2 })
+  Fiber.cancel(move failureCanceller)
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: cancelledProducer,
+    canceller: cancelledCanceller,
+    fiber: cancelledFiber,
+  } = move immediateCancellation
+  Fiber.cancel(move cancelledCanceller)
+  Fiber.completeSuccess<i32, Problem>(move cancelledProducer, 99)
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: joinProducer,
+    canceller: joinCanceller,
+    fiber: joinFiber,
+  } = move joinedSuccess
+  Fiber.completeSuccess<i32, Problem>(move joinProducer, 4)
+  drop joinCanceller
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: joinFailureProducer,
+    canceller: joinFailureCanceller,
+    fiber: joinFailureFiber,
+  } = move joinedFailure
+  Fiber.completeFailure<i32, Problem>(
+    move joinFailureProducer,
+    Problem { code: 5 },
+  )
+  drop joinFailureCanceller
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: joinCancelledProducer,
+    canceller: joinCancelledCanceller,
+    fiber: joinCancelledFiber,
+  } = move joinedCancellation
+  Fiber.cancel(move joinCancelledCanceller)
+  drop joinCancelledProducer
+
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: pendingProducer,
+    canceller: pendingCanceller,
+    fiber: pendingFiber,
+  } = move pending
+  let Fiber.PreparedFiber<i32, Problem> {
+    producer: pendingCancellationProducer,
+    canceller: pendingCancellationCanceller,
+    fiber: pendingCancellationFiber,
+  } = move pendingCancellation
+
+  let successExecution = run Execution.make(observePending(move successFiber), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let failureExecution = run Execution.make(observePending(move failureFiber), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let cancellationExecution = run Execution.make(observePending(move cancelledFiber), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinExecution = run Execution.make(joinAsFailureCode(move joinFiber), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinFailureExecution = run Execution.make(
+    joinAsFailureCode(move joinFailureFiber),
+    (),
+    ready,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  let joinCancellationExecution = run Execution.make(
+    joinAsCancellationCode(move joinCancelledFiber),
+    (),
+    ready,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+  let pendingExecution = run Execution.make(observePending(move pendingFiber), (), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let pendingCancellationExecution = run Execution.make(
+    observePending(move pendingCancellationFiber),
+    (),
+    ready,
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
+
+  constructionComplete()
+
+  let mut successOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut failureOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut cancellationOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut joinOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut joinFailureOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut joinCancellationOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut pendingOwner = Owner { slot: NoExecution {}, result: 0 }
+  let mut pendingCancellationOwner = Owner { slot: NoExecution {}, result: 0 }
+
+  run drive(move successExecution, &mut successOwner)
+  run drive(move failureExecution, &mut failureOwner)
+  run drive(move cancellationExecution, &mut cancellationOwner)
+  run drive(move joinExecution, &mut joinOwner)
+  run drive(move joinFailureExecution, &mut joinFailureOwner)
+  run drive(move joinCancellationExecution, &mut joinCancellationOwner)
+  run drive(move pendingExecution, &mut pendingOwner)
+  run drive(move pendingCancellationExecution, &mut pendingCancellationOwner)
+
+  Fiber.completeSuccess<i32, Problem>(move pendingProducer, 18)
+  run resume(&mut pendingOwner)
+  drop pendingCanceller
+  Fiber.cancel(move pendingCancellationCanceller)
+  run resume(&mut pendingCancellationOwner)
+  drop pendingCancellationProducer
+
+  let result = successOwner.result
+    + failureOwner.result
+    + cancellationOwner.result
+    + joinOwner.result
+    + joinFailureOwner.result
+    + joinCancellationOwner.result
+    + pendingOwner.result
+    + pendingCancellationOwner.result
+  drop successOwner
+  drop failureOwner
+  drop cancellationOwner
+  drop joinOwner
+  drop joinFailureOwner
+  drop joinCancellationOwner
+  drop pendingOwner
+  drop pendingCancellationOwner
+  return result
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+
+pub fn main() -> i32 { return run Effect.catchAll(scenario(), recover) }

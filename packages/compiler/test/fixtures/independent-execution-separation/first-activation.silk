@@ -47,6 +47,13 @@ effect fn driveSelected(execution: Intrinsic.Execution<TaskOutput>, owner: &mut 
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
 
+fn notifySecond(owner: &mut Owner) -> () {
+  return match &mut owner.second {
+    Empty {} => ()
+    Stored { execution } => Execution.notifyInitial(&mut execution)
+  }
+}
+
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let marker = run Shared.make<Marker>(Marker { value: 0, callbacks: 0 })
@@ -63,6 +70,7 @@ effect fn program() -> i32 ! Allocator.OutOfMemoryError {
     first: Stored { execution: move first },
     second: Stored { execution: move second },
   }
+  notifySecond(&mut owner)
   let selected = Intrinsic.replace(owner.second, Empty {})
   match move selected {
     Empty {} => ()
