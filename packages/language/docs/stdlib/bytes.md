@@ -24,7 +24,7 @@ import silk.bytes as Bytes
 
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.u8 as u8
 

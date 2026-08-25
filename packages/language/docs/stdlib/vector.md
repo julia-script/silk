@@ -34,7 +34,7 @@ produces a copied value.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.vector as Vector
 
@@ -67,7 +67,7 @@ pub fn main() -> i32 {
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.option as Option
 

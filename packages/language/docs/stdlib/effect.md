@@ -37,7 +37,7 @@ while preserving all three channels exactly; frame exhaustion is fatal.
 ### Transform and continue a successful computation
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 struct Problem {
   code: i32
@@ -75,7 +75,7 @@ pub fn main() -> i32 {
 ### Supply a custom service for one lexical computation
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 service Clock {
   effect fn value() -> i32 ? &Clock
@@ -107,7 +107,7 @@ pub fn main() -> i32 {
 ### Recover a typed failure into success
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 struct Problem {
   answer: i32
@@ -129,7 +129,24 @@ pub fn main() -> i32 {
 
 Import as `Effect` with `import silk.effect`.
 
-Public declarations: 26.
+Public declarations: 27.
+
+<a id="declaration-73696c6b2f6566666563743a3a456666656374"></a>
+
+## `Effect`
+
+```silk
+pub struct Effect
+```
+
+The importable name of the `silk.effect` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.effect { Effect }` names the module scope, so `Effect.map(...)` and every other
+combinator resolve through it exactly as through a module alias. It is unrelated to the builtin
+`Effect<A ! E ? R>` type, which needs no import.
 
 <a id="declaration-73696c6b2f6566666563743a3a6c6f67"></a>
 
@@ -182,7 +199,7 @@ failures and therefore are not captured.
 #### Inspect a failure as ordinary data
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.result as Result
 
@@ -597,7 +614,7 @@ not moved and becomes exclusively available to the caller again after execution.
 #### Mutate a custom service for one computation
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 service Counter {
   effect fn next() -> i32 ? &mut Counter

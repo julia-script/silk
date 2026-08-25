@@ -24,7 +24,7 @@ parsing accepts `-0`; unsigned parsing rejects any sign.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.format as Format
 

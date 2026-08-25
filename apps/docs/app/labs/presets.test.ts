@@ -350,7 +350,7 @@ describe('preset catalog', () => {
     const native = snapshotOf(loggingPreset, 'aarch64-apple-darwin')
     const wasm = snapshotOf(loggingPreset, 'wasm32-unknown-unknown')
     expect(Analysis.diagnostics(native)).toEqual([])
-    expect(Analysis.modules(native).map((module) => module.name)).toContain('silk/logging')
+    expect(Analysis.modules(native).map((module) => module.name)).toContain('silk/logger')
     expect(Analysis.moduleAnalysis(native, 'silk/effect')?.hir).toBeDefined()
     expect(Analysis.mirOf(wasm)._tag).toBe('Available')
     const evaluation = Analysis.evaluate(native)
@@ -578,10 +578,10 @@ describe('preset catalog', () => {
       'app/Main',
       'compiler/Coverage',
       'compiler/Member',
+      'silk/allocator',
       'silk/bool',
       'silk/bytes',
       'silk/char',
-      'silk/core',
       'silk/f32',
       'silk/f64',
       'silk/format',

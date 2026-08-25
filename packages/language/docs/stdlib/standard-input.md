@@ -29,7 +29,7 @@ available input from end-of-input.
 ### Read one byte and then observe the end of input
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.standard_input as Input
 

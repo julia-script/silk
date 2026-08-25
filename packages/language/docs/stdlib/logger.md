@@ -27,7 +27,7 @@ In-memory accessors require an event index less than [`length`](#declaration-736
 ### Record and inspect one warning
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.logger { Logger }
 

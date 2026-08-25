@@ -31,7 +31,7 @@ import silk.allocator { Allocator }
 
 import silk.allocator {Allocator}
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.layout as Layout
 

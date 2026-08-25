@@ -34,7 +34,7 @@ move-only elements without taking them out.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.hash as Hash
 
