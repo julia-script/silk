@@ -17,6 +17,7 @@ import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as Match from './Match.js'
 import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import { executableStatements } from './StatementAnalysis.js'
@@ -63,9 +64,12 @@ export const hirReference = (
 
 export const hirPatternSelection = (selection: PatternSelectionFact): Hir.PatternSelection => {
   const member =
-    selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern'
-      ? selection.pattern.member
-      : undefined
+    selection.pattern._tag === 'EnumMemberPattern'
+      ? selection.pattern.coverage
+      : (selection.pattern._tag === 'NominalPattern' || selection.pattern._tag === 'TypePattern') &&
+          selection.pattern.member !== undefined
+        ? Match.structuralMember(selection.pattern.member)
+        : undefined
   return Object.freeze({
     id: selection.id,
     arm: selection.arm,
@@ -463,6 +467,41 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       })
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
   }
+  if (fact._tag === 'EnumMember') {
+    if (
+      fact.enum.canonical._tag !== 'Canonical' ||
+      fact.member?.canonical._tag !== 'Canonical' ||
+      fact.member.discriminant._tag !== 'Available' ||
+      fact.type._tag !== 'Available' ||
+      !Type.isNominal(fact.type.type)
+    )
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.cause === undefined ? {} : { cause: fact.cause }),
+      })
+    return Object.freeze({
+      _tag: 'EnumMember',
+      enum: fact.enum.canonical.id,
+      member: fact.member.canonical.id,
+      discriminant: fact.member.discriminant.value,
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
+  }
+  if (fact._tag === 'EnumValue') {
+    const value = hirExpression(fact.argument)
+    return fact.type._tag !== 'Available' || value._tag === 'Unavailable'
+      ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+      : Object.freeze({
+          _tag: 'EnumValue',
+          enum: fact.operation.enum,
+          value,
+          intrinsic: fact.operation.intrinsic,
+          type: fact.operation.result.spelling,
+          span: fact.syntax.span,
+        })
+  }
   if (fact._tag === 'Identifier') {
     return hirReference(fact.reference, fact.type, fact.syntax.span)
   }
@@ -625,9 +664,12 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       arms: Object.freeze(
         fact.arms.map((arm) => {
           const member =
-            arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern'
-              ? arm.pattern.member
-              : undefined
+            arm.pattern._tag === 'EnumMemberPattern'
+              ? arm.pattern.coverage
+              : (arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
+                  arm.pattern.member !== undefined
+                ? Match.structuralMember(arm.pattern.member)
+                : undefined
           return Object.freeze({
             id: arm.id,
             ...(member === undefined ? {} : { member }),
@@ -1014,6 +1056,30 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
       type: fact.type.type,
       span: fact.syntax.span,
     })
+  }
+  if (
+    fact._tag === 'Operator' &&
+    fact.reference._tag === 'ResolvedEnumEquality' &&
+    fact.type._tag === 'Available'
+  ) {
+    const leftFact = fact.arguments.at(0)
+    const rightFact = fact.arguments.at(1)
+    const left = leftFact === undefined ? undefined : hirExpression(leftFact.expression)
+    const right = rightFact === undefined ? undefined : hirExpression(rightFact.expression)
+    return left === undefined ||
+      right === undefined ||
+      left._tag === 'Unavailable' ||
+      right._tag === 'Unavailable'
+      ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+      : Object.freeze({
+          _tag: 'EnumEquality',
+          enum: fact.reference.enum,
+          left,
+          right,
+          negated: fact.reference.operator === 'NotEquals',
+          type: Scalar.boolean.spelling,
+          span: fact.syntax.span,
+        })
   }
   if (
     fact.reference._tag === 'ResolvedBuiltin' &&
@@ -1490,6 +1556,8 @@ export const directExpressionChildren = (
   expression: ExpressionFact,
 ): ReadonlyArray<ExpressionFact> => {
   switch (expression._tag) {
+    case 'EnumValue':
+      return Object.freeze([expression.argument])
     case 'Move':
     case 'Borrow':
     case 'FieldProjection':
@@ -1531,6 +1599,7 @@ export const directExpressionChildren = (
     case 'Unit':
     case 'Boolean':
     case 'Constant':
+    case 'EnumMember':
     case 'Identifier':
     case 'FunctionItem':
       return Object.freeze([])

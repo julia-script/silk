@@ -21,6 +21,7 @@ import * as Packing from './internal/Packing.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
+import * as Match from './Match.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -47,6 +48,17 @@ export interface Field extends PlacedField {
 export type Representation =
   | { readonly _tag: 'SignedInteger'; readonly bits: Scalar.FixedBits }
   | { readonly _tag: 'UnsignedInteger'; readonly bits: Scalar.FixedBits }
+  | {
+      readonly _tag: 'ScalarEnum'
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly scalar: Scalar.EnumRepresentationSpelling
+      readonly bits: Scalar.FixedBits
+      readonly signedness: 'Signed' | 'Unsigned'
+      readonly members: ReadonlyArray<{
+        readonly member: DeclarationFacts.CanonicalEnumMemberId
+        readonly discriminant: bigint
+      }>
+    }
   | { readonly _tag: 'Floating'; readonly bits: 32 | 64; readonly ieee: true }
   | { readonly _tag: 'Boolean'; readonly bits: 32; readonly falseValue: 0; readonly trueValue: 1 }
   | {
@@ -529,10 +541,52 @@ export const neverEntry = (): Entry =>
     }),
   })
 
-const nominalOf = (struct: DeclarationFacts.StructFact): Type.Nominal | undefined =>
-  struct.canonical._tag === 'Canonical'
-    ? Type.nominal(struct.canonical.id.module, struct.canonical.id.name)
+const nominalOf = (
+  declaration: DeclarationFacts.StructFact | DeclarationFacts.EnumFact,
+): Type.Nominal | undefined =>
+  declaration.canonical._tag === 'Canonical'
+    ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
     : undefined
+
+export const scalarEnumEntry = (
+  target: Target.Target,
+  declaration: DeclarationFacts.EnumFact,
+): Entry | undefined => {
+  if (
+    declaration.canonical._tag !== 'Canonical' ||
+    declaration.validity._tag !== 'Valid' ||
+    declaration.representation._tag !== 'Available'
+  )
+    return undefined
+  const scalar = declaration.representation.scalar
+  const layout = Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+  const members = declaration.members.flatMap((member) =>
+    member.canonical._tag === 'Canonical' && member.discriminant._tag === 'Available'
+      ? [
+          Object.freeze({
+            member: member.canonical.id,
+            discriminant: member.discriminant.value,
+          }),
+        ]
+      : [],
+  )
+  if (members.length !== declaration.members.length) return undefined
+  return Object.freeze({
+    _tag: 'LayoutEntry',
+    type: Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name),
+    copy: true,
+    size: layout.size,
+    alignment: layout.alignment,
+    representation: Object.freeze({
+      _tag: 'ScalarEnum',
+      enum: declaration.canonical.id,
+      scalar: scalar.spelling,
+      bits: Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64),
+      signedness: scalar.signedness,
+      members: Object.freeze(members),
+    }),
+  })
+}
 
 const dependenciesOf = (
   struct: DeclarationFacts.StructFact,
@@ -579,6 +633,13 @@ export const catalog = (
       return type === undefined ? [] : [Object.freeze({ struct, type })]
     })
     .sort((left, right) => Type.compare(left.type, right.type))
+  const enumDeclarations = index.modules
+    .flatMap((module) => module.enums)
+    .flatMap((enum_) => {
+      const type = nominalOf(enum_)
+      return type === undefined ? [] : [Object.freeze({ enum_, type })]
+    })
+    .sort((left, right) => Type.compare(left.type, right.type))
   const byType = new Map(
     declarations.map((declaration) => [
       `${declaration.type.module}\u0000${declaration.type.name}`,
@@ -586,6 +647,26 @@ export const catalog = (
     ]),
   )
   const completed = new Map<string, CatalogEntry>()
+  for (const declaration of enumDeclarations) {
+    const entry = scalarEnumEntry(target, declaration.enum_)
+    completed.set(
+      Type.key(declaration.type),
+      entry ??
+        unavailable(
+          declaration.type,
+          Object.freeze([]),
+          {
+            _tag: 'InvalidDeclaration',
+            detail: `scalar enum ${Type.encode(declaration.type)} has no valid fixed-width representation plan`,
+          },
+          declaration.enum_.validity._tag === 'Invalid'
+            ? declaration.enum_.validity.causes.at(0)
+            : declaration.enum_.representation._tag === 'Unavailable'
+              ? declaration.enum_.representation.cause
+              : undefined,
+        ),
+    )
+  }
   const visiting = new Set<string>()
   const callableRealizations =
     discovery === undefined
@@ -1518,7 +1599,7 @@ export const catalog = (
       if (statement._tag === 'PatternBind' || statement._tag === 'IfLet') {
         addReferenced('bool')
         for (const member of statement.selection.members)
-          addReferenced(Type.substitute(member, substitution))
+          addReferenced(Type.substitute(Match.sourceType(member), substitution))
         for (const binding of statement.selection.bindings)
           addReferenced(Type.substitute(binding.type, substitution))
       }
@@ -1677,12 +1758,15 @@ const addExpressionTypes = (
   if (expression._tag === 'Match') {
     addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
-      const type = Type.substitute(member, substitution)
+      const type = Type.substitute(Match.sourceType(member), substitution)
       types.set(Type.key(type), type)
     }
     for (const arm of expression.arms) {
       if (!arm.reachable) continue
-      if (arm.member !== undefined) types.set(Type.key(arm.member), arm.member)
+      if (arm.member !== undefined) {
+        const memberType = Match.sourceType(arm.member)
+        types.set(Type.key(memberType), memberType)
+      }
       for (const binding of arm.bindings) types.set(Type.key(binding.type), binding.type)
       if (arm.guard !== undefined) addExpressionTypes(types, arm.guard, substitution)
       addExpressionTypes(types, arm.result, substitution)
@@ -1702,7 +1786,7 @@ const addStatementTypes = (
       types.set(Type.key('bool'), 'bool')
       addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
-        const type = Type.substitute(member, substitution)
+        const type = Type.substitute(Match.sourceType(member), substitution)
         types.set(Type.key(type), type)
       }
       for (const binding of statement.selection.bindings) {
@@ -1723,7 +1807,7 @@ const addStatementTypes = (
       types.set(Type.key('bool'), 'bool')
       addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
-        const type = Type.substitute(member, substitution)
+        const type = Type.substitute(Match.sourceType(member), substitution)
         types.set(Type.key(type), type)
       }
       for (const binding of statement.selection.bindings) {
@@ -2880,6 +2964,15 @@ const shapeNode = (
   if (Type.isBuiltin(type)) {
     return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
   }
+  const enumRepresentation = entries.get(Type.key(type))?.representation
+  if (Type.isNominal(type) && enumRepresentation?._tag === 'ScalarEnum') {
+    return Object.freeze({
+      _tag: 'ScalarEnumShape',
+      type,
+      lane: enumRepresentation.scalar,
+      laneCount: 1,
+    })
+  }
   if (Type.isString(type)) {
     return Object.freeze({
       _tag: 'StringShape',
@@ -3169,6 +3262,9 @@ const materializeLanes = (
   if (node._tag === 'EmptyShape') return Object.freeze([])
   if (node._tag === 'ScalarShape') {
     return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.type })])
+  }
+  if (node._tag === 'ScalarEnumShape') {
+    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.lane })])
   }
   if (node._tag === 'SliceShape') {
     return Object.freeze([

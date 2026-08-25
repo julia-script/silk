@@ -29,6 +29,97 @@ const snapshot = (
   ).pipe(Effect.provide(SourceResolver.memory(imports)))
 }
 
+it.effect('resolves scalar enums as ordinary nominal declaration types', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'enum/Local',
+      ascii('enum Status { Ready }\nfn identity(value: Status) -> Status { return move value }'),
+    )
+    const declaration = self.index.modules.at(0)?.declarations.at(0)
+    const parameter = declaration?.parameters.at(0)?.declaredType
+    const result = declaration?.returnType
+
+    assert.deepEqual(parameter?._tag === 'Resolved' ? parameter.type : parameter?._tag, {
+      _tag: 'NominalType',
+      module: 'enum/Local',
+      name: 'Status',
+      arguments: [],
+    })
+    assert.deepEqual(result?._tag === 'Resolved' ? result.type : result?._tag, {
+      _tag: 'NominalType',
+      module: 'enum/Local',
+      name: 'Status',
+      arguments: [],
+    })
+    assert.strictEqual(Analysis.memberByName(self, 'enum/Local', 'Status')._tag, 'Resolved')
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('resolves qualified scalar enum members only through their canonical enum', () =>
+  Effect.gen(function* () {
+    const source = `enum Status { Ready, Waiting }
+enum Mode { Ready }
+fn ready() -> Status { return Status.Ready }
+fn missing() -> Status { return Status.Unknown }
+fn bare() -> Status { return Ready }
+fn wrong() -> Status { return Mode.Ready }`
+    const self = yield* Analysis.ofSource('enum/Members', ascii(source))
+    const ready = Analysis.expressionsOf(self, 'enum/Members').find(
+      (expression) => expression._tag === 'EnumMember' && expression.member !== undefined,
+    )
+    assert.strictEqual(ready?._tag, 'EnumMember')
+    if (ready?._tag === 'EnumMember') {
+      assert.strictEqual(ready.enum.canonical._tag, 'Canonical')
+      assert.strictEqual(ready.member?.canonical._tag, 'Canonical')
+      assert.strictEqual(ready.type._tag, 'Available')
+    }
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0150', 'SEM0006', 'SEM0151'],
+    )
+    const unknown = Analysis.diagnostics(self).find((diagnostic) => diagnostic.code === 'SEM0150')
+    assert.strictEqual(
+      unknown === undefined ? undefined : source.slice(unknown.span.start, unknown.span.end),
+      'Unknown',
+    )
+  }),
+)
+
+it.effect('resolves imported scalar enum types through explicit module scopes', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.make({
+      root: SourceFile.make(
+        'app/Main',
+        ascii(
+          'import model.Status { Status }\nfn identity(value: Status) -> Status { return move value }\nfn ready() -> Status { return Status.Ready }',
+        ),
+      ),
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(new Map([['model/Status', ascii('pub enum Status { Ready }')]])),
+      ),
+    )
+    const declaration = self.index.modules
+      .find((module) => module.module === 'app/Main')
+      ?.declarations.at(0)
+    const parameter = declaration?.parameters.at(0)?.declaredType
+
+    assert.deepEqual(parameter?._tag === 'Resolved' ? parameter.type : parameter?._tag, {
+      _tag: 'NominalType',
+      module: 'model/Status',
+      name: 'Status',
+      arguments: [],
+    })
+    const member = Analysis.expressionsOf(self, 'app/Main').find(
+      (expression) => expression._tag === 'EnumMember',
+    )
+    assert.strictEqual(member?._tag, 'EnumMember')
+    if (member?._tag === 'EnumMember') assert.strictEqual(member.enum.canonical._tag, 'Canonical')
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it.effect('binds namespace aliases and selected members to canonical calls', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('app/Main', {

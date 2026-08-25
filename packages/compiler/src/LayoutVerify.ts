@@ -25,6 +25,7 @@ import {
   stringEntry,
   unionEntry,
 } from './Layout.js'
+import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
 
@@ -34,6 +35,26 @@ const representationEquals = (left: Representation, right: Representation): bool
     return right._tag === 'SignedInteger' && left.bits === right.bits
   if (left._tag === 'UnsignedInteger')
     return right._tag === 'UnsignedInteger' && left.bits === right.bits
+  if (left._tag === 'ScalarEnum')
+    return (
+      right._tag === 'ScalarEnum' &&
+      left.enum.module === right.enum.module &&
+      left.enum.name === right.enum.name &&
+      left.scalar === right.scalar &&
+      left.bits === right.bits &&
+      left.signedness === right.signedness &&
+      left.members.length === right.members.length &&
+      left.members.every((member, ordinal) => {
+        const other = right.members.at(ordinal)
+        return (
+          other !== undefined &&
+          member.member.enum.module === other.member.enum.module &&
+          member.member.enum.name === other.member.enum.name &&
+          member.member.name === other.member.name &&
+          member.discriminant === other.discriminant
+        )
+      })
+    )
   if (left._tag === 'Floating')
     return right._tag === 'Floating' && left.bits === right.bits && right.ieee
   if (left._tag === 'Boolean') {
@@ -247,6 +268,57 @@ const verifyEntry = (
             'InvalidScalar',
             candidate.type,
             `${Type.encode(candidate.type)} does not match the canonical scalar layout`,
+          ),
+        ])
+  }
+  if (Type.isNominal(candidate.type) && candidate.representation._tag === 'ScalarEnum') {
+    const representation = candidate.representation
+    const scalar = Scalar.enumRepresentation(representation.scalar)
+    const canonical =
+      scalar === undefined
+        ? undefined
+        : Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+    const range =
+      scalar === undefined ? undefined : Scalar.range(scalar, target.pointerSize === 4 ? 32 : 64)
+    const metadataValid =
+      Object.keys(representation).sort().join(',') === '_tag,bits,enum,members,scalar,signedness' &&
+      representation.members.every(
+        (member) => Object.keys(member).sort().join(',') === 'discriminant,member',
+      )
+    const membersValid =
+      representation.members.length > 0 &&
+      new Set(representation.members.map((member) => member.member.name)).size ===
+        representation.members.length &&
+      new Set(representation.members.map((member) => member.discriminant.toString())).size ===
+        representation.members.length &&
+      representation.members.every(
+        (member) =>
+          member.member.enum.module === representation.enum.module &&
+          member.member.enum.name === representation.enum.name &&
+          range !== undefined &&
+          member.discriminant >= range.minimum &&
+          member.discriminant <= range.maximum,
+      )
+    return candidate.type.module === representation.enum.module &&
+      candidate.type.name === representation.enum.name &&
+      candidate.type.arguments.length === 0 &&
+      scalar?.category === 'Integer' &&
+      scalar.width._tag === 'FixedWidth' &&
+      representation.bits === scalar.width.bits &&
+      representation.signedness === scalar.signedness &&
+      canonical !== undefined &&
+      candidate.copy &&
+      candidate.size === canonical.size &&
+      candidate.alignment === canonical.alignment &&
+      candidate.executable === undefined &&
+      metadataValid &&
+      membersValid
+      ? Object.freeze([])
+      : Object.freeze([
+          invalid(
+            'InvalidScalar',
+            candidate.type,
+            `${Type.encode(candidate.type)} does not match its canonical scalar-enum layout`,
           ),
         ])
   }

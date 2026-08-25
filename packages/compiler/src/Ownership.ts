@@ -9,7 +9,7 @@ import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import { equal as setEqual } from './internal/SetOf.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -217,7 +217,7 @@ export interface MatchOwnership {
   readonly span: SourceSpan.SourceSpan
   readonly arms: ReadonlyArray<{
     readonly id: Match.ArmId
-    readonly member?: Type.Type
+    readonly member?: Match.CoverageIdentity
     readonly universal: boolean
     readonly provisionalGuard: boolean
     readonly bindings: ReadonlyArray<BindingSite>
@@ -1060,7 +1060,7 @@ const checkExpression = (
                 ...arm.cleanup.flatMap((path) => {
                   const type = CleanupPlan.cleanupTypeAtPath(
                     state.index,
-                    arm.member ?? scrutineeType,
+                    arm.member === undefined ? scrutineeType : Match.sourceType(arm.member),
                     path,
                   )
                   return type === undefined
@@ -2572,7 +2572,9 @@ const checkFunction = (
               selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
             const type = CleanupPlan.cleanupTypeAtPath(
               index,
-              selection.member ?? subjectType ?? 'never',
+              selection.member === undefined
+                ? (subjectType ?? 'never')
+                : Match.sourceType(selection.member),
               path,
             )
             return type === undefined

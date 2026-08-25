@@ -48,6 +48,9 @@ const suspendedEffectPresets = suspendedEffectLabels.map((label) =>
 const loggingPreset = presets.find(
   (preset) => preset.label === 'ok · Portable Logger provider',
 )
+const scalarEnumPreset = presets.find(
+  (preset) => preset.label === 'ok · Scalar enum across phases',
+)
 const layoutPreset = presets.find((preset) => preset.label === 'ok · Validated target Layout')
 const allocationPreset = presets.find(
   (preset) => preset.label === 'ok · Self-contained Allocation contract',
@@ -115,6 +118,25 @@ describe('preset catalog', () => {
     if (outcome.reason._tag !== 'EvaluationLimit') return
     expect(outcome.reason.kind).toBe('CallDepth')
     expect(outcome.reason.activeFrames).toHaveLength(4)
+  })
+
+  it('carries scalar enum declaration, conversion, equality, matching, and evaluation through the workbench', () => {
+    expect(scalarEnumPreset).toBeDefined()
+    if (scalarEnumPreset === undefined) return
+    const snapshot = snapshotOf(scalarEnumPreset, 'wasm32-unknown-unknown')
+    expect(Analysis.diagnostics(snapshot)).toEqual([])
+    const outcome = Analysis.evaluate(snapshot)
+    expect(outcome._tag).toBe('Completed')
+    if (outcome._tag !== 'Completed') return
+    expect(outcome.result.value).toBe(42n)
+
+    const declarationRows = viewById('index')?.project(
+      acceptanceContext(scalarEnumPreset, snapshot),
+    ).rows
+    expect(
+      declarationRows?.some((row) => row.detail?.includes('enum(i16) · 3 members') === true),
+    ).toBe(true)
+    expect(declarationRows?.some((row) => row.detail === 'discriminant -1')).toBe(true)
   })
 
   it('has a unique label per preset, so the picker can key on it', () => {

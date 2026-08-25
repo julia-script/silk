@@ -355,8 +355,8 @@ export interface PatternSelection {
   readonly arm: Match.ArmId
   readonly access: Match.Access
   readonly subject: Expression
-  readonly members: ReadonlyArray<Type.Type>
-  readonly member?: Type.Type
+  readonly members: ReadonlyArray<Match.CoverageIdentity>
+  readonly member?: Match.CoverageIdentity
   readonly universal: boolean
   readonly bindings: ReadonlyArray<PatternBinding>
   readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
@@ -410,6 +410,31 @@ export type Expression =
       readonly _tag: 'CharacterLiteral'
       readonly value: number
       readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EnumMember'
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly member: DeclarationFacts.CanonicalEnumMemberId
+      readonly discriminant: bigint
+      readonly type: Type.Nominal
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EnumValue'
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly value: Expression
+      readonly intrinsic: Intrinsic.OperationId
+      readonly type: Scalar.EnumRepresentationSpelling
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EnumEquality'
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly left: Expression
+      readonly right: Expression
+      readonly negated: boolean
+      readonly type: 'bool'
       readonly span: SourceSpan.SourceSpan
     }
   | {
@@ -468,17 +493,17 @@ export type Expression =
       readonly id: Match.MatchId
       readonly access: Match.Access
       readonly scrutinee: Expression
-      readonly members: ReadonlyArray<Type.Type>
+      readonly members: ReadonlyArray<Match.CoverageIdentity>
       readonly arms: ReadonlyArray<{
         readonly id: Match.ArmId
-        readonly member?: Type.Type
+        readonly member?: Match.CoverageIdentity
         readonly universal: boolean
         readonly bindings: ReadonlyArray<PatternBinding>
         readonly cleanup: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
         readonly guard?: Expression
         readonly result: Expression
-        readonly before: ReadonlyArray<Type.Type>
-        readonly after: ReadonlyArray<Type.Type>
+        readonly before: ReadonlyArray<Match.CoverageIdentity>
+        readonly after: ReadonlyArray<Match.CoverageIdentity>
         readonly reachable: boolean
         readonly span: SourceSpan.SourceSpan
       }>
@@ -942,8 +967,11 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'RuntimeStringView':
         return [expression.source]
       case 'StringEquality':
+      case 'EnumEquality':
       case 'ShortCircuit':
         return [expression.left, expression.right]
+      case 'EnumValue':
+        return [expression.value]
       case 'Replace':
         return [expression.value]
       case 'IndexPlace':
@@ -1021,8 +1049,11 @@ export const firstUnavailable = (
       case 'RuntimeStringView':
         return walk(expression.source)
       case 'StringEquality':
+      case 'EnumEquality':
       case 'ShortCircuit':
         return walk(expression.left) ?? walk(expression.right)
+      case 'EnumValue':
+        return walk(expression.value)
       case 'Replace':
         return walk(expression.value)
       case 'UnionConvert':
@@ -1117,12 +1148,20 @@ export type VerificationIssue =
   | { readonly _tag: 'InvalidSliceOperation'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidStringView'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidStringEquality'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidEnumValue'; readonly span: SourceSpan.SourceSpan }
+  | { readonly _tag: 'InvalidEnumEquality'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidLoanEnd'; readonly span: SourceSpan.SourceSpan }
   | { readonly _tag: 'InvalidBorrowedWrite'; readonly span: SourceSpan.SourceSpan }
 
-const sameMembers = (left: ReadonlyArray<Type.Type>, right: ReadonlyArray<Type.Type>): boolean =>
+const sameMembers = (
+  left: ReadonlyArray<Match.CoverageIdentity>,
+  right: ReadonlyArray<Match.CoverageIdentity>,
+): boolean =>
   left.length === right.length &&
-  left.every((member, index) => Type.equals(member, right[index] ?? member))
+  left.every((member, index) => {
+    const other = right.at(index)
+    return other !== undefined && Match.identityEquals(member, other)
+  })
 
 /** Verifies acyclic expression ownership and the canonical facts carried by structured matches. */
 export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
@@ -1194,6 +1233,39 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     ) {
       issues.push(Object.freeze({ _tag: 'InvalidStringEquality', span: expression.span }))
     }
+    if (expression._tag === 'EnumMember') {
+      if (
+        expression.enum.module !== expression.member.enum.module ||
+        expression.enum.name !== expression.member.enum.name ||
+        expression.type.module !== expression.enum.module ||
+        expression.type.name !== expression.enum.name ||
+        expression.type.arguments.length !== 0
+      )
+        issues.push(Object.freeze({ _tag: 'InvalidEnumValue', span: expression.span }))
+    }
+    if (
+      expression._tag === 'EnumValue' &&
+      (expression.value._tag === 'Unavailable' ||
+        !Type.isNominal(expression.value.type) ||
+        expression.value.type.module !== expression.enum.module ||
+        expression.value.type.name !== expression.enum.name ||
+        expression.intrinsic.actor !== 'Intrinsic' ||
+        expression.intrinsic.name !== 'enumValue')
+    )
+      issues.push(Object.freeze({ _tag: 'InvalidEnumValue', span: expression.span }))
+    if (
+      expression._tag === 'EnumEquality' &&
+      (expression.left._tag === 'Unavailable' ||
+        expression.right._tag === 'Unavailable' ||
+        !Type.isNominal(expression.left.type) ||
+        !Type.isNominal(expression.right.type) ||
+        expression.left.type.module !== expression.enum.module ||
+        expression.left.type.name !== expression.enum.name ||
+        expression.right.type.module !== expression.enum.module ||
+        expression.right.type.name !== expression.enum.name ||
+        !Type.equals(expression.type, 'bool'))
+    )
+      issues.push(Object.freeze({ _tag: 'InvalidEnumEquality', span: expression.span }))
     if (expression._tag === 'SliceLength') {
       if (
         expression.slice._tag === 'Unavailable' ||
@@ -1533,11 +1605,11 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'Match':
       return [
-        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Type.encode).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         `${indent}  scrutinee`,
         encodeExpression(expression.scrutinee, depth + 2),
         ...expression.arms.flatMap((arm) => [
-          `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Type.encode(arm.member)} reachable=${arm.reachable} before=${arm.before.map(Type.encode).join(',') || 'empty'} after=${arm.after.map(Type.encode).join(',') || 'empty'} ${spanText(arm.span)}`,
+          `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${spanText(arm.span)}`,
           ...arm.bindings.map(
             (binding) =>
               `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${spanText(binding.span)}`,
@@ -1596,6 +1668,19 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}slice-index ${expression.access.toLowerCase()} bounds=runtime : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         encodeExpression(expression.slice, depth + 1),
         encodeExpression(expression.index, depth + 1),
+      ].join('\n')
+    case 'EnumMember':
+      return `${indent}enum-member ${expression.member.enum.module}.${expression.member.enum.name}.${expression.member.name} discriminant=${expression.discriminant} : ${Type.encode(expression.type)} ${spanText(expression.span)}`
+    case 'EnumValue':
+      return [
+        `${indent}enum-value ${expression.enum.module}.${expression.enum.name} via ${Intrinsic.operationText(expression.intrinsic)} : ${expression.type} ${spanText(expression.span)}`,
+        encodeExpression(expression.value, depth + 1),
+      ].join('\n')
+    case 'EnumEquality':
+      return [
+        `${indent}enum-${expression.negated ? 'not-equals' : 'equals'} ${expression.enum.module}.${expression.enum.name} : bool ${spanText(expression.span)}`,
+        encodeExpression(expression.left, depth + 1),
+        encodeExpression(expression.right, depth + 1),
       ].join('\n')
     case 'FunctionItem':
       return `${indent}function-item ${
@@ -1686,7 +1771,7 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         encodeExpression(statement.initializer, depth + 1),
       ].join('\n')
     case 'PatternBind':
-      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
+      return `${indent}pattern-bind ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`
     case 'Evaluate':
       return [
         `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
@@ -1722,7 +1807,7 @@ const encodeStatement = (statement: Statement, depth: number): string => {
       ].join('\n')
     case 'IfLet':
       return [
-        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Type.encode).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}if-let ${statement.selection.access.toLowerCase()} members=${statement.selection.members.map(Match.encodeIdentity).join(',')} r${statement.region.ordinal} ${spanText(statement.span)}`,
         ...statement.taken.map((inner) => encodeStatement(inner, depth + 1)),
         ...statement.otherwise.map((inner) => encodeStatement(inner, depth + 1)),
       ].join('\n')

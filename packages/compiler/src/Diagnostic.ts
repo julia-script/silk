@@ -183,6 +183,40 @@ export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
 export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 /** Stable code for a statically known execution-package allocation/layout mismatch. */
 export const executionLayoutMismatchCode = 'SEM0142' as const
+/** Stable code for a scalar enum with no declared members. */
+export const emptyEnumCode = 'SEM0143' as const
+/** Stable code for a scalar enum representation outside the fixed-width integer set. */
+export const unsupportedEnumRepresentationCode = 'SEM0144' as const
+/** Stable code for a scalar enum member name repeated after its first declaration. */
+export const duplicateEnumMemberNameCode = 'SEM0145' as const
+/** Stable code for a scalar enum discriminant repeated after its first declaration. */
+export const duplicateEnumDiscriminantCode = 'SEM0146' as const
+/** Stable code for an explicit scalar enum discriminant outside its representation range. */
+export const enumDiscriminantOutOfRangeCode = 'SEM0147' as const
+/** Stable code for an implicit scalar enum successor outside its representation range. */
+export const enumImplicitDiscriminantOverflowCode = 'SEM0148' as const
+/** Stable code for a negative discriminant under an unsigned scalar enum representation. */
+export const unsignedEnumNegativeDiscriminantCode = 'SEM0149' as const
+/** Stable code for a member missing from a resolved scalar enum. */
+export const unknownEnumMemberCode = 'SEM0150' as const
+/** Stable code for a canonical member used through or required by another enum. */
+export const wrongEnumMemberCode = 'SEM0151' as const
+/** Stable code for implicit mixing between a scalar enum and an integer. */
+export const enumIntegerMismatchCode = 'SEM0152' as const
+/** Stable code for equality between distinct canonical scalar enums. */
+export const crossEnumEqualityCode = 'SEM0153' as const
+/** Stable code for direct ordering of scalar enum values. */
+export const enumOrderingCode = 'SEM0154' as const
+/** Stable code for a scalar enum match that leaves canonical members uncovered. */
+export const incompleteEnumMatchCode = 'SEM0155' as const
+/** Stable code for a repeated unguarded scalar enum member arm. */
+export const duplicateEnumMatchArmCode = 'SEM0156' as const
+/** Stable code for a scalar enum arm following an unguarded wildcard. */
+export const enumMatchArmAfterWildcardCode = 'SEM0157' as const
+/** Stable code for a scalar enum pattern naming a member of another enum. */
+export const foreignEnumPatternCode = 'SEM0158' as const
+/** Stable code for an integer literal pattern used against a scalar enum. */
+export const integerPatternAgainstEnumCode = 'SEM0159' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -405,6 +439,23 @@ export type Code =
   | typeof missingExplicitExecutionOwnerCode
   | typeof invalidExecutablePropertyConjunctCode
   | typeof executionLayoutMismatchCode
+  | typeof emptyEnumCode
+  | typeof unsupportedEnumRepresentationCode
+  | typeof duplicateEnumMemberNameCode
+  | typeof duplicateEnumDiscriminantCode
+  | typeof enumDiscriminantOutOfRangeCode
+  | typeof enumImplicitDiscriminantOverflowCode
+  | typeof unsignedEnumNegativeDiscriminantCode
+  | typeof unknownEnumMemberCode
+  | typeof wrongEnumMemberCode
+  | typeof enumIntegerMismatchCode
+  | typeof crossEnumEqualityCode
+  | typeof enumOrderingCode
+  | typeof incompleteEnumMatchCode
+  | typeof duplicateEnumMatchArmCode
+  | typeof enumMatchArmAfterWildcardCode
+  | typeof foreignEnumPatternCode
+  | typeof integerPatternAgainstEnumCode
   | typeof missingUnsafeBoundaryCode
   | typeof invalidConformanceCode
   | typeof invalidDropHookCode
@@ -748,6 +799,66 @@ export type Reason =
       readonly spelling: string
       readonly originalSpan: SourceSpan.SourceSpan
     }
+  | { readonly _tag: 'EmptyEnum'; readonly enum: string }
+  | {
+      readonly _tag: 'UnsupportedEnumRepresentation'
+      readonly spelling: string
+      readonly allowed: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'DuplicateEnumMemberName'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'DuplicateEnumDiscriminant'
+      readonly value: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EnumDiscriminantOutOfRange'
+      readonly representation: string
+      readonly value: string
+      readonly minimum: string
+      readonly maximum: string
+    }
+  | {
+      readonly _tag: 'EnumImplicitDiscriminantOverflow'
+      readonly representation: string
+      readonly predecessor: string
+      readonly maximum: string
+    }
+  | {
+      readonly _tag: 'UnsignedEnumNegativeDiscriminant'
+      readonly representation: string
+      readonly value: string
+    }
+  | { readonly _tag: 'UnknownEnumMember'; readonly enum: string; readonly member: string }
+  | { readonly _tag: 'WrongEnumMember'; readonly expected: string; readonly actual: string }
+  | {
+      readonly _tag: 'EnumIntegerMismatch'
+      readonly enum: string
+      readonly integer: string
+      readonly direction: 'IntegerToEnum' | 'EnumToInteger'
+    }
+  | { readonly _tag: 'CrossEnumEquality'; readonly left: string; readonly right: string }
+  | { readonly _tag: 'EnumOrdering'; readonly enum: string; readonly operator: string }
+  | {
+      readonly _tag: 'IncompleteEnumMatch'
+      readonly enum: string
+      readonly missing: ReadonlyArray<string>
+    }
+  | {
+      readonly _tag: 'DuplicateEnumMatchArm'
+      readonly member: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | {
+      readonly _tag: 'EnumMatchArmAfterWildcard'
+      readonly wildcardSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'ForeignEnumPattern'; readonly expected: string; readonly actual: string }
+  | { readonly _tag: 'IntegerPatternAgainstEnum'; readonly enum: string; readonly value: string }
   | { readonly _tag: 'ExpectedType'; readonly spelling: string }
   | { readonly _tag: 'PrivateTypeExposure'; readonly type: string }
   | { readonly _tag: 'InlineRecursiveStruct'; readonly members: ReadonlyArray<string> }
@@ -1494,6 +1605,219 @@ export const duplicateFieldName = (
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'first declared here', span: originalSpan }),
     ]),
+  })
+
+/** Creates the diagnostic for a scalar enum with no members. */
+export const emptyEnum = (enumName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyEnumCode,
+    severity: 'error',
+    message: `Enum ${enumName} must declare at least one member`,
+    reason: Object.freeze({ _tag: 'EmptyEnum', enum: enumName }),
+    span,
+  })
+
+export const unsupportedEnumRepresentation = (
+  spelling: string,
+  allowed: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsupportedEnumRepresentationCode,
+    severity: 'error',
+    message: `${spelling} is not a scalar enum representation`,
+    reason: Object.freeze({
+      _tag: 'UnsupportedEnumRepresentation',
+      spelling,
+      allowed: Object.freeze([...allowed]),
+    }),
+    span,
+  })
+
+export const duplicateEnumMemberName = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateEnumMemberNameCode,
+    severity: 'error',
+    message: `Duplicate enum member name ${spelling}`,
+    reason: Object.freeze({ _tag: 'DuplicateEnumMemberName', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+export const duplicateEnumDiscriminant = (
+  value: bigint,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateEnumDiscriminantCode,
+    severity: 'error',
+    message: `Duplicate enum discriminant ${value}`,
+    reason: Object.freeze({
+      _tag: 'DuplicateEnumDiscriminant',
+      value: value.toString(),
+      originalSpan,
+    }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+export const enumDiscriminantOutOfRange = (
+  representation: string,
+  value: bigint,
+  minimum: bigint,
+  maximum: bigint,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: enumDiscriminantOutOfRangeCode,
+    severity: 'error',
+    message: `Enum discriminant ${value} is outside ${representation}`,
+    reason: Object.freeze({
+      _tag: 'EnumDiscriminantOutOfRange',
+      representation,
+      value: value.toString(),
+      minimum: minimum.toString(),
+      maximum: maximum.toString(),
+    }),
+    span,
+  })
+
+export const enumImplicitDiscriminantOverflow = (
+  representation: string,
+  predecessor: bigint,
+  maximum: bigint,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: enumImplicitDiscriminantOverflowCode,
+    severity: 'error',
+    message: `Implicit enum discriminant after ${predecessor} exceeds ${representation}`,
+    reason: Object.freeze({
+      _tag: 'EnumImplicitDiscriminantOverflow',
+      representation,
+      predecessor: predecessor.toString(),
+      maximum: maximum.toString(),
+    }),
+    span,
+  })
+
+export const unsignedEnumNegativeDiscriminant = (
+  representation: string,
+  value: bigint,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsignedEnumNegativeDiscriminantCode,
+    severity: 'error',
+    message: `Unsigned enum representation ${representation} cannot hold ${value}`,
+    reason: Object.freeze({
+      _tag: 'UnsignedEnumNegativeDiscriminant',
+      representation,
+      value: value.toString(),
+    }),
+    span,
+  })
+
+export const unknownEnumMember = (
+  enumName: string,
+  member: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownEnumMemberCode,
+    severity: 'error',
+    message: `Enum ${enumName} has no member ${member}`,
+    reason: Object.freeze({ _tag: 'UnknownEnumMember', enum: enumName, member }),
+    span,
+  })
+
+export const wrongEnumMember = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: wrongEnumMemberCode,
+    severity: 'error',
+    message: `Enum member of ${actual} cannot be used as ${expected}`,
+    reason: Object.freeze({ _tag: 'WrongEnumMember', expected, actual }),
+    span,
+  })
+
+export const enumIntegerMismatch = (
+  enumName: string,
+  integer: string,
+  direction: 'IntegerToEnum' | 'EnumToInteger',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: enumIntegerMismatchCode,
+    severity: 'error',
+    message:
+      direction === 'IntegerToEnum'
+        ? `${integer} does not implicitly construct ${enumName}`
+        : `${enumName} does not implicitly convert to ${integer}`,
+    reason: Object.freeze({ _tag: 'EnumIntegerMismatch', enum: enumName, integer, direction }),
+    span,
+  })
+
+export const crossEnumEquality = (
+  left: string,
+  right: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: crossEnumEqualityCode,
+    severity: 'error',
+    message: `Equality requires one enum type, not ${left} and ${right}`,
+    reason: Object.freeze({ _tag: 'CrossEnumEquality', left, right }),
+    span,
+  })
+
+export const enumOrdering = (
+  enumName: string,
+  operator: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: enumOrderingCode,
+    severity: 'error',
+    message: `Enum ${enumName} does not support ${operator}; compare backing values explicitly`,
+    reason: Object.freeze({ _tag: 'EnumOrdering', enum: enumName, operator }),
+    span,
   })
 
 /** Creates the diagnostic for a value declaration used as a declared type. */
@@ -2606,6 +2930,92 @@ export const incompleteMatch = (
     severity: 'error',
     message: `Match does not cover ${missing.join(', ')}`,
     reason: Object.freeze({ _tag: 'IncompleteMatch', missing: Object.freeze([...missing]) }),
+    span,
+  })
+
+export const incompleteEnumMatch = (
+  enum_: string,
+  missing: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: incompleteEnumMatchCode,
+    severity: 'error',
+    message: `Match over ${enum_} does not cover ${missing.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'IncompleteEnumMatch',
+      enum: enum_,
+      missing: Object.freeze([...missing]),
+    }),
+    span,
+  })
+
+export const duplicateEnumMatchArm = (
+  member: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateEnumMatchArmCode,
+    severity: 'error',
+    message: `Duplicate enum match arm ${member}`,
+    reason: Object.freeze({ _tag: 'DuplicateEnumMatchArm', member, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first covering arm', span: originalSpan }),
+    ]),
+  })
+
+export const enumMatchArmAfterWildcard = (
+  wildcardSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: enumMatchArmAfterWildcardCode,
+    severity: 'error',
+    message: 'Enum match arm is unreachable after `_`',
+    reason: Object.freeze({ _tag: 'EnumMatchArmAfterWildcard', wildcardSpan }),
+    span,
+    relatedSpans: Object.freeze([Object.freeze({ label: 'wildcard arm', span: wildcardSpan })]),
+  })
+
+export const foreignEnumPattern = (
+  expected: string,
+  actual: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: foreignEnumPatternCode,
+    severity: 'error',
+    message: `Enum pattern from ${actual} cannot match ${expected}`,
+    reason: Object.freeze({ _tag: 'ForeignEnumPattern', expected, actual }),
+    span,
+  })
+
+export const integerPatternAgainstEnum = (
+  enum_: string,
+  value: bigint,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: integerPatternAgainstEnumCode,
+    severity: 'error',
+    message: `Integer pattern ${value} cannot match enum ${enum_}`,
+    reason: Object.freeze({
+      _tag: 'IntegerPatternAgainstEnum',
+      enum: enum_,
+      value: value.toString(),
+    }),
     span,
   })
 

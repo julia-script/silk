@@ -7,19 +7,19 @@ const end = Type.nominal('main', 'End')
 
 it('subtracts only reachable unguarded member decisions', () => {
   const coverage = Match.cover(
-    [token, end],
+    [Match.structuralMember(token), Match.structuralMember(end)],
     [
-      { member: token, universal: false, guarded: true },
-      { member: token, universal: false, guarded: false },
-      { member: token, universal: false, guarded: true },
-      { member: end, universal: false, guarded: false },
+      { member: Match.structuralMember(token), universal: false, guarded: true },
+      { member: Match.structuralMember(token), universal: false, guarded: false },
+      { member: Match.structuralMember(token), universal: false, guarded: true },
+      { member: Match.structuralMember(end), universal: false, guarded: false },
     ],
   )
 
   assert.deepEqual(
     coverage.transitions.map((transition) => ({
-      before: transition.before.map(Type.encode),
-      after: transition.after.map(Type.encode),
+      before: transition.before.map(Match.encodeIdentity),
+      after: transition.after.map(Match.encodeIdentity),
       reachable: transition.reachable,
     })),
     [
@@ -34,10 +34,10 @@ it('subtracts only reachable unguarded member decisions', () => {
 
 it('treats an unguarded universal decision as terminal coverage', () => {
   const coverage = Match.cover(
-    [token, end],
+    [Match.structuralMember(token), Match.structuralMember(end)],
     [
       { universal: true, guarded: false },
-      { member: token, universal: false, guarded: false },
+      { member: Match.structuralMember(token), universal: false, guarded: false },
     ],
   )
 

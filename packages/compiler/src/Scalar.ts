@@ -11,6 +11,8 @@ export type IntegerSpelling =
   | 'i64'
   | 'isize'
 
+export type EnumRepresentationSpelling = 'u8' | 'u16' | 'u32' | 'u64' | 'i8' | 'i16' | 'i32' | 'i64'
+
 export type FloatSpelling = 'f32' | 'f64'
 
 /** The spelling of the scalar that holds one Unicode scalar value. */
@@ -138,6 +140,11 @@ export interface IntegerScalar {
   readonly layout: Layout
   readonly lanes: BackendLanes
   readonly operations: ReadonlyArray<Operation>
+}
+
+/** One fixed-width integer representation admitted by scalar enum declarations. */
+export type EnumRepresentation = IntegerScalar & {
+  readonly spelling: EnumRepresentationSpelling
 }
 
 /** The immutable Boolean entry in the authoritative scalar catalog. */
@@ -357,6 +364,35 @@ export const defaultInteger = integer('i32', 'Signed', fixedWidth(32), fixedLayo
 
 const i64 = integer('i64', 'Signed', fixedWidth(64), fixedLayout(8), 'I64')
 const isize = integer('isize', 'Signed', pointerWidth, pointerLayout, 'Pointer')
+
+const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = Object.freeze([
+  u8,
+  u16,
+  u32,
+  u64,
+  i8,
+  i16,
+  defaultInteger,
+  i64,
+])
+
+const enumRepresentationsBySpelling: ReadonlyMap<string, EnumRepresentation> = new Map(
+  enumRepresentationCatalog.map((scalar): readonly [string, EnumRepresentation] => [
+    scalar.spelling,
+    scalar,
+  ]),
+)
+
+/** Returns the exact fixed-width integer representation selected by an enum spelling. */
+export const enumRepresentation = (spelling: string): EnumRepresentation | undefined =>
+  enumRepresentationsBySpelling.get(spelling)
+
+/** Returns every allowed enum representation in deterministic unsigned-then-signed width order. */
+export const enumRepresentations = (): ReadonlyArray<EnumRepresentation> =>
+  enumRepresentationCatalog
+
+/** The exact representation selected when an enum omits its representation clause. */
+export const defaultEnumRepresentation: EnumRepresentation = u8
 
 const floatOperations = (self: FloatSpelling, bitsType: 'u32' | 'u64') =>
   Object.freeze([

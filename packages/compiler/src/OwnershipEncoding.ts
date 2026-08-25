@@ -3,6 +3,7 @@ import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as Hir from './Hir.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
+import * as Match from './Match.js'
 import type { BindingSite, ModuleOwnership, Verdict } from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -162,7 +163,7 @@ export const encode = (self: ModuleOwnership): string =>
           `  match ${match.access.toLowerCase()} ${spanText(match.span)}`,
           ...match.arms.map(
             (arm) =>
-              `    arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Type.encode(arm.member)} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`,
+              `    arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} guard=${arm.provisionalGuard} bindings=${arm.bindings.map(siteText).join(',') || 'none'} cleanup=${arm.cleanup.map((entry) => `${entry.path.map((field) => `#${field.ordinal}`).join('.') || 'payload'}(${cleanupText(entry.cleanup)})`).join(',') || 'none'}`,
           ),
         ].join('\n'),
       ),

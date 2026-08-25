@@ -7,6 +7,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import type * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import type * as Scalar from './Scalar.js'
 import type * as StaticText from './StaticText.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 import type * as TargetConstant from './TargetConstant.js'
@@ -548,6 +549,113 @@ export interface StructFact {
   readonly name: DeclaredName
   readonly fields: ReadonlyArray<FieldFact>
   readonly dependency: StructDependency
+  readonly syntax: SyntaxTree.Node
+}
+
+/** A deterministic member identity nested under its owning enum declaration. */
+export interface EnumMemberId {
+  readonly _tag: 'EnumMemberId'
+  readonly enum: DeclarationId
+  readonly ordinal: number
+}
+
+/** The canonical identity of one uniquely named member of a canonical enum. */
+export interface CanonicalEnumMemberId {
+  readonly _tag: 'CanonicalEnumMemberId'
+  readonly enum: CanonicalId
+  readonly name: string
+}
+
+export type EnumMemberCanonicalState =
+  | { readonly _tag: 'Canonical'; readonly id: CanonicalEnumMemberId }
+  | {
+      readonly _tag: 'Duplicate'
+      readonly original: CanonicalEnumMemberId
+      readonly cause: Diagnostic.Identity
+    }
+  | { readonly _tag: 'Unidentified' }
+
+/** The selected fixed-width representation or its explicit recovery state. */
+export type EnumRepresentationFact =
+  | {
+      readonly _tag: 'Available'
+      readonly scalar: Scalar.EnumRepresentation
+      readonly explicit: boolean
+      readonly syntax: SyntaxTree.Element
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly explicit: boolean
+      readonly syntax: SyntaxTree.Element
+      readonly spelling?: string
+      readonly cause?: Diagnostic.Identity
+    }
+
+/** One checked discriminant or its local recovery state. */
+export type EnumDiscriminantFact =
+  | {
+      readonly _tag: 'Available'
+      readonly value: bigint
+      readonly source: 'Explicit' | 'Implicit'
+      readonly syntax: SyntaxTree.Element
+    }
+  | {
+      readonly _tag: 'Unavailable'
+      readonly source: 'Explicit' | 'Implicit'
+      readonly syntax: SyntaxTree.Element
+      readonly attempted?: bigint
+      readonly cause?: Diagnostic.Identity
+    }
+
+/** One declaration-ordered, fieldless scalar-enum member. */
+export interface EnumMemberFact {
+  readonly _tag: 'EnumMember'
+  readonly id: EnumMemberId
+  readonly canonical: EnumMemberCanonicalState
+  readonly name: DeclaredName
+  readonly discriminant: EnumDiscriminantFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** Canonical identity of one compiler-generated operation owned by an enum declaration. */
+export interface EnumAssociatedOperationId {
+  readonly _tag: 'EnumAssociatedOperationId'
+  readonly enum: CanonicalId
+  readonly name: 'value'
+}
+
+/** The generated backing-value projection contributed by one canonical enum declaration. */
+export interface EnumAssociatedOperationFact {
+  readonly _tag: 'EnumAssociatedOperation'
+  readonly id: EnumAssociatedOperationId
+  readonly name: 'value'
+  readonly enum: CanonicalId
+  readonly parameter: Type.Nominal
+  readonly result: Scalar.EnumRepresentation
+  readonly intrinsic: {
+    readonly _tag: 'IntrinsicOperationId'
+    readonly actor: 'Intrinsic'
+    readonly name: 'enumValue'
+  }
+}
+
+/** Whether all declaration-owned enum invariants were established. */
+export type EnumValidity =
+  | { readonly _tag: 'Valid' }
+  | { readonly _tag: 'Invalid'; readonly causes: ReadonlyArray<Diagnostic.Identity> }
+
+/** One canonical nominal scalar enum and its checked declaration-ordered member set. */
+export interface EnumFact {
+  readonly _tag: 'EnumDeclaration'
+  readonly id: DeclarationId
+  readonly canonical: CanonicalState
+  readonly visibility: 'Public' | 'Private'
+  readonly typeParameters: ReadonlyArray<TypeParameterFact>
+  readonly name: DeclaredName
+  readonly representation: EnumRepresentationFact
+  readonly members: ReadonlyArray<EnumMemberFact>
+  readonly associatedOperations: ReadonlyArray<EnumAssociatedOperationFact>
+  readonly validity: EnumValidity
   readonly syntax: SyntaxTree.Node
 }
 
@@ -1225,6 +1333,7 @@ export type ConformanceWitness =
 export type MemberFact =
   | DeclarationFact
   | StructFact
+  | EnumFact
   | ServiceFact
   | InterfaceFact
   | ConstantFact
@@ -1257,6 +1366,24 @@ export type MemberLookup =
       readonly declarations: ReadonlyArray<MemberFact>
     }
 
+export type EnumLookup =
+  | { readonly _tag: 'Resolved'; readonly spelling: string; readonly declaration: EnumFact }
+  | { readonly _tag: 'Missing'; readonly spelling: string }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly declarations: ReadonlyArray<EnumFact>
+    }
+
+export type EnumMemberLookup =
+  | { readonly _tag: 'Resolved'; readonly spelling: string; readonly member: EnumMemberFact }
+  | { readonly _tag: 'Missing'; readonly spelling: string }
+  | {
+      readonly _tag: 'Ambiguous'
+      readonly spelling: string
+      readonly members: ReadonlyArray<EnumMemberFact>
+    }
+
 export type StructLookup =
   | { readonly _tag: 'Resolved'; readonly spelling: string; readonly declaration: StructFact }
   | { readonly _tag: 'Missing'; readonly spelling: string }
@@ -1282,6 +1409,7 @@ export interface ModuleHeaders {
   readonly members: ReadonlyArray<MemberFact>
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly structs: ReadonlyArray<StructFact>
+  readonly enums: ReadonlyArray<EnumFact>
   readonly services: ReadonlyArray<ServiceFact>
   readonly interfaces: ReadonlyArray<InterfaceFact>
   readonly constants: ReadonlyArray<ConstantFact>
@@ -1378,6 +1506,41 @@ export const lookupDeclaration = (
     : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
 }
 
+export const enumValueOperation = (
+  declaration: Pick<EnumFact, 'canonical' | 'representation'>,
+): EnumAssociatedOperationFact | undefined => {
+  if (declaration.canonical._tag !== 'Canonical' || declaration.representation._tag !== 'Available')
+    return undefined
+  const enum_ = declaration.canonical.id
+  return Object.freeze({
+    _tag: 'EnumAssociatedOperation',
+    id: Object.freeze({ _tag: 'EnumAssociatedOperationId', enum: enum_, name: 'value' }),
+    name: 'value',
+    enum: enum_,
+    parameter: Type.nominal(enum_.module, enum_.name),
+    result: declaration.representation.scalar,
+    intrinsic: Object.freeze({
+      _tag: 'IntrinsicOperationId',
+      actor: 'Intrinsic',
+      name: 'enumValue',
+    }),
+  })
+}
+
+export const lookupEnumMember = (
+  members: ReadonlyArray<EnumMemberFact>,
+  name: string,
+): EnumMemberLookup => {
+  const matches = members.filter(
+    (member) => member.name._tag === 'Present' && member.name.spelling === name,
+  )
+  const first = matches.at(0)
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  return matches.length === 1
+    ? Object.freeze({ _tag: 'Resolved', spelling: name, member: first })
+    : Object.freeze({ _tag: 'Ambiguous', spelling: name, members: Object.freeze(matches) })
+}
+
 export const lookupStruct = (structs: ReadonlyArray<StructFact>, name: string): StructLookup => {
   const matches = structs.filter(
     (struct) => struct.name._tag === 'Present' && struct.name.spelling === name,
@@ -1412,6 +1575,25 @@ export const member = (self: Index, module: string, name: string): MemberLookup 
     self.modules.find((candidate) => candidate.module === module)?.members ?? Object.freeze([]),
     name,
   )
+
+export const enumByName = (self: Index, module: string, name: string): EnumLookup => {
+  const result = member(self, module, name)
+  if (result._tag === 'Missing') return result
+  if (result._tag === 'Resolved')
+    return result.declaration._tag === 'EnumDeclaration'
+      ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: result.declaration })
+      : Object.freeze({ _tag: 'Missing', spelling: name })
+  const declarations = result.declarations.filter(
+    (declaration): declaration is EnumFact => declaration._tag === 'EnumDeclaration',
+  )
+  return declarations.length === 0
+    ? Object.freeze({ _tag: 'Missing', spelling: name })
+    : Object.freeze({
+        _tag: 'Ambiguous',
+        spelling: name,
+        declarations: Object.freeze(declarations),
+      })
+}
 
 export const struct = (self: Index, module: string, name: string): StructLookup =>
   lookupStruct(

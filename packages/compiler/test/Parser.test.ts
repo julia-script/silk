@@ -434,6 +434,60 @@ fn main() -> i32 { return 42 }`
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
+it('retains qualified enum-member and signed integer patterns losslessly', () => {
+  const source = `enum(i8) Status { Unknown = -1, Ready = 1 }
+fn inspect(value: Status) -> i32 {
+  return match value {
+    -1 => 1
+    Status.Unknown => 0
+    Status.Ready => 2
+  }
+}`
+  const result = parseText('memory://enum-patterns.silk', source)
+  const patterns = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'EnumMemberPattern' || element.kind === 'IntegerPattern'),
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(
+    patterns.map((pattern) => ({
+      kind: pattern.kind,
+      text: source.slice(pattern.span.start, pattern.span.end).trim(),
+    })),
+    [
+      { kind: 'IntegerPattern', text: '-1' },
+      { kind: 'EnumMemberPattern', text: 'Status.Unknown' },
+      { kind: 'EnumMemberPattern', text: 'Status.Ready' },
+    ],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps qualified generic nominal patterns distinct from enum members', () => {
+  const source = `fn inspect(value: Result.Result<i32, Problem>) -> i32 {
+  return match move value {
+    Result.Result<i32, Problem> {value} => value
+  }
+}`
+  const result = parseText('memory://qualified-generic-pattern.silk', source)
+  const patterns = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'NominalPattern' || element.kind === 'EnumMemberPattern'),
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(
+    patterns.map((pattern) => pattern.kind),
+    ['NominalPattern'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses whole-member binding patterns losslessly', () => {
   const source = `struct Empty {}
 struct Full { value: i32 }

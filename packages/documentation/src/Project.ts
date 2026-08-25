@@ -9,6 +9,8 @@ import * as Document from './Document.js'
 export type ItemKind =
   | 'Function'
   | 'Struct'
+  | 'Enum'
+  | 'EnumMember'
   | 'Service'
   | 'Interface'
   | 'Constant'
@@ -225,6 +227,21 @@ const serviceOperationItem = (
   })
 }
 
+const enumMemberItem = (parent: string, member: DeclarationFacts.EnumMemberFact): Item => {
+  const name = nameOf(member.name, '_')
+  const discriminant =
+    member.discriminant._tag === 'Available' ? ` = ${member.discriminant.value}` : ''
+  return Object.freeze({
+    id: `${parent}::member:${member.id.ordinal}`,
+    kind: 'EnumMember',
+    name,
+    visibility: 'Inherited',
+    signature: Object.freeze({ text: `${name}${discriminant}` }),
+    source: rangeOf(member.syntax),
+    children: Object.freeze([]),
+  })
+}
+
 const memberItem = (
   snapshot: Analysis.FrontendSnapshot,
   module: string,
@@ -238,11 +255,13 @@ const memberItem = (
       ? Presentation.functionDeclaration(member)
       : member._tag === 'StructDeclaration'
         ? Presentation.structDeclaration(member)
-        : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
-          ? Presentation.serviceDeclaration(member)
-          : member._tag === 'RoleDeclaration'
-            ? Presentation.roleDeclaration(member)
-            : Presentation.constantDeclaration(member)
+        : member._tag === 'EnumDeclaration'
+          ? Presentation.enumDeclaration(member)
+          : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
+            ? Presentation.serviceDeclaration(member)
+            : member._tag === 'RoleDeclaration'
+              ? Presentation.roleDeclaration(member)
+              : Presentation.constantDeclaration(member)
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -258,11 +277,13 @@ const memberItem = (
         ? member.fields
             .filter((field) => options.includePrivate === true || field.visibility === 'Public')
             .map((field) => fieldItem(snapshot, module, source, id, field))
-        : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
-          ? member.operations.map((operation) =>
-              serviceOperationItem(snapshot, module, source, id, operation),
-            )
-          : []
+        : member._tag === 'EnumDeclaration'
+          ? member.members.map((enumMember) => enumMemberItem(id, enumMember))
+          : member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
+            ? member.operations.map((operation) =>
+                serviceOperationItem(snapshot, module, source, id, operation),
+              )
+            : []
   return Object.freeze({
     id,
     kind:
@@ -270,13 +291,15 @@ const memberItem = (
         ? 'Function'
         : member._tag === 'StructDeclaration'
           ? 'Struct'
-          : member._tag === 'ServiceDeclaration'
-            ? 'Service'
-            : member._tag === 'InterfaceDeclaration'
-              ? 'Interface'
-              : member._tag === 'RoleDeclaration'
-                ? 'Role'
-                : 'Constant',
+          : member._tag === 'EnumDeclaration'
+            ? 'Enum'
+            : member._tag === 'ServiceDeclaration'
+              ? 'Service'
+              : member._tag === 'InterfaceDeclaration'
+                ? 'Interface'
+                : member._tag === 'RoleDeclaration'
+                  ? 'Role'
+                  : 'Constant',
     name: nameOf(member.name, '_'),
     visibility: member.visibility,
     signature: Object.freeze({ text: presentation.text }),

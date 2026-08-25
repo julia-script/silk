@@ -24,8 +24,14 @@ skill and update this file rather than preserving an older convention.
 Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
 
 Use [proposals/PROCESS.md](proposals/PROCESS.md) for conceptual Silk language and standard-library
-work that must establish whole-language direction before OpenSpec. The SLP skills are numbered in
-pipeline order and are manual-only — never invoke one without an explicit user request:
+work. An SLP is the default for broad or uncertain whole-language direction, but the human author may
+explicitly authorize a bounded change to proceed directly to OpenSpec case by case. An explicit
+request for direct OpenSpec is sufficient authority: do not block on creating, changing, or accepting
+an SLP. The direct OpenSpec change must carry the decisions, alternatives, whole-language interaction
+map, compiler-privilege boundary, and normative scenarios that an SLP handoff would otherwise supply.
+
+The SLP skills are numbered in pipeline order and remain manual-only when the author selects that
+route — never invoke one without an explicit user request:
 
 1. `slp-1-develop` — draft/evolve an SLP to the Candidate bar.
 2. `slp-2-review` — bounded adversarial review (max 3 rounds, evidence-gated ledger).

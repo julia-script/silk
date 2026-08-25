@@ -12,10 +12,10 @@ is compiled by `packages/compiler/test/DocumentationExamples.test.ts`.
 
 ### 1.1 Keywords
 
-The keyword vocabulary is closed. There are 28:
+The keyword vocabulary is closed. There are 29:
 
 ```
-pub struct service interface effect fn run fail drop unsafe impl for
+pub struct enum service interface effect fn run fail drop unsafe impl for
 return import as let const mut once move match if else while
 break continue true false
 ```
@@ -23,8 +23,8 @@ break continue true false
 Keyword recognition applies to a complete identifier only, so `letter`, `iffy`, and `matcher` are
 ordinary identifiers.
 
-There is no `enum`, no `type` alias, no `trait` (it is `interface`), no `loop`, no `async`, and no
-visibility beyond `pub`. `for` appears only in `impl Capability for Target`.
+There is no `type` alias, no `trait` (it is `interface`), no `loop`, no `async`, and no visibility
+beyond `pub`. `for` appears only in `impl Capability for Target`.
 
 ### 1.2 Identifiers
 
@@ -181,7 +181,7 @@ value produced on one path only.
 
 ## 2. Declarations
 
-There are exactly seven top-level declaration forms: `import`, `const`, `struct`, `service`,
+There are exactly eight top-level declaration forms: `import`, `const`, `struct`, `enum`, `service`,
 `interface`, `impl`, and `fn` (including `effect fn`). Visibility is binary — `pub`, or private to
 the module. Each module has one flat top-level namespace, and a name collision inside it is
 rejected.
@@ -278,7 +278,68 @@ pub fn main() -> i32 {
 }
 ```
 
-### 2.5 Interfaces and impls
+### 2.5 Scalar enums
+
+A scalar enum declares a closed, nominal set of payload-free values. Its representation defaults
+exactly to `u8`; the compiler does not infer a wider type. An explicit representation may be `u8`,
+`u16`, `u32`, `u64`, `i8`, `i16`, `i32`, or `i64`. Choose one explicitly when the discriminants do
+not fit the default or when an ABI requires a particular width.
+
+```silk
+enum Direction {
+  North,
+  East,
+  South,
+  West,
+}
+
+enum(i16) Status {
+  Unknown = -1,
+  Ready = 10,
+  Running,
+}
+
+fn statusCode(value: Status) -> i16 {
+  return Status.value(value)
+}
+
+fn classify(value: Status) -> i32 {
+  return match value {
+    Status.Unknown => 0
+    Status.Ready => 41
+    Status.Running => 42
+  }
+}
+
+pub fn main() -> i32 {
+  let status = Status.Running
+  let code = statusCode(status)
+  drop code
+  if status == Status.Running { return classify(status) }
+  return 0
+}
+```
+
+Members are constructed only by qualified names such as `Status.Ready`; there is no call,
+payload, or allocation. Every declaration implicitly contributes `EnumName.value(value)`, which
+returns the exact representation type. There is no built-in conversion from an integer to an enum.
+
+The first implicit discriminant is `0`. Each later implicit discriminant is the previous value plus
+one, including after an explicit signed decimal discriminant, so `Status.Running` above is `11`.
+Every value is checked against the declared representation. Negative values are invalid for unsigned
+representations, duplicate values are rejected, and explicit or implicit overflow is an error. An
+enum that outgrows the default `u8` must be widened explicitly.
+
+Enum equality and inequality require two values of the same declaration. Even enums with identical
+members and representations are different nominal types. Enums have no direct ordering; compare
+`EnumName.value(left)` and `EnumName.value(right)` when numeric ordering is intended.
+
+A match uses qualified member patterns and must cover every member, unless `_` covers the remainder.
+Scalar enums are not structural unions: an enum is one nominal, payload-free type with a chosen public
+integer representation, while `A | B` is a structural choice among payload-bearing nominal types and
+keeps its runtime tag private.
+
+### 2.6 Interfaces and impls
 
 An `interface` is a static conformance contract resolved at specialization time. It creates no
 runtime dispatch, no provider slot, and no requirement row.
@@ -341,14 +402,14 @@ interface's module also declares a public function of the same name; the module 
 reachable through its module everywhere else. A declaration that bounds two of its type parameters
 by one interface leaves the receiver naming neither, and the call is reported with `SEM0097`.
 
-### 2.6 Services
+### 2.7 Services
 
 A `service` declares runtime capability contracts — operation signatures only, with no fields, no
 bodies, and no default provider. Using one places an entry in a requirement row, which a caller
 must later satisfy with `provide`. This is the deliberate contrast with `interface`, which is
 resolved statically and never appears in a row.
 
-### 2.7 Bindings
+### 2.8 Bindings
 
 `let` binds immutably and `let mut` binds mutably. There is no `var`, and locals carry no type
 annotation — a local's type is always inferred. Assignment is a statement, never an expression.

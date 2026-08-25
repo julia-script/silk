@@ -4,6 +4,7 @@ import type {
   ConformanceFact,
   ConstantFact,
   DeclarationFact,
+  EnumFact,
   InterfaceFact,
   MemberFact,
   ModuleHeaders,
@@ -280,7 +281,7 @@ export const complete = (
           operationContracts: interfaceOperationContracts(completed, operations),
         })
       }
-      if (member._tag === 'RoleDeclaration') return member
+      if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
       const fields = member.fields.map((field) => {
         const resolved = resolveDeclaredType(
           module.module,
@@ -401,6 +402,9 @@ export const complete = (
       structs: Object.freeze(
         closedMembers.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
       ),
+      enums: Object.freeze(
+        closedMembers.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      ),
       services: Object.freeze(
         closedMembers.filter(
           (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
@@ -425,6 +429,7 @@ export const complete = (
   // resolved operation contracts; no witness selection or executable behavior is decided here.
   modules = modules.map((module): ModuleHeaders => {
     const members = module.members.map((member): MemberFact => {
+      if (member._tag === 'EnumDeclaration') return member
       const typeParameters = refreshInterfaceApplications(member.typeParameters, modules)
       if (member._tag !== 'ServiceDeclaration' && member._tag !== 'InterfaceDeclaration')
         return Object.freeze({ ...member, typeParameters })
@@ -490,6 +495,9 @@ export const complete = (
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      enums: Object.freeze(
+        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
@@ -928,6 +936,28 @@ export const complete = (
 
       if (!Type.isNominal(provider)) continue
 
+      const providerEnum = modules
+        .flatMap((candidate) => candidate.enums)
+        .find(
+          (candidate) =>
+            candidate.canonical._tag === 'Canonical' &&
+            candidate.canonical.id.module === provider.module &&
+            candidate.canonical.id.name === provider.name,
+        )
+      if (
+        providerEnum !== undefined &&
+        (Type.equals(capability, Type.copyCapability) ||
+          Type.equals(capability, Type.dropCapability))
+      ) {
+        diagnostics.push(
+          invalidDiagnostic(
+            `scalar enum ${Type.encode(provider)} has sealed compiler-proved Copy semantics and cannot implement ${capability.name}`,
+            conformance.syntax.span,
+          ),
+        )
+        continue
+      }
+
       if (Type.equals(capability, Type.copyCapability)) {
         if (
           Type.isIntrinsicNominal(provider) ||
@@ -1132,7 +1162,7 @@ export const complete = (
         }
         continue
       }
-      if (member._tag === 'RoleDeclaration') continue
+      if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') continue
       for (const field of member.fields) {
         if (
           field.declaredType._tag === 'Resolved' &&
@@ -1203,7 +1233,7 @@ export const complete = (
           operationContracts: interfaceOperationContracts(exposed, operations),
         })
       }
-      if (member._tag === 'RoleDeclaration') return member
+      if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
       const fields = member.fields.map((field) =>
         field.visibility === 'Public'
           ? Object.freeze({
@@ -1224,6 +1254,9 @@ export const complete = (
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      enums: Object.freeze(
+        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
@@ -1313,6 +1346,9 @@ export const complete = (
       ),
       structs: Object.freeze(
         members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      enums: Object.freeze(
+        members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),

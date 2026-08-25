@@ -207,6 +207,37 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
     }),
   )
 
+const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candidate> =>
+  Object.freeze([
+    ...enum_.members.flatMap(
+      (member): ReadonlyArray<Candidate> =>
+        member.name._tag !== 'Present' || member.canonical._tag !== 'Canonical'
+          ? []
+          : [
+              candidate({
+                identity: semantic(
+                  Object.freeze({ _tag: 'EnumMemberIdentity', id: member.canonical.id }),
+                ),
+                kind: 'Constant',
+                label: member.name.spelling,
+                detail: PresentationRenderer.enumMember(enum_, member),
+                sortGroup: 0,
+              }),
+            ],
+    ),
+    ...enum_.associatedOperations.map((operation) =>
+      candidate({
+        identity: semantic(
+          Object.freeze({ _tag: 'EnumAssociatedOperationIdentity', id: operation.id }),
+        ),
+        kind: 'Operation',
+        label: operation.name,
+        detail: PresentationRenderer.enumAssociatedOperation(operation),
+        sortGroup: 1,
+      }),
+    ),
+  ])
+
 const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
   Object.freeze(
     service.operations.flatMap(
@@ -257,7 +288,9 @@ const namespaceCandidates = (
                       ? PresentationRenderer.serviceDeclaration(declaration)
                       : declaration._tag === 'RoleDeclaration'
                         ? PresentationRenderer.roleDeclaration(declaration)
-                        : PresentationRenderer.structDeclaration(declaration),
+                        : declaration._tag === 'EnumDeclaration'
+                          ? PresentationRenderer.enumDeclaration(declaration)
+                          : PresentationRenderer.structDeclaration(declaration),
               sortGroup: 0,
             }),
           ],
@@ -382,6 +415,7 @@ const typeCandidates = (
       )
   for (const declaration of [
     ...(index.modules.find((headers) => headers.module === module)?.structs ?? []),
+    ...(index.modules.find((headers) => headers.module === module)?.enums ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.services ?? []),
     ...(index.modules.find((headers) => headers.module === module)?.interfaces ?? []),
   ])
@@ -394,7 +428,9 @@ const typeCandidates = (
           detail:
             declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
               ? PresentationRenderer.serviceDeclaration(declaration)
-              : PresentationRenderer.structDeclaration(declaration),
+              : declaration._tag === 'EnumDeclaration'
+                ? PresentationRenderer.enumDeclaration(declaration)
+                : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 0,
         }),
       )
@@ -414,6 +450,7 @@ const typeCandidates = (
     const declaration = DeclarationFacts.byCanonical(index, binding.declaration)
     if (
       declaration?._tag !== 'StructDeclaration' &&
+      declaration?._tag !== 'EnumDeclaration' &&
       declaration?._tag !== 'ServiceDeclaration' &&
       declaration?._tag !== 'InterfaceDeclaration'
     )
@@ -426,7 +463,9 @@ const typeCandidates = (
         detail:
           declaration._tag === 'ServiceDeclaration' || declaration._tag === 'InterfaceDeclaration'
             ? PresentationRenderer.serviceDeclaration(declaration)
-            : PresentationRenderer.structDeclaration(declaration),
+            : declaration._tag === 'EnumDeclaration'
+              ? PresentationRenderer.enumDeclaration(declaration)
+              : PresentationRenderer.structDeclaration(declaration),
         sortGroup: 2,
       }),
     )
@@ -497,7 +536,7 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? 'Type'
-                  : declaration._tag === 'RoleDeclaration'
+                  : declaration._tag === 'RoleDeclaration' || declaration._tag === 'EnumDeclaration'
                     ? 'Type'
                     : 'Constructor',
           label: declaration.name.spelling,
@@ -511,7 +550,9 @@ const expressionCandidates = (
                   ? PresentationRenderer.serviceDeclaration(declaration)
                   : declaration._tag === 'RoleDeclaration'
                     ? PresentationRenderer.roleDeclaration(declaration)
-                    : PresentationRenderer.structDeclaration(declaration),
+                    : declaration._tag === 'EnumDeclaration'
+                      ? PresentationRenderer.enumDeclaration(declaration)
+                      : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 2,
         }),
       )
@@ -530,7 +571,7 @@ const expressionCandidates = (
                 : declaration._tag === 'ServiceDeclaration' ||
                     declaration._tag === 'InterfaceDeclaration'
                   ? 'Type'
-                  : declaration._tag === 'RoleDeclaration'
+                  : declaration._tag === 'RoleDeclaration' || declaration._tag === 'EnumDeclaration'
                     ? 'Type'
                     : 'Constructor',
           label: binding.spelling,
@@ -544,7 +585,9 @@ const expressionCandidates = (
                   ? PresentationRenderer.serviceDeclaration(declaration)
                   : declaration._tag === 'RoleDeclaration'
                     ? PresentationRenderer.roleDeclaration(declaration)
-                    : PresentationRenderer.structDeclaration(declaration),
+                    : declaration._tag === 'EnumDeclaration'
+                      ? PresentationRenderer.enumDeclaration(declaration)
+                      : PresentationRenderer.structDeclaration(declaration),
           sortGroup: 3,
         }),
       )
@@ -669,6 +712,19 @@ export const complete = (options: {
         context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
+      })
+    if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'EnumDeclaration')
+      return Object.freeze({
+        _tag: 'CompletionResult',
+        context: Object.freeze({
+          _tag: 'ActorMemberContext',
+          actor:
+            lookup.declaration.name._tag === 'Present'
+              ? lookup.declaration.name.spelling
+              : (qualifier ?? 'enum'),
+        }),
+        replacement: replacement.span,
+        candidates: stable(enumCandidates(lookup.declaration)),
       })
     if (
       lookup?._tag === 'Resolved' &&

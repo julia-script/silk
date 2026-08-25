@@ -1,6 +1,6 @@
 import type { ControlProvenance } from './Backend.js'
 import type * as Layout from './Layout.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type * as SilkType from './Type.js'
 
@@ -19,6 +19,16 @@ export type LinearTerminator =
       readonly _tag: 'MatchBranch'
       readonly scrutinee: Mir.LocalId
       readonly memberOrdinal: number
+      readonly taken: Mir.RegionId
+      readonly otherwise: Mir.RegionId
+      readonly provenance: Mir.Provenance
+    }
+  | {
+      readonly _tag: 'EnumMatchBranch'
+      readonly scrutinee: Mir.LocalId
+      readonly discriminant: bigint
+      readonly type: Extract<Mir.Type, { readonly _tag: 'Enum' }>
+      readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
       readonly taken: Mir.RegionId
       readonly otherwise: Mir.RegionId
       readonly provenance: Mir.Provenance
@@ -71,6 +81,9 @@ export interface StructuredBlock {
 export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
   switch (operation._tag) {
     case 'Literal':
+    case 'EnumConstant':
+    case 'EnumValue':
+    case 'EnumEquality':
     case 'StaticString':
     case 'StringFromUtf8Unchecked':
     case 'StringUtf8Bytes':
@@ -307,7 +320,7 @@ export const expandMatches = (
     )
 
     const candidateEntry = (
-      member: SilkType.Type,
+      member: Match.CoverageIdentity,
       candidates: ReadonlyArray<Match.ArmId>,
       ordinal: number,
     ): Mir.RegionId => {
@@ -333,7 +346,7 @@ export const expandMatches = (
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
             shape: match.scrutineeShape,
-            member,
+            member: Match.sourceType(member),
             binding,
             provenance: binding.provenance,
           }),
@@ -379,6 +392,44 @@ export const expandMatches = (
     const decisionEntries = match.decisions.map((decision) =>
       candidateEntry(decision.member, decision.candidates, 0),
     )
+    if (match.scrutineeType._tag === 'Enum') {
+      const enumType = match.scrutineeType
+      const dispatchIds = match.decisions.map((_, ordinal) =>
+        ordinal === 0 ? dispatch : reserve(),
+      )
+      match.decisions.forEach((decision, ordinal) => {
+        if (decision.member._tag !== 'EnumMember')
+          throw new RangeError('Verified scalar enum match lost its member identity')
+        const member = decision.member.member
+        const declared = enumType.representation.members.find(
+          (candidate) =>
+            candidate.member.enum.module === member.enum.module &&
+            candidate.member.enum.name === member.enum.name &&
+            candidate.member.name === member.name,
+        )
+        if (declared === undefined)
+          throw new RangeError('Verified scalar enum match lost its declared discriminant')
+        blocks.push(
+          Object.freeze({
+            id: dispatchIds.at(ordinal) ?? dispatch,
+            origin,
+            kind: 'Normal',
+            operations: Object.freeze([]),
+            terminator: Object.freeze({
+              _tag: 'EnumMatchBranch',
+              scrutinee: match.scrutinee,
+              discriminant: declared.discriminant,
+              type: enumType,
+              representation: enumType.representation,
+              taken: decisionEntries.at(ordinal) ?? trap,
+              otherwise: dispatchIds.at(ordinal + 1) ?? trap,
+              provenance: match.provenance,
+            }),
+          }),
+        )
+      })
+      return
+    }
     if (match.scrutineeType._tag !== 'Union') {
       const selected = decisionEntries.at(0) ?? trap
       blocks.push(
@@ -427,7 +478,11 @@ export const expandMatches = (
     ordered.push(block)
     const terminator = block.terminator
     if (terminator._tag === 'Jump') visit(terminator.target)
-    if (terminator._tag === 'Branch' || terminator._tag === 'MatchBranch') {
+    if (
+      terminator._tag === 'Branch' ||
+      terminator._tag === 'MatchBranch' ||
+      terminator._tag === 'EnumMatchBranch'
+    ) {
       visit(terminator.taken)
       visit(terminator.otherwise)
     }
@@ -553,7 +608,11 @@ export const linearize = (fn: Mir.MirFunction): ReadonlyArray<LinearBlock> => {
   for (const block of blocks) {
     const terminator = block.terminator
     if (terminator._tag === 'Jump') referenced.add(terminator.target.ordinal)
-    if (terminator._tag === 'Branch' || terminator._tag === 'MatchBranch') {
+    if (
+      terminator._tag === 'Branch' ||
+      terminator._tag === 'MatchBranch' ||
+      terminator._tag === 'EnumMatchBranch'
+    ) {
       referenced.add(terminator.taken.ordinal)
       referenced.add(terminator.otherwise.ordinal)
     }
@@ -578,7 +637,9 @@ export const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenanc
           const targets =
             terminator._tag === 'Jump'
               ? [originOf(terminator.target)]
-              : terminator._tag === 'Branch' || terminator._tag === 'MatchBranch'
+              : terminator._tag === 'Branch' ||
+                  terminator._tag === 'MatchBranch' ||
+                  terminator._tag === 'EnumMatchBranch'
                 ? [originOf(terminator.taken), originOf(terminator.otherwise)]
                 : []
           const canonicalTargets = Object.freeze(
@@ -595,7 +656,9 @@ export const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenanc
             construct:
               terminator._tag === 'Jump'
                 ? 'LlvmJump'
-                : terminator._tag === 'Branch' || terminator._tag === 'MatchBranch'
+                : terminator._tag === 'Branch' ||
+                    terminator._tag === 'MatchBranch' ||
+                    terminator._tag === 'EnumMatchBranch'
                   ? 'LlvmBranch'
                   : terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure'
                     ? 'LlvmReturn'

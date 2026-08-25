@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 134 |
+| `SEM` | Semantic | 151 |
 | `OWN` | Ownership | 15 |
 | `LAY` | Layout | 1 |
 
-There are 164 codes in total.
+There are 181 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -189,6 +189,23 @@ There are 164 codes in total.
 | `SEM0140` | Stable code for an externally parking entry with no explicit Execution owner. | `External parking requires an explicit Intrinsic.Execution owner` |
 | `SEM0141` | Stable code for an ordinary capability conjoined with one exact executable bound. | `<conjunct> is not a sealed executable property` |
 | `SEM0142` | Stable code for a statically known execution-package allocation/layout mismatch. | `Execution allocation was planned for <actual>, not <expected>` |
+| `SEM0143` | Stable code for a scalar enum with no declared members. | `Enum <enumName> must declare at least one member` |
+| `SEM0144` | Stable code for a scalar enum representation outside the fixed-width integer set. | `<spelling> is not a scalar enum representation` |
+| `SEM0145` | Stable code for a scalar enum member name repeated after its first declaration. | `Duplicate enum member name <spelling>` |
+| `SEM0146` | Stable code for a scalar enum discriminant repeated after its first declaration. | `Duplicate enum discriminant <value>` |
+| `SEM0147` | Stable code for an explicit scalar enum discriminant outside its representation range. | `Enum discriminant <value> is outside <representation>` |
+| `SEM0148` | Stable code for an implicit scalar enum successor outside its representation range. | `Implicit enum discriminant after <predecessor> exceeds <representation>` |
+| `SEM0149` | Stable code for a negative discriminant under an unsigned scalar enum representation. | `Unsigned enum representation <representation> cannot hold <value>` |
+| `SEM0150` | Stable code for a member missing from a resolved scalar enum. | `Enum <enumName> has no member <member>` |
+| `SEM0151` | Stable code for a canonical member used through or required by another enum. | `Enum member of <actual> cannot be used as <expected>` |
+| `SEM0152` | Stable code for implicit mixing between a scalar enum and an integer. | `<integer> does not implicitly construct <enumName>`<br>`<enumName> does not implicitly convert to <integer>` |
+| `SEM0153` | Stable code for equality between distinct canonical scalar enums. | `Equality requires one enum type, not <left> and <right>` |
+| `SEM0154` | Stable code for direct ordering of scalar enum values. | `Enum <enumName> does not support <operator>; compare backing values explicitly` |
+| `SEM0155` | Stable code for a scalar enum match that leaves canonical members uncovered. | `Match over <enum> does not cover <join>` |
+| `SEM0156` | Stable code for a repeated unguarded scalar enum member arm. | `Duplicate enum match arm <member>` |
+| `SEM0157` | Stable code for a scalar enum arm following an unguarded wildcard. | `` Enum match arm is unreachable after `_` `` |
+| `SEM0158` | Stable code for a scalar enum pattern naming a member of another enum. | `Enum pattern from <actual> cannot match <expected>` |
+| `SEM0159` | Stable code for an integer literal pattern used against a scalar enum. | `Integer pattern <value> cannot match enum <enum>` |
 
 ## Ownership (`OWN`)
 

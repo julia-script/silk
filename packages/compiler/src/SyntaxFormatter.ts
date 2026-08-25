@@ -1350,6 +1350,8 @@ const printNode = (
       )
     }
     case 'ErrorPattern':
+    case 'EnumMemberPattern':
+    case 'IntegerPattern':
     case 'UniversalPattern':
     case 'RestPattern':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)

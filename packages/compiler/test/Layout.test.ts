@@ -276,6 +276,147 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('plans every scalar enum as one exact nominal integer lane with no metadata', () =>
+  Effect.gen(function* () {
+    const source = `enum Default { Only }
+enum(u8) U8 { Value }
+enum(u16) U16 { Value }
+enum(u32) U32 { Value }
+enum(u64) U64 { Value }
+enum(i8) I8 { Value = -1 }
+enum(i16) I16 { Value = -1 }
+enum(i32) I32 { Value = -1 }
+enum(i64) I64 { Value = -1 }
+pub fn main() -> i32 { return 0 }`
+    const expected: ReadonlyArray<readonly [string, Type.Builtin, number]> = [
+      ['Default', 'u8', 1],
+      ['U8', 'u8', 1],
+      ['U16', 'u16', 2],
+      ['U32', 'u32', 4],
+      ['U64', 'u64', 8],
+      ['I8', 'i8', 1],
+      ['I16', 'i16', 2],
+      ['I32', 'i32', 4],
+      ['I64', 'i64', 8],
+    ]
+    for (const target of Target.all) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'layout/scalar-enums',
+        ascii(source),
+        target.id,
+      )
+      const catalog = Analysis.layoutCatalogOf(snapshot)
+      assert.strictEqual(catalog._tag, 'Available')
+      if (catalog._tag !== 'Available') continue
+      for (const [name, lane, bytes] of expected) {
+        const entry = Layout.catalogEntry(catalog.value, Type.nominal('layout/scalar-enums', name))
+        assert.strictEqual(entry?._tag, 'LayoutEntry')
+        if (entry?._tag !== 'LayoutEntry') continue
+        assert.strictEqual(entry.copy, true)
+        assert.strictEqual(entry.size, bytes)
+        assert.strictEqual(entry.alignment, bytes)
+        assert.strictEqual(entry.representation._tag, 'ScalarEnum')
+        if (entry.representation._tag !== 'ScalarEnum' || !Type.isNominal(entry.type)) continue
+        assert.strictEqual(entry.representation.scalar, lane)
+        assert.strictEqual(entry.representation.bits, bytes * 8)
+        assert.strictEqual(
+          entry.representation.signedness,
+          lane.startsWith('i') ? 'Signed' : 'Unsigned',
+        )
+        assert.strictEqual('hiddenMetadata' in entry.representation, false)
+        assert.isUndefined(entry.executable)
+        const shape = Layout.callingShapes(target, [entry]).at(0)
+        assert.deepEqual(shape?.tree, {
+          _tag: 'ScalarEnumShape',
+          type: entry.type,
+          lane,
+          laneCount: 1,
+        })
+        assert.strictEqual(shape?.laneCount, 1)
+        assert.deepEqual(shape?.lanes, [{ _tag: 'CallingLane', path: [], type: lane }])
+        assert.deepEqual(LayoutVerify.verifyCatalog(catalog.value), [])
+      }
+    }
+  }),
+)
+
+it.effect('rejects malformed scalar enum width, signedness, metadata, and calling lanes', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/verify-scalar-enum',
+      ascii(`enum State { Ready }
+pub fn main() -> i32 { let state = State.Ready drop state return 0 }`),
+    )
+    const planned = Analysis.layoutOf(snapshot)
+    assert.strictEqual(planned._tag, 'Available')
+    if (planned._tag !== 'Available') return
+    const entry = Layout.entry(planned.value, Type.nominal('layout/verify-scalar-enum', 'State'))
+    assert.strictEqual(entry?.representation._tag, 'ScalarEnum')
+    if (entry?.representation._tag !== 'ScalarEnum' || !Type.isNominal(entry.type)) return
+    const enumType = entry.type
+    const malformedLane: 'u16' = 'u16'
+    const malformedBits: 16 = 16
+    const malformedSignedness: 'Signed' = 'Signed'
+    const malformedRepresentation = {
+      ...entry.representation,
+      scalar: malformedLane,
+      bits: malformedBits,
+      signedness: malformedSignedness,
+      hiddenMetadata: 1,
+    }
+    const malformedEntry: Layout.Entry = {
+      ...entry,
+      size: 2,
+      alignment: 2,
+      representation: malformedRepresentation,
+    }
+    const malformedShape: ReadonlyArray<Layout.CallingShape> = planned.value.callingShapes.map(
+      (shape) =>
+        Type.equals(shape.type, entry.type)
+          ? {
+              ...shape,
+              tree: { _tag: 'ScalarEnumShape', type: enumType, lane: 'i16', laneCount: 1 },
+              lanes: [{ _tag: 'CallingLane', path: [], type: 'i16' }],
+            }
+          : shape,
+    )
+    const malformed: Layout.Plan = {
+      ...planned.value,
+      entries: planned.value.entries.map((candidate) =>
+        Type.equals(candidate.type, entry.type) ? malformedEntry : candidate,
+      ),
+      callingShapes: malformedShape,
+    }
+    assert.deepEqual(
+      LayoutVerify.verify(malformed).map((violation) => violation.rule),
+      ['InvalidScalar', 'InvalidCallingShape'],
+    )
+  }),
+)
+
+it.effect('isolates invalid scalar enum layouts from valid peers', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'layout/invalid-scalar-enum',
+      ascii(`enum(usize) Broken { Value }
+enum Good { Only }
+pub fn main() -> i32 { return 0 }`),
+    )
+    const catalog = Analysis.layoutCatalogOf(snapshot)
+    assert.strictEqual(catalog._tag, 'Available')
+    if (catalog._tag !== 'Available') return
+    assert.strictEqual(
+      Layout.catalogEntry(catalog.value, Type.nominal('layout/invalid-scalar-enum', 'Broken'))
+        ?._tag,
+      'UnavailableLayoutEntry',
+    )
+    assert.strictEqual(
+      Layout.catalogEntry(catalog.value, Type.nominal('layout/invalid-scalar-enum', 'Good'))?._tag,
+      'LayoutEntry',
+    )
+  }),
+)
+
 it('orders and encodes canonical scalar entries identically on every target', () => {
   for (const target of Target.all) {
     const first = Layout.make(target, ['i32', 'bool', 'i32'])

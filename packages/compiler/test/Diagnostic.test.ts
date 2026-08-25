@@ -23,6 +23,202 @@ const build = () => {
   return { lexical, parser, semantic }
 }
 
+it('publishes structured scalar enum diagnostics with exact related spans', () => {
+  const declaration = spanAt(0, 12)
+  const first = spanAt(16, 21)
+  const duplicate = spanAt(24, 29)
+  const literal = spanAt(32, 35)
+  const diagnostics = [
+    Diagnostic.emptyEnum('Empty', declaration),
+    Diagnostic.unsupportedEnumRepresentation('usize', ['u8', 'i8'], literal),
+    Diagnostic.duplicateEnumMemberName('Ready', first, duplicate),
+    Diagnostic.duplicateEnumDiscriminant(3n, first, duplicate),
+    Diagnostic.enumDiscriminantOutOfRange('i8', 128n, -128n, 127n, literal),
+    Diagnostic.enumImplicitDiscriminantOverflow('u8', 255n, 255n, duplicate),
+    Diagnostic.unsignedEnumNegativeDiscriminant('u8', -1n, literal),
+    Diagnostic.unknownEnumMember('Status', 'Missing', duplicate),
+    Diagnostic.wrongEnumMember('Status', 'Other', duplicate),
+    Diagnostic.enumIntegerMismatch('Status', 'u8', 'IntegerToEnum', literal),
+    Diagnostic.enumIntegerMismatch('Status', 'u8', 'EnumToInteger', literal),
+    Diagnostic.crossEnumEquality('Status', 'Other', duplicate),
+    Diagnostic.enumOrdering('Status', '<', duplicate),
+  ]
+
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+      span: [diagnostic.span.start, diagnostic.span.end],
+      related: diagnostic.relatedSpans?.map((related) => [related.span.start, related.span.end]),
+    })),
+    [
+      {
+        code: 'SEM0143',
+        reason: { _tag: 'EmptyEnum', enum: 'Empty' },
+        span: [0, 12],
+        related: undefined,
+      },
+      {
+        code: 'SEM0144',
+        reason: {
+          _tag: 'UnsupportedEnumRepresentation',
+          spelling: 'usize',
+          allowed: ['u8', 'i8'],
+        },
+        span: [32, 35],
+        related: undefined,
+      },
+      {
+        code: 'SEM0145',
+        reason: { _tag: 'DuplicateEnumMemberName', spelling: 'Ready', originalSpan: first },
+        span: [24, 29],
+        related: [[16, 21]],
+      },
+      {
+        code: 'SEM0146',
+        reason: { _tag: 'DuplicateEnumDiscriminant', value: '3', originalSpan: first },
+        span: [24, 29],
+        related: [[16, 21]],
+      },
+      {
+        code: 'SEM0147',
+        reason: {
+          _tag: 'EnumDiscriminantOutOfRange',
+          representation: 'i8',
+          value: '128',
+          minimum: '-128',
+          maximum: '127',
+        },
+        span: [32, 35],
+        related: undefined,
+      },
+      {
+        code: 'SEM0148',
+        reason: {
+          _tag: 'EnumImplicitDiscriminantOverflow',
+          representation: 'u8',
+          predecessor: '255',
+          maximum: '255',
+        },
+        span: [24, 29],
+        related: undefined,
+      },
+      {
+        code: 'SEM0149',
+        reason: {
+          _tag: 'UnsignedEnumNegativeDiscriminant',
+          representation: 'u8',
+          value: '-1',
+        },
+        span: [32, 35],
+        related: undefined,
+      },
+      {
+        code: 'SEM0150',
+        reason: { _tag: 'UnknownEnumMember', enum: 'Status', member: 'Missing' },
+        span: [24, 29],
+        related: undefined,
+      },
+      {
+        code: 'SEM0151',
+        reason: { _tag: 'WrongEnumMember', expected: 'Status', actual: 'Other' },
+        span: [24, 29],
+        related: undefined,
+      },
+      {
+        code: 'SEM0152',
+        reason: {
+          _tag: 'EnumIntegerMismatch',
+          enum: 'Status',
+          integer: 'u8',
+          direction: 'IntegerToEnum',
+        },
+        span: [32, 35],
+        related: undefined,
+      },
+      {
+        code: 'SEM0152',
+        reason: {
+          _tag: 'EnumIntegerMismatch',
+          enum: 'Status',
+          integer: 'u8',
+          direction: 'EnumToInteger',
+        },
+        span: [32, 35],
+        related: undefined,
+      },
+      {
+        code: 'SEM0153',
+        reason: { _tag: 'CrossEnumEquality', left: 'Status', right: 'Other' },
+        span: [24, 29],
+        related: undefined,
+      },
+      {
+        code: 'SEM0154',
+        reason: { _tag: 'EnumOrdering', enum: 'Status', operator: '<' },
+        span: [24, 29],
+        related: undefined,
+      },
+    ],
+  )
+})
+
+it('publishes structured scalar enum match diagnostics with exact related spans', () => {
+  const match = spanAt(0, 40)
+  const first = spanAt(4, 16)
+  const duplicate = spanAt(20, 32)
+  const wildcard = spanAt(2, 8)
+  const arm = spanAt(10, 20)
+  const diagnostics = [
+    Diagnostic.incompleteEnumMatch('Status', ['Status.Unknown'], match),
+    Diagnostic.duplicateEnumMatchArm('Status.Ready', first, duplicate),
+    Diagnostic.enumMatchArmAfterWildcard(wildcard, arm),
+    Diagnostic.foreignEnumPattern('Status', 'Other', duplicate),
+    Diagnostic.integerPatternAgainstEnum('Status', 1n, arm),
+  ]
+
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      reason: diagnostic.reason,
+      span: [diagnostic.span.start, diagnostic.span.end],
+      related: diagnostic.relatedSpans?.map((related) => [related.span.start, related.span.end]),
+    })),
+    [
+      {
+        code: 'SEM0155',
+        reason: { _tag: 'IncompleteEnumMatch', enum: 'Status', missing: ['Status.Unknown'] },
+        span: [0, 40],
+        related: undefined,
+      },
+      {
+        code: 'SEM0156',
+        reason: { _tag: 'DuplicateEnumMatchArm', member: 'Status.Ready', originalSpan: first },
+        span: [20, 32],
+        related: [[4, 16]],
+      },
+      {
+        code: 'SEM0157',
+        reason: { _tag: 'EnumMatchArmAfterWildcard', wildcardSpan: wildcard },
+        span: [10, 20],
+        related: [[2, 8]],
+      },
+      {
+        code: 'SEM0158',
+        reason: { _tag: 'ForeignEnumPattern', expected: 'Status', actual: 'Other' },
+        span: [20, 32],
+        related: undefined,
+      },
+      {
+        code: 'SEM0159',
+        reason: { _tag: 'IntegerPatternAgainstEnum', enum: 'Status', value: '1' },
+        span: [10, 20],
+        related: undefined,
+      },
+    ],
+  )
+})
+
 it('merges phase collections into one deterministic driver order', () => {
   const { lexical, parser, semantic } = build()
   const merged = Diagnostic.merge(lexical, parser, semantic)

@@ -646,6 +646,7 @@ const outcomeOf = (region: Region): Outcome | undefined =>
 export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'Literal':
+    case 'EnumConstant':
     case 'StaticView':
     case 'StaticString':
       return [operation.destination]
@@ -655,7 +656,10 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'StringByteLength':
       return [operation.destination, operation.string]
     case 'StringEqualsExact':
+    case 'EnumEquality':
       return [operation.destination, operation.left, operation.right]
+    case 'EnumValue':
+      return [operation.destination, operation.source]
     case 'PackEffectComposite':
       return [operation.destination, operation.source]
     case 'Binary':
@@ -943,6 +947,37 @@ const sameMembers = (
   left.every((member, ordinal) => {
     const candidate = right.at(ordinal)
     return candidate !== undefined && SilkType.equals(member, candidate)
+  })
+
+const sameCoverage = (
+  left: ReadonlyArray<Match.CoverageIdentity>,
+  right: ReadonlyArray<Match.CoverageIdentity>,
+): boolean =>
+  left.length === right.length &&
+  left.every((member, ordinal) => {
+    const candidate = right.at(ordinal)
+    return candidate !== undefined && Match.identityEquals(member, candidate)
+  })
+
+const enumRepresentationMatches = (
+  left: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>,
+  right: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>,
+): boolean =>
+  left.enum.module === right.enum.module &&
+  left.enum.name === right.enum.name &&
+  left.scalar === right.scalar &&
+  left.bits === right.bits &&
+  left.signedness === right.signedness &&
+  left.members.length === right.members.length &&
+  left.members.every((member, ordinal) => {
+    const candidate = right.members.at(ordinal)
+    return (
+      candidate !== undefined &&
+      member.member.enum.module === candidate.member.enum.module &&
+      member.member.enum.name === candidate.member.enum.name &&
+      member.member.name === candidate.member.name &&
+      member.discriminant === candidate.discriminant
+    )
   })
 
 export const targetText = (target: DeclarationFacts.CanonicalId): string =>
@@ -1402,6 +1437,7 @@ const storedEffectCleanupValid = (
 const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.SemanticType> => {
   switch (operation._tag) {
     case 'Literal':
+    case 'EnumConstant':
     case 'StaticView':
     case 'Binary':
     case 'ValidateLayout':
@@ -1424,6 +1460,13 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'StringByteLength':
     case 'StringEqualsExact':
       return [SilkType.string, semanticType(operation.type)]
+    case 'EnumValue':
+      return [
+        SilkType.nominal(operation.enum.module, operation.enum.name),
+        semanticType(operation.type),
+      ]
+    case 'EnumEquality':
+      return [SilkType.nominal(operation.enum.module, operation.enum.name), 'bool']
     case 'ConvertInteger':
     case 'ConvertScalar':
     case 'ReinterpretScalar':
@@ -1599,11 +1642,11 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [
         semanticType(operation.scrutineeType),
         semanticType(operation.type),
-        ...operation.members,
+        ...operation.members.map(Match.sourceType),
         ...operation.arms.flatMap((arm) => [
-          ...(arm.member === undefined ? [] : [arm.member]),
-          ...arm.before,
-          ...arm.after,
+          ...(arm.member === undefined ? [] : [Match.sourceType(arm.member)]),
+          ...arm.before.map(Match.sourceType),
+          ...arm.after.map(Match.sourceType),
           ...arm.bindings.map((binding) => semanticType(binding.type)),
           ...(arm.guard?.operations.flatMap(operationTypes) ?? []),
           ...arm.selected.operations.flatMap(operationTypes),
@@ -1633,7 +1676,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'StringByteLength':
       return [operation.string]
     case 'StringEqualsExact':
+    case 'EnumEquality':
       return [operation.left, operation.right]
+    case 'EnumValue':
+      return [operation.source]
     case 'PackEffectComposite':
       return [operation.source]
     case 'Binary':
@@ -1744,6 +1790,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'ShortCircuit':
       return [operation.left]
     case 'Literal':
+    case 'EnumConstant':
     case 'StaticView':
     case 'StaticString':
     case 'BeginLoan':
@@ -2905,6 +2952,73 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               'exact string equality requires two string operands and a bool destination',
             )
           }
+        }
+        if (
+          operation._tag === 'EnumConstant' ||
+          operation._tag === 'EnumValue' ||
+          operation._tag === 'EnumEquality'
+        ) {
+          const enumType = SilkType.nominal(operation.enum.module, operation.enum.name)
+          const layoutEntry = Layout.entry(self.layout, enumType)
+          const canonical =
+            layoutEntry?.representation._tag === 'ScalarEnum'
+              ? layoutEntry.representation
+              : undefined
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          let valid =
+            canonical !== undefined &&
+            enumRepresentationMatches(operation.representation, canonical) &&
+            operation.representation.enum.module === operation.enum.module &&
+            operation.representation.enum.name === operation.enum.name
+          if (operation._tag === 'EnumConstant') {
+            const declared = canonical?.members.find(
+              (member) =>
+                member.member.enum.module === operation.member.enum.module &&
+                member.member.enum.name === operation.member.enum.name &&
+                member.member.name === operation.member.name,
+            )
+            valid =
+              valid &&
+              operation.type._tag === 'Enum' &&
+              enumRepresentationMatches(operation.type.representation, operation.representation) &&
+              SilkType.equals(operation.type.type, enumType) &&
+              destination?._tag === 'Enum' &&
+              SilkType.equals(destination.type, enumType) &&
+              declared !== undefined &&
+              declared.discriminant === operation.discriminant
+          } else if (operation._tag === 'EnumValue') {
+            const source = fn.localTypes.at(operation.source.ordinal)
+            valid =
+              valid &&
+              source?._tag === 'Enum' &&
+              SilkType.equals(source.type, enumType) &&
+              enumRepresentationMatches(source.representation, operation.representation) &&
+              destination?._tag === operation.representation.scalar &&
+              operation.type._tag === operation.representation.scalar
+          } else {
+            const left = fn.localTypes.at(operation.left.ordinal)
+            const right = fn.localTypes.at(operation.right.ordinal)
+            valid =
+              valid &&
+              left?._tag === 'Enum' &&
+              right?._tag === 'Enum' &&
+              SilkType.equals(left.type, enumType) &&
+              SilkType.equals(right.type, enumType) &&
+              enumRepresentationMatches(left.representation, operation.representation) &&
+              enumRepresentationMatches(right.representation, operation.representation) &&
+              destination?._tag === 'bool' &&
+              operation.type._tag === 'bool'
+          }
+          if (!valid)
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEnumOperation',
+                function: fn.id,
+                region: region.id,
+                detail: `${operation._tag} disagrees with its canonical enum identity, member, discriminant, or representation lane`,
+              }),
+            )
         }
         if (operation._tag === 'StaticView') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -4071,8 +4185,18 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
             semanticType(operation.scrutineeType),
           )
           const plannedResult = Layout.callingShape(self.layout, semanticType(operation.type))
+          const enumScrutineeValid =
+            operation.scrutineeType._tag !== 'Enum' ||
+            (source?._tag === 'Enum' &&
+              enumRepresentationMatches(
+                source.representation,
+                operation.scrutineeType.representation,
+              ) &&
+              Layout.entry(self.layout, operation.scrutineeType.type)?.representation._tag ===
+                'ScalarEnum')
           if (
             source === undefined ||
+            !enumScrutineeValid ||
             destination === undefined ||
             !SilkType.equals(semanticType(source), semanticType(operation.scrutineeType)) ||
             !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
@@ -4105,8 +4229,26 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               guarded: arm.guard !== undefined,
             })),
           )
+          const enumRepresentation =
+            operation.scrutineeType._tag === 'Enum'
+              ? operation.scrutineeType.representation
+              : undefined
+          const enumMembers =
+            enumRepresentation === undefined
+              ? undefined
+              : enumRepresentation.members.map((member) =>
+                  Match.enumMember(enumRepresentation.enum, member.member),
+                )
+          const enumCoverageValid =
+            enumMembers === undefined ||
+            (sameCoverage(operation.members, enumMembers) &&
+              operation.members.every((member) => member._tag === 'EnumMember') &&
+              operation.arms.every(
+                (arm) => arm.member === undefined || arm.member._tag === 'EnumMember',
+              ))
           const decisionsValid =
             coverage.exhaustive &&
+            enumCoverageValid &&
             operation.decisions.length === operation.members.length &&
             operation.decisions.every((decision, ordinal) => {
               const member = operation.members.at(ordinal)
@@ -4115,11 +4257,11 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                   arm.universal ||
                   (arm.member !== undefined &&
                     member !== undefined &&
-                    SilkType.equals(arm.member, member)),
+                    Match.identityEquals(arm.member, member)),
               )
               return (
                 member !== undefined &&
-                SilkType.equals(decision.member, member) &&
+                Match.identityEquals(decision.member, member) &&
                 decision.candidates.length === expected.length &&
                 decision.candidates.every(
                   (candidate, candidateOrdinal) =>
@@ -4131,8 +4273,8 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               const transition = coverage.transitions.at(ordinal)
               return (
                 transition?.reachable === true &&
-                sameMembers(arm.before, transition.before) &&
-                sameMembers(arm.after, transition.after)
+                sameCoverage(arm.before, transition.before) &&
+                sameCoverage(arm.after, transition.after)
               )
             })
           if (!decisionsValid) {
@@ -4153,7 +4295,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
               const selected =
                 arm.member === undefined
                   ? undefined
-                  : fieldPathType(self.layout, arm.member, binding.path)
+                  : fieldPathType(self.layout, Match.sourceType(arm.member), binding.path)
               if (
                 localType === undefined ||
                 selected === undefined ||
@@ -4212,7 +4354,7 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
                     const selected =
                       arm.member === undefined
                         ? undefined
-                        : fieldPathType(self.layout, arm.member, entry.path)
+                        : fieldPathType(self.layout, Match.sourceType(arm.member), entry.path)
                     return selected !== undefined && SilkType.equals(selected, entry.cleanup.type)
                   })
                 : arm.selected.cleanup.length === 0)

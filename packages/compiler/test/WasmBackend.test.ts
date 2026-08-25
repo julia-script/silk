@@ -7,7 +7,7 @@ import * as Backend from '../src/Backend.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as WasmBackend from '../src/WasmBackend.js'
-import { corpus } from './support/corpus.js'
+import { corpus, scalarEnumLaneAcceptance } from './support/corpus.js'
 import * as WasmMain from './support/WasmMain.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -75,6 +75,37 @@ it.effect('emits an instantiable module whose entry is exported as silk_main', (
     assert.strictEqual(artifact.backend, 'wasm')
     assert.deepEqual(Array.from(artifact.bytes.slice(0, 8)), [0, 97, 115, 109, 1, 0, 0, 0])
     assert.match(artifact.wat, /\(export "silk_main"/)
+  }),
+)
+
+it.effect('lowers scalar enums through verified i32 and i64 lanes and exact narrow storage', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* snapshotOf(scalarEnumLaneAcceptance)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const evaluated = Analysis.evaluate(snapshot)
+    assert.strictEqual(evaluated._tag, 'Completed')
+    if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+
+    const artifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    assert.strictEqual(yield* WasmMain.invoke(artifact.bytes, 'WasmBackend.scalarEnums'), 42)
+    assert.match(artifact.wat, /i32\.load8_s/)
+    assert.match(artifact.wat, /i32\.load8_u/)
+    assert.match(artifact.wat, /i32\.store8/)
+    assert.match(artifact.wat, /i64\.const 4294967297/)
+    assert.match(artifact.wat, /i64\.eq/)
+
+    const wordSnapshot = yield* snapshotOf(scalarEnumWordStorage)
+    assert.deepEqual(Analysis.diagnostics(wordSnapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(wordSnapshot)), [])
+    const wordArtifact = yield* Analysis.codegenWasm(wordSnapshot, { mode: 'release' })
+    assert.strictEqual(
+      yield* WasmMain.invoke(wordArtifact.bytes, 'WasmBackend.scalarEnumWords'),
+      42,
+    )
+    assert.match(wordArtifact.wat, /i32\.load16_s/)
+    assert.match(wordArtifact.wat, /i32\.load16_u/)
+    assert.match(wordArtifact.wat, /i32\.store16/)
   }),
 )
 
@@ -166,6 +197,19 @@ pub fn main() -> i32 { return identity(identity(42)) }`
 
 const branchSource =
   'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'
+
+const scalarEnumWordStorage = `enum(i16) SignedWord { Negative = -300, Positive = 300 }
+enum(u16) UnsignedWord { Low = 2, High = 60000 }
+struct StoredWords { signed: SignedWord unsigned: UnsignedWord }
+fn inspect(words: &StoredWords) -> i32 {
+  if words.signed != SignedWord.Negative { return 1 }
+  if words.unsigned != UnsignedWord.High { return 2 }
+  return 42
+}
+pub fn main() -> i32 {
+  let words = StoredWords { signed: SignedWord.Negative, unsigned: UnsignedWord.High }
+  return inspect(&words)
+}`
 
 const matchSource = `import silk.i32 as i32
 pub struct Left { value: i32 }

@@ -27,7 +27,7 @@ import * as LayoutPlan from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import * as Scalar from './Scalar.js'
@@ -4241,6 +4241,34 @@ const emitShortCircuitOperation = (
   ]
 }
 
+const emitEnumConstantOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'EnumConstant' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => [
+  operation.representation.bits === 64
+    ? Instr.i64Const(BigInt.asIntN(64, operation.discriminant))
+    : Instr.i32Const(Number(BigInt.asIntN(32, operation.discriminant))),
+  Instr.localSet(state.scalar(operation.destination)),
+]
+
+const emitEnumValueOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'EnumValue' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> =>
+  state.copy(state.slots(operation.source), state.slots(operation.destination))
+
+const emitEnumEqualityOperation = (
+  operation: Extract<Mir.Operation, { readonly _tag: 'EnumEquality' }>,
+  state: WasmOperationContext,
+): ReadonlyArray<Instr.Instr> => [
+  Instr.localGet(state.scalar(operation.left)),
+  Instr.localGet(state.scalar(operation.right)),
+  Instr.op(
+    `${operation.representation.bits === 64 ? 'i64' : 'i32'}.${operation.negated ? 'ne' : 'eq'}`,
+  ),
+  Instr.localSet(state.scalar(operation.destination)),
+]
+
 const emitMatchOperation = (
   operation: Extract<Mir.Operation, { readonly _tag: 'Match' }>,
   state: WasmOperationContext,
@@ -4259,7 +4287,11 @@ const emitMatchOperation = (
     const arm = operation.arms.find((entry) => entry.id.ordinal === candidate.ordinal)
     if (arm === undefined) throw new RangeError('Wasm match lost a candidate arm')
     const bindings = arm.bindings.flatMap((binding) => {
-      const physical = LayoutPlan.memberFieldSlots(operation.scrutineeShape, member, binding.path)
+      const physical = LayoutPlan.memberFieldSlots(
+        operation.scrutineeShape,
+        Match.sourceType(member),
+        binding.path,
+      )
       if (physical === undefined) {
         throw new RangeError('Wasm match lost a pattern payload path')
       }
@@ -4289,6 +4321,27 @@ const emitMatchOperation = (
     const decision = operation.decisions.at(ordinal)
     if (decision === undefined) return [Instr.op('unreachable')]
     const selected = emitCandidates(decision.member, decision.candidates)
+    if (operation.scrutineeType._tag === 'Enum') {
+      if (decision.member._tag !== 'EnumMember')
+        throw new RangeError('Verified scalar enum match lost its member identity')
+      const member = decision.member.member
+      const declared = operation.scrutineeType.representation.members.find(
+        (candidate) =>
+          candidate.member.enum.module === member.enum.module &&
+          candidate.member.enum.name === member.enum.name &&
+          candidate.member.name === member.name,
+      )
+      if (declared === undefined)
+        throw new RangeError('Verified scalar enum match lost its declared discriminant')
+      return [
+        Instr.localGet(scalar(operation.scrutinee)),
+        operation.scrutineeType.representation.bits === 64
+          ? Instr.i64Const(BigInt.asIntN(64, declared.discriminant))
+          : Instr.i32Const(Number(BigInt.asIntN(32, declared.discriminant))),
+        Instr.op(operation.scrutineeType.representation.bits === 64 ? 'i64.eq' : 'i32.eq'),
+        Instr.ifElse(Instr.emptyBlockType, selected, emitDecisions(ordinal + 1)),
+      ]
+    }
     if (operation.scrutineeType._tag !== 'Union') return selected
     const tag = slots(operation.scrutinee).at(0)
     if (tag === undefined) throw new RangeError('Wasm union match has no tag lane')
@@ -6766,6 +6819,12 @@ const emitOperationWithContext = (
   context: WasmOperationContext,
 ): ReadonlyArray<Instr.Instr> => {
   switch (operation._tag) {
+    case 'EnumConstant':
+      return emitEnumConstantOperation(operation, context)
+    case 'EnumValue':
+      return emitEnumValueOperation(operation, context)
+    case 'EnumEquality':
+      return emitEnumEqualityOperation(operation, context)
     case 'StaticString':
       return emitStaticStringOperation(operation, context)
     case 'StringFromUtf8Unchecked':

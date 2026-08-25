@@ -181,6 +181,56 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`,
   assert.strictEqual(main.bindings.length, 1)
 })
 
+it('treats valid scalar enums as cleanup-free Copy values while explicit move still consumes', () => {
+  const reusable = check(
+    'ownership://scalar-enum-copy.silk',
+    `enum State { Ready, Done }
+fn choose(left: State, right: State) -> State { return right }
+pub fn main() -> i32 {
+  let state = State.Ready
+  let copy = state
+  let selected = choose(state, copy)
+  drop selected
+  return 0
+}`,
+  )
+  const main = reusable.functions.at(1)
+  assert.strictEqual(main?.verdict._tag, 'Satisfied')
+  assert.deepEqual(
+    main?.bindings.map((binding) => ({
+      name: binding.name,
+      category: binding.category._tag,
+      cleanup: binding.cleanup._tag,
+    })),
+    [
+      { name: 'state', category: 'Copyable', cleanup: 'NoCleanup' },
+      { name: 'copy', category: 'Copyable', cleanup: 'NoCleanup' },
+      { name: 'selected', category: 'Copyable', cleanup: 'NoCleanup' },
+    ],
+  )
+  assert.ok(
+    main?.exits
+      .flatMap((exit) => exit.releases)
+      .every((release) => release.cleanup._tag === 'NoCleanup'),
+  )
+
+  const consumed = check(
+    'ownership://scalar-enum-move.silk',
+    `enum State { Ready }
+fn choose(left: State, right: State) -> State { return right }
+pub fn main() -> i32 {
+  let state = State.Ready
+  let selected = choose(move state, state)
+  drop selected
+  return 0
+}`,
+  )
+  assert.deepEqual(
+    consumed.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+})
+
 it('accepts an ordinary read before the consuming move', () => {
   const facts = check(
     'golden://read-then-move.silk',

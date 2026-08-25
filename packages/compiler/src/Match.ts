@@ -34,44 +34,103 @@ export interface BindingId {
   readonly ordinal: number
 }
 
+/** One exact inhabitant in a closed match coverage domain. */
+export type CoverageIdentity =
+  | { readonly _tag: 'StructuralTypeMember'; readonly type: Type.Type }
+  | {
+      readonly _tag: 'EnumMember'
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly member: DeclarationFacts.CanonicalEnumMemberId
+      readonly type: Type.Nominal
+    }
+
+/** Creates the coverage identity for one structural type member. */
+export const structuralMember = (type: Type.Type): CoverageIdentity =>
+  Object.freeze({ _tag: 'StructuralTypeMember', type })
+
+/** Creates the coverage identity for one declared scalar enum member. */
+export const enumMember = (
+  enum_: DeclarationFacts.CanonicalId,
+  member: DeclarationFacts.CanonicalEnumMemberId,
+): CoverageIdentity =>
+  Object.freeze({
+    _tag: 'EnumMember',
+    enum: enum_,
+    member,
+    type: Type.nominal(enum_.module, enum_.name),
+  })
+
+/** Tests canonical coverage identity without erasing enum members to types or integers. */
+export const identityEquals = (self: CoverageIdentity, other: CoverageIdentity): boolean =>
+  self._tag === 'StructuralTypeMember'
+    ? other._tag === 'StructuralTypeMember' && Type.equals(self.type, other.type)
+    : other._tag === 'EnumMember' &&
+      self.enum.module === other.enum.module &&
+      self.enum.name === other.enum.name &&
+      self.member.name === other.member.name
+
+/** Returns the source type selected by one coverage identity. */
+export const sourceType = (self: CoverageIdentity): Type.Type => self.type
+
+/** Encodes one coverage identity for diagnostics and deterministic snapshots. */
+export const encodeIdentity = (self: CoverageIdentity): string =>
+  self._tag === 'StructuralTypeMember'
+    ? Type.encode(self.type)
+    : `${self.enum.module}.${self.enum.name}.${self.member.name}`
+
 /** One source decision reduced to the facts that affect coverage. */
-export interface Decision<Member extends Type.Type = Type.Type> {
-  readonly member?: Member
+export interface Decision {
+  readonly member?: CoverageIdentity
   readonly universal: boolean
   readonly guarded: boolean
 }
 
 /** One arm's immutable canonical coverage transition. */
-export interface CoverageTransition<Member extends Type.Type = Type.Type> {
-  readonly before: ReadonlyArray<Member>
-  readonly after: ReadonlyArray<Member>
+export interface CoverageTransition {
+  readonly before: ReadonlyArray<CoverageIdentity>
+  readonly after: ReadonlyArray<CoverageIdentity>
   readonly reachable: boolean
 }
 
-/** Complete ordered coverage result for one nominal or structural-union scrutinee. */
-export interface Coverage<Member extends Type.Type = Type.Type> {
-  readonly initial: ReadonlyArray<Member>
-  readonly transitions: ReadonlyArray<CoverageTransition<Member>>
-  readonly missing: ReadonlyArray<Member>
+/** Complete ordered coverage result for one nominal, structural-union, or scalar-enum scrutinee. */
+export interface Coverage {
+  readonly initial: ReadonlyArray<CoverageIdentity>
+  readonly transitions: ReadonlyArray<CoverageTransition>
+  readonly missing: ReadonlyArray<CoverageIdentity>
   readonly exhaustive: boolean
 }
 
-const contains = <Member extends Type.Type>(
-  members: ReadonlyArray<Member>,
-  member: Member,
-): boolean => members.some((candidate) => Type.equals(candidate, member))
+const contains = (members: ReadonlyArray<CoverageIdentity>, member: CoverageIdentity): boolean =>
+  members.some((candidate) => identityEquals(candidate, member))
 
-/** Returns the canonical exact-member set observed by a pattern decision. */
-export const membersOf = (type: Type.Type): ReadonlyArray<Type.Type> =>
-  Type.isUnion(type) ? type.members : Type.isNever(type) ? Object.freeze([]) : Object.freeze([type])
+/** Returns the canonical structural exact-member set observed by a pattern decision. */
+export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> =>
+  Type.isUnion(type)
+    ? Object.freeze(type.members.map(structuralMember))
+    : Type.isNever(type)
+      ? Object.freeze([])
+      : Object.freeze([structuralMember(type)])
+
+/** Returns the canonical source-ordered member set of one scalar enum. */
+export const enumMembersOf = (
+  declaration: DeclarationFacts.EnumFact,
+): ReadonlyArray<CoverageIdentity> => {
+  if (declaration.canonical._tag !== 'Canonical') return Object.freeze([])
+  const enum_ = declaration.canonical.id
+  return Object.freeze(
+    declaration.members.flatMap((member) =>
+      member.canonical._tag === 'Canonical' ? [enumMember(enum_, member.canonical.id)] : [],
+    ),
+  )
+}
 
 /** Folds source decisions over one canonical remaining-member set. */
-export const cover = <Member extends Type.Type>(
-  initial: ReadonlyArray<Member>,
-  decisions: ReadonlyArray<Decision<Member>>,
-): Coverage<Member> => {
-  let remaining = Object.freeze([...initial]) as ReadonlyArray<Member>
-  const transitions: Array<CoverageTransition<Member>> = []
+export const cover = (
+  initial: ReadonlyArray<CoverageIdentity>,
+  decisions: ReadonlyArray<Decision>,
+): Coverage => {
+  let remaining = Object.freeze([...initial])
+  const transitions: Array<CoverageTransition> = []
   for (const decision of decisions) {
     const before = remaining
     const reachable = decision.universal
@@ -85,7 +144,7 @@ export const cover = <Member extends Type.Type>(
         : Object.freeze(
             before.filter(
               (candidate) =>
-                decision.member === undefined || !Type.equals(candidate, decision.member),
+                decision.member === undefined || !identityEquals(candidate, decision.member),
             ),
           )
     }

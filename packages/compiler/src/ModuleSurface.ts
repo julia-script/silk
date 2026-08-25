@@ -1782,6 +1782,68 @@ const structDependency = (value: DeclarationFacts.StructDependency): string =>
     array(value.types.map(type)),
   ])
 
+const enumMemberCanonicalState = (value: DeclarationFacts.EnumMemberCanonicalState): string => {
+  switch (value._tag) {
+    case 'Canonical':
+      return record('CanonicalEnumMember', [
+        value.id.enum.module,
+        value.id.enum.name,
+        value.id.name,
+      ])
+    case 'Duplicate':
+      return record('DuplicateEnumMember', [
+        value.original.enum.module,
+        value.original.enum.name,
+        value.original.name,
+      ])
+    case 'Unidentified':
+      return record('UnidentifiedEnumMember')
+    default:
+      return exhaustive(value)
+  }
+}
+
+const enumRepresentation = (value: DeclarationFacts.EnumRepresentationFact): string =>
+  value._tag === 'Available'
+    ? record('AvailableEnumRepresentation', [value.scalar.spelling, boolean(value.explicit)])
+    : record('UnavailableEnumRepresentation', [boolean(value.explicit), optional(value.spelling)])
+
+const enumDiscriminant = (value: DeclarationFacts.EnumDiscriminantFact): string =>
+  value._tag === 'Available'
+    ? record('AvailableEnumDiscriminant', [value.source, value.value.toString()])
+    : record('UnavailableEnumDiscriminant', [value.source, optional(value.attempted?.toString())])
+
+const enumMember = (value: DeclarationFacts.EnumMemberFact): string =>
+  record('EnumMember', [
+    number(value.id.ordinal),
+    enumMemberCanonicalState(value.canonical),
+    name(value.name),
+    enumDiscriminant(value.discriminant),
+  ])
+
+const enumAssociatedOperation = (value: DeclarationFacts.EnumAssociatedOperationFact): string =>
+  record('EnumAssociatedOperation', [
+    value.id.enum.module,
+    value.id.enum.name,
+    value.id.name,
+    type(value.parameter),
+    value.result.spelling,
+    value.intrinsic.actor,
+    value.intrinsic.name,
+  ])
+
+const enumDeclaration = (value: DeclarationFacts.EnumFact): string =>
+  record('EnumDeclaration', [
+    declarationIdOrdinal(value.id),
+    canonicalState(value.canonical),
+    value.visibility,
+    name(value.name),
+    enumRepresentation(value.representation),
+    array(value.members.map(enumMember)),
+    array(value.associatedOperations.map(enumAssociatedOperation)),
+    value.validity._tag,
+  ])
+
 const struct = (value: DeclarationFacts.StructFact): string =>
   record('StructDeclaration', [
     declarationIdOrdinal(value.id),
@@ -1880,6 +1942,8 @@ const member = (value: DeclarationFacts.MemberFact): string => {
       return declaration(value)
     case 'StructDeclaration':
       return struct(value)
+    case 'EnumDeclaration':
+      return enumDeclaration(value)
     case 'ServiceDeclaration':
       return service(value)
     case 'InterfaceDeclaration':

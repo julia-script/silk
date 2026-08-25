@@ -11,6 +11,41 @@ const ascii = (value: string): Uint8Array =>
 const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
 
+const scalarEnumNativeWidths = `enum(i8) Code8 { Selected = -1, Other = 1 }
+enum(i16) Code16 { Selected = -300, Other = 2 }
+enum(i32) Code32 { Selected = 70000, Other = 3 }
+enum(i64) Code64 { Selected = 4294967297, Other = 4 }
+fn identity8(value: Code8) -> Code8 { return value }
+fn identity16(value: Code16) -> Code16 { return value }
+fn identity32(value: Code32) -> Code32 { return value }
+fn identity64(value: Code64) -> Code64 { return value }
+pub fn main() -> i32 {
+  let code8 = identity8(Code8.Selected)
+  let unequal8 = code8 != Code8.Other
+  let raw8 = Code8.value(code8)
+  drop unequal8
+  drop raw8
+  let code16 = identity16(Code16.Selected)
+  let unequal16 = code16 != Code16.Other
+  let raw16 = Code16.value(code16)
+  drop unequal16
+  drop raw16
+  let code32 = identity32(Code32.Selected)
+  let unequal32 = code32 != Code32.Other
+  let raw32 = Code32.value(code32)
+  drop unequal32
+  drop raw32
+  let selected = identity64(Code64.Selected)
+  let equal64 = selected == Code64.Selected
+  let raw64 = Code64.value(selected)
+  drop equal64
+  drop raw64
+  return match selected {
+    Code64.Selected => 42
+    Code64.Other => 5
+  }
+}`
+
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
   const snapshot = yield* Analysis.ofSourceRealized(
     'golden/program',
@@ -22,6 +57,32 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
+
+it.effect('lowers scalar enums to exact native integer lanes and declared discriminants', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'golden/program',
+      ascii(scalarEnumNativeWidths),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+
+    assert.match(artifact.ir, /define i8 @silk_.*identity8.*\(i8/)
+    assert.match(artifact.ir, /define i16 @silk_.*identity16.*\(i16/)
+    assert.match(artifact.ir, /define i32 @silk_.*identity32.*\(i32/)
+    assert.match(artifact.ir, /define i64 @silk_.*identity64.*\(i64/)
+    assert.match(artifact.ir, /i8 -1/)
+    assert.match(artifact.ir, /i16 -300/)
+    assert.match(artifact.ir, /i32 70000/)
+    assert.match(artifact.ir, /i64 4294967297/)
+    assert.match(artifact.ir, /icmp ne i8/)
+    assert.match(artifact.ir, /icmp ne i16/)
+    assert.match(artifact.ir, /icmp ne i32/)
+    assert.match(artifact.ir, /icmp eq i64/)
+    assert.notInclude(artifact.ir, 'enum_tag')
+  }),
+)
 
 it.effect('emits one artifact per program with deterministic symbols', () =>
   Effect.gen(function* () {

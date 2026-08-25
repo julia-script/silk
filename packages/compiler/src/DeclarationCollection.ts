@@ -2,6 +2,7 @@ import * as Option from 'effect/Option'
 import type {
   ArrayLengthFact,
   BoundFact,
+  CanonicalEnumMemberId,
   CanonicalId,
   CanonicalState,
   ConformanceFact,
@@ -13,6 +14,11 @@ import type {
   DeclarationId,
   DeclaredName,
   DeclaredTypeFact,
+  EnumDiscriminantFact,
+  EnumFact,
+  EnumMemberFact,
+  EnumMemberId,
+  EnumRepresentationFact,
   FailureRowFact,
   FieldFact,
   FieldId,
@@ -36,6 +42,7 @@ import type {
   TypeResolution,
 } from './DeclarationFacts.js'
 import {
+  enumValueOperation,
   interfaceOperationContracts,
   presentParameterEntries,
   requirementRoleIdentity,
@@ -49,8 +56,9 @@ import type * as ModuleClosure from './ModuleClosure.js'
 import * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import * as Scalar from './Scalar.js'
 import * as SourceFile from './SourceFile.js'
-import type * as SourceSpan from './SourceSpan.js'
+import * as SourceSpan from './SourceSpan.js'
 import * as StaticText from './StaticText.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -1800,6 +1808,279 @@ const collectConstraints = (
   return Object.freeze({ facts: Object.freeze(facts), diagnostics: Object.freeze(diagnostics) })
 }
 
+const tightSpan = (syntax: SyntaxTree.Element): SourceSpan.SourceSpan => {
+  if (!SyntaxTree.isNode(syntax)) return syntax.span
+  const tokens = SyntaxTree.tokens(syntax).filter(
+    (token) =>
+      token.kind !== 'Whitespace' &&
+      token.kind !== 'LineComment' &&
+      token.kind !== 'DocComment' &&
+      token.kind !== 'ModuleDocComment' &&
+      token.kind !== 'EndOfFile',
+  )
+  const first = tokens.at(0)
+  const last = tokens.at(-1)
+  return first === undefined || last === undefined
+    ? syntax.span
+    : (SourceSpan.fromOffsets(syntax.span.sourceId, first.span.start, last.span.end) ?? syntax.span)
+}
+
+const enumRepresentation = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  diagnostics: Array<Diagnostic.Diagnostic>,
+): EnumRepresentationFact => {
+  const explicit = SyntaxTree.directToken(node, 'LeftParenthesis') !== undefined
+  if (!explicit)
+    return Object.freeze({
+      _tag: 'Available',
+      scalar: Scalar.defaultEnumRepresentation,
+      explicit: false,
+      syntax: node,
+    })
+  const syntax = node.children.find(isDeclaredTypeNode)
+  if (syntax === undefined || !SyntaxTree.isAvailableSyntax(syntax))
+    return Object.freeze({
+      _tag: 'Unavailable',
+      explicit: true,
+      syntax: syntax ?? node,
+    })
+  const token = SyntaxTree.tokens(syntax).find((candidate) => candidate.kind === 'Identifier')
+  const representationSpelling = token === undefined ? '<unavailable>' : spelling(source, token)
+  const scalar = Scalar.enumRepresentation(representationSpelling)
+  if (scalar !== undefined)
+    return Object.freeze({ _tag: 'Available', scalar, explicit: true, syntax })
+  const diagnostic = Diagnostic.unsupportedEnumRepresentation(
+    representationSpelling,
+    Scalar.enumRepresentations().map((candidate) => candidate.spelling),
+    tightSpan(syntax),
+  )
+  diagnostics.push(diagnostic)
+  return Object.freeze({
+    _tag: 'Unavailable',
+    explicit: true,
+    syntax,
+    spelling: representationSpelling,
+    cause: Diagnostic.identity(diagnostic),
+  })
+}
+
+const collectEnum = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  id: DeclarationId,
+  canonical: CanonicalState,
+  visibility: 'Private' | 'Public',
+  name: DeclaredName,
+  diagnostics: Array<Diagnostic.Diagnostic>,
+): EnumFact => {
+  const enumDiagnostics: Array<Diagnostic.Diagnostic> = []
+  const representation = enumRepresentation(source, node, enumDiagnostics)
+  const memberNodes = SyntaxTree.directNodes(node, 'EnumMember')
+  if (memberNodes.length === 0) {
+    enumDiagnostics.push(
+      Diagnostic.emptyEnum(
+        name._tag === 'Present' ? name.spelling : '<anonymous>',
+        tightSpan(node),
+      ),
+    )
+  }
+  const firstNames = new Map<
+    string,
+    {
+      readonly id: EnumMemberId
+      readonly canonical?: CanonicalEnumMemberId
+      readonly token: Token.Token
+    }
+  >()
+  const firstDiscriminants = new Map<bigint, SyntaxTree.Node>()
+  const representationScalar =
+    representation._tag === 'Available' ? representation.scalar : undefined
+  const range =
+    representationScalar === undefined ? undefined : Scalar.range(representationScalar, 64)
+  let previous: bigint | undefined
+  const members = memberNodes.map((memberNode, ordinal): EnumMemberFact => {
+    const memberId: EnumMemberId = Object.freeze({ _tag: 'EnumMemberId', enum: id, ordinal })
+    const memberName = presentName(source, memberNode)
+    let memberCanonical: EnumMemberFact['canonical'] = Object.freeze({ _tag: 'Unidentified' })
+    if (memberName._tag === 'Present') {
+      const original = firstNames.get(memberName.spelling)
+      if (original === undefined) {
+        const canonicalMember =
+          canonical._tag === 'Canonical'
+            ? Object.freeze({
+                _tag: 'CanonicalEnumMemberId' as const,
+                enum: canonical.id,
+                name: memberName.spelling,
+              })
+            : undefined
+        firstNames.set(
+          memberName.spelling,
+          Object.freeze({
+            id: memberId,
+            token: memberName.token,
+            ...(canonicalMember === undefined ? {} : { canonical: canonicalMember }),
+          }),
+        )
+        if (canonicalMember !== undefined)
+          memberCanonical = Object.freeze({ _tag: 'Canonical', id: canonicalMember })
+      } else {
+        const diagnostic = Diagnostic.duplicateEnumMemberName(
+          memberName.spelling,
+          original.token.span,
+          memberName.token.span,
+        )
+        enumDiagnostics.push(diagnostic)
+        if (original.canonical !== undefined)
+          memberCanonical = Object.freeze({
+            _tag: 'Duplicate',
+            original: original.canonical,
+            cause: Diagnostic.identity(diagnostic),
+          })
+      }
+    }
+
+    const explicitSyntax = SyntaxTree.directNode(memberNode, 'IntegerLiteralExpression')
+    const sourceKind: EnumDiscriminantFact['source'] =
+      explicitSyntax === undefined ? 'Implicit' : 'Explicit'
+    let attempted: bigint | undefined
+    if (explicitSyntax !== undefined) {
+      const literal = constantLiteral(source, explicitSyntax)
+      if (literal._tag === 'IntegerLiteral') attempted = literal.value
+    } else if (ordinal === 0) attempted = 0n
+    else if (previous !== undefined) attempted = previous + 1n
+
+    let discriminant: EnumDiscriminantFact
+    const discriminantSyntax = explicitSyntax ?? memberNode
+    if (attempted === undefined || range === undefined || representationScalar === undefined) {
+      discriminant = Object.freeze({
+        _tag: 'Unavailable',
+        source: sourceKind,
+        syntax: discriminantSyntax,
+        ...(attempted === undefined ? {} : { attempted }),
+        ...(representation._tag === 'Unavailable' && representation.cause !== undefined
+          ? { cause: representation.cause }
+          : {}),
+      })
+    } else if (
+      sourceKind === 'Explicit' &&
+      representationScalar.signedness === 'Unsigned' &&
+      attempted < 0n
+    ) {
+      const diagnostic = Diagnostic.unsignedEnumNegativeDiscriminant(
+        representationScalar.spelling,
+        attempted,
+        tightSpan(discriminantSyntax),
+      )
+      enumDiagnostics.push(diagnostic)
+      discriminant = Object.freeze({
+        _tag: 'Unavailable',
+        source: sourceKind,
+        syntax: discriminantSyntax,
+        attempted,
+        cause: Diagnostic.identity(diagnostic),
+      })
+    } else if (attempted < range.minimum || attempted > range.maximum) {
+      const diagnostic =
+        sourceKind === 'Explicit'
+          ? Diagnostic.enumDiscriminantOutOfRange(
+              representationScalar.spelling,
+              attempted,
+              range.minimum,
+              range.maximum,
+              tightSpan(discriminantSyntax),
+            )
+          : Diagnostic.enumImplicitDiscriminantOverflow(
+              representationScalar.spelling,
+              previous ?? range.maximum,
+              range.maximum,
+              tightSpan(memberNode),
+            )
+      enumDiagnostics.push(diagnostic)
+      discriminant = Object.freeze({
+        _tag: 'Unavailable',
+        source: sourceKind,
+        syntax: discriminantSyntax,
+        attempted,
+        cause: Diagnostic.identity(diagnostic),
+      })
+    } else {
+      const original = firstDiscriminants.get(attempted)
+      if (original === undefined) {
+        firstDiscriminants.set(attempted, memberNode)
+        discriminant = Object.freeze({
+          _tag: 'Available',
+          value: attempted,
+          source: sourceKind,
+          syntax: discriminantSyntax,
+        })
+      } else {
+        const diagnostic = Diagnostic.duplicateEnumDiscriminant(
+          attempted,
+          tightSpan(original),
+          tightSpan(memberNode),
+        )
+        enumDiagnostics.push(diagnostic)
+        discriminant = Object.freeze({
+          _tag: 'Unavailable',
+          source: sourceKind,
+          syntax: discriminantSyntax,
+          attempted,
+          cause: Diagnostic.identity(diagnostic),
+        })
+      }
+    }
+    previous =
+      attempted !== undefined &&
+      range !== undefined &&
+      attempted >= range.minimum &&
+      attempted <= range.maximum
+        ? attempted
+        : undefined
+    return Object.freeze({
+      _tag: 'EnumMember',
+      id: memberId,
+      canonical: memberCanonical,
+      name: memberName,
+      discriminant,
+      syntax: memberNode,
+    })
+  })
+  diagnostics.push(...enumDiagnostics)
+  const associatedOperation = enumValueOperation({ canonical, representation })
+  const valid =
+    enumDiagnostics.length === 0 &&
+    representation._tag === 'Available' &&
+    members.every(
+      (member) =>
+        member.name._tag === 'Present' &&
+        member.canonical._tag === 'Canonical' &&
+        member.discriminant._tag === 'Available',
+    )
+  return Object.freeze({
+    _tag: 'EnumDeclaration',
+    id,
+    canonical,
+    visibility,
+    typeParameters: Object.freeze([]),
+    name,
+    representation,
+    members: Object.freeze(members),
+    associatedOperations: Object.freeze(
+      associatedOperation === undefined ? [] : [associatedOperation],
+    ),
+    validity: valid
+      ? Object.freeze({ _tag: 'Valid' })
+      : Object.freeze({
+          _tag: 'Invalid',
+          causes: Object.freeze(
+            enumDiagnostics.map((diagnostic) => Diagnostic.identity(diagnostic)),
+          ),
+        }),
+    syntax: node,
+  })
+}
+
 const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   const source = syntax.source
   const nodes = syntax.root.children.filter(
@@ -1807,6 +2088,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       SyntaxTree.isNode(element) &&
       (element.kind === 'FunctionDeclaration' ||
         element.kind === 'StructDeclaration' ||
+        element.kind === 'EnumDeclaration' ||
         element.kind === 'ServiceDeclaration' ||
         element.kind === 'InterfaceDeclaration' ||
         element.kind === 'RoleDeclaration' ||
@@ -2082,6 +2364,8 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         syntax: node,
       })
     }
+    if (node.kind === 'EnumDeclaration')
+      return collectEnum(source, node, id, canonical, visibility, name, diagnostics)
     if (node.kind === 'StructDeclaration') {
       const collected = collectFields(source, node, id, typeParameters.environment)
       diagnostics.push(...collected.diagnostics)
@@ -2556,7 +2840,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       }),
     ]
   })
-  const members = [...ownMembers, ...inlineMembers, ...hookMembers]
+  const members: ReadonlyArray<MemberFact> = [...ownMembers, ...inlineMembers, ...hookMembers]
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
@@ -2566,6 +2850,9 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     ),
     structs: Object.freeze(
       members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+    ),
+    enums: Object.freeze(
+      members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
     ),
     services: Object.freeze(
       members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),

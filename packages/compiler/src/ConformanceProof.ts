@@ -242,6 +242,19 @@ export const copyProof = (
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type))
     return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is compiler-affine` })
 
+  const declaration = byCanonical(self, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (declaration?._tag === 'EnumDeclaration')
+    return declaration.validity._tag === 'Valid'
+      ? provedCopy
+      : Object.freeze({
+          _tag: 'UnavailableCopy',
+          reason: `scalar enum ${Type.encode(type)} is invalid`,
+        })
+
   const key = Type.key(type)
   if (active.has(key))
     return Object.freeze({
@@ -263,11 +276,6 @@ export const copyProof = (
       _tag: 'NotCopy',
       reason: `${Type.encode(type)} also implements Drop`,
     })
-  const declaration = byCanonical(self, {
-    _tag: 'CanonicalDeclarationId',
-    module: type.module,
-    name: type.name,
-  })
   if (declaration?._tag !== 'StructDeclaration')
     return Object.freeze({ _tag: 'NotCopy', reason: `${Type.encode(type)} is not a struct` })
   if (declaration.dependency._tag === 'Unavailable')

@@ -62,6 +62,19 @@ pub fn main() -> i32 { return i32Add(20, 22) }`)
   }),
 )
 
+it.effect('does not grant enum projection privilege to an ordinary value declaration', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`fn value(input: i32) -> i32 { return input }
+pub fn main() -> i32 { return value(42) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.isFalse(
+      self.instances.intrinsics.some(
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.enumValue',
+      ),
+    )
+  }),
+)
+
 it.effect('does not grant suspension privilege to a user-defined Effect.suspend', () =>
   Effect.gen(function* () {
     const root = `import user_effect as Effect

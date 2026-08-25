@@ -5,6 +5,7 @@ import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
+import type * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
@@ -33,6 +34,255 @@ const collect = (
     (closure) => NameResolution.analyze(closure).index,
   )
 }
+
+it.effect('indexes canonical scalar enums with exact representations and bigint sequences', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub enum Direction { North, East = 5, South }
+enum(i64) Signed { Minimum = -9223372036854775808, Next }`,
+      ],
+    ])
+    const enums = index.modules.at(0)?.enums ?? []
+    const direction = enums.at(0)
+    const signed = enums.at(1)
+
+    assert.strictEqual(direction?.canonical._tag, 'Canonical')
+    assert.deepEqual(direction?.canonical, {
+      _tag: 'Canonical',
+      id: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'Direction' },
+    })
+    assert.strictEqual(direction?.visibility, 'Public')
+    assert.strictEqual(direction?.representation._tag, 'Available')
+    assert.strictEqual(
+      direction?.representation._tag === 'Available'
+        ? direction.representation.scalar.spelling
+        : undefined,
+      'u8',
+    )
+    assert.strictEqual(
+      direction?.representation._tag === 'Available'
+        ? direction.representation.explicit
+        : undefined,
+      false,
+    )
+    assert.deepEqual(
+      direction?.members.map((member) => ({
+        canonical: member.canonical,
+        value:
+          member.discriminant._tag === 'Available'
+            ? member.discriminant.value
+            : member.discriminant._tag,
+        source: member.discriminant.source,
+      })),
+      [
+        {
+          canonical: {
+            _tag: 'Canonical',
+            id: {
+              _tag: 'CanonicalEnumMemberId',
+              enum: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'Direction' },
+              name: 'North',
+            },
+          },
+          value: 0n,
+          source: 'Implicit',
+        },
+        {
+          canonical: {
+            _tag: 'Canonical',
+            id: {
+              _tag: 'CanonicalEnumMemberId',
+              enum: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'Direction' },
+              name: 'East',
+            },
+          },
+          value: 5n,
+          source: 'Explicit',
+        },
+        {
+          canonical: {
+            _tag: 'Canonical',
+            id: {
+              _tag: 'CanonicalEnumMemberId',
+              enum: { _tag: 'CanonicalDeclarationId', module: 'root', name: 'Direction' },
+              name: 'South',
+            },
+          },
+          value: 6n,
+          source: 'Implicit',
+        },
+      ],
+    )
+    assert.strictEqual(
+      signed?.representation._tag === 'Available'
+        ? signed.representation.scalar.spelling
+        : undefined,
+      'i64',
+    )
+    assert.deepEqual(
+      signed?.members.map((member) =>
+        member.discriminant._tag === 'Available'
+          ? member.discriminant.value
+          : member.discriminant._tag,
+      ),
+      [-9223372036854775808n, -9223372036854775807n],
+    )
+    assert.strictEqual(Object.isFrozen(direction), true)
+    assert.strictEqual(Object.isFrozen(direction?.members), true)
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('accepts default and all fixed-width enum representations at exact boundaries', () =>
+  Effect.gen(function* () {
+    const source = `enum Default { Only }
+enum(u8) U8 { Minimum = 0, Maximum = 255 }
+enum(u16) U16 { Minimum = 0, Maximum = 65535 }
+enum(u32) U32 { Minimum = 0, Maximum = 4294967295 }
+enum(u64) U64 { Minimum = 0, Maximum = 18446744073709551615 }
+enum(i8) I8 { Minimum = -128, Maximum = 127 }
+enum(i16) I16 { Minimum = -32768, Maximum = 32767 }
+enum(i32) I32 { Minimum = -2147483648, Maximum = 2147483647 }
+enum(i64) I64 { Minimum = -9223372036854775808, Maximum = 9223372036854775807 }`
+    const expected: Array<{
+      spelling: Scalar.EnumRepresentationSpelling
+      explicit: boolean
+      values: Array<bigint>
+    }> = [
+      { spelling: 'u8', explicit: false, values: [0n] },
+      { spelling: 'u8', explicit: true, values: [0n, 255n] },
+      { spelling: 'u16', explicit: true, values: [0n, 65535n] },
+      { spelling: 'u32', explicit: true, values: [0n, 4294967295n] },
+      { spelling: 'u64', explicit: true, values: [0n, 18446744073709551615n] },
+      { spelling: 'i8', explicit: true, values: [-128n, 127n] },
+      { spelling: 'i16', explicit: true, values: [-32768n, 32767n] },
+      { spelling: 'i32', explicit: true, values: [-2147483648n, 2147483647n] },
+      { spelling: 'i64', explicit: true, values: [-9223372036854775808n, 9223372036854775807n] },
+    ]
+    const index = yield* collect('root', [['root', source]])
+
+    assert.deepEqual(
+      index.modules.at(0)?.enums.map((declaration) => ({
+        spelling:
+          declaration.representation._tag === 'Available'
+            ? declaration.representation.scalar.spelling
+            : declaration.representation._tag,
+        explicit:
+          declaration.representation._tag === 'Available'
+            ? declaration.representation.explicit
+            : undefined,
+        values: declaration.members.map((member) =>
+          member.discriminant._tag === 'Available'
+            ? member.discriminant.value
+            : member.discriminant._tag,
+        ),
+      })),
+      expected,
+    )
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('keeps enums in one source-ordered flat nominal namespace', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'struct State {}\nenum State { Ready }\nfn State() -> i32 { return 0 }'],
+    ])
+    const module = index.modules.at(0)
+
+    assert.deepEqual(
+      module?.members.map((member) => member._tag),
+      ['StructDeclaration', 'EnumDeclaration', 'FunctionDeclaration'],
+    )
+    assert.deepEqual(
+      module?.enums,
+      module?.members.filter(
+        (member): member is DeclarationFacts.EnumFact => member._tag === 'EnumDeclaration',
+      ),
+    )
+    assert.strictEqual(module?.enums.at(0)?.canonical._tag, 'Duplicate')
+    assert.strictEqual(module?.members.at(1)?.canonical._tag, 'Duplicate')
+    assert.strictEqual(DeclarationFacts.enumByName(index, 'root', 'State')._tag, 'Ambiguous')
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0003', 'SEM0003'],
+    )
+  }),
+)
+
+it.effect('diagnoses enum declaration and discriminant failures with local unavailable facts', () =>
+  Effect.gen(function* () {
+    const source = `enum Empty {}
+enum(usize) Unsupported { Value }
+enum DuplicateName { Same, Same }
+enum DuplicateValue { First = 3, Second = 3 }
+enum Negative { Below = -1 }
+enum(i8) ExplicitUnderflow { TooSmall = -129 }
+enum(i8) ExplicitOverflow { TooLarge = 128 }
+enum(u64) ExplicitWideOverflow { TooLarge = 18446744073709551616 }
+enum ImplicitOverflow { Last = 255, After }
+enum Good { Ready }`
+    const index = yield* collect('root', [['root', source]])
+    const enums = index.modules.at(0)?.enums ?? []
+    const byName = (name: string) =>
+      enums.find((declaration) =>
+        declaration.name._tag === 'Present' ? declaration.name.spelling === name : false,
+      )
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end),
+        related: diagnostic.relatedSpans?.map((related) =>
+          source.slice(related.span.start, related.span.end),
+        ),
+      })),
+      [
+        { code: 'SEM0143', text: 'enum Empty {}', related: undefined },
+        { code: 'SEM0144', text: 'usize', related: undefined },
+        { code: 'SEM0145', text: 'Same', related: ['Same'] },
+        { code: 'SEM0146', text: 'Second = 3', related: ['First = 3'] },
+        { code: 'SEM0149', text: '-1', related: undefined },
+        { code: 'SEM0147', text: '-129', related: undefined },
+        { code: 'SEM0147', text: '128', related: undefined },
+        { code: 'SEM0147', text: '18446744073709551616', related: undefined },
+        { code: 'SEM0148', text: 'After', related: undefined },
+      ],
+    )
+    assert.strictEqual(byName('Unsupported')?.representation._tag, 'Unavailable')
+    assert.strictEqual(byName('DuplicateName')?.members.at(1)?.canonical._tag, 'Duplicate')
+    assert.strictEqual(byName('DuplicateValue')?.members.at(1)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(byName('Negative')?.members.at(0)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(byName('ExplicitUnderflow')?.members.at(0)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(byName('ExplicitOverflow')?.members.at(0)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(
+      byName('ExplicitWideOverflow')?.members.at(0)?.discriminant._tag,
+      'Unavailable',
+    )
+    assert.strictEqual(byName('ImplicitOverflow')?.members.at(1)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(byName('Good')?.validity._tag, 'Valid')
+    assert.strictEqual(byName('Good')?.members.at(0)?.discriminant._tag, 'Available')
+  }),
+)
+
+it.effect('keeps parser-damaged enum values explicitly unavailable without losing siblings', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      ['root', 'enum Broken { Missing =, Next }\nenum Good { Ready }'],
+    ])
+    const broken = index.modules.at(0)?.enums.at(0)
+    const good = index.modules.at(0)?.enums.at(1)
+
+    assert.strictEqual(broken?.validity._tag, 'Invalid')
+    assert.strictEqual(broken?.members.at(0)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(broken?.members.at(1)?.discriminant._tag, 'Unavailable')
+    assert.strictEqual(good?.validity._tag, 'Valid')
+    assert.strictEqual(good?.members.at(0)?.discriminant._tag, 'Available')
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
 
 it.effect('assigns distinct canonical identities to same-named declarations across modules', () =>
   Effect.gen(function* () {
@@ -985,6 +1235,34 @@ impl Drop for Guard { effect fn dispose(value: &Guard) -> i32 { return 0 } }`,
           diagnostic.reason._tag === 'InvalidConformance' ? diagnostic.reason.detail : undefined,
         ),
       'duplicate Drop implementation for drop-hooks.Guard',
+    )
+  }),
+)
+
+it.effect('rejects user Copy and Drop conformances for sealed scalar enums', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `enum State { Ready }
+impl Copy for State {}
+impl Drop for State { fn drop(self: &mut State) -> () { return () } }`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        reason: diagnostic.reason._tag,
+      })),
+      [
+        { code: 'SEM0083', reason: 'InvalidConformance' },
+        { code: 'SEM0083', reason: 'InvalidConformance' },
+      ],
+    )
+    assert.deepEqual(
+      index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
+      ['InvalidConformance', 'InvalidConformance'],
     )
   }),
 )

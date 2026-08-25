@@ -1,5 +1,6 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Hir from './Hir.js'
+import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
@@ -8,6 +9,15 @@ export interface IntegerValue {
   readonly _tag: 'IntegerValue'
   readonly type: Scalar.IntegerSpelling
   readonly value: bigint
+}
+
+/** One immutable logical scalar-enum member, before physical lane realization. */
+export interface EnumValue {
+  readonly _tag: 'EnumValue'
+  readonly enum: DeclarationFacts.CanonicalId
+  readonly member: DeclarationFacts.CanonicalEnumMemberId
+  readonly discriminant: bigint
+  readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
 }
 
 /**
@@ -234,6 +244,7 @@ export interface SlotValue {
 /** One immutable logical evaluator value, independent of backend lane realization. */
 export type Value =
   | IntegerValue
+  | EnumValue
   | CharacterValue
   | FloatValue
   | AggregateValue

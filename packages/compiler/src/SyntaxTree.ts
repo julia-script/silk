@@ -81,6 +81,8 @@ export type NodeKind =
   | 'MatchAccess'
   | 'MatchArm'
   | 'ErrorPattern'
+  | 'EnumMemberPattern'
+  | 'IntegerPattern'
   | 'NominalPattern'
   | 'BindingPattern'
   | 'UniversalPattern'

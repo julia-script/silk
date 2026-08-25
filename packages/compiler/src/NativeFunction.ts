@@ -858,6 +858,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               builder,
               body,
               i32,
+              types: nativeTypes,
               blocks,
               locals,
               entry,

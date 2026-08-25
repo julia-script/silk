@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as MirSamples from './support/mirSamples.js'
+
+const ascii = (value: string): Uint8Array =>
+  Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -17,6 +22,193 @@ const operationRegion = (region: Mir.Region | undefined): Mir.OperationRegion =>
   if (region?._tag !== 'OperationRegion') throw new Error('expected an operation region')
   return region
 }
+
+it.effect(
+  'lowers scalar enum constants, projection, equality, and matches with logical identity',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'mir/scalar-enum',
+        ascii(`enum State { Ready = 3, Done = 7 }
+enum Other { Ready = 3 }
+pub fn main() -> i32 {
+  let state = State.Ready
+  let other = Other.Ready
+  drop other
+  let raw = State.value(state)
+  drop raw
+  let equal = state == State.Done
+  drop equal
+  return match state {
+    State.Ready => 1
+    State.Done => 2
+  }
+}`),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const program = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(program), [])
+      const operations = program.functions.flatMap((fn) => MirVerification.operations(fn))
+      assert.strictEqual(
+        operations.filter((operation) => operation._tag === 'EnumConstant').length,
+        3,
+      )
+      assert.strictEqual(operations.filter((operation) => operation._tag === 'EnumValue').length, 1)
+      assert.strictEqual(
+        operations.filter((operation) => operation._tag === 'EnumEquality').length,
+        1,
+      )
+      const match = operations.find((operation) => operation._tag === 'Match')
+      assert.strictEqual(match?.scrutineeType._tag, 'Enum')
+      if (match?._tag !== 'Match') return
+      assert.deepEqual(
+        match.members.map((member) =>
+          member._tag === 'EnumMember' ? member.member.name : member._tag,
+        ),
+        ['Ready', 'Done'],
+      )
+      assert.strictEqual(MirEncoding.encode(program), MirEncoding.encode(program))
+    }),
+)
+
+it.effect('rejects malformed scalar enum MIR before execution engines', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/invalid-scalar-enum',
+      ascii(`enum State { Ready = 3, Done = 7 }
+enum Other { Ready = 3 }
+pub fn main() -> i32 {
+  let state = State.Ready
+  let other = Other.Ready
+  drop other
+  let raw = State.value(state)
+  drop raw
+  let equal = state == State.Done
+  drop equal
+  return match state {
+    State.Ready => 1
+    State.Done => 2
+  }
+}`),
+    )
+    const program = Analysis.loweredMir(snapshot)
+    const fn = program.functions.at(0) ?? raise('expected scalar enum function')
+    const operations = MirVerification.operations(fn)
+    const constants = operations.filter((operation) => operation._tag === 'EnumConstant')
+    const stateReady = constants.find((operation) => operation.member.enum.name === 'State')
+    const stateDone = constants.find(
+      (operation) => operation.member.enum.name === 'State' && operation.member.name === 'Done',
+    )
+    const otherReady = constants.find((operation) => operation.member.enum.name === 'Other')
+    const projection = operations.find((operation) => operation._tag === 'EnumValue')
+    const equality = operations.find((operation) => operation._tag === 'EnumEquality')
+    const match = operations.find((operation) => operation._tag === 'Match')
+    if (
+      stateReady === undefined ||
+      stateDone === undefined ||
+      otherReady === undefined ||
+      projection === undefined ||
+      equality === undefined ||
+      match === undefined
+    )
+      return raise('expected complete scalar enum MIR')
+
+    const replace = (target: Mir.Operation, replacement: Mir.Operation): Mir.Module => ({
+      ...program,
+      functions: program.functions.map((candidate) =>
+        candidate === fn
+          ? {
+              ...candidate,
+              regions: candidate.regions.map((region) =>
+                region._tag === 'OperationRegion' && region.operations.includes(target)
+                  ? {
+                      ...region,
+                      operations: region.operations.map((operation) =>
+                        operation === target ? replacement : operation,
+                      ),
+                    }
+                  : region,
+              ),
+            }
+          : candidate,
+      ),
+    })
+    const ruleSet = (candidate: Mir.Module) =>
+      MirVerification.verify(candidate).map((violation) => violation.rule)
+
+    assert.include(
+      ruleSet(replace(stateReady, { ...stateReady, member: otherReady.member })),
+      'InvalidEnumOperation',
+    )
+    assert.include(
+      ruleSet(replace(stateReady, { ...stateReady, discriminant: 99n })),
+      'InvalidEnumOperation',
+    )
+    assert.include(
+      ruleSet(
+        replace(equality, {
+          ...equality,
+          right: otherReady.destination,
+        }),
+      ),
+      'InvalidEnumOperation',
+    )
+    assert.include(
+      ruleSet(
+        replace(projection, {
+          ...projection,
+          enum: otherReady.enum,
+        }),
+      ),
+      'InvalidEnumOperation',
+    )
+    const wrongLane: 'u16' = 'u16'
+    const wrongBits: 16 = 16
+    assert.include(
+      ruleSet(
+        replace(stateDone, {
+          ...stateDone,
+          representation: {
+            ...stateDone.representation,
+            scalar: wrongLane,
+            bits: wrongBits,
+          },
+        }),
+      ),
+      'InvalidEnumOperation',
+    )
+
+    const firstMember = match.members.at(0) ?? raise('expected first enum match member')
+    const firstDecision = match.decisions.at(0) ?? raise('expected first enum match decision')
+    const incomplete = replace(match, {
+      ...match,
+      members: [firstMember],
+      decisions: [firstDecision],
+      arms: match.arms.slice(0, 1),
+    })
+    const duplicate = replace(match, {
+      ...match,
+      members: [firstMember, firstMember],
+      decisions: [firstDecision, firstDecision],
+    })
+    const foreign = replace(match, {
+      ...match,
+      members: [
+        firstMember,
+        {
+          _tag: 'EnumMember',
+          enum: otherReady.enum,
+          member: otherReady.member,
+          type: otherReady.type.type,
+        },
+      ],
+    })
+    for (const malformed of [incomplete, duplicate, foreign]) {
+      assert.include(ruleSet(malformed), 'InvalidMatchDecision')
+      assert.deepEqual(MirVerification.verify(malformed), MirVerification.verify(malformed))
+    }
+  }),
+)
 
 it('verifies the hand-built samples clean', () => {
   for (const sample of MirSamples.samples()) {

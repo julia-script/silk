@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as Match from '../src/Match.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -529,12 +530,14 @@ it.effect('discovers calls and lowers nested matches as structured acyclic opera
     assert.strictEqual(matches.at(0)?.arms.at(0)?.selected.operations.at(0)?._tag, 'Match')
     const outerMember = matches.at(0)?.decisions.at(0)?.member
     const innerMember = matches.at(1)?.decisions.at(0)?.member
+    const outerType = outerMember === undefined ? undefined : Match.sourceType(outerMember)
+    const innerType = innerMember === undefined ? undefined : Match.sourceType(innerMember)
     assert.strictEqual(
-      outerMember !== undefined && Type.isNominal(outerMember) ? outerMember.name : undefined,
+      outerType !== undefined && Type.isNominal(outerType) ? outerType.name : undefined,
       'Box',
     )
     assert.strictEqual(
-      innerMember !== undefined && Type.isNominal(innerMember) ? innerMember.name : undefined,
+      innerType !== undefined && Type.isNominal(innerType) ? innerType.name : undefined,
       'Token',
     )
     assert.strictEqual(MirEncoding.encode(mir), golden('match.mir.txt'))
