@@ -28,6 +28,68 @@ const localSchedulerStaleReuse = readFileSync(
 const localSchedulerSemantics = readFileSync(
   new URL('./fixtures/scheduler-fiber/local-scheduler-semantics.silk', import.meta.url),
 )
+const localSchedulerImplementation = readFileSync(
+  new URL('../stdlib/silk/local_scheduler.silk', import.meta.url),
+  'utf8',
+)
+
+const taskIdBoundarySource = `${localSchedulerImplementation}
+
+fn verifyTaskIdRefusal(
+  outcome: Result<Scheduler.TaskId, Scheduler.TaskIdExhausted>,
+  fresh: Scheduler.TaskId,
+) -> i32 {
+  let Result<Scheduler.TaskId, Scheduler.TaskIdExhausted> { value: phase } = move outcome
+  return match move phase {
+    Success<Scheduler.TaskId> { value: reserved } => -3
+    Failure<Scheduler.TaskIdExhausted> { error } => verifyFreshTaskId(move error, fresh)
+  }
+}
+
+fn verifyFreshTaskId(error: Scheduler.TaskIdExhausted, fresh: Scheduler.TaskId) -> i32 {
+  drop error
+  if fresh.value != 0 { return -4 }
+  return 42
+}
+
+effect fn taskIdBoundary() -> i32 ! OutOfMemoryError | Scheduler.TaskIdExhausted {
+  let mut allocator = Allocator.systemAllocatorService()
+  let nearLimit = run Shared.make<TaskIdSource>(TaskIdSource {
+    next: 18446744073709551614,
+    exhausted: false,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let first = run reserve(&nearLimit)
+  let second = run reserve(&nearLimit)
+  let refused = run Effect.result(reserve(&nearLimit))
+  let freshSource = run Shared.make<TaskIdSource>(TaskIdSource {
+    next: 0,
+    exhausted: false,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let fresh = run reserve(&freshSource)
+  drop nearLimit
+  drop freshSource
+  drop allocator
+  if first.value != 18446744073709551614 { return -1 }
+  if second.value != u64.MAX { return -2 }
+  return verifyTaskIdRefusal(move refused, fresh)
+}
+
+fn taskIdBoundaryFailed(error: OutOfMemoryError | Scheduler.TaskIdExhausted) -> i32 {
+  return match move error {
+    OutOfMemoryError {} => -5
+    Scheduler.TaskIdExhausted {} => -6
+  }
+}
+
+pub fn main() -> i32 {
+  let outcome = run Effect.result(taskIdBoundary())
+  let Result<i32, OutOfMemoryError | Scheduler.TaskIdExhausted> { value: phase } = move outcome
+  return match move phase {
+    Success<i32> { value: answer } => answer
+    Failure<OutOfMemoryError | Scheduler.TaskIdExhausted> { error } =>
+      taskIdBoundaryFailed(move error)
+  }
+}`
 
 const describe = (value: unknown): string =>
   JSON.stringify(value, (_, current) =>
@@ -451,6 +513,24 @@ it.effect('dispatches Scheduler.prepare to a renamed ordinary-source provider', 
       1,
     )
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
+
+it.effect('reserves task identities through MAX, refuses exhaustion, and resets fresh state', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'scheduler-fiber/task-id-boundary',
+      ascii(taskIdBoundarySource),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+      describe(Analysis.diagnostics(snapshot)),
+    )
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed', describe(outcome))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
   }),
 )
 

@@ -795,6 +795,33 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('selects each lexical provider of the same service capability', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect as Effect
+service Value {
+  effect fn get() -> i32 ? &Value
+}
+struct Tens { value: i32 }
+effect fn tensGet(self: &Tens) -> i32 { return self.value }
+impl Value for Tens { get: Tens.tensGet }
+struct Ones { value: i32 }
+effect fn onesGet(self: &Ones) -> i32 { return self.value }
+impl Value for Ones { get: Ones.onesGet }
+pub fn main() -> i32 {
+  let tens = Tens { value: 4 }
+  let ones = Ones { value: 2 }
+  let left = run Effect.provide(Value.get(), &tens)
+  let right = run Effect.provide(Value.get(), &ones)
+  return left * 10 + right
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('retains an unprovided user service requirement instead of inventing a provider', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`service Value { effect fn get() -> i32 ? &Value }

@@ -7,6 +7,7 @@ import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
@@ -1039,6 +1040,60 @@ export const make = (operations: Operations) => {
     return recipes.length === 1 ? recipes.at(0) : undefined
   }
 
+  const constrainedServiceTarget = (
+    target: Hir.HirFunction,
+    targetSubstitution: Type.Substitution,
+    effectParameter: number,
+    service: ServiceEffectRecipe,
+    context: EffectOriginContext,
+  ): InstanceKey | undefined => {
+    if (target.contract._tag !== 'Contract') return undefined
+    const parameter = target.contract.parameters.at(effectParameter)
+    const effect =
+      parameter === undefined ? undefined : Type.substitute(parameter, targetSubstitution)
+    if (effect === undefined || !Type.isEffect(effect)) return undefined
+    for (const constraint of target.contract.constraints) {
+      if (constraint._tag !== 'ProviderSelectionConstraint') continue
+      const provider = Type.substitute(constraint.provider, targetSubstitution)
+      const selected = Type.substituteRequirementsRow(constraint.selected, targetSubstitution)
+      const source = Type.substituteRequirementsRow(constraint.source, targetSubstitution)
+      const concrete = RowAlgebra.concretize(Type.requirementRowPolicy(), selected)
+      const requirement = concrete._tag === 'Concrete' ? concrete.row.members.at(0) : undefined
+      const hasProviderParameter = target.contract.parameters.some((candidate, ordinal) => {
+        if (ordinal === effectParameter) return false
+        const specialized = Type.substitute(candidate, targetSubstitution)
+        if (constraint.mode === 'Take') return Type.equals(specialized, provider)
+        return (
+          Type.isReference(specialized) &&
+          specialized.access === constraint.mode &&
+          Type.equals(specialized.target, provider)
+        )
+      })
+      if (
+        !Type.isNominal(provider) ||
+        concrete._tag !== 'Concrete' ||
+        concrete.row.members.length !== 1 ||
+        requirement === undefined ||
+        !Type.isNominal(requirement.capability) ||
+        !RowAlgebra.equals(Type.requirementRowPolicy(), effect.requirementRow, source) ||
+        !hasProviderParameter ||
+        !Type.equals(
+          Type.substitute(service.expression.service, service.context.substitution),
+          requirement.capability,
+        ) ||
+        service.expression.role !== requirement.role ||
+        (service.expression.access !== 'Shared' &&
+          constraint.mode !== 'Exclusive' &&
+          constraint.mode !== 'Take')
+      )
+        continue
+      const witness = ConformanceProof.witness(context.index, provider, requirement.capability)
+      if (witness?._tag === 'SourceConformanceWitness')
+        return targetKeyOfServiceCall(service.expression, witness, service.context)
+    }
+    return undefined
+  }
+
   function forwardedServiceTargetOfCallableApply(
     expression: Extract<Hir.Expression, { readonly _tag: 'CallableApply' }>,
     target: Hir.HirFunction,
@@ -1048,18 +1103,19 @@ export const make = (operations: Operations) => {
     serviceOverride?: ServiceEffectRecipe,
   ): InstanceKey | undefined {
     const binding = forwardedRequirementBinding(target)
-    if (binding === undefined) return undefined
-    const selected = selectedRequirement(binding, targetSubstitution)
-    const witness = requirementBindingWitness(binding, targetSubstitution, context.index)
     const argument = callableApplicationArgument(expression, effectParameter)
     const service =
       serviceOverride ??
       (argument === undefined ? undefined : serviceEffectRecipe(argument, context))
+    if (service === undefined) return undefined
+    if (binding === undefined)
+      return constrainedServiceTarget(target, targetSubstitution, effectParameter, service, context)
+    const selected = selectedRequirement(binding, targetSubstitution)
+    const witness = requirementBindingWitness(binding, targetSubstitution, context.index)
     if (
       selected === undefined ||
       !Type.isNominal(selected.capability) ||
       witness?._tag !== 'SourceConformanceWitness' ||
-      service === undefined ||
       !Type.equals(
         Type.substitute(service.expression.service, service.context.substitution),
         selected.capability,
@@ -1082,18 +1138,19 @@ export const make = (operations: Operations) => {
     serviceOverride?: ServiceEffectRecipe,
   ): InstanceKey | undefined => {
     const binding = forwardedRequirementBinding(target)
-    if (binding === undefined) return undefined
-    const selected = selectedRequirement(binding, targetSubstitution)
-    const witness = requirementBindingWitness(binding, targetSubstitution, context.index)
     const argument = expression.arguments.at(effectParameter)
     const service =
       serviceOverride ??
       (argument === undefined ? undefined : serviceEffectRecipe(argument, context))
+    if (service === undefined) return undefined
+    if (binding === undefined)
+      return constrainedServiceTarget(target, targetSubstitution, effectParameter, service, context)
+    const selected = selectedRequirement(binding, targetSubstitution)
+    const witness = requirementBindingWitness(binding, targetSubstitution, context.index)
     if (
       selected === undefined ||
       !Type.isNominal(selected.capability) ||
       witness?._tag !== 'SourceConformanceWitness' ||
-      service === undefined ||
       !Type.equals(
         Type.substitute(service.expression.service, service.context.substitution),
         selected.capability,
@@ -1360,7 +1417,8 @@ export const make = (operations: Operations) => {
     if (
       expression._tag !== 'Unavailable' &&
       expression._tag !== 'Call' &&
-      expression._tag !== 'EffectConstruct'
+      expression._tag !== 'EffectConstruct' &&
+      expression._tag !== 'ServiceEffectConstruct'
     ) {
       const identity = exactIdentity(expression.type)
       if (identity !== undefined) return identity
@@ -1435,34 +1493,7 @@ export const make = (operations: Operations) => {
         ? identities.at(0)
         : undefined
     }
-    if (expression._tag === 'ServiceEffectConstruct') {
-      const service = Type.substitute(expression.service, context.substitution)
-      const selected = requirementBindings(context.fn).find((binding) => {
-        const capability = selectedRequirement(binding, context.substitution)?.capability
-        return (
-          capability !== undefined &&
-          Type.isNominal(capability) &&
-          Type.equals(capability, service) &&
-          binding.provider.role === expression.role &&
-          (expression.access === 'Shared' ||
-            binding.provider.selectionAccess === 'Exclusive' ||
-            binding.provider.selectionAccess === 'Take')
-        )
-      })
-      const witness =
-        selected === undefined
-          ? undefined
-          : requirementBindingWitness(selected, context.substitution, context.index)
-      const targetKey =
-        witness?._tag === 'SourceConformanceWitness'
-          ? targetKeyOfServiceCall(expression, witness, context)
-          : undefined
-      const target =
-        targetKey === undefined ? undefined : targetFunction(context.results, targetKey.declaration)
-      return targetKey === undefined || target === undefined
-        ? undefined
-        : resultEffectIdentity(target, targetKey, context.results, context.index, context.resolving)
-    }
+    if (expression._tag === 'ServiceEffectConstruct') return undefined
     if (expression._tag === 'CallableApply') {
       const targetKey = targetKeyOfCallableApply(expression, context)
       if (targetKey === undefined) return undefined
@@ -2377,43 +2408,6 @@ export const make = (operations: Operations) => {
         return identity === undefined ? [] : Object.freeze([identity])
       }
 
-      const selectedServiceTarget = (
-        expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>,
-      ): InstanceKey | undefined => {
-        const service = Type.substitute(expression.service, instance.substitution)
-        const selected = requirementBindings(instance.function).find((binding) => {
-          const capability = selectedRequirement(binding, instance.substitution)?.capability
-          return (
-            capability !== undefined &&
-            Type.isNominal(capability) &&
-            Type.equals(capability, service) &&
-            binding.provider.role === expression.role &&
-            (expression.access === 'Shared' ||
-              binding.provider.selectionAccess === 'Exclusive' ||
-              binding.provider.selectionAccess === 'Take')
-          )
-        })
-        const selectedEvidence = instance.specialization.evidence.find(
-          (evidence) =>
-            evidence._tag === 'RequirementSelection' &&
-            Type.isNominal(evidence.selected.capability) &&
-            Type.equals(evidence.selected.capability, service) &&
-            evidence.selected.role === expression.role &&
-            (expression.access === 'Shared' || evidence.selected.access === 'Exclusive'),
-        )
-        let witness: DeclarationFacts.ConformanceWitness | undefined
-        if (selected !== undefined) {
-          witness = requirementBindingWitness(selected, instance.substitution, index)
-        } else if (selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)) {
-          witness = ConformanceProof.witness(index, selectedEvidence.provider, service)
-        } else {
-          witness = undefined
-        }
-        return witness?._tag === 'SourceConformanceWitness'
-          ? targetKeyOfServiceCall(expression, witness, context)
-          : undefined
-      }
-
       const selectedInterfaceEffectTarget = (
         expression: Extract<
           Hir.Expression,
@@ -2490,15 +2484,6 @@ export const make = (operations: Operations) => {
         }
         if (expression._tag === 'ServiceEffectConstruct') {
           const service = Type.substitute(expression.service, instance.substitution)
-          const targetKey = selectedServiceTarget(expression)
-          const target =
-            targetKey === undefined ? undefined : targetFunction(results, targetKey.declaration)
-          const identity =
-            targetKey === undefined || target === undefined
-              ? undefined
-              : resultEffectIdentity(target, targetKey, results, index)
-          if (identity !== undefined) return Object.freeze([effectNode(identity)])
-          if (targetKey !== undefined) return Object.freeze([instanceNode(targetKey)])
           if (!Type.isNominal(service)) return []
           const node = serviceCallNode(instance.key, expression)
           serviceCalls.set(
@@ -2702,14 +2687,6 @@ export const make = (operations: Operations) => {
         ) {
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'ServiceEffectConstruct') {
-          const target = selectedServiceTarget(expression)
-          if (target !== undefined) {
-            const span = expression.span
-            providedTargets.set(
-              `${keyText(instance.key)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-              Object.freeze({ owner: instance.key, target, span }),
-            )
-          }
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'CallableApply') {
           const target = targetKeyOfCallableApply(expression, context)

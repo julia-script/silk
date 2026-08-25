@@ -2456,6 +2456,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     source: schedulerFiber('local-scheduler-semantics'),
     expected: { _tag: 'Completes', result: 42 },
   },
+  {
+    name: 'scheduler-fiber-shutdown',
+    source: schedulerFiber('local-scheduler-shutdown'),
+    expected: { _tag: 'Completes', result: 42 },
+  },
   ...[
     { name: 'first-activation', result: 21 },
     { name: 'coroutine', result: 123 },
