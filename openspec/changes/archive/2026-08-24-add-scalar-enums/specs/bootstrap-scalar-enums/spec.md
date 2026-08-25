@@ -1,3 +1,8 @@
+## Purpose
+
+Define closed nominal scalar enums, their fixed-width representations, member values, conversions,
+operators, matching behavior, ownership, diagnostics, and runtime invariants across Silk targets.
+
 ## ADDED Requirements
 
 ### Requirement: Scalar enums declare one closed nominal value set
