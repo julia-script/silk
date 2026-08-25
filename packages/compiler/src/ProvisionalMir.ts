@@ -562,12 +562,10 @@ const runnerOf = (
     baseClassification =
       context.effectClassifications.get(identity) ??
       classificationOfEffect(context.discovery, identity)
+  } else if (stored.suspendable) {
+    baseClassification = 'Suspendable'
   } else {
-    if (stored.suspendable) {
-      baseClassification = 'Suspendable'
-    } else {
-      baseClassification = 'Synchronous'
-    }
+    baseClassification = 'Synchronous'
   }
   const providedClassification = (): Classification => {
     const fixedProvided =
@@ -1338,23 +1336,17 @@ export const classificationOfRun = (
   let selected: Classification
   if (control?.outcome._tag === 'RunSuspendableEffect') {
     selected = control.outcome.runner.classification
+  } else if (execution === undefined) {
+    selected = 'Unknown'
+  } else if (execution.classification === 'Unknown') {
+    selected = 'Unknown'
+  } else if (
+    execution.classification === 'Synchronous' &&
+    providedClassification(self, instance) === 'Suspendable'
+  ) {
+    selected = 'Suspendable'
   } else {
-    if (execution === undefined) {
-      selected = 'Unknown'
-    } else {
-      if (execution.classification === 'Unknown') {
-        selected = 'Unknown'
-      } else {
-        if (
-          execution.classification === 'Synchronous' &&
-          providedClassification(self, instance) === 'Suspendable'
-        ) {
-          selected = 'Suspendable'
-        } else {
-          selected = 'Synchronous'
-        }
-      }
-    }
+    selected = 'Synchronous'
   }
   return selected
 }

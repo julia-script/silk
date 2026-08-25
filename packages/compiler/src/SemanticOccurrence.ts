@@ -704,12 +704,10 @@ const collectCallReference = (
   let tokens: ReadonlyArray<Token.Token>
   if (path?._tag === 'ReferencePath') {
     tokens = Object.freeze([...(path.qualifier === undefined ? [] : [path.qualifier]), path.member])
+  } else if ('token' in reference) {
+    tokens = Object.freeze([reference.token])
   } else {
-    if ('token' in reference) {
-      tokens = Object.freeze([reference.token])
-    } else {
-      tokens = Object.freeze([])
-    }
+    tokens = Object.freeze([])
   }
   const qualifier = tokens.length > 1 ? tokens.at(0) : undefined
   if (qualifier !== undefined) {

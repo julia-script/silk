@@ -338,12 +338,10 @@ const retainedBinding = (
   let source: Hir.Expression
   if (expression._tag === 'Move') {
     source = expression.subject
+  } else if (expression._tag === 'UnionConvert') {
+    source = expression.source
   } else {
-    if (expression._tag === 'UnionConvert') {
-      source = expression.source
-    } else {
-      source = expression
-    }
+    source = expression
   }
   const site = useSite(source)
   return site === undefined ? undefined : state.bindings.get(siteKey(site))
@@ -356,12 +354,10 @@ const borrowRootType = (state: CheckState, expression: Hir.Expression): Type.Typ
   let site: BindingSite
   if (expression.root._tag === 'BindingSliceRoot') {
     site = Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+  } else if (expression.root._tag === 'ParameterSliceRoot') {
+    site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
   } else {
-    if (expression.root._tag === 'ParameterSliceRoot') {
-      site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
-    } else {
-      site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
-    }
+    site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
   }
   return state.bindings.get(siteKey(site))?.type
 }
@@ -577,12 +573,10 @@ const executableEnvironment = (
       let site: BindingSite | undefined
       if (capture.binding !== undefined) {
         site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+      } else if (capture.parameter !== undefined) {
+        site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
       } else {
-        if (capture.parameter !== undefined) {
-          site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-        } else {
-          site = undefined
-        }
+        site = undefined
       }
       return Object.freeze({
         access: capture.access,
@@ -826,12 +820,10 @@ const checkExpression = (
       let site: BindingSite
       if (expression.root._tag === 'BindingSliceRoot') {
         site = Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+      } else if (expression.root._tag === 'ParameterSliceRoot') {
+        site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
       } else {
-        if (expression.root._tag === 'ParameterSliceRoot') {
-          site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
-        } else {
-          site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
-        }
+        site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
       }
       checkUse(state, live, site, expression.span, false)
       return
@@ -968,12 +960,10 @@ const checkExpression = (
         let site: BindingSite | undefined
         if (capture.binding !== undefined) {
           site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+        } else if (capture.parameter !== undefined) {
+          site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
         } else {
-          if (capture.parameter !== undefined) {
-            site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-          } else {
-            site = undefined
-          }
+          site = undefined
         }
         if (site !== undefined) checkUse(state, live, site, capture.span, capture.access === 'Take')
       }
@@ -984,12 +974,10 @@ const checkExpression = (
       let site: BindingSite | undefined
       if (expression.provider.binding !== undefined) {
         site = Object.freeze({ _tag: 'Let', binding: expression.provider.binding })
+      } else if (expression.provider.parameter !== undefined) {
+        site = Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
       } else {
-        if (expression.provider.parameter !== undefined) {
-          site = Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
-        } else {
-          site = undefined
-        }
+        site = undefined
       }
       if (site !== undefined)
         checkUse(
@@ -1186,15 +1174,13 @@ const checkExpression = (
       let rootSite: BindingSite
       if (expression.place._tag === 'WritePlace') {
         rootSite = ownedWriteSite(expression.place.root)
+      } else if (expression.place.root._tag === 'BindingSliceRoot') {
+        rootSite = Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
       } else {
-        if (expression.place.root._tag === 'BindingSliceRoot') {
-          rootSite = Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
-        } else {
-          rootSite = Object.freeze({
-            _tag: 'Parameter',
-            parameter: expression.place.root.parameter,
-          })
-        }
+        rootSite = Object.freeze({
+          _tag: 'Parameter',
+          parameter: expression.place.root.parameter,
+        })
       }
       const rootKey = siteKey(rootSite)
       const root = state.bindings.get(rootKey)
@@ -2759,12 +2745,10 @@ const checkFunction = (
           let site: BindingSite | undefined
           if (capture.binding !== undefined) {
             site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+          } else if (capture.parameter !== undefined) {
+            site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
           } else {
-            if (capture.parameter !== undefined) {
-              site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-            } else {
-              site = undefined
-            }
+            site = undefined
           }
           if (site === undefined) continue
           bodyLive.add(siteKey(site))
@@ -2984,15 +2968,13 @@ const checkFunction = (
         let rootSite: BindingSite
         if (statement.place._tag === 'WritePlace') {
           rootSite = ownedWriteSite(statement.place.root)
+        } else if (statement.place.root._tag === 'BindingSliceRoot') {
+          rootSite = Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
         } else {
-          if (statement.place.root._tag === 'BindingSliceRoot') {
-            rootSite = Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
-          } else {
-            rootSite = Object.freeze({
-              _tag: 'Parameter',
-              parameter: statement.place.root.parameter,
-            })
-          }
+          rootSite = Object.freeze({
+            _tag: 'Parameter',
+            parameter: statement.place.root.parameter,
+          })
         }
         const rootKey = siteKey(rootSite)
         const root = state.bindings.get(rootKey)
@@ -3222,19 +3204,15 @@ const checkFunction = (
       _tag: 'Unavailable',
       ...(fn.contract.cause === undefined ? {} : { cause: fn.contract.cause }),
     })
+  } else if (firstUnavailable !== undefined) {
+    verdict = Object.freeze({
+      _tag: 'Unavailable',
+      ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
+    })
+  } else if (violation !== undefined) {
+    verdict = Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
   } else {
-    if (firstUnavailable !== undefined) {
-      verdict = Object.freeze({
-        _tag: 'Unavailable',
-        ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
-      })
-    } else {
-      if (violation !== undefined) {
-        verdict = Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
-      } else {
-        verdict = satisfied
-      }
-    }
+    verdict = satisfied
   }
 
   return Object.freeze({

@@ -67,12 +67,10 @@ export const declaration = (kind: Token.TokenKind, arity: number): Eligible | un
   let selected: Prefix | Infix | undefined
   if (arity === 1) {
     selected = prefix(kind)
+  } else if (arity === 2) {
+    selected = infix(kind)?.operator
   } else {
-    if (arity === 2) {
-      selected = infix(kind)?.operator
-    } else {
-      selected = undefined
-    }
+    selected = undefined
   }
   return selected === undefined || isShortCircuit(selected) ? undefined : selected
 }

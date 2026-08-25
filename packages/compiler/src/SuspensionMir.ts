@@ -105,22 +105,18 @@ const runnerOf = (
   let declaration: typeof runner.declaration | undefined
   if (operation === undefined || operation._tag === 'ExecutionPark') {
     declaration = runner.declaration
+  } else if (operation._tag === 'RunEffect') {
+    declaration = operation.target
   } else {
-    if (operation._tag === 'RunEffect') {
-      declaration = operation.target
-    } else {
-      declaration = operation.runner
-    }
+    declaration = operation.runner
   }
   let typeArguments: ReadonlyArray<Type.GenericArgument>
   if (operation === undefined || operation._tag === 'ExecutionPark') {
     typeArguments = runner.typeArguments
+  } else if (operation._tag === 'RunEffect') {
+    typeArguments = operation.typeArguments
   } else {
-    if (operation._tag === 'RunEffect') {
-      typeArguments = operation.typeArguments
-    } else {
-      typeArguments = operation.runnerTypeArguments
-    }
+    typeArguments = operation.runnerTypeArguments
   }
   const exact =
     declaration === undefined
@@ -194,12 +190,10 @@ const operationsOf = (fn: Mir.MirFunction): ReadonlyArray<LocatedOperation> =>
     let operations: ReadonlyArray<Mir.Operation>
     if (region._tag === 'OperationRegion') {
       operations = region.operations
+    } else if (region._tag === 'CleanupRegion') {
+      operations = region.releases
     } else {
-      if (region._tag === 'CleanupRegion') {
-        operations = region.releases
-      } else {
-        operations = []
-      }
+      operations = []
     }
     return operations
       .flatMap(Mir.operationTree)

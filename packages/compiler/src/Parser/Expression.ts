@@ -162,12 +162,10 @@ export const parseStaticTextLiteralExpression = (initial: State): NodeResult => 
   let kind: 'ByteStringLiteral' | 'InvalidStaticLiteral' | 'TextLiteral'
   if (next === 'ByteStringLiteral') {
     kind = 'ByteStringLiteral'
+  } else if (next === 'InvalidStaticLiteral') {
+    kind = 'InvalidStaticLiteral'
   } else {
-    if (next === 'InvalidStaticLiteral') {
-      kind = 'InvalidStaticLiteral'
-    } else {
-      kind = 'TextLiteral'
-    }
+    kind = 'TextLiteral'
   }
   const literal = expect(initial, kind, expressionFollowing)
   return Object.freeze({

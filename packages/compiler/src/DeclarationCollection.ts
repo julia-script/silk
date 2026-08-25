@@ -264,12 +264,10 @@ const analyzeAppliedRows = (
   let failureNodes: SyntaxTree.Node[]
   if (failureType?.kind === 'UnionType') {
     failureNodes = failureType.children.filter(isDeclaredTypeNode)
+  } else if (failureType === undefined) {
+    failureNodes = []
   } else {
-    if (failureType === undefined) {
-      failureNodes = []
-    } else {
-      failureNodes = [failureType]
-    }
+    failureNodes = [failureType]
   }
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const failures = failureNodes.flatMap((member): ReadonlyArray<TypeResolution> => {
@@ -398,12 +396,10 @@ export const analyzeDeclaredType = (
     let mode: Type.CallableMode
     if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
       mode = 'Take'
+    } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
+      mode = 'Exclusive'
     } else {
-      if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
-        mode = 'Exclusive'
-      } else {
-        mode = 'Shared'
-      }
+      mode = 'Shared'
     }
     const unsafe = SyntaxTree.directToken(syntax, 'UnsafeKeyword') !== undefined
     const analyzed = typeNodes.map((node) => analyzeDeclaredType(source, node, typeParameters))
@@ -697,12 +693,10 @@ export const analyzeDeclaredType = (
     let pathSyntax: SyntaxTree.Node | undefined
     if (item === undefined) {
       pathSyntax = undefined
+    } else if (item.kind === 'TypePath') {
+      pathSyntax = item
     } else {
-      if (item.kind === 'TypePath') {
-        pathSyntax = item
-      } else {
-        pathSyntax = SyntaxTree.directNode(item, 'TypePath')
-      }
+      pathSyntax = SyntaxTree.directNode(item, 'TypePath')
     }
     const keyword = SyntaxTree.directToken(syntax, 'Identifier')
     if (item === undefined || pathSyntax === undefined || keyword === undefined)
@@ -764,12 +758,10 @@ export const analyzeDeclaredType = (
       let access: Type.Effect['access']
       if (SyntaxTree.directToken(syntax, 'OnceKeyword') !== undefined) {
         access = 'Take'
+      } else if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
+        access = 'Exclusive'
       } else {
-        if (SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined) {
-          access = 'Exclusive'
-        } else {
-          access = 'Shared'
-        }
+        access = 'Shared'
       }
       const {
         failures,
@@ -1234,12 +1226,10 @@ const collectTypeParameters = (
     let representationKind: Type.ParameterKind | undefined
     if (boundNode?.kind === 'CallableType') {
       representationKind = 'CallableRepresentation'
+    } else if (effectBound) {
+      representationKind = 'EffectRepresentation'
     } else {
-      if (effectBound) {
-        representationKind = 'EffectRepresentation'
-      } else {
-        representationKind = undefined
-      }
+      representationKind = undefined
     }
     const firstStaticProperty = boundNode === undefined ? undefined : staticPropertyOf(boundNode)
     const rawStaticProperties = (
@@ -1596,12 +1586,10 @@ const collectFailureRow = (
   let syntaxMembers: readonly SyntaxTree.Node[]
   if (declared.kind === 'UnionType') {
     syntaxMembers = declared.children.filter(isDeclaredTypeNode)
+  } else if (isDeclaredTypeNode(declared)) {
+    syntaxMembers = Object.freeze([declared])
   } else {
-    if (isDeclaredTypeNode(declared)) {
-      syntaxMembers = Object.freeze([declared])
-    } else {
-      syntaxMembers = Object.freeze([])
-    }
+    syntaxMembers = Object.freeze([])
   }
   // The legacy member facts remain the single diagnostic owner while the row
   // expression is retained as the semantic shape. Reporting both would emit
@@ -2539,16 +2527,12 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
             let detail: string | undefined
             if (node.kind !== 'InterfaceDeclaration') {
               detail = 'only interface operations may declare an operator'
+            } else if (operationTypeParameters.facts.length > 0) {
+              detail = 'operator operations cannot declare operation-local type parameters'
+            } else if (selectedOperator === undefined) {
+              detail = `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
             } else {
-              if (operationTypeParameters.facts.length > 0) {
-                detail = 'operator operations cannot declare operation-local type parameters'
-              } else {
-                if (selectedOperator === undefined) {
-                  detail = `${operatorToken === undefined ? 'the marker' : Token.describe(operatorToken.kind)} is not an eligible ${parameterFacts.length}-operand operator`
-                } else {
-                  detail = undefined
-                }
-              }
+              detail = undefined
             }
             if (detail !== undefined)
               diagnostics.push(Diagnostic.invalidOperatorContract(detail, operatorSyntax.span))

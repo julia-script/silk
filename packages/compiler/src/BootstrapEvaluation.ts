@@ -155,24 +155,16 @@ const floatingUnary = (
   let result: boolean
   if (operation === 'IsNaN') {
     result = FloatingPoint.isNotANumber(bits)
+  } else if (operation === 'IsInfinite') {
+    result = FloatingPoint.isInfinite(bits)
+  } else if (operation === 'IsFinite') {
+    result = FloatingPoint.isFiniteNumber(bits)
+  } else if (operation === 'IsNormal') {
+    result = FloatingPoint.isNormal(bits)
+  } else if (operation === 'IsSubnormal') {
+    result = FloatingPoint.isSubnormal(bits)
   } else {
-    if (operation === 'IsInfinite') {
-      result = FloatingPoint.isInfinite(bits)
-    } else {
-      if (operation === 'IsFinite') {
-        result = FloatingPoint.isFiniteNumber(bits)
-      } else {
-        if (operation === 'IsNormal') {
-          result = FloatingPoint.isNormal(bits)
-        } else {
-          if (operation === 'IsSubnormal') {
-            result = FloatingPoint.isSubnormal(bits)
-          } else {
-            result = FloatingPoint.isSignNegative(bits)
-          }
-        }
-      }
-    }
+    result = FloatingPoint.isSignNegative(bits)
   }
   return integerValue('i32', result ? 1 : 0)
 }
@@ -197,24 +189,16 @@ const floatingBinary = (
     let result: boolean
     if (operation === 'Equals') {
       result = leftNumber === rightNumber
+    } else if (operation === 'NotEquals') {
+      result = leftNumber !== rightNumber
+    } else if (operation === 'LessThan') {
+      result = leftNumber < rightNumber
+    } else if (operation === 'LessOrEqual') {
+      result = leftNumber <= rightNumber
+    } else if (operation === 'GreaterThan') {
+      result = leftNumber > rightNumber
     } else {
-      if (operation === 'NotEquals') {
-        result = leftNumber !== rightNumber
-      } else {
-        if (operation === 'LessThan') {
-          result = leftNumber < rightNumber
-        } else {
-          if (operation === 'LessOrEqual') {
-            result = leftNumber <= rightNumber
-          } else {
-            if (operation === 'GreaterThan') {
-              result = leftNumber > rightNumber
-            } else {
-              result = leftNumber >= rightNumber
-            }
-          }
-        }
-      }
+      result = leftNumber >= rightNumber
     }
     return integerValue('i32', result ? 1 : 0)
   }
@@ -226,20 +210,14 @@ const floatingBinary = (
   let result: number
   if (operation === 'Add') {
     result = leftNumber + rightNumber
+  } else if (operation === 'Subtract') {
+    result = leftNumber - rightNumber
+  } else if (operation === 'Multiply') {
+    result = leftNumber * rightNumber
+  } else if (operation === 'Divide') {
+    result = leftNumber / rightNumber
   } else {
-    if (operation === 'Subtract') {
-      result = leftNumber - rightNumber
-    } else {
-      if (operation === 'Multiply') {
-        result = leftNumber * rightNumber
-      } else {
-        if (operation === 'Divide') {
-          result = leftNumber / rightNumber
-        } else {
-          result = leftNumber % rightNumber
-        }
-      }
-    }
+    result = leftNumber % rightNumber
   }
   const encoded = FloatingPoint.fromNumber(result, leftBits.width)
   return floatValue(left.type, encoded.bits)
@@ -1847,12 +1825,10 @@ function* executeFunction(
     let regionSpan: SourceSpan.SourceSpan
     if (region._tag === 'ConditionalRegion' || region._tag === 'LoopRegion') {
       regionSpan = region.provenance.span
+    } else if (region._tag === 'OperationRegion') {
+      regionSpan = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
     } else {
-      if (region._tag === 'OperationRegion') {
-        regionSpan = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
-      } else {
-        regionSpan = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
-      }
+      regionSpan = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
     }
     trace.push(
       Object.freeze({
@@ -1953,26 +1929,20 @@ function* executeFunction(
             let activeMember: Type.Type
             if (activeIdentity !== undefined) {
               activeMember = activeIdentity.type
+            } else if (scrutinee._tag === 'UnionValue') {
+              activeMember = scrutinee.member
+            } else if (scrutinee._tag === 'AggregateValue') {
+              activeMember = scrutinee.type
             } else {
-              if (scrutinee._tag === 'UnionValue') {
-                activeMember = scrutinee.member
-              } else {
-                if (scrutinee._tag === 'AggregateValue') {
-                  activeMember = scrutinee.type
-                } else {
-                  activeMember = Mir.semanticType(operation.scrutineeType)
-                }
-              }
+              activeMember = Mir.semanticType(operation.scrutineeType)
             }
             let payload: Value
             if (scrutinee._tag === 'UnionValue') {
               payload = scrutinee.payload
+            } else if (scrutinee._tag === 'AggregateValue') {
+              payload = scrutinee
             } else {
-              if (scrutinee._tag === 'AggregateValue') {
-                payload = scrutinee
-              } else {
-                payload = scrutinee
-              }
+              payload = scrutinee
             }
             if (activeMember === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed matching a scalar value')
@@ -2366,24 +2336,20 @@ function* executeFunction(
             let mapping: (typeof operation.mappings)[number] | undefined
             if (operation.conversion === 'Inject') {
               mapping = operation.mappings.at(0)
+            } else if (source._tag === 'UnionValue') {
+              mapping = operation.mappings.find((candidate) =>
+                Type.equals(candidate.source, source.member),
+              )
             } else {
-              if (source._tag === 'UnionValue') {
-                mapping = operation.mappings.find((candidate) =>
-                  Type.equals(candidate.source, source.member),
-                )
-              } else {
-                mapping = undefined
-              }
+              mapping = undefined
             }
             let payload: Value | undefined
             if (operation.conversion === 'Inject') {
               payload = source
+            } else if (operation.conversion === 'Widen' && source._tag === 'UnionValue') {
+              payload = source.payload
             } else {
-              if (operation.conversion === 'Widen' && source._tag === 'UnionValue') {
-                payload = source.payload
-              } else {
-                payload = undefined
-              }
+              payload = undefined
             }
             if (mapping === undefined || payload === undefined) {
               throw new RangeError('MIR verifier allowed an invalid logical union conversion')
@@ -2950,25 +2916,23 @@ function* executeFunction(
                 operation.wake.ordinal,
               )
               if (notified !== undefined) return notified
-            } else {
-              if (consumed.after.wake.allocation === 'Released') {
-                if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
-                  return blockedStep({
-                    _tag: 'Trap',
-                    function: fn.id,
-                    reason: 'Late cancelled Wake consumed reclaim authority twice',
-                    span: operation.provenance.span,
-                  })
-                trace.push(
-                  Object.freeze({
-                    _tag: 'AllocationRelease',
-                    function: fn.id,
-                    ticket: wakeValue.ticket,
-                    span: operation.provenance.span,
-                  }),
-                )
-                traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
-              }
+            } else if (consumed.after.wake.allocation === 'Released') {
+              if (!BootstrapStorage.release(state.allocations, wakeValue.ticket, true))
+                return blockedStep({
+                  _tag: 'Trap',
+                  function: fn.id,
+                  reason: 'Late cancelled Wake consumed reclaim authority twice',
+                  span: operation.provenance.span,
+                })
+              trace.push(
+                Object.freeze({
+                  _tag: 'AllocationRelease',
+                  function: fn.id,
+                  ticket: wakeValue.ticket,
+                  span: operation.provenance.span,
+                }),
+              )
+              traceExecution(package_, wakeValue.ticket, 'Release', operation.provenance.span)
             }
             write(operation.destination, {
               value: Object.freeze({
@@ -3648,28 +3612,18 @@ function* executeFunction(
               let result: boolean | undefined
               if (operation.operator === 'Equals') {
                 result = left === right
+              } else if (operation.operator === 'NotEquals') {
+                result = left !== right
+              } else if (operation.operator === 'LessThan') {
+                result = left < right
+              } else if (operation.operator === 'LessOrEqual') {
+                result = left <= right
+              } else if (operation.operator === 'GreaterThan') {
+                result = left > right
+              } else if (operation.operator === 'GreaterOrEqual') {
+                result = left >= right
               } else {
-                if (operation.operator === 'NotEquals') {
-                  result = left !== right
-                } else {
-                  if (operation.operator === 'LessThan') {
-                    result = left < right
-                  } else {
-                    if (operation.operator === 'LessOrEqual') {
-                      result = left <= right
-                    } else {
-                      if (operation.operator === 'GreaterThan') {
-                        result = left > right
-                      } else {
-                        if (operation.operator === 'GreaterOrEqual') {
-                          result = left >= right
-                        } else {
-                          result = undefined
-                        }
-                      }
-                    }
-                  }
-                }
+                result = undefined
               }
               if (result === undefined)
                 throw new RangeError('MIR verifier allowed a non-comparison char operation')
@@ -4628,12 +4582,10 @@ const argumentSpanFallback = (fn: Mir.MirFunction): SourceSpan.SourceSpan => {
   let span: SourceSpan.SourceSpan | undefined
   if (region?._tag === 'ConditionalRegion' || region?._tag === 'LoopRegion') {
     span = region.provenance.span
+  } else if (region?._tag === 'OperationRegion') {
+    span = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
   } else {
-    if (region?._tag === 'OperationRegion') {
-      span = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
-    } else {
-      span = region?.releases.at(0)?.provenance.span ?? region?.outcome.provenance.span
-    }
+    span = region?.releases.at(0)?.provenance.span ?? region?.outcome.provenance.span
   }
   if (span === undefined) {
     throw new RangeError(`Lowered function ${fn.id.name} has no regions`)

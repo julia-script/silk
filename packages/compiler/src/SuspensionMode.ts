@@ -140,12 +140,10 @@ export const join = (inputs: ReadonlyArray<Summary>): Summary => {
   let availability: Summary['availability']
   if (inputs.some((input) => input.availability === 'Unavailable')) {
     availability = 'Unavailable'
+  } else if (inputs.some((input) => input.availability === 'Open')) {
+    availability = 'Open'
   } else {
-    if (inputs.some((input) => input.availability === 'Open')) {
-      availability = 'Open'
-    } else {
-      availability = 'Complete'
-    }
+    availability = 'Complete'
   }
   const causes = [
     ...new Map(

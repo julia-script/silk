@@ -324,12 +324,10 @@ export const type = (
     let mode: string
     if (self.mode === 'Exclusive') {
       mode = 'mut '
+    } else if (self.mode === 'Take') {
+      mode = 'once '
     } else {
-      if (self.mode === 'Take') {
-        mode = 'once '
-      } else {
-        mode = ''
-      }
+      mode = ''
     }
     return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }

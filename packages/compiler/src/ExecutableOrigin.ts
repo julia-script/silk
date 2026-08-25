@@ -66,19 +66,15 @@ export const reachableIntrinsics = (
           let operation: Intrinsic.OperationId | undefined
           if (expression._tag === 'BuiltinCall') {
             operation = expression.intrinsic
+          } else if (expression._tag === 'EffectCatch') {
+            operation = expression.intrinsic
+          } else if (
+            (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
+            expression.target._tag === 'BuiltinCallableTarget'
+          ) {
+            operation = expression.target.intrinsic
           } else {
-            if (expression._tag === 'EffectCatch') {
-              operation = expression.intrinsic
-            } else {
-              if (
-                (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') &&
-                expression.target._tag === 'BuiltinCallableTarget'
-              ) {
-                operation = expression.target.intrinsic
-              } else {
-                operation = selected
-              }
-            }
+            operation = selected
           }
           if (operation === undefined) continue
           const span = expression.span
@@ -474,12 +470,10 @@ export const make = (operations: Operations) => {
         | undefined
       if (expression._tag === 'BuiltinCall') {
         bound = expression.interfaceOperation
+      } else if (expression._tag === 'BoundOperationCall') {
+        bound = expression
       } else {
-        if (expression._tag === 'BoundOperationCall') {
-          bound = expression
-        } else {
-          bound = undefined
-        }
+        bound = undefined
       }
       const capability =
         bound === undefined ? undefined : Type.substitute(bound.capability, substitution)
@@ -1597,20 +1591,16 @@ export const make = (operations: Operations) => {
           let sourceType: Type.Type | undefined
           if (sourceOrdinal === undefined) {
             sourceType = undefined
-          } else {
-            if (source === 'Parameter') {
-              if (instance.function.contract._tag === 'Contract') {
-                sourceType = instance.function.contract.parameters.at(sourceOrdinal)
-              } else {
-                sourceType = undefined
-              }
+          } else if (source === 'Parameter') {
+            if (instance.function.contract._tag === 'Contract') {
+              sourceType = instance.function.contract.parameters.at(sourceOrdinal)
             } else {
-              if (initializer === undefined || initializer._tag === 'Unavailable') {
-                sourceType = undefined
-              } else {
-                sourceType = initializer.type
-              }
+              sourceType = undefined
             }
+          } else if (initializer === undefined || initializer._tag === 'Unavailable') {
+            sourceType = undefined
+          } else {
+            sourceType = initializer.type
           }
           if (sourceOrdinal === undefined || sourceType === undefined) return []
           const specialized = specializeInstanceType(sourceType, instance.key, [
@@ -1625,12 +1615,10 @@ export const make = (operations: Operations) => {
                 instance.key,
                 sourceOrdinal,
               )
+            } else if (initializer === undefined) {
+              capturedEffectIdentity = undefined
             } else {
-              if (initializer === undefined) {
-                capturedEffectIdentity = undefined
-              } else {
-                capturedEffectIdentity = effectOriginOf(initializer, context)
-              }
+              capturedEffectIdentity = effectOriginOf(initializer, context)
             }
           } else {
             capturedEffectIdentity = undefined
@@ -1643,12 +1631,10 @@ export const make = (operations: Operations) => {
                 instance.key,
                 sourceOrdinal,
               )
+            } else if (initializer === undefined) {
+              capturedCallableIdentity = undefined
             } else {
-              if (initializer === undefined) {
-                capturedCallableIdentity = undefined
-              } else {
-                capturedCallableIdentity = callableOriginOf(initializer, context)
-              }
+              capturedCallableIdentity = callableOriginOf(initializer, context)
             }
           } else {
             capturedCallableIdentity = undefined
@@ -1841,12 +1827,10 @@ export const make = (operations: Operations) => {
         let access: 'Take' | 'Exclusive' | 'Shared'
         if (captures.some((capture) => capture.access === 'Take')) {
           access = 'Take'
+        } else if (captures.some((capture) => capture.access === 'Exclusive')) {
+          access = 'Exclusive'
         } else {
-          if (captures.some((capture) => capture.access === 'Exclusive')) {
-            access = 'Exclusive'
-          } else {
-            access = 'Shared'
-          }
+          access = 'Shared'
         }
         if (
           access === effect.type.access &&
@@ -2059,12 +2043,10 @@ export const make = (operations: Operations) => {
           let witness: DeclarationFacts.ConformanceWitness | undefined
           if (selected !== undefined) {
             witness = requirementBindingWitness(selected, instance.substitution, index)
+          } else if (selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)) {
+            witness = ConformanceProof.witness(index, selectedEvidence.provider, service)
           } else {
-            if (selectedEvidence?._tag === 'RequirementSelection' && Type.isNominal(service)) {
-              witness = ConformanceProof.witness(index, selectedEvidence.provider, service)
-            } else {
-              witness = undefined
-            }
+            witness = undefined
           }
           const operation =
             witness?._tag !== 'SourceConformanceWitness'

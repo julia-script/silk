@@ -432,12 +432,10 @@ export const lookupQualified = (
   let module: string | undefined
   if (qualifier._tag === 'Namespace') {
     module = qualifier.module
+  } else if (qualifier._tag === 'Resolved') {
+    module = scopedModule(qualifier.declaration)
   } else {
-    if (qualifier._tag === 'Resolved') {
-      module = scopedModule(qualifier.declaration)
-    } else {
-      module = undefined
-    }
+    module = undefined
   }
   if (module === undefined)
     return Object.freeze({ _tag: 'Missing', spelling: `${namespace}.${member}` })

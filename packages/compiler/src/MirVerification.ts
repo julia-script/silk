@@ -260,10 +260,10 @@ const loanAncestryPathsValid = (
     for (const state of states) {
       if (key === parentKey) {
         if (operation._tag === 'BeginLoan') next.add(state | parentBit)
-        else {
-          if ((state & childBit) !== 0) valid = false
+        else if ((state & childBit) !== 0) {
+          valid = false
           next.add(state & ~parentBit)
-        }
+        } else next.add(state & ~parentBit)
       } else if (operation._tag === 'BeginLoan') {
         if ((state & parentBit) === 0) valid = false
         next.add(state | childBit)

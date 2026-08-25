@@ -215,18 +215,19 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           const zero = yield* Constant.integerSigned(builder, operandType, 0n)
           if (target.operation !== 'Not') {
             let unaryOperator: Mir.BinaryOperator
-            if (target.operation === 'Negate') {
-              unaryOperator = 'Subtract'
-            } else {
-              if (target.operation === 'WrappingNegate') {
+            switch (target.operation) {
+              case 'Negate':
+                unaryOperator = 'Subtract'
+                break
+              case 'WrappingNegate':
                 unaryOperator = 'WrappingSubtract'
-              } else {
-                if (target.operation === 'SaturatingNegate') {
-                  unaryOperator = 'SaturatingSubtract'
-                } else {
-                  unaryOperator = 'BitXor'
-                }
-              }
+                break
+              case 'SaturatingNegate':
+                unaryOperator = 'SaturatingSubtract'
+                break
+              case 'BitNot':
+                unaryOperator = 'BitXor'
+                break
             }
             const right =
               target.operation === 'BitNot'

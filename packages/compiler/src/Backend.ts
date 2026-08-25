@@ -176,12 +176,10 @@ export const terminationOf = (program: Mir.Module): Termination => {
       let provenance: SourceSpan.SourceSpan | undefined
       if (region?._tag === 'OperationRegion') {
         provenance = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
+      } else if (region?._tag === 'CleanupRegion') {
+        provenance = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
       } else {
-        if (region?._tag === 'CleanupRegion') {
-          provenance = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
-        } else {
-          provenance = region?.provenance.span
-        }
+        provenance = region?.provenance.span
       }
       return provenance === undefined ? [] : [Object.freeze({ function: fn.id, provenance })]
     }),

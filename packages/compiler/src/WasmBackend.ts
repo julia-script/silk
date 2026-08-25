@@ -4667,10 +4667,9 @@ const emitBeginLoanOperation = (
       rootAddress = [Instr.localGet(borrowedPointer)]
     } else if (SilkType.isReference(rootSemantic)) {
       rootAddress = [Instr.localGet(scalar(operation.root))]
+    } else if (planned === undefined) {
+      throw new RangeError('Wasm borrow formation lost its address-taken frame root')
     } else {
-      if (planned === undefined) {
-        throw new RangeError('Wasm borrow formation lost its address-taken frame root')
-      }
       rootAddress = [...materializeRoot(operation.root), ...frameAddress(planned.offset)]
     }
     const instructions: Array<Instr.Instr> = []
@@ -4938,14 +4937,14 @@ const emitReadPlaceOperation = (
           ) {
             return []
           }
-        } else {
-          if (physical._tag !== 'ElementSelector') return []
-          if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
-            return []
-          }
-          if (selector.index._tag === 'Runtime') {
-            conditions.push(Object.freeze({ local: selector.index.local, element: physical.index }))
-          }
+          continue
+        }
+        if (physical._tag !== 'ElementSelector') return []
+        if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
+          return []
+        }
+        if (selector.index._tag === 'Runtime') {
+          conditions.push(Object.freeze({ local: selector.index.local, element: physical.index }))
         }
       }
       const suffix = sourceLane.path.slice(operation.selectors.length)

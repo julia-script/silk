@@ -1080,12 +1080,10 @@ export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAc
     } else {
       type = undefined
     }
+  } else if (root.inferredType._tag === 'Available') {
+    type = root.inferredType.type
   } else {
-    if (root.inferredType._tag === 'Available') {
-      type = root.inferredType.type
-    } else {
-      type = undefined
-    }
+    type = undefined
   }
   if (type !== undefined && (Type.isSlice(type) || Type.isReference(type))) {
     return type.access === 'Exclusive' ? 'ExclusiveBorrowed' : 'SharedBorrowed'
@@ -1948,12 +1946,10 @@ export const elaborateModule = (input: Input): Result => {
             let access: 'Take' | 'Exclusive' | 'Shared'
             if (semanticAccesses.some((capture) => capture === 'Take')) {
               access = 'Take'
+            } else if (semanticAccesses.some((capture) => capture === 'Exclusive')) {
+              access = 'Exclusive'
             } else {
-              if (semanticAccesses.some((capture) => capture === 'Exclusive')) {
-                access = 'Exclusive'
-              } else {
-                access = 'Shared'
-              }
+              access = 'Shared'
             }
             const type = Type.effectWithRows(
               fact.declaration.returnType.type,

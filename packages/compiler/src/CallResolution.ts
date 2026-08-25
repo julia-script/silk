@@ -1279,18 +1279,16 @@ export const analyzeCallContract = (
           Type.encode(suppliedValue),
           argument.syntax.span,
         )
+      } else if (Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)) {
+        mismatch = Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
       } else {
-        if (Type.isSlice(expectedValue) && Type.isFixedArray(suppliedValue)) {
-          mismatch = Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
-        } else {
-          mismatch =
-            unionConversionDiagnostic(suppliedValue, expectedValue, argument.syntax.span) ??
-            Diagnostic.argumentTypeMismatch(
-              Type.encode(expectedValue),
-              Type.encode(suppliedValue),
-              argument.syntax.span,
-            )
-        }
+        mismatch =
+          unionConversionDiagnostic(suppliedValue, expectedValue, argument.syntax.span) ??
+          Diagnostic.argumentTypeMismatch(
+            Type.encode(expectedValue),
+            Type.encode(suppliedValue),
+            argument.syntax.span,
+          )
       }
       return Object.freeze({
         mappings,
@@ -1675,12 +1673,10 @@ export const resolvedFunctionReference = (
     let declaration: DeclarationFacts.DeclarationFact | undefined
     if (resolved._tag === 'Resolved' && resolved.declaration._tag === 'FunctionDeclaration') {
       declaration = resolved.declaration
+    } else if (local._tag === 'Resolved') {
+      declaration = local.declaration
     } else {
-      if (local._tag === 'Resolved') {
-        declaration = local.declaration
-      } else {
-        declaration = undefined
-      }
+      declaration = undefined
     }
     return declaration === undefined
       ? undefined
@@ -1768,16 +1764,14 @@ export const analyzeFunctionItem = (
         member,
         memberToken.span,
       )
+    } else if (memberLookup.declaration.visibility !== 'Public') {
+      diagnostic = Diagnostic.inaccessibleImportedMember(
+        qualifierLookup.module,
+        member,
+        memberToken.span,
+      )
     } else {
-      if (memberLookup.declaration.visibility !== 'Public') {
-        diagnostic = Diagnostic.inaccessibleImportedMember(
-          qualifierLookup.module,
-          member,
-          memberToken.span,
-        )
-      } else {
-        diagnostic = undefined
-      }
+      diagnostic = undefined
     }
     if (diagnostic === undefined) return undefined
     const missing: CallReferenceFact = Object.freeze({
@@ -2279,16 +2273,14 @@ export const finishCallableApplication = (
   let callable: Type.Callable | undefined
   if (callee.type !== undefined && Type.isCallable(callee.type)) {
     callable = callee.type
+  } else if (
+    callee.type !== undefined &&
+    Type.isRepresented(callee.type) &&
+    Type.isCallable(callee.type.contract)
+  ) {
+    callable = callee.type.contract
   } else {
-    if (
-      callee.type !== undefined &&
-      Type.isRepresented(callee.type) &&
-      Type.isCallable(callee.type.contract)
-    ) {
-      callable = callee.type.contract
-    } else {
-      callable = undefined
-    }
+    callable = undefined
   }
   const diagnostics: Array<Diagnostic.Diagnostic> = [
     ...callee.diagnostics,

@@ -573,10 +573,9 @@ const projectCall = (
     if (returned.integer._tag !== 'Available') {
       return Object.freeze({ groupId: id, resultId: undefined, complete: false })
     }
+  } else if (returnedReference === undefined) {
+    return Object.freeze({ groupId: id, resultId: undefined, complete: false })
   } else {
-    if (returnedReference === undefined) {
-      return Object.freeze({ groupId: id, resultId: undefined, complete: false })
-    }
     const referenceLabel =
       returnedReference._tag === 'Unavailable'
         ? 'Unavailable reference'

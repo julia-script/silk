@@ -64,62 +64,48 @@ export const integralBinary = (
       ? leftBits
       : BigInt.asUintN(width, (leftBits >> BigInt(rotate)) | (leftBits << BigInt(width - rotate)))
   let exact: bigint
-  if (operation === 'Add' || operation === 'WrappingAdd' || operation === 'SaturatingAdd') {
-    exact = left + right
-  } else {
-    if (
-      operation === 'Subtract' ||
-      operation === 'WrappingSubtract' ||
-      operation === 'SaturatingSubtract'
-    ) {
+  switch (operation) {
+    case 'Add':
+    case 'WrappingAdd':
+    case 'SaturatingAdd':
+      exact = left + right
+      break
+    case 'Subtract':
+    case 'WrappingSubtract':
+    case 'SaturatingSubtract':
       exact = left - right
-    } else {
-      if (
-        operation === 'Multiply' ||
-        operation === 'WrappingMultiply' ||
-        operation === 'SaturatingMultiply'
-      ) {
-        exact = left * right
-      } else {
-        if (operation === 'Divide') {
-          exact = left / right
-        } else {
-          if (operation === 'Remainder') {
-            exact = left % right
-          } else {
-            if (operation === 'BitAnd') {
-              exact = fromBits(leftBits & rightBits)
-            } else {
-              if (operation === 'BitOr') {
-                exact = fromBits(leftBits | rightBits)
-              } else {
-                if (operation === 'BitXor') {
-                  exact = fromBits(leftBits ^ rightBits)
-                } else {
-                  if (operation === 'ShiftLeft') {
-                    exact = fromBits(leftBits << right)
-                  } else {
-                    if (operation === 'ShiftRight') {
-                      if (scalar.signedness === 'Signed') {
-                        exact = left >> right
-                      } else {
-                        exact = fromBits(leftBits >> right)
-                      }
-                    } else {
-                      if (operation === 'RotateLeft') {
-                        exact = fromBits(rotatedLeft)
-                      } else {
-                        exact = fromBits(rotatedRight)
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+      break
+    case 'Multiply':
+    case 'WrappingMultiply':
+    case 'SaturatingMultiply':
+      exact = left * right
+      break
+    case 'Divide':
+      exact = left / right
+      break
+    case 'Remainder':
+      exact = left % right
+      break
+    case 'BitAnd':
+      exact = fromBits(leftBits & rightBits)
+      break
+    case 'BitOr':
+      exact = fromBits(leftBits | rightBits)
+      break
+    case 'BitXor':
+      exact = fromBits(leftBits ^ rightBits)
+      break
+    case 'ShiftLeft':
+      exact = fromBits(leftBits << right)
+      break
+    case 'ShiftRight':
+      exact = scalar.signedness === 'Signed' ? left >> right : fromBits(leftBits >> right)
+      break
+    case 'RotateLeft':
+      exact = fromBits(rotatedLeft)
+      break
+    default:
+      exact = fromBits(rotatedRight)
   }
   const range = Scalar.range(scalar, pointerBits)
   const wrapping =
@@ -138,24 +124,10 @@ export const integralBinary = (
           ? 'arithmetic underflow'
           : 'arithmetic overflow',
     })
-  let value: bigint
-  if (wrapping) {
-    value = fromBits(exact)
-  } else {
-    if (saturating) {
-      if (exact < range.minimum) {
-        value = range.minimum
-      } else {
-        if (exact > range.maximum) {
-          value = range.maximum
-        } else {
-          value = exact
-        }
-      }
-    } else {
-      value = exact
-    }
-  }
+  let value = exact
+  if (wrapping) value = fromBits(exact)
+  if (saturating && exact < range.minimum) value = range.minimum
+  if (saturating && exact > range.maximum) value = range.maximum
   return Object.freeze({ _tag: 'Integer', type: scalar.spelling, value })
 }
 

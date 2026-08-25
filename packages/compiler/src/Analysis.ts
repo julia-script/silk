@@ -585,16 +585,12 @@ const presentationOfIdentity = (
         let nested: readonly Elaboration.StatementFact[]
         if (statement._tag === 'UnsafeStatement') {
           nested = statement.statements
+        } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+          nested = [...statement.taken, ...statement.otherwise]
+        } else if (statement._tag === 'WhileStatement') {
+          nested = statement.body
         } else {
-          if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
-            nested = [...statement.taken, ...statement.otherwise]
-          } else {
-            if (statement._tag === 'WhileStatement') {
-              nested = statement.body
-            } else {
-              nested = []
-            }
-          }
+          nested = []
         }
         const found = findStatementBinding(nested)
         if (found !== undefined) return found

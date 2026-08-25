@@ -113,12 +113,10 @@ export const encode = (self: ModuleOwnership): string =>
         let category: string
         if (binding.category._tag === 'Copyable') {
           category = 'copyable'
+        } else if (binding.category._tag === 'Unavailable') {
+          category = 'unavailable'
         } else {
-          if (binding.category._tag === 'Unavailable') {
-            category = 'unavailable'
-          } else {
-            category = `move-only ${Type.encode(binding.category.type)}`
-          }
+          category = `move-only ${Type.encode(binding.category.type)}`
         }
         return `  binding ${siteText(binding.site)} ${binding.name ?? '?'} ${category} affinity=${ExecutionAffinity.encode(binding.executionAffinity)} obligations=${LocalSharedOwnership.encode(binding.localSharedObligations)} live ${spanText(binding.liveFrom)}..${spanText(binding.liveTo)}${binding.movedAt === undefined ? '' : ` moved ${spanText(binding.movedAt)}`}`
       }),

@@ -415,22 +415,18 @@ export function* execute(
         } else {
           sourceTag = -1
         }
+      } else if (source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal') {
+        sourceTag = 0
       } else {
-        if (source._tag === 'AggregateValue' && operation.sourceType._tag === 'Nominal') {
-          sourceTag = 0
-        } else {
-          sourceTag = -1
-        }
+        sourceTag = -1
       }
       let payload: Value | undefined
       if (source._tag === 'UnionValue') {
         payload = source.payload
+      } else if (source._tag === 'AggregateValue') {
+        payload = source
       } else {
-        if (source._tag === 'AggregateValue') {
-          payload = source
-        } else {
-          payload = undefined
-        }
+        payload = undefined
       }
       const mapping = operation.tagMappings.find((candidate) => candidate.source === sourceTag)
       if (payload === undefined || mapping === undefined)

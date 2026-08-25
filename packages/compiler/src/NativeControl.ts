@@ -159,9 +159,9 @@ export const emit = Effect.fnUntraced(function* (
           i32,
           BigInt(terminator.tagMappings.at(0)?.target ?? -1),
         )
+      } else if (sourceTag === undefined) {
+        throw new RangeError('Effect failure propagation lost its tag lane')
       } else {
-        if (sourceTag === undefined)
-          throw new RangeError('Effect failure propagation lost its tag lane')
         mappedTag = yield* Constant.integerSigned(builder, i32, -1n)
         for (const [ordinal, mapping] of terminator.tagMappings.entries()) {
           const matches = yield* FunctionBody.integerCompare(

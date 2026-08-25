@@ -75,12 +75,10 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   let usizeType: LlvmType.Type | undefined
   if (usizeLayout?.representation._tag === 'UnsignedInteger') {
     usizeType = yield* LlvmType.integer(builder, usizeLayout.representation.bits)
+  } else if (suspensionEnabled) {
+    usizeType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
   } else {
-    if (suspensionEnabled) {
-      usizeType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
-    } else {
-      usizeType = undefined
-    }
+    usizeType = undefined
   }
   const integerTypes = new Map<number, LlvmType.Type>([[32, i32]])
   if (usizeLayout?.representation._tag === 'UnsignedInteger' && usizeType !== undefined) {
@@ -279,16 +277,12 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     let resultType: LlvmType.Type
     if (abi === 'OpenOut') {
       resultType = i32
+    } else if (resultLanes.length === 0) {
+      resultType = voidType ?? (yield* LlvmType.voidType(builder))
+    } else if (resultLanes.length === 1 && singleResultLane !== undefined) {
+      resultType = laneType(singleResultLane)
     } else {
-      if (resultLanes.length === 0) {
-        resultType = voidType ?? (yield* LlvmType.voidType(builder))
-      } else {
-        if (resultLanes.length === 1 && singleResultLane !== undefined) {
-          resultType = laneType(singleResultLane)
-        } else {
-          resultType = yield* LlvmType.structure(builder, resultLanes.map(laneType))
-        }
-      }
+      resultType = yield* LlvmType.structure(builder, resultLanes.map(laneType))
     }
     const parameters = operation.arguments.flatMap((argument) => {
       const type = program.functions

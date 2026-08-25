@@ -315,12 +315,10 @@ const borrowOf = (
   let access: Type.BorrowAccess
   if (type?._tag === 'EffectBorrow') {
     access = type.access
+  } else if (type?._tag === 'Reference' || type?._tag === 'Slice') {
+    access = type.type.access
   } else {
-    if (type?._tag === 'Reference' || type?._tag === 'Slice') {
-      access = type.type.access
-    } else {
-      access = 'Shared'
-    }
+    access = 'Shared'
   }
   if (seen.has(local.ordinal))
     return Object.freeze({
@@ -404,15 +402,13 @@ const affinityOf = (
       index,
       type.environment.fields.map((field) => Object.freeze({ type: field.type })),
     )
+  } else if (type._tag === 'CallableValue' && type.environment !== undefined) {
+    retained = ExecutionAffinity.ofEnvironment(
+      index,
+      type.environment.fields.map((field) => Object.freeze({ type: field.type })),
+    )
   } else {
-    if (type._tag === 'CallableValue' && type.environment !== undefined) {
-      retained = ExecutionAffinity.ofEnvironment(
-        index,
-        type.environment.fields.map((field) => Object.freeze({ type: field.type })),
-      )
-    } else {
-      retained = ExecutionAffinity.ofType(index, Mir.semanticType(type))
-    }
+    retained = ExecutionAffinity.ofType(index, Mir.semanticType(type))
   }
   if (access._tag !== 'BorrowedDependency') return retained
   const root = fn.localTypes.at(access.root.ordinal)
@@ -476,16 +472,14 @@ const planFor = (
         let runtimeLanes: ReturnType<typeof Layout.effectEnvironmentLanes>
         if (type._tag === 'EffectValue') {
           runtimeLanes = Layout.effectEnvironmentLanes(program.layout, type.environment)
-        } else {
-          if (type._tag === 'CallableValue') {
-            if (type.environment === undefined) {
-              runtimeLanes = []
-            } else {
-              runtimeLanes = Layout.callableEnvironmentLanes(program.layout, type.environment)
-            }
+        } else if (type._tag === 'CallableValue') {
+          if (type.environment === undefined) {
+            runtimeLanes = []
           } else {
-            runtimeLanes = Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? []
+            runtimeLanes = Layout.callableEnvironmentLanes(program.layout, type.environment)
           }
+        } else {
+          runtimeLanes = Layout.callingShape(program.layout, Mir.semanticType(type))?.lanes ?? []
         }
         if (
           runtimeLanes.length === 0 &&

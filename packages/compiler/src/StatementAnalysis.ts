@@ -274,12 +274,10 @@ export const analyzeStatements = (
     let access: Match.Access
     if (initializer.fact._tag === 'Move') {
       access = 'Move'
+    } else if (initializer.fact._tag === 'Borrow') {
+      access = initializer.fact.access
     } else {
-      if (initializer.fact._tag === 'Borrow') {
-        access = initializer.fact.access
-      } else {
-        access = 'Copy'
-      }
+      access = 'Copy'
     }
     const subject =
       initializer.fact._tag === 'Move' || initializer.fact._tag === 'Borrow'
@@ -318,25 +316,21 @@ export const analyzeStatements = (
     let members: ReadonlyArray<Match.CoverageIdentity>
     if (subject.type._tag !== 'Available') {
       members = []
+    } else if (subjectEnum === undefined) {
+      members = Match.membersOf(subject.type.type)
     } else {
-      if (subjectEnum === undefined) {
-        members = Match.membersOf(subject.type.type)
-      } else {
-        members = Match.enumMembersOf(subjectEnum)
-      }
+      members = Match.enumMembersOf(subjectEnum)
     }
     let member: Match.CoverageIdentity | undefined
     if (pattern.fact._tag === 'EnumMemberPattern') {
       member = pattern.fact.coverage
+    } else if (
+      (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
+      pattern.fact.member !== undefined
+    ) {
+      member = Match.structuralMember(pattern.fact.member)
     } else {
-      if (
-        (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
-        pattern.fact.member !== undefined
-      ) {
-        member = Match.structuralMember(pattern.fact.member)
-      } else {
-        member = undefined
-      }
+      member = undefined
     }
     if (
       subjectEnum === undefined &&
@@ -605,16 +599,14 @@ export const analyzeStatements = (
         let selected: Match.CoverageIdentity | undefined
         if (selection.pattern._tag === 'EnumMemberPattern') {
           selected = selection.pattern.coverage
+        } else if (
+          (selection.pattern._tag === 'NominalPattern' ||
+            selection.pattern._tag === 'TypePattern') &&
+          selection.pattern.member !== undefined
+        ) {
+          selected = Match.structuralMember(selection.pattern.member)
         } else {
-          if (
-            (selection.pattern._tag === 'NominalPattern' ||
-              selection.pattern._tag === 'TypePattern') &&
-            selection.pattern.member !== undefined
-          ) {
-            selected = Match.structuralMember(selection.pattern.member)
-          } else {
-            selected = undefined
-          }
+          selected = undefined
         }
         context.diagnostics.push(
           Diagnostic.refutableLetPattern(

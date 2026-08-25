@@ -298,7 +298,12 @@ export const make = (input: Input): SemanticInvalidation => {
       previousModule === undefined
     ) {
       addReason(module, 'Fresh')
-    } else {
+    }
+    if (
+      input.previous !== undefined &&
+      revision?._tag !== 'Fresh' &&
+      previousModule !== undefined
+    ) {
       if (input.current.environment !== input.previous.environment)
         addReason(module, 'EnvironmentChange')
       if (revision?._tag !== 'Reused') addReason(module, 'LocalChange')

@@ -360,12 +360,10 @@ export const execute = (
         let result: HostInput.Lookup
         if (name === 'osHostArgument') {
           result = input.argument(Number(readInteger(selector, 'usize').value))
+        } else if (name === 'osHostVariable') {
+          result = input.variable(byteView(selector))
         } else {
-          if (name === 'osHostVariable') {
-            result = input.variable(byteView(selector))
-          } else {
-            result = input.workingDirectory()
-          }
+          result = input.workingDirectory()
         }
         if (result._tag !== 'Present') {
           // Absence is the not-found reason, which the provider reads as an ordinary answer;

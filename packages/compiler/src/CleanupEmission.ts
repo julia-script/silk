@@ -238,16 +238,12 @@ export const propagationReleases = (
       let local: Mir.LocalId | undefined
       if (site._tag === 'Let') {
         local = fn.bindingLocals.get(site.binding.ordinal)
+      } else if (site._tag === 'Parameter') {
+        local = fn.parameterLocals.get(site.parameter.ordinal)
+      } else if (site._tag === 'Pattern') {
+        local = fn.patternLocals.get(patternKey(site.binding))
       } else {
-        if (site._tag === 'Parameter') {
-          local = fn.parameterLocals.get(site.parameter.ordinal)
-        } else {
-          if (site._tag === 'Pattern') {
-            local = fn.patternLocals.get(patternKey(site.binding))
-          } else {
-            local = undefined
-          }
-        }
+        local = undefined
       }
       const localType = local === undefined ? undefined : fn.localTypes.at(local.ordinal)
       if (local === undefined || localType === undefined) return []
@@ -368,16 +364,12 @@ export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | un
     let dropped: Mir.LocalId | undefined
     if (site._tag === 'Parameter') {
       dropped = fn.parameterLocals.get(site.parameter.ordinal)
+    } else if (site._tag === 'Temporary') {
+      dropped = undefined
+    } else if (site._tag === 'Pattern') {
+      dropped = fn.patternLocals.get(patternKey(site.binding))
     } else {
-      if (site._tag === 'Temporary') {
-        dropped = undefined
-      } else {
-        if (site._tag === 'Pattern') {
-          dropped = fn.patternLocals.get(patternKey(site.binding))
-        } else {
-          dropped = fn.bindingLocals.get(site.binding.ordinal)
-        }
-      }
+      dropped = fn.bindingLocals.get(site.binding.ordinal)
     }
     if (dropped === undefined) continue
     const localType = fn.localTypes.at(dropped.ordinal)

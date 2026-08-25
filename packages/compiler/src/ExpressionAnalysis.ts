@@ -501,21 +501,19 @@ export const analyzeEnumMember = (
       Type.encode(nominal),
       memberPathSpan,
     )
+  } else if (
+    nominal !== undefined &&
+    typeof expected === 'string' &&
+    Scalar.isIntegerSpelling(expected)
+  ) {
+    wrongEnum = Diagnostic.enumIntegerMismatch(
+      Type.encode(nominal),
+      expected,
+      'EnumToInteger',
+      memberPathSpan,
+    )
   } else {
-    if (
-      nominal !== undefined &&
-      typeof expected === 'string' &&
-      Scalar.isIntegerSpelling(expected)
-    ) {
-      wrongEnum = Diagnostic.enumIntegerMismatch(
-        Type.encode(nominal),
-        expected,
-        'EnumToInteger',
-        memberPathSpan,
-      )
-    } else {
-      wrongEnum = undefined
-    }
+    wrongEnum = undefined
   }
   const unknown =
     member === undefined
@@ -570,29 +568,25 @@ const analyzeEnumValueCall = (
   let mismatch: Diagnostic.Diagnostic | undefined
   if (actual === undefined || Type.equals(actual, operation.parameter)) {
     mismatch = undefined
+  } else if (enumFactByType(resolution.index, actual) !== undefined) {
+    mismatch = Diagnostic.wrongEnumMember(
+      Type.encode(operation.parameter),
+      Type.encode(actual),
+      argument?.syntax.span ?? node.span,
+    )
+  } else if (typeof actual === 'string' && Scalar.isIntegerSpelling(actual)) {
+    mismatch = Diagnostic.enumIntegerMismatch(
+      Type.encode(operation.parameter),
+      actual,
+      'IntegerToEnum',
+      argument?.syntax.span ?? node.span,
+    )
   } else {
-    if (enumFactByType(resolution.index, actual) !== undefined) {
-      mismatch = Diagnostic.wrongEnumMember(
-        Type.encode(operation.parameter),
-        Type.encode(actual),
-        argument?.syntax.span ?? node.span,
-      )
-    } else {
-      if (typeof actual === 'string' && Scalar.isIntegerSpelling(actual)) {
-        mismatch = Diagnostic.enumIntegerMismatch(
-          Type.encode(operation.parameter),
-          actual,
-          'IntegerToEnum',
-          argument?.syntax.span ?? node.span,
-        )
-      } else {
-        mismatch = Diagnostic.argumentTypeMismatch(
-          Type.encode(operation.parameter),
-          Type.encode(actual),
-          argument?.syntax.span ?? node.span,
-        )
-      }
-    }
+    mismatch = Diagnostic.argumentTypeMismatch(
+      Type.encode(operation.parameter),
+      Type.encode(actual),
+      argument?.syntax.span ?? node.span,
+    )
   }
   const arity =
     argumentsResult.facts.length === 1
@@ -1034,12 +1028,10 @@ export const intrinsicStruct = (
       Object.freeze(['bytes', 'usize'] as const),
       Object.freeze(['alignment', 'usize'] as const),
     ])
+  } else if (Type.equals(type, Type.invalidAlignment)) {
+    fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
   } else {
-    if (Type.equals(type, Type.invalidAlignment)) {
-      fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
-    } else {
-      fieldTypes = Object.freeze([])
-    }
+    fieldTypes = Object.freeze([])
   }
   return Object.freeze({
     _tag: 'StructDeclaration',
@@ -1765,12 +1757,10 @@ export const analyzeMatch = (
   let members: readonly Match.CoverageIdentity[] | undefined
   if (scrutinee?.type === undefined) {
     members = undefined
+  } else if (enumScrutinee === undefined) {
+    members = Match.membersOf(scrutinee.type)
   } else {
-    if (enumScrutinee === undefined) {
-      members = Match.membersOf(scrutinee.type)
-    } else {
-      members = Match.enumMembersOf(enumScrutinee)
-    }
+    members = Match.enumMembersOf(enumScrutinee)
   }
 
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
@@ -2029,12 +2019,10 @@ export const analyzeMatch = (
       } else {
         joinedEffect = undefined
       }
+    } else if (Type.isEffect(joined.type)) {
+      joinedEffect = joined.type
     } else {
-      if (Type.isEffect(joined.type)) {
-        joinedEffect = joined.type
-      } else {
-        joinedEffect = undefined
-      }
+      joinedEffect = undefined
     }
   } else {
     joinedEffect = undefined
@@ -3084,12 +3072,10 @@ export const analyzeProjection = (
   let nominal: Type.Nominal | undefined
   if (subject.type !== undefined && Type.isNominal(subject.type)) {
     nominal = subject.type
+  } else if (reference !== undefined && Type.isNominal(reference.target)) {
+    nominal = reference.target
   } else {
-    if (reference !== undefined && Type.isNominal(reference.target)) {
-      nominal = reference.target
-    } else {
-      nominal = undefined
-    }
+    nominal = undefined
   }
   const slice = subject.type !== undefined && Type.isSlice(subject.type) ? subject.type : undefined
   const borrowAccess =
@@ -3730,16 +3716,14 @@ export function analyzeBuiltinCall(
   let missingDiagnostic: Diagnostic.Diagnostic | undefined
   if (actor === undefined) {
     missingDiagnostic = Diagnostic.unknownActor(actorSpelling, actorToken.span)
+  } else if (signature === undefined) {
+    missingDiagnostic = Diagnostic.unknownActorOperation(
+      actorSpelling,
+      operationSpelling,
+      operationToken.span,
+    )
   } else {
-    if (signature === undefined) {
-      missingDiagnostic = Diagnostic.unknownActorOperation(
-        actorSpelling,
-        operationSpelling,
-        operationToken.span,
-      )
-    } else {
-      missingDiagnostic = undefined
-    }
+    missingDiagnostic = undefined
   }
   let reference: CallReferenceFact
   if (signature !== undefined) {
@@ -4158,12 +4142,10 @@ export const analyzeOperatorExpression = (
   let operator: Operator.Prefix | Operator.Infix | undefined
   if (operatorToken === undefined) {
     operator = undefined
+  } else if (node.kind === 'PrefixExpression') {
+    operator = Operator.prefix(operatorToken.kind)
   } else {
-    if (node.kind === 'PrefixExpression') {
-      operator = Operator.prefix(operatorToken.kind)
-    } else {
-      operator = Operator.infix(operatorToken.kind)?.operator
-    }
+    operator = Operator.infix(operatorToken.kind)?.operator
   }
   const operandNodes = node.children.filter(isExpressionNode)
   if (operator !== undefined && Operator.isShortCircuit(operator)) {
@@ -4309,21 +4291,17 @@ export const analyzeOperatorExpression = (
         spelling(source, operatorToken),
         operatorToken.span,
       )
+    } else if (isEquality && firstEnum !== undefined && secondEnum !== undefined) {
+      diagnostic = Diagnostic.crossEnumEquality(firstTypeText, secondTypeText, operatorToken.span)
+    } else if (isEquality) {
+      diagnostic = Diagnostic.enumIntegerMismatch(
+        firstEnum === undefined ? secondTypeText : firstTypeText,
+        firstEnum === undefined ? firstTypeText : secondTypeText,
+        firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
+        operatorToken.span,
+      )
     } else {
-      if (isEquality && firstEnum !== undefined && secondEnum !== undefined) {
-        diagnostic = Diagnostic.crossEnumEquality(firstTypeText, secondTypeText, operatorToken.span)
-      } else {
-        if (isEquality) {
-          diagnostic = Diagnostic.enumIntegerMismatch(
-            firstEnum === undefined ? secondTypeText : firstTypeText,
-            firstEnum === undefined ? firstTypeText : secondTypeText,
-            firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
-            operatorToken.span,
-          )
-        } else {
-          diagnostic = undefined
-        }
-      }
+      diagnostic = undefined
     }
     if (diagnostic !== undefined) {
       const reference: CallReferenceFact = Object.freeze({
@@ -4416,12 +4394,10 @@ export const analyzeOperatorExpression = (
   let selectedActor: Operator.Actor
   if (selectedFirstType?._tag === 'Available' && Type.isString(selectedFirstType.type)) {
     selectedActor = 'string'
+  } else if (selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)) {
+    selectedActor = selectedFirstType.type
   } else {
-    if (selectedFirstType?._tag === 'Available' && Scalar.isSpelling(selectedFirstType.type)) {
-      selectedActor = selectedFirstType.type
-    } else {
-      selectedActor = Scalar.defaultInteger.spelling
-    }
+    selectedActor = Scalar.defaultInteger.spelling
   }
   const target = Operator.target(operator, selectedActor)
   const signature = builtinSignature(target.actor, target.operation, 'Primitive')
@@ -4750,12 +4726,10 @@ export const effectCaptureFacts = (
     let reference: DeclarationFacts.ParameterFact | BindingDeclarationFact | undefined
     if (fact.reference._tag === 'ResolvedBinding') {
       reference = fact.reference.binding
+    } else if (fact.reference._tag === 'Resolved') {
+      reference = fact.reference.parameter
     } else {
-      if (fact.reference._tag === 'Resolved') {
-        reference = fact.reference.parameter
-      } else {
-        reference = undefined
-      }
+      reference = undefined
     }
     recordReference(
       reference,
@@ -5235,16 +5209,14 @@ export function analyzeExpression(
     let effect: Type.Effect | undefined
     if (subject.type !== undefined && Type.isEffect(subject.type)) {
       effect = subject.type
+    } else if (
+      subject.type !== undefined &&
+      Type.isRepresented(subject.type) &&
+      Type.isEffect(subject.type.contract)
+    ) {
+      effect = subject.type.contract
     } else {
-      if (
-        subject.type !== undefined &&
-        Type.isRepresented(subject.type) &&
-        Type.isEffect(subject.type.contract)
-      ) {
-        effect = subject.type.contract
-      } else {
-        effect = undefined
-      }
+      effect = undefined
     }
     const type =
       effect !== undefined ? availableExpressionType(effect.success) : unavailableExpressionType
@@ -5624,16 +5596,14 @@ export function analyzeExpression(
       let diagnostic: Diagnostic.Diagnostic | undefined
       if (candidate === undefined) {
         diagnostic = Diagnostic.unknownActorOperation(qualifier, member, memberToken.span)
+      } else if (candidate.visibility === 'Private') {
+        diagnostic = Diagnostic.inaccessibleImportedMember(
+          actorModule ?? qualifier,
+          member,
+          memberToken.span,
+        )
       } else {
-        if (candidate.visibility === 'Private') {
-          diagnostic = Diagnostic.inaccessibleImportedMember(
-            actorModule ?? qualifier,
-            member,
-            memberToken.span,
-          )
-        } else {
-          diagnostic = undefined
-        }
+        diagnostic = undefined
       }
       let reference: CallReferenceFact
       if (candidate !== undefined && candidate.visibility === 'Public') {
@@ -5671,16 +5641,14 @@ export function analyzeExpression(
           member,
           memberToken.span,
         )
+      } else if (candidate.visibility === 'Private') {
+        diagnostic = Diagnostic.inaccessibleImportedMember(
+          qualifierLookup.module,
+          member,
+          memberToken.span,
+        )
       } else {
-        if (candidate.visibility === 'Private') {
-          diagnostic = Diagnostic.inaccessibleImportedMember(
-            qualifierLookup.module,
-            member,
-            memberToken.span,
-          )
-        } else {
-          diagnostic = undefined
-        }
+        diagnostic = undefined
       }
       let reference: CallReferenceFact
       if (candidate !== undefined && candidate.visibility === 'Public') {
@@ -5715,12 +5683,10 @@ export function analyzeExpression(
     let inheritedCause: Diagnostic.Identity | undefined
     if (qualifierLookup._tag === 'Unavailable') {
       inheritedCause = qualifierLookup.cause
+    } else if (qualifierLookup._tag === 'Conflict') {
+      inheritedCause = qualifierLookup.conflict.cause
     } else {
-      if (qualifierLookup._tag === 'Conflict') {
-        inheritedCause = qualifierLookup.conflict.cause
-      } else {
-        inheritedCause = undefined
-      }
+      inheritedCause = undefined
     }
     const cause = diagnostic !== undefined ? Diagnostic.identity(diagnostic) : inheritedCause
     const reference: CallReferenceFact = Object.freeze({
@@ -5784,27 +5750,21 @@ export function analyzeExpression(
         }),
       ),
     })
+  } else if (localLookup._tag === 'Ambiguous') {
+    lookup = localLookup
+  } else if (
+    resolvedLookup._tag === 'Resolved' &&
+    resolvedLookup.declaration._tag === 'FunctionDeclaration'
+  ) {
+    lookup = Object.freeze({
+      _tag: 'Resolved',
+      spelling: tokenSpelling,
+      declaration: resolvedLookup.declaration,
+    })
+  } else if (resolvedLookup._tag === 'Missing') {
+    lookup = localLookup
   } else {
-    if (localLookup._tag === 'Ambiguous') {
-      lookup = localLookup
-    } else {
-      if (
-        resolvedLookup._tag === 'Resolved' &&
-        resolvedLookup.declaration._tag === 'FunctionDeclaration'
-      ) {
-        lookup = Object.freeze({
-          _tag: 'Resolved',
-          spelling: tokenSpelling,
-          declaration: resolvedLookup.declaration,
-        })
-      } else {
-        if (resolvedLookup._tag === 'Missing') {
-          lookup = localLookup
-        } else {
-          lookup = Object.freeze({ _tag: 'Missing', spelling: tokenSpelling })
-        }
-      }
-    }
+    lookup = Object.freeze({ _tag: 'Missing', spelling: tokenSpelling })
   }
   const missingDiagnostic =
     lookup._tag === 'Missing' && resolvedLookup._tag !== 'Unavailable'
@@ -5818,26 +5778,24 @@ export function analyzeExpression(
       token,
       declaration: lookup.declaration,
     })
+  } else if (lookup._tag === 'Ambiguous') {
+    reference = Object.freeze({
+      _tag: 'Ambiguous',
+      spelling: tokenSpelling,
+      token,
+      declarations: lookup.declarations,
+      ...(resolvedLookup._tag === 'Conflict' ? { cause: resolvedLookup.conflict.cause } : {}),
+    })
   } else {
-    if (lookup._tag === 'Ambiguous') {
-      reference = Object.freeze({
-        _tag: 'Ambiguous',
-        spelling: tokenSpelling,
-        token,
-        declarations: lookup.declarations,
-        ...(resolvedLookup._tag === 'Conflict' ? { cause: resolvedLookup.conflict.cause } : {}),
-      })
-    } else {
-      let cause: ReturnType<typeof Diagnostic.identity> | undefined
-      if (missingDiagnostic !== undefined) cause = Diagnostic.identity(missingDiagnostic)
-      else if (resolvedLookup._tag === 'Unavailable') cause = resolvedLookup.cause
-      reference = Object.freeze({
-        _tag: 'Missing',
-        spelling: tokenSpelling,
-        token,
-        ...(cause === undefined ? {} : { cause }),
-      })
-    }
+    let cause: ReturnType<typeof Diagnostic.identity> | undefined
+    if (missingDiagnostic !== undefined) cause = Diagnostic.identity(missingDiagnostic)
+    else if (resolvedLookup._tag === 'Unavailable') cause = resolvedLookup.cause
+    reference = Object.freeze({
+      _tag: 'Missing',
+      spelling: tokenSpelling,
+      token,
+      ...(cause === undefined ? {} : { cause }),
+    })
   }
   if (
     reference._tag === 'Resolved' &&

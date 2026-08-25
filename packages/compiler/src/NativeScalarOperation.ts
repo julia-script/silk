@@ -97,24 +97,20 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         } else {
           kind = 'fpext'
         }
-      } else {
-        if (source.category === 'Floating' && target.category === 'Integer') {
-          if (target.signedness === 'Signed') {
-            kind = 'fptosi'
-          } else {
-            kind = 'fptoui'
-          }
+      } else if (source.category === 'Floating' && target.category === 'Integer') {
+        if (target.signedness === 'Signed') {
+          kind = 'fptosi'
         } else {
-          if (source.category === 'Integer' && target.category === 'Floating') {
-            if (source.signedness === 'Signed') {
-              kind = 'sitofp'
-            } else {
-              kind = 'uitofp'
-            }
-          } else {
-            throw new RangeError('LLVM scalar conversion was not numeric')
-          }
+          kind = 'fptoui'
         }
+      } else if (source.category === 'Integer' && target.category === 'Floating') {
+        if (source.signedness === 'Signed') {
+          kind = 'sitofp'
+        } else {
+          kind = 'uitofp'
+        }
+      } else {
+        throw new RangeError('LLVM scalar conversion was not numeric')
       }
       const result = yield* FunctionBody.cast(
         body,
@@ -468,14 +464,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           signatures.set(targetBits, signature)
         }
         let stem: 'add' | 'sub' | 'mul'
-        if (operation.operation === 'CheckedAdd') {
-          stem = 'add'
-        } else {
-          if (operation.operation === 'CheckedSubtract') {
+        switch (operation.operation) {
+          case 'CheckedAdd':
+            stem = 'add'
+            break
+          case 'CheckedSubtract':
             stem = 'sub'
-          } else {
+            break
+          case 'CheckedMultiply':
             stem = 'mul'
-          }
+            break
         }
         const pair = yield* Intrinsic.call(
           body,
@@ -488,9 +486,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (pair === undefined) throw new RangeError('LLVM checked arithmetic produced no outcome')
         result = yield* FunctionBody.extractValue(body, pair, [0], `${name}_value`)
         invalid = yield* FunctionBody.extractValue(body, pair, [1], `${name}_invalid`)
-      } else {
-        if (target.category !== 'Integer')
-          throw new RangeError('LLVM checked division lost its integer target')
+      } else if (target.category === 'Integer') {
         if (right === undefined)
           throw new RangeError('LLVM checked division lost its right operand')
         const zero = yield* Constant.integerUnsigned(builder, targetPhysical, 0n)
@@ -529,6 +525,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           opcode = target.signedness === 'Unsigned' ? 'udiv' : 'sdiv'
         else opcode = target.signedness === 'Unsigned' ? 'urem' : 'srem'
         result = yield* FunctionBody.binary(body, opcode, left, safeRight, `${name}_value`)
+      } else {
+        throw new RangeError('LLVM checked division lost its integer target')
       }
       const successOrdinal = operation.type.type.members.findIndex((member) =>
         SilkType.equals(member, operation.success),
@@ -636,30 +634,28 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           break
         }
         let predicate: FunctionBody.FloatingPredicate | undefined
-        if (operation.operator === 'Equals') {
-          predicate = 'oeq'
-        } else {
-          if (operation.operator === 'NotEquals') {
+        switch (operation.operator) {
+          case 'Equals':
+            predicate = 'oeq'
+            break
+          case 'NotEquals':
             predicate = 'une'
-          } else {
-            if (operation.operator === 'LessThan') {
-              predicate = 'olt'
-            } else {
-              if (operation.operator === 'LessOrEqual') {
-                predicate = 'ole'
-              } else {
-                if (operation.operator === 'GreaterThan') {
-                  predicate = 'ogt'
-                } else {
-                  if (operation.operator === 'GreaterOrEqual') {
-                    predicate = 'oge'
-                  } else {
-                    predicate = undefined
-                  }
-                }
-              }
-            }
-          }
+            break
+          case 'LessThan':
+            predicate = 'olt'
+            break
+          case 'LessOrEqual':
+            predicate = 'ole'
+            break
+          case 'GreaterThan':
+            predicate = 'ogt'
+            break
+          case 'GreaterOrEqual':
+            predicate = 'oge'
+            break
+          default:
+            predicate = undefined
+            break
         }
         if (predicate !== undefined) {
           const flag = yield* FunctionBody.floatingCompare(
@@ -674,26 +670,25 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           break
         }
         let mnemonic: FunctionBody.FloatingBinaryKind | undefined
-        if (operation.operator === 'Add') {
-          mnemonic = 'fadd'
-        } else {
-          if (operation.operator === 'Subtract') {
+        switch (operation.operator) {
+          case 'Add':
+            mnemonic = 'fadd'
+            break
+          case 'Subtract':
             mnemonic = 'fsub'
-          } else {
-            if (operation.operator === 'Multiply') {
-              mnemonic = 'fmul'
-            } else {
-              if (operation.operator === 'Divide') {
-                mnemonic = 'fdiv'
-              } else {
-                if (operation.operator === 'Remainder') {
-                  mnemonic = 'frem'
-                } else {
-                  mnemonic = undefined
-                }
-              }
-            }
-          }
+            break
+          case 'Multiply':
+            mnemonic = 'fmul'
+            break
+          case 'Divide':
+            mnemonic = 'fdiv'
+            break
+          case 'Remainder':
+            mnemonic = 'frem'
+            break
+          default:
+            mnemonic = undefined
+            break
         }
         if (mnemonic === undefined)
           throw new RangeError(`LLVM float operation ${operation.operator} is unavailable`)
@@ -730,26 +725,25 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.operator === 'WrappingMultiply'
       ) {
         let mnemonic: FunctionBody.BinaryKind
-        if (operation.operator === 'BitAnd') {
-          mnemonic = 'and'
-        } else {
-          if (operation.operator === 'BitOr') {
+        switch (operation.operator) {
+          case 'BitAnd':
+            mnemonic = 'and'
+            break
+          case 'BitOr':
             mnemonic = 'or'
-          } else {
-            if (operation.operator === 'BitXor') {
-              mnemonic = 'xor'
-            } else {
-              if (operation.operator === 'WrappingAdd') {
-                mnemonic = 'add'
-              } else {
-                if (operation.operator === 'WrappingSubtract') {
-                  mnemonic = 'sub'
-                } else {
-                  mnemonic = 'mul'
-                }
-              }
-            }
-          }
+            break
+          case 'BitXor':
+            mnemonic = 'xor'
+            break
+          case 'WrappingAdd':
+            mnemonic = 'add'
+            break
+          case 'WrappingSubtract':
+            mnemonic = 'sub'
+            break
+          case 'WrappingMultiply':
+            mnemonic = 'mul'
+            break
         }
         const result = yield* FunctionBody.binary(body, mnemonic, left, right, `integer${ordinal}`)
         yield* NativeDebug.locate(
@@ -819,18 +813,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           parameters: Object.freeze([operandType, operandType]),
         })
         let intrinsic: Intrinsic.Id
-        if (operation.operator === 'SaturatingAdd') {
-          if (unsigned) {
-            intrinsic = 'uadd.sat'
-          } else {
-            intrinsic = 'sadd.sat'
-          }
-        } else {
-          if (unsigned) {
-            intrinsic = 'usub.sat'
-          } else {
-            intrinsic = 'ssub.sat'
-          }
+        switch (operation.operator) {
+          case 'SaturatingAdd':
+            intrinsic = unsigned ? 'uadd.sat' : 'sadd.sat'
+            break
+          case 'SaturatingSubtract':
+            intrinsic = unsigned ? 'usub.sat' : 'ssub.sat'
+            break
         }
         const result = yield* Intrinsic.call(
           body,
@@ -948,26 +937,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.operator === 'Multiply'
       ) {
         let intrinsicId: Intrinsic.Id
-        if (operation.operator === 'Add') {
-          if (unsigned) {
-            intrinsicId = 'uadd.with.overflow'
-          } else {
-            intrinsicId = 'sadd.with.overflow'
-          }
-        } else {
-          if (operation.operator === 'Subtract') {
-            if (unsigned) {
-              intrinsicId = 'usub.with.overflow'
-            } else {
-              intrinsicId = 'ssub.with.overflow'
-            }
-          } else {
-            if (unsigned) {
-              intrinsicId = 'umul.with.overflow'
-            } else {
-              intrinsicId = 'smul.with.overflow'
-            }
-          }
+        switch (operation.operator) {
+          case 'Add':
+            intrinsicId = unsigned ? 'uadd.with.overflow' : 'sadd.with.overflow'
+            break
+          case 'Subtract':
+            intrinsicId = unsigned ? 'usub.with.overflow' : 'ssub.with.overflow'
+            break
+          case 'Multiply':
+            intrinsicId = unsigned ? 'umul.with.overflow' : 'smul.with.overflow'
+            break
         }
         let bits: number
         if (scalar === undefined) {

@@ -320,12 +320,10 @@ const notifyReady = Effect.fnUntraced(function* (
   let targetArguments: ReadonlyArray<SilkType.GenericArgument>
   if (identity === undefined) {
     targetArguments = Object.freeze([])
+  } else if (environment === undefined) {
+    targetArguments = identity.typeArguments
   } else {
-    if (environment === undefined) {
-      targetArguments = identity.typeArguments
-    } else {
-      targetArguments = Layout.callableTargetArguments(environment)
-    }
+    targetArguments = Layout.callableTargetArguments(environment)
   }
   const target =
     targetIdentity?._tag === 'DeclarationCallableTarget'

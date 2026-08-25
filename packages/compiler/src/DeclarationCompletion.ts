@@ -863,12 +863,10 @@ export const complete = (
                 let detail: string
                 if (problem._tag === 'UnresolvedBinder') {
                   detail = `cannot infer witness target binder ${problem.binder.name}`
+                } else if (problem._tag === 'ConflictingBinder') {
+                  detail = `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
                 } else {
-                  if (problem._tag === 'ConflictingBinder') {
-                    detail = `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
-                  } else {
-                    detail = `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
-                  }
+                  detail = `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
                 }
                 diagnostics.push(
                   invalidDiagnostic(`${target.spelling}: ${detail}`, mapping.syntax.span),

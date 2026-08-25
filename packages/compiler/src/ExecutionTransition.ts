@@ -164,16 +164,12 @@ export const relinquish = (self: State): Result => {
   let execution: 'Dormant' | 'Notifying' | 'Released' | 'Destroyed'
   if (returned.state.phase === 'Notifying') {
     execution = 'Notifying'
+  } else if (returned.state.phase === 'Released') {
+    execution = 'Released'
+  } else if (returned.state.phase === 'Cancelled') {
+    execution = 'Destroyed'
   } else {
-    if (returned.state.phase === 'Released') {
-      execution = 'Released'
-    } else {
-      if (returned.state.phase === 'Cancelled') {
-        execution = 'Destroyed'
-      } else {
-        execution = 'Dormant'
-      }
-    }
+    execution = 'Dormant'
   }
   let operation: Event
   if (returned.state.phase === 'Notifying') operation = 'Notify'

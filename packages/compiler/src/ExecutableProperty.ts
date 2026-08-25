@@ -195,12 +195,10 @@ const representedSubjectsOfType = (
     let alternatives: readonly Type.ExactRepresentationArgument[]
     if (Type.isExactRepresentationArgument(argument)) {
       alternatives = [argument]
+    } else if (Type.isCompositeEffectRepresentationArgument(argument)) {
+      alternatives = argument.alternatives
     } else {
-      if (Type.isCompositeEffectRepresentationArgument(argument)) {
-        alternatives = argument.alternatives
-      } else {
-        alternatives = []
-      }
+      alternatives = []
     }
     return Object.freeze(
       alternatives.flatMap((alternative) => {
@@ -322,12 +320,10 @@ export const derive = (
             let directTarget: string | undefined
             if (capture.effectIdentity !== undefined) {
               directTarget = `Effect:${capture.effectIdentity}`
+            } else if (capture.callableIdentity === undefined) {
+              directTarget = undefined
             } else {
-              if (capture.callableIdentity === undefined) {
-                directTarget = undefined
-              } else {
-                directTarget = callableSubjectOf(discovery, capture.callableIdentity)
-              }
+              directTarget = callableSubjectOf(discovery, capture.callableIdentity)
             }
             const targets = [
               ...(directTarget === undefined ? [] : [directTarget]),
@@ -550,12 +546,10 @@ export const violationDiagnostics = (
       let ordinaryVerdict: Verdict | undefined
       if (ordinary === undefined) {
         ordinaryVerdict = undefined
+      } else if (property === 'Intrinsic.Detached') {
+        ordinaryVerdict = detachedOfType(index, ordinary)
       } else {
-        if (property === 'Intrinsic.Detached') {
-          ordinaryVerdict = detachedOfType(index, ordinary)
-        } else {
-          ordinaryVerdict = verdict([cause('Unavailable', [Type.encode(ordinary)])])
-        }
+        ordinaryVerdict = verdict([cause('Unavailable', [Type.encode(ordinary)])])
       }
       let failed: readonly Cause[]
       if (ordinaryVerdict === undefined) {
@@ -568,12 +562,10 @@ export const violationDiagnostics = (
           if (propertyVerdict._tag === 'Unsatisfied') return propertyVerdict.causes
           return []
         })
+      } else if (ordinaryVerdict._tag === 'Unsatisfied') {
+        failed = ordinaryVerdict.causes
       } else {
-        if (ordinaryVerdict._tag === 'Unsatisfied') {
-          failed = ordinaryVerdict.causes
-        } else {
-          failed = []
-        }
+        failed = []
       }
       return failed.length === 0
         ? []

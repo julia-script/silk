@@ -1352,12 +1352,10 @@ const resolveRequirementRole = (
   let declaration: MemberFact | undefined
   if (resolution._tag === 'Resolved' || resolution._tag === 'Inaccessible') {
     declaration = resolution.declaration
+  } else if (resolution._tag === 'Unavailable') {
+    declaration = resolution.declaration
   } else {
-    if (resolution._tag === 'Unavailable') {
-      declaration = resolution.declaration
-    } else {
-      declaration = undefined
-    }
+    declaration = undefined
   }
   if (
     resolution._tag === 'Resolved' &&

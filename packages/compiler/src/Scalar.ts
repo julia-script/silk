@@ -533,12 +533,10 @@ export const conversionTarget = (operation: string): IntegerScalar | undefined =
   let prefix: string | undefined
   if (operation.startsWith('CheckedConvertTo')) {
     prefix = 'CheckedConvertTo'
+  } else if (operation.startsWith('ConvertTo')) {
+    prefix = 'ConvertTo'
   } else {
-    if (operation.startsWith('ConvertTo')) {
-      prefix = 'ConvertTo'
-    } else {
-      prefix = undefined
-    }
+    prefix = undefined
   }
   if (prefix === undefined) return undefined
   const suffix = operation.slice(prefix.length)
@@ -551,12 +549,10 @@ export const floatConversionTarget = (operation: string): FloatScalar | undefine
   let spelling: Spelling | undefined
   if (operation === 'ConvertToF32') {
     spelling = 'f32'
+  } else if (operation === 'ConvertToF64') {
+    spelling = 'f64'
   } else {
-    if (operation === 'ConvertToF64') {
-      spelling = 'f64'
-    } else {
-      spelling = undefined
-    }
+    spelling = undefined
   }
   const target = spelling === undefined ? undefined : find(spelling)
   return target?.category === 'Floating' ? target : undefined

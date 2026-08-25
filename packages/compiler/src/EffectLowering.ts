@@ -1133,12 +1133,10 @@ const prepareProvidedEffect = (
   let provider: Mir.LocalId | undefined
   if (providerFact.binding !== undefined) {
     provider = fn.bindingLocals.get(providerFact.binding.ordinal)
+  } else if (providerFact.parameter !== undefined) {
+    provider = fn.parameterLocals.get(providerFact.parameter.ordinal)
   } else {
-    if (providerFact.parameter !== undefined) {
-      provider = fn.parameterLocals.get(providerFact.parameter.ordinal)
-    } else {
-      provider = undefined
-    }
+    provider = undefined
   }
   const ownedProvider = providerFact.selectionAccess === 'Take' ? provider : undefined
   if (selected.witness._tag !== 'SourceConformanceWitness')

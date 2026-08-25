@@ -64,18 +64,16 @@ export const coerceLane = Effect.fnUntraced(function* (
       sourceIntegerType,
       `${name}_bits`,
     )
+  } else if (sourceFloating) {
+    bits = yield* FunctionBody.cast(
+      context.body,
+      'bitcast',
+      input,
+      sourceIntegerType,
+      `${name}_bits`,
+    )
   } else {
-    if (sourceFloating) {
-      bits = yield* FunctionBody.cast(
-        context.body,
-        'bitcast',
-        input,
-        sourceIntegerType,
-        `${name}_bits`,
-      )
-    } else {
-      bits = input
-    }
+    bits = input
   }
   if (sourceBits !== targetBits)
     bits = yield* FunctionBody.cast(
@@ -188,30 +186,28 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
   const operandType = NativeType.laneType(types, leftLane)
   if (scalar?.category === 'Floating') {
     let predicate: FunctionBody.FloatingPredicate | undefined
-    if (operator === 'Equals') {
-      predicate = 'oeq'
-    } else {
-      if (operator === 'NotEquals') {
+    switch (operator) {
+      case 'Equals':
+        predicate = 'oeq'
+        break
+      case 'NotEquals':
         predicate = 'une'
-      } else {
-        if (operator === 'LessThan') {
-          predicate = 'olt'
-        } else {
-          if (operator === 'LessOrEqual') {
-            predicate = 'ole'
-          } else {
-            if (operator === 'GreaterThan') {
-              predicate = 'ogt'
-            } else {
-              if (operator === 'GreaterOrEqual') {
-                predicate = 'oge'
-              } else {
-                predicate = undefined
-              }
-            }
-          }
-        }
-      }
+        break
+      case 'LessThan':
+        predicate = 'olt'
+        break
+      case 'LessOrEqual':
+        predicate = 'ole'
+        break
+      case 'GreaterThan':
+        predicate = 'ogt'
+        break
+      case 'GreaterOrEqual':
+        predicate = 'oge'
+        break
+      default:
+        predicate = undefined
+        break
     }
     if (predicate !== undefined) {
       const flag = yield* FunctionBody.floatingCompare(
@@ -224,26 +220,25 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       return yield* FunctionBody.cast(body, 'zext', flag, i32, `callable_fcmp${nameOrdinal}`)
     }
     let mnemonic: FunctionBody.FloatingBinaryKind | undefined
-    if (operator === 'Add') {
-      mnemonic = 'fadd'
-    } else {
-      if (operator === 'Subtract') {
+    switch (operator) {
+      case 'Add':
+        mnemonic = 'fadd'
+        break
+      case 'Subtract':
         mnemonic = 'fsub'
-      } else {
-        if (operator === 'Multiply') {
-          mnemonic = 'fmul'
-        } else {
-          if (operator === 'Divide') {
-            mnemonic = 'fdiv'
-          } else {
-            if (operator === 'Remainder') {
-              mnemonic = 'frem'
-            } else {
-              mnemonic = undefined
-            }
-          }
-        }
-      }
+        break
+      case 'Multiply':
+        mnemonic = 'fmul'
+        break
+      case 'Divide':
+        mnemonic = 'fdiv'
+        break
+      case 'Remainder':
+        mnemonic = 'frem'
+        break
+      default:
+        mnemonic = undefined
+        break
     }
     if (mnemonic === undefined)
       throw new RangeError(`LLVM callable float ${operator} is unavailable`)
@@ -365,18 +360,13 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       parameters: Object.freeze([operandType, operandType]),
     })
     let intrinsic: Intrinsic.Id
-    if (operator === 'SaturatingAdd') {
-      if (unsigned) {
-        intrinsic = 'uadd.sat'
-      } else {
-        intrinsic = 'sadd.sat'
-      }
-    } else {
-      if (unsigned) {
-        intrinsic = 'usub.sat'
-      } else {
-        intrinsic = 'ssub.sat'
-      }
+    switch (operator) {
+      case 'SaturatingAdd':
+        intrinsic = unsigned ? 'uadd.sat' : 'sadd.sat'
+        break
+      case 'SaturatingSubtract':
+        intrinsic = unsigned ? 'usub.sat' : 'ssub.sat'
+        break
     }
     const result = yield* Intrinsic.call(
       body,
@@ -480,26 +470,16 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
   let result: Value.Value
   if (operator === 'Add' || operator === 'Subtract' || operator === 'Multiply') {
     let intrinsicId: Intrinsic.Id
-    if (operator === 'Add') {
-      if (unsigned) {
-        intrinsicId = 'uadd.with.overflow'
-      } else {
-        intrinsicId = 'sadd.with.overflow'
-      }
-    } else {
-      if (operator === 'Subtract') {
-        if (unsigned) {
-          intrinsicId = 'usub.with.overflow'
-        } else {
-          intrinsicId = 'ssub.with.overflow'
-        }
-      } else {
-        if (unsigned) {
-          intrinsicId = 'umul.with.overflow'
-        } else {
-          intrinsicId = 'smul.with.overflow'
-        }
-      }
+    switch (operator) {
+      case 'Add':
+        intrinsicId = unsigned ? 'uadd.with.overflow' : 'sadd.with.overflow'
+        break
+      case 'Subtract':
+        intrinsicId = unsigned ? 'usub.with.overflow' : 'ssub.with.overflow'
+        break
+      case 'Multiply':
+        intrinsicId = unsigned ? 'umul.with.overflow' : 'smul.with.overflow'
+        break
     }
     let bits: number
     if (scalar === undefined) {

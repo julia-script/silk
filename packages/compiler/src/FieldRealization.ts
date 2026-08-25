@@ -434,12 +434,10 @@ const realizeCallableField = (
   let contract: Type.Callable | undefined
   if (Type.isCallable(resolution.requiredBound)) {
     contract = resolution.requiredBound
+  } else if (Type.isCallable(resolution.argument.contract)) {
+    contract = resolution.argument.contract
   } else {
-    if (Type.isCallable(resolution.argument.contract)) {
-      contract = resolution.argument.contract
-    } else {
-      contract = undefined
-    }
+    contract = undefined
   }
   if (contract === undefined)
     return unsupported(

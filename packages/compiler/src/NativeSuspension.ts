@@ -227,17 +227,15 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           let value: Value.Input | undefined
           if (resultLanes.length === 1 && !target.suspendable) {
             value = result
+          } else if (result === undefined) {
+            value = undefined
           } else {
-            if (result === undefined) {
-              value = undefined
-            } else {
-              value = yield* FunctionBody.extractValue(
-                body,
-                result,
-                [target.suspendable ? ordinal + 1 : ordinal],
-                `child_result${ordinal}`,
-              )
-            }
+            value = yield* FunctionBody.extractValue(
+              body,
+              result,
+              [target.suspendable ? ordinal + 1 : ordinal],
+              `child_result${ordinal}`,
+            )
           }
           if (value === undefined) throw new RangeError('LLVM child thunk lost result lane')
           yield* FunctionBody.store(
