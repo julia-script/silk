@@ -381,6 +381,8 @@ const parseBlockChild = (state: State): NodeResult => {
       return parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
     case 'ContinueKeyword':
       return parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
+    case 'ReturnKeyword':
+      return parseReturnStatement(state)
     case 'FailKeyword':
       return parseFailStatement(state)
     case 'DropKeyword':
