@@ -435,10 +435,12 @@ interface HoverPresentation {
 const hoverPresentation = (
   presentation: Presentation.Presentation | undefined,
   type?: Type.Type,
-): HoverPresentation | undefined =>
-  presentation === undefined
-    ? undefined
-    : Object.freeze({ presentation, ...(type === undefined ? {} : { type }) })
+): HoverPresentation | undefined => {
+  if (presentation === undefined) {
+    return undefined
+  }
+  return Object.freeze({ presentation, ...(type === undefined ? {} : { type }) })
+}
 
 const nominalDeclarationType = (
   declaration:
@@ -580,14 +582,20 @@ const presentationOfIdentity = (
               ) === key
             )
               return binding
-        const nested =
-          statement._tag === 'UnsafeStatement'
-            ? statement.statements
-            : statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement'
-              ? [...statement.taken, ...statement.otherwise]
-              : statement._tag === 'WhileStatement'
-                ? statement.body
-                : []
+        let nested: readonly Elaboration.StatementFact[]
+        if (statement._tag === 'UnsafeStatement') {
+          nested = statement.statements
+        } else {
+          if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+            nested = [...statement.taken, ...statement.otherwise]
+          } else {
+            if (statement._tag === 'WhileStatement') {
+              nested = statement.body
+            } else {
+              nested = []
+            }
+          }
+        }
         const found = findStatementBinding(nested)
         if (found !== undefined) return found
       }
@@ -919,16 +927,18 @@ export const ownershipMatchesOf = (
 /** Returns every structured MIR match, including nested expression matches, in DAG preorder. */
 export const mirMatchesOf = (
   self: Snapshot,
-): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'Match' }>> =>
-  self.mir._tag === 'Unavailable'
-    ? Object.freeze([])
-    : Object.freeze(
-        self.mir.value.functions.flatMap((fn) =>
-          MirVerification.operations(fn).flatMap((operation) =>
-            operation._tag === 'Match' ? [operation] : [],
-          ),
-        ),
-      )
+): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'Match' }>> => {
+  if (self.mir._tag === 'Unavailable') {
+    return Object.freeze([])
+  }
+  return Object.freeze(
+    self.mir.value.functions.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'Match' ? [operation] : [],
+      ),
+    ),
+  )
+}
 
 /** Returns the snapshot's available or explicitly unavailable lowered MIR state. */
 export const mirOf = (self: Snapshot): Targeted<Mir.Module> => self.mir

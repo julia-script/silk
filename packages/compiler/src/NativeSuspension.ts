@@ -206,11 +206,16 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         )
         if (target.resultLaneCount > 0 && result === undefined)
           throw new RangeError('LLVM child thunk lost result')
-        const status = target.suspendable
-          ? result === undefined
-            ? undefined
-            : yield* FunctionBody.extractValue(body, result, [0], 'child_status')
-          : yield* Constant.integerUnsigned(builder, i32, 0n)
+        let status: Value.Input | undefined
+        if (target.suspendable) {
+          if (result === undefined) {
+            status = undefined
+          } else {
+            status = yield* FunctionBody.extractValue(body, result, [0], 'child_status')
+          }
+        } else {
+          status = yield* Constant.integerUnsigned(builder, i32, 0n)
+        }
         if (status === undefined) throw new RangeError('LLVM child thunk lost status')
         const resultLanes = NativeType.lanesFor(types, target.fn.result)
         const resultPacked = NativeType.packLanes(
@@ -219,17 +224,21 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           transferResultOffset,
         )
         for (const [ordinal, lane] of resultPacked.entries.entries()) {
-          const value =
-            resultLanes.length === 1 && !target.suspendable
-              ? result
-              : result === undefined
-                ? undefined
-                : yield* FunctionBody.extractValue(
-                    body,
-                    result,
-                    [target.suspendable ? ordinal + 1 : ordinal],
-                    `child_result${ordinal}`,
-                  )
+          let value: Value.Input | undefined
+          if (resultLanes.length === 1 && !target.suspendable) {
+            value = result
+          } else {
+            if (result === undefined) {
+              value = undefined
+            } else {
+              value = yield* FunctionBody.extractValue(
+                body,
+                result,
+                [target.suspendable ? ordinal + 1 : ordinal],
+                `child_result${ordinal}`,
+              )
+            }
+          }
           if (value === undefined) throw new RangeError('LLVM child thunk lost result lane')
           yield* FunctionBody.store(
             body,

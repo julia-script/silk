@@ -134,20 +134,16 @@ it.effect('rejects incomplete array construction before evaluation', () =>
       functions: mir.functions.map(
         (fn): Mir.MirFunction => ({
           ...fn,
-          regions: fn.regions.map(
-            (region): Mir.Region =>
-              region._tag === 'OperationRegion'
-                ? {
-                    ...region,
-                    operations: region.operations.map(
-                      (operation): Mir.Operation =>
-                        operation._tag === 'ConstructArray'
-                          ? { ...operation, elements: operation.elements.slice(0, 2) }
-                          : operation,
-                    ),
-                  }
-                : region,
-          ),
+          regions: fn.regions.map((region): Mir.Region => {
+            if (region._tag !== 'OperationRegion') return region
+            return {
+              ...region,
+              operations: region.operations.map((operation): Mir.Operation => {
+                if (operation._tag !== 'ConstructArray') return operation
+                return { ...operation, elements: operation.elements.slice(0, 2) }
+              }),
+            }
+          }),
         }),
       ),
     }

@@ -53,12 +53,15 @@ export const operationInputs = (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
-): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'ExecutionPark'
-    ? Object.freeze([operation.register])
-    : operation._tag === 'RunEffect'
-      ? Object.freeze(operation.arguments)
-      : Object.freeze([operation.effect, ...operation.arguments])
+): ReadonlyArray<Mir.LocalId> => {
+  if (operation._tag === 'ExecutionPark') {
+    return Object.freeze([operation.register])
+  }
+  if (operation._tag === 'RunEffect') {
+    return Object.freeze(operation.arguments)
+  }
+  return Object.freeze([operation.effect, ...operation.arguments])
+}
 
 export interface Context {
   readonly builder: Builder.Builder

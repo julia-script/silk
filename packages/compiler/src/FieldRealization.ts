@@ -431,11 +431,16 @@ const realizeCallableField = (
   identity: Type.CallableIdentityArgument,
   callables: ReadonlyArray<Instances.CallableInstance>,
 ): Support => {
-  const contract = Type.isCallable(resolution.requiredBound)
-    ? resolution.requiredBound
-    : Type.isCallable(resolution.argument.contract)
-      ? resolution.argument.contract
-      : undefined
+  let contract: Type.Callable | undefined
+  if (Type.isCallable(resolution.requiredBound)) {
+    contract = resolution.requiredBound
+  } else {
+    if (Type.isCallable(resolution.argument.contract)) {
+      contract = resolution.argument.contract
+    } else {
+      contract = undefined
+    }
+  }
   if (contract === undefined)
     return unsupported(
       resolution.id,
@@ -627,9 +632,15 @@ export const realize = (
   return Object.freeze({
     _tag: 'FieldRealizationIndex',
     entries: Object.freeze(
-      [...entries.values()].sort((left, right) =>
-        left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-      ),
+      [...entries.values()].sort((left, right) => {
+        if (left.key < right.key) {
+          return -1
+        }
+        if (left.key > right.key) {
+          return 1
+        }
+        return 0
+      }),
     ),
   })
 }
@@ -778,20 +789,26 @@ const equalsEffect = (left: EffectRealization, right: EffectRealization): boolea
   left.suspendable === right.suspendable
 
 /** Structural equality for the shared tagged realization fact owned by this actor. */
-export const equals = (left: Realization, right: Realization): boolean =>
-  left._tag === 'FieldRealization' && right._tag === 'FieldRealization'
-    ? equalsCallable(left, right)
-    : left._tag === 'EffectFieldRealization' && right._tag === 'EffectFieldRealization'
-      ? equalsEffect(left, right)
-      : false
+export const equals = (left: Realization, right: Realization): boolean => {
+  if (left._tag === 'FieldRealization' && right._tag === 'FieldRealization') {
+    return equalsCallable(left, right)
+  }
+  if (left._tag === 'EffectFieldRealization' && right._tag === 'EffectFieldRealization') {
+    return equalsEffect(left, right)
+  }
+  return false
+}
 
 /** Every invocation mode one receiver access admits, weakest receiver first. */
-export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.CallableMode> =>
-  receiver === 'Shared'
-    ? Object.freeze(['Shared'] as const)
-    : receiver === 'Exclusive'
-      ? Object.freeze(['Shared', 'Exclusive'] as const)
-      : Object.freeze(['Shared', 'Exclusive', 'Take'] as const)
+export const admittedModes = (receiver: ReceiverAccess): ReadonlyArray<Type.CallableMode> => {
+  if (receiver === 'Shared') {
+    return Object.freeze(['Shared'] as const)
+  }
+  if (receiver === 'Exclusive') {
+    return Object.freeze(['Shared', 'Exclusive'] as const)
+  }
+  return Object.freeze(['Shared', 'Exclusive', 'Take'] as const)
+}
 
 /**
  * True when one aggregate receiver access may invoke one callable mode.

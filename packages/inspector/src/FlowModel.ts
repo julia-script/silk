@@ -1,32 +1,38 @@
 import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-effect/compiler'
 import * as Type from '@silk-effect/compiler/Type'
 
-const typeText = (type: Type.Type): string =>
-  typeof type === 'string'
-    ? type
-    : type._tag === 'NominalType'
-      ? `${type.module}.${type.name}${
-          type.arguments.length === 0
-            ? ''
-            : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
-        }`
-      : type._tag === 'TypeParameter'
-        ? type.name
-        : type._tag === 'FixedArrayType'
-          ? `Array<${typeText(type.element)}, ${type.length}>`
-          : type._tag === 'SliceType'
-            ? `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-            : type._tag === 'EffectType'
-              ? `Effect<${typeText(type.success)}${
-                  Type.failureType(type) === 'never' ? '' : ` ! ${typeText(Type.failureType(type))}`
-                }> ${type.access.toLowerCase()}`
-              : type._tag === 'CallableType'
-                ? `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-                : type._tag === 'ReferenceType'
-                  ? `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-                  : type._tag === 'RepresentedType'
-                    ? Type.encode(type)
-                    : type.members.map(typeText).join(' | ')
+const typeText = (type: Type.Type): string => {
+  if (typeof type === 'string') return type
+
+  switch (type._tag) {
+    case 'NominalType': {
+      const argumentsText =
+        type.arguments.length === 0
+          ? ''
+          : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
+      return `${type.module}.${type.name}${argumentsText}`
+    }
+    case 'TypeParameter':
+      return type.name
+    case 'FixedArrayType':
+      return `Array<${typeText(type.element)}, ${type.length}>`
+    case 'SliceType':
+      return `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
+    case 'EffectType': {
+      const failureType = Type.failureType(type)
+      const failureText = failureType === 'never' ? '' : ` ! ${typeText(failureType)}`
+      return `Effect<${typeText(type.success)}${failureText}> ${type.access.toLowerCase()}`
+    }
+    case 'CallableType':
+      return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
+    case 'ReferenceType':
+      return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
+    case 'RepresentedType':
+      return Type.encode(type)
+    case 'StructuralUnionType':
+      return type.members.map(typeText).join(' | ')
+  }
+}
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 export type FlowLayer = 'Semantic' | 'Evaluated'
@@ -201,13 +207,16 @@ const sameDeclaration = (
   right: Elaboration.DeclarationFact,
 ): boolean => left.id.sourceId === right.id.sourceId && left.id.ordinal === right.id.ordinal
 
-const groupState = (call: CallFact): FlowItemState =>
-  call.reference._tag === 'Ambiguous'
-    ? 'Branched'
-    : (call.reference._tag !== 'Resolved' && call.reference._tag !== 'ResolvedBuiltin') ||
-        call.contract._tag !== 'Compatible'
-      ? 'Stopped'
-      : 'Connected'
+const groupState = (call: CallFact): FlowItemState => {
+  if (call.reference._tag === 'Ambiguous') return 'Branched'
+  if (
+    (call.reference._tag !== 'Resolved' && call.reference._tag !== 'ResolvedBuiltin') ||
+    call.contract._tag !== 'Compatible'
+  ) {
+    return 'Stopped'
+  }
+  return 'Connected'
+}
 
 const addNode = (draft: ProjectionDraft, group: GroupDraft, value: FlowNode): void => {
   draft.nodes.push(Object.freeze(value))
@@ -572,6 +581,9 @@ const projectCall = (
       returnedReference._tag === 'Unavailable'
         ? 'Unavailable reference'
         : returnedReference.spelling
+    let returnedState: FlowItemState = 'Stopped'
+    if (returnedReference._tag === 'Resolved') returnedState = 'Connected'
+    else if (returnedReference._tag === 'Ambiguous') returnedState = 'Branched'
     addNode(
       draft,
       group,
@@ -581,11 +593,7 @@ const projectCall = (
         'Reference',
         `Returned reference: ${referenceLabel}`,
         returnedReference._tag,
-        returnedReference._tag === 'Resolved'
-          ? 'Connected'
-          : returnedReference._tag === 'Ambiguous'
-            ? 'Branched'
-            : 'Stopped',
+        returnedState,
         returned.syntax.span,
       ),
     )
@@ -912,16 +920,24 @@ export const projectDataFlow = (
     return Object.freeze({ ...item, ...(evaluation === undefined ? {} : { evaluation }) })
   })
   const nestedCount = Math.max(0, groups.length - 1)
-  const modeSummary =
-    outcome === undefined
-      ? 'Semantic relationships only; evaluate explicitly to add reachable order and exact values.'
-      : outcome._tag === 'Completed'
-        ? `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
-        : outcome._tag === 'UnhandledFailure'
-          ? `Evaluation terminated with ${outcome.identity} (tag ${outcome.tag}); its completed trace is overlaid.`
-          : outcome._tag === 'Trap'
-            ? `Evaluation trapped at ${outcome.reason}; only its completed trace prefix is overlaid.`
-            : `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
+  let modeSummary =
+    'Semantic relationships only; evaluate explicitly to add reachable order and exact values.'
+  if (outcome !== undefined) {
+    switch (outcome._tag) {
+      case 'Completed':
+        modeSummary = `Evaluation completed with ${outcome.result.value}; trace-backed order and values are overlaid.`
+        break
+      case 'UnhandledFailure':
+        modeSummary = `Evaluation terminated with ${outcome.identity} (tag ${outcome.tag}); its completed trace is overlaid.`
+        break
+      case 'Trap':
+        modeSummary = `Evaluation trapped at ${outcome.reason}; only its completed trace prefix is overlaid.`
+        break
+      case 'Blocked':
+        modeSummary = `Evaluation stopped at ${outcome.reason._tag}; only its completed trace prefix is overlaid.`
+        break
+    }
+  }
   return Object.freeze({
     _tag: 'FlowModel',
     mode: outcome === undefined ? 'Semantic' : 'Evaluated',

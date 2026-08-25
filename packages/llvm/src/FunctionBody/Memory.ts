@@ -426,12 +426,9 @@ const gepPlan = Effect.fn('FunctionBody.gepPlan')(function* (
             resolved.push(index.operand)
             continue
           }
-          const body =
-            aggregate._tag === 'Structure'
-              ? aggregate
-              : aggregate._tag === 'NamedStructure'
-                ? aggregate.body
-                : undefined
+          let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
+          if (aggregate._tag === 'Structure') body = aggregate
+          else if (aggregate._tag === 'NamedStructure') body = aggregate.body
           if (body === undefined || index.operand._tag !== 'Constant') {
             return yield* Result.fail(
               invalidInput({
@@ -492,12 +489,12 @@ export const getElementPtr = Effect.fn('FunctionBody.getElementPtr')(function* (
 ): Effect.fn.Return<Value.Value, LlvmError> {
   const plan = yield* gepPlan(self, sourceType, base, indices, options)
   const builder = yield* FunctionBodyState.builder(self)
-  const resultType =
-    plan.vector === undefined || plan.baseIsVector
-      ? plan.pointerType
-      : plan.vector.scalable
-        ? yield* Type.scalableVector(builder, plan.pointerScalarType, plan.vector.length)
-        : yield* Type.vector(builder, plan.pointerScalarType, plan.vector.length)
+  let resultType = plan.pointerType
+  if (plan.vector !== undefined && !plan.baseIsVector) {
+    resultType = plan.vector.scalable
+      ? yield* Type.scalableVector(builder, plan.pointerScalarType, plan.vector.length)
+      : yield* Type.vector(builder, plan.pointerScalarType, plan.vector.length)
+  }
   return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.getElementPtr', (draft) =>
     Result.gen(function* () {
       const resultTypeIndex = yield* Handle.resolve(

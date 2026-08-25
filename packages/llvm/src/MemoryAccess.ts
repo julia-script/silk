@@ -425,8 +425,9 @@ export const validateCompareExchange = Effect.fn('MemoryAccess.validateCompareEx
     acquire: 1,
     seq_cst: 2,
   }
-  const successLimit =
-    success === 'seq_cst' ? 2 : success === 'acquire' || success === 'acq_rel' ? 1 : 0
+  let successLimit = 0
+  if (success === 'seq_cst') successLimit = 2
+  else if (success === 'acquire' || success === 'acq_rel') successLimit = 1
   if (allowedFailure[failure] > successLimit) {
     return yield* Effect.fail(
       invalidInput({

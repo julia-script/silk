@@ -173,12 +173,16 @@ export const terminationOf = (program: Mir.Module): Termination => {
     program.functions.flatMap((fn) => {
       if (fn.id.name === '$effect-entry' || fn.id.name === '$unit-entry') return []
       const region = fn.regions.find((candidate) => candidate.id.ordinal === fn.entry.ordinal)
-      const provenance =
-        region?._tag === 'OperationRegion'
-          ? (region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span)
-          : region?._tag === 'CleanupRegion'
-            ? (region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span)
-            : region?.provenance.span
+      let provenance: SourceSpan.SourceSpan | undefined
+      if (region?._tag === 'OperationRegion') {
+        provenance = region.operations.at(0)?.provenance.span ?? region.outcome.provenance.span
+      } else {
+        if (region?._tag === 'CleanupRegion') {
+          provenance = region.releases.at(0)?.provenance.span ?? region.outcome.provenance.span
+        } else {
+          provenance = region?.provenance.span
+        }
+      }
       return provenance === undefined ? [] : [Object.freeze({ function: fn.id, provenance })]
     }),
   )

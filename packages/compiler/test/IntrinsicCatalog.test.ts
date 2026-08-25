@@ -45,9 +45,10 @@ const acceptedSources = Object.freeze([
       const calls = scalar.operations.map((operation, operationOrdinal) => {
         const parameters =
           operation.parameters ?? Array.from({ length: operation.arity }, () => scalar.spelling)
-        const arguments_ = parameters.map((parameter, ordinal) =>
-          parameter === 'u32' ? 'number' : ordinal === 0 ? 'left' : 'right',
-        )
+        const arguments_ = parameters.map((parameter, ordinal) => {
+          if (parameter === 'u32') return 'number'
+          return ordinal === 0 ? 'left' : 'right'
+        })
         return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_.join(', ')})`
       })
       return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`

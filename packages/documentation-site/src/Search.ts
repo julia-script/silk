@@ -37,6 +37,16 @@ export interface Location {
  * Exact name beats prefix beats substring beats a match found only in the summary, and ties keep
  * the index's own order, so results are stable rather than dependent on a sort's stability.
  */
+const rankEntry = (entry: Entry, needle: string): number => {
+  const name = entry.name.toLowerCase()
+  if (name === needle) return 0
+  if (name.startsWith(needle)) return 1
+  if (name.includes(needle)) return 2
+  if (entry.module.toLowerCase().includes(needle)) return 3
+  if (entry.summary.toLowerCase().includes(needle)) return 4
+  return -1
+}
+
 export const query = (
   entries: ReadonlyArray<Entry>,
   text: string,
@@ -48,19 +58,7 @@ export const query = (
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]
     if (entry === undefined) continue
-    const name = entry.name.toLowerCase()
-    const rank =
-      name === needle
-        ? 0
-        : name.startsWith(needle)
-          ? 1
-          : name.includes(needle)
-            ? 2
-            : entry.module.toLowerCase().includes(needle)
-              ? 3
-              : entry.summary.toLowerCase().includes(needle)
-                ? 4
-                : -1
+    const rank = rankEntry(entry, needle)
     if (rank >= 0) ranked.push({ rank, index, entry })
   }
   ranked.sort((left, right) => left.rank - right.rank || left.index - right.index)

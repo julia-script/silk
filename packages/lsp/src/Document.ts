@@ -1015,9 +1015,11 @@ const matchesOfIdentity = (
 ): ReadonlyArray<Match> => {
   const key = SemanticOccurrence.identityKey(identity)
   const sources = Analysis.sources(snapshot)
-  const modules = [...sources.keys()].sort((left, right) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  )
+  const modules = [...sources.keys()].sort((left, right) => {
+    if (left < right) return -1
+    if (left > right) return 1
+    return 0
+  })
   const seen = new Set<string>()
   const matches: Array<Match> = []
   for (const module of modules) {
@@ -1813,11 +1815,14 @@ export const semanticTokens = (
   let previousCharacter = 0
   for (const token of SyntaxTree.tokens(syntax.root)) {
     const occurrence = byStart.get(token.span.start)
-    const type = importPathSegmentStarts.has(token.span.start)
-      ? SemanticTokenTypes.namespace
-      : occurrence !== undefined && token.kind === 'Identifier'
-        ? occurrenceTokenType(snapshot, occurrence)
-        : lexicalTokenType(token.kind)
+    let type: string | undefined
+    if (importPathSegmentStarts.has(token.span.start)) {
+      type = SemanticTokenTypes.namespace
+    } else if (occurrence !== undefined && token.kind === 'Identifier') {
+      type = occurrenceTokenType(snapshot, occurrence)
+    } else {
+      type = lexicalTokenType(token.kind)
+    }
     if (type === undefined) continue
     const index = typeIndexes.get(type)
     if (index === undefined) continue

@@ -151,17 +151,15 @@ it.effect('keeps logical native and WebAssembly execution in parity', () =>
       profile: 'release',
       destination: join(destinationRoot, 'coverage-fold'),
     }).pipe(Effect.provide(resolver))
-    assert.strictEqual(
-      native._tag,
-      'Compiled',
-      native._tag === 'BackendFailed'
-        ? `${native.error.message}: ${String(
-            native.error.reason._tag === 'WrappedFailure'
-              ? native.error.reason.cause
-              : JSON.stringify(native.error.reason),
-          )}`
-        : undefined,
-    )
+    let nativeFailure: string | undefined
+    if (native._tag === 'BackendFailed') {
+      const reason =
+        native.error.reason._tag === 'WrappedFailure'
+          ? native.error.reason.cause
+          : JSON.stringify(native.error.reason)
+      nativeFailure = `${native.error.message}: ${String(reason)}`
+    }
+    assert.strictEqual(native._tag, 'Compiled', nativeFailure)
     if (native._tag !== 'Compiled') return
     assert.strictEqual(existsSync(native.path), true)
     const nativeRun = spawnSync(native.path, [], { encoding: 'utf8' })

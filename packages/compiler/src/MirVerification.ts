@@ -326,12 +326,11 @@ const sameEffectChannels = (left: SilkType.Effect, right: SilkType.Effect): bool
     return candidate !== undefined && SilkType.equals(failure, candidate)
   })
 
-export const suspensionBorrowText = (borrow: SuspensionBorrowIdentity): string =>
-  borrow._tag === 'MirLoan'
-    ? `loan:${borrowKey(borrow.borrow)}`
-    : borrow._tag === 'BorrowedParameter'
-      ? `parameter:${borrow.parameterOrdinal}`
-      : `local:${borrow.local.ordinal}`
+export const suspensionBorrowText = (borrow: SuspensionBorrowIdentity): string => {
+  if (borrow._tag === 'MirLoan') return `loan:${borrowKey(borrow.borrow)}`
+  if (borrow._tag === 'BorrowedParameter') return `parameter:${borrow.parameterOrdinal}`
+  return `local:${borrow.local.ordinal}`
+}
 
 export const coroutineFrameReleaseText = (release: CoroutineFrameRelease): string =>
   `${release.local.ordinal}:${release.cleanup._tag}:${SilkType.key(release.cleanup.type)}`
@@ -585,14 +584,17 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
       )
     for (const slot of slots) {
       const declared = fn.localTypes.at(slot.local.ordinal)
-      const accessValid =
-        slot.access._tag === 'Copy'
-          ? isCopy(layout, semanticType(slot.type))
-          : slot.access._tag === 'BorrowedDependency'
-            ? slot.type._tag === 'Reference' ||
-              slot.type._tag === 'Slice' ||
-              slot.type._tag === 'EffectBorrow'
-            : !isCopy(layout, semanticType(slot.type))
+      let accessValid: boolean
+      if (slot.access._tag === 'Copy') {
+        accessValid = isCopy(layout, semanticType(slot.type))
+      } else if (slot.access._tag === 'BorrowedDependency') {
+        accessValid =
+          slot.type._tag === 'Reference' ||
+          slot.type._tag === 'Slice' ||
+          slot.type._tag === 'EffectBorrow'
+      } else {
+        accessValid = !isCopy(layout, semanticType(slot.type))
+      }
       if (
         declared === undefined ||
         !SilkType.equals(semanticType(declared), semanticType(slot.type)) ||
@@ -844,13 +846,13 @@ const localUses = (region: Region): ReadonlyArray<LocalId> => [
 ]
 
 const selectorLocals = (selectors: ReadonlyArray<PlaceSelector>): ReadonlyArray<LocalId> =>
-  selectors.flatMap((selector) =>
-    selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
-      ? [selector.index.local]
-      : selector._tag === 'SliceElementSelector'
-        ? [selector.index]
-        : [],
-  )
+  selectors.flatMap((selector) => {
+    if (selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime') {
+      return [selector.index.local]
+    }
+    if (selector._tag === 'SliceElementSelector') return [selector.index]
+    return []
+  })
 
 const placeType = (
   fn: MirFunction,
@@ -1893,9 +1895,7 @@ const loanViolations = (
           borrowed.access !== operation.access ||
           (SilkType.isSlice(borrowed)
             ? sourceElement === undefined || !SilkType.equals(borrowed.element, sourceElement)
-            : sourceReferenceTarget === undefined
-              ? !SilkType.equals(borrowed.target, sourceSemantic)
-              : !SilkType.equals(borrowed.target, sourceReferenceTarget)) ||
+            : !SilkType.equals(borrowed.target, sourceReferenceTarget ?? sourceSemantic)) ||
           (reborrowSource &&
             operation.sourceType.type.access === 'Shared' &&
             operation.access === 'Exclusive') ||
@@ -2174,15 +2174,18 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
         layout.payload.every((field, ordinal) => {
           const slot = state.slots.at(ordinal)
           if (slot === undefined) return false
-          const physical =
-            slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow'
-              ? Object.freeze({ size: wordSize, alignment: wordAlignment })
-              : slot.type._tag === 'EffectValue'
-                ? slot.type.environment
-                : slot.type._tag === 'CallableValue'
-                  ? (slot.type.environment?.view ??
-                    Object.freeze({ size: wordSize * 2, alignment: wordAlignment }))
-                  : Layout.entry(self.layout, semanticType(slot.type))
+          let physical: { readonly size: number; readonly alignment: number } | undefined
+          if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EffectBorrow') {
+            physical = Object.freeze({ size: wordSize, alignment: wordAlignment })
+          } else if (slot.type._tag === 'EffectValue') {
+            physical = slot.type.environment
+          } else if (slot.type._tag === 'CallableValue') {
+            physical =
+              slot.type.environment?.view ??
+              Object.freeze({ size: wordSize * 2, alignment: wordAlignment })
+          } else {
+            physical = Layout.entry(self.layout, semanticType(slot.type))
+          }
           if (physical === undefined) return false
           const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
           const valid =
@@ -2680,18 +2683,21 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
       }
     >()
     const localUseCounts = new Map<number, number>()
-    const successPathOperations = (operation: Operation): ReadonlyArray<Operation> =>
-      operation._tag === 'ShortCircuit'
-        ? [operation, ...operation.right.operations.flatMap(successPathOperations)]
-        : operation._tag === 'Match'
-          ? [
-              operation,
-              ...operation.arms.flatMap((arm) => [
-                ...(arm.guard?.operations.flatMap(successPathOperations) ?? []),
-                ...arm.selected.operations.flatMap(successPathOperations),
-              ]),
-            ]
-          : [operation]
+    const successPathOperations = (operation: Operation): ReadonlyArray<Operation> => {
+      if (operation._tag === 'ShortCircuit') {
+        return [operation, ...operation.right.operations.flatMap(successPathOperations)]
+      }
+      if (operation._tag === 'Match') {
+        return [
+          operation,
+          ...operation.arms.flatMap((arm) => [
+            ...(arm.guard?.operations.flatMap(successPathOperations) ?? []),
+            ...arm.selected.operations.flatMap(successPathOperations),
+          ]),
+        ]
+      }
+      return [operation]
+    }
     for (const operation of fn.regions.flatMap(operationsOf).flatMap(successPathOperations))
       for (const local of operation._tag === 'PropagateEffectFailure'
         ? [operation.source]
@@ -3049,20 +3055,19 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           const value = BigInt(operation.value)
           const scalar = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
           const pointerBits = self.layout.target.pointerSize === 4 ? 32 : 64
-          const validValue =
-            scalar?.category === 'Integer'
-              ? (() => {
-                  const range = Scalar.range(scalar, pointerBits)
-                  return value >= range.minimum && value <= range.maximum
-                })()
-              : scalar?.category === 'Boolean'
-                ? value === 0n || value === 1n
-                : scalar?.category === 'Character'
-                  ? // A Unicode scalar value: inside the range and outside the surrogate hole.
-                    value >= 0n && value <= 0x10ffffn && !(value >= 0xd800n && value <= 0xdfffn)
-                  : scalar?.category === 'Floating'
-                    ? value >= 0n && value < 1n << BigInt(Scalar.bits(scalar, pointerBits))
-                    : false
+          let validValue = false
+          if (scalar?.category === 'Integer') {
+            const range = Scalar.range(scalar, pointerBits)
+            validValue = value >= range.minimum && value <= range.maximum
+          } else if (scalar?.category === 'Boolean') {
+            validValue = value === 0n || value === 1n
+          } else if (scalar?.category === 'Character') {
+            // A Unicode scalar value: inside the range and outside the surrogate hole.
+            validValue =
+              value >= 0n && value <= 0x10ffffn && !(value >= 0xd800n && value <= 0xdfffn)
+          } else if (scalar?.category === 'Floating') {
+            validValue = value >= 0n && value < 1n << BigInt(Scalar.bits(scalar, pointerBits))
+          }
           if (
             destination === undefined ||
             !SilkType.equals(semanticType(destination), semantic) ||

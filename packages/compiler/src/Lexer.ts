@@ -267,12 +267,12 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     }
 
     if (isLineCommentStart(bytes, index)) {
-      const kind =
-        bytes[index + 2] === 0x21
-          ? 'ModuleDocComment'
-          : bytes[index + 2] === 0x2f && bytes[index + 3] !== 0x2f
-            ? 'DocComment'
-            : 'LineComment'
+      let kind: Token.TokenKind = 'LineComment'
+      if (bytes[index + 2] === 0x21) {
+        kind = 'ModuleDocComment'
+      } else if (bytes[index + 2] === 0x2f && bytes[index + 3] !== 0x2f) {
+        kind = 'DocComment'
+      }
       index += 2
       while (index < bytes.length && bytes[index] !== 0x0a && bytes[index] !== 0x0d) index += 1
       pushToken(kind, start, index)
@@ -366,11 +366,10 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
         exponentDigits = exponent.digits
         separated = separated && exponent.separated
       }
-      const span = pushToken(
-        !separated || !exponentDigits ? 'Invalid' : floating ? 'DecimalFloat' : 'DecimalInteger',
-        start,
-        index,
-      )
+      let kind: Token.TokenKind = 'DecimalInteger'
+      if (!separated || !exponentDigits) kind = 'Invalid'
+      else if (floating) kind = 'DecimalFloat'
+      const span = pushToken(kind, start, index)
       if (!separated) diagnostics.push(Diagnostic.invalidDigitSeparator(span))
       else if (!exponentDigits) diagnostics.push(Diagnostic.missingExponentDigits(span))
       continue

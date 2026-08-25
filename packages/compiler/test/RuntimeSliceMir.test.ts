@@ -127,29 +127,26 @@ it.effect('rejects missing endings and mismatched slice access as verifier data'
     const wrongAccess: Mir.MirFunction = Object.freeze({
       ...inspect,
       regions: Object.freeze(
-        inspect.regions.map((region) =>
-          region._tag === 'OperationRegion'
-            ? Object.freeze({
-                ...region,
-                operations: Object.freeze(
-                  region.operations.map((operation) =>
-                    operation._tag === 'ReadPlace'
-                      ? Object.freeze({
-                          ...operation,
-                          selectors: Object.freeze(
-                            operation.selectors.map((selector) =>
-                              selector._tag === 'SliceElementSelector'
-                                ? Object.freeze({ ...selector, access: 'Exclusive' as const })
-                                : selector,
-                            ),
-                          ),
-                        })
-                      : operation,
+        inspect.regions.map((region) => {
+          if (region._tag !== 'OperationRegion') return region
+          return Object.freeze({
+            ...region,
+            operations: Object.freeze(
+              region.operations.map((operation): Mir.Operation => {
+                if (operation._tag !== 'ReadPlace') return operation
+                return Object.freeze({
+                  ...operation,
+                  selectors: Object.freeze(
+                    operation.selectors.map((selector) => {
+                      if (selector._tag !== 'SliceElementSelector') return selector
+                      return Object.freeze({ ...selector, access: 'Exclusive' })
+                    }),
                   ),
-                ),
-              })
-            : region,
-        ),
+                })
+              }),
+            ),
+          })
+        }),
       ),
     })
     const malformed: Mir.Module = Object.freeze({

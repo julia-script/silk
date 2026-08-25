@@ -6,10 +6,13 @@ import { parseTopLevelDeclaration } from './Parser/Declaration.js'
 import * as SyntaxFile from './SyntaxFile.js'
 import type * as SyntaxTree from './SyntaxTree.js'
 
-const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number =>
-  left.span.start - right.span.start ||
-  left.span.end - right.span.end ||
-  (left.code < right.code ? -1 : left.code > right.code ? 1 : 0)
+const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagnostic): number => {
+  const spanOrder = left.span.start - right.span.start || left.span.end - right.span.end
+  if (spanOrder !== 0) return spanOrder
+  if (left.code < right.code) return -1
+  if (left.code > right.code) return 1
+  return 0
+}
 
 /** Parses zero or more bootstrap declarations with lossless local recovery. */
 export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {

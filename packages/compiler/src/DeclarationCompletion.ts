@@ -860,12 +860,16 @@ export const complete = (
                   rejectIncompatibleMapping()
                   continue
                 }
-                const detail =
-                  problem._tag === 'UnresolvedBinder'
-                    ? `cannot infer witness target binder ${problem.binder.name}`
-                    : problem._tag === 'ConflictingBinder'
-                      ? `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
-                      : `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
+                let detail: string
+                if (problem._tag === 'UnresolvedBinder') {
+                  detail = `cannot infer witness target binder ${problem.binder.name}`
+                } else {
+                  if (problem._tag === 'ConflictingBinder') {
+                    detail = `witness target binder ${problem.binder.name} is ${Type.encodeGenericArgument(problem.previous)} from ${problem.previousConstraint} but ${Type.encodeGenericArgument(problem.conflicting)} from ${problem.conflictingConstraint}`
+                  } else {
+                    detail = `witness target binder ${problem.binder.name} cannot accept ${Type.encodeGenericArgument(problem.argument)}`
+                  }
+                }
                 diagnostics.push(
                   invalidDiagnostic(`${target.spelling}: ${detail}`, mapping.syntax.span),
                 )
@@ -1338,13 +1342,13 @@ export const complete = (
       )
       const key =
         member.canonical._tag === 'Canonical' ? canonicalKey(member.canonical.id) : undefined
-      const cause =
-        (key === undefined ? undefined : cycleCause.get(key)) ??
-        (fieldCause?.declaredType._tag === 'Unresolved'
-          ? fieldCause.declaredType.cause
-          : fieldCause?.declaredType._tag === 'Resolved'
-            ? fieldCause.declaredType.exposureCause
-            : undefined)
+      let fieldDependencyCause: ReturnType<typeof Diagnostic.identity> | undefined
+      if (fieldCause?.declaredType._tag === 'Unresolved') {
+        fieldDependencyCause = fieldCause.declaredType.cause
+      } else if (fieldCause?.declaredType._tag === 'Resolved') {
+        fieldDependencyCause = fieldCause.declaredType.exposureCause
+      }
+      const cause = (key === undefined ? undefined : cycleCause.get(key)) ?? fieldDependencyCause
       return Object.freeze({
         ...member,
         dependency: Object.freeze(

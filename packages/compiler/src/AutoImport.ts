@@ -97,14 +97,16 @@ export const discover = (request: Request): ReadonlyArray<Action> => {
         candidate.module !== request.module &&
         applicableNamespace(occurrence.role, candidate.exported.namespace),
     )
-    .sort(
-      (left, right) =>
+    .sort((left, right) => {
+      const importOrder =
         Number(alreadyImports(request.inventory, request.module, right.module)) -
-          Number(alreadyImports(request.inventory, request.module, left.module)) ||
-        (left.tier === right.tier ? 0 : left.tier === 'Project' ? -1 : 1) ||
-        left.module.localeCompare(right.module) ||
-        left.exported.ordinal - right.exported.ordinal,
-    )
+        Number(alreadyImports(request.inventory, request.module, left.module))
+      if (importOrder !== 0) return importOrder
+      if (left.tier !== right.tier) return left.tier === 'Project' ? -1 : 1
+      return (
+        left.module.localeCompare(right.module) || left.exported.ordinal - right.exported.ordinal
+      )
+    })
   return Object.freeze(
     candidates.map((candidate): Action => {
       const selected = candidateKey(candidate)

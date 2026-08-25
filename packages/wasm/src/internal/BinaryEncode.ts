@@ -361,12 +361,10 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
     }
     case 'StructGet': {
       const gcOps = InstructionTable.gcOpcodes
-      const opcode =
-        instr.sign === undefined
-          ? gcOps.structGet
-          : instr.sign === 's'
-            ? gcOps.structGetS
-            : gcOps.structGetU
+      let opcode: number = gcOps.structGet
+      if (instr.sign !== undefined) {
+        opcode = instr.sign === 's' ? gcOps.structGetS : gcOps.structGetU
+      }
       writer
         .byte(ops.prefixGc)
         .u32(opcode)
@@ -412,12 +410,10 @@ export const encodeInstr = (context: Context, writer: ByteWriter, instr: Instr.I
       return
     case 'ArrayGet': {
       const gcOps = InstructionTable.gcOpcodes
-      const opcode =
-        instr.sign === undefined
-          ? gcOps.arrayGet
-          : instr.sign === 's'
-            ? gcOps.arrayGetS
-            : gcOps.arrayGetU
+      let opcode: number = gcOps.arrayGet
+      if (instr.sign !== undefined) {
+        opcode = instr.sign === 's' ? gcOps.arrayGetS : gcOps.arrayGetU
+      }
       writer
         .byte(ops.prefixGc)
         .u32(opcode)

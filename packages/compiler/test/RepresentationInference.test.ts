@@ -88,13 +88,13 @@ pub fn main() -> i32 {
       ? [statement.binding.inferredType.type]
       : [],
   )
-  const identities = types.flatMap((type) =>
-    Type.isNominal(type)
-      ? type.arguments.flatMap((argument) =>
-          Type.isExactRepresentationArgument(argument) ? [argument.identity.identity] : [],
-        )
-      : [],
-  )
+  const identities = types.flatMap((type) => {
+    if (!Type.isNominal(type)) return []
+    return type.arguments.flatMap((argument) => {
+      if (Type.isExactRepresentationArgument(argument)) return [argument.identity.identity]
+      return []
+    })
+  })
 
   assert.deepEqual(identities, [
     'declaration:representation-inference/sites.main:site:0:owner=representation-inference/sites.main<>',

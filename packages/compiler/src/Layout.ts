@@ -368,14 +368,16 @@ export const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry =>
   if (scalar === undefined) throw new RangeError(`Layout lost scalar catalog entry for ${type}`)
   const layout = Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
   const bits = Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64)
-  const representation: Representation =
-    scalar.category === 'Boolean'
-      ? Object.freeze({ _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 })
-      : scalar.category === 'Floating'
-        ? Object.freeze({ _tag: 'Floating', bits: bits as 32 | 64, ieee: true })
-        : scalar.signedness === 'Signed'
-          ? Object.freeze({ _tag: 'SignedInteger', bits })
-          : Object.freeze({ _tag: 'UnsignedInteger', bits })
+  let representation: Representation
+  if (scalar.category === 'Boolean') {
+    representation = Object.freeze({ _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 })
+  } else if (scalar.category === 'Floating') {
+    representation = Object.freeze({ _tag: 'Floating', bits: bits as 32 | 64, ieee: true })
+  } else if (scalar.signedness === 'Signed') {
+    representation = Object.freeze({ _tag: 'SignedInteger', bits })
+  } else {
+    representation = Object.freeze({ _tag: 'UnsignedInteger', bits })
+  }
   return Object.freeze({
     _tag: 'LayoutEntry',
     type,
@@ -594,12 +596,15 @@ const dependenciesOf = (
 ): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
   for (const field of struct.fields) {
-    const types =
-      field.declaredType._tag === 'Resolved'
-        ? Type.nominals(Type.substitute(field.declaredType.type, substitution))
-        : field.declaredType._tag === 'Unresolved' && field.declaredType.candidate !== undefined
-          ? [field.declaredType.candidate]
-          : []
+    let types: ReadonlyArray<Type.Nominal> = []
+    if (field.declaredType._tag === 'Resolved') {
+      types = Type.nominals(Type.substitute(field.declaredType.type, substitution))
+    } else if (
+      field.declaredType._tag === 'Unresolved' &&
+      field.declaredType.candidate !== undefined
+    ) {
+      types = [field.declaredType.candidate]
+    }
     for (const type of types) dependencies.set(Type.key(type), type)
   }
   return Object.freeze([...dependencies.values()].sort(Type.compare))
@@ -649,6 +654,12 @@ export const catalog = (
   const completed = new Map<string, CatalogEntry>()
   for (const declaration of enumDeclarations) {
     const entry = scalarEnumEntry(target, declaration.enum_)
+    let cause: Diagnostic.Identity | undefined
+    if (declaration.enum_.validity._tag === 'Invalid') {
+      cause = declaration.enum_.validity.causes.at(0)
+    } else if (declaration.enum_.representation._tag === 'Unavailable') {
+      cause = declaration.enum_.representation.cause
+    }
     completed.set(
       Type.key(declaration.type),
       entry ??
@@ -659,11 +670,7 @@ export const catalog = (
             _tag: 'InvalidDeclaration',
             detail: `scalar enum ${Type.encode(declaration.type)} has no valid fixed-width representation plan`,
           },
-          declaration.enum_.validity._tag === 'Invalid'
-            ? declaration.enum_.validity.causes.at(0)
-            : declaration.enum_.representation._tag === 'Unavailable'
-              ? declaration.enum_.representation.cause
-              : undefined,
+          cause,
         ),
     )
   }
@@ -758,6 +765,9 @@ export const catalog = (
         (slot.access === 'Copy' ||
           (slot.access === 'Shared' && borrowed) ||
           nestedLayout?.copy === true)
+      let representation: 'Borrow' | 'Callable' | 'Value' = 'Value'
+      if (borrowed) representation = 'Borrow'
+      else if (nestedCallable !== undefined) representation = 'Callable'
       fieldInputs.push({
         value: Object.freeze({
           capture: slot.ordinal,
@@ -765,7 +775,7 @@ export const catalog = (
           ordinal: slot.sourceOrdinal,
           access: slot.access,
           type: nestedEffect?.type ?? slot.type,
-          representation: borrowed ? 'Borrow' : nestedCallable === undefined ? 'Value' : 'Callable',
+          representation,
           ...(slot.effectIdentity === undefined ? {} : { effectIdentity: slot.effectIdentity }),
           ...(slot.callableIdentity === undefined
             ? {}
@@ -926,43 +936,45 @@ export const catalog = (
         sourceId: type.module,
         ordinal,
       })
-      const fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Type.equals(type, Type.layout)
-        ? Object.freeze([
-            Object.freeze(['bytes', 'usize'] as const),
-            Object.freeze(['alignment', 'usize'] as const),
-          ])
-        : Type.equals(type, Type.invalidAlignment)
-          ? Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
-          : Type.equals(type, Type.allocation)
-            ? Object.freeze([
-                Object.freeze(['$base', 'usize'] as const),
-                Object.freeze(['$bytes', 'usize'] as const),
-                Object.freeze(['$alignment', 'usize'] as const),
-                Object.freeze(['$reclaim', 'usize'] as const),
-                Object.freeze(['$context', 'usize'] as const),
-                Object.freeze(['$active', 'usize'] as const),
-              ])
-            : Type.equals(type, Type.osHandle)
-              ? Object.freeze([
-                  Object.freeze(['$identity', 'usize'] as const),
-                  Object.freeze(['$kind', 'i32'] as const),
-                  Object.freeze(['$active', 'i32'] as const),
-                ])
-              : Type.isRawBuffer(type)
-                ? Object.freeze([
-                    Object.freeze(['$allocation', Type.allocation] as const),
-                    Object.freeze(['count', 'usize'] as const),
-                  ])
-                : Type.isSlot(type)
-                  ? Object.freeze([Object.freeze(['$address', 'usize'] as const)])
-                  : Object.freeze([])
+      let fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Object.freeze([])
+      if (Type.equals(type, Type.layout)) {
+        fieldTypes = Object.freeze([
+          Object.freeze(['bytes', 'usize'] as const),
+          Object.freeze(['alignment', 'usize'] as const),
+        ])
+      } else if (Type.equals(type, Type.invalidAlignment)) {
+        fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
+      } else if (Type.equals(type, Type.allocation)) {
+        fieldTypes = Object.freeze([
+          Object.freeze(['$base', 'usize'] as const),
+          Object.freeze(['$bytes', 'usize'] as const),
+          Object.freeze(['$alignment', 'usize'] as const),
+          Object.freeze(['$reclaim', 'usize'] as const),
+          Object.freeze(['$context', 'usize'] as const),
+          Object.freeze(['$active', 'usize'] as const),
+        ])
+      } else if (Type.equals(type, Type.osHandle)) {
+        fieldTypes = Object.freeze([
+          Object.freeze(['$identity', 'usize'] as const),
+          Object.freeze(['$kind', 'i32'] as const),
+          Object.freeze(['$active', 'i32'] as const),
+        ])
+      } else if (Type.isRawBuffer(type)) {
+        fieldTypes = Object.freeze([
+          Object.freeze(['$allocation', Type.allocation] as const),
+          Object.freeze(['count', 'usize'] as const),
+        ])
+      } else if (Type.isSlot(type)) {
+        fieldTypes = Object.freeze([Object.freeze(['$address', 'usize'] as const)])
+      }
       const inputs: Array<Packing.Input<Omit<Field, keyof Packing.PlacedField>>> = []
       for (const [fieldOrdinal, [name, fieldType]] of fieldTypes.entries()) {
-        const fieldLayout = Type.isBuiltin(fieldType)
-          ? scalarEntry(target, fieldType)
-          : Type.isNominal(fieldType)
-            ? layoutNominal(fieldType)
-            : undefined
+        let fieldLayout: CatalogEntry | undefined
+        if (Type.isBuiltin(fieldType)) {
+          fieldLayout = scalarEntry(target, fieldType)
+        } else if (Type.isNominal(fieldType)) {
+          fieldLayout = layoutNominal(fieldType)
+        }
         if (fieldLayout === undefined || fieldLayout._tag === 'UnavailableLayoutEntry') {
           const result = unavailable(
             type,
@@ -1066,6 +1078,9 @@ export const catalog = (
         field.declaredType._tag !== 'Resolved' ||
         field.declaredType.exposureCause !== undefined
       ) {
+        let cause: Diagnostic.Identity | undefined
+        if (field.declaredType._tag === 'Unresolved') cause = field.declaredType.cause
+        else if (field.declaredType._tag === 'Resolved') cause = field.declaredType.exposureCause
         failure = unavailable(
           type,
           dependencies,
@@ -1074,11 +1089,7 @@ export const catalog = (
             field: field.id,
             detail: 'field type is unavailable',
           },
-          field.declaredType._tag === 'Unresolved'
-            ? field.declaredType.cause
-            : field.declaredType._tag === 'Resolved'
-              ? field.declaredType.exposureCause
-              : undefined,
+          cause,
         )
         break
       }
@@ -1713,12 +1724,12 @@ const addExpressionTypes = (
     expression._tag === 'BoundOperationCall'
   ) {
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
-    const contract =
-      expression._tag === 'BoundOperationCall'
-        ? expression.contract
-        : expression._tag === 'BuiltinCall'
-          ? expression.interfaceOperation?.contract
-          : undefined
+    let contract: DeclarationFacts.InterfaceOperationApplicationFact | undefined
+    if (expression._tag === 'BoundOperationCall') {
+      contract = expression.contract
+    } else if (expression._tag === 'BuiltinCall') {
+      contract = expression.interfaceOperation?.contract
+    }
     for (const operand of contract?.operands ?? []) {
       if (operand.type._tag !== 'Resolved') continue
       const type = Type.substitute(operand.type.type, substitution)
@@ -1981,15 +1992,14 @@ const effectEnvironments = (
             realized?.source ?? (capture.binding === undefined ? 'Parameter' : 'Binding')
           const ordinal =
             realized?.sourceOrdinal ?? capture.binding?.ordinal ?? capture.parameter?.ordinal
-          const type =
-            realized?.type ??
-            (capture.binding === undefined
-              ? instance.function.contract._tag === 'Contract' && ordinal !== undefined
-                ? instance.function.contract.parameters.at(ordinal)
-                : undefined
-              : ordinal === undefined
-                ? undefined
-                : bindingTypes.get(ordinal))
+          let type = realized?.type
+          if (type === undefined && capture.binding === undefined) {
+            if (instance.function.contract._tag === 'Contract' && ordinal !== undefined) {
+              type = instance.function.contract.parameters.at(ordinal)
+            }
+          } else if (type === undefined && ordinal !== undefined) {
+            type = bindingTypes.get(ordinal)
+          }
           if (ordinal === undefined || type === undefined) {
             unavailable = `capture ${source.toLowerCase()} has no concrete type`
             break
@@ -2077,23 +2087,25 @@ const effectEnvironments = (
             unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
             break
           }
-          const size = borrowed
-            ? target.pointerSize
-            : callable
-              ? (capturedCallableEnvironment?.size ?? 0)
-              : (valueLayout?.size ?? 0)
-          const alignment = borrowed
-            ? target.pointerAlignment
-            : callable
-              ? (capturedCallableEnvironment?.alignment ?? 1)
-              : (valueLayout?.alignment ?? 1)
+          let size = valueLayout?.size ?? 0
+          let alignment = valueLayout?.alignment ?? 1
+          if (borrowed) {
+            size = target.pointerSize
+            alignment = target.pointerAlignment
+          } else if (callable) {
+            size = capturedCallableEnvironment?.size ?? 0
+            alignment = capturedCallableEnvironment?.alignment ?? 1
+          }
+          let representation: 'Borrow' | 'Callable' | 'Value' = 'Value'
+          if (borrowed) representation = 'Borrow'
+          else if (callable) representation = 'Callable'
           fieldInputs.push({
             value: Object.freeze({
               source,
               ordinal,
               access,
               type: fieldType,
-              representation: borrowed ? 'Borrow' : callable ? 'Callable' : 'Value',
+              representation,
               ...(capturedEffectIdentity === undefined
                 ? {}
                 : { effectIdentity: capturedEffectIdentity }),
@@ -2109,11 +2121,12 @@ const effectEnvironments = (
           })
         }
         if (unavailable === undefined) {
-          const access = fieldInputs.some((field) => field.value.access === 'Take')
-            ? 'Take'
-            : fieldInputs.some((field) => field.value.access === 'Exclusive')
-              ? 'Exclusive'
-              : 'Shared'
+          let access: Type.CallableMode = 'Shared'
+          if (fieldInputs.some((field) => field.value.access === 'Take')) {
+            access = 'Take'
+          } else if (fieldInputs.some((field) => field.value.access === 'Exclusive')) {
+            access = 'Exclusive'
+          }
           effect = Type.effectWithRows(
             structuralEffect.success,
             structuralEffect.failureRow,
@@ -2159,12 +2172,12 @@ const effectEnvironments = (
           if (expression._tag !== 'BoundOperationCall' && expression._tag !== 'BuiltinCall')
             return []
           if (expression.witnessEffectSite === undefined) return []
-          const contract =
-            expression._tag === 'BoundOperationCall'
-              ? expression.contract
-              : expression._tag === 'BuiltinCall'
-                ? expression.interfaceOperation?.contract
-                : undefined
+          let contract: DeclarationFacts.InterfaceOperationApplicationFact | undefined
+          if (expression._tag === 'BoundOperationCall') {
+            contract = expression.contract
+          } else if (expression._tag === 'BuiltinCall') {
+            contract = expression.interfaceOperation?.contract
+          }
           return contract === undefined
             ? []
             : [Object.freeze({ expression, contract, site: expression.witnessEffectSite })]
@@ -2199,11 +2212,12 @@ const effectEnvironments = (
             alignment: valueLayout.alignment,
           })
         }
-        const access = fieldInputs.some((field) => field.value.access === 'Take')
-          ? 'Take'
-          : fieldInputs.some((field) => field.value.access === 'Exclusive')
-            ? 'Exclusive'
-            : 'Shared'
+        let access: Type.CallableMode = 'Shared'
+        if (fieldInputs.some((field) => field.value.access === 'Take')) {
+          access = 'Take'
+        } else if (fieldInputs.some((field) => field.value.access === 'Exclusive')) {
+          access = 'Exclusive'
+        }
         const effect = Type.effectWithRows(
           structuralEffect.success,
           structuralEffect.failureRow,
@@ -2331,20 +2345,19 @@ const callableEnvironments = (
       if (!borrowed && !callableCapture && valueLayout === undefined) {
         return unavailable(`capture ${capture.ordinal} has no concrete value layout`)
       }
-      const size = borrowed
-        ? target.pointerSize
-        : callableCapture
-          ? nestedEnvironment?._tag === 'CallableEnvironment'
-            ? nestedEnvironment.size
-            : 0
-          : (valueLayout?.size ?? 0)
-      const alignment = borrowed
-        ? target.pointerAlignment
-        : callableCapture
-          ? nestedEnvironment?._tag === 'CallableEnvironment'
-            ? nestedEnvironment.alignment
-            : 1
-          : (valueLayout?.alignment ?? 1)
+      let size = valueLayout?.size ?? 0
+      let alignment = valueLayout?.alignment ?? 1
+      if (borrowed) {
+        size = target.pointerSize
+        alignment = target.pointerAlignment
+      } else if (callableCapture) {
+        size = nestedEnvironment?._tag === 'CallableEnvironment' ? nestedEnvironment.size : 0
+        alignment =
+          nestedEnvironment?._tag === 'CallableEnvironment' ? nestedEnvironment.alignment : 1
+      }
+      let representation: 'Borrow' | 'Callable' | 'Value' = 'Value'
+      if (borrowed) representation = 'Borrow'
+      else if (callableCapture) representation = 'Callable'
       inputs.push(
         Object.freeze({
           value: Object.freeze({
@@ -2352,7 +2365,7 @@ const callableEnvironments = (
             parameterOrdinal: capture.parameterOrdinal,
             access: capture.access,
             type: capture.type,
-            representation: borrowed ? 'Borrow' : callableCapture ? 'Callable' : 'Value',
+            representation,
             ...(callableIdentity === undefined ? {} : { callableIdentity }),
           }),
           size,
@@ -3104,30 +3117,30 @@ const shapeNode = (
       )
     }
     const kind = executable?._tag ?? (storedCallable === undefined ? 'Effect' : 'Callable')
-    const fields =
-      executable !== undefined
-        ? executable.fields.map((field) =>
-            Object.freeze({
-              capture: field.capture,
-              shape:
-                executable._tag === 'Callable' && field.representation !== 'Borrow'
-                  ? shapeNode(field.type, context)
-                  : executableEnvironmentFieldShape(context, field),
-            }),
-          )
-        : storedCallable !== undefined
-          ? storedCallable.fields.map((field) =>
-              Object.freeze({
-                capture: field.ordinal,
-                shape: executableEnvironmentFieldShape(context, field),
-              }),
-            )
-          : (storedEffect?.fields ?? []).map((field) =>
-              Object.freeze({
-                capture: field.capture,
-                shape: executableEnvironmentFieldShape(context, field),
-              }),
-            )
+    let fields: ReadonlyArray<{ readonly capture: number; readonly shape: CallingShapeNode }>
+    if (executable !== undefined) {
+      fields = executable.fields.map((field) => {
+        const shape =
+          executable._tag === 'Callable' && field.representation !== 'Borrow'
+            ? shapeNode(field.type, context)
+            : executableEnvironmentFieldShape(context, field)
+        return Object.freeze({ capture: field.capture, shape })
+      })
+    } else if (storedCallable !== undefined) {
+      fields = storedCallable.fields.map((field) =>
+        Object.freeze({
+          capture: field.ordinal,
+          shape: executableEnvironmentFieldShape(context, field),
+        }),
+      )
+    } else {
+      fields = (storedEffect?.fields ?? []).map((field) =>
+        Object.freeze({
+          capture: field.capture,
+          shape: executableEnvironmentFieldShape(context, field),
+        }),
+      )
+    }
     return Object.freeze({
       _tag:
         kind === 'Callable'
@@ -3674,17 +3687,15 @@ export const memberFieldSlots = (
 ): ReadonlyArray<number> | undefined => {
   if (path.length === 0 && Type.equals(shape.type, member))
     return Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
-  const selected =
-    shape.tree._tag === 'ProductShape' && Type.equals(shape.tree.type, member)
-      ? Object.freeze({ shape: shape.tree, physicalOffset: 0 })
-      : shape.tree._tag === 'SumShape'
-        ? (() => {
-            const candidate = shape.tree.members.find((entry) => Type.equals(entry.member, member))
-            return candidate === undefined
-              ? undefined
-              : Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
-          })()
-        : undefined
+  let selected: { readonly shape: CallingShapeNode; readonly physicalOffset: number } | undefined
+  if (shape.tree._tag === 'ProductShape' && Type.equals(shape.tree.type, member)) {
+    selected = Object.freeze({ shape: shape.tree, physicalOffset: 0 })
+  } else if (shape.tree._tag === 'SumShape') {
+    const candidate = shape.tree.members.find((entry) => Type.equals(entry.member, member))
+    if (candidate !== undefined) {
+      selected = Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
+    }
+  }
   if (selected === undefined) return undefined
   const slice = fieldSlice(selected.shape, path)
   return slice === undefined

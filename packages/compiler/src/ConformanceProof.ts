@@ -134,7 +134,15 @@ export const implementedContracts = (
     }
   return Object.freeze(
     [...implemented.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => {
+        if (left < right) {
+          return -1
+        }
+        if (left > right) {
+          return 1
+        }
+        return 0
+      })
       .map(([, capability]) => capability),
   )
 }
@@ -463,12 +471,15 @@ const selectedConformance = (
     ?.conformances.find((conformance) => conformance.ordinal === selection.ordinal)
 
 /** Tests whether one nominal provider has a compiler-shipped or source-declared witness. */
-export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean =>
-  Type.equals(capability, Type.copyCapability)
-    ? copyType(self, provider)
-    : contractByCapability(self, capability) !== undefined
-      ? prove(self, provider, capability)._tag === 'Proved'
-      : witness(self, provider, capability) !== undefined
+export const conforms = (self: Index, provider: Type.Type, capability: Type.Nominal): boolean => {
+  if (Type.equals(capability, Type.copyCapability)) {
+    return copyType(self, provider)
+  }
+  if (contractByCapability(self, capability) !== undefined) {
+    return prove(self, provider, capability)._tag === 'Proved'
+  }
+  return witness(self, provider, capability) !== undefined
+}
 
 /**
  * Returns, in declaration order, the operations one interface declares that the provider's selected
@@ -726,26 +737,26 @@ export const witness = (
       (operation) => operation.name._tag === 'Present' && mappedNames.has(operation.name.spelling),
     ) &&
     conformance.operations.length === contract.operations.length
-  const operations =
-    contract === undefined
-      ? Object.freeze([])
-      : Object.freeze(
-          contract.operations.flatMap((operation) => {
-            const name = operation.name._tag === 'Present' ? operation.name.spelling : undefined
-            const implementation =
-              name === undefined
-                ? undefined
-                : witnessImplementation(self, provider, conformance, name)
-            return name === undefined || implementation === undefined
-              ? []
-              : [
-                  Object.freeze({
-                    name,
-                    implementation,
-                  }),
-                ]
-          }),
-        )
+  let operations: readonly Readonly<{ name: string; implementation: CanonicalId }>[]
+  if (contract === undefined) {
+    operations = Object.freeze([])
+  } else {
+    operations = Object.freeze(
+      contract.operations.flatMap((operation) => {
+        const name = operation.name._tag === 'Present' ? operation.name.spelling : undefined
+        const implementation =
+          name === undefined ? undefined : witnessImplementation(self, provider, conformance, name)
+        return name === undefined || implementation === undefined
+          ? []
+          : [
+              Object.freeze({
+                name,
+                implementation,
+              }),
+            ]
+      }),
+    )
+  }
   const completeOperationSet =
     contract === undefined || operations.length === contract.operations.length
   return Type.equals(capability, Type.dropCapability) || (completeContract && completeOperationSet)

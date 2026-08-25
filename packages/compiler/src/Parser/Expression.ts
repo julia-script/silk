@@ -159,12 +159,16 @@ export const parseBooleanLiteralExpression = (initial: State): NodeResult => {
 
 export const parseStaticTextLiteralExpression = (initial: State): NodeResult => {
   const next = nextSignificantKind(initial)
-  const kind =
-    next === 'ByteStringLiteral'
-      ? 'ByteStringLiteral'
-      : next === 'InvalidStaticLiteral'
-        ? 'InvalidStaticLiteral'
-        : 'TextLiteral'
+  let kind: 'ByteStringLiteral' | 'InvalidStaticLiteral' | 'TextLiteral'
+  if (next === 'ByteStringLiteral') {
+    kind = 'ByteStringLiteral'
+  } else {
+    if (next === 'InvalidStaticLiteral') {
+      kind = 'InvalidStaticLiteral'
+    } else {
+      kind = 'TextLiteral'
+    }
+  }
   const literal = expect(initial, kind, expressionFollowing)
   return Object.freeze({
     state: literal.state,
@@ -217,12 +221,11 @@ export const primaryKind = (
     )
       return 'StaticText'
     if (token.kind === 'CharLiteral') return 'Character'
-    if (token.kind === 'Minus')
-      return peek(state, 1) === 'DecimalInteger'
-        ? 'Integer'
-        : peek(state, 1) === 'DecimalFloat'
-          ? 'Floating'
-          : 'Prefix'
+    if (token.kind === 'Minus') {
+      if (peek(state, 1) === 'DecimalInteger') return 'Integer'
+      if (peek(state, 1) === 'DecimalFloat') return 'Floating'
+      return 'Prefix'
+    }
     if (token.kind === 'Bang' || token.kind === 'Tilde') return 'Prefix'
     if (token.kind === 'TrueKeyword' || token.kind === 'FalseKeyword') return 'Boolean'
     if (token.kind === 'MoveKeyword') return 'Move'

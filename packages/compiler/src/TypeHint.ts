@@ -23,8 +23,11 @@ export interface ProviderSelectorTypeHint {
 
 export type TypeHint = BindingTypeHint | ProviderSelectorTypeHint
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
 
 const selectorSyntax = (expression: Elaboration.ExpressionFact): SyntaxTree.Node | undefined => {
   if (expression._tag === 'Call') return expression.syntax
@@ -37,14 +40,16 @@ const selectorSyntax = (expression: Elaboration.ExpressionFact): SyntaxTree.Node
 
 const selectorFacts = (
   expression: Elaboration.ExpressionFact,
-): ReadonlyArray<Elaboration.InferredProviderSelector> =>
-  expression._tag === 'Call'
-    ? expression.contract._tag === 'Compatible'
-      ? expression.contract.inferredProviderSelectors
-      : Object.freeze([])
-    : expression._tag === 'CallableApply'
-      ? expression.inferredProviderSelectors
-      : Object.freeze([])
+): ReadonlyArray<Elaboration.InferredProviderSelector> => {
+  if (expression._tag === 'Call') {
+    if (expression.contract._tag === 'Compatible') {
+      return expression.contract.inferredProviderSelectors
+    }
+    return Object.freeze([])
+  }
+  if (expression._tag === 'CallableApply') return expression.inferredProviderSelectors
+  return Object.freeze([])
+}
 
 /** Projects available inferred editor facts into one half-open byte range. */
 export const make = (

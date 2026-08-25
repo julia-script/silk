@@ -31,8 +31,15 @@ export interface Graph {
 
 export const order: ReadonlyArray<Mode> = Object.freeze(['NestedTransfer', 'ExternalPark'])
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 const normalizeModes = (modes: Iterable<Mode>): ReadonlyArray<Mode> => {
   const retained = new Set(modes)
@@ -88,15 +95,14 @@ export const summarize = (graph: Graph): ReadonlyMap<string, Summary> => {
     }
     const permitted = graph.permitted.get(node) ?? new Set<Mode>()
     const modes = normalizeModes([...causes.map((cause) => cause.mode), ...permitted])
+    let availability: Summary['availability'] = 'Complete'
+    if (graph.unavailable.has(node)) availability = 'Unavailable'
+    else if (permitted.size > 0) availability = 'Open'
     summaries.set(
       node,
       Object.freeze({
         _tag: 'SuspensionModeSummary',
-        availability: graph.unavailable.has(node)
-          ? 'Unavailable'
-          : permitted.size > 0
-            ? 'Open'
-            : 'Complete',
+        availability,
         modes,
         causes: Object.freeze(causes),
       }),
@@ -131,11 +137,16 @@ export const has = (self: Summary, mode: Mode): boolean => self.modes.includes(m
 
 /** Joins summaries while retaining deterministic modes and causal paths. */
 export const join = (inputs: ReadonlyArray<Summary>): Summary => {
-  const availability = inputs.some((input) => input.availability === 'Unavailable')
-    ? 'Unavailable'
-    : inputs.some((input) => input.availability === 'Open')
-      ? 'Open'
-      : 'Complete'
+  let availability: Summary['availability']
+  if (inputs.some((input) => input.availability === 'Unavailable')) {
+    availability = 'Unavailable'
+  } else {
+    if (inputs.some((input) => input.availability === 'Open')) {
+      availability = 'Open'
+    } else {
+      availability = 'Complete'
+    }
+  }
   const causes = [
     ...new Map(
       inputs

@@ -503,20 +503,25 @@ const verifyEntry = (
         const borrowed = field.representation === 'Borrow'
         const executable =
           field.effectIdentity !== undefined || field.callableIdentity !== undefined
-        const fieldLayout =
-          borrowed || executable
-            ? undefined
-            : Type.isBuiltin(field.type)
-              ? scalarEntry(target, field.type)
-              : available.get(Type.key(field.type))
+        let fieldLayout: Entry | undefined
+        if (!borrowed && !executable) {
+          fieldLayout = Type.isBuiltin(field.type)
+            ? scalarEntry(target, field.type)
+            : available.get(Type.key(field.type))
+        }
+        let size = fieldLayout?.size ?? 0
+        let alignment = fieldLayout?.alignment ?? 1
+        if (borrowed) {
+          size = target.pointerSize
+          alignment = target.pointerAlignment
+        } else if (executable) {
+          size = field.size
+          alignment = field.alignment
+        }
         return Object.freeze({
           value: ordinal,
-          size: borrowed ? target.pointerSize : executable ? field.size : (fieldLayout?.size ?? 0),
-          alignment: borrowed
-            ? target.pointerAlignment
-            : executable
-              ? field.alignment
-              : (fieldLayout?.alignment ?? 1),
+          size,
+          alignment,
           available: borrowed || executable || fieldLayout !== undefined,
         })
       })
@@ -598,20 +603,25 @@ const verifyEntry = (
     const expected = candidate.representation.fields.map((field, ordinal) => {
       const borrowed = field.representation === 'Borrow'
       const executable = field.callableIdentity !== undefined
-      const fieldLayout =
-        borrowed || executable
-          ? undefined
-          : Type.isBuiltin(field.type)
-            ? scalarEntry(target, field.type)
-            : available.get(Type.key(field.type))
+      let fieldLayout: Entry | undefined
+      if (!borrowed && !executable) {
+        fieldLayout = Type.isBuiltin(field.type)
+          ? scalarEntry(target, field.type)
+          : available.get(Type.key(field.type))
+      }
+      let size = fieldLayout?.size ?? 0
+      let alignment = fieldLayout?.alignment ?? 1
+      if (borrowed) {
+        size = target.pointerSize
+        alignment = target.pointerAlignment
+      } else if (executable) {
+        size = field.size
+        alignment = field.alignment
+      }
       return Object.freeze({
         value: ordinal,
-        size: borrowed ? target.pointerSize : executable ? field.size : (fieldLayout?.size ?? 0),
-        alignment: borrowed
-          ? target.pointerAlignment
-          : executable
-            ? field.alignment
-            : (fieldLayout?.alignment ?? 1),
+        size,
+        alignment,
         available: borrowed || executable || fieldLayout !== undefined,
       })
     })
@@ -834,28 +844,32 @@ const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.F
   left.struct.ordinal === right.struct.ordinal
 
 /** Compares two compiler-planned physical selectors. */
-export const selectorEquals = (left: Selector, right: Selector): boolean =>
-  left._tag === 'ElementSelector'
-    ? right._tag === 'ElementSelector' && left.index === right.index
-    : left._tag === 'CallableCaptureSelector'
-      ? right._tag === 'CallableCaptureSelector' && left.ordinal === right.ordinal
-      : left._tag === 'EffectCaptureSelector'
-        ? right._tag === 'EffectCaptureSelector' && left.ordinal === right.ordinal
-        : left._tag === 'UnionTagSelector'
-          ? right._tag === 'UnionTagSelector'
-          : left._tag === 'UnionPayloadSelector'
-            ? right._tag === 'UnionPayloadSelector' && left.slot === right.slot
-            : left._tag === 'SliceAddressSelector'
-              ? right._tag === 'SliceAddressSelector'
-              : left._tag === 'SliceLengthSelector'
-                ? right._tag === 'SliceLengthSelector'
-                : left._tag === 'StringStorageSelector'
-                  ? right._tag === 'StringStorageSelector'
-                  : left._tag === 'StringByteLengthSelector'
-                    ? right._tag === 'StringByteLengthSelector'
-                    : left._tag === 'ReferenceAddressSelector'
-                      ? right._tag === 'ReferenceAddressSelector'
-                      : right._tag === 'FieldId' && fieldIdEquals(left, right)
+export const selectorEquals = (left: Selector, right: Selector): boolean => {
+  switch (left._tag) {
+    case 'ElementSelector':
+      return right._tag === 'ElementSelector' && left.index === right.index
+    case 'CallableCaptureSelector':
+      return right._tag === 'CallableCaptureSelector' && left.ordinal === right.ordinal
+    case 'EffectCaptureSelector':
+      return right._tag === 'EffectCaptureSelector' && left.ordinal === right.ordinal
+    case 'UnionTagSelector':
+      return right._tag === 'UnionTagSelector'
+    case 'UnionPayloadSelector':
+      return right._tag === 'UnionPayloadSelector' && left.slot === right.slot
+    case 'SliceAddressSelector':
+      return right._tag === 'SliceAddressSelector'
+    case 'SliceLengthSelector':
+      return right._tag === 'SliceLengthSelector'
+    case 'StringStorageSelector':
+      return right._tag === 'StringStorageSelector'
+    case 'StringByteLengthSelector':
+      return right._tag === 'StringByteLengthSelector'
+    case 'ReferenceAddressSelector':
+      return right._tag === 'ReferenceAddressSelector'
+    case 'FieldId':
+      return right._tag === 'FieldId' && fieldIdEquals(left, right)
+  }
+}
 
 /** Resolves one compiler-planned scalar lane to its byte offset within a logical value. */
 export const laneOffset = (

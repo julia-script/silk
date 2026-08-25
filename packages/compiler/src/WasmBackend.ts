@@ -187,6 +187,122 @@ const unsignedI64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.Pl
  */
 type OverflowShape = 'Add' | 'Subtract' | 'Multiply'
 
+const arithmeticMnemonic = (shape: OverflowShape, prefix: 'i32' | 'i64'): Instr.PlainMnemonic => {
+  switch (shape) {
+    case 'Add':
+      return `${prefix}.add`
+    case 'Subtract':
+      return `${prefix}.sub`
+    case 'Multiply':
+      return `${prefix}.mul`
+  }
+}
+
+const overflowShape = (operator: Mir.BinaryOperator): OverflowShape | undefined => {
+  switch (operator) {
+    case 'Add':
+    case 'SaturatingAdd':
+      return 'Add'
+    case 'Subtract':
+    case 'SaturatingSubtract':
+      return 'Subtract'
+    case 'Multiply':
+    case 'SaturatingMultiply':
+      return 'Multiply'
+    default:
+      return undefined
+  }
+}
+
+const storeMnemonic = (type: ValType.ValType): Instr.MemoryAccessMnemonic => {
+  if (type === i64) return 'i64.store'
+  if (type === f32) return 'f32.store'
+  if (type === f64) return 'f64.store'
+  return 'i32.store'
+}
+
+const floatToIntegerMnemonic = (
+  bits: number,
+  source: 'f32' | 'f64',
+  signed: boolean,
+): Instr.PlainMnemonic => {
+  const integerPrefix = bits === 64 ? 'i64' : 'i32'
+  const signedness = signed ? 's' : 'u'
+  return `${integerPrefix}.trunc_${source}_${signedness}`
+}
+
+const integerToFloatMnemonic = (
+  target: 'f32' | 'f64',
+  bits: number,
+  signed: boolean,
+): Instr.PlainMnemonic => {
+  const integerPrefix = bits === 64 ? 'i64' : 'i32'
+  const signedness = signed ? 's' : 'u'
+  return `${target}.convert_${integerPrefix}_${signedness}`
+}
+
+const scalarComparisonMnemonic = (
+  operator: Mir.BinaryOperator,
+  prefix: 'f32' | 'f64' | 'i32',
+  unsigned = false,
+): Instr.PlainMnemonic | undefined => {
+  switch (operator) {
+    case 'Equals':
+      return `${prefix}.eq`
+    case 'NotEquals':
+      return `${prefix}.ne`
+    case 'LessThan':
+      if (prefix === 'i32') return unsigned ? 'i32.lt_u' : 'i32.lt_s'
+      return `${prefix}.lt`
+    case 'LessOrEqual':
+      if (prefix === 'i32') return unsigned ? 'i32.le_u' : 'i32.le_s'
+      return `${prefix}.le`
+    case 'GreaterThan':
+      if (prefix === 'i32') return unsigned ? 'i32.gt_u' : 'i32.gt_s'
+      return `${prefix}.gt`
+    case 'GreaterOrEqual':
+      if (prefix === 'i32') return unsigned ? 'i32.ge_u' : 'i32.ge_s'
+      return `${prefix}.ge`
+    default:
+      return undefined
+  }
+}
+
+const floatArithmeticMnemonic = (
+  operator: Mir.BinaryOperator,
+  prefix: 'f32' | 'f64',
+): Instr.PlainMnemonic | undefined => {
+  switch (operator) {
+    case 'Add':
+      return `${prefix}.add`
+    case 'Subtract':
+      return `${prefix}.sub`
+    case 'Multiply':
+      return `${prefix}.mul`
+    case 'Divide':
+      return `${prefix}.div`
+    default:
+      return undefined
+  }
+}
+
+const floatBuiltinMnemonic = (
+  operator: Mir.BinaryOperator,
+  prefix: 'f32' | 'f64',
+): Instr.PlainMnemonic | undefined =>
+  floatArithmeticMnemonic(operator, prefix) ?? scalarComparisonMnemonic(operator, prefix)
+
+const reinterpretMnemonic = (
+  source: { readonly spelling: string },
+  target: { readonly spelling: string },
+): Instr.PlainMnemonic | undefined => {
+  if (source.spelling === 'f32' && target.spelling === 'u32') return 'i32.reinterpret_f32'
+  if (source.spelling === 'f64' && target.spelling === 'u64') return 'i64.reinterpret_f64'
+  if (source.spelling === 'u32' && target.spelling === 'f32') return 'f32.reinterpret_i32'
+  if (source.spelling === 'u64' && target.spelling === 'f64') return 'f64.reinterpret_i64'
+  return undefined
+}
+
 /**
  * Emits `l op r` with its overflow check, leaving the checked result on the stack. Operands are
  * read from `left`/`right` locals rather than the stack so they can be re-read by the check.
@@ -201,8 +317,7 @@ const checkedArithmetic = (
   const prefix = bits === 64 ? 'i64' : 'i32'
   const constant = (input: bigint): Instr.Instr =>
     bits === 64 ? Instr.i64Const(input) : Instr.i32Const(Number(input))
-  const wrapped: Instr.PlainMnemonic =
-    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const wrapped = arithmeticMnemonic(shape, prefix)
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
@@ -210,6 +325,8 @@ const checkedArithmetic = (
     Instr.localSet(scratch),
   ]
 
+  const minimum = bits === 64 ? -9223372036854775808n : -2147483648n
+  const signComparison: Instr.PlainMnemonic = shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`
   // `overflowed` leaves one i32 boolean on the stack: 1 when the operation overflowed.
   const overflowed: ReadonlyArray<Instr.Instr> =
     shape === 'Multiply'
@@ -223,7 +340,7 @@ const checkedArithmetic = (
             [Instr.i32Const(0)],
             [
               Instr.localGet(left),
-              constant(bits === 64 ? -9223372036854775808n : -2147483648n),
+              constant(minimum),
               Instr.op(`${prefix}.eq`),
               Instr.localGet(right),
               constant(-1n),
@@ -250,7 +367,7 @@ const checkedArithmetic = (
           Instr.localGet(right),
           Instr.op(`${prefix}.xor`),
           constant(0n),
-          ...(shape === 'Add' ? [Instr.op(`${prefix}.ge_s`)] : [Instr.op(`${prefix}.lt_s`)]),
+          Instr.op(signComparison),
           Instr.localGet(left),
           Instr.localGet(scratch),
           Instr.op(`${prefix}.xor`),
@@ -276,34 +393,39 @@ const checkedUnsignedArithmetic = (
   bits: 32 | 64 = 32,
 ): ReadonlyArray<Instr.Instr> => {
   const prefix = bits === 64 ? 'i64' : 'i32'
-  const wrapped: Instr.PlainMnemonic =
-    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const wrapped = arithmeticMnemonic(shape, prefix)
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
     Instr.op(wrapped),
     Instr.localSet(scratch),
   ]
-  const overflowed: ReadonlyArray<Instr.Instr> =
-    shape === 'Add'
-      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
-      : shape === 'Subtract'
-        ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
-        : [
+  let overflowed: ReadonlyArray<Instr.Instr>
+  switch (shape) {
+    case 'Add':
+      overflowed = [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
+      break
+    case 'Subtract':
+      overflowed = [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
+      break
+    case 'Multiply':
+      overflowed = [
+        Instr.localGet(right),
+        Instr.op(`${prefix}.eqz`),
+        Instr.ifElse(
+          Instr.valueBlockType(i32),
+          [Instr.i32Const(0)],
+          [
+            Instr.localGet(scratch),
             Instr.localGet(right),
-            Instr.op(`${prefix}.eqz`),
-            Instr.ifElse(
-              Instr.valueBlockType(i32),
-              [Instr.i32Const(0)],
-              [
-                Instr.localGet(scratch),
-                Instr.localGet(right),
-                Instr.op(`${prefix}.div_u`),
-                Instr.localGet(left),
-                Instr.op(`${prefix}.ne`),
-              ],
-            ),
-          ]
+            Instr.op(`${prefix}.div_u`),
+            Instr.localGet(left),
+            Instr.op(`${prefix}.ne`),
+          ],
+        ),
+      ]
+      break
+  }
   return [
     ...compute,
     ...overflowed,
@@ -322,8 +444,7 @@ const checkedSubwordArithmetic = (
   maximum: bigint,
   unsigned: boolean,
 ): ReadonlyArray<Instr.Instr> => {
-  const wrapped: Instr.PlainMnemonic =
-    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+  const wrapped = arithmeticMnemonic(shape, 'i32')
   const below = unsigned
     ? [Instr.localGet(scratch), Instr.i32Const(Number(minimum)), Instr.op('i32.lt_u')]
     : [Instr.localGet(scratch), Instr.i32Const(Number(minimum)), Instr.op('i32.lt_s')]
@@ -358,8 +479,7 @@ const checkedArithmeticOutcome = (
   const unsigned = integer.signedness === 'Unsigned'
   const constant = (value: bigint): Instr.Instr =>
     laneBits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
-  const operation: Instr.PlainMnemonic =
-    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const operation = arithmeticMnemonic(shape, prefix)
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
@@ -380,30 +500,36 @@ const checkedArithmeticOutcome = (
     ]
   }
   if (unsigned) {
-    return [
-      ...compute,
-      ...(shape === 'Add'
-        ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
-        : shape === 'Subtract'
-          ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
-          : [
+    let overflowed: ReadonlyArray<Instr.Instr>
+    switch (shape) {
+      case 'Add':
+        overflowed = [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
+        break
+      case 'Subtract':
+        overflowed = [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
+        break
+      case 'Multiply':
+        overflowed = [
+          Instr.localGet(right),
+          Instr.op(`${prefix}.eqz`),
+          Instr.ifElse(
+            Instr.valueBlockType(i32),
+            [Instr.i32Const(0)],
+            [
+              Instr.localGet(scratch),
               Instr.localGet(right),
-              Instr.op(`${prefix}.eqz`),
-              Instr.ifElse(
-                Instr.valueBlockType(i32),
-                [Instr.i32Const(0)],
-                [
-                  Instr.localGet(scratch),
-                  Instr.localGet(right),
-                  Instr.op(`${prefix}.div_u`),
-                  Instr.localGet(left),
-                  Instr.op(`${prefix}.ne`),
-                ],
-              ),
-            ]),
-    ]
+              Instr.op(`${prefix}.div_u`),
+              Instr.localGet(left),
+              Instr.op(`${prefix}.ne`),
+            ],
+          ),
+        ]
+        break
+    }
+    return [...compute, ...overflowed]
   }
   const minimum = -(1n << BigInt(laneBits - 1))
+  const signComparison: Instr.PlainMnemonic = shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`
   return [
     ...compute,
     ...(shape === 'Multiply'
@@ -440,7 +566,7 @@ const checkedArithmeticOutcome = (
           Instr.localGet(right),
           Instr.op(`${prefix}.xor`),
           constant(0n),
-          Instr.op(shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`),
+          Instr.op(signComparison),
           Instr.localGet(left),
           Instr.localGet(scratch),
           Instr.op(`${prefix}.xor`),
@@ -467,8 +593,7 @@ const saturatingSubwordArithmetic = (
   maximum: bigint,
   unsigned: boolean,
 ): ReadonlyArray<Instr.Instr> => {
-  const operation: Instr.PlainMnemonic =
-    shape === 'Add' ? 'i32.add' : shape === 'Subtract' ? 'i32.sub' : 'i32.mul'
+  const operation = arithmeticMnemonic(shape, 'i32')
   const lessThan: Instr.PlainMnemonic = unsigned ? 'i32.lt_u' : 'i32.lt_s'
   const greaterThan: Instr.PlainMnemonic = unsigned ? 'i32.gt_u' : 'i32.gt_s'
   return [
@@ -500,20 +625,27 @@ const wrappingOrBitwise = (
   signed: boolean,
 ): ReadonlyArray<Instr.Instr> | undefined => {
   const prefix = bits === 64 ? 'i64' : 'i32'
-  const operation: Instr.PlainMnemonic | undefined =
-    operator === 'BitAnd'
-      ? `${prefix}.and`
-      : operator === 'BitOr'
-        ? `${prefix}.or`
-        : operator === 'BitXor'
-          ? `${prefix}.xor`
-          : operator === 'WrappingAdd'
-            ? `${prefix}.add`
-            : operator === 'WrappingSubtract'
-              ? `${prefix}.sub`
-              : operator === 'WrappingMultiply'
-                ? `${prefix}.mul`
-                : undefined
+  let operation: Instr.PlainMnemonic | undefined
+  switch (operator) {
+    case 'BitAnd':
+      operation = `${prefix}.and`
+      break
+    case 'BitOr':
+      operation = `${prefix}.or`
+      break
+    case 'BitXor':
+      operation = `${prefix}.xor`
+      break
+    case 'WrappingAdd':
+      operation = `${prefix}.add`
+      break
+    case 'WrappingSubtract':
+      operation = `${prefix}.sub`
+      break
+    case 'WrappingMultiply':
+      operation = `${prefix}.mul`
+      break
+  }
   if (operation === undefined) return undefined
   return [
     Instr.localGet(left),
@@ -547,11 +679,14 @@ const shiftOrRotate = (
     Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
   ]
   if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
+    const signedness = signed ? 's' : 'u'
+    const operation: Instr.PlainMnemonic =
+      operator === 'ShiftLeft' ? `${prefix}.shl` : `${prefix}.shr_${signedness}`
     return [
       ...validate,
       Instr.localGet(left),
       Instr.localGet(right),
-      Instr.op(operator === 'ShiftLeft' ? `${prefix}.shl` : `${prefix}.shr_${signed ? 's' : 'u'}`),
+      Instr.op(operation),
       ...(operator === 'ShiftLeft' ? normalizeSubword(bits, signed) : []),
     ]
   }
@@ -714,87 +849,102 @@ const saturatingWideArithmetic = (
     bits === 64 ? Instr.i64Const(value) : Instr.i32Const(Number(value))
   const minimum = unsigned ? 0n : -(1n << BigInt(bits - 1))
   const maximum = unsigned ? (1n << BigInt(bits)) - 1n : (1n << BigInt(bits - 1)) - 1n
-  const operation: Instr.PlainMnemonic =
-    shape === 'Add' ? `${prefix}.add` : shape === 'Subtract' ? `${prefix}.sub` : `${prefix}.mul`
+  const operation = arithmeticMnemonic(shape, prefix)
   const compute = [
     Instr.localGet(left),
     Instr.localGet(right),
     Instr.op(operation),
     Instr.localSet(scratch),
   ]
-  const overflowed: ReadonlyArray<Instr.Instr> = unsigned
-    ? shape === 'Add'
-      ? [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
-      : shape === 'Subtract'
-        ? [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
-        : [
-            Instr.localGet(right),
-            Instr.op(`${prefix}.eqz`),
-            Instr.ifElse(
-              Instr.valueBlockType(i32),
-              [Instr.i32Const(0)],
-              [
-                Instr.localGet(scratch),
-                Instr.localGet(right),
-                Instr.op(`${prefix}.div_u`),
-                Instr.localGet(left),
-                Instr.op(`${prefix}.ne`),
-              ],
-            ),
-          ]
-    : shape === 'Multiply'
-      ? [
+  let overflowed: ReadonlyArray<Instr.Instr>
+  if (unsigned) {
+    switch (shape) {
+      case 'Add':
+        overflowed = [Instr.localGet(scratch), Instr.localGet(left), Instr.op(`${prefix}.lt_u`)]
+        break
+      case 'Subtract':
+        overflowed = [Instr.localGet(left), Instr.localGet(right), Instr.op(`${prefix}.lt_u`)]
+        break
+      case 'Multiply':
+        overflowed = [
           Instr.localGet(right),
           Instr.op(`${prefix}.eqz`),
           Instr.ifElse(
             Instr.valueBlockType(i32),
             [Instr.i32Const(0)],
             [
-              Instr.localGet(left),
-              constant(minimum),
-              Instr.op(`${prefix}.eq`),
+              Instr.localGet(scratch),
               Instr.localGet(right),
-              constant(-1n),
-              Instr.op(`${prefix}.eq`),
-              Instr.op('i32.and'),
-              Instr.ifElse(
-                Instr.valueBlockType(i32),
-                [Instr.i32Const(1)],
-                [
-                  Instr.localGet(scratch),
-                  Instr.localGet(right),
-                  Instr.op(`${prefix}.div_s`),
-                  Instr.localGet(left),
-                  Instr.op(`${prefix}.ne`),
-                ],
-              ),
+              Instr.op(`${prefix}.div_u`),
+              Instr.localGet(left),
+              Instr.op(`${prefix}.ne`),
             ],
           ),
         ]
-      : [
+        break
+    }
+  } else if (shape === 'Multiply') {
+    overflowed = [
+      Instr.localGet(right),
+      Instr.op(`${prefix}.eqz`),
+      Instr.ifElse(
+        Instr.valueBlockType(i32),
+        [Instr.i32Const(0)],
+        [
           Instr.localGet(left),
+          constant(minimum),
+          Instr.op(`${prefix}.eq`),
           Instr.localGet(right),
-          Instr.op(`${prefix}.xor`),
-          constant(0n),
-          Instr.op(shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`),
-          Instr.localGet(left),
-          Instr.localGet(scratch),
-          Instr.op(`${prefix}.xor`),
-          constant(0n),
-          Instr.op(`${prefix}.lt_s`),
+          constant(-1n),
+          Instr.op(`${prefix}.eq`),
           Instr.op('i32.and'),
-        ]
-  const saturation = unsigned
-    ? [constant(shape === 'Subtract' ? minimum : maximum)]
-    : [
-        constant(minimum),
-        constant(maximum),
-        Instr.localGet(left),
-        ...(shape === 'Multiply' ? [Instr.localGet(right), Instr.op(`${prefix}.xor`)] : []),
-        constant(0n),
-        Instr.op(`${prefix}.lt_s`),
-        Instr.op('select'),
-      ]
+          Instr.ifElse(
+            Instr.valueBlockType(i32),
+            [Instr.i32Const(1)],
+            [
+              Instr.localGet(scratch),
+              Instr.localGet(right),
+              Instr.op(`${prefix}.div_s`),
+              Instr.localGet(left),
+              Instr.op(`${prefix}.ne`),
+            ],
+          ),
+        ],
+      ),
+    ]
+  } else {
+    const comparison: Instr.PlainMnemonic = shape === 'Add' ? `${prefix}.ge_s` : `${prefix}.lt_s`
+    overflowed = [
+      Instr.localGet(left),
+      Instr.localGet(right),
+      Instr.op(`${prefix}.xor`),
+      constant(0n),
+      Instr.op(comparison),
+      Instr.localGet(left),
+      Instr.localGet(scratch),
+      Instr.op(`${prefix}.xor`),
+      constant(0n),
+      Instr.op(`${prefix}.lt_s`),
+      Instr.op('i32.and'),
+    ]
+  }
+  let saturation: ReadonlyArray<Instr.Instr>
+  if (unsigned) {
+    const limit = shape === 'Subtract' ? minimum : maximum
+    saturation = [constant(limit)]
+  } else {
+    const signOperands =
+      shape === 'Multiply' ? [Instr.localGet(right), Instr.op(`${prefix}.xor`)] : []
+    saturation = [
+      constant(minimum),
+      constant(maximum),
+      Instr.localGet(left),
+      ...signOperands,
+      constant(0n),
+      Instr.op(`${prefix}.lt_s`),
+      Instr.op('select'),
+    ]
+  }
   return [...compute, ...saturation, Instr.localGet(scratch), ...overflowed, Instr.op('select')]
 }
 
@@ -808,17 +958,15 @@ const emitIntegerBinaryValue = (
 ): ReadonlyArray<Instr.Instr> => {
   const bits = Scalar.bits(integer, pointerBits)
   const unsigned = integer.signedness === 'Unsigned'
-  const comparison =
-    bits === 64
-      ? (unsigned ? unsignedI64Comparisons : i64Comparisons)[operator]
-      : (unsigned ? unsignedComparisons : comparisons)[operator]
+  const comparisonsForWidth = bits === 64 ? i64Comparisons : comparisons
+  const unsignedComparisonsForWidth = bits === 64 ? unsignedI64Comparisons : unsignedComparisons
+  const comparison = (unsigned ? unsignedComparisonsForWidth : comparisonsForWidth)[operator]
   if (comparison !== undefined)
     return [Instr.localGet(left), Instr.localGet(right), Instr.op(comparison)]
 
-  const division =
-    bits === 64
-      ? (unsigned ? unsignedI64Divisions : i64Divisions)[operator]
-      : (unsigned ? unsignedDivisions : divisions)[operator]
+  const divisionsForWidth = bits === 64 ? i64Divisions : divisions
+  const unsignedDivisionsForWidth = bits === 64 ? unsignedI64Divisions : unsignedDivisions
+  const division = (unsigned ? unsignedDivisionsForWidth : divisionsForWidth)[operator]
   if (division !== undefined) {
     const result = [Instr.localGet(left), Instr.localGet(right), Instr.op(division)]
     if (bits >= 32 || operator !== 'Divide') return result
@@ -843,14 +991,7 @@ const emitIntegerBinaryValue = (
   const shifted = shiftOrRotate(operator, left, right, bits, !unsigned)
   if (shifted !== undefined) return shifted
 
-  const shape: OverflowShape | undefined =
-    operator === 'Add' || operator === 'SaturatingAdd'
-      ? 'Add'
-      : operator === 'Subtract' || operator === 'SaturatingSubtract'
-        ? 'Subtract'
-        : operator === 'Multiply' || operator === 'SaturatingMultiply'
-          ? 'Multiply'
-          : undefined
+  const shape = overflowShape(operator)
   if (shape === undefined) throw new RangeError(`Wasm integer operation ${operator} is unavailable`)
   const saturating = operator.startsWith('Saturating')
   if (bits < 32) {
@@ -877,15 +1018,11 @@ const emitIntegerBinaryValue = (
   }
   const laneBits = bits === 64 ? 64 : 32
   const scratch = laneBits === 64 ? layout.scratch64 : layout.scratch
-  return saturating
-    ? saturatingWideArithmetic(shape, left, right, scratch, laneBits, unsigned)
-    : (unsigned ? checkedUnsignedArithmetic : checkedArithmetic)(
-        shape,
-        left,
-        right,
-        scratch,
-        laneBits,
-      )
+  if (saturating) {
+    return saturatingWideArithmetic(shape, left, right, scratch, laneBits, unsigned)
+  }
+  const checked = unsigned ? checkedUnsignedArithmetic : checkedArithmetic
+  return checked(shape, left, right, scratch, laneBits)
 }
 
 const emitIntegerConversionValue = (
@@ -918,12 +1055,13 @@ const emitIntegerConversionValue = (
       Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
     )
   }
-  const conversion: ReadonlyArray<Instr.Instr> =
-    sourceBits < 64 && targetBits === 64
-      ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
-      : sourceBits === 64 && targetBits < 64
-        ? [Instr.op('i32.wrap_i64')]
-        : []
+  let conversion: ReadonlyArray<Instr.Instr> = []
+  if (sourceBits < 64 && targetBits === 64) {
+    const signedness = source.signedness === 'Signed' ? 's' : 'u'
+    conversion = [Instr.op(`i64.extend_i32_${signedness}`)]
+  } else if (sourceBits === 64 && targetBits < 64) {
+    conversion = [Instr.op('i32.wrap_i64')]
+  }
   return [
     ...checks,
     Instr.localGet(input),
@@ -1122,12 +1260,17 @@ const suspensionOperationInputs = (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'ReifyEffect' | 'ExecutionPark' }
   >,
-): ReadonlyArray<Mir.LocalId> =>
-  operation._tag === 'ExecutionPark'
-    ? Object.freeze([operation.register])
-    : operation._tag === 'RunEffect'
-      ? operation.arguments
-      : Object.freeze([operation.effect, ...operation.arguments])
+): ReadonlyArray<Mir.LocalId> => {
+  switch (operation._tag) {
+    case 'ExecutionPark':
+      return Object.freeze([operation.register])
+    case 'RunEffect':
+      return operation.arguments
+    case 'RunEffectValue':
+    case 'ReifyEffect':
+      return Object.freeze([operation.effect, ...operation.arguments])
+  }
+}
 
 const matchesSuspensionOperation = (
   candidate: Mir.Operation,
@@ -1179,26 +1322,18 @@ const makeOperationContext = (
   // back yields exactly the bits that went in, whatever the member's own signedness.
   const laneBridge = (from: ValType.ValType, to: ValType.ValType): ReadonlyArray<Instr.Instr> => {
     if (from === to) return []
-    const toInteger =
-      from === f32
-        ? [Instr.op('i32.reinterpret_f32')]
-        : from === f64
-          ? [Instr.op('i64.reinterpret_f64')]
-          : []
+    let toInteger: ReadonlyArray<Instr.Instr> = []
+    if (from === f32) toInteger = [Instr.op('i32.reinterpret_f32')]
+    else if (from === f64) toInteger = [Instr.op('i64.reinterpret_f64')]
     const sourceBits = from === i64 || from === f64 ? 64 : 32
     const targetBits = to === i64 || to === f64 ? 64 : 32
-    const resize =
-      sourceBits === targetBits
-        ? []
-        : targetBits === 64
-          ? [Instr.op('i64.extend_i32_u')]
-          : [Instr.op('i32.wrap_i64')]
-    const fromInteger =
-      to === f32
-        ? [Instr.op('f32.reinterpret_i32')]
-        : to === f64
-          ? [Instr.op('f64.reinterpret_i64')]
-          : []
+    let resize: ReadonlyArray<Instr.Instr> = []
+    if (sourceBits !== targetBits) {
+      resize = targetBits === 64 ? [Instr.op('i64.extend_i32_u')] : [Instr.op('i32.wrap_i64')]
+    }
+    let fromInteger: ReadonlyArray<Instr.Instr> = []
+    if (to === f32) fromInteger = [Instr.op('f32.reinterpret_i32')]
+    else if (to === f64) fromInteger = [Instr.op('f64.reinterpret_i64')]
     return [...toInteger, ...resize, ...fromInteger]
   }
   /** Moves one physical local into another, bridging the value types when they differ. */
@@ -2029,23 +2164,22 @@ const makeOperationContext = (
                         ]),
                       ]
                 })
-                return selected.length !== memberLanes.length
-                  ? []
-                  : [
-                      Object.freeze({
-                        cleanup: caseEntry.cleanup,
-                        state: selected,
-                        wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
-                          instructions.length === 0
-                            ? Object.freeze([])
-                            : Object.freeze([
-                                ...tag,
-                                Instr.i32Const(caseEntry.ordinal),
-                                Instr.op('i32.eq'),
-                                Instr.ifElse(Instr.emptyBlockType, instructions, []),
-                              ]),
-                      }),
-                    ]
+                if (selected.length !== memberLanes.length) return []
+                return [
+                  Object.freeze({
+                    cleanup: caseEntry.cleanup,
+                    state: selected,
+                    wrap: (instructions: ReadonlyArray<Instr.Instr>) =>
+                      instructions.length === 0
+                        ? Object.freeze([])
+                        : Object.freeze([
+                            ...tag,
+                            Instr.i32Const(caseEntry.ordinal),
+                            Instr.op('i32.eq'),
+                            Instr.ifElse(Instr.emptyBlockType, instructions, []),
+                          ]),
+                  }),
+                ]
               }),
             ),
           })
@@ -2214,18 +2348,22 @@ const makeOperationContext = (
   const releaseInstructions = (
     cleanup: CleanupPlan.CleanupPlan,
     local: Mir.LocalId,
-  ): ReadonlyArray<Instr.Instr> =>
-    cleanup._tag === 'ExecutionCleanup'
-      ? releaseExecutionBase(scalar(local))
-      : cleanup._tag === 'WakeCleanup'
-        ? releaseWakeBase(scalar(local))
-        : WasmCleanup.release(
-            hookReleaseInstructions(cleanup, local),
-            reclaimReleaseInstructions(
-              cleanup,
-              slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
-            ),
-          )
+  ): ReadonlyArray<Instr.Instr> => {
+    switch (cleanup._tag) {
+      case 'ExecutionCleanup':
+        return releaseExecutionBase(scalar(local))
+      case 'WakeCleanup':
+        return releaseWakeBase(scalar(local))
+      default:
+        return WasmCleanup.release(
+          hookReleaseInstructions(cleanup, local),
+          reclaimReleaseInstructions(
+            cleanup,
+            slots(local).map((slot) => Object.freeze([Instr.localGet(slot)])),
+          ),
+        )
+    }
+  }
   function releaseWakeBase(base: number): ReadonlyArray<Instr.Instr> {
     const releasePackage = (ordinal: number): ReadonlyArray<Instr.Instr> => {
       const package_ = plan.executionPackages.plans.at(ordinal)
@@ -3887,13 +4025,12 @@ const emitSharedWithMutOperation = (
   const payload = scalar(operation.payload)
   const callableArguments = (local: Mir.LocalId): ReadonlyArray<SilkType.GenericArgument> => {
     const type = layout.types.at(local.ordinal)
-    return type?._tag === 'CallableValue'
-      ? ((type.environment === undefined
-          ? undefined
-          : LayoutPlan.callableTargetArguments(type.environment)) ??
-          type.storage?.realization.targetArguments ??
-          Object.freeze([]))
-      : Object.freeze([])
+    if (type?._tag !== 'CallableValue') return Object.freeze([])
+    const environmentArguments =
+      type.environment === undefined
+        ? undefined
+        : LayoutPlan.callableTargetArguments(type.environment)
+    return environmentArguments ?? type.storage?.realization.targetArguments ?? Object.freeze([])
   }
   const apply = (
     callable: Mir.LocalId,
@@ -5236,26 +5373,28 @@ const emitPropagateEffectFailureOperation = (
 
   const source = slots(operation.source)
   const sourceTag = operation.sourceType._tag === 'Union' ? source.at(0) : undefined
-  const mapTag =
-    operation.sourceType._tag === 'Nominal'
-      ? [Instr.i32Const(operation.tagMappings.at(0)?.target ?? -1)]
-      : sourceTag === undefined
-        ? []
-        : [
-            Instr.i32Const(-1),
-            Instr.localSet(layout.scratch),
-            ...operation.tagMappings.flatMap((mapping) => [
-              Instr.localGet(sourceTag),
-              Instr.i32Const(mapping.source),
-              Instr.op('i32.eq'),
-              Instr.ifElse(
-                Instr.emptyBlockType,
-                [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
-                [],
-              ),
-            ]),
-            Instr.localGet(layout.scratch),
-          ]
+  let mapTag: ReadonlyArray<Instr.Instr>
+  if (operation.sourceType._tag === 'Nominal') {
+    mapTag = [Instr.i32Const(operation.tagMappings.at(0)?.target ?? -1)]
+  } else if (sourceTag === undefined) {
+    mapTag = []
+  } else {
+    mapTag = [
+      Instr.i32Const(-1),
+      Instr.localSet(layout.scratch),
+      ...operation.tagMappings.flatMap((mapping) => [
+        Instr.localGet(sourceTag),
+        Instr.i32Const(mapping.source),
+        Instr.op('i32.eq'),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [Instr.i32Const(mapping.target), Instr.localSet(layout.scratch)],
+          [],
+        ),
+      ]),
+      Instr.localGet(layout.scratch),
+    ]
+  }
   return [
     ...(operation.releases ?? []).flatMap((release) =>
       releaseInstructions(release.cleanup, release.local),
@@ -5637,22 +5776,15 @@ const emitReifyEffectOperation = (
       const to = layout.physicalTypes.at(target)
       const member = memberLanes.at(index)
       const memberType = member === undefined ? undefined : laneValueType(plan, member)
-      return [
-        ...(value === undefined
-          ? [zeroFor(target)]
-          : [
-              Instr.localGet(value),
-              ...(from === undefined || memberType === undefined
-                ? []
-                : laneBridge(from, memberType)),
-              ...(to === undefined || memberType === undefined
-                ? from === undefined || to === undefined
-                  ? []
-                  : laneBridge(from, to)
-                : laneBridge(memberType, to)),
-            ]),
-        Instr.localSet(target),
-      ]
+      if (value === undefined) return [zeroFor(target), Instr.localSet(target)]
+      const bridgeToMember =
+        from === undefined || memberType === undefined ? [] : laneBridge(from, memberType)
+      let bridgeToTarget: ReadonlyArray<Instr.Instr> = []
+      if (to !== undefined) {
+        if (memberType !== undefined) bridgeToTarget = laneBridge(memberType, to)
+        else if (from !== undefined) bridgeToTarget = laneBridge(from, to)
+      }
+      return [Instr.localGet(value), ...bridgeToMember, ...bridgeToTarget, Instr.localSet(target)]
     })
   const resultPayload = destinationSlots.slice(1)
   const successLaneCount =
@@ -5667,27 +5799,27 @@ const emitReifyEffectOperation = (
     Instr.localSet(resultTag),
     ...writePayload(outcomeSlots.slice(1, 1 + successLaneCount), resultPayload, successShape.lanes),
   ]
-  const failure =
-    SilkType.failureMembers(operation.outcomeType.type).length === 0
-      ? [Instr.op('unreachable')]
-      : [
-          Instr.i32Const(operation.failureTag),
-          Instr.localSet(resultTag),
-          ...(SilkType.isUnion(operation.failureValueType)
-            ? (() => {
-                const innerTag = resultPayload.at(0)
-                if (innerTag === undefined)
-                  throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
-                return [
-                  Instr.localGet(outcomeTag),
-                  Instr.i32Const(1),
-                  Instr.op('i32.sub'),
-                  Instr.localSet(innerTag),
-                  ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
-                ]
-              })()
-            : writePayload(outcomeSlots.slice(1), resultPayload)),
-        ]
+  let failure: ReadonlyArray<Instr.Instr>
+  if (SilkType.failureMembers(operation.outcomeType.type).length === 0) {
+    failure = [Instr.op('unreachable')]
+  } else {
+    let payload: ReadonlyArray<Instr.Instr>
+    if (SilkType.isUnion(operation.failureValueType)) {
+      const innerTag = resultPayload.at(0)
+      if (innerTag === undefined)
+        throw new RangeError('Wasm Effect Result failure lost its nested tag lane')
+      payload = [
+        Instr.localGet(outcomeTag),
+        Instr.i32Const(1),
+        Instr.op('i32.sub'),
+        Instr.localSet(innerTag),
+        ...writePayload(outcomeSlots.slice(1), resultPayload.slice(1)),
+      ]
+    } else {
+      payload = writePayload(outcomeSlots.slice(1), resultPayload)
+    }
+    failure = [Instr.i32Const(operation.failureTag), Instr.localSet(resultTag), ...payload]
+  }
   return [
     ...(skipInvocation ? [] : invoke),
     ...(skipInvocation || suspensionRegion?._tag !== 'RunSuspendableEffectRegion'
@@ -5857,22 +5989,11 @@ const emitApplyCallableOperation = (
       const source = scalarActor
       if (source?.category === 'Floating') {
         const bits = Scalar.bits(conversionTarget, plan.target.pointerSize === 4 ? 32 : 64)
-        const mnemonic: Instr.PlainMnemonic =
-          bits === 64
-            ? source.spelling === 'f32'
-              ? conversionTarget.signedness === 'Signed'
-                ? 'i64.trunc_f32_s'
-                : 'i64.trunc_f32_u'
-              : conversionTarget.signedness === 'Signed'
-                ? 'i64.trunc_f64_s'
-                : 'i64.trunc_f64_u'
-            : source.spelling === 'f32'
-              ? conversionTarget.signedness === 'Signed'
-                ? 'i32.trunc_f32_s'
-                : 'i32.trunc_f32_u'
-              : conversionTarget.signedness === 'Signed'
-                ? 'i32.trunc_f64_s'
-                : 'i32.trunc_f64_u'
+        const mnemonic = floatToIntegerMnemonic(
+          bits,
+          source.spelling,
+          conversionTarget.signedness === 'Signed',
+        )
         return [
           Instr.localGet(left),
           Instr.op(mnemonic),
@@ -5895,22 +6016,11 @@ const emitApplyCallableOperation = (
     const floatTarget = Scalar.floatConversionTarget(target.operation)
     if (floatTarget !== undefined && scalarActor?.category === 'Integer') {
       const bits = Scalar.bits(scalarActor, plan.target.pointerSize === 4 ? 32 : 64)
-      const mnemonic: Instr.PlainMnemonic =
-        floatTarget.spelling === 'f32'
-          ? bits === 64
-            ? scalarActor.signedness === 'Signed'
-              ? 'f32.convert_i64_s'
-              : 'f32.convert_i64_u'
-            : scalarActor.signedness === 'Signed'
-              ? 'f32.convert_i32_s'
-              : 'f32.convert_i32_u'
-          : bits === 64
-            ? scalarActor.signedness === 'Signed'
-              ? 'f64.convert_i64_s'
-              : 'f64.convert_i64_u'
-            : scalarActor.signedness === 'Signed'
-              ? 'f64.convert_i32_s'
-              : 'f64.convert_i32_u'
+      const mnemonic = integerToFloatMnemonic(
+        floatTarget.spelling,
+        bits,
+        scalarActor.signedness === 'Signed',
+      )
       return [
         Instr.localGet(left),
         Instr.op(mnemonic),
@@ -5918,12 +6028,10 @@ const emitApplyCallableOperation = (
       ]
     }
     if (floatTarget !== undefined && scalarActor?.category === 'Floating') {
-      const instruction: Instr.PlainMnemonic | undefined =
-        scalarActor.spelling === floatTarget.spelling
-          ? undefined
-          : scalarActor.spelling === 'f64'
-            ? 'f32.demote_f64'
-            : 'f64.promote_f32'
+      let instruction: Instr.PlainMnemonic | undefined
+      if (scalarActor.spelling !== floatTarget.spelling) {
+        instruction = scalarActor.spelling === 'f64' ? 'f32.demote_f64' : 'f64.promote_f32'
+      }
       return [
         Instr.localGet(left),
         ...(instruction === undefined ? [] : [Instr.op(instruction)]),
@@ -6031,28 +6139,7 @@ const emitApplyCallableOperation = (
     }
     if (scalarActor?.category === 'Floating') {
       const prefix = scalarActor.spelling
-      const mnemonic: Instr.PlainMnemonic | undefined =
-        target.operation === 'Add'
-          ? `${prefix}.add`
-          : target.operation === 'Subtract'
-            ? `${prefix}.sub`
-            : target.operation === 'Multiply'
-              ? `${prefix}.mul`
-              : target.operation === 'Divide'
-                ? `${prefix}.div`
-                : target.operation === 'Equals'
-                  ? `${prefix}.eq`
-                  : target.operation === 'NotEquals'
-                    ? `${prefix}.ne`
-                    : target.operation === 'LessThan'
-                      ? `${prefix}.lt`
-                      : target.operation === 'LessOrEqual'
-                        ? `${prefix}.le`
-                        : target.operation === 'GreaterThan'
-                          ? `${prefix}.gt`
-                          : target.operation === 'GreaterOrEqual'
-                            ? `${prefix}.ge`
-                            : undefined
+      const mnemonic = floatBuiltinMnemonic(target.operation, prefix)
       if (mnemonic !== undefined)
         return [
           Instr.localGet(left),
@@ -6091,6 +6178,7 @@ const emitApplyCallableOperation = (
     ]
   }
   const diverges = sourceType?._tag === 'CallableValue' && SilkType.isNever(sourceType.type.result)
+  const callableSource = operation.callable === undefined ? [] : [operation.callable]
   return [
     ...(
       explicitArguments ??
@@ -6103,7 +6191,7 @@ const emitApplyCallableOperation = (
       : [
           ...[...slots(operation.destination)].reverse().map((slot) => Instr.localSet(slot)),
           ...reloadReachableRoots([
-            ...(operation.callable === undefined ? [] : [operation.callable]),
+            ...callableSource,
             ...operation.captures.map((capture) => capture.source),
             ...operation.arguments,
           ]),
@@ -6167,42 +6255,12 @@ const emitConvertScalarOperation = (
   }
   if (source.category === 'Integer' && target.category === 'Floating') {
     const bits = Scalar.bits(source, plan.target.pointerSize === 4 ? 32 : 64)
-    const mnemonic: Instr.PlainMnemonic =
-      target.spelling === 'f32'
-        ? bits === 64
-          ? source.signedness === 'Signed'
-            ? 'f32.convert_i64_s'
-            : 'f32.convert_i64_u'
-          : source.signedness === 'Signed'
-            ? 'f32.convert_i32_s'
-            : 'f32.convert_i32_u'
-        : bits === 64
-          ? source.signedness === 'Signed'
-            ? 'f64.convert_i64_s'
-            : 'f64.convert_i64_u'
-          : source.signedness === 'Signed'
-            ? 'f64.convert_i32_s'
-            : 'f64.convert_i32_u'
+    const mnemonic = integerToFloatMnemonic(target.spelling, bits, source.signedness === 'Signed')
     return [Instr.localGet(sourceSlot), Instr.op(mnemonic), Instr.localSet(targetSlot)]
   }
   if (source.category === 'Floating' && target.category === 'Integer') {
     const bits = Scalar.bits(target, plan.target.pointerSize === 4 ? 32 : 64)
-    const mnemonic: Instr.PlainMnemonic =
-      bits === 64
-        ? source.spelling === 'f32'
-          ? target.signedness === 'Signed'
-            ? 'i64.trunc_f32_s'
-            : 'i64.trunc_f32_u'
-          : target.signedness === 'Signed'
-            ? 'i64.trunc_f64_s'
-            : 'i64.trunc_f64_u'
-        : source.spelling === 'f32'
-          ? target.signedness === 'Signed'
-            ? 'i32.trunc_f32_s'
-            : 'i32.trunc_f32_u'
-          : target.signedness === 'Signed'
-            ? 'i32.trunc_f64_s'
-            : 'i32.trunc_f64_u'
+    const mnemonic = floatToIntegerMnemonic(bits, source.spelling, target.signedness === 'Signed')
     return [
       Instr.localGet(sourceSlot),
       Instr.op(mnemonic),
@@ -6223,18 +6281,8 @@ const emitReinterpretScalarOperation = (
   const target = Scalar.find(operation.type._tag)
   if (source === undefined || target === undefined)
     throw new RangeError('Wasm reinterpretation lost its types')
-  const mnemonic: Instr.PlainMnemonic =
-    source.spelling === 'f32' && target.spelling === 'u32'
-      ? 'i32.reinterpret_f32'
-      : source.spelling === 'f64' && target.spelling === 'u64'
-        ? 'i64.reinterpret_f64'
-        : source.spelling === 'u32' && target.spelling === 'f32'
-          ? 'f32.reinterpret_i32'
-          : source.spelling === 'u64' && target.spelling === 'f64'
-            ? 'f64.reinterpret_i64'
-            : (() => {
-                throw new RangeError('Wasm reinterpretation widths do not match')
-              })()
+  const mnemonic = reinterpretMnemonic(source, target)
+  if (mnemonic === undefined) throw new RangeError('Wasm reinterpretation widths do not match')
   return [
     Instr.localGet(scalar(operation.source)),
     Instr.op(mnemonic),
@@ -6388,22 +6436,26 @@ const emitFloatTranscendentalOperation = (
     Instr.op(`${prefix}.add`),
   ]
   const quadrantCase = (quadrant: number): ReadonlyArray<Instr.Instr> => {
-    const sineResult =
-      quadrant === 0
-        ? [Instr.localGet(scratchA)]
-        : quadrant === 1
-          ? [Instr.localGet(scratchB)]
-          : quadrant === 2
-            ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
-            : [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
-    const cosineResult =
-      quadrant === 0
-        ? [Instr.localGet(scratchB)]
-        : quadrant === 1
-          ? [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
-          : quadrant === 2
-            ? [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
-            : [Instr.localGet(scratchA)]
+    let sineResult: ReadonlyArray<Instr.Instr>
+    let cosineResult: ReadonlyArray<Instr.Instr>
+    switch (quadrant) {
+      case 0:
+        sineResult = [Instr.localGet(scratchA)]
+        cosineResult = [Instr.localGet(scratchB)]
+        break
+      case 1:
+        sineResult = [Instr.localGet(scratchB)]
+        cosineResult = [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+        break
+      case 2:
+        sineResult = [Instr.localGet(scratchA), Instr.op(`${prefix}.neg`)]
+        cosineResult = [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+        break
+      default:
+        sineResult = [Instr.localGet(scratchB), Instr.op(`${prefix}.neg`)]
+        cosineResult = [Instr.localGet(scratchA)]
+        break
+    }
     return operation.operation === 'Sin' ? sineResult : cosineResult
   }
   const selectQuadrant = (quadrant = 0): ReadonlyArray<Instr.Instr> =>
@@ -6592,12 +6644,13 @@ const emitCheckedScalarOperation = (
       )
       if (targetRange.minimum > sourceRange.minimum) invalid.push(Instr.op('i32.or'))
     }
-    const conversion: ReadonlyArray<Instr.Instr> =
-      sourceBits < 64 && targetBits === 64
-        ? [Instr.op(`i64.extend_i32_${source.signedness === 'Signed' ? 's' : 'u'}`)]
-        : sourceBits === 64 && targetBits < 64
-          ? [Instr.op('i32.wrap_i64')]
-          : []
+    let conversion: ReadonlyArray<Instr.Instr> = []
+    if (sourceBits < 64 && targetBits === 64) {
+      const signedness = source.signedness === 'Signed' ? 's' : 'u'
+      conversion = [Instr.op(`i64.extend_i32_${signedness}`)]
+    } else if (sourceBits === 64 && targetBits < 64) {
+      conversion = [Instr.op('i32.wrap_i64')]
+    }
     return [
       ...(invalid.length === 0 ? [Instr.i32Const(0)] : invalid),
       Instr.localSet(tag),
@@ -6615,12 +6668,20 @@ const emitCheckedScalarOperation = (
     operation.operation === 'CheckedSubtract' ||
     operation.operation === 'CheckedMultiply'
   ) {
-    const shape: OverflowShape =
-      operation.operation === 'CheckedAdd'
-        ? 'Add'
-        : operation.operation === 'CheckedSubtract'
-          ? 'Subtract'
-          : 'Multiply'
+    let shape: OverflowShape
+    switch (operation.operation) {
+      case 'CheckedAdd':
+        shape = 'Add'
+        break
+      case 'CheckedSubtract':
+        shape = 'Subtract'
+        break
+      case 'CheckedMultiply':
+        shape = 'Multiply'
+        break
+      default:
+        throw new RangeError('Wasm checked arithmetic lost its operation')
+    }
     const resultScratch = targetBits === 64 ? layout.scratch64 : layout.scratch
     return [
       ...checkedArithmeticOutcome(shape, target, leftSlot, rightSlot, resultScratch, pointerBits),
@@ -6644,10 +6705,11 @@ const emitCheckedScalarOperation = (
           Instr.op('i32.and'),
         ]
       : [Instr.i32Const(0)]
+  const signedness = target.signedness === 'Signed' ? 's' : 'u'
   const division: Instr.PlainMnemonic =
     operation.operation === 'CheckedDivide'
-      ? `${targetPrefix}.div_${target.signedness === 'Signed' ? 's' : 'u'}`
-      : `${targetPrefix}.rem_${target.signedness === 'Signed' ? 's' : 'u'}`
+      ? `${targetPrefix}.div_${signedness}`
+      : `${targetPrefix}.rem_${signedness}`
   return [
     Instr.localGet(rightSlot),
     Instr.op(`${targetPrefix}.eqz`),
@@ -6708,20 +6770,7 @@ const emitBinaryOperation = (
         Instr.localSet(scalar(operation.destination)),
       ]
     }
-    const comparison: Instr.PlainMnemonic | undefined =
-      operation.operator === 'Equals'
-        ? `${prefix}.eq`
-        : operation.operator === 'NotEquals'
-          ? `${prefix}.ne`
-          : operation.operator === 'LessThan'
-            ? `${prefix}.lt`
-            : operation.operator === 'LessOrEqual'
-              ? `${prefix}.le`
-              : operation.operator === 'GreaterThan'
-                ? `${prefix}.gt`
-                : operation.operator === 'GreaterOrEqual'
-                  ? `${prefix}.ge`
-                  : undefined
+    const comparison = scalarComparisonMnemonic(operation.operator, prefix)
     if (comparison !== undefined)
       return [
         Instr.localGet(scalar(operation.left)),
@@ -6729,16 +6778,7 @@ const emitBinaryOperation = (
         Instr.op(comparison),
         Instr.localSet(scalar(operation.destination)),
       ]
-    const arithmetic: Instr.PlainMnemonic | undefined =
-      operation.operator === 'Add'
-        ? `${prefix}.add`
-        : operation.operator === 'Subtract'
-          ? `${prefix}.sub`
-          : operation.operator === 'Multiply'
-            ? `${prefix}.mul`
-            : operation.operator === 'Divide'
-              ? `${prefix}.div`
-              : undefined
+    const arithmetic = floatArithmeticMnemonic(operation.operator, prefix)
     if (arithmetic !== undefined)
       return [
         Instr.localGet(scalar(operation.left)),
@@ -6774,20 +6814,7 @@ const emitBinaryOperation = (
   // A Unicode scalar value occupies one 32-bit lane and orders by that value, so its
   // comparisons are the unsigned 32-bit comparisons and it declares nothing else.
   if (scalarType?.category === 'Character') {
-    const comparison: Instr.PlainMnemonic | undefined =
-      operation.operator === 'Equals'
-        ? 'i32.eq'
-        : operation.operator === 'NotEquals'
-          ? 'i32.ne'
-          : operation.operator === 'LessThan'
-            ? 'i32.lt_u'
-            : operation.operator === 'LessOrEqual'
-              ? 'i32.le_u'
-              : operation.operator === 'GreaterThan'
-                ? 'i32.gt_u'
-                : operation.operator === 'GreaterOrEqual'
-                  ? 'i32.ge_u'
-                  : undefined
+    const comparison = scalarComparisonMnemonic(operation.operator, 'i32', true)
     if (comparison === undefined)
       throw new RangeError(`Wasm char operation ${operation.operator} is unavailable`)
     return [
@@ -7267,13 +7294,7 @@ const emitBody = (
     ...base,
     Instr.localGet(slot),
     Instr.memoryAccess(
-      type === i64
-        ? 'i64.store'
-        : type === f32
-          ? 'f32.store'
-          : type === f64
-            ? 'f64.store'
-            : 'i32.store',
+      storeMnemonic(type),
       suspensionRuntime?.memory ??
         (() => {
           throw new RangeError('Wasm suspension storage lost its memory')
@@ -7284,142 +7305,128 @@ const emitBody = (
   const suspensionRegions = new Map(
     (fn.suspension?.regions ?? []).map((region) => [region.operation, region] as const),
   )
-  const suspensionContext: WasmSuspensionFunctionContext | undefined =
-    suspensionRuntime === undefined || suspensionRegions.size === 0
-      ? undefined
-      : Object.freeze({
-          regions: suspensionRegions,
-          originate: (
-            region: Extract<Mir.SuspensionRegion, { readonly _tag: 'SuspendEffectRegion' }>,
-          ) => {
-            const child = suspensionRuntime.origins.get(Backend.suspensionPointKey(region.point))
-            if (child === undefined) throw new RangeError('Wasm suspension origin lost child id')
-            const inputs = suspensionOperationInputs(region.operation)
-            const lanes = inputs.flatMap((local) => layout.lanes.at(local.ordinal) ?? [])
-            const values = inputs.flatMap((local) => layout.slots.at(local.ordinal) ?? [])
-            const packed = packWasmLanes(lanes, plan, suspensionRuntime.transferHeaderSize)
-            if (packed.lanes.length !== values.length)
-              throw new RangeError('Wasm suspension origin argument lanes disagree')
-            return [
-              ...storeI32(suspensionRuntime.transferAddress, child),
-              ...storeI32(suspensionRuntime.transferAddress + plan.target.pointerSize * 2, 0),
-              ...packed.lanes.flatMap((lane, ordinal) => {
-                const value = values.at(ordinal)
-                if (value === undefined) return []
-                return storeLocalLane(
-                  [Instr.i32Const(suspensionRuntime.transferAddress)],
-                  lane.offset,
-                  value,
-                  lane.type,
-                )
-              }),
-              Instr.i32Const(1),
-              Instr.globalSet(suspensionRuntime.status),
-              ...returnTransfer(),
-            ]
-          },
-          relay: (
-            region: Extract<Mir.SuspensionRegion, { readonly _tag: 'RunSuspendableEffectRegion' }>,
-          ) => {
-            const descriptor = region.relay.state
-            const transfer = [
-              Instr.globalGet(suspensionRuntime.status),
-              Instr.ifElse(Instr.emptyBlockType, returnTransfer(), []),
-            ]
-            if (descriptor === undefined) return transfer
-            const targetLayout = suspensionRuntime.layouts.get(
-              Backend.suspensionPointKey(descriptor.point),
+  let suspensionContext: WasmSuspensionFunctionContext | undefined
+  if (suspensionRuntime !== undefined && suspensionRegions.size > 0) {
+    suspensionContext = Object.freeze({
+      regions: suspensionRegions,
+      originate: (
+        region: Extract<Mir.SuspensionRegion, { readonly _tag: 'SuspendEffectRegion' }>,
+      ) => {
+        const child = suspensionRuntime.origins.get(Backend.suspensionPointKey(region.point))
+        if (child === undefined) throw new RangeError('Wasm suspension origin lost child id')
+        const inputs = suspensionOperationInputs(region.operation)
+        const lanes = inputs.flatMap((local) => layout.lanes.at(local.ordinal) ?? [])
+        const values = inputs.flatMap((local) => layout.slots.at(local.ordinal) ?? [])
+        const packed = packWasmLanes(lanes, plan, suspensionRuntime.transferHeaderSize)
+        if (packed.lanes.length !== values.length)
+          throw new RangeError('Wasm suspension origin argument lanes disagree')
+        return [
+          ...storeI32(suspensionRuntime.transferAddress, child),
+          ...storeI32(suspensionRuntime.transferAddress + plan.target.pointerSize * 2, 0),
+          ...packed.lanes.flatMap((lane, ordinal) => {
+            const value = values.at(ordinal)
+            if (value === undefined) return []
+            return storeLocalLane(
+              [Instr.i32Const(suspensionRuntime.transferAddress)],
+              lane.offset,
+              value,
+              lane.type,
             )
-            const resume = suspensionRuntime.resumes.get(
-              Backend.suspensionPointKey(descriptor.point),
-            )
-            const scratch = layout.suspensionScratch
-            if (targetLayout === undefined || resume === undefined || scratch === undefined)
-              throw new RangeError('Wasm stateful relay lost its layout or dispatch identity')
-            const { frame, append, next } = scratch
-            if (memory === undefined)
-              throw new RangeError('Wasm coroutine-frame stack lost its memory context')
-            const ownerFrame = coroutineFrame
-            if (ownerFrame === undefined)
-              throw new RangeError('Wasm coroutine-frame stack lost its invocation layout')
-            const initialize = [
-              Instr.localGet(frame),
-              Instr.op('i32.eqz'),
-              Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-              Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
+          }),
+          Instr.i32Const(1),
+          Instr.globalSet(suspensionRuntime.status),
+          ...returnTransfer(),
+        ]
+      },
+      relay: (
+        region: Extract<Mir.SuspensionRegion, { readonly _tag: 'RunSuspendableEffectRegion' }>,
+      ) => {
+        const descriptor = region.relay.state
+        const transfer = [
+          Instr.globalGet(suspensionRuntime.status),
+          Instr.ifElse(Instr.emptyBlockType, returnTransfer(), []),
+        ]
+        if (descriptor === undefined) return transfer
+        const targetLayout = suspensionRuntime.layouts.get(
+          Backend.suspensionPointKey(descriptor.point),
+        )
+        const resume = suspensionRuntime.resumes.get(Backend.suspensionPointKey(descriptor.point))
+        const scratch = layout.suspensionScratch
+        if (targetLayout === undefined || resume === undefined || scratch === undefined)
+          throw new RangeError('Wasm stateful relay lost its layout or dispatch identity')
+        const { frame, append, next } = scratch
+        if (memory === undefined)
+          throw new RangeError('Wasm coroutine-frame stack lost its memory context')
+        const ownerFrame = coroutineFrame
+        if (ownerFrame === undefined)
+          throw new RangeError('Wasm coroutine-frame stack lost its invocation layout')
+        const initialize = [
+          Instr.localGet(frame),
+          Instr.op('i32.eqz'),
+          Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+          Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
+          Instr.memoryAccess('i32.load', suspensionRuntime.memory),
+          Instr.localSet(append),
+          Instr.localGet(append),
+          Instr.ifElse(
+            Instr.valueBlockType(i32),
+            [Instr.localGet(append), Instr.memoryAccess('i32.load', suspensionRuntime.frameMemory)],
+            [
+              Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
               Instr.memoryAccess('i32.load', suspensionRuntime.memory),
-              Instr.localSet(append),
+            ],
+          ),
+          Instr.localSet(next),
+          Instr.localGet(frame),
+          Instr.localGet(next),
+          Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
+          Instr.localGet(frame),
+          Instr.i32Const(resume),
+          Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory, {
+            offset: plan.target.pointerSize,
+          }),
+          ...targetLayout.payload.flatMap((field) => {
+            const fieldLanes = layout.lanes.at(field.local.ordinal) ?? []
+            const fieldSlots = layout.slots.at(field.local.ordinal) ?? []
+            const packed = packWasmLanes(fieldLanes, plan, field.offset)
+            return packed.lanes.flatMap((lane, ordinal) => {
+              const value = fieldSlots.at(ordinal)
+              if (value === undefined) return []
+              return [
+                Instr.localGet(frame),
+                Instr.localGet(value),
+                Instr.memoryAccess(storeMnemonic(lane.type), suspensionRuntime.frameMemory, {
+                  offset: lane.offset,
+                }),
+              ]
+            })
+          }),
+          Instr.localGet(append),
+          Instr.ifElse(
+            Instr.emptyBlockType,
+            [
               Instr.localGet(append),
-              Instr.ifElse(
-                Instr.valueBlockType(i32),
-                [
-                  Instr.localGet(append),
-                  Instr.memoryAccess('i32.load', suspensionRuntime.frameMemory),
-                ],
-                [
-                  Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
-                  Instr.memoryAccess('i32.load', suspensionRuntime.memory),
-                ],
-              ),
-              Instr.localSet(next),
               Instr.localGet(frame),
-              Instr.localGet(next),
               Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
-              Instr.localGet(frame),
-              Instr.i32Const(resume),
-              Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory, {
-                offset: plan.target.pointerSize,
-              }),
-              ...targetLayout.payload.flatMap((field) => {
-                const fieldLanes = layout.lanes.at(field.local.ordinal) ?? []
-                const fieldSlots = layout.slots.at(field.local.ordinal) ?? []
-                const packed = packWasmLanes(fieldLanes, plan, field.offset)
-                return packed.lanes.flatMap((lane, ordinal) => {
-                  const value = fieldSlots.at(ordinal)
-                  return value === undefined
-                    ? []
-                    : [
-                        Instr.localGet(frame),
-                        Instr.localGet(value),
-                        Instr.memoryAccess(
-                          lane.type === i64
-                            ? 'i64.store'
-                            : lane.type === f32
-                              ? 'f32.store'
-                              : lane.type === f64
-                                ? 'f64.store'
-                                : 'i32.store',
-                          suspensionRuntime.frameMemory,
-                          { offset: lane.offset },
-                        ),
-                      ]
-                })
-              }),
-              Instr.localGet(append),
-              Instr.ifElse(
-                Instr.emptyBlockType,
-                [
-                  Instr.localGet(append),
-                  Instr.localGet(frame),
-                  Instr.memoryAccess('i32.store', suspensionRuntime.frameMemory),
-                ],
-                [
-                  Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
-                  Instr.localGet(frame),
-                  Instr.memoryAccess('i32.store', suspensionRuntime.memory),
-                ],
-              ),
-              Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
+            ],
+            [
+              Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize),
               Instr.localGet(frame),
               Instr.memoryAccess('i32.store', suspensionRuntime.memory),
-              ...returnTransfer(),
-            ]
-            return [
-              Instr.globalGet(suspensionRuntime.status),
-              Instr.ifElse(Instr.emptyBlockType, initialize, []),
-            ]
-          },
-        })
+            ],
+          ),
+          Instr.i32Const(suspensionRuntime.transferAddress + plan.target.pointerSize * 2),
+          Instr.localGet(frame),
+          Instr.memoryAccess('i32.store', suspensionRuntime.memory),
+          ...returnTransfer(),
+        ]
+        return [
+          Instr.globalGet(suspensionRuntime.status),
+          Instr.ifElse(Instr.emptyBlockType, initialize, []),
+        ]
+      },
+    })
+  }
 
   const emitOutcome = (
     outcome: Mir.Outcome,
@@ -7691,6 +7698,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   // name the module, its functions, and their locals; release builds omit every name, which is
   // what the LLVM backend's `strip` flag does with its own metadata.
   const debug = request.mode === 'debug'
+  const debugName = (name: string): { readonly name?: string } => (debug ? { name } : {})
   const builder = yield* Builder.make(debug ? { moduleName: program.module } : {})
   const runtimeFeatures = new Set<Backend.RuntimeFeature>()
   const executionPackageCleanups = new Map<string, WasmEmitContext.ExecutionPackageCleanup>()
@@ -7810,12 +7818,9 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     suspensionEnabled ||
     needsHostWrite ||
     [...frames.values()].some((frame) => frame.roots.size > 0)
+  const initialMemoryPages = needsHeap ? 2 : 1
   const privateMemory = needsMemory
-    ? yield* Memory.make(
-        builder,
-        { min: needsHeap ? 2 : 1, max: 65536 },
-        debug ? { name: 'silk_memory' } : {},
-      )
+    ? yield* Memory.make(builder, { min: initialMemoryPages, max: 65536 }, debugName('silk_memory'))
     : undefined
   const privateExecutionStackPages = request.privateExecutionStackPages ?? 65536
   if (
@@ -7839,7 +7844,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     ? yield* Memory.make(
         builder,
         { min: 1, max: privateExecutionStackPages },
-        debug ? { name: 'silk_coroutine_frame_memory' } : {},
+        debugName('silk_coroutine_frame_memory'),
       )
     : undefined
   // Every function is exported so the artifact is directly instantiable for inspection; the
@@ -7854,7 +7859,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(staticEnd)],
-        debug ? { name: 'silk_stack_pointer' } : {},
+        debugName('silk_stack_pointer'),
       )
     : undefined
   if (privateMemory !== undefined) {
@@ -7867,7 +7872,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           privateMemory,
           [Instr.i32Const(offset)],
           Uint8Array.from(data.bytes),
-          debug ? { name: `${data.kind === 'Text' ? 'string_utf8' : 'bytes'}_${offset}` } : {},
+          debugName(`${data.kind === 'Text' ? 'string_utf8' : 'bytes'}_${offset}`),
         )
     }
   }
@@ -7878,17 +7883,11 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(heapBase)],
-        debug ? { name: 'silk_heap_pointer' } : {},
+        debugName('silk_heap_pointer'),
       )
     : undefined
   const suspendStatus = suspensionEnabled
-    ? yield* Global.make(
-        builder,
-        i32,
-        true,
-        [Instr.i32Const(0)],
-        debug ? { name: 'silk_suspend_status' } : {},
-      )
+    ? yield* Global.make(builder, i32, true, [Instr.i32Const(0)], debugName('silk_suspend_status'))
     : undefined
   const suspendResumePath = suspensionEnabled
     ? yield* Global.make(
@@ -7896,7 +7895,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(0)],
-        debug ? { name: 'silk_suspend_resume_path' } : {},
+        debugName('silk_suspend_resume_path'),
       )
     : undefined
   const suspendResumeFrame = suspensionEnabled
@@ -7905,7 +7904,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(0)],
-        debug ? { name: 'silk_suspend_resume_frame' } : {},
+        debugName('silk_suspend_resume_frame'),
       )
     : undefined
   const suspendFrameStackPointer = suspensionEnabled
@@ -7914,7 +7913,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(16)],
-        debug ? { name: 'silk_coroutine_frame_stack_pointer' } : {},
+        debugName('silk_coroutine_frame_stack_pointer'),
       )
     : undefined
   const suspendFreeFrameHead = suspensionEnabled
@@ -7923,7 +7922,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(0)],
-        debug ? { name: 'silk_coroutine_frame_free_head' } : {},
+        debugName('silk_coroutine_frame_free_head'),
       )
     : undefined
   const activeExecution = suspensionEnabled
@@ -7932,7 +7931,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(0)],
-        debug ? { name: 'silk_active_execution' } : {},
+        debugName('silk_active_execution'),
       )
     : undefined
   const externalResumeHead = suspensionEnabled
@@ -7941,7 +7940,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         i32,
         true,
         [Instr.i32Const(0)],
-        debug ? { name: 'silk_external_resume_head' } : {},
+        debugName('silk_external_resume_head'),
       )
     : undefined
   const heapAllocate =
@@ -7949,7 +7948,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       ? yield* FuncActor.declare(
           builder,
           yield* WasmType.func(builder, [i32, i32], [i32]),
-          debug ? { name: 'silk_heap_allocate' } : {},
+          debugName('silk_heap_allocate'),
         )
       : undefined
   const heapRelease =
@@ -7957,7 +7956,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       ? yield* FuncActor.declare(
           builder,
           yield* WasmType.func(builder, [i32], []),
-          debug ? { name: 'silk_heap_release' } : {},
+          debugName('silk_heap_release'),
         )
       : undefined
   const standardWrite = needsHostWrite
@@ -7966,7 +7965,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         StandardStreams.wasmModule,
         StandardStreams.wasmWriteAll,
         yield* WasmType.func(builder, [i32, i32, i32], [i32]),
-        debug ? { name: 'silk_standard_stream_write_v1' } : {},
+        debugName('silk_standard_stream_write_v1'),
       )
     : undefined
   if (heapAllocate !== undefined && privateMemory !== undefined && heapPointer !== undefined) {
@@ -8263,42 +8262,44 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
     const frame = frames.get(entry.fn)
     if (frame === undefined) throw new RangeError('Wasm declaration lost its frame plan')
     const layout = layoutOf(entry.fn, program.layout, frame, debug, entry.suspendable)
-    const memory: MemoryContext | undefined =
-      privateMemory === undefined || stackPointer === undefined || heapPointer === undefined
-        ? undefined
-        : Object.freeze({
-            memory: privateMemory,
-            stackPointer,
-            stackBase: staticEnd,
-            // Only a module with a heap has something above the shadow stack to run into.
-            stackLimit: needsHeap ? stackLimit : undefined,
-            heapPointer,
-            frame,
-            plan: program.layout,
-            staticOffsets,
-            ...(standardWrite === undefined ? {} : { standardWrite }),
-            ...(heapAllocate === undefined ? {} : { heapAllocate }),
-            ...(heapRelease === undefined ? {} : { heapRelease }),
-          })
+    let memory: MemoryContext | undefined
+    if (privateMemory !== undefined && stackPointer !== undefined && heapPointer !== undefined) {
+      memory = Object.freeze({
+        memory: privateMemory,
+        stackPointer,
+        stackBase: staticEnd,
+        // Only a module with a heap has something above the shadow stack to run into.
+        stackLimit: needsHeap ? stackLimit : undefined,
+        heapPointer,
+        frame,
+        plan: program.layout,
+        staticOffsets,
+        ...(standardWrite === undefined ? {} : { standardWrite }),
+        ...(heapAllocate === undefined ? {} : { heapAllocate }),
+        ...(heapRelease === undefined ? {} : { heapRelease }),
+      })
+    }
     // A body-less function is a declaration the frontend could not resolve; the LLVM backend
     // leaves it undefined, but wasm rejects an undefined function at emission, so it becomes a
     // trapping stub with the same observable behaviour.
-    const body =
-      entry.fn.regions.length === 0
-        ? [Instr.op('unreachable')]
-        : emitBody(
-            Object.freeze({
-              runtimeFeatures,
-              fn: entry.fn,
-              layout,
-              plan: program.layout,
-              resolve,
-              resolveIndependent,
-              memory,
-              executionPackageCleanups,
-              ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
-            }),
-          )
+    let body: ReadonlyArray<Instr.Instr>
+    if (entry.fn.regions.length === 0) {
+      body = [Instr.op('unreachable')]
+    } else {
+      body = emitBody(
+        Object.freeze({
+          runtimeFeatures,
+          fn: entry.fn,
+          layout,
+          plan: program.layout,
+          resolve,
+          resolveIndependent,
+          memory,
+          executionPackageCleanups,
+          ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
+        }),
+      )
+    }
     // Body validation happens here, inside the wasm builder, and its failure names only the
     // operation. Naming the function turns "expected i64, found i32" into a report that points
     // at the one body that produced it.
@@ -8755,27 +8756,42 @@ const controlProvenance = (program: Mir.Module): ReadonlyArray<Backend.ControlPr
                 })
               : Object.freeze([])
           const outcome = region.outcome
-          const loop =
-            outcome._tag === 'Repeat' || outcome._tag === 'Exit'
-              ? loops.get(outcome.loop.ordinal)
-              : outcome._tag === 'Yield'
-                ? conditions.get(region.id.ordinal)
-                : undefined
-          const construct =
-            outcome._tag === 'Repeat' || outcome._tag === 'Exit' || outcome._tag === 'Yield'
-              ? 'WasmBr'
-              : outcome._tag === 'Return'
-                ? 'WasmReturn'
-                : outcome._tag === 'Trap'
-                  ? 'WasmTrap'
-                  : undefined
+          let loop: ReturnType<typeof loops.get>
+          let construct: 'WasmBr' | 'WasmReturn' | 'WasmTrap' | undefined
+          switch (outcome._tag) {
+            case 'Repeat':
+            case 'Exit':
+              loop = loops.get(outcome.loop.ordinal)
+              construct = 'WasmBr'
+              break
+            case 'Yield':
+              loop = conditions.get(region.id.ordinal)
+              construct = 'WasmBr'
+              break
+            case 'Return':
+              construct = 'WasmReturn'
+              break
+            case 'Trap':
+              construct = 'WasmTrap'
+              break
+            default:
+              construct = undefined
+              break
+          }
           if (construct === undefined) return earlyReturns
-          const target =
-            outcome._tag === 'Repeat'
-              ? loop?.id
-              : outcome._tag === 'Exit' || outcome._tag === 'Yield'
-                ? loop?.following
-                : undefined
+          let target: Mir.RegionId | undefined
+          switch (outcome._tag) {
+            case 'Repeat':
+              target = loop?.id
+              break
+            case 'Exit':
+            case 'Yield':
+              target = loop?.following
+              break
+            default:
+              target = undefined
+              break
+          }
           return [
             ...earlyReturns,
             Object.freeze({

@@ -166,24 +166,28 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (source === undefined || source.category === 'Boolean')
             throw new RangeError('LLVM callable float conversion lost its source type')
           const destination = floatTarget.spelling === 'f32' ? f32 : f64
-          const result =
-            source.category === 'Floating'
-              ? source.spelling === floatTarget.spelling
-                ? first
-                : yield* FunctionBody.cast(
-                    body,
-                    source.spelling === 'f64' ? 'fptrunc' : 'fpext',
-                    first,
-                    destination,
-                    `callable_convert${operation.destination.ordinal}`,
-                  )
-              : yield* FunctionBody.cast(
-                  body,
-                  source.signedness === 'Signed' ? 'sitofp' : 'uitofp',
-                  first,
-                  destination,
-                  `callable_convert${operation.destination.ordinal}`,
-                )
+          let result: Value.Input
+          if (source.category === 'Floating') {
+            if (source.spelling === floatTarget.spelling) {
+              result = first
+            } else {
+              result = yield* FunctionBody.cast(
+                body,
+                source.spelling === 'f64' ? 'fptrunc' : 'fpext',
+                first,
+                destination,
+                `callable_convert${operation.destination.ordinal}`,
+              )
+            }
+          } else {
+            result = yield* FunctionBody.cast(
+              body,
+              source.signedness === 'Signed' ? 'sitofp' : 'uitofp',
+              first,
+              destination,
+              `callable_convert${operation.destination.ordinal}`,
+            )
+          }
           nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
           break
         }
@@ -210,14 +214,20 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           const operandType = NativeType.laneType(types, firstLane)
           const zero = yield* Constant.integerSigned(builder, operandType, 0n)
           if (target.operation !== 'Not') {
-            const unaryOperator =
-              target.operation === 'Negate'
-                ? 'Subtract'
-                : target.operation === 'WrappingNegate'
-                  ? 'WrappingSubtract'
-                  : target.operation === 'SaturatingNegate'
-                    ? 'SaturatingSubtract'
-                    : 'BitXor'
+            let unaryOperator: Mir.BinaryOperator
+            if (target.operation === 'Negate') {
+              unaryOperator = 'Subtract'
+            } else {
+              if (target.operation === 'WrappingNegate') {
+                unaryOperator = 'WrappingSubtract'
+              } else {
+                if (target.operation === 'SaturatingNegate') {
+                  unaryOperator = 'SaturatingSubtract'
+                } else {
+                  unaryOperator = 'BitXor'
+                }
+              }
+            }
             const right =
               target.operation === 'BitNot'
                 ? yield* Constant.integerSigned(builder, operandType, -1n)

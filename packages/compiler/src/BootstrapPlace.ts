@@ -169,11 +169,13 @@ export const selectStored = (
 /** Structural selector identity used by checked-place index tables. */
 export const selectorKey = (selectors: ReadonlyArray<Mir.PlaceSelector>): string =>
   selectors
-    .map((selector) =>
-      selector._tag === 'FieldSelector'
-        ? `field:${selector.field.struct.sourceId}:${selector.field.struct.ordinal}:${selector.field.ordinal}`
-        : selector._tag === 'SliceElementSelector'
-          ? `slice:${selector.index.ordinal}`
-          : `array:${selector.index._tag === 'Proven' ? selector.index.value : selector.index.local.ordinal}`,
-    )
+    .map((selector) => {
+      if (selector._tag === 'FieldSelector') {
+        return `field:${selector.field.struct.sourceId}:${selector.field.struct.ordinal}:${selector.field.ordinal}`
+      }
+      if (selector._tag === 'SliceElementSelector') {
+        return `slice:${selector.index.ordinal}`
+      }
+      return `array:${selector.index._tag === 'Proven' ? selector.index.value : selector.index.local.ordinal}`
+    })
     .join('/')

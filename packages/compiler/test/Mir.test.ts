@@ -115,23 +115,23 @@ pub fn main() -> i32 {
 
     const replace = (target: Mir.Operation, replacement: Mir.Operation): Mir.Module => ({
       ...program,
-      functions: program.functions.map((candidate) =>
-        candidate === fn
-          ? {
-              ...candidate,
-              regions: candidate.regions.map((region) =>
-                region._tag === 'OperationRegion' && region.operations.includes(target)
-                  ? {
-                      ...region,
-                      operations: region.operations.map((operation) =>
-                        operation === target ? replacement : operation,
-                      ),
-                    }
-                  : region,
+      functions: program.functions.map((candidate) => {
+        if (candidate !== fn) return candidate
+        return {
+          ...candidate,
+          regions: candidate.regions.map((region) => {
+            if (region._tag !== 'OperationRegion' || !region.operations.includes(target)) {
+              return region
+            }
+            return {
+              ...region,
+              operations: region.operations.map((operation) =>
+                operation === target ? replacement : operation,
               ),
             }
-          : candidate,
-      ),
+          }),
+        }
+      }),
     })
     const ruleSet = (candidate: Mir.Module) =>
       MirVerification.verify(candidate).map((violation) => violation.rule)

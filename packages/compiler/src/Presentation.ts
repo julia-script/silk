@@ -85,10 +85,15 @@ const requirementRow = (fact: DeclarationFacts.RequirementRowFact): string => {
   return row.length === 0 ? '' : ` ? ${row}`
 }
 
-const constraint = (fact: DeclarationFacts.ConstraintFact): string =>
-  fact._tag === 'MembershipConstraint'
-    ? `${rowExpression(fact.selected)} in ${rowExpression(fact.source)}`
-    : `${fact.mode === 'Exclusive' ? '&mut ' : fact.mode === 'Shared' ? '&' : ''}${declaredType(fact.provider)} provides ${rowExpression(fact.selected)} from ${rowExpression(fact.source)}`
+const constraint = (fact: DeclarationFacts.ConstraintFact): string => {
+  if (fact._tag === 'MembershipConstraint') {
+    return `${rowExpression(fact.selected)} in ${rowExpression(fact.source)}`
+  }
+  let prefix = ''
+  if (fact.mode === 'Exclusive') prefix = '&mut '
+  else if (fact.mode === 'Shared') prefix = '&'
+  return `${prefix}${declaredType(fact.provider)} provides ${rowExpression(fact.selected)} from ${rowExpression(fact.source)}`
+}
 
 const constraints = (facts: ReadonlyArray<DeclarationFacts.ConstraintFact>): string =>
   facts.length === 0 ? '' : ` where ${facts.map(constraint).join(', ')}`
@@ -126,9 +131,12 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
 export const enumDeclaration = (self: DeclarationFacts.EnumFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  const representation = self.representation.explicit
-    ? `(${self.representation._tag === 'Available' ? self.representation.scalar.spelling : (self.representation.spelling ?? '_')})`
-    : ''
+  let representation: string
+  if (self.representation.explicit) {
+    representation = `(${self.representation._tag === 'Available' ? self.representation.scalar.spelling : (self.representation.spelling ?? '_')})`
+  } else {
+    representation = ''
+  }
   return Object.freeze({
     _tag: 'EnumPresentation',
     name,
@@ -291,16 +299,17 @@ export const type = (
   if (Type.equals(self, Type.unit)) return '()'
   if (typeof self === 'string') return self
   if (Type.isNominal(self)) {
-    const base =
-      self.module === module || self.module === 'silk/core'
-        ? self.name
-        : (importedMemberSpelling(self, scope) ??
-          (() => {
-            const namespace = namespaceSpelling(self.module, scope)
-            return namespace === undefined
-              ? `${self.module}.${self.name}`
-              : `${namespace}.${self.name}`
-          })())
+    let base: string
+    if (self.module === module || self.module === 'silk/core') {
+      base = self.name
+    } else {
+      const imported = importedMemberSpelling(self, scope)
+      if (imported !== undefined) base = imported
+      else {
+        const namespace = namespaceSpelling(self.module, scope)
+        base = namespace === undefined ? `${self.module}.${self.name}` : `${namespace}.${self.name}`
+      }
+    }
     return self.arguments.length === 0
       ? base
       : `${base}<${self.arguments.map((argument) => genericArgument(argument, module, scope)).join(', ')}>`
@@ -312,7 +321,16 @@ export const type = (
   if (Type.isReference(self))
     return `${self.access === 'Exclusive' ? '&mut ' : '&'}${type(self.target, module, scope)}`
   if (Type.isCallable(self)) {
-    const mode = self.mode === 'Exclusive' ? 'mut ' : self.mode === 'Take' ? 'once ' : ''
+    let mode: string
+    if (self.mode === 'Exclusive') {
+      mode = 'mut '
+    } else {
+      if (self.mode === 'Take') {
+        mode = 'once '
+      } else {
+        mode = ''
+      }
+    }
     return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
@@ -345,34 +363,41 @@ export const genericArgument = (
   self: Type.GenericArgument,
   module: string,
   scope?: NameResolution.ModuleScope,
-): string =>
-  Type.isUnavailableGenericArgument(self)
-    ? Type.encodeGenericArgument(self)
-    : Type.isRepresentationParameterArgument(self)
-      ? self.parameter.name
-      : Type.isOpaqueRepresentationArgument(self)
-        ? Type.encodeGenericArgument(self)
-        : Type.isExactRepresentationArgument(self)
-          ? Type.encodeGenericArgument(self)
-          : Type.isCompositeEffectRepresentationArgument(self)
-            ? Type.encodeGenericArgument(self)
-            : Type.isEffectIdentityArgument(self)
-              ? `effect@${self.identity}`
-              : Type.isCallableIdentityArgument(self)
-                ? `callable@${self.identity}`
-                : Type.isRequirementRowArgument(self)
-                  ? `? ${RowAlgebra.encode(
-                      Type.requirementRowPolicy(),
-                      self.row,
-                      (requirement) =>
-                        Type.encodeRequirement(requirement, (capability) =>
-                          type(capability, module, scope),
-                        ),
-                      (parameter_) => parameter_.name,
-                      (member) =>
-                        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
-                    )}`
-                  : type(self, module, scope)
+): string => {
+  if (Type.isUnavailableGenericArgument(self)) {
+    return Type.encodeGenericArgument(self)
+  }
+  if (Type.isRepresentationParameterArgument(self)) {
+    return self.parameter.name
+  }
+  if (Type.isOpaqueRepresentationArgument(self)) {
+    return Type.encodeGenericArgument(self)
+  }
+  if (Type.isExactRepresentationArgument(self)) {
+    return Type.encodeGenericArgument(self)
+  }
+  if (Type.isCompositeEffectRepresentationArgument(self)) {
+    return Type.encodeGenericArgument(self)
+  }
+  if (Type.isEffectIdentityArgument(self)) {
+    return `effect@${self.identity}`
+  }
+  if (Type.isCallableIdentityArgument(self)) {
+    return `callable@${self.identity}`
+  }
+  if (Type.isRequirementRowArgument(self)) {
+    return `? ${RowAlgebra.encode(
+      Type.requirementRowPolicy(),
+      self.row,
+      (requirement) =>
+        Type.encodeRequirement(requirement, (capability) => type(capability, module, scope)),
+      (parameter_) => parameter_.name,
+      (member) =>
+        `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
+    )}`
+  }
+  return type(self, module, scope)
+}
 
 const scopedNominalBase = (
   self: Type.Nominal,

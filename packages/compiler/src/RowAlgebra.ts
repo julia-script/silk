@@ -74,8 +74,15 @@ export type Concretization<Member> =
   | { readonly _tag: 'Concrete'; readonly row: FiniteRow.FiniteRow<Member> }
   | { readonly _tag: 'Residual'; readonly keys: ReadonlyArray<string> }
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 const canonicalOrigins = (
   origins: Iterable<SourceSpan.SourceSpan>,
@@ -571,14 +578,18 @@ export const encode = <Member, RowParameter, SymbolicMember, MemberParameter>(
       case 'Singleton':
         return symbolicMember(expression.member)
       case 'Union': {
-        const rank = (operand: Expression<Member, RowParameter, SymbolicMember>): number =>
-          operand._tag === 'Concrete'
-            ? 0
-            : operand._tag === 'Singleton'
-              ? 1
-              : operand._tag === 'RowParameter'
-                ? 2
-                : 3
+        const rank = (operand: Expression<Member, RowParameter, SymbolicMember>): number => {
+          if (operand._tag === 'Concrete') {
+            return 0
+          }
+          if (operand._tag === 'Singleton') {
+            return 1
+          }
+          if (operand._tag === 'RowParameter') {
+            return 2
+          }
+          return 3
+        }
         return expression.operands
           .map((operand, ordinal) => ({ operand, ordinal }))
           .sort(

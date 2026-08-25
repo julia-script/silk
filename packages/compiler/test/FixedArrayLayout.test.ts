@@ -38,19 +38,24 @@ pub fn main() -> i32 {
     assert.strictEqual(shape?.laneCount, 4)
     assert.deepEqual(
       shape?.lanes.map((lane) =>
-        lane.path.map((selector) =>
-          selector._tag === 'ElementSelector'
-            ? `element:${selector.index}`
-            : selector._tag === 'FieldId'
-              ? `field:${selector.ordinal}`
-              : selector._tag === 'UnionTagSelector'
-                ? 'union:tag'
-                : selector._tag === 'UnionPayloadSelector'
-                  ? `union:payload:${selector.slot}`
-                  : selector._tag === 'SliceAddressSelector'
-                    ? 'slice:address'
-                    : 'slice:length',
-        ),
+        lane.path.map((selector) => {
+          switch (selector._tag) {
+            case 'ElementSelector':
+              return `element:${selector.index}`
+            case 'FieldId':
+              return `field:${selector.ordinal}`
+            case 'UnionTagSelector':
+              return 'union:tag'
+            case 'UnionPayloadSelector':
+              return `union:payload:${selector.slot}`
+            case 'SliceAddressSelector':
+              return 'slice:address'
+            case 'SliceLengthSelector':
+              return 'slice:length'
+            default:
+              return assert.fail('unexpected layout selector')
+          }
+        }),
       ),
       [
         ['element:0', 'field:0'],

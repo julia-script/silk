@@ -303,29 +303,26 @@ pub fn main() -> i32 { return 40 |> add(2) }`),
     const malformed: Mir.Module = Object.freeze({
       ...stored,
       functions: Object.freeze(
-        stored.functions.map((fn, ordinal) =>
-          ordinal !== 0
-            ? fn
-            : Object.freeze({
-                ...fn,
-                regions: Object.freeze(
-                  fn.regions.map((region) =>
-                    region._tag !== 'OperationRegion'
-                      ? region
-                      : Object.freeze({
-                          ...region,
-                          operations: Object.freeze(
-                            region.operations.map((operation) =>
-                              operation._tag === 'ApplyCallable'
-                                ? Object.freeze({ ...operation, access: 'Take' as const })
-                                : operation,
-                            ),
-                          ),
-                        }),
+        stored.functions.map((fn, ordinal) => {
+          if (ordinal !== 0) return fn
+          return Object.freeze({
+            ...fn,
+            regions: Object.freeze(
+              fn.regions.map((region) => {
+                if (region._tag !== 'OperationRegion') return region
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation): Mir.Operation => {
+                      if (operation._tag !== 'ApplyCallable') return operation
+                      return Object.freeze({ ...operation, access: 'Take' })
+                    }),
                   ),
-                ),
+                })
               }),
-        ),
+            ),
+          })
+        }),
       ),
     })
     assert.include(
@@ -490,9 +487,10 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
     assert.deepEqual(
       builtinFunction === undefined
         ? []
-        : MirVerification.operations(builtinFunction).map((operation) =>
-            operation._tag === 'Binary' ? `Binary:${operation.operator}` : operation._tag,
-          ),
+        : MirVerification.operations(builtinFunction).map((operation) => {
+            if (operation._tag === 'Binary') return `Binary:${operation.operator}`
+            return operation._tag
+          }),
       ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
     )
     const unavailable = Analysis.loweredMir(

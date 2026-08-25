@@ -11,88 +11,121 @@ import type {
 import * as Target from './Target.js'
 import * as Type from './Type.js'
 
-const representationText = (representation: Representation): string =>
-  representation._tag === 'SignedInteger'
-    ? `signed-i${representation.bits}`
-    : representation._tag === 'UnsignedInteger'
-      ? `unsigned-i${representation.bits}`
-      : representation._tag === 'ScalarEnum'
-        ? `scalar-enum ${representation.enum.module}.${representation.enum.name} lane=${representation.scalar} bits=${representation.bits} signedness=${representation.signedness.toLowerCase()} members=${representation.members.map((member) => `${member.member.name}=${member.discriminant}`).join(',')}`
-        : representation._tag === 'Floating'
-          ? `float${representation.bits}`
-          : representation._tag === 'Boolean'
-            ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-            : representation._tag === 'CallableEnvironment'
-              ? `callable-environment target=${
-                  representation.realization.target._tag === 'Declaration'
-                    ? `${representation.realization.target.module}.${representation.realization.target.name}`
-                    : `${representation.realization.target.actor}.${representation.realization.target.operation}`
-                } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
-              : representation._tag === 'StoredEffectEnvironment'
-                ? `stored-effect-environment runner=${representation.realization.runner.module}.${representation.realization.runner.name} identity=${representation.realization.runnerIdentity} access=${representation.realization.access.toLowerCase()} suspendable=${representation.realization.suspendable ? 'yes' : 'no'} tail-padding=${representation.tailPadding}`
-                : representation._tag === 'Repeated'
-                  ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-                  : representation._tag === 'Slice'
-                    ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-                    : representation._tag === 'String'
-                      ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
-                      : representation._tag === 'Reference'
-                        ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-                        : representation._tag === 'Union'
-                          ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                          : `aggregate cleanup-hook=${
-                              representation.cleanupHook === undefined
-                                ? 'none'
-                                : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
-                            } tail-padding=${representation.tailPadding}`
+const representationText = (representation: Representation): string => {
+  switch (representation._tag) {
+    case 'SignedInteger':
+      return `signed-i${representation.bits}`
+    case 'UnsignedInteger':
+      return `unsigned-i${representation.bits}`
+    case 'ScalarEnum':
+      return `scalar-enum ${representation.enum.module}.${representation.enum.name} lane=${representation.scalar} bits=${representation.bits} signedness=${representation.signedness.toLowerCase()} members=${representation.members.map((member) => `${member.member.name}=${member.discriminant}`).join(',')}`
+    case 'Floating':
+      return `float${representation.bits}`
+    case 'Boolean':
+      return `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+    case 'CallableEnvironment': {
+      const target =
+        representation.realization.target._tag === 'Declaration'
+          ? `${representation.realization.target.module}.${representation.realization.target.name}`
+          : `${representation.realization.target.actor}.${representation.realization.target.operation}`
+      const environment =
+        representation.realization.environment === undefined
+          ? 'none'
+          : Type.callableEnvironmentKey(representation.realization.environment)
+      return `callable-environment target=${target} environment=${environment} tail-padding=${representation.tailPadding}`
+    }
+    case 'StoredEffectEnvironment':
+      return `stored-effect-environment runner=${representation.realization.runner.module}.${representation.realization.runner.name} identity=${representation.realization.runnerIdentity} access=${representation.realization.access.toLowerCase()} suspendable=${representation.realization.suspendable ? 'yes' : 'no'} tail-padding=${representation.tailPadding}`
+    case 'Repeated':
+      return `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+    case 'Slice':
+      return `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+    case 'String':
+      return `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
+    case 'Reference':
+      return `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+    case 'Union':
+      return `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+    case 'Aggregate': {
+      const cleanupHook =
+        representation.cleanupHook === undefined
+          ? 'none'
+          : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
+      return `aggregate cleanup-hook=${cleanupHook} tail-padding=${representation.tailPadding}`
+    }
+  }
+}
 
-const entryLines = (candidate: Entry): ReadonlyArray<string> => [
-  `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}${candidate.executable === undefined ? '' : ` executable=${candidate.executable._tag.toLowerCase()}`}`,
-  ...(candidate.executable !== undefined
-    ? candidate.executable.fields.map(
+const entryLines = (candidate: Entry): ReadonlyArray<string> => {
+  const header = `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}${candidate.executable === undefined ? '' : ` executable=${candidate.executable._tag.toLowerCase()}`}`
+  if (candidate.executable !== undefined) {
+    return [
+      header,
+      ...candidate.executable.fields.map(
         (field) =>
           `  ${candidate.executable?._tag.toLowerCase()}-capture ${field.capture}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
-      )
-    : candidate.representation._tag === 'Aggregate'
-      ? candidate.representation.fields.map(
+      ),
+    ]
+  }
+  switch (candidate.representation._tag) {
+    case 'Aggregate':
+      return [
+        header,
+        ...candidate.representation.fields.map(
           (field) =>
             `  field ${field.id.ordinal} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
-        )
-      : candidate.representation._tag === 'CallableEnvironment'
-        ? candidate.representation.fields.map(
-            (field) =>
-              `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
-          )
-        : candidate.representation._tag === 'StoredEffectEnvironment'
-          ? candidate.representation.fields.map(
-              (field) =>
-                `  effect-capture ${field.capture} ${field.source.toLowerCase()}${field.ordinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
-            )
-          : candidate.representation._tag === 'Repeated'
-            ? [
-                `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
-              ]
-            : candidate.representation._tag === 'Slice'
-              ? [
-                  `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-                  `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
-                ]
-              : candidate.representation._tag === 'String'
-                ? [
-                    `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
-                    `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
-                  ]
-                : candidate.representation._tag === 'Reference'
-                  ? [
-                      `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
-                    ]
-                  : candidate.representation._tag === 'Union'
-                    ? candidate.representation.members.map(
-                        (member) =>
-                          `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
-                      )
-                    : []),
-]
+        ),
+      ]
+    case 'CallableEnvironment':
+      return [
+        header,
+        ...candidate.representation.fields.map(
+          (field) =>
+            `  capture ${field.ordinal}->p${field.parameterOrdinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+        ),
+      ]
+    case 'StoredEffectEnvironment':
+      return [
+        header,
+        ...candidate.representation.fields.map(
+          (field) =>
+            `  effect-capture ${field.capture} ${field.source.toLowerCase()}${field.ordinal}: ${Type.encode(field.type)} access=${field.access.toLowerCase()} representation=${field.representation.toLowerCase()} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+        ),
+      ]
+    case 'Repeated':
+      return [
+        header,
+        `  elements ${Type.encode(candidate.representation.element)} count=${candidate.representation.length} stride=${candidate.representation.stride}`,
+      ]
+    case 'Slice':
+      return [
+        header,
+        `  address Address<${Type.encode(candidate.representation.element)}> bits=${candidate.representation.address.bits} offset=${candidate.representation.address.offset} size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+        `  length usize offset=${candidate.representation.length.offset} size=${candidate.representation.length.size} stride=${candidate.representation.stride}`,
+      ]
+    case 'String':
+      return [
+        header,
+        `  storage StringUtf8 bits=${candidate.representation.storage.bits} offset=${candidate.representation.storage.offset} size=${candidate.representation.storage.size} align=${candidate.representation.storage.alignment}`,
+        `  byte-length usize offset=${candidate.representation.byteLength.offset} size=${candidate.representation.byteLength.size}`,
+      ]
+    case 'Reference':
+      return [
+        header,
+        `  address Address<${Type.encode(candidate.representation.target)}> bits=${candidate.representation.address.bits} offset=0 size=${candidate.representation.address.size} align=${candidate.representation.address.alignment}`,
+      ]
+    case 'Union':
+      return [
+        header,
+        ...candidate.representation.members.map(
+          (member) =>
+            `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
+        ),
+      ]
+    default:
+      return [header]
+  }
+}
 
 /** Deterministic textual encoding of a complete runtime layout plan. */
 const callingScalarText = (scalar: CallingScalar): string =>
@@ -128,29 +161,33 @@ export const encode = (self: Plan): string =>
                 .map(
                   (lane) =>
                     `${callingScalarText(lane.type)}[${lane.path
-                      .map((selector) =>
-                        selector._tag === 'ElementSelector'
-                          ? `[${selector.index}]`
-                          : selector._tag === 'CallableCaptureSelector'
-                            ? `capture[${selector.ordinal}]`
-                            : selector._tag === 'EffectCaptureSelector'
-                              ? `effect-capture[${selector.ordinal}]`
-                              : selector._tag === 'UnionTagSelector'
-                                ? 'tag'
-                                : selector._tag === 'UnionPayloadSelector'
-                                  ? `payload[${selector.slot}]`
-                                  : selector._tag === 'SliceAddressSelector'
-                                    ? 'address'
-                                    : selector._tag === 'SliceLengthSelector'
-                                      ? 'length'
-                                      : selector._tag === 'StringStorageSelector'
-                                        ? 'storage'
-                                        : selector._tag === 'StringByteLengthSelector'
-                                          ? 'byte-length'
-                                          : selector._tag === 'ReferenceAddressSelector'
-                                            ? 'address'
-                                            : `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`,
-                      )
+                      .map((selector) => {
+                        switch (selector._tag) {
+                          case 'ElementSelector':
+                            return `[${selector.index}]`
+                          case 'CallableCaptureSelector':
+                            return `capture[${selector.ordinal}]`
+                          case 'EffectCaptureSelector':
+                            return `effect-capture[${selector.ordinal}]`
+                          case 'UnionTagSelector':
+                            return 'tag'
+                          case 'UnionPayloadSelector':
+                            return `payload[${selector.slot}]`
+                          case 'SliceAddressSelector':
+                          case 'ReferenceAddressSelector':
+                            return 'address'
+                          case 'SliceLengthSelector':
+                            return 'length'
+                          case 'StringStorageSelector':
+                            return 'storage'
+                          case 'StringByteLengthSelector':
+                            return 'byte-length'
+                          case 'FieldId':
+                            return `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`
+                          default:
+                            return ''
+                        }
+                      })
                       .join('.')}]`,
                 )
                 .join(',')}`

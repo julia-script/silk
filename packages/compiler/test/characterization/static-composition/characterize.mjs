@@ -28,15 +28,13 @@ const tree = (shape, indexes, nodes) => {
   const right = tree(shape, indexes.slice(middle), nodes)
   const type = `Node${nodes.length}`
   nodes.push(`struct ${type} { left: ${left.type} right: ${right.type} }`)
+  let selectedPath
+  if (left.selectedPath !== undefined) selectedPath = `.left${left.selectedPath}`
+  else if (right.selectedPath !== undefined) selectedPath = `.right${right.selectedPath}`
   return Object.freeze({
     type,
     value: `${type} { left: ${left.value}, right: ${right.value} }`,
-    selectedPath:
-      left.selectedPath !== undefined
-        ? `.left${left.selectedPath}`
-        : right.selectedPath === undefined
-          ? undefined
-          : `.right${right.selectedPath}`,
+    selectedPath,
   })
 }
 

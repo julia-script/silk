@@ -471,12 +471,16 @@ export const resolveDeclaredType = (
         const concrete = available.filter(
           (argument): argument is Type.GenericArgument => argument !== undefined,
         )
-        const substitution =
-          declaredParameters === undefined
-            ? concrete.every(Type.isTypeArgument)
-              ? new Map<string, Type.GenericArgument>()
-              : undefined
-            : TypeInference.substitution(declaredParameters, concrete)
+        let substitution: Type.Substitution | undefined
+        if (declaredParameters === undefined) {
+          if (concrete.every(Type.isTypeArgument)) {
+            substitution = new Map<string, Type.GenericArgument>()
+          } else {
+            substitution = undefined
+          }
+        } else {
+          substitution = TypeInference.substitution(declaredParameters, concrete)
+        }
         if (substitution === undefined) {
           const incompatibleBound = concrete.findIndex((argument, ordinal) => {
             const parameter = declaredParameters?.at(ordinal)
@@ -530,17 +534,18 @@ export const resolveDeclaredType = (
               incompatibleArgument._tag === 'RepresentationParameterArgument'
                 ? incompatibleArgument.parameter.representationBound
                 : incompatibleArgument.contract
-            const actualParameter =
-              incompatibleArgument._tag === 'RepresentationParameterArgument'
-                ? modules
-                    .flatMap((candidateModule) => candidateModule.members)
-                    .flatMap((member) => ('typeParameters' in member ? member.typeParameters : []))
-                    .find(
-                      (candidateParameter) =>
-                        Type.key(candidateParameter.type) ===
-                        Type.key(incompatibleArgument.parameter),
-                    )
-                : undefined
+            let actualParameter: TypeParameterFact | undefined
+            if (incompatibleArgument._tag === 'RepresentationParameterArgument') {
+              actualParameter = modules
+                .flatMap((candidateModule) => candidateModule.members)
+                .flatMap((member) => ('typeParameters' in member ? member.typeParameters : []))
+                .find(
+                  (candidateParameter) =>
+                    Type.key(candidateParameter.type) === Type.key(incompatibleArgument.parameter),
+                )
+            } else {
+              actualParameter = undefined
+            }
             const requiredParameter = declaration?.typeParameters.at(incompatibleBound)
             if ((Type.isCallable(required) || Type.isEffect(required)) && actual !== undefined)
               diagnostics.push(
@@ -573,19 +578,24 @@ export const resolveDeclaredType = (
           const parameter = declaredParameters?.at(mismatch)
           const supplied = arguments_.at(mismatch)
           if (incompatibleBound < 0 && parameter !== undefined && supplied !== undefined) {
+            let suppliedKind: Type.ParameterKind = 'Value'
+            if (supplied.fact._tag === 'Resolved' && Type.isRepresented(supplied.fact.type)) {
+              suppliedKind =
+                supplied.fact.type.contract._tag === 'CallableType'
+                  ? 'CallableRepresentation'
+                  : 'EffectRepresentation'
+            } else if (
+              supplied.fact._tag === 'Resolved' &&
+              Type.isParameter(supplied.fact.type) &&
+              supplied.fact.type.kind === 'RequirementRow'
+            ) {
+              suppliedKind = supplied.fact.type.kind
+            }
             diagnostics.push(
               Diagnostic.genericParameterKindMismatch(
                 parameter.name,
                 parameter.kind,
-                supplied.fact._tag === 'Resolved' && Type.isRepresented(supplied.fact.type)
-                  ? supplied.fact.type.contract._tag === 'CallableType'
-                    ? 'CallableRepresentation'
-                    : 'EffectRepresentation'
-                  : supplied.fact._tag === 'Resolved' &&
-                      Type.isParameter(supplied.fact.type) &&
-                      supplied.fact.type.kind === 'RequirementRow'
-                    ? supplied.fact.type.kind
-                    : 'Value',
+                suppliedKind,
                 supplied.fact.syntax.span,
               ),
             )
@@ -916,26 +926,28 @@ export const resolveBounds = (
       }
       if (parameter.bounds.length === 0) return parameter
       const parameterName = parameter.name._tag === 'Present' ? parameter.name : undefined
-      const boundResolvers: ResolutionSeams.ResolutionSeams =
-        parameterName === undefined
-          ? resolvers
-          : Object.freeze({
-              ...resolvers,
-              type: (candidateModule: string, path: TypePathFact): TypeResolution =>
-                path.segments.length === 1 && path.spelling === parameterName.spelling
-                  ? Object.freeze({
-                      fact: Object.freeze({
-                        _tag: 'Resolved' as const,
-                        type: parameter.type,
-                        spelling: parameterName.spelling,
-                        token: parameterName.token,
-                        syntax: path.syntax,
-                        components: Object.freeze([]),
-                      }),
-                      diagnostics: Object.freeze([]),
-                    })
-                  : resolvers.type(candidateModule, path),
-            })
+      let boundResolvers: ResolutionSeams.ResolutionSeams
+      if (parameterName === undefined) {
+        boundResolvers = resolvers
+      } else {
+        boundResolvers = Object.freeze({
+          ...resolvers,
+          type: (candidateModule: string, path: TypePathFact): TypeResolution =>
+            path.segments.length === 1 && path.spelling === parameterName.spelling
+              ? Object.freeze({
+                  fact: Object.freeze({
+                    _tag: 'Resolved' as const,
+                    type: parameter.type,
+                    spelling: parameterName.spelling,
+                    token: parameterName.token,
+                    syntax: path.syntax,
+                    components: Object.freeze([]),
+                  }),
+                  diagnostics: Object.freeze([]),
+                })
+              : resolvers.type(candidateModule, path),
+        })
+      }
       const bounds = Object.freeze(
         parameter.bounds.map((bound): BoundFact => {
           const unresolvedCapability =
@@ -1337,12 +1349,16 @@ const resolveRequirementRole = (
   if (role._tag !== 'UnresolvedRole')
     return Object.freeze({ fact: role, diagnostics: Object.freeze([]) })
   const resolution = resolvers.item(module, role.path)
-  const declaration =
-    resolution._tag === 'Resolved' || resolution._tag === 'Inaccessible'
-      ? resolution.declaration
-      : resolution._tag === 'Unavailable'
-        ? resolution.declaration
-        : undefined
+  let declaration: MemberFact | undefined
+  if (resolution._tag === 'Resolved' || resolution._tag === 'Inaccessible') {
+    declaration = resolution.declaration
+  } else {
+    if (resolution._tag === 'Unavailable') {
+      declaration = resolution.declaration
+    } else {
+      declaration = undefined
+    }
+  }
   if (
     resolution._tag === 'Resolved' &&
     declaration?._tag === 'RoleDeclaration' &&

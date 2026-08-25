@@ -62,22 +62,31 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
     ...escaping,
     // A hook-bearing drop passes `&mut self` into its hook, so the owner needs frame storage.
     ...MirVerification.operations(fn).flatMap((operation) => {
-      const dropped =
-        operation._tag === 'Drop'
-          ? [operation]
-          : operation._tag === 'RunEffect' ||
-              operation._tag === 'RunEffectValue' ||
-              operation._tag === 'RunEffectComposite' ||
-              operation._tag === 'RunStaticEffect'
-            ? (operation.releases ?? [])
-            : []
+      const droppedOrdinals: Array<number> = []
+      if (operation._tag === 'Drop') {
+        if (
+          CleanupPlan.hasHook(operation.cleanup) &&
+          fn.localTypes.at(operation.local.ordinal)?._tag !== 'EffectBorrow'
+        ) {
+          droppedOrdinals.push(operation.local.ordinal)
+        }
+      } else if (
+        operation._tag === 'RunEffect' ||
+        operation._tag === 'RunEffectValue' ||
+        operation._tag === 'RunEffectComposite' ||
+        operation._tag === 'RunStaticEffect'
+      ) {
+        for (const release of operation.releases ?? []) {
+          if (
+            CleanupPlan.hasHook(release.cleanup) &&
+            fn.localTypes.at(release.local.ordinal)?._tag !== 'EffectBorrow'
+          ) {
+            droppedOrdinals.push(release.local.ordinal)
+          }
+        }
+      }
       return [
-        ...dropped.flatMap((release) =>
-          CleanupPlan.hasHook(release.cleanup) &&
-          fn.localTypes.at(release.local.ordinal)?._tag !== 'EffectBorrow'
-            ? [release.local.ordinal]
-            : [],
-        ),
+        ...droppedOrdinals,
         ...(operation._tag === 'CloseEffectEntry'
           ? operation.failures.flatMap((failure) =>
               CleanupPlan.hasHook(failure.cleanup) ? [failure.payload.ordinal] : [],
@@ -103,25 +112,31 @@ export const framePlan = (fn: Mir.MirFunction, plan: LayoutPlan.Plan): FramePlan
   let alignment = 1
   for (const local of [...rootOrdinals].sort((left, right) => left - right)) {
     const type = fn.localTypes.at(local)
-    const storage =
-      type?._tag === 'CallableValue' && type.environment !== undefined
-        ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
-        : type?._tag === 'EffectValue'
-          ? Object.freeze({ size: type.environment.size, alignment: type.environment.alignment })
-          : type?._tag === 'EffectComposite'
-            ? Object.freeze({
-                size: type.alternatives.reduce(
-                  (maximum, alternative) => Math.max(maximum, alternative.environment.size),
-                  0,
-                ),
-                alignment: type.alternatives.reduce(
-                  (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
-                  1,
-                ),
-              })
-            : type === undefined
-              ? undefined
-              : LayoutPlan.entry(plan, Mir.semanticType(type))
+    let storage: { readonly size: number; readonly alignment: number } | undefined
+    if (type?._tag === 'CallableValue' && type.environment !== undefined) {
+      storage = Object.freeze({
+        size: type.environment.size,
+        alignment: type.environment.alignment,
+      })
+    } else if (type?._tag === 'EffectValue') {
+      storage = Object.freeze({
+        size: type.environment.size,
+        alignment: type.environment.alignment,
+      })
+    } else if (type?._tag === 'EffectComposite') {
+      storage = Object.freeze({
+        size: type.alternatives.reduce(
+          (maximum, alternative) => Math.max(maximum, alternative.environment.size),
+          0,
+        ),
+        alignment: type.alternatives.reduce(
+          (maximum, alternative) => Math.max(maximum, alternative.environment.alignment),
+          1,
+        ),
+      })
+    } else if (type !== undefined) {
+      storage = LayoutPlan.entry(plan, Mir.semanticType(type))
+    }
     if (
       type === undefined ||
       type._tag === 'EffectBorrow' ||

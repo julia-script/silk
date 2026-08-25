@@ -97,9 +97,11 @@ const referenceExecute = (bytecode: ReadonlyArray<number>): VmResult => {
         }
         const right = stack.pop() ?? 0
         const left = stack.pop() ?? 0
-        stack.push(
-          opcode === 2 ? left + right : opcode === 3 ? left - right : Math.imul(left, right),
-        )
+        let result: number
+        if (opcode === 2) result = left + right
+        else if (opcode === 3) result = left - right
+        else result = Math.imul(left, right)
+        stack.push(result)
         pc += 1
         record(instructionPc, opcode)
         break

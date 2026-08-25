@@ -31,15 +31,16 @@ export const lowerBuiltinExpression = (
   if (argumentLocals === undefined) return undefined
   const finishBuiltin = (result: Mir.LocalId): { readonly result: Mir.LocalId } => {
     const slot = argumentLocals.at(0)
-    const inherited =
-      expression.operation === 'SlotWrite' ||
-      expression.operation === 'SlotTake' ||
-      expression.operation === 'SlotCopy' ||
-      expression.operation === 'SlotDrop'
-        ? slot === undefined
-          ? []
-          : (fn.slotLoans.get(slot.ordinal) ?? [])
-        : []
+    let inherited: ReadonlyArray<Hir.BorrowId> = []
+    if (
+      slot !== undefined &&
+      (expression.operation === 'SlotWrite' ||
+        expression.operation === 'SlotTake' ||
+        expression.operation === 'SlotCopy' ||
+        expression.operation === 'SlotDrop')
+    ) {
+      inherited = fn.slotLoans.get(slot.ordinal) ?? []
+    }
     const endings = new Map(
       [...expression.loanEnds, ...inherited].map((authored) => {
         const borrow = fn.recipeBorrow(authored)
@@ -969,12 +970,10 @@ export const lowerBuiltinExpression = (
     const scalar = typeof semanticOperand === 'string' ? Scalar.find(semanticOperand) : undefined
     if (expression.operation !== 'Not' && scalar?.category !== 'Integer') return undefined
     const pointerBits = fn.layout.target.pointerSize === 4 ? 32 : 64
-    const constant =
-      expression.operation === 'BitNot' && scalar?.category === 'Integer'
-        ? scalar.signedness === 'Signed'
-          ? -1n
-          : Scalar.range(scalar, pointerBits).maximum
-        : 0n
+    let constant = 0n
+    if (expression.operation === 'BitNot' && scalar?.category === 'Integer') {
+      constant = scalar.signedness === 'Signed' ? -1n : Scalar.range(scalar, pointerBits).maximum
+    }
     const zero = fn.alloc(operandType)
     fn.emit(
       Object.freeze({
@@ -986,19 +985,15 @@ export const lowerBuiltinExpression = (
       }),
     )
     const destination = fn.alloc(operandType)
+    let operator: Mir.BinaryOperator = 'Subtract'
+    if (expression.operation === 'Not') operator = 'Equals'
+    else if (expression.operation === 'BitNot') operator = 'BitXor'
+    else if (expression.operation === 'WrappingNegate') operator = 'WrappingSubtract'
+    else if (expression.operation === 'SaturatingNegate') operator = 'SaturatingSubtract'
     fn.emit(
       Object.freeze({
         _tag: 'Binary',
-        operator:
-          expression.operation === 'Not'
-            ? 'Equals'
-            : expression.operation === 'BitNot'
-              ? 'BitXor'
-              : expression.operation === 'WrappingNegate'
-                ? 'WrappingSubtract'
-                : expression.operation === 'SaturatingNegate'
-                  ? 'SaturatingSubtract'
-                  : 'Subtract',
+        operator,
         destination,
         left: expression.operation === 'Not' ? subject : zero,
         right: expression.operation === 'Not' ? zero : subject,

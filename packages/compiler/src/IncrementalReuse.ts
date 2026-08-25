@@ -45,17 +45,12 @@ export const revisions = (
     previous?.closure.modules.map((module) => [module.name, module.syntax]),
   )
   return new Map(
-    closure.modules.map((module) => [
-      module.name,
-      Object.freeze({
-        _tag:
-          previousSyntax.get(module.name) === undefined
-            ? ('Fresh' as const)
-            : previousSyntax.get(module.name) === module.syntax
-              ? ('Reused' as const)
-              : ('Changed' as const),
-      }),
-    ]),
+    closure.modules.map((module): readonly [string, SemanticInvalidation.LocalRevision] => {
+      const prior = previousSyntax.get(module.name)
+      if (prior === undefined) return [module.name, Object.freeze({ _tag: 'Fresh' })]
+      if (prior === module.syntax) return [module.name, Object.freeze({ _tag: 'Reused' })]
+      return [module.name, Object.freeze({ _tag: 'Changed' })]
+    }),
   )
 }
 

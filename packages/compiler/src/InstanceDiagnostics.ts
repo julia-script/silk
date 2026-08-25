@@ -158,7 +158,11 @@ export const representedNominals = (
   }
   return Object.freeze(
     [...found.entries()]
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .sort(([left], [right]) => {
+        if (left < right) return -1
+        if (left > right) return 1
+        return 0
+      })
       .map(([, nominal]) => nominal),
   )
 }
@@ -175,12 +179,12 @@ export const callableFieldRealizations = (
     self.effects,
   )
 
-const compareCallSites = (left: Instances.CallInstance, right: Instances.CallInstance): number =>
-  left.span.sourceId === right.span.sourceId
-    ? left.span.start - right.span.start || left.span.end - right.span.end
-    : left.span.sourceId < right.span.sourceId
-      ? -1
-      : 1
+const compareCallSites = (left: Instances.CallInstance, right: Instances.CallInstance): number => {
+  if (left.span.sourceId === right.span.sourceId) {
+    return left.span.start - right.span.start || left.span.end - right.span.end
+  }
+  return left.span.sourceId < right.span.sourceId ? -1 : 1
+}
 
 interface StoredExecutable {
   readonly path: ReadonlyArray<string>

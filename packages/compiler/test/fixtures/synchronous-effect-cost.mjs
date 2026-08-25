@@ -13,6 +13,11 @@ import * as MirVerification from '../../dist/MirVerification.js'
 const encoder = new TextEncoder()
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const occurrences = (text, pattern) => [...text.matchAll(pattern)].length
+const evaluatorBehavior = (evaluated) => {
+  if (evaluated._tag === 'Completed') return Number(evaluated.result.value)
+  if (evaluated._tag === 'Trap') return 'trap'
+  return evaluated._tag
+}
 const suspensionVocabulary = Object.freeze([
   'suspend',
   'suspended',
@@ -621,13 +626,8 @@ try {
 
       const evaluated = Analysis.evaluate(native)
       const unnormalizedEvaluated = Analysis.evaluate(unnormalizedWasm)
-      const evaluatorBehavior =
-        evaluated._tag === 'Completed'
-          ? Number(evaluated.result.value)
-          : evaluated._tag === 'Trap'
-            ? 'trap'
-            : evaluated._tag
-      if (evaluatorBehavior !== sample.expected) {
+      const normalizedEvaluatorBehavior = evaluatorBehavior(evaluated)
+      if (normalizedEvaluatorBehavior !== sample.expected) {
         throw new Error(
           `${sample.id} did not complete: ${JSON.stringify(evaluated, (_, value) =>
             typeof value === 'bigint' ? value.toString() : value,
@@ -697,13 +697,8 @@ try {
           kind: sample.kind,
           expected: sample.expected,
           behavior: Object.freeze({
-            evaluator: evaluatorBehavior,
-            unnormalizedEvaluator:
-              unnormalizedEvaluated._tag === 'Completed'
-                ? Number(unnormalizedEvaluated.result.value)
-                : unnormalizedEvaluated._tag === 'Trap'
-                  ? 'trap'
-                  : unnormalizedEvaluated._tag,
+            evaluator: normalizedEvaluatorBehavior,
+            unnormalizedEvaluator: evaluatorBehavior(unnormalizedEvaluated),
             wasm: directWasmBehavior,
             unnormalizedWasm: unnormalizedDirectWasmBehavior,
             dropCalls,

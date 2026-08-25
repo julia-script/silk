@@ -387,32 +387,56 @@ export function parseBlock(
 
   let kind = nextSignificantKind(state)
   while (!endsBlock(state)) {
-    const statement =
-      kind === 'LetKeyword'
-        ? startsPatternBindingStatement(state)
-          ? parsePatternBindingStatement(state)
-          : parseBindingStatement(state)
-        : kind === 'IfKeyword'
-          ? parseConditionalStatement(state)
-          : kind === 'WhileKeyword'
-            ? parseWhileStatement(state)
-            : kind === 'BreakKeyword'
-              ? parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
-              : kind === 'ContinueKeyword'
-                ? parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
-                : kind === 'Identifier' && startsAssignmentStatement(state)
-                  ? parseAssignmentStatement(state)
-                  : kind === 'FailKeyword'
-                    ? parseFailStatement(state)
-                    : kind === 'DropKeyword'
-                      ? parseDropStatement(state)
-                      : kind === 'UnsafeKeyword' && peek(state, 1) === 'LeftBrace'
-                        ? parseUnsafeStatement(state)
-                        : kind === 'ReturnKeyword'
-                          ? parseReturnStatement(state)
-                          : startsBlockStatement(state)
-                            ? parseExpressionStatement(state)
-                            : parseErrorStatement(state)
+    let statement: NodeResult
+    if (kind === 'LetKeyword') {
+      if (startsPatternBindingStatement(state)) {
+        statement = parsePatternBindingStatement(state)
+      } else {
+        statement = parseBindingStatement(state)
+      }
+    } else {
+      if (kind === 'IfKeyword') {
+        statement = parseConditionalStatement(state)
+      } else {
+        if (kind === 'WhileKeyword') {
+          statement = parseWhileStatement(state)
+        } else {
+          if (kind === 'BreakKeyword') {
+            statement = parseTransferStatement(state, 'BreakKeyword', 'BreakStatement')
+          } else {
+            if (kind === 'ContinueKeyword') {
+              statement = parseTransferStatement(state, 'ContinueKeyword', 'ContinueStatement')
+            } else {
+              if (kind === 'Identifier' && startsAssignmentStatement(state)) {
+                statement = parseAssignmentStatement(state)
+              } else {
+                if (kind === 'FailKeyword') {
+                  statement = parseFailStatement(state)
+                } else {
+                  if (kind === 'DropKeyword') {
+                    statement = parseDropStatement(state)
+                  } else {
+                    if (kind === 'UnsafeKeyword' && peek(state, 1) === 'LeftBrace') {
+                      statement = parseUnsafeStatement(state)
+                    } else {
+                      if (kind === 'ReturnKeyword') {
+                        statement = parseReturnStatement(state)
+                      } else {
+                        if (startsBlockStatement(state)) {
+                          statement = parseExpressionStatement(state)
+                        } else {
+                          statement = parseErrorStatement(state)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
     children = Object.freeze([...children, statement.node])
     state = statement.state
     kind = nextSignificantKind(state)

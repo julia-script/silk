@@ -110,21 +110,23 @@ export interface Module {
 
 const executionIdentity = (key: ExecutionKey): string => key.identity
 
-const executionInstance = (key: ExecutionKey): Instances.InstanceKey =>
-  key._tag === 'InstanceExecution'
-    ? key.instance
-    : Object.freeze({
-        _tag: 'InstanceKey',
-        declaration: key.runner,
-        typeArguments: key.owner.typeArguments,
-        contractRow: Object.freeze([
-          ...key.owner.contractRow,
-          `effect-site:${Hir.executableSiteKey(key.site)}`,
-          ...(key._tag === 'ProvidedEffectRunnerExecution'
-            ? key.providers.map(providedContractEntry)
-            : []),
-        ]),
-      })
+const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
+  if (key._tag === 'InstanceExecution') {
+    return key.instance
+  }
+  return Object.freeze({
+    _tag: 'InstanceKey',
+    declaration: key.runner,
+    typeArguments: key.owner.typeArguments,
+    contractRow: Object.freeze([
+      ...key.owner.contractRow,
+      `effect-site:${Hir.executableSiteKey(key.site)}`,
+      ...(key._tag === 'ProvidedEffectRunnerExecution'
+        ? key.providers.map(providedContractEntry)
+        : []),
+    ]),
+  })
+}
 
 const sameInstance = (left: Instances.InstanceKey, right: Instances.InstanceKey): boolean =>
   Instances.keyText(left) === Instances.keyText(right)
@@ -193,14 +195,18 @@ const executionForInstance = (
 export const executionOf = (self: Module, instance: Instances.InstanceKey): Execution | undefined =>
   executionForInstance(self, instance)
 
-const mergeClassifications = (classifications: ReadonlyArray<Classification>): Classification =>
-  classifications.includes('Suspendable')
-    ? 'Suspendable'
-    : classifications.includes('Unknown')
-      ? 'Unknown'
-      : classifications.includes('Synchronous')
-        ? 'Synchronous'
-        : 'Unknown'
+const mergeClassifications = (classifications: ReadonlyArray<Classification>): Classification => {
+  if (classifications.includes('Suspendable')) {
+    return 'Suspendable'
+  }
+  if (classifications.includes('Unknown')) {
+    return 'Unknown'
+  }
+  if (classifications.includes('Synchronous')) {
+    return 'Synchronous'
+  }
+  return 'Unknown'
+}
 
 const providedClassification = (
   self: Module,
@@ -272,12 +278,15 @@ const controlId = (
 const classificationOfEffect = (
   discovery: Instances.Discovery,
   identity: string | undefined,
-): Classification =>
-  identity === undefined
-    ? 'Unknown'
-    : suspendableSummary(Instances.effectSuspensionOf(discovery, identity))
-      ? 'Suspendable'
-      : 'Synchronous'
+): Classification => {
+  if (identity === undefined) {
+    return 'Unknown'
+  }
+  if (suspendableSummary(Instances.effectSuspensionOf(discovery, identity))) {
+    return 'Suspendable'
+  }
+  return 'Synchronous'
+}
 
 const suspendableSummary = (summary: SuspensionMode.Summary): boolean =>
   SuspensionMode.has(summary, 'NestedTransfer') || SuspensionMode.has(summary, 'ExternalPark')
@@ -298,15 +307,17 @@ const bindingsOfStatements = (
   statements: ReadonlyArray<Hir.Statement>,
 ): ReadonlyMap<number, Hir.Expression> =>
   new Map(
-    statements.flatMap((statement) =>
-      statement._tag === 'Bind'
-        ? [[statement.binding.ordinal, statement.initializer] as const]
-        : statement._tag === 'If'
-          ? [...statement.taken, ...statement.otherwise].flatMap((nested) =>
-              nested._tag === 'Bind' ? [[nested.binding.ordinal, nested.initializer] as const] : [],
-            )
-          : [],
-    ),
+    statements.flatMap((statement) => {
+      if (statement._tag === 'Bind') {
+        return [[statement.binding.ordinal, statement.initializer] as const]
+      }
+      if (statement._tag === 'If') {
+        return [...statement.taken, ...statement.otherwise].flatMap((nested) =>
+          nested._tag === 'Bind' ? [[nested.binding.ordinal, nested.initializer] as const] : [],
+        )
+      }
+      return []
+    }),
   )
 
 const bindingsOf = (fn: Hir.HirFunction): ReadonlyMap<number, Hir.Expression> =>
@@ -546,13 +557,18 @@ const runnerOf = (
           runner: baseExecution.runner,
           providers,
         })
-  const baseClassification =
-    stored === undefined
-      ? (context.effectClassifications.get(identity) ??
-        classificationOfEffect(context.discovery, identity))
-      : stored.suspendable
-        ? 'Suspendable'
-        : 'Synchronous'
+  let baseClassification: Classification
+  if (stored === undefined) {
+    baseClassification =
+      context.effectClassifications.get(identity) ??
+      classificationOfEffect(context.discovery, identity)
+  } else {
+    if (stored.suspendable) {
+      baseClassification = 'Suspendable'
+    } else {
+      baseClassification = 'Synchronous'
+    }
+  }
   const providedClassification = (): Classification => {
     const fixedProvided =
       providedIdentity === undefined
@@ -1319,17 +1335,27 @@ export const classificationOfRun = (
     (region) =>
       region.outcome._tag === 'RunSuspendableEffect' && sameSpan(region.outcome.span, span),
   )
-  const selected =
-    control?.outcome._tag === 'RunSuspendableEffect'
-      ? control.outcome.runner.classification
-      : execution === undefined
-        ? 'Unknown'
-        : execution.classification === 'Unknown'
-          ? 'Unknown'
-          : execution.classification === 'Synchronous' &&
-              providedClassification(self, instance) === 'Suspendable'
-            ? 'Suspendable'
-            : 'Synchronous'
+  let selected: Classification
+  if (control?.outcome._tag === 'RunSuspendableEffect') {
+    selected = control.outcome.runner.classification
+  } else {
+    if (execution === undefined) {
+      selected = 'Unknown'
+    } else {
+      if (execution.classification === 'Unknown') {
+        selected = 'Unknown'
+      } else {
+        if (
+          execution.classification === 'Synchronous' &&
+          providedClassification(self, instance) === 'Suspendable'
+        ) {
+          selected = 'Suspendable'
+        } else {
+          selected = 'Synchronous'
+        }
+      }
+    }
+  }
   return selected
 }
 

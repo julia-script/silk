@@ -530,11 +530,16 @@ export const isCharacterSpelling = (value: unknown): value is CharacterSpelling 
 
 /** Resolves the destination of one explicit integer conversion operation. */
 export const conversionTarget = (operation: string): IntegerScalar | undefined => {
-  const prefix = operation.startsWith('CheckedConvertTo')
-    ? 'CheckedConvertTo'
-    : operation.startsWith('ConvertTo')
-      ? 'ConvertTo'
-      : undefined
+  let prefix: string | undefined
+  if (operation.startsWith('CheckedConvertTo')) {
+    prefix = 'CheckedConvertTo'
+  } else {
+    if (operation.startsWith('ConvertTo')) {
+      prefix = 'ConvertTo'
+    } else {
+      prefix = undefined
+    }
+  }
   if (prefix === undefined) return undefined
   const suffix = operation.slice(prefix.length)
   const spelling = `${suffix[0]?.toLowerCase() ?? ''}${suffix.slice(1)}`
@@ -543,8 +548,16 @@ export const conversionTarget = (operation: string): IntegerScalar | undefined =
 }
 
 export const floatConversionTarget = (operation: string): FloatScalar | undefined => {
-  const spelling =
-    operation === 'ConvertToF32' ? 'f32' : operation === 'ConvertToF64' ? 'f64' : undefined
+  let spelling: Spelling | undefined
+  if (operation === 'ConvertToF32') {
+    spelling = 'f32'
+  } else {
+    if (operation === 'ConvertToF64') {
+      spelling = 'f64'
+    } else {
+      spelling = undefined
+    }
+  }
   const target = spelling === undefined ? undefined : find(spelling)
   return target?.category === 'Floating' ? target : undefined
 }

@@ -38,31 +38,32 @@ const mapOperations = (
         Object.freeze({
           ...fn,
           regions: Object.freeze(
-            fn.regions.map((region) =>
-              region._tag === 'OperationRegion'
-                ? Object.freeze({
-                    ...region,
-                    operations: Object.freeze(
-                      region.operations.flatMap((operation) => {
-                        const result = map(operation)
-                        return result === undefined ? [] : [result]
-                      }),
-                    ),
-                  })
-                : region._tag === 'CleanupRegion'
-                  ? Object.freeze({
-                      ...region,
-                      releases: Object.freeze(
-                        region.releases.flatMap((operation) => {
-                          const result = map(operation)
-                          return result?._tag === 'Drop' || result?._tag === 'EndLoan'
-                            ? [result]
-                            : []
-                        }),
-                      ),
-                    })
-                  : region,
-            ),
+            fn.regions.map((region) => {
+              if (region._tag === 'OperationRegion') {
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.flatMap((operation) => {
+                      const result = map(operation)
+                      return result === undefined ? [] : [result]
+                    }),
+                  ),
+                })
+              }
+              if (region._tag === 'CleanupRegion') {
+                return Object.freeze({
+                  ...region,
+                  releases: Object.freeze(
+                    region.releases.flatMap((operation) => {
+                      const result = map(operation)
+                      if (result?._tag === 'Drop' || result?._tag === 'EndLoan') return [result]
+                      return []
+                    }),
+                  ),
+                })
+              }
+              return region
+            }),
           ),
         }),
       ),

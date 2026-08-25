@@ -226,17 +226,24 @@ export const callableTargetIdentity = (
       })
 
 /** Tests complete structural identity for two HIR callable targets. */
-export const sameCallableTarget = (left: CallableTarget, right: CallableTarget): boolean =>
-  left._tag === right._tag &&
-  (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget'
-    ? left.declaration.module === right.declaration.module &&
+export const sameCallableTarget = (left: CallableTarget, right: CallableTarget): boolean => {
+  if (left._tag !== right._tag) return false
+  if (left._tag === 'DeclarationCallableTarget' && right._tag === 'DeclarationCallableTarget') {
+    return (
+      left.declaration.module === right.declaration.module &&
       left.declaration.name === right.declaration.name
-    : left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget'
-      ? left.actor === right.actor &&
-        left.operation === right.operation &&
-        left.intrinsic.actor === right.intrinsic.actor &&
-        left.intrinsic.name === right.intrinsic.name
-      : false)
+    )
+  }
+  if (left._tag === 'BuiltinCallableTarget' && right._tag === 'BuiltinCallableTarget') {
+    return (
+      left.actor === right.actor &&
+      left.operation === right.operation &&
+      left.intrinsic.actor === right.intrinsic.actor &&
+      left.intrinsic.name === right.intrinsic.name
+    )
+  }
+  return false
+}
 
 /** Tests whether one HIR target is the target retained by a semantic callable identity. */
 export const matchesCallableTargetIdentity = (
@@ -1301,14 +1308,14 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         'type' in expression.subject && typeof expression.subject.type === 'object'
           ? expression.subject.type
           : undefined
-      const inherited =
-        expression.subject._tag === 'SliceIndexPlace'
-          ? expression.subject.access
-          : expression.subject._tag === 'Project'
-            ? expression.subject.borrowAccess
-            : subjectType !== undefined && Type.isReference(subjectType)
-              ? subjectType.access
-              : undefined
+      let inherited: Type.BorrowAccess | undefined
+      if (expression.subject._tag === 'SliceIndexPlace') {
+        inherited = expression.subject.access
+      } else if (expression.subject._tag === 'Project') {
+        inherited = expression.subject.borrowAccess
+      } else if (subjectType !== undefined && Type.isReference(subjectType)) {
+        inherited = subjectType.access
+      }
       if (inherited !== expression.borrowAccess) {
         issues.push(Object.freeze({ _tag: 'InvalidSliceOperation', span: expression.span }))
       }
@@ -1626,19 +1633,24 @@ const encodeExpression = (expression: Expression, depth: number): string => {
         `${indent}match ${expression.access.toLowerCase()} members=${expression.members.map(Match.encodeIdentity).join(',') || 'none'} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         `${indent}  scrutinee`,
         encodeExpression(expression.scrutinee, depth + 2),
-        ...expression.arms.flatMap((arm) => [
-          `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${spanText(arm.span)}`,
-          ...arm.bindings.map(
-            (binding) =>
-              `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${spanText(binding.span)}`,
-          ),
-          `${indent}    cleanup ${arm.cleanup.map((path) => path.map((field) => `#${field.ordinal}`).join('.') || 'payload').join(',') || 'none'}`,
-          ...(arm.guard === undefined
-            ? []
-            : [`${indent}    guard`, encodeExpression(arm.guard, depth + 3)]),
-          `${indent}    result`,
-          encodeExpression(arm.result, depth + 3),
-        ]),
+        ...expression.arms.flatMap((arm) => {
+          let pattern = 'unknown'
+          if (arm.universal) pattern = '_'
+          else if (arm.member !== undefined) pattern = Match.encodeIdentity(arm.member)
+          return [
+            `${indent}  arm #${arm.id.ordinal} ${pattern} reachable=${arm.reachable} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${spanText(arm.span)}`,
+            ...arm.bindings.map(
+              (binding) =>
+                `${indent}    binding #${binding.id.ordinal} ${binding.name ?? '?'} path=${binding.path.map((field) => `#${field.ordinal}`).join('.') || 'root'} access=${binding.access} : ${Type.encode(binding.type)} ${spanText(binding.span)}`,
+            ),
+            `${indent}    cleanup ${arm.cleanup.map((path) => path.map((field) => `#${field.ordinal}`).join('.') || 'payload').join(',') || 'none'}`,
+            ...(arm.guard === undefined
+              ? []
+              : [`${indent}    guard`, encodeExpression(arm.guard, depth + 3)]),
+            `${indent}    result`,
+            encodeExpression(arm.result, depth + 3),
+          ]
+        }),
       ].join('\n')
     case 'Construct':
       return [
@@ -1795,21 +1807,32 @@ const encodeStatement = (statement: Statement, depth: number): string => {
         `${indent}evaluate r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.expression, depth + 1),
       ].join('\n')
-    case 'Write':
+    case 'Write': {
+      let root: string
+      if (statement.place._tag === 'WritePlace') {
+        root =
+          statement.place.root._tag === 'BindingWriteRoot'
+            ? `b${statement.place.root.binding.ordinal}`
+            : `p${statement.place.root.parameter.ordinal}`
+      } else {
+        root =
+          statement.place.root._tag === 'BindingSliceRoot'
+            ? `slice-b${statement.place.root.binding.ordinal}`
+            : `slice-p${statement.place.root.parameter.ordinal}`
+      }
+      const selectors = statement.place.selectors
+        .map((selector) => {
+          if (selector._tag === 'Field') return `.#${selector.field.ordinal}`
+          if (selector._tag === 'SliceIndex') return '[runtime/slice]'
+          const index = selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'
+          return `[${index}/${selector.array.length}]`
+        })
+        .join('')
       return [
-        `${indent}write ${statement.place._tag === 'WritePlace' ? (statement.place.root._tag === 'BindingWriteRoot' ? `b${statement.place.root.binding.ordinal}` : `p${statement.place.root.parameter.ordinal}`) : statement.place.root._tag === 'BindingSliceRoot' ? `slice-b${statement.place.root.binding.ordinal}` : `slice-p${statement.place.root.parameter.ordinal}`}${statement.place.selectors
-          .map((selector) =>
-            selector._tag === 'Field'
-              ? `.#${selector.field.ordinal}`
-              : selector._tag === 'SliceIndex'
-                ? '[runtime/slice]'
-                : `[${selector.bounds._tag === 'Proven' ? selector.bounds.index : 'runtime'}/${selector.array.length}]`,
-          )
-          .join(
-            '',
-          )} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${spanText(statement.span)}`,
+        `${indent}write ${root}${selectors} : ${Type.encode(statement.place.type)} r${statement.region.ordinal} ${spanText(statement.span)}`,
         encodeExpression(statement.value, depth + 1),
       ].join('\n')
+    }
     case 'If':
       return [
         `${indent}if r${statement.region.ordinal} ${spanText(statement.span)}`,

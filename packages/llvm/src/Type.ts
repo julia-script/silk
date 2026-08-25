@@ -459,12 +459,7 @@ export const namedStructure = Effect.fn('Type.namedStructure')(function* (
   builder: Builder.Builder,
   name: ByteString.ByteString | Uint8Array | string,
 ): Effect.fn.Return<Type, LlvmError> {
-  const value =
-    typeof name === 'string'
-      ? ByteString.fromString(name)
-      : name instanceof Uint8Array
-        ? ByteString.fromUint8Array(name)
-        : name
+  const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
     return yield* Effect.fail(
       invalidInput({
@@ -554,12 +549,7 @@ export const targetExtension = Effect.fn('Type.targetExtension')(function* (
   types: ReadonlyArray<Type> = [],
   integerParameters: ReadonlyArray<number | bigint> = [],
 ): Effect.fn.Return<Type, LlvmError> {
-  const value =
-    typeof name === 'string'
-      ? ByteString.fromString(name)
-      : name instanceof Uint8Array
-        ? ByteString.fromUint8Array(name)
-        : name
+  const value = ByteString.coerce(name)
   if (ByteString.isEmpty(value)) {
     return yield* Effect.fail(
       invalidInput({
@@ -747,12 +737,9 @@ export const aggregateShape = Effect.fn('Type.aggregateShape')(function* (
           length: description._tag === 'Array' ? description.length : BigInt(description.length),
         })
       }
-      const body =
-        description._tag === 'Structure'
-          ? description
-          : description._tag === 'NamedStructure'
-            ? description.body
-            : undefined
+      let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
+      if (description._tag === 'Structure') body = description
+      else if (description._tag === 'NamedStructure') body = description.body
       if (body === undefined) {
         return yield* Result.fail(
           invalidInput({
@@ -840,12 +827,9 @@ const layoutOf = (
       const length = description._tag === 'Array' ? description.length : BigInt(description.length)
       return { size: child.size * length, alignment: child.alignment }
     }
-    const body =
-      description._tag === 'Structure'
-        ? description
-        : description._tag === 'NamedStructure'
-          ? description.body
-          : undefined
+    let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
+    if (description._tag === 'Structure') body = description
+    else if (description._tag === 'NamedStructure') body = description.body
     if (body !== undefined) {
       let offset = 0n
       let maximumAlignment = 1n

@@ -156,21 +156,35 @@ export const evaluate = (operation: Operation, input: FloatingPoint.Bits): Float
   }
   const [sine, cosine] = reducedKernels(residual, self)
   const quadrant = ((quadrantFloat % 4) + 4) % 4
-  const result =
-    operation === 'Sin'
-      ? quadrant === 0
-        ? sine
-        : quadrant === 1
-          ? cosine
-          : quadrant === 2
-            ? -sine
-            : -cosine
-      : quadrant === 0
-        ? cosine
-        : quadrant === 1
-          ? -sine
-          : quadrant === 2
-            ? -cosine
-            : sine
+  let result: number
+  if (operation === 'Sin') {
+    switch (quadrant) {
+      case 0:
+        result = sine
+        break
+      case 1:
+        result = cosine
+        break
+      case 2:
+        result = -sine
+        break
+      default:
+        result = -cosine
+    }
+  } else {
+    switch (quadrant) {
+      case 0:
+        result = cosine
+        break
+      case 1:
+        result = -sine
+        break
+      case 2:
+        result = -cosine
+        break
+      default:
+        result = sine
+    }
+  }
   return FloatingPoint.fromNumber(round(result, input.width), input.width)
 }

@@ -81,11 +81,16 @@ const runnerOf = (
         operation?._tag === 'RunEffectValue'
           ? operation.providers.find((candidate) => sameSelection(candidate, provider))
           : undefined
-      const argument = hasRuntimeArgument
-        ? operation?._tag === 'RunEffectValue'
-          ? selected?.argument
-          : arguments_.at(argumentOffset + runtimeOrdinal)
-        : undefined
+      let argument: Mir.LocalId | undefined
+      if (hasRuntimeArgument) {
+        if (operation?._tag === 'RunEffectValue') {
+          argument = selected?.argument
+        } else {
+          argument = arguments_.at(argumentOffset + runtimeOrdinal)
+        }
+      } else {
+        argument = undefined
+      }
       if (hasRuntimeArgument) runtimeOrdinal += 1
       const witness =
         provider.witness ??
@@ -97,33 +102,43 @@ const runnerOf = (
         purposes: ['ChildRequirement'] as const,
       })
     })
-  const declaration =
-    operation === undefined || operation._tag === 'ExecutionPark'
-      ? runner.declaration
-      : operation._tag === 'RunEffect'
-        ? operation.target
-        : operation.runner
-  const typeArguments =
-    operation === undefined || operation._tag === 'ExecutionPark'
-      ? runner.typeArguments
-      : operation._tag === 'RunEffect'
-        ? operation.typeArguments
-        : operation.runnerTypeArguments
+  let declaration: typeof runner.declaration | undefined
+  if (operation === undefined || operation._tag === 'ExecutionPark') {
+    declaration = runner.declaration
+  } else {
+    if (operation._tag === 'RunEffect') {
+      declaration = operation.target
+    } else {
+      declaration = operation.runner
+    }
+  }
+  let typeArguments: ReadonlyArray<Type.GenericArgument>
+  if (operation === undefined || operation._tag === 'ExecutionPark') {
+    typeArguments = runner.typeArguments
+  } else {
+    if (operation._tag === 'RunEffect') {
+      typeArguments = operation.typeArguments
+    } else {
+      typeArguments = operation.runnerTypeArguments
+    }
+  }
   const exact =
     declaration === undefined
       ? undefined
       : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments))
+  let instance = exact?.instance
+  if (
+    instance === undefined &&
+    runner.instance !== undefined &&
+    declaration !== undefined &&
+    runner.instance.declaration.module === declaration.module &&
+    runner.instance.declaration.name === declaration.name
+  )
+    instance = runner.instance
   return Object.freeze({
     classification: runner.classification,
     ...(declaration === undefined ? {} : { declaration }),
-    ...(exact?.instance === undefined
-      ? runner.instance === undefined ||
-        declaration === undefined ||
-        runner.instance.declaration.module !== declaration.module ||
-        runner.instance.declaration.name !== declaration.name
-        ? {}
-        : { instance: runner.instance }
-      : { instance: exact.instance }),
+    ...(instance === undefined ? {} : { instance }),
     ...(runner.effectIdentity === undefined ? {} : { effectIdentity: runner.effectIdentity }),
     typeArguments,
     outcome:
@@ -176,12 +191,16 @@ interface LocatedOperation {
 
 const operationsOf = (fn: Mir.MirFunction): ReadonlyArray<LocatedOperation> =>
   fn.regions.flatMap((region) => {
-    const operations =
-      region._tag === 'OperationRegion'
-        ? region.operations
-        : region._tag === 'CleanupRegion'
-          ? region.releases
-          : []
+    let operations: ReadonlyArray<Mir.Operation>
+    if (region._tag === 'OperationRegion') {
+      operations = region.operations
+    } else {
+      if (region._tag === 'CleanupRegion') {
+        operations = region.releases
+      } else {
+        operations = []
+      }
+    }
     return operations
       .flatMap(Mir.operationTree)
       .flatMap((operation) =>
@@ -288,45 +307,43 @@ export const finalize = (
   index: DeclarationIndex.Index,
 ): Mir.Module => {
   const functions = Object.freeze(
-    program.functions.map((fn) =>
-      (() => {
-        const execution = ProvisionalMir.executionOf(provisional, fn.instance)
-        const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
-        const regions = regionsOf(program, fn, execution, ownership, index)
-        const states = Object.freeze(
-          regions
-            .flatMap((region) =>
-              region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
-                ? [region.relay.state]
-                : [],
-            )
-            .sort(
-              (left, right) =>
-                left.point.sourceId.localeCompare(right.point.sourceId) ||
-                left.point.spanStart - right.point.spanStart ||
-                left.point.ordinal - right.point.ordinal,
-            ),
-        )
-        return regions.length === 0 && (classification === 'Synchronous' || execution === undefined)
-          ? fn
-          : Object.freeze({
-              ...fn,
-              suspension: Object.freeze({
-                classification,
-                regions,
-                ...(states.length === 0
-                  ? {}
-                  : {
-                      frame: Object.freeze({
-                        _tag: 'CoroutineFrameDescriptor' as const,
-                        function: fn.instance,
-                        states,
-                      }),
-                    }),
+    program.functions.map((fn) => {
+      const execution = ProvisionalMir.executionOf(provisional, fn.instance)
+      const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
+      const regions = regionsOf(program, fn, execution, ownership, index)
+      const states = Object.freeze(
+        regions
+          .flatMap((region) =>
+            region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
+              ? [region.relay.state]
+              : [],
+          )
+          .sort(
+            (left, right) =>
+              left.point.sourceId.localeCompare(right.point.sourceId) ||
+              left.point.spanStart - right.point.spanStart ||
+              left.point.ordinal - right.point.ordinal,
+          ),
+      )
+      if (regions.length === 0 && (classification === 'Synchronous' || execution === undefined))
+        return fn
+      return Object.freeze({
+        ...fn,
+        suspension: Object.freeze({
+          classification,
+          regions,
+          ...(states.length === 0
+            ? {}
+            : {
+                frame: Object.freeze({
+                  _tag: 'CoroutineFrameDescriptor' as const,
+                  function: fn.instance,
+                  states,
+                }),
               }),
-            })
-      })(),
-    ),
+        }),
+      })
+    }),
   )
   const hasRetainedOrigin = functions.some((fn) =>
     fn.suspension?.regions.some(

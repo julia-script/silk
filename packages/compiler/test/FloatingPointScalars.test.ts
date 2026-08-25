@@ -158,12 +158,10 @@ const floatMatrix = (() => {
     if (operation.result === 'Boolean')
       return `fn floatCase${ordinal}() -> i32 { if ${invocation} { return 42 } return 0 }`
     if (operation.code === 'Sin' || operation.code === 'Cos') {
-      const expected =
-        operation.code === 'Sin'
-          ? '0'
-          : scalar.spelling === 'f32'
-            ? '1065353216'
-            : '4607182418800017408'
+      let expected = '0'
+      if (operation.code !== 'Sin') {
+        expected = scalar.spelling === 'f32' ? '1065353216' : '4607182418800017408'
+      }
       return `fn floatCase${ordinal}() -> i32 { if ${scalar.spelling}.toBits(${invocation}) == ${expected} { return 42 } return 0 }`
     }
     if (operation.code === 'ToBits')

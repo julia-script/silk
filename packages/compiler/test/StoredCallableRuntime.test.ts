@@ -173,6 +173,19 @@ pub fn main() -> i32 {
 
 type CleanupExit = 'uncalled' | 'consuming' | 'moved' | 'typed-failure'
 
+const cleanupExitStatement = (exit: CleanupExit): string => {
+  switch (exit) {
+    case 'consuming':
+      return 'return holder.step(40)'
+    case 'moved':
+      return 'return keep(move holder)'
+    case 'typed-failure':
+      return 'fail OutOfMemoryError {}'
+    case 'uncalled':
+      return 'return 42'
+  }
+}
+
 const cleanupProgram = (dropBody: string, exit: CleanupExit) => `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
@@ -198,15 +211,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let allocation = run recipe
   let guard = Guard { tag: 2, storage: move allocation }
   let holder = Holder { step: consume(move guard) }
-  ${
-    exit === 'consuming'
-      ? 'return holder.step(40)'
-      : exit === 'moved'
-        ? 'return keep(move holder)'
-        : exit === 'typed-failure'
-          ? 'fail OutOfMemoryError {}'
-          : 'return 42'
-  }
+  ${cleanupExitStatement(exit)}
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
@@ -232,15 +237,7 @@ fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
 effect fn build() -> i32 ! OutOfMemoryError {
   let guard = Guard { tag: 2, marker: marker }
   let holder = Holder { step: consume(move guard) }
-  ${
-    exit === 'consuming'
-      ? 'return holder.step(40)'
-      : exit === 'moved'
-        ? 'return keep(move holder)'
-        : exit === 'typed-failure'
-          ? 'fail OutOfMemoryError {}'
-          : 'return 42'
-  }
+  ${cleanupExitStatement(exit)}
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 42 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`

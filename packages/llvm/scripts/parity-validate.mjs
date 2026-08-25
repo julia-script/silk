@@ -25,7 +25,9 @@ const duplicates = (values) => {
 const sourceFiles = (directory) =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name)
-    return entry.isDirectory() ? sourceFiles(path) : path.endsWith('.ts') ? [path] : []
+    if (entry.isDirectory()) return sourceFiles(path)
+    if (path.endsWith('.ts')) return [path]
+    return []
   })
 
 check(manifest.schemaVersion === 1, 'unsupported manifest schemaVersion')

@@ -809,11 +809,10 @@ requireInvariant(
 )
 const metricRows = ['switched', 'retcon'].flatMap((variant) =>
   Object.entries(selection.candidates[variant].metrics).map(([name, metric]) => {
-    const result = metric.material
-      ? metric.delta < 0
-        ? '**material advantage**'
-        : '**material regression**'
-      : 'not material'
+    let result = 'not material'
+    if (metric.material) {
+      result = metric.delta < 0 ? '**material advantage**' : '**material regression**'
+    }
     const threshold = 'noiseThreshold' in metric ? metric.noiseThreshold : metric.threshold
     return `| ${variant} ${name} | ${metric.direct.toFixed(6)} | ${metric.candidate.toFixed(6)} | ${metric.delta.toFixed(6)} (${(metric.ratio * 100).toFixed(2)}%) | ${threshold.toFixed(6)} | ${result} |`
   }),

@@ -457,12 +457,16 @@ export const lowerEffectCatch = (
   },
 ): LoweredExpression | undefined => {
   if (expression.protected._tag === 'Unavailable') return undefined
-  const protected_ =
-    captured === undefined
-      ? expression.protected._tag === 'ServiceEffectConstruct'
-        ? lowerServiceEffectValue(fn, expression.protected, fn.providedRequirements)
-        : lowerExpression(fn, expression.protected)
-      : Object.freeze({ result: captured.protected })
+  let protected_: LoweredExpression | undefined
+  if (captured === undefined) {
+    if (expression.protected._tag === 'ServiceEffectConstruct') {
+      protected_ = lowerServiceEffectValue(fn, expression.protected, fn.providedRequirements)
+    } else {
+      protected_ = lowerExpression(fn, expression.protected)
+    }
+  } else {
+    protected_ = Object.freeze({ result: captured.protected })
+  }
   const protectedType =
     captured?.protectedType ??
     (protected_ === undefined ? undefined : fn.localTypes.at(protected_.result.ordinal))
@@ -1126,12 +1130,16 @@ const prepareProvidedEffect = (
 ): LoweredProvidedEffect | undefined => {
   const selected = specializeProvider(fn, providerFact)
   if (selected === undefined) return undefined
-  const provider =
-    providerFact.binding !== undefined
-      ? fn.bindingLocals.get(providerFact.binding.ordinal)
-      : providerFact.parameter !== undefined
-        ? fn.parameterLocals.get(providerFact.parameter.ordinal)
-        : undefined
+  let provider: Mir.LocalId | undefined
+  if (providerFact.binding !== undefined) {
+    provider = fn.bindingLocals.get(providerFact.binding.ordinal)
+  } else {
+    if (providerFact.parameter !== undefined) {
+      provider = fn.parameterLocals.get(providerFact.parameter.ordinal)
+    } else {
+      provider = undefined
+    }
+  }
   const ownedProvider = providerFact.selectionAccess === 'Take' ? provider : undefined
   if (selected.witness._tag !== 'SourceConformanceWitness')
     return Object.freeze({

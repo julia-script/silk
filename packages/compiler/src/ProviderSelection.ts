@@ -134,8 +134,15 @@ export interface ConformanceOracle {
   readonly match: (provider: Type.Type, capability: Type.Nominal) => Constraint.ConformanceOutcome
 }
 
-const compareText = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0
+const compareText = (left: string, right: string): number => {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
 
 const canonicalOrigins = (origins: NonEmptySourceSpans): NonEmptySourceSpans => {
   const canonical = SourceSpan.canonicalize(origins)
@@ -299,17 +306,19 @@ export const solve = (options: {
     ])
 
   const selectedMember = selected?.members.at(0)
-  const considered =
-    selectedMember === undefined
-      ? maps
-      : maps.map((relation) => {
-          const key = memberKey(selectedMember)
-          const candidate = relation.candidates.get(key)
-          return Object.freeze({
-            ...relation,
-            candidates: new Map(candidate === undefined ? [] : [[key, candidate]]),
-          })
-        })
+  let considered: ReadonlyArray<RelationCandidates>
+  if (selectedMember === undefined) {
+    considered = maps
+  } else {
+    considered = maps.map((relation) => {
+      const key = memberKey(selectedMember)
+      const candidate = relation.candidates.get(key)
+      return Object.freeze({
+        ...relation,
+        candidates: new Map(candidate === undefined ? [] : [[key, candidate]]),
+      })
+    })
+  }
   const empty = considered.filter((relation) => relation.candidates.size === 0)
   if (empty.length > 0)
     return rejected(

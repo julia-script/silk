@@ -153,20 +153,18 @@ it.effect('accepts canonical static selectors and rejects malformed roots, indic
       'InvalidSliceOperation',
     )
 
-    const wrongIndex = rewriteOperations(fn, (operation) =>
-      operation === read
-        ? Object.freeze({
-            ...read,
-            selectors: Object.freeze(
-              read.selectors.map((selector) =>
-                selector._tag === 'SliceElementSelector'
-                  ? Object.freeze({ ...selector, index: read.root })
-                  : selector,
-              ),
-            ),
-          })
-        : operation,
-    )
+    const wrongIndex = rewriteOperations(fn, (operation) => {
+      if (operation !== read) return operation
+      return Object.freeze({
+        ...read,
+        selectors: Object.freeze(
+          read.selectors.map((selector) => {
+            if (selector._tag !== 'SliceElementSelector') return selector
+            return Object.freeze({ ...selector, index: read.root })
+          }),
+        ),
+      })
+    })
     assert.include(
       MirVerification.verify(replaceFunction(mir, fnIndex, wrongIndex)).map(
         (violation) => violation.rule,
@@ -198,13 +196,13 @@ it.effect(
       if (evaluated._tag !== 'Completed') return
       assert.strictEqual(evaluated.result.value, 201n)
       assert.deepEqual(
-        evaluated.trace.flatMap((event) =>
-          event._tag === 'PlaceRead'
-            ? event.selectors.flatMap((selector) =>
-                selector._tag === 'StaticElement' ? [selector.index] : [],
-              )
-            : [],
-        ),
+        evaluated.trace.flatMap((event) => {
+          if (event._tag !== 'PlaceRead') return []
+          return event.selectors.flatMap((selector) => {
+            if (selector._tag === 'StaticElement') return [selector.index]
+            return []
+          })
+        }),
         [0, 1, 2, 3],
       )
       assert.isFalse(

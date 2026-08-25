@@ -166,13 +166,11 @@ pub fn main() -> i32 { return read(&[Guard { value: 42 }]) }`)
     if (mir._tag !== 'Available') return
     const main = mir.value.functions.find((fn) => fn.id.name === 'main')
     const operations =
-      main?.regions.flatMap((region) =>
-        region._tag === 'OperationRegion'
-          ? region.operations
-          : region._tag === 'CleanupRegion'
-            ? region.releases
-            : [],
-      ) ?? []
+      main?.regions.flatMap((region) => {
+        if (region._tag === 'OperationRegion') return region.operations
+        if (region._tag === 'CleanupRegion') return region.releases
+        return []
+      }) ?? []
     const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
     const cleanup = operations.findIndex(
       (operation, ordinal) => operation._tag === 'Drop' && ordinal > ending,
@@ -346,13 +344,11 @@ pub fn main() -> i32 {
     const mir = Analysis.loweredMir(self)
     const mainMir = mir.functions.find((fn) => fn.id.name === 'main')
     const operations =
-      mainMir?.regions.flatMap((region) =>
-        region._tag === 'OperationRegion'
-          ? region.operations
-          : region._tag === 'CleanupRegion'
-            ? region.releases
-            : [],
-      ) ?? []
+      mainMir?.regions.flatMap((region) => {
+        if (region._tag === 'OperationRegion') return region.operations
+        if (region._tag === 'CleanupRegion') return region.releases
+        return []
+      }) ?? []
     const ending = operations.findIndex((operation) => operation._tag === 'EndLoan')
     const restoredRead = operations.findLastIndex((operation) => operation._tag === 'ReadPlace')
     assert.isAtLeast(ending, 0)

@@ -291,27 +291,25 @@ it.effect('keeps affine captures materialized and ownership explicit', () =>
           Object.freeze({
             ...fn,
             regions: Object.freeze(
-              fn.regions.map((region) =>
-                region._tag !== 'OperationRegion'
-                  ? region
-                  : Object.freeze({
-                      ...region,
-                      operations: Object.freeze(
-                        region.operations.map((operation) =>
-                          operation._tag !== 'MakeEffect'
-                            ? operation
-                            : Object.freeze({
-                                ...operation,
-                                captures: Object.freeze(
-                                  operation.captures.map((capture) =>
-                                    Object.freeze({ ...capture, access: 'Take' as const }),
-                                  ),
-                                ),
-                              }),
+              fn.regions.map((region) => {
+                if (region._tag !== 'OperationRegion') return region
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation): Mir.Operation => {
+                      if (operation._tag !== 'MakeEffect') return operation
+                      return Object.freeze({
+                        ...operation,
+                        captures: Object.freeze(
+                          operation.captures.map((capture) =>
+                            Object.freeze({ ...capture, access: 'Take' }),
+                          ),
                         ),
-                      ),
+                      })
                     }),
-              ),
+                  ),
+                })
+              }),
             ),
           }),
         ),
@@ -414,29 +412,26 @@ it.effect('verifier rejects dangling normalization identities', () =>
     const inconsistent: Mir.Module = Object.freeze({
       ...program,
       functions: Object.freeze(
-        program.functions.map((fn) =>
-          fn !== main
-            ? fn
-            : Object.freeze({
-                ...fn,
-                regions: Object.freeze(
-                  fn.regions.map((region) =>
-                    region !== mainRegion
-                      ? region
-                      : Object.freeze({
-                          ...region,
-                          operations: Object.freeze(
-                            region.operations.map((operation) =>
-                              operation !== run
-                                ? operation
-                                : Object.freeze({ ...run, captures: Object.freeze([]) }),
-                            ),
-                          ),
-                        }),
+        program.functions.map((fn) => {
+          if (fn !== main) return fn
+          return Object.freeze({
+            ...fn,
+            regions: Object.freeze(
+              fn.regions.map((region) => {
+                if (region !== mainRegion) return region
+                return Object.freeze({
+                  ...region,
+                  operations: Object.freeze(
+                    region.operations.map((operation) => {
+                      if (operation !== run) return operation
+                      return Object.freeze({ ...run, captures: Object.freeze([]) })
+                    }),
                   ),
-                ),
+                })
               }),
-        ),
+            ),
+          })
+        }),
       ),
     })
     assert.isTrue(

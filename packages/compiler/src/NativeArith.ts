@@ -33,13 +33,13 @@ export const coerceLane = Effect.fnUntraced(function* (
   const sourceIsAddress = typeof source.type !== 'string'
   const targetIsAddress = typeof target.type !== 'string'
   if (sourceIsAddress && targetIsAddress) return input
-  const scalarBits = (lane: Layout.CallingLane): number =>
-    typeof lane.type !== 'string'
-      ? context.pointerBits
-      : (() => {
-          const scalar = Scalar.find(lane.type) ?? Scalar.defaultInteger
-          return scalar.category === 'Boolean' ? 32 : Scalar.bits(scalar, context.pointerBits)
-        })()
+  const scalarBits = (lane: Layout.CallingLane): number => {
+    if (typeof lane.type !== 'string') {
+      return context.pointerBits
+    }
+    const scalar = Scalar.find(lane.type) ?? Scalar.defaultInteger
+    return scalar.category === 'Boolean' ? 32 : Scalar.bits(scalar, context.pointerBits)
+  }
   const sourceBits = scalarBits(source)
   const targetBits = scalarBits(target)
   const sourceScalar = typeof source.type === 'string' ? Scalar.find(source.type) : undefined
@@ -55,11 +55,28 @@ export const coerceLane = Effect.fnUntraced(function* (
     sourceFloating === targetFloating
   )
     return input
-  let bits = sourceIsAddress
-    ? yield* FunctionBody.cast(context.body, 'ptrtoint', input, sourceIntegerType, `${name}_bits`)
-    : sourceFloating
-      ? yield* FunctionBody.cast(context.body, 'bitcast', input, sourceIntegerType, `${name}_bits`)
-      : input
+  let bits: Value.Input
+  if (sourceIsAddress) {
+    bits = yield* FunctionBody.cast(
+      context.body,
+      'ptrtoint',
+      input,
+      sourceIntegerType,
+      `${name}_bits`,
+    )
+  } else {
+    if (sourceFloating) {
+      bits = yield* FunctionBody.cast(
+        context.body,
+        'bitcast',
+        input,
+        sourceIntegerType,
+        `${name}_bits`,
+      )
+    } else {
+      bits = input
+    }
+  }
   if (sourceBits !== targetBits)
     bits = yield* FunctionBody.cast(
       context.body,
@@ -170,20 +187,32 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
   const unsigned = scalar?.signedness === 'Unsigned'
   const operandType = NativeType.laneType(types, leftLane)
   if (scalar?.category === 'Floating') {
-    const predicate: FunctionBody.FloatingPredicate | undefined =
-      operator === 'Equals'
-        ? 'oeq'
-        : operator === 'NotEquals'
-          ? 'une'
-          : operator === 'LessThan'
-            ? 'olt'
-            : operator === 'LessOrEqual'
-              ? 'ole'
-              : operator === 'GreaterThan'
-                ? 'ogt'
-                : operator === 'GreaterOrEqual'
-                  ? 'oge'
-                  : undefined
+    let predicate: FunctionBody.FloatingPredicate | undefined
+    if (operator === 'Equals') {
+      predicate = 'oeq'
+    } else {
+      if (operator === 'NotEquals') {
+        predicate = 'une'
+      } else {
+        if (operator === 'LessThan') {
+          predicate = 'olt'
+        } else {
+          if (operator === 'LessOrEqual') {
+            predicate = 'ole'
+          } else {
+            if (operator === 'GreaterThan') {
+              predicate = 'ogt'
+            } else {
+              if (operator === 'GreaterOrEqual') {
+                predicate = 'oge'
+              } else {
+                predicate = undefined
+              }
+            }
+          }
+        }
+      }
+    }
     if (predicate !== undefined) {
       const flag = yield* FunctionBody.floatingCompare(
         body,
@@ -194,18 +223,28 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       )
       return yield* FunctionBody.cast(body, 'zext', flag, i32, `callable_fcmp${nameOrdinal}`)
     }
-    const mnemonic: FunctionBody.FloatingBinaryKind | undefined =
-      operator === 'Add'
-        ? 'fadd'
-        : operator === 'Subtract'
-          ? 'fsub'
-          : operator === 'Multiply'
-            ? 'fmul'
-            : operator === 'Divide'
-              ? 'fdiv'
-              : operator === 'Remainder'
-                ? 'frem'
-                : undefined
+    let mnemonic: FunctionBody.FloatingBinaryKind | undefined
+    if (operator === 'Add') {
+      mnemonic = 'fadd'
+    } else {
+      if (operator === 'Subtract') {
+        mnemonic = 'fsub'
+      } else {
+        if (operator === 'Multiply') {
+          mnemonic = 'fmul'
+        } else {
+          if (operator === 'Divide') {
+            mnemonic = 'fdiv'
+          } else {
+            if (operator === 'Remainder') {
+              mnemonic = 'frem'
+            } else {
+              mnemonic = undefined
+            }
+          }
+        }
+      }
+    }
     if (mnemonic === undefined)
       throw new RangeError(`LLVM callable float ${operator} is unavailable`)
     const result = yield* FunctionBody.binary(
@@ -239,19 +278,30 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     operator === 'WrappingSubtract' ||
     operator === 'WrappingMultiply'
   ) {
+    let opcode: 'and' | 'or' | 'xor' | 'add' | 'sub' | 'mul'
+    switch (operator) {
+      case 'BitAnd':
+        opcode = 'and'
+        break
+      case 'BitOr':
+        opcode = 'or'
+        break
+      case 'BitXor':
+        opcode = 'xor'
+        break
+      case 'WrappingAdd':
+        opcode = 'add'
+        break
+      case 'WrappingSubtract':
+        opcode = 'sub'
+        break
+      case 'WrappingMultiply':
+        opcode = 'mul'
+        break
+    }
     const result = yield* FunctionBody.binary(
       body,
-      operator === 'BitAnd'
-        ? 'and'
-        : operator === 'BitOr'
-          ? 'or'
-          : operator === 'BitXor'
-            ? 'xor'
-            : operator === 'WrappingAdd'
-              ? 'add'
-              : operator === 'WrappingSubtract'
-                ? 'sub'
-                : 'mul',
+      opcode,
       left,
       right,
       `callable_integer${nameOrdinal}`,
@@ -262,10 +312,12 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
   if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
     if (operationState.trapBlock === undefined)
       operationState.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
-    const width =
-      scalar === undefined
-        ? 32
-        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    let width: number
+    if (scalar === undefined) {
+      width = 32
+    } else {
+      width = Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    }
     const limit = yield* Constant.integerUnsigned(builder, operandType, BigInt(width))
     const invalid = yield* FunctionBody.integerCompare(
       body,
@@ -277,9 +329,12 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     const continueBlock = yield* LlvmBlock.make(body, `callable_shift${nameOrdinal}_ok`)
     yield* FunctionBody.conditionalBranch(body, invalid, operationState.trapBlock, continueBlock)
     yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+    let opcode: 'shl' | 'lshr' | 'ashr'
+    if (operator === 'ShiftLeft') opcode = 'shl'
+    else opcode = unsigned ? 'lshr' : 'ashr'
     const result = yield* FunctionBody.binary(
       body,
-      operator === 'ShiftLeft' ? 'shl' : unsigned ? 'lshr' : 'ashr',
+      opcode,
       left,
       right,
       `callable_shift${nameOrdinal}`,
@@ -309,14 +364,20 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       returnType: operandType,
       parameters: Object.freeze([operandType, operandType]),
     })
-    const intrinsic =
-      operator === 'SaturatingAdd'
-        ? unsigned
-          ? 'uadd.sat'
-          : 'sadd.sat'
-        : unsigned
-          ? 'usub.sat'
-          : 'ssub.sat'
+    let intrinsic: Intrinsic.Id
+    if (operator === 'SaturatingAdd') {
+      if (unsigned) {
+        intrinsic = 'uadd.sat'
+      } else {
+        intrinsic = 'sadd.sat'
+      }
+    } else {
+      if (unsigned) {
+        intrinsic = 'usub.sat'
+      } else {
+        intrinsic = 'ssub.sat'
+      }
+    }
     const result = yield* Intrinsic.call(
       body,
       intrinsic,
@@ -331,10 +392,12 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     return result
   }
   if (operator === 'SaturatingMultiply') {
-    const bits =
-      scalar === undefined
-        ? 32
-        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    let bits: number
+    if (scalar === undefined) {
+      bits = 32
+    } else {
+      bits = Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    }
     const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
     let signature = signatures.get(bits)
     if (signature === undefined) {
@@ -367,10 +430,12 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
       [1],
       `callable_saturating${nameOrdinal}_overflow`,
     )
-    const range =
-      scalar?.category === 'Integer'
-        ? Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
-        : { minimum: -2147483648n, maximum: 2147483647n }
+    let range: { readonly minimum: bigint; readonly maximum: bigint }
+    if (scalar?.category === 'Integer') {
+      range = Scalar.range(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    } else {
+      range = { minimum: -2147483648n, maximum: 2147483647n }
+    }
     const maximum = unsigned
       ? yield* Constant.integerUnsigned(builder, operandType, range.maximum)
       : yield* Constant.integerSigned(builder, operandType, range.maximum)
@@ -414,22 +479,34 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     operationState.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
   let result: Value.Value
   if (operator === 'Add' || operator === 'Subtract' || operator === 'Multiply') {
-    const intrinsicId =
-      operator === 'Add'
-        ? unsigned
-          ? ('uadd.with.overflow' as const)
-          : ('sadd.with.overflow' as const)
-        : operator === 'Subtract'
-          ? unsigned
-            ? ('usub.with.overflow' as const)
-            : ('ssub.with.overflow' as const)
-          : unsigned
-            ? ('umul.with.overflow' as const)
-            : ('smul.with.overflow' as const)
-    const bits =
-      scalar === undefined
-        ? 32
-        : Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    let intrinsicId: Intrinsic.Id
+    if (operator === 'Add') {
+      if (unsigned) {
+        intrinsicId = 'uadd.with.overflow'
+      } else {
+        intrinsicId = 'sadd.with.overflow'
+      }
+    } else {
+      if (operator === 'Subtract') {
+        if (unsigned) {
+          intrinsicId = 'usub.with.overflow'
+        } else {
+          intrinsicId = 'ssub.with.overflow'
+        }
+      } else {
+        if (unsigned) {
+          intrinsicId = 'umul.with.overflow'
+        } else {
+          intrinsicId = 'smul.with.overflow'
+        }
+      }
+    }
+    let bits: number
+    if (scalar === undefined) {
+      bits = 32
+    } else {
+      bits = Scalar.bits(scalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+    }
     const signatures = unsigned ? unsignedOverflowSignatures : signedOverflowSignatures
     let overflowSignature = signatures.get(bits)
     if (overflowSignature === undefined) {
@@ -511,13 +588,10 @@ export const emitCallableBinary = Effect.fnUntraced(function* (
     const continueBlock = yield* LlvmBlock.make(body, `callable_div${nameOrdinal}_ok`)
     yield* FunctionBody.conditionalBranch(body, trapping, operationState.trapBlock, continueBlock)
     yield* LlvmBlock.setInsertionPoint(body, continueBlock)
-    result = yield* FunctionBody.binary(
-      body,
-      operator === 'Divide' ? (unsigned ? 'udiv' : 'sdiv') : unsigned ? 'urem' : 'srem',
-      left,
-      right,
-      `callable_arith${nameOrdinal}`,
-    )
+    let opcode: 'udiv' | 'sdiv' | 'urem' | 'srem'
+    if (operator === 'Divide') opcode = unsigned ? 'udiv' : 'sdiv'
+    else opcode = unsigned ? 'urem' : 'srem'
+    result = yield* FunctionBody.binary(body, opcode, left, right, `callable_arith${nameOrdinal}`)
   }
   yield* NativeDebug.locate(debug, span, yield* Value.instruction(body, result))
   return result
@@ -591,9 +665,10 @@ export const emitIntegerConversion = Effect.fnUntraced(function* (
     yield* LlvmBlock.setInsertionPoint(body, following)
   }
   if (sourceBits === targetBits) return input
+  const extension = source.signedness === 'Signed' ? 'sext' : 'zext'
   return yield* FunctionBody.cast(
     body,
-    sourceBits < targetBits ? (source.signedness === 'Signed' ? 'sext' : 'zext') : 'trunc',
+    sourceBits < targetBits ? extension : 'trunc',
     input,
     physicalTarget,
     name,

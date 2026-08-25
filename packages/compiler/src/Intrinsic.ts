@@ -201,6 +201,27 @@ const builtin = (options: {
   readonly returnedBorrowParameter?: number
 }): BuiltinOperation => {
   const spelling = intrinsicSpelling(options.actor, options.name)
+  let invariant: string | undefined
+  if (options.unsafe) {
+    switch (options.actor) {
+      case 'RawBuffer':
+        invariant =
+          'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
+        break
+      case 'Slot':
+        invariant =
+          'caller proves the selected slot is in bounds and has the initializedness state required by the operation'
+        break
+      case 'Shared':
+        invariant =
+          'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once'
+        break
+      case 'Execution':
+        invariant =
+          'caller proves the allocation came from the exact execution package layout specialization and transfers it, the body, and the fixed endpoint exactly once'
+        break
+    }
+  }
   return Object.freeze({
     _tag: 'IntrinsicOperation',
     id: operationId('Intrinsic', spelling),
@@ -213,22 +234,7 @@ const builtin = (options: {
     admission: admission(options.actor),
     consumer: consumer(options.actor, options.name),
     targets: normalizeExecutionTargets(options.targets ?? executionTargets),
-    ...(options.unsafe &&
-    (options.actor === 'RawBuffer' ||
-      options.actor === 'Slot' ||
-      options.actor === 'Shared' ||
-      options.actor === 'Execution')
-      ? {
-          invariant:
-            options.actor === 'RawBuffer'
-              ? 'caller proves raw-buffer bounds, ownership, and initializedness required by the operation'
-              : options.actor === 'Slot'
-                ? 'caller proves the selected slot is in bounds and has the initializedness state required by the operation'
-                : options.actor === 'Shared'
-                  ? 'caller proves the allocation came from the exact shared layout specialization and transfers it and the value exactly once'
-                  : 'caller proves the allocation came from the exact execution package layout specialization and transfers it, the body, and the fixed endpoint exactly once',
-        }
-      : {}),
+    ...(invariant === undefined ? {} : { invariant }),
     ...(options.actor === 'Host' && options.name === 'write'
       ? { hostImport: 'silk_standard_stream_write_v1' }
       : {}),
@@ -635,16 +641,22 @@ const osBuiltin = (options: {
   })
 
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
-  const concreteResult =
-    operation.result === 'Self'
-      ? scalar.spelling
-      : operation.result === 'Boolean'
-        ? Scalar.boolean.spelling
-        : operation.result === 'OptionSelf'
-          ? scalar.spelling
-          : operation.result === 'OptionTarget'
-            ? (Scalar.conversionTarget(operation.code)?.spelling ?? scalar.spelling)
-            : operation.result
+  let concreteResult: Type.Type
+  switch (operation.result) {
+    case 'Self':
+    case 'OptionSelf':
+      concreteResult = scalar.spelling
+      break
+    case 'Boolean':
+      concreteResult = Scalar.boolean.spelling
+      break
+    case 'OptionTarget':
+      concreteResult = Scalar.conversionTarget(operation.code)?.spelling ?? scalar.spelling
+      break
+    default:
+      concreteResult = operation.result
+      break
+  }
   const checked = operation.result === 'OptionSelf' || operation.result === 'OptionTarget'
   const result = checked ? `Option<${concreteResult}>` : concreteResult
   const semanticResult = checked ? Type.option(concreteResult) : concreteResult
@@ -1625,16 +1637,24 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
       )
         throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
-      const identity =
-        operation.rule._tag === 'BuiltinRule'
-          ? operation.rule.operation
-          : operation.rule._tag === 'EffectRule'
-            ? `${operation.rule._tag}.${operation.rule.operation}`
-            : operation.rule._tag === 'ContractRule'
-              ? `${operation.rule._tag}.${operation.rule.post}`
-              : operation.rule._tag === 'EnumValueRule'
-                ? operation.rule._tag
-                : `${operation.rule._tag}.${operation.rule.operation}`
+      let identity: string
+      switch (operation.rule._tag) {
+        case 'BuiltinRule':
+          identity = operation.rule.operation
+          break
+        case 'EffectRule':
+          identity = `${operation.rule._tag}.${operation.rule.operation}`
+          break
+        case 'ContractRule':
+          identity = `${operation.rule._tag}.${operation.rule.post}`
+          break
+        case 'EnumValueRule':
+          identity = operation.rule._tag
+          break
+        default:
+          identity = `${operation.rule._tag}.${operation.rule.operation}`
+          break
+      }
       return Object.freeze({
         operation: `Intrinsic.${operation.spelling}`,
         signature: signature(operation),

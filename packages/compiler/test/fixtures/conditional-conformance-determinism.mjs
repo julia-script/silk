@@ -126,7 +126,11 @@ const encodeProof = ({ goal, proof }) => ({
   trace: ConformanceGoal.traceLines(proof),
 })
 
-const byGoal = (left, right) => (left.goal < right.goal ? -1 : left.goal > right.goal ? 1 : 0)
+const byGoal = (left, right) => {
+  if (left.goal < right.goal) return -1
+  if (left.goal > right.goal) return 1
+  return 0
+}
 
 const proveAll = (target, providers) =>
   providers

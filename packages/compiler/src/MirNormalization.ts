@@ -1,3 +1,4 @@
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Mir from './Mir.js'
 import * as ProvisionalMir from './ProvisionalMir.js'
 
@@ -57,12 +58,12 @@ const hasConcreteTarget = (
   program: Mir.Module,
   operation: Extract<Mir.Operation, { readonly _tag: 'Call' | 'ApplyCallable' }>,
 ): boolean => {
-  const declaration =
-    operation._tag === 'Call'
-      ? operation.target
-      : operation.target?._tag === 'DeclarationCallableTarget'
-        ? operation.target.declaration
-        : undefined
+  let declaration: DeclarationFacts.CanonicalId | undefined
+  if (operation._tag === 'Call') {
+    declaration = operation.target
+  } else if (operation.target?._tag === 'DeclarationCallableTarget') {
+    declaration = operation.target.declaration
+  }
   return (
     declaration !== undefined &&
     program.functions.some((candidate) =>
@@ -178,12 +179,11 @@ const rejection = (
 
 const suspensionReason = (
   classification: ProvisionalMir.Classification,
-): Extract<Mir.NormalizationRejection, 'SuspendableRunner' | 'SuspensionUnknown'> | undefined =>
-  classification === 'Suspendable'
-    ? 'SuspendableRunner'
-    : classification === 'Unknown'
-      ? 'SuspensionUnknown'
-      : undefined
+): Extract<Mir.NormalizationRejection, 'SuspendableRunner' | 'SuspensionUnknown'> | undefined => {
+  if (classification === 'Suspendable') return 'SuspendableRunner'
+  if (classification === 'Unknown') return 'SuspensionUnknown'
+  return undefined
+}
 
 const operationClassification = (
   provisional: ProvisionalMir.Module,
@@ -304,25 +304,27 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
           run?._tag === 'RunEffectValue'
             ? suspensionReason(operationClassification(provisional, folded, run))
             : undefined
-        const reason: Mir.NormalizationRejection | undefined =
-          runSuspension ??
-          (uses.length === 0
-            ? 'EffectEscapes'
-            : uses.length > 1
-              ? 'EffectReused'
-              : use === undefined || !sameRegion(use.region.id, region.id)
-                ? 'CrossRegionUse'
-                : run?._tag !== 'RunEffectValue' ||
-                    run.effect.ordinal !== construction.destination.ordinal
-                  ? 'EffectEscapes'
-                  : construction.captures.some(
-                        (capture, ordinal) =>
-                          (capture.access !== 'Copy' && capture.access !== 'Shared') ||
-                          construction.type.environment.fields.at(ordinal)?.representation ===
-                            'Borrow',
-                      )
-                    ? 'AffineCapture'
-                    : undefined)
+        let reason: Mir.NormalizationRejection | undefined = runSuspension
+        if (reason === undefined) {
+          if (uses.length === 0) reason = 'EffectEscapes'
+          else if (uses.length > 1) reason = 'EffectReused'
+          else if (use === undefined || !sameRegion(use.region.id, region.id)) {
+            reason = 'CrossRegionUse'
+          } else if (
+            run?._tag !== 'RunEffectValue' ||
+            run.effect.ordinal !== construction.destination.ordinal
+          ) {
+            reason = 'EffectEscapes'
+          } else if (
+            construction.captures.some(
+              (capture, ordinal) =>
+                (capture.access !== 'Copy' && capture.access !== 'Shared') ||
+                construction.type.environment.fields.at(ordinal)?.representation === 'Borrow',
+            )
+          ) {
+            reason = 'AffineCapture'
+          }
+        }
         if (reason !== undefined) {
           verdicts.push(rejection(folded, region.id, construction, reason))
           continue

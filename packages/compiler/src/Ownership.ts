@@ -258,23 +258,32 @@ const categoryOf = (
   index: DeclarationIndex.Index,
   type: DeclarationFacts.SemanticType | undefined,
   assumptions: ReadonlySet<string> = new Set(),
-): OwnershipCategory =>
-  type === undefined
-    ? Object.freeze({ _tag: 'Unavailable' })
-    : (Type.isEffect(type) && type.access === 'Shared') ||
-        (Type.isCallable(type) && type.mode === 'Shared') ||
-        ConformanceProof.copyType(index, type, assumptions)
-      ? copyable
-      : Object.freeze({ _tag: 'MoveOnly', type })
+): OwnershipCategory => {
+  if (type === undefined) {
+    return Object.freeze({ _tag: 'Unavailable' })
+  }
+  if (
+    (Type.isEffect(type) && type.access === 'Shared') ||
+    (Type.isCallable(type) && type.mode === 'Shared') ||
+    ConformanceProof.copyType(index, type, assumptions)
+  ) {
+    return copyable
+  }
+  return Object.freeze({ _tag: 'MoveOnly', type })
+}
 
-const siteKey = (site: BindingSite): string =>
-  site._tag === 'Parameter'
-    ? `p${site.parameter.ordinal}`
-    : site._tag === 'Let'
-      ? `b${site.binding.ordinal}`
-      : site._tag === 'Pattern'
-        ? `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
-        : `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
+const siteKey = (site: BindingSite): string => {
+  if (site._tag === 'Parameter') {
+    return `p${site.parameter.ordinal}`
+  }
+  if (site._tag === 'Let') {
+    return `b${site.binding.ordinal}`
+  }
+  if (site._tag === 'Pattern') {
+    return `m${site.binding.arm.match.span.start}.a${site.binding.arm.ordinal}.p${site.binding.ordinal}`
+  }
+  return `t${site.owner.span.sourceId}:${site.owner.span.start}:${site.owner.span.end}:${site.owner.ordinal}`
+}
 
 interface MutableBinding {
   readonly site: BindingSite
@@ -326,12 +335,16 @@ const retainedBinding = (
   state: CheckState,
   expression: Hir.Expression,
 ): MutableBinding | undefined => {
-  const source =
-    expression._tag === 'Move'
-      ? expression.subject
-      : expression._tag === 'UnionConvert'
-        ? expression.source
-        : expression
+  let source: Hir.Expression
+  if (expression._tag === 'Move') {
+    source = expression.subject
+  } else {
+    if (expression._tag === 'UnionConvert') {
+      source = expression.source
+    } else {
+      source = expression
+    }
+  }
   const site = useSite(source)
   return site === undefined ? undefined : state.bindings.get(siteKey(site))
 }
@@ -340,12 +353,16 @@ const borrowRootType = (state: CheckState, expression: Hir.Expression): Type.Typ
   if (expression._tag !== 'SliceBorrow' && expression._tag !== 'ValueBorrow') return undefined
   if (expression.root._tag === 'TemporarySliceRoot')
     return expression.root.value._tag === 'Unavailable' ? undefined : expression.root.value.type
-  const site: BindingSite =
-    expression.root._tag === 'BindingSliceRoot'
-      ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
-      : expression.root._tag === 'ParameterSliceRoot'
-        ? Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
-        : Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
+  let site: BindingSite
+  if (expression.root._tag === 'BindingSliceRoot') {
+    site = Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+  } else {
+    if (expression.root._tag === 'ParameterSliceRoot') {
+      site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+    } else {
+      site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
+    }
+  }
   return state.bindings.get(siteKey(site))?.type
 }
 
@@ -483,19 +500,22 @@ const callableEnvironment = (
       const cause = capture.value._tag === 'Unavailable' ? capture.value.cause : undefined
       const retained = retainedBinding(state, capture.value)
       const root = borrowRootType(state, capture.value)
+      let executionAffinity: ExecutionAffinity.ExecutionAffinity
+      if (type === undefined)
+        executionAffinity = ExecutionAffinity.ofEnvironment(state.index, [
+          Object.freeze(cause === undefined ? {} : { cause }),
+        ])
+      else if (root !== undefined)
+        executionAffinity = ExecutionAffinity.ofBorrow(state.index, type, root)
+      else
+        executionAffinity =
+          retained?.executionAffinity ?? ExecutionAffinity.ofType(state.index, type)
       return Object.freeze({
         ordinal: capture.ordinal,
         parameterOrdinal: capture.parameterOrdinal,
         access: capture.access,
         ...(type === undefined ? {} : { type }),
-        executionAffinity:
-          type === undefined
-            ? ExecutionAffinity.ofEnvironment(state.index, [
-                Object.freeze(cause === undefined ? {} : { cause }),
-              ])
-            : root !== undefined
-              ? ExecutionAffinity.ofBorrow(state.index, type, root)
-              : (retained?.executionAffinity ?? ExecutionAffinity.ofType(state.index, type)),
+        executionAffinity,
         localSharedObligations:
           capture.access === 'Take' && type !== undefined
             ? (retained?.localSharedObligations ?? LocalSharedOwnership.ofType(state.index, type))
@@ -554,12 +574,16 @@ const executableEnvironment = (
     })
   if (expression._tag === 'EffectBlock') {
     const captures = expression.captures.map((capture) => {
-      const site: BindingSite | undefined =
-        capture.binding !== undefined
-          ? Object.freeze({ _tag: 'Let', binding: capture.binding })
-          : capture.parameter !== undefined
-            ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-            : undefined
+      let site: BindingSite | undefined
+      if (capture.binding !== undefined) {
+        site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+      } else {
+        if (capture.parameter !== undefined) {
+          site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+        } else {
+          site = undefined
+        }
+      }
       return Object.freeze({
         access: capture.access,
         binding: site === undefined ? undefined : state.bindings.get(siteKey(site)),
@@ -578,40 +602,41 @@ const executableEnvironment = (
         ),
       ),
       obligations: LocalSharedOwnership.combine(
-        captures.map(({ access, binding }) =>
-          access !== 'Take'
-            ? LocalSharedOwnership.none
-            : (binding?.localSharedObligations ??
-              (binding?.type === undefined
-                ? LocalSharedOwnership.ofEnvironment(state.index, [
-                    Object.freeze(
-                      binding?.cause === undefined
-                        ? { access: 'Take' as const }
-                        : { access: 'Take' as const, cause: binding.cause },
-                    ),
-                  ])
-                : LocalSharedOwnership.ofType(state.index, binding.type))),
-        ),
+        captures.map(({ access, binding }) => {
+          if (access !== 'Take') {
+            return LocalSharedOwnership.none
+          }
+          return (
+            binding?.localSharedObligations ??
+            (binding?.type === undefined
+              ? LocalSharedOwnership.ofEnvironment(state.index, [
+                  Object.freeze(
+                    binding?.cause === undefined
+                      ? { access: 'Take' as const }
+                      : { access: 'Take' as const, cause: binding.cause },
+                  ),
+                ])
+              : LocalSharedOwnership.ofType(state.index, binding.type))
+          )
+        }),
       ),
     })
   }
-  const components: ReadonlyArray<{
+  let components: ReadonlyArray<{
     readonly access: Type.CaptureAccess
     readonly type?: Type.Type
     readonly cause?: Diagnostic.Identity
-  }> =
-    expression._tag === 'EffectConstruct' || expression._tag === 'ServiceEffectConstruct'
-      ? expression.arguments.map((argument) =>
-          Object.freeze({
-            access: 'Take' as const,
-            ...(argument._tag === 'Unavailable'
-              ? argument.cause === undefined
-                ? {}
-                : { cause: argument.cause }
-              : { type: argument.type }),
-          }),
-        )
-      : Object.freeze([])
+  }>
+  if (expression._tag === 'EffectConstruct' || expression._tag === 'ServiceEffectConstruct') {
+    components = expression.arguments.map((argument) => {
+      if (argument._tag !== 'Unavailable')
+        return Object.freeze({ access: 'Take' as const, type: argument.type })
+      if (argument.cause === undefined) return Object.freeze({ access: 'Take' as const })
+      return Object.freeze({ access: 'Take' as const, cause: argument.cause })
+    })
+  } else {
+    components = Object.freeze([])
+  }
   if (components.length === 0) return undefined
   return Object.freeze({
     affinity: ExecutionAffinity.ofEnvironment(state.index, components),
@@ -671,14 +696,18 @@ const checkExpression = (
   guard = false,
   escaping = false,
 ): void => {
-  const argumentConsumes = (argument: Hir.Expression): boolean =>
-    argument._tag === 'Unavailable'
-      ? true
-      : Type.isEffect(argument.type)
-        ? argument.type.access === 'Take'
-        : Type.isCallable(argument.type)
-          ? argument.type.mode === 'Take'
-          : true
+  const argumentConsumes = (argument: Hir.Expression): boolean => {
+    if (argument._tag === 'Unavailable') {
+      return true
+    }
+    if (Type.isEffect(argument.type)) {
+      return argument.type.access === 'Take'
+    }
+    if (Type.isCallable(argument.type)) {
+      return argument.type.mode === 'Take'
+    }
+    return true
+  }
   switch (expression._tag) {
     case 'ParameterReference':
     case 'BindingReference': {
@@ -794,12 +823,16 @@ const checkExpression = (
         checkExpression(state, live, expression.root.value, true, guard, escaping)
         return
       }
-      const site: BindingSite =
-        expression.root._tag === 'BindingSliceRoot'
-          ? Object.freeze({ _tag: 'Let', binding: expression.root.binding })
-          : expression.root._tag === 'ParameterSliceRoot'
-            ? Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
-            : Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
+      let site: BindingSite
+      if (expression.root._tag === 'BindingSliceRoot') {
+        site = Object.freeze({ _tag: 'Let', binding: expression.root.binding })
+      } else {
+        if (expression.root._tag === 'ParameterSliceRoot') {
+          site = Object.freeze({ _tag: 'Parameter', parameter: expression.root.parameter })
+        } else {
+          site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
+        }
+      }
       checkUse(state, live, site, expression.span, false)
       return
     }
@@ -932,24 +965,32 @@ const checkExpression = (
     }
     case 'EffectBlock': {
       for (const capture of expression.captures) {
-        const site: BindingSite | undefined =
-          capture.binding !== undefined
-            ? Object.freeze({ _tag: 'Let', binding: capture.binding })
-            : capture.parameter !== undefined
-              ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-              : undefined
+        let site: BindingSite | undefined
+        if (capture.binding !== undefined) {
+          site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+        } else {
+          if (capture.parameter !== undefined) {
+            site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+          } else {
+            site = undefined
+          }
+        }
         if (site !== undefined) checkUse(state, live, site, capture.span, capture.access === 'Take')
       }
       return
     }
     case 'EffectBindRequirement': {
       checkExpression(state, live, expression.protected, false, guard, escaping)
-      const site: BindingSite | undefined =
-        expression.provider.binding !== undefined
-          ? Object.freeze({ _tag: 'Let', binding: expression.provider.binding })
-          : expression.provider.parameter !== undefined
-            ? Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
-            : undefined
+      let site: BindingSite | undefined
+      if (expression.provider.binding !== undefined) {
+        site = Object.freeze({ _tag: 'Let', binding: expression.provider.binding })
+      } else {
+        if (expression.provider.parameter !== undefined) {
+          site = Object.freeze({ _tag: 'Parameter', parameter: expression.provider.parameter })
+        } else {
+          site = undefined
+        }
+      }
       if (site !== undefined)
         checkUse(
           state,
@@ -1068,33 +1109,38 @@ const checkExpression = (
         }
         if (arm.guard !== undefined) checkExpression(state, armLive, arm.guard, false, true, false)
         checkExpression(state, armLive, arm.result, consuming, guard, true)
-        const cleanup =
-          expression.access === 'Move'
-            ? [
-                ...arm.cleanup.flatMap((path) => {
-                  const type = CleanupPlan.cleanupTypeAtPath(
-                    state.index,
-                    arm.member === undefined ? scrutineeType : Match.sourceType(arm.member),
-                    path,
-                  )
-                  return type === undefined
-                    ? []
-                    : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(state.index, type) })]
-                }),
-                ...arm.bindings.flatMap((binding) => {
-                  const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-                  return armLive.has(siteKey(site)) &&
-                    categoryOf(state.index, binding.type, state.copyAssumptions)._tag === 'MoveOnly'
-                    ? [
-                        Object.freeze({
-                          path: binding.path,
-                          cleanup: CleanupPlan.cleanupPlan(state.index, binding.type),
-                        }),
-                      ]
-                    : []
-                }),
-              ]
-            : []
+        let cleanup: ReadonlyArray<{
+          readonly path: ReadonlyArray<DeclarationFacts.FieldId>
+          readonly cleanup: CleanupPlan.CleanupPlan
+        }>
+        if (expression.access === 'Move') {
+          cleanup = [
+            ...arm.cleanup.flatMap((path) => {
+              const type = CleanupPlan.cleanupTypeAtPath(
+                state.index,
+                arm.member === undefined ? scrutineeType : Match.sourceType(arm.member),
+                path,
+              )
+              return type === undefined
+                ? []
+                : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(state.index, type) })]
+            }),
+            ...arm.bindings.flatMap((binding) => {
+              const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
+              return armLive.has(siteKey(site)) &&
+                categoryOf(state.index, binding.type, state.copyAssumptions)._tag === 'MoveOnly'
+                ? [
+                    Object.freeze({
+                      path: binding.path,
+                      cleanup: CleanupPlan.cleanupPlan(state.index, binding.type),
+                    }),
+                  ]
+                : []
+            }),
+          ]
+        } else {
+          cleanup = []
+        }
         armFacts.push(
           Object.freeze({
             id: arm.id,
@@ -1137,12 +1183,19 @@ const checkExpression = (
           checkExpression(state, live, selector.index, false)
         }
       }
-      const rootSite: BindingSite =
-        expression.place._tag === 'WritePlace'
-          ? ownedWriteSite(expression.place.root)
-          : expression.place.root._tag === 'BindingSliceRoot'
-            ? Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
-            : Object.freeze({ _tag: 'Parameter', parameter: expression.place.root.parameter })
+      let rootSite: BindingSite
+      if (expression.place._tag === 'WritePlace') {
+        rootSite = ownedWriteSite(expression.place.root)
+      } else {
+        if (expression.place.root._tag === 'BindingSliceRoot') {
+          rootSite = Object.freeze({ _tag: 'Let', binding: expression.place.root.binding })
+        } else {
+          rootSite = Object.freeze({
+            _tag: 'Parameter',
+            parameter: expression.place.root.parameter,
+          })
+        }
+      }
       const rootKey = siteKey(rootSite)
       const root = state.bindings.get(rootKey)
       const wasLive = live.has(rootKey)
@@ -1245,14 +1298,18 @@ interface LoanAnalysis {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
-const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite =>
-  root._tag === 'BindingRoot'
-    ? Object.freeze({ _tag: 'Let', binding: root.binding.id })
-    : root._tag === 'ParameterRoot'
-      ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
-      : root._tag === 'PatternRoot'
-        ? Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
-        : Object.freeze({ _tag: 'Temporary', owner: root.owner })
+const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite => {
+  if (root._tag === 'BindingRoot') {
+    return Object.freeze({ _tag: 'Let', binding: root.binding.id })
+  }
+  if (root._tag === 'ParameterRoot') {
+    return Object.freeze({ _tag: 'Parameter', parameter: root.parameter.id })
+  }
+  if (root._tag === 'PatternRoot') {
+    return Object.freeze({ _tag: 'Pattern', binding: root.binding.id })
+  }
+  return Object.freeze({ _tag: 'Temporary', owner: root.owner })
+}
 
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
@@ -1738,6 +1795,9 @@ const analyzeLoans = (
           )
           return
         }
+        let origin: LoanFact['origin'] = 'ValueBorrow'
+        if (expression.formation._tag === 'FixedArrayBorrow') origin = 'FixedArrayBorrow'
+        else if (expression.formation._tag === 'SliceReborrow') origin = 'SliceReborrow'
         loans.push(
           Object.freeze({
             _tag: 'Loan',
@@ -1749,12 +1809,7 @@ const analyzeLoans = (
             }),
             root,
             access: expression.access,
-            origin:
-              expression.formation._tag === 'FixedArrayBorrow'
-                ? 'FixedArrayBorrow'
-                : expression.formation._tag === 'SliceReborrow'
-                  ? 'SliceReborrow'
-                  : 'ValueBorrow',
+            origin,
             suspendsParent:
               expression.formation._tag === 'SliceReborrow' && expression.formation.suspendsParent,
             startRegion: region,
@@ -1939,18 +1994,12 @@ const analyzeLoans = (
       case 'CallableApply': {
         const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
         const returnedOrdinal = returnedArgumentOrdinal(expression)
-        const inspectCallee = (): void =>
-          inspect(
-            expression.callee,
-            region,
-            active,
-            expression.mode === 'Take'
-              ? 'Move'
-              : expression.mode === 'Exclusive'
-                ? 'Write'
-                : 'Read',
-            delayedEnd,
-          )
+        const inspectCallee = (): void => {
+          let access: 'Move' | 'Write' | 'Read' = 'Read'
+          if (expression.mode === 'Take') access = 'Move'
+          else if (expression.mode === 'Exclusive') access = 'Write'
+          inspect(expression.callee, region, active, access, delayedEnd)
+        }
         const inspectArguments = (): void => {
           for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
             const candidate = argument.expression
@@ -2001,17 +2050,14 @@ const analyzeLoans = (
               callActive.push(loan)
               continue
             }
-            inspect(
-              candidate,
-              region,
-              callActive,
-              naturalAccess(candidate),
-              argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
-                ? delayedEnd
-                : returnedOrdinal === argumentOrdinal
-                  ? (delayedEnd ?? Object.freeze({ region, span: expression.syntax.span }))
-                  : undefined,
-            )
+            let argumentEnd:
+              | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+              | undefined
+            if (argument.type._tag === 'Available' && Type.isEffect(argument.type.type))
+              argumentEnd = delayedEnd
+            else if (returnedOrdinal === argumentOrdinal)
+              argumentEnd = delayedEnd ?? Object.freeze({ region, span: expression.syntax.span })
+            inspect(candidate, region, callActive, naturalAccess(candidate), argumentEnd)
           }
         }
         if (expression.provenance._tag === 'PipelineCallableApplication') {
@@ -2037,19 +2083,15 @@ const analyzeLoans = (
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
             const preservesEffectLifetime =
               argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
-            inspect(
-              candidate,
-              region,
-              callActive,
-              naturalAccess(candidate),
-              preservesEffectLifetime
-                ? delayedEnd
-                : returnedOrdinal === argumentOrdinal
-                  ? (delayedEnd ?? Object.freeze({ region, span: expression.syntax.span }))
-                  : consumesSlot
-                    ? Object.freeze({ region, span: expression.syntax.span })
-                    : undefined,
-            )
+            let argumentEnd:
+              | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+              | undefined
+            if (preservesEffectLifetime) argumentEnd = delayedEnd
+            else if (returnedOrdinal === argumentOrdinal)
+              argumentEnd = delayedEnd ?? Object.freeze({ region, span: expression.syntax.span })
+            else if (consumesSlot)
+              argumentEnd = Object.freeze({ region, span: expression.syntax.span })
+            inspect(candidate, region, callActive, naturalAccess(candidate), argumentEnd)
             continue
           }
           const directRoot = borrowSite(candidate.formation.root)
@@ -2225,43 +2267,44 @@ const analyzeLoans = (
           break
         case 'BindStatement': {
           const initializerType = statement.binding.initializer.type
-          inspect(
-            statement.binding.initializer,
-            statement.region,
-            [],
-            'Read',
-            initializerType._tag === 'Available' && Type.isEffect(initializerType.type)
-              ? (runEnds.get(statement.binding.id.ordinal) ??
-                  callableEnds.get(statement.binding.id.ordinal) ?? {
-                    region: statement.region,
-                    span: fn.declaration.syntax.span,
-                  })
-              : // A binding that stores an executable holds its captured borrows for as long as it
-                // holds that environment, whether it is the binding's own value or sits in a field
-                // of the aggregate it names.
-                initializerType._tag === 'Available' &&
-                  (Type.isCallable(initializerType.type) ||
-                    Type.containsExecutableRepresentation(initializerType.type))
-                ? (laterExecutableEnd(
-                    runEnds.get(statement.binding.id.ordinal),
-                    callableEnds.get(statement.binding.id.ordinal),
-                  ) ?? {
-                    region: statement.region,
-                    span: fn.declaration.syntax.span,
-                  })
-                : initializerType._tag === 'Available' && Type.isSlot(initializerType.type)
-                  ? (slotEnds.get(statement.binding.id.ordinal) ?? {
-                      region: statement.region,
-                      span: fn.declaration.syntax.span,
-                    })
-                  : initializerType._tag === 'Available' &&
-                      Type.containsViewBorrow(initializerType.type)
-                    ? (viewEnds.get(statement.binding.id.ordinal) ?? {
-                        region: statement.region,
-                        span: statement.binding.initializer.syntax.span,
-                      })
-                    : undefined,
+          const fallbackEnd = Object.freeze({
+            region: statement.region,
+            span: fn.declaration.syntax.span,
+          })
+          let bindingEnd:
+            | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
+            | undefined
+          if (initializerType._tag === 'Available' && Type.isEffect(initializerType.type))
+            bindingEnd =
+              runEnds.get(statement.binding.id.ordinal) ??
+              callableEnds.get(statement.binding.id.ordinal) ??
+              fallbackEnd
+          // A binding that stores an executable holds its captured borrows for as long as it
+          // holds that environment, whether it is the binding's own value or sits in a field
+          // of the aggregate it names.
+          else if (
+            initializerType._tag === 'Available' &&
+            (Type.isCallable(initializerType.type) ||
+              Type.containsExecutableRepresentation(initializerType.type))
           )
+            bindingEnd =
+              laterExecutableEnd(
+                runEnds.get(statement.binding.id.ordinal),
+                callableEnds.get(statement.binding.id.ordinal),
+              ) ?? fallbackEnd
+          else if (initializerType._tag === 'Available' && Type.isSlot(initializerType.type))
+            bindingEnd = slotEnds.get(statement.binding.id.ordinal) ?? fallbackEnd
+          else if (
+            initializerType._tag === 'Available' &&
+            Type.containsViewBorrow(initializerType.type)
+          )
+            bindingEnd =
+              viewEnds.get(statement.binding.id.ordinal) ??
+              Object.freeze({
+                region: statement.region,
+                span: statement.binding.initializer.syntax.span,
+              })
+          inspect(statement.binding.initializer, statement.region, [], 'Read', bindingEnd)
           break
         }
         case 'ExpressionStatement':
@@ -2646,39 +2689,41 @@ const checkFunction = (
     selection: Hir.PatternSelection,
     live: ReadonlySet<string>,
     includeBindings: boolean,
-  ): MatchOwnership['arms'][number]['cleanup'] =>
-    selection.access === 'Move'
-      ? Object.freeze([
-          ...selection.cleanup.flatMap((path) => {
-            const subjectType =
-              selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
-            const type = CleanupPlan.cleanupTypeAtPath(
-              index,
-              selection.member === undefined
-                ? (subjectType ?? 'never')
-                : Match.sourceType(selection.member),
-              path,
-            )
-            return type === undefined
-              ? []
-              : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
-          }),
-          ...(includeBindings
-            ? selection.bindings.flatMap((binding) => {
-                const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-                return live.has(siteKey(site)) &&
-                  categoryOf(index, binding.type, copyAssumptions)._tag === 'MoveOnly'
-                  ? [
-                      Object.freeze({
-                        path: binding.path,
-                        cleanup: CleanupPlan.cleanupPlan(index, binding.type),
-                      }),
-                    ]
-                  : []
-              })
-            : []),
-        ])
-      : Object.freeze([])
+  ): MatchOwnership['arms'][number]['cleanup'] => {
+    if (selection.access === 'Move') {
+      return Object.freeze([
+        ...selection.cleanup.flatMap((path) => {
+          const subjectType =
+            selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
+          const type = CleanupPlan.cleanupTypeAtPath(
+            index,
+            selection.member === undefined
+              ? (subjectType ?? 'never')
+              : Match.sourceType(selection.member),
+            path,
+          )
+          return type === undefined
+            ? []
+            : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
+        }),
+        ...(includeBindings
+          ? selection.bindings.flatMap((binding) => {
+              const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
+              return live.has(siteKey(site)) &&
+                categoryOf(index, binding.type, copyAssumptions)._tag === 'MoveOnly'
+                ? [
+                    Object.freeze({
+                      path: binding.path,
+                      cleanup: CleanupPlan.cleanupPlan(index, binding.type),
+                    }),
+                  ]
+                : []
+            })
+          : []),
+      ])
+    }
+    return Object.freeze([])
+  }
 
   const walkStatements = (
     statements: ReadonlyArray<Hir.Statement>,
@@ -2711,12 +2756,16 @@ const checkFunction = (
         const bodyLive = new Set(live)
         const bodyFrame: Array<string> = []
         for (const capture of block.captures) {
-          const site: BindingSite | undefined =
-            capture.binding !== undefined
-              ? Object.freeze({ _tag: 'Let', binding: capture.binding })
-              : capture.parameter !== undefined
-                ? Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
-                : undefined
+          let site: BindingSite | undefined
+          if (capture.binding !== undefined) {
+            site = Object.freeze({ _tag: 'Let', binding: capture.binding })
+          } else {
+            if (capture.parameter !== undefined) {
+              site = Object.freeze({ _tag: 'Parameter', parameter: capture.parameter })
+            } else {
+              site = undefined
+            }
+          }
           if (site === undefined) continue
           bodyLive.add(siteKey(site))
           // A taken capture is owned by the body, so a failure inside it releases the value.
@@ -2932,12 +2981,19 @@ const checkFunction = (
             checkExpression(state, live, selector.index, false)
           }
         }
-        const rootSite: BindingSite =
-          statement.place._tag === 'WritePlace'
-            ? ownedWriteSite(statement.place.root)
-            : statement.place.root._tag === 'BindingSliceRoot'
-              ? Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
-              : Object.freeze({ _tag: 'Parameter', parameter: statement.place.root.parameter })
+        let rootSite: BindingSite
+        if (statement.place._tag === 'WritePlace') {
+          rootSite = ownedWriteSite(statement.place.root)
+        } else {
+          if (statement.place.root._tag === 'BindingSliceRoot') {
+            rootSite = Object.freeze({ _tag: 'Let', binding: statement.place.root.binding })
+          } else {
+            rootSite = Object.freeze({
+              _tag: 'Parameter',
+              parameter: statement.place.root.parameter,
+            })
+          }
+        }
         const rootKey = siteKey(rootSite)
         const root = state.bindings.get(rootKey)
         const wasLive = live.has(rootKey)
@@ -3160,20 +3216,26 @@ const checkFunction = (
 
   const firstUnavailable = Hir.firstUnavailable(fn)
   const violation = state.diagnostics.at(0)
-  const verdict: Verdict =
-    fn.contract._tag === 'Unavailable'
-      ? Object.freeze({
-          _tag: 'Unavailable',
-          ...(fn.contract.cause === undefined ? {} : { cause: fn.contract.cause }),
-        })
-      : firstUnavailable !== undefined
-        ? Object.freeze({
-            _tag: 'Unavailable',
-            ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
-          })
-        : violation !== undefined
-          ? Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
-          : satisfied
+  let verdict: Verdict
+  if (fn.contract._tag === 'Unavailable') {
+    verdict = Object.freeze({
+      _tag: 'Unavailable',
+      ...(fn.contract.cause === undefined ? {} : { cause: fn.contract.cause }),
+    })
+  } else {
+    if (firstUnavailable !== undefined) {
+      verdict = Object.freeze({
+        _tag: 'Unavailable',
+        ...(firstUnavailable.cause === undefined ? {} : { cause: firstUnavailable.cause }),
+      })
+    } else {
+      if (violation !== undefined) {
+        verdict = Object.freeze({ _tag: 'Violation', cause: Diagnostic.identity(violation) })
+      } else {
+        verdict = satisfied
+      }
+    }
+  }
 
   return Object.freeze({
     ownership: Object.freeze({

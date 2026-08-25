@@ -450,6 +450,11 @@ const collectDeclaredType = (
     if (qualifier !== undefined)
       collectQualifier(qualifier.token, qualifier.spelling, scope, index, pending)
     const selected = fact.path.segments.at(-1)
+    let declarationLocation: DeclarationLocation | undefined
+    if (fact.candidate !== undefined) {
+      const declaration = declarationByNominal(index, fact.candidate)
+      if (declaration !== undefined) declarationLocation = locationOfDeclaration(index, declaration)
+    }
     push(
       pending,
       selected?.token.span,
@@ -458,12 +463,7 @@ const collectDeclaredType = (
         _tag: fact.candidate === undefined ? 'Missing' : 'Inaccessible',
         ...(fact.cause === undefined ? {} : { cause: fact.cause }),
       }),
-      fact.candidate === undefined
-        ? undefined
-        : (() => {
-            const declaration = declarationByNominal(index, fact.candidate)
-            return declaration === undefined ? undefined : locationOfDeclaration(index, declaration)
-          })(),
+      declarationLocation,
     )
     return
   }
@@ -583,34 +583,31 @@ const collectConstraint = (
 const parameterResolution = (
   reference: Elaboration.ParameterReferenceFact,
 ): { readonly resolution: Resolution; readonly declaration?: DeclarationLocation } => {
-  if (reference._tag === 'Resolved')
-    return (() => {
-      const declaration = locationOfParameter(reference.parameter)
-      return Object.freeze({
-        resolution: available(
-          Object.freeze({ _tag: 'ParameterIdentity', id: reference.parameter.id }),
-        ),
-        ...(declaration === undefined ? {} : { declaration }),
-      })
-    })()
-  if (reference._tag === 'ResolvedBinding')
-    return (() => {
-      const declaration = locationOfBinding(reference.binding)
-      return Object.freeze({
-        resolution: available(Object.freeze({ _tag: 'BindingIdentity', id: reference.binding.id })),
-        ...(declaration === undefined ? {} : { declaration }),
-      })
-    })()
-  if (reference._tag === 'ResolvedPattern')
-    return (() => {
-      const declaration = locationOfBinding(reference.binding)
-      return Object.freeze({
-        resolution: available(
-          Object.freeze({ _tag: 'PatternBindingIdentity', id: reference.binding.id }),
-        ),
-        ...(declaration === undefined ? {} : { declaration }),
-      })
-    })()
+  if (reference._tag === 'Resolved') {
+    const declaration = locationOfParameter(reference.parameter)
+    return Object.freeze({
+      resolution: available(
+        Object.freeze({ _tag: 'ParameterIdentity', id: reference.parameter.id }),
+      ),
+      ...(declaration === undefined ? {} : { declaration }),
+    })
+  }
+  if (reference._tag === 'ResolvedBinding') {
+    const declaration = locationOfBinding(reference.binding)
+    return Object.freeze({
+      resolution: available(Object.freeze({ _tag: 'BindingIdentity', id: reference.binding.id })),
+      ...(declaration === undefined ? {} : { declaration }),
+    })
+  }
+  if (reference._tag === 'ResolvedPattern') {
+    const declaration = locationOfBinding(reference.binding)
+    return Object.freeze({
+      resolution: available(
+        Object.freeze({ _tag: 'PatternBindingIdentity', id: reference.binding.id }),
+      ),
+      ...(declaration === undefined ? {} : { declaration }),
+    })
+  }
   if (reference._tag === 'Missing')
     return Object.freeze({
       resolution: Object.freeze({
@@ -704,12 +701,16 @@ const collectCallReference = (
   scope: NameResolution.ModuleScope | undefined,
   pending: Array<Pending>,
 ): void => {
-  const tokens =
-    path?._tag === 'ReferencePath'
-      ? Object.freeze([...(path.qualifier === undefined ? [] : [path.qualifier]), path.member])
-      : 'token' in reference
-        ? Object.freeze([reference.token])
-        : Object.freeze([])
+  let tokens: ReadonlyArray<Token.Token>
+  if (path?._tag === 'ReferencePath') {
+    tokens = Object.freeze([...(path.qualifier === undefined ? [] : [path.qualifier]), path.member])
+  } else {
+    if ('token' in reference) {
+      tokens = Object.freeze([reference.token])
+    } else {
+      tokens = Object.freeze([])
+    }
+  }
   const qualifier = tokens.length > 1 ? tokens.at(0) : undefined
   if (qualifier !== undefined) {
     const qualifierName = 'spelling' in reference ? reference.spelling.split('.').at(0) : undefined

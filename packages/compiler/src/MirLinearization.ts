@@ -634,35 +634,40 @@ export const llvmControl = (program: Mir.Module): ReadonlyArray<ControlProvenanc
           linear.find((candidate) => candidate.id.ordinal === target.ordinal)?.origin
         return linear.map((block): ControlProvenance => {
           const terminator = block.terminator
-          const targets =
-            terminator._tag === 'Jump'
-              ? [originOf(terminator.target)]
-              : terminator._tag === 'Branch' ||
-                  terminator._tag === 'MatchBranch' ||
-                  terminator._tag === 'EnumMatchBranch'
-                ? [originOf(terminator.taken), originOf(terminator.otherwise)]
-                : []
+          let targets: Array<Mir.RegionId | undefined> = []
+          if (terminator._tag === 'Jump') {
+            targets = [originOf(terminator.target)]
+          } else if (
+            terminator._tag === 'Branch' ||
+            terminator._tag === 'MatchBranch' ||
+            terminator._tag === 'EnumMatchBranch'
+          ) {
+            targets = [originOf(terminator.taken), originOf(terminator.otherwise)]
+          }
           const canonicalTargets = Object.freeze(
             targets.flatMap((target) =>
               target === undefined || target.ordinal === block.origin.ordinal ? [] : [target],
             ),
           )
+          let construct: ControlProvenance['construct'] = 'LlvmTrap'
+          if (terminator._tag === 'Jump') {
+            construct = 'LlvmJump'
+          } else if (
+            terminator._tag === 'Branch' ||
+            terminator._tag === 'MatchBranch' ||
+            terminator._tag === 'EnumMatchBranch'
+          ) {
+            construct = 'LlvmBranch'
+          } else if (terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure') {
+            construct = 'LlvmReturn'
+          }
           return Object.freeze({
             _tag: 'BackendControlProvenance',
             backend: 'LLVM',
             function: fn.id,
             instance: fn.instance,
             region: block.origin,
-            construct:
-              terminator._tag === 'Jump'
-                ? 'LlvmJump'
-                : terminator._tag === 'Branch' ||
-                    terminator._tag === 'MatchBranch' ||
-                    terminator._tag === 'EnumMatchBranch'
-                  ? 'LlvmBranch'
-                  : terminator._tag === 'Return' || terminator._tag === 'PropagateEffectFailure'
-                    ? 'LlvmReturn'
-                    : 'LlvmTrap',
+            construct,
             targets: canonicalTargets,
             span: terminator.provenance.span,
           })

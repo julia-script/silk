@@ -39,8 +39,11 @@ export const find = (spelling: string): Selector | undefined =>
   all.find((candidate) => candidate === spelling)
 
 /** The one primitive type a selector may be declared at. */
-export const declaredType = (self: Selector): 'usize' | 'isize' | 'u32' =>
-  self === 'pointerBits' ? 'u32' : self === 'usizeMax' ? 'usize' : 'isize'
+export const declaredType = (self: Selector): 'usize' | 'isize' | 'u32' => {
+  if (self === 'pointerBits') return 'u32'
+  if (self === 'usizeMax') return 'usize'
+  return 'isize'
+}
 
 /** The exact value the selector names for one target pointer width. */
 export const value = (self: Selector, pointerBits: 32 | 64): bigint => {

@@ -234,20 +234,25 @@ export const emit = Effect.fnUntraced(function* (
         )
         break
       }
-      const instruction =
-        returned.length === 0
-          ? yield* FunctionBody.returnVoid(body)
-          : returned.length === 1
-            ? yield* FunctionBody.returnValue(body, readScalar(terminator.value))
-            : yield* FunctionBody.returnValue(
-                body,
-                yield* FunctionBody.buildAggregate(
-                  body,
-                  entry.resultType,
-                  returned,
-                  `return_value_b${block.id.ordinal}`,
-                ),
-              )
+      if (returned.length === 0) {
+        const instruction = yield* FunctionBody.returnVoid(body)
+        yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
+        break
+      }
+      if (returned.length === 1) {
+        const instruction = yield* FunctionBody.returnValue(body, readScalar(terminator.value))
+        yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
+        break
+      }
+      const instruction = yield* FunctionBody.returnValue(
+        body,
+        yield* FunctionBody.buildAggregate(
+          body,
+          entry.resultType,
+          returned,
+          `return_value_b${block.id.ordinal}`,
+        ),
+      )
       yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break
     }

@@ -1403,40 +1403,38 @@ it.effect('rejects uncovered match endings and path-exclusive endings replayed b
     const uncovered: Mir.MirFunction = Object.freeze({
       ...choose,
       regions: Object.freeze(
-        choose.regions.map((region) =>
-          region._tag !== 'OperationRegion'
-            ? region
-            : Object.freeze({
-                ...region,
-                operations: Object.freeze(
-                  region.operations.map((operation) => {
-                    if (operation._tag !== 'Match') return operation
-                    return Object.freeze({
-                      ...operation,
-                      arms: Object.freeze(
-                        operation.arms.map((arm, ordinal) =>
-                          ordinal !== 0
-                            ? arm
-                            : Object.freeze({
-                                ...arm,
-                                selected: Object.freeze({
-                                  ...arm.selected,
-                                  operations: Object.freeze(
-                                    arm.selected.operations.filter((nested) => {
-                                      if (removed || nested._tag !== 'EndLoan') return true
-                                      removed = true
-                                      return false
-                                    }),
-                                  ),
-                                }),
-                              }),
-                        ),
-                      ),
-                    })
-                  }),
-                ),
+        choose.regions.map((region) => {
+          if (region._tag !== 'OperationRegion') return region
+          return Object.freeze({
+            ...region,
+            operations: Object.freeze(
+              region.operations.map((operation) => {
+                if (operation._tag !== 'Match') return operation
+                return Object.freeze({
+                  ...operation,
+                  arms: Object.freeze(
+                    operation.arms.map((arm, ordinal) => {
+                      if (ordinal !== 0) return arm
+                      return Object.freeze({
+                        ...arm,
+                        selected: Object.freeze({
+                          ...arm.selected,
+                          operations: Object.freeze(
+                            arm.selected.operations.filter((nested) => {
+                              if (removed || nested._tag !== 'EndLoan') return true
+                              removed = true
+                              return false
+                            }),
+                          ),
+                        }),
+                      })
+                    }),
+                  ),
+                })
               }),
-        ),
+            ),
+          })
+        }),
       ),
     })
     assert.strictEqual(removed, true)
@@ -1696,17 +1694,15 @@ it.effect(
       const propagation =
         Analysis.loweredMir(snapshot)
           .functions.flatMap((fn) =>
-            fn.regions.flatMap((region) =>
-              region._tag !== 'OperationRegion'
-                ? []
-                : region.operations
-                    .flatMap(Mir.operationTree)
-                    .flatMap((operation) =>
-                      operation._tag === 'PropagateEffectFailure'
-                        ? [Object.freeze({ fn, region, operation })]
-                        : [],
-                    ),
-            ),
+            fn.regions.flatMap((region) => {
+              if (region._tag !== 'OperationRegion') return []
+              return region.operations.flatMap(Mir.operationTree).flatMap((operation) => {
+                if (operation._tag === 'PropagateEffectFailure') {
+                  return [Object.freeze({ fn, region, operation })]
+                }
+                return []
+              })
+            }),
           )
           .at(0) ?? unreachable('expected selective residual propagation in MIR')
       const wasmArtifact = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })

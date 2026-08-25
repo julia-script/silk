@@ -44,6 +44,10 @@ pub fn main() -> i32 {
   return 1
 }`
 
+let boxAction = 'dropOnly()'
+if (shape === 'box-build') boxAction = 'buildOnly()'
+else if (shape === 'box-walk') boxAction = 'walkOnly()'
+
 const boxSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box {
   Box,
@@ -152,7 +156,7 @@ effect fn dropOnly() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
 
 pub fn main() -> i32 {
-  return run Effect.catchAll(${shape === 'box-build' ? 'buildOnly()' : shape === 'box-walk' ? 'walkOnly()' : 'dropOnly()'}, recover)
+  return run Effect.catchAll(${boxAction}, recover)
 }`
 
 const source = shape === 'scalar-non-tail' ? scalarSource : boxSource
@@ -163,6 +167,14 @@ const classifyWasm = (cause) => {
   if (cause instanceof RangeError) return 'host-stack-exhaustion'
   if (cause instanceof WebAssembly.RuntimeError) return 'wasm-trap'
   return 'host-error'
+}
+
+const classifyNative = (run) => {
+  if (run.status === 42) return 'completed'
+  if (run.signal === 'SIGSEGV') return 'host-stack-exhaustion'
+  if (run.error?.code === 'ETIMEDOUT') return 'timeout'
+  if (run.signal === null) return 'unexpected-exit'
+  return 'host-signal'
 }
 
 try {
@@ -180,13 +192,12 @@ try {
       maxSteps: Math.max(1_000_000, depth * 10_000),
       maxCallDepth: Math.max(1_024, depth + 16),
     })
-    outcome =
-      evaluated._tag === 'Completed'
-        ? Object.freeze({ kind: 'completed', result: evaluated.result.value })
-        : Object.freeze({
-            kind: evaluated._tag === 'Blocked' ? 'evaluation-blocked' : 'evaluation-failure',
-            outcome: evaluated,
-          })
+    if (evaluated._tag === 'Completed') {
+      outcome = Object.freeze({ kind: 'completed', result: evaluated.result.value })
+    } else {
+      const kind = evaluated._tag === 'Blocked' ? 'evaluation-blocked' : 'evaluation-failure'
+      outcome = Object.freeze({ kind, outcome: evaluated })
+    }
   } else if (engine === 'wasm') {
     const snapshot = await Effect.runPromise(
       Analysis.ofSourceRealized(sourceId, encoder.encode(source), 'wasm32-unknown-unknown'),
@@ -226,16 +237,7 @@ try {
     }
     const run = spawnSync(compiled.path, [], { encoding: 'utf8', timeout: 60_000 })
     outcome = Object.freeze({
-      kind:
-        run.status === 42
-          ? 'completed'
-          : run.signal === 'SIGSEGV'
-            ? 'host-stack-exhaustion'
-            : run.error?.code === 'ETIMEDOUT'
-              ? 'timeout'
-              : run.signal === null
-                ? 'unexpected-exit'
-                : 'host-signal',
+      kind: classifyNative(run),
       status: run.status,
       signal: run.signal,
       stderr: run.stderr,

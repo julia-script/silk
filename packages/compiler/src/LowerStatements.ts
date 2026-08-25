@@ -188,20 +188,17 @@ export const lowerPatternSelection = (
       retainsBindings: true,
       members,
       decisions: Object.freeze(
-        members.map((candidate) =>
-          Object.freeze({
-            member: candidate,
-            candidates: Object.freeze(
-              selection.universal
-                ? [selection.arm]
-                : member !== undefined && Match.identityEquals(candidate, member)
-                  ? needsFallback
-                    ? [selection.arm, fallbackId]
-                    : [selection.arm]
-                  : [fallbackId],
-            ),
-          }),
-        ),
+        members.map((candidate) => {
+          let candidates: ReadonlyArray<Match.ArmId>
+          if (selection.universal) {
+            candidates = [selection.arm]
+          } else if (member === undefined || !Match.identityEquals(candidate, member)) {
+            candidates = [fallbackId]
+          } else {
+            candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]
+          }
+          return Object.freeze({ member: candidate, candidates: Object.freeze(candidates) })
+        }),
       ),
       arms,
       type: resultType,
@@ -305,12 +302,12 @@ export const lowerSequence = (
     const staticCallable = callableRecipe(fn, statement.initializer)
     const staticCallableType =
       staticCallable === undefined ? undefined : fn.semantic(staticCallable.type)
-    const callableSchema =
-      staticCallableType !== undefined && Type.isCallable(staticCallableType)
-        ? staticCallableType.schema
-        : initializerType !== undefined && Type.isCallable(initializerType)
-          ? initializerType.schema
-          : undefined
+    let callableSchema: Type.CallableSchema | undefined
+    if (staticCallableType !== undefined && Type.isCallable(staticCallableType)) {
+      callableSchema = staticCallableType.schema
+    } else if (initializerType !== undefined && Type.isCallable(initializerType)) {
+      callableSchema = initializerType.schema
+    }
     if (
       staticCallable !== undefined &&
       callableSchema !== undefined &&

@@ -36,13 +36,15 @@ const regionText = (region: RegionId): string => `r${region.ordinal}`
 const loopText = (loop: LoopId): string => `loop${loop.ordinal}`
 const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
   selectors
-    .map((selector) =>
-      selector._tag === 'FieldSelector'
-        ? `.#${selector.field.ordinal}`
-        : selector._tag === 'SliceElementSelector'
-          ? `[${localText(selector.index)}/slice:${selector.access.toLowerCase()}]`
-          : `[${selector.index._tag === 'Proven' ? selector.index.value : localText(selector.index.local)}/${selector.length}]`,
-    )
+    .map((selector) => {
+      if (selector._tag === 'FieldSelector') return `.#${selector.field.ordinal}`
+      if (selector._tag === 'SliceElementSelector') {
+        return `[${localText(selector.index)}/slice:${selector.access.toLowerCase()}]`
+      }
+      const index =
+        selector.index._tag === 'Proven' ? selector.index.value : localText(selector.index.local)
+      return `[${index}/${selector.length}]`
+    })
     .join('')
 
 const operationText = (operation: Operation): string => {
@@ -149,8 +151,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = make-effect ${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'MakeCallable':
       return `${localText(operation.destination)} = make-callable ${callableTargetText(operation.target)} captures=${operation.captures.map((capture) => `#${capture.ordinal}->p${capture.parameterOrdinal}:${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'ApplyCallable':
-      return `${localText(operation.destination)} = apply-callable ${operation.callable === undefined ? (operation.target === undefined ? '?' : callableTargetText(operation.target)) : localText(operation.callable)}(${operation.arguments.map(localText).join(', ')}) captures=${operation.captures.map((capture) => `#${capture.ordinal}:${localText(capture.source)}`).join(',') || 'none'} access=${operation.access.toLowerCase()} evaluation=${operation.evaluation} realization=${operation.realization} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ApplyCallable': {
+      let target = '?'
+      if (operation.callable !== undefined) target = localText(operation.callable)
+      else if (operation.target !== undefined) target = callableTargetText(operation.target)
+      return `${localText(operation.destination)} = apply-callable ${target}(${operation.arguments.map(localText).join(', ')}) captures=${operation.captures.map((capture) => `#${capture.ordinal}:${localText(capture.source)}`).join(',') || 'none'} access=${operation.access.toLowerCase()} evaluation=${operation.evaluation} realization=${operation.realization} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    }
     case 'PackEffectOutcome':
       return `${localText(operation.destination)} = effect-outcome tag=${operation.tag} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PackEffectFailureUnion':
@@ -211,24 +217,29 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
       (decision) =>
         `${indent}  decision ${Match.encodeIdentity(decision.member)} candidates=${decision.candidates.map((candidate) => `#${candidate.ordinal}`).join(',')}`,
     ),
-    ...operation.arms.flatMap((arm) => [
-      `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
-      ...arm.bindings.map(
-        (binding) =>
-          `${indent}    bind #${binding.id.ordinal} ${localText(binding.destination)} <- ${fieldPathText(binding.path)} : ${typeText(binding.type)} access=${binding.access} ${provenanceText(binding.provenance)}`,
-      ),
-      ...(arm.guard === undefined
-        ? []
-        : [
-            `${indent}    guard -> ${localText(arm.guard.result)}`,
-            ...arm.guard.operations.flatMap((child) => operationLines(child, `${indent}      `)),
-          ]),
-      `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
-      ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
-      ...arm.selected.cleanup.map(
-        (entry) => `${indent}      cleanup ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
-      ),
-    ]),
+    ...operation.arms.flatMap((arm) => {
+      let pattern = 'unknown'
+      if (arm.universal) pattern = '_'
+      else if (arm.member !== undefined) pattern = Match.encodeIdentity(arm.member)
+      return [
+        `${indent}  arm #${arm.id.ordinal} ${pattern} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
+        ...arm.bindings.map(
+          (binding) =>
+            `${indent}    bind #${binding.id.ordinal} ${localText(binding.destination)} <- ${fieldPathText(binding.path)} : ${typeText(binding.type)} access=${binding.access} ${provenanceText(binding.provenance)}`,
+        ),
+        ...(arm.guard === undefined
+          ? []
+          : [
+              `${indent}    guard -> ${localText(arm.guard.result)}`,
+              ...arm.guard.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+            ]),
+        `${indent}    selected access=${arm.selected.access} result=${localText(arm.selected.result)} end-borrow=${arm.selected.endBorrow}`,
+        ...arm.selected.operations.flatMap((child) => operationLines(child, `${indent}      `)),
+        ...arm.selected.cleanup.map(
+          (entry) => `${indent}      cleanup ${fieldPathText(entry.path)} ${entry.cleanup._tag}`,
+        ),
+      ]
+    }),
   ]
 }
 
@@ -319,13 +330,15 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
           ? []
           : [
               `    descriptor outcome=${SilkType.encode(descriptor.outcome)} resume-success=${suspensionPointText(descriptor.success.resume.point)}:${descriptor.success.resume.path.toLowerCase()} resume-failure=${suspensionPointText(descriptor.failure.resume.point)}:${descriptor.failure.resume.path.toLowerCase()}`,
-              ...descriptor.slots.map((slot) =>
-                slot.access._tag === 'Copy'
-                  ? `    slot ${slot.ordinal} ${localText(slot.local)} copy ${typeText(slot.type)}`
-                  : slot.access._tag === 'BorrowedDependency'
-                    ? `    slot ${slot.ordinal} ${localText(slot.local)} borrow:${slot.access.access.toLowerCase()} root=${localText(slot.access.root)} ${typeText(slot.type)}`
-                    : `    slot ${slot.ordinal} ${localText(slot.local)} move:${slot.access.cleanup._tag} ${typeText(slot.type)}`,
-              ),
+              ...descriptor.slots.map((slot) => {
+                if (slot.access._tag === 'Copy') {
+                  return `    slot ${slot.ordinal} ${localText(slot.local)} copy ${typeText(slot.type)}`
+                }
+                if (slot.access._tag === 'BorrowedDependency') {
+                  return `    slot ${slot.ordinal} ${localText(slot.local)} borrow:${slot.access.access.toLowerCase()} root=${localText(slot.access.root)} ${typeText(slot.type)}`
+                }
+                return `    slot ${slot.ordinal} ${localText(slot.local)} move:${slot.access.cleanup._tag} ${typeText(slot.type)}`
+              }),
               continuationPathText('success', descriptor.success),
               continuationPathText('failure', descriptor.failure),
             ]),
@@ -350,14 +363,22 @@ const coroutineFrameTargetLines = (self: Module): ReadonlyArray<string> =>
     ]),
   ])
 
-export const encode = (self: Module): string =>
-  [
+export const encode = (self: Module): string => {
+  let entry: string
+  switch (self.entry._tag) {
+    case 'UnavailableEntry':
+      entry = `entry unavailable reason=${self.entry.reason}`
+      break
+    case 'OrdinaryEntry':
+      entry = `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
+      break
+    case 'EffectEntry':
+      entry = `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.identity}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`
+      break
+  }
+  return [
     `mir-module ${self.module}`,
-    self.entry._tag === 'UnavailableEntry'
-      ? `entry unavailable reason=${self.entry.reason}`
-      : self.entry._tag === 'OrdinaryEntry'
-        ? `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
-        : `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.identity}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`,
+    entry,
     ...(self.staticData ?? []).map(
       (data) =>
         `static ${data.id} kind=${data.kind.toLowerCase()} utf8=${data.utf8} bytes=${data.bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`,
@@ -381,3 +402,4 @@ export const encode = (self: Module): string =>
     ]),
     '',
   ].join('\n')
+}

@@ -37,18 +37,24 @@ export const reverseHex = (value: ByteString.ByteString): string =>
 export const floatHex = (
   description: Extract<ConstantDescription.Description, { _tag: 'Float' }>,
 ): string => {
-  const prefix =
-    description.format === 'half'
-      ? 'H'
-      : description.format === 'bfloat'
-        ? 'R'
-        : description.format === 'x86_fp80'
-          ? 'K'
-          : description.format === 'fp128'
-            ? 'L'
-            : description.format === 'ppc_fp128'
-              ? 'M'
-              : ''
+  let prefix = ''
+  switch (description.format) {
+    case 'half':
+      prefix = 'H'
+      break
+    case 'bfloat':
+      prefix = 'R'
+      break
+    case 'x86_fp80':
+      prefix = 'K'
+      break
+    case 'fp128':
+      prefix = 'L'
+      break
+    case 'ppc_fp128':
+      prefix = 'M'
+      break
+  }
   if (description.format === 'float') {
     const source = ByteString.toUint8Array(description.bits)
     const sourceView = new DataView(source.buffer)

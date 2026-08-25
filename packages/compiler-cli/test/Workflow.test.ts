@@ -15,13 +15,16 @@ import * as Timeouts from './timeouts.js'
 
 const source = 'pub fn main() -> i32 { return 42 }'
 
-const wasmClang =
-  process.env.SILK_TEST_CLANG ??
-  (existsSync('/opt/homebrew/opt/llvm/bin/clang')
-    ? '/opt/homebrew/opt/llvm/bin/clang'
-    : existsSync('/usr/local/opt/llvm/bin/clang')
-      ? '/usr/local/opt/llvm/bin/clang'
-      : 'clang')
+let wasmClang = process.env.SILK_TEST_CLANG
+if (wasmClang === undefined) {
+  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) {
+    wasmClang = '/opt/homebrew/opt/llvm/bin/clang'
+  } else if (existsSync('/usr/local/opt/llvm/bin/clang')) {
+    wasmClang = '/usr/local/opt/llvm/bin/clang'
+  } else {
+    wasmClang = 'clang'
+  }
+}
 
 const writeFile = Effect.fnUntraced(function* (path: string, text: string) {
   const fileSystem = yield* FileSystem.FileSystem
