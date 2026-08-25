@@ -192,7 +192,6 @@ and stable rule use an ordered prefix because provider APIs and ordinary partial
 on it.
 
 **Evidence:** [current inference specification](../../openspec/specs/bootstrap-type-generics/spec.md),
-[older all-or-none direction](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
 [call specialization](../../packages/compiler/src/Elaboration.ts),
 [provider inference](requirements-and-services.md#serv-007--provision-infers-exactly-one-compatible-requirement-key).
 
@@ -1236,9 +1235,7 @@ offer to move the conformance into a module the author cannot modify.
 module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
 own explicitly privileged rules.
 
-**Evidence:** [actor and conformance style](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions),
-[module coherence decision](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
-[type-system decision](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md).
+**Evidence:** [actor and conformance style](style-guide.md#style-002--public-apis-prefer-qualified-data-first-functions).
 
 ### IMPL-005 — Conformances have no independent import or visibility modifier
 
@@ -1273,8 +1270,7 @@ for a modifier that has no conformance meaning.
 dimension is superseded: provider-local coherence and endpoint visibility already determine every
 usable goal, and current source syntax needs no general conformance visibility modifier.
 
-**Evidence:** [module visibility direction](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
-[current impl parser](../../packages/compiler/src/Parser.ts),
+**Evidence:** [current impl parser](../../packages/compiler/src/Parser.ts),
 [non-activating imports](modules-names-and-visibility.md#module-005--imports-have-no-runtime-behavior).
 
 ### IMPL-006 — A generic `impl` may require conformances of contained parameters

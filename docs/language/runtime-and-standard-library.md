@@ -75,7 +75,6 @@ pipeline, the generated catalog classifies portable and target-provider modules,
 explicit, and intrinsic support is reachable-only.
 
 **Evidence:** [bootstrap library source specification](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
-[minimum runtime inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
 [unsafe and intrinsic boundary](unsafe-intrinsics-and-targets.md),
 [current library manifest](../../packages/compiler/stdlib/manifest.json).
 
@@ -204,7 +203,6 @@ digests, documentation, layers, provider targets, and intrinsic inventories with
 scope.
 
 **Evidence:** [current deterministic catalog](../../packages/compiler/stdlib/manifest.json),
-[bootstrap library inventory](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
 [canonical packaging requirements](../../openspec/specs/bootstrap-silk-stdlib/spec.md).
 
 ### STDLIB-004 — Portable modules never select a target provider
@@ -301,8 +299,7 @@ standard-library names remain explicit in source; entry adaptation is defined se
 
 **Evidence:** [Effect contracts](effect-contracts.md),
 [requirements and services](requirements-and-services.md),
-[ownership and cleanup](ownership-and-borrowing.md),
-[bootstrap allocation model](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md).
+[ownership and cleanup](ownership-and-borrowing.md).
 
 ### STDLIB-006 — Cataloged modules use ordinary module visibility
 
@@ -494,8 +491,7 @@ toolchain does not imply compatibility merely because a symbol existed in anothe
 **Current compiler:** Aligned in direction. Native support is compiler-versioned and direct Wasm
 uses its own lowering model; neither is presented as a user-facing runtime library.
 
-**Evidence:** [private shim boundary](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md),
-[sealed intrinsic contracts](unsafe-intrinsics-and-targets.md#sealed-intrinsic-boundary),
+**Evidence:** [sealed intrinsic contracts](unsafe-intrinsics-and-targets.md#sealed-intrinsic-boundary),
 [current native runtime support](../../packages/compiler/src/OsRuntime.ts).
 
 ### RUNTIME-004 — Silk has no ambient runtime facilities
@@ -544,8 +540,7 @@ ambient source behavior or unavoidable artifact cost.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
 [Effect suspension](effect-suspension.md),
-[entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
-[minimum runtime exclusions](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md).
+[entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved).
 
 ### RUNTIME-005 — The compiler-generated adapter is the only mandatory program runtime boundary
 
@@ -623,8 +618,7 @@ Compiled artifacts retain the graph identity, and language-tooling inventories e
 graph and validation result.
 
 **Evidence:** [standard-library manifest](../../packages/compiler/stdlib/manifest.json),
-[intrinsic inventory](../../packages/compiler/test/fixtures/intrinsic-inventory.json),
-[self-hosting reproducibility](../../wayfinder/bootstrap-language/research/self-hosting-reproducibility.md).
+[intrinsic inventory](../../packages/compiler/test/fixtures/intrinsic-inventory.json).
 
 ### DIST-002 — Missing source, unsupported targets, open entries, and broken toolchains are distinct
 

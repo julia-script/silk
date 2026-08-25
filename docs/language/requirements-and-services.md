@@ -134,8 +134,7 @@ function was intended.
 and mixtures of both forms. Completeness and compatibility are checked through one ordered witness
 table for interfaces and services.
 
-**Evidence:** [earlier actor-function direction](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
-[earlier service mapping requirement](../../openspec/specs/bootstrap-service-declarations/spec.md),
+**Evidence:** [earlier service mapping requirement](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [interface witness specification](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [current parser](../../packages/compiler/src/Parser.ts),
 [current conformance index](../../packages/compiler/src/DeclarationIndex.ts).
@@ -193,8 +192,7 @@ it must not silently synthesize a service declaration or wrapper.
 **Current compiler:** Aligned. Requirement construction admits service declarations and generic
 requirement parameters, while concrete structs and ordinary interfaces receive `SEM0070`.
 
-**Evidence:** [service and requirement decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[service declaration specification](../../openspec/specs/bootstrap-service-declarations/spec.md),
+**Evidence:** [service declaration specification](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [requirement validation](../../packages/compiler/src/Elaboration.ts).
 
 ## SERV-003 — A service is a dependency-eligible interface
@@ -324,8 +322,7 @@ normalized form.
 `DefaultRole`, strongest-access union normalization, and `at` spelling. The superseded `@` role
 spelling is not accepted as a compatibility alias.
 
-**Evidence:** [requirement-row decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[current requirement representation](../../packages/compiler/src/Type.ts),
+**Evidence:** [current requirement representation](../../packages/compiler/src/Type.ts),
 [current row elaboration](../../packages/compiler/src/Elaboration.ts),
 [current generic-row specification](../../openspec/specs/bootstrap-type-generics/spec.md).
 
@@ -419,8 +416,7 @@ call. The diagnostic must distinguish insufficient access from missing service c
 **Current compiler:** Aligned. Requirement rows store shared or exclusive access independently from
 provider binding, while provision separately supports shared, exclusive, and owned capture.
 
-**Evidence:** [service access decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
-[provider-binding intrinsics](../../packages/compiler/src/Intrinsic.ts),
+**Evidence:** [provider-binding intrinsics](../../packages/compiler/src/Intrinsic.ts),
 [provider-selection rules](../../packages/compiler/src/ProviderSelection.ts),
 [ownership tests](../../packages/compiler/test/Ownership.test.ts).
 
@@ -596,7 +592,6 @@ both layers' requirement rows.
 
 **Evidence:** [effect construction and execution](effects-and-execution.md),
 [nested Effect rule](effects-and-execution.md#eff-004--effects-may-be-nested-and-flattening-is-explicit),
-[provider lifetime decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md),
 [flow-function provision specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [provider ownership tests](../../packages/compiler/test/Ownership.test.ts).
 
@@ -650,5 +645,4 @@ type does not conform to `K` reports the ordinary conformance mismatch at the ac
 selector `K`. No compatibility alias is retained in this green-field codebase.
 
 **Evidence:** [current Effect standard library](../../packages/compiler/stdlib/silk/effect.silk),
-[acquired-provider acceptance tests](../../packages/compiler/test/ProvideEffectAcceptance.test.ts),
-[provider lifetime decision](../../wayfinder/bootstrap-language/issues/03-function-contracts-services-and-failures.md).
+[acquired-provider acceptance tests](../../packages/compiler/test/ProvideEffectAcceptance.test.ts).

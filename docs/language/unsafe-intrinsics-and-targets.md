@@ -594,8 +594,7 @@ the bootstrap intrinsic specification has repeatedly replaced domain-shaped oper
 primitives. A stabilization audit must still remove any survivor that cannot meet this rule.
 
 **Evidence:** [minimal intrinsic requirement](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
-[current deterministic inventory](../../packages/compiler/test/IntrinsicCatalog.test.ts),
-[minimum runtime direction](../../wayfinder/bootstrap-language/issues/07-minimum-runtime-and-standard-library.md).
+[current deterministic inventory](../../packages/compiler/test/IntrinsicCatalog.test.ts).
 
 ### INTR-004 — Safe wrappers are ordinary Silk proofs over unsafe contracts
 

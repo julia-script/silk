@@ -120,10 +120,7 @@ from the ability to add ordinary functions anywhere.
 documentation may prefer this shape and show its direct and piped forms together. Method-call syntax
 and reopening another module or type remain invalid language boundaries, not style warnings.
 
-**Evidence:** [behavior-extension decision](../../wayfinder/bootstrap-language/issues/02-bootstrap-type-system-and-values.md),
-[module and conformance coherence](../../wayfinder/bootstrap-language/issues/04-modules-visibility-and-name-resolution.md),
-[automatic leading-argument sections](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md),
-[callable pipeline specification](../../openspec/specs/bootstrap-callable-values/spec.md).
+**Evidence:** [callable pipeline specification](../../openspec/specs/bootstrap-callable-values/spec.md).
 
 ## STYLE-003 — Examples prefer namespace imports and qualified operations
 

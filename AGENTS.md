@@ -23,28 +23,8 @@ skill and update this file rather than preserving an older convention.
 
 Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
 
-Use [proposals/PROCESS.md](proposals/PROCESS.md) for conceptual Silk language and standard-library
-work. An SLP is the default for broad or uncertain whole-language direction, but the human author may
-explicitly authorize a bounded change to proceed directly to OpenSpec case by case. An explicit
-request for direct OpenSpec is sufficient authority: do not block on creating, changing, or accepting
-an SLP. The direct OpenSpec change must carry the decisions, alternatives, whole-language interaction
-map, compiler-privilege boundary, and normative scenarios that an SLP handoff would otherwise supply.
-
-The SLP skills are numbered in pipeline order and remain manual-only when the author selects that
-route — never invoke one without an explicit user request:
-
-1. `slp-1-develop` — draft/evolve an SLP to the Candidate bar.
-2. `slp-2-review` — bounded adversarial review (max 3 rounds, evidence-gated ledger).
-3. `slp-3-resolve` — author decides forks and records the outcome.
-4. `slp-4-handoff` — create and audit OpenSpec change(s) from an SLP in Accepted direction.
-5. `slp-5-implement` — implement all handed-off changes (DAG-ordered, parallel, bounded gates).
-6. `slp-6-audit-implementation` — audit code against SLP and OpenSpec before archive.
-
-### Issue tracker
-
-Use the local Markdown tracker. General issues live under `.scratch/<feature>/`; Wayfinder maps
-live under visible `wayfinder/<effort>/` directories. See `docs/agents/issue-tracker.md`.
-
+Plan Silk language and standard-library changes through OpenSpec (`openspec/`). The language
+definition and reference live in `docs/language/`.
 
 ## Repository workflow
 

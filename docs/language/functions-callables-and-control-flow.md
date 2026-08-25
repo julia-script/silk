@@ -303,8 +303,7 @@ The compiler carries every remaining leading parameter and captured trailing arg
 semantic facts, HIR, MIR, and each execution engine. `combine(3)(2)(1)` therefore preserves both
 source evaluation order and the final positional call `combine(1, 2, 3)`.
 
-**Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application),
-[pipeline syntax decision](../../wayfinder/bootstrap-language/issues/08-prototype-bootstrap-syntax.md).
+**Evidence:** [captured callable rule](ownership-and-borrowing.md#callable-001--named-functions-support-trailing-partial-application).
 
 ### CALLABLE-003 — Invocation mode describes access to the callable environment
 

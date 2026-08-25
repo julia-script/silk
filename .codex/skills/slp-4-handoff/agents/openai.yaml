@@ -1,6 +1,0 @@
-interface:
-  display_name: "SLP 4: Handoff"
-  short_description: "Step 4 — create and audit OpenSpec changes from an accepted SLP"
-  default_prompt: "Use $slp-4-handoff to create and audit the OpenSpec changes that realize this accepted SLP."
-policy:
-  allow_implicit_invocation: false
