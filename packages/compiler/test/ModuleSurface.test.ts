@@ -113,6 +113,17 @@ pub fn answer() -> i32 { return 99 }`)
   }),
 )
 
+it.effect('erases local parameter mutability from the exported callable surface', () =>
+  Effect.gen(function* () {
+    const immutable = yield* surface(`pub struct Counter { pub value: i32 }
+pub fn update(counter: Counter) -> Counter { return move counter }`)
+    const mutable = yield* surface(`pub struct Counter { pub value: i32 }
+pub fn update(mut counter: Counter) -> Counter { return move counter }`)
+
+    assert.strictEqual(ModuleSurface.equals(immutable, mutable), true)
+  }),
+)
+
 it.effect('distinguishes every cross-module observable header family', () =>
   Effect.gen(function* () {
     const cases = [

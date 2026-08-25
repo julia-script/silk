@@ -192,6 +192,7 @@ interface FunctionContext {
   readonly bindings: ReadonlyMap<number, Hir.Expression>
   readonly patternBindings: ReadonlyMap<string, Hir.Expression>
   readonly writtenBindings: ReadonlySet<number>
+  readonly writtenParameters: ReadonlySet<number>
 }
 
 const patternBindingKey = (
@@ -227,6 +228,10 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   const contexts = new Map<string, FunctionContext>()
   for (const instance of discovery.instances) {
     const statements = nestedStatements(instance.function.statements)
+    const replacedRoots = statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .flatMap((expression) => (expression._tag === 'Replace' ? [expression.place.root] : []))
     contexts.set(
       ownerKey(instance),
       Object.freeze({
@@ -252,13 +257,30 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                 : [],
             ),
         ),
-        writtenBindings: new Set(
-          statements.flatMap((statement) =>
-            statement._tag === 'Write' && statement.place._tag === 'WritePlace'
-              ? [statement.place.root.ordinal]
+        writtenBindings: new Set([
+          ...statements.flatMap((statement) =>
+            statement._tag === 'Write' &&
+            statement.place._tag === 'WritePlace' &&
+            statement.place.root._tag === 'BindingWriteRoot'
+              ? [statement.place.root.binding.ordinal]
               : [],
           ),
-        ),
+          ...replacedRoots.flatMap((root) =>
+            root._tag === 'BindingWriteRoot' ? [root.binding.ordinal] : [],
+          ),
+        ]),
+        writtenParameters: new Set([
+          ...statements.flatMap((statement) =>
+            statement._tag === 'Write' &&
+            statement.place._tag === 'WritePlace' &&
+            statement.place.root._tag === 'ParameterWriteRoot'
+              ? [statement.place.root.parameter.ordinal]
+              : [],
+          ),
+          ...replacedRoots.flatMap((root) =>
+            root._tag === 'ParameterWriteRoot' ? [root.parameter.ordinal] : [],
+          ),
+        ]),
       }),
     )
   }
@@ -338,6 +360,15 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     activeBindings = new Set<number>(),
   ): Origin {
     const context = contexts.get(ownerKey(instance))
+    if (
+      expression._tag === 'ParameterReference' &&
+      context?.writtenParameters.has(expression.parameter.ordinal)
+    )
+      return Object.freeze({
+        _tag: 'InvalidOrigin',
+        description: 'mutable parameter allocation provenance',
+        span: expression.span,
+      })
     if (expression._tag === 'ParameterReference')
       return parameterOrigins.at(expression.parameter.ordinal) ?? unreached
     if (expression._tag === 'BindingReference') {

@@ -24,6 +24,7 @@ import {
   lowerPlace,
   lowerReifiedEffectRecipe,
   lowerRunEffectComposite,
+  ownedWriteRoot,
 } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -354,7 +355,7 @@ export function lowerExpressionInner(
       const root =
         place._tag === 'BorrowedWritePlace'
           ? borrowedWriteRoot(fn, place.root)
-          : fn.bindingLocals.get(place.root.ordinal)
+          : ownedWriteRoot(fn, place.root)
       const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
       const type = fn.type(place.type)
       if (root === undefined || rootType === undefined || type === undefined) return undefined
@@ -617,9 +618,30 @@ export function lowerExpressionInner(
           provenance: authored(expression.span),
         }),
       )
+      for (const authored of expression.loanEnds) {
+        const borrow = fn.recipeBorrow(authored)
+        const loan = fn.loanLocals.get(borrowKey(borrow))
+        if (loan === undefined) return undefined
+        fn.emit(
+          Object.freeze({
+            _tag: 'EndLoan',
+            borrow,
+            slice: loan,
+            provenance: generated(expression.span),
+          }),
+        )
+        fn.loanLocals.delete(borrowKey(borrow))
+      }
       for (const capture of directSection?.captures ?? []) {
         if (capture.value._tag !== 'SliceBorrow' && capture.value._tag !== 'ValueBorrow') continue
         const borrow = fn.recipeBorrow(capture.value.borrow)
+        if (
+          expression.heldLoans.some(
+            (held) => borrowKey(fn.recipeBorrow(held)) === borrowKey(borrow),
+          )
+        ) {
+          continue
+        }
         const held = fn.loanLocals.get(borrowKey(borrow))
         if (held === undefined) return undefined
         fn.emit(

@@ -2,7 +2,6 @@ import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResoluti
 import type {
   ArgumentFact,
   AssignmentRootFact,
-  BindingDeclarationFact,
   CallReferenceFact,
   DeclarationId,
   ExpressionFact,
@@ -12,7 +11,11 @@ import type {
   SemanticType,
   StatementFact,
 } from './Elaboration.js'
-import { contextualIntegerCompatible, returnedBorrowArgument } from './Elaboration.js'
+import {
+  assignmentRootAccess,
+  contextualIntegerCompatible,
+  returnedBorrowArgument,
+} from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -195,16 +198,10 @@ export const lowerStatements = (
           })
         if (statement._tag === 'WriteStatement') {
           const place =
-            statement.root?._tag === 'BindingFact'
-              ? hirAssignmentWritePlace(statement.destination, statement.root)
-              : statement.root?._tag === 'ParameterDeclaration'
-                ? hirBorrowedWritePlace(statement.destination, statement.root)
-                : undefined
-          if (
-            place === undefined ||
-            (statement.root?._tag === 'BindingFact' && statement.root.mutability !== 'Mutable') ||
-            !statement.compatible
-          )
+            statement.root === undefined
+              ? undefined
+              : hirAssignmentWritePlace(statement.destination, statement.root)
+          if (place === undefined || !statement.compatible)
             return Object.freeze({
               _tag: 'UnavailableStatement',
               region: statement.region,
@@ -524,17 +521,8 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   }
   if (fact._tag === 'PlaceReplace') {
     const place =
-      fact.root?._tag === 'BindingFact'
-        ? hirAssignmentWritePlace(fact.destination, fact.root)
-        : fact.root?._tag === 'ParameterDeclaration'
-          ? hirBorrowedWritePlace(fact.destination, fact.root)
-          : undefined
-    if (
-      place === undefined ||
-      (fact.root?._tag === 'BindingFact' && fact.root.mutability !== 'Mutable') ||
-      !fact.compatible ||
-      fact.type._tag !== 'Available'
-    ) {
+      fact.root === undefined ? undefined : hirAssignmentWritePlace(fact.destination, fact.root)
+    if (place === undefined || !fact.compatible || fact.type._tag !== 'Available') {
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     }
     return Object.freeze({
@@ -1015,12 +1003,32 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
   if (fact._tag === 'CallableApply') {
     if (fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
+    const returnedCapture =
+      fact.returnedBorrowSource?._tag === 'Capture' ? fact.returnedBorrowSource.capture : undefined
+    const returnedSection = callableSectionOf(fact.callee)
+    const returnedCaptureLoan =
+      returnedCapture === undefined || returnedSection === undefined
+        ? undefined
+        : Object.freeze({
+            _tag: 'BorrowId' as const,
+            function: returnedSection.site.function,
+            callSpan: returnedSection.syntax.span,
+            ordinal: returnedCapture.ordinal,
+          })
     return Object.freeze({
       _tag: 'CallableApply',
       callee: hirExpression(fact.callee),
       arguments: Object.freeze(
-        fact.arguments.map((argument) => hirExpression(argument.expression)),
+        fact.arguments.map((argument, ordinal) =>
+          hirExpression(argument.expression, argumentBorrowId(argument, ordinal)),
+        ),
       ),
+      loanEnds: loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal !== ordinal),
+      heldLoans: Object.freeze([
+        ...loanEndsOf(fact.arguments, (ordinal) => returnedBorrowOrdinal === ordinal),
+        ...(returnedCaptureLoan === undefined ? [] : [returnedCaptureLoan]),
+      ]),
       access: fact.mode,
       substitution: fact.substitution,
       evaluation:
@@ -1358,16 +1366,17 @@ export const hirExpectedExpression = (
 
 export const hirWritePlace = (
   fact: ExpressionFact,
-  root: BindingDeclarationFact,
+  root: AssignmentRootFact,
 ): Hir.WritePlace | undefined => {
   const selectors: Array<Hir.WriteSelector> = []
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Grouped') return walk(current.expression)
     if (current._tag === 'Identifier') {
-      return (
-        current.reference._tag === 'ResolvedBinding' &&
-        current.reference.binding.id.ordinal === root.id.ordinal
-      )
+      return root._tag === 'ParameterDeclaration'
+        ? current.reference._tag === 'Resolved' &&
+            current.reference.parameter.id.ordinal === root.id.ordinal
+        : current.reference._tag === 'ResolvedBinding' &&
+            current.reference.binding.id.ordinal === root.id.ordinal
     }
     if (current._tag === 'FieldProjection') {
       if (
@@ -1415,7 +1424,10 @@ export const hirWritePlace = (
   if (!walk(fact) || fact.type._tag !== 'Available') return undefined
   return Object.freeze({
     _tag: 'WritePlace',
-    root: root.id,
+    root:
+      root._tag === 'ParameterDeclaration'
+        ? Object.freeze({ _tag: 'ParameterWriteRoot' as const, parameter: root.id })
+        : Object.freeze({ _tag: 'BindingWriteRoot' as const, binding: root.id }),
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: fact.syntax.span,
@@ -1511,14 +1523,14 @@ export const hirBorrowedWritePlace = (
 
 export const hirAssignmentWritePlace = (
   fact: ExpressionFact,
-  root: BindingDeclarationFact,
+  root: AssignmentRootFact,
 ): Hir.WritePlace | undefined => {
-  const rootType = assignmentRootType(root)
-  return rootType !== undefined &&
-    (Type.isSlice(rootType) || Type.isReference(rootType)) &&
-    rootType.access === 'Exclusive'
+  const access = assignmentRootAccess(root)
+  return access === 'ExclusiveBorrowed'
     ? hirBorrowedWritePlace(fact, root)
-    : hirWritePlace(fact, root)
+    : access === 'MutableOwned'
+      ? hirWritePlace(fact, root)
+      : undefined
 }
 
 export const statementSpan = (statement: StatementFact): SourceSpan.SourceSpan =>

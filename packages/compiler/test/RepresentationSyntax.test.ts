@@ -291,3 +291,19 @@ fn forward<E, ?R>() -> i32 ! E ? R { return 0 }`,
     )
   }),
 )
+
+it.effect('presents mutable owned parameter storage in the source declaration', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* index(
+      'representation-syntax/mutable-parameter-presentation',
+      `struct Counter { value: i32 }
+fn update(mut counter: Counter) -> Counter { return move counter }`,
+    )
+    const declaration = analyzed.modules.at(0)?.declarations.at(0)
+
+    assert.strictEqual(
+      declaration === undefined ? undefined : Presentation.functionDeclaration(declaration).text,
+      'fn update(mut counter: Counter) -> Counter',
+    )
+  }),
+)

@@ -1011,6 +1011,91 @@ pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
   }),
 )
 
+it.effect('invalidates inherited allocation provenance after a mutable parameter write', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
+import silk.effect as Effect
+fn replace(mut allocation: Allocation, replacement: Allocation) -> Allocation {
+  allocation = move replacement
+  return move allocation
+}
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstLayout = Intrinsic.sharedLayout<i32>()
+  let first = run Intrinsic.systemAllocationAcquire(move firstLayout)
+  let secondLayout = Intrinsic.sharedLayout<i32>()
+  let second = run Intrinsic.systemAllocationAcquire(move secondLayout)
+  let allocation = replace(move first, move second)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/mutable-parameter',
+      source,
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0138'],
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'LocalSharedLayoutMismatch'
+        ? diagnostic.reason.actual
+        : undefined,
+      'mutable parameter allocation provenance',
+    )
+  }),
+)
+
+it.effect('invalidates inherited allocation provenance after replacing a mutable parameter', () =>
+  Effect.gen(function* () {
+    const source = ascii(`import silk.allocator { OutOfMemoryError }
+import silk.effect as Effect
+fn replace(mut allocation: Allocation, replacement: Allocation) -> Allocation {
+  let old = Intrinsic.replace(allocation, move replacement)
+  drop old
+  return move allocation
+}
+effect fn construct() -> i32 ! OutOfMemoryError {
+  let firstLayout = Intrinsic.sharedLayout<i32>()
+  let first = run Intrinsic.systemAllocationAcquire(move firstLayout)
+  let secondLayout = Intrinsic.sharedLayout<i64>()
+  let second = run Intrinsic.systemAllocationAcquire(move secondLayout)
+  let allocation = replace(move first, move second)
+  unsafe {
+    let core = Intrinsic.sharedFromAllocation<i32>(move allocation, 42)
+    drop core
+  }
+  return 42
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'local-shared-allocation/mutable-parameter-replace',
+      source,
+      'wasm32-unknown-unknown',
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0138'],
+    )
+    const diagnostic = Analysis.diagnostics(snapshot).at(0)
+    assert.strictEqual(
+      diagnostic?.reason._tag === 'LocalSharedLayoutMismatch'
+        ? diagnostic.reason.actual
+        : undefined,
+      'mutable parameter allocation provenance',
+    )
+  }),
+)
+
 it.effect('proves exact local-shared provenance through the selected allocator provider', () =>
   Effect.gen(function* () {
     const source = ascii(`import silk.allocator { Allocator }

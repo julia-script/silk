@@ -1,4 +1,4 @@
-import { concreteCallableIdentity, executableSites } from './CallResolution.js'
+import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -11,15 +11,19 @@ import type {
 } from './Elaboration.js'
 import {
   assignmentRoot,
+  assignmentRootAccess,
   childNode,
   compatible,
   declaredReturnTypesCompatible,
+  expressionChildren,
   isExpressionNode,
   representationJoinDiagnostic,
   returnedBorrowArgument,
+  returnedBorrowExpression,
   typesCompatible,
   unavailableCompatibility,
   unionConversionDiagnostic,
+  visitExpressionFacts,
 } from './Elaboration.js'
 import type {
   BodyContext,
@@ -93,6 +97,150 @@ export const analyzeStatements = (
   const facts: Array<StatementFact> = []
   let scope = initialScope
   const blockBindings = new Map<string, SourceSpan.SourceSpan>()
+  const callableWrites = context.resolution.writtenCallableBindings
+  const snapshotCallableWrites = (): ReadonlySet<number> => new Set(callableWrites)
+  const restoreCallableWrites = (snapshot: ReadonlySet<number>): void => {
+    if (callableWrites === undefined) return
+    callableWrites.clear()
+    for (const ordinal of snapshot) callableWrites.add(ordinal)
+  }
+  const mergeCallableWrites = (...snapshots: ReadonlyArray<ReadonlySet<number>>): void => {
+    restoreCallableWrites(new Set(snapshots.flatMap((snapshot) => [...snapshot])))
+  }
+  const analyzePath = <A>(initial: ReadonlySet<number>, analyze: () => A) => {
+    restoreCallableWrites(initial)
+    const value = analyze()
+    return Object.freeze({ value, writes: snapshotCallableWrites() })
+  }
+  const unionWriteStates = (
+    ...states: ReadonlyArray<ReadonlySet<number> | undefined>
+  ): ReadonlySet<number> | undefined => {
+    const present = states.filter((state): state is ReadonlySet<number> => state !== undefined)
+    return present.length === 0 ? undefined : new Set(present.flatMap((state) => [...state]))
+  }
+  interface CallableWriteFlow {
+    readonly fallthrough?: ReadonlySet<number>
+    readonly continues?: ReadonlySet<number>
+    readonly breaks?: ReadonlySet<number>
+  }
+  const expressionWrites = (
+    expression: ExpressionFact,
+    initial: ReadonlySet<number>,
+  ): ReadonlySet<number> => {
+    const writes = new Set(initial)
+    visitExpressionFacts(expression, {
+      descendEffectBlocks: false,
+      expression: (candidate) => {
+        if (
+          candidate._tag === 'PlaceReplace' &&
+          !expressionNever(candidate.destination) &&
+          !expressionNever(candidate.value) &&
+          candidate.root?._tag === 'BindingFact' &&
+          candidate.root.inferredType._tag === 'Available' &&
+          Type.isCallable(candidate.root.inferredType.type)
+        )
+          writes.add(candidate.root.id.ordinal)
+      },
+    })
+    return writes
+  }
+  const callableWriteFlow = (
+    statements: ReadonlyArray<StatementFact>,
+    initial: ReadonlySet<number>,
+    targetLoop: Hir.LoopId,
+  ): CallableWriteFlow => {
+    let fallthrough: ReadonlySet<number> | undefined = new Set(initial)
+    let continues: ReadonlySet<number> | undefined
+    let breaks: ReadonlySet<number> | undefined
+    for (const statement of statements) {
+      if (fallthrough === undefined) break
+      if (statement._tag === 'BindStatement') {
+        fallthrough = expressionWrites(statement.binding.initializer, fallthrough)
+        if (expressionNever(statement.binding.initializer)) fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'PatternBindStatement') {
+        fallthrough = expressionWrites(statement.selection.source, fallthrough)
+        if (expressionNever(statement.selection.source)) fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
+        fallthrough = expressionWrites(statement.expression, fallthrough)
+        if (expressionNever(statement.expression)) fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'WriteStatement') {
+        fallthrough = expressionWrites(
+          statement.value,
+          expressionWrites(statement.destination, fallthrough),
+        )
+        if (
+          statement.root?._tag === 'BindingFact' &&
+          statement.root.inferredType._tag === 'Available' &&
+          Type.isCallable(statement.root.inferredType.type)
+        )
+          fallthrough = new Set(fallthrough).add(statement.root.id.ordinal)
+        if (expressionNever(statement.destination) || expressionNever(statement.value))
+          fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
+        expressionWrites(statement.expression, fallthrough)
+        fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+        if (statement.target === targetLoop) {
+          if (statement._tag === 'BreakStatement') breaks = unionWriteStates(breaks, fallthrough)
+          else continues = unionWriteStates(continues, fallthrough)
+        }
+        fallthrough = undefined
+        continue
+      }
+      if (statement._tag === 'UnsafeStatement') {
+        const nested = callableWriteFlow(statement.statements, fallthrough, targetLoop)
+        fallthrough = nested.fallthrough
+        continues = unionWriteStates(continues, nested.continues)
+        breaks = unionWriteStates(breaks, nested.breaks)
+        continue
+      }
+      if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+        const afterCondition = expressionWrites(
+          statement._tag === 'IfStatement' ? statement.condition : statement.selection.source,
+          fallthrough,
+        )
+        if (
+          expressionNever(
+            statement._tag === 'IfStatement' ? statement.condition : statement.selection.source,
+          )
+        ) {
+          fallthrough = undefined
+          continue
+        }
+        const taken = callableWriteFlow(statement.taken, afterCondition, targetLoop)
+        const otherwise = callableWriteFlow(statement.otherwise, afterCondition, targetLoop)
+        fallthrough = unionWriteStates(taken.fallthrough, otherwise.fallthrough)
+        continues = unionWriteStates(continues, taken.continues, otherwise.continues)
+        breaks = unionWriteStates(breaks, taken.breaks, otherwise.breaks)
+        continue
+      }
+      if (statement._tag === 'WhileStatement') {
+        const nestedEntry = expressionWrites(statement.condition, fallthrough)
+        if (expressionNever(statement.condition)) {
+          fallthrough = undefined
+          continue
+        }
+        const nested = callableWriteFlow(statement.body, nestedEntry, statement.loop)
+        const nestedBackedge = unionWriteStates(nested.fallthrough, nested.continues)
+        fallthrough = unionWriteStates(nestedEntry, nestedBackedge, nested.breaks)
+      }
+    }
+    return Object.freeze({
+      ...(fallthrough === undefined ? {} : { fallthrough }),
+      ...(continues === undefined ? {} : { continues }),
+      ...(breaks === undefined ? {} : { breaks }),
+    })
+  }
 
   const nextRegion = (): Hir.RegionId => {
     const region = Object.freeze({
@@ -247,21 +395,31 @@ export const analyzeStatements = (
 
     const arms = SyntaxTree.directNodes(element, 'Block')
     const firstArm = arms.at(0)
-    const taken =
-      firstArm === undefined ? [] : analyzeStatements(context, firstArm, armScope, armLoopStack)
+    const branchEntry = snapshotCallableWrites()
+    const taken = analyzePath(branchEntry, () =>
+      firstArm === undefined ? [] : analyzeStatements(context, firstArm, armScope, armLoopStack),
+    )
     const chained = SyntaxTree.directNode(element, 'ConditionalStatement')
     const otherwiseArm = arms.at(1)
-    const otherwise =
+    const otherwise = analyzePath(branchEntry, () =>
       chained !== undefined
         ? [analyzeConditional(chained, armScope, armLoopStack)]
         : otherwiseArm === undefined
           ? []
-          : analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+          : analyzeStatements(context, otherwiseArm, armScope, armLoopStack),
+    )
+    const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
+    const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
+    mergeCallableWrites(
+      ...(takenFallsThrough ? [taken.writes] : []),
+      ...(otherwiseFallsThrough ? [otherwise.writes] : []),
+      ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
+    )
     return Object.freeze({
       _tag: 'IfStatement',
       condition: condition.fact,
-      taken: Object.freeze([...taken]),
-      otherwise: Object.freeze([...otherwise]),
+      taken: Object.freeze([...taken.value]),
+      otherwise: Object.freeze([...otherwise.value]),
       region,
       syntax: element,
     })
@@ -281,25 +439,35 @@ export const analyzeStatements = (
     })
     const arms = SyntaxTree.directNodes(element, 'Block')
     const firstArm = arms.at(0)
-    const taken =
-      firstArm === undefined ? [] : analyzeStatements(context, firstArm, takenScope, armLoopStack)
+    const branchEntry = snapshotCallableWrites()
+    const taken = analyzePath(branchEntry, () =>
+      firstArm === undefined ? [] : analyzeStatements(context, firstArm, takenScope, armLoopStack),
+    )
     const chained =
       SyntaxTree.directNode(element, 'ConditionalStatement') ??
       SyntaxTree.directNode(element, 'PatternConditionalStatement')
     const otherwiseArm = arms.at(1)
-    const otherwise =
+    const otherwise = analyzePath(branchEntry, () =>
       chained?.kind === 'PatternConditionalStatement'
         ? [analyzePatternConditional(chained, armScope, armLoopStack)]
         : chained !== undefined
           ? [analyzeConditional(chained, armScope, armLoopStack)]
           : otherwiseArm === undefined
             ? []
-            : analyzeStatements(context, otherwiseArm, armScope, armLoopStack)
+            : analyzeStatements(context, otherwiseArm, armScope, armLoopStack),
+    )
+    const takenFallsThrough = returnFlowOf(taken.value, false).fallsThrough
+    const otherwiseFallsThrough = returnFlowOf(otherwise.value, false).fallsThrough
+    mergeCallableWrites(
+      ...(takenFallsThrough ? [taken.writes] : []),
+      ...(otherwiseFallsThrough ? [otherwise.writes] : []),
+      ...(!takenFallsThrough && !otherwiseFallsThrough ? [branchEntry] : []),
+    )
     return Object.freeze({
       _tag: 'IfLetStatement',
       selection,
-      taken: Object.freeze([...taken]),
-      otherwise: Object.freeze([...otherwise]),
+      taken: Object.freeze([...taken.value]),
+      otherwise: Object.freeze([...otherwise.value]),
       region,
       syntax: element,
     })
@@ -354,6 +522,14 @@ export const analyzeStatements = (
         context.diagnostics.push(Diagnostic.mutableEffectRecipe(element.span))
 
       const name = bindingName(context.source, element)
+      const exactCallable = exactCallableOf(
+        initializer.fact,
+        context.resolution.writtenCallableBindings,
+      )
+      const hasConcreteCallableIdentity = concreteCallableIdentity(
+        initializer.fact,
+        context.resolution.writtenCallableBindings,
+      )
       const binding: BindingDeclarationFact = Object.freeze({
         _tag: 'BindingFact',
         id: Object.freeze({
@@ -366,6 +542,8 @@ export const analyzeStatements = (
           SyntaxTree.directToken(element, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
         inferredType: initializer.fact.type,
         initializer: initializer.fact,
+        ...(exactCallable === undefined ? {} : { exactCallable }),
+        ...(hasConcreteCallableIdentity ? { concreteCallableIdentity: true as const } : {}),
         syntax: element,
       })
       context.bindings.push(binding)
@@ -540,7 +718,7 @@ export const analyzeStatements = (
         if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
         }
-      } else if (root._tag === 'BindingFact' && root.mutability === 'Immutable') {
+      } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -548,14 +726,10 @@ export const analyzeStatements = (
           ),
         )
       } else if (
-        root._tag === 'ParameterDeclaration' &&
-        (root.declaredType._tag !== 'Resolved' ||
-          !(
-            (Type.isSlice(root.declaredType.type) || Type.isReference(root.declaredType.type)) &&
-            root.declaredType.type.access === 'Exclusive'
-          ) ||
-          (destination.fact._tag !== 'IndexProjection' &&
-            destination.fact._tag !== 'FieldProjection'))
+        assignmentRootAccess(root) === 'SharedBorrowed' ||
+        (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+          destination.fact._tag !== 'IndexProjection' &&
+          destination.fact._tag !== 'FieldProjection')
       ) {
         context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
       }
@@ -582,6 +756,13 @@ export const analyzeStatements = (
             ),
         )
       }
+      if (
+        root?._tag === 'BindingFact' &&
+        root.inferredType._tag === 'Available' &&
+        Type.isCallable(root.inferredType.type)
+      ) {
+        context.resolution.writtenCallableBindings?.add(root.id.ordinal)
+      }
       facts.push(
         Object.freeze({
           _tag: 'WriteStatement',
@@ -604,37 +785,69 @@ export const analyzeStatements = (
         ordinal: context.loops.length,
       })
       context.loops.push(loop)
-      const conditionNode = statementExpressionNode(element)
-      const condition = analyzeExpression(
-        context.source,
-        conditionNode,
-        context.declarations,
-        context.declaration,
-        scope,
-        context.resolution,
-      )
-      if (condition === undefined) {
-        throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
-      }
-      context.diagnostics.push(...condition.diagnostics)
-      if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
-        context.diagnostics.push(
-          Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
-        )
-      }
       const bodyNode = SyntaxTree.directNode(element, 'Block')
-      const body =
-        bodyNode === undefined
-          ? []
-          : analyzeStatements(context, bodyNode, scope, Object.freeze([...loopStack, loop]))
+      const loopEntry = snapshotCallableWrites()
+      const checkpoint = Object.freeze({
+        bindings: context.bindings.length,
+        diagnostics: context.diagnostics.length,
+        regions: context.regions.length,
+        loops: context.loops.length,
+        nextBindingOrdinal: context.nextBindingOrdinal.value,
+      })
+      const analyzeLoopPass = (entry: ReadonlySet<number>) => {
+        restoreCallableWrites(entry)
+        const conditionNode = statementExpressionNode(element)
+        const condition = analyzeExpression(
+          context.source,
+          conditionNode,
+          context.declarations,
+          context.declaration,
+          scope,
+          context.resolution,
+        )
+        if (condition === undefined) {
+          throw new RangeError(`Semantic analysis cannot analyze ${conditionNode.kind}`)
+        }
+        context.diagnostics.push(...condition.diagnostics)
+        if (condition.fact.type._tag === 'Available' && condition.fact.type.type !== 'bool') {
+          context.diagnostics.push(
+            Diagnostic.conditionNotBool(Type.encode(condition.fact.type.type), conditionNode.span),
+          )
+        }
+        const bodyEntry = snapshotCallableWrites()
+        const body =
+          bodyNode === undefined
+            ? []
+            : analyzeStatements(context, bodyNode, scope, Object.freeze([...loopStack, loop]))
+        const flow = callableWriteFlow(body, bodyEntry, loop)
+        const backedge = unionWriteStates(flow.fallthrough, flow.continues)
+        return Object.freeze({ condition: condition.fact, body, bodyEntry, flow, backedge })
+      }
+      let analyzed = analyzeLoopPass(loopEntry)
+      const initialBackedge = analyzed.backedge
+      if ([...(initialBackedge ?? [])].some((ordinal) => !loopEntry.has(ordinal))) {
+        context.bindings.length = checkpoint.bindings
+        context.diagnostics.length = checkpoint.diagnostics
+        context.regions.length = checkpoint.regions
+        context.loops.length = checkpoint.loops
+        context.nextBindingOrdinal.value = checkpoint.nextBindingOrdinal
+        const fixedEntry = new Set(loopEntry)
+        for (const ordinal of initialBackedge ?? []) fixedEntry.add(ordinal)
+        analyzed = analyzeLoopPass(fixedEntry)
+      }
+      mergeCallableWrites(
+        analyzed.bodyEntry,
+        ...(analyzed.backedge === undefined ? [] : [analyzed.backedge]),
+        ...(analyzed.flow.breaks === undefined ? [] : [analyzed.flow.breaks]),
+      )
       const parent = loopStack.at(-1)
       facts.push(
         Object.freeze({
           _tag: 'WhileStatement',
           loop,
           ...(parent === undefined ? {} : { parent }),
-          condition: condition.fact,
-          body: Object.freeze([...body]),
+          condition: analyzed.condition,
+          body: Object.freeze([...analyzed.body]),
           region,
           syntax: element,
         }),
@@ -688,7 +901,7 @@ export const analyzeStatements = (
         expression.type !== undefined &&
         Type.isCallable(expression.type) &&
         expression.type.mode !== 'Shared' &&
-        !concreteCallableIdentity(expression.fact)
+        !concreteCallableIdentity(expression.fact, context.resolution.writtenCallableBindings)
       ) {
         context.diagnostics.push(Diagnostic.unknownOwnedCallableReturn(expressionNode.span))
       }
@@ -889,6 +1102,93 @@ export const executableStatements = (
   return Object.freeze(reachable)
 }
 
+/** Callable binding roots written on any reachable path through these already-analyzed facts. */
+export const reachableCallableWrites = (
+  body: ReadonlyArray<StatementFact>,
+): ReadonlySet<number> => {
+  const writes = new Set<number>()
+  const expression = (fact: ExpressionFact): boolean => {
+    if (fact._tag === 'EffectBlock') return true
+    if (fact._tag === 'ShortCircuit') {
+      const left = fact.arguments.at(0)?.expression
+      if (left !== undefined && !expression(left)) return false
+      const right = fact.arguments.at(1)?.expression
+      if (right !== undefined) expression(right)
+      return !expressionNever(fact)
+    }
+    if (fact._tag === 'Match') {
+      if (!expression(fact.scrutinee)) return false
+      let completes = false
+      for (const arm of fact.arms) {
+        if (!arm.reachable) continue
+        if (arm.guard !== undefined && !expression(arm.guard)) continue
+        if (expression(arm.result)) completes = true
+      }
+      return completes
+    }
+    for (const child of expressionChildren(fact)) if (!expression(child)) return false
+    if (
+      fact._tag === 'PlaceReplace' &&
+      fact.root?._tag === 'BindingFact' &&
+      fact.root.inferredType._tag === 'Available' &&
+      Type.isCallable(fact.root.inferredType.type)
+    )
+      writes.add(fact.root.id.ordinal)
+    return !expressionNever(fact)
+  }
+  const visit = (statements: ReadonlyArray<StatementFact>): boolean => {
+    let fallsThrough = true
+    for (const statement of statements) {
+      if (!fallsThrough) break
+      if (statement._tag === 'BindStatement') {
+        fallsThrough = expression(statement.binding.initializer)
+      } else if (statement._tag === 'PatternBindStatement') {
+        fallsThrough = expression(statement.selection.source)
+      } else if (statement._tag === 'ExpressionStatement' || statement._tag === 'DropStatement') {
+        fallsThrough = expression(statement.expression)
+      } else if (statement._tag === 'WriteStatement') {
+        const destinationContinues = expression(statement.destination)
+        if (!destinationContinues) {
+          fallsThrough = false
+          continue
+        }
+        const valueContinues = expression(statement.value)
+        if (
+          valueContinues &&
+          statement.root?._tag === 'BindingFact' &&
+          statement.root.inferredType._tag === 'Available' &&
+          Type.isCallable(statement.root.inferredType.type)
+        )
+          writes.add(statement.root.id.ordinal)
+        fallsThrough = valueContinues
+      } else if (statement._tag === 'ReturnStatement' || statement._tag === 'FailStatement') {
+        expression(statement.expression)
+        fallsThrough = false
+      } else if (statement._tag === 'BreakStatement' || statement._tag === 'ContinueStatement') {
+        fallsThrough = false
+      } else if (statement._tag === 'UnsafeStatement') {
+        fallsThrough = visit(statement.statements)
+      } else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
+        const condition =
+          statement._tag === 'IfStatement' ? statement.condition : statement.selection.source
+        if (!expression(condition)) {
+          fallsThrough = false
+        } else {
+          const takenFallsThrough = visit(statement.taken)
+          const otherwiseFallsThrough = visit(statement.otherwise)
+          fallsThrough = takenFallsThrough || otherwiseFallsThrough
+        }
+      } else {
+        fallsThrough = expression(statement.condition)
+        if (fallsThrough) visit(statement.body)
+      }
+    }
+    return fallsThrough
+  }
+  visit(body)
+  return writes
+}
+
 export const analyzeFunctionBody = (
   source: SourceFile.SourceFile,
   declaration: DeclarationFact,
@@ -912,6 +1212,7 @@ export const analyzeFunctionBody = (
       ? { executableOwner: declaration.canonical.id }
       : {}),
     executableSites: executableSites(declaration.syntax),
+    writtenCallableBindings: new Set<number>(),
   })
   const context: BodyContext = {
     source,
@@ -937,6 +1238,7 @@ export const analyzeFunctionBody = (
     patternOrigins: ReadonlyMap<string, DeclarationFacts.ParameterFact | undefined> = new Map(),
   ): DeclarationFacts.ParameterFact | undefined => {
     if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
+    if (expression._tag === 'Move') return originOf(expression.subject, patternOrigins)
     if (expression._tag === 'Identifier') {
       if (expression.reference._tag === 'Resolved') return expression.reference.parameter
       if (expression.reference._tag === 'ResolvedBinding') {
@@ -967,14 +1269,9 @@ export const analyzeFunctionBody = (
     if (expression._tag === 'FieldProjection' || expression._tag === 'IndexProjection') {
       return originOf(expression.subject, patternOrigins)
     }
-    if (expression._tag === 'Call' && expression.reference._tag === 'Resolved') {
-      const argument = returnedBorrowArgument(expression)
-      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
-    }
-    if (expression._tag === 'Call' && expression.reference._tag === 'ResolvedBuiltin') {
-      const ordinal = expression.reference.returnedBorrowParameter
-      const argument = ordinal === undefined ? undefined : expression.arguments.at(ordinal)
-      return argument === undefined ? undefined : originOf(argument.expression, patternOrigins)
+    if (expression._tag === 'Call' || expression._tag === 'CallableApply') {
+      const source = returnedBorrowExpression(expression)
+      return source === undefined ? undefined : originOf(source, patternOrigins)
     }
     if (expression._tag === 'Match') {
       const scrutinee = originOf(expression.scrutinee, patternOrigins)

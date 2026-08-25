@@ -1,6 +1,8 @@
-export const vectorGrowthSource = `import silk.core {SystemAllocator}
+export const vectorGrowthSource = `import silk.allocator {Allocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {SystemAllocator}
+
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -10,7 +12,7 @@ import silk.vector {Vector, make, append, get, length, capacity}
 
 effect fn build() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10)
     |> Effect.provideMut(&mut allocator)
@@ -50,11 +52,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorFailedGrowthSource = `import silk.core {Allocator}
+export const vectorFailedGrowthSource = `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -74,7 +76,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
     fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
-  let mut inner = SystemAllocator.make()
+  let mut inner = Allocator.systemAllocatorService()
   let pending = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut inner)
   let block = run pending
@@ -138,9 +140,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorDestructionOrderSource = `import silk.core {SystemAllocator}
+export const vectorDestructionOrderSource = `import silk.allocator {Allocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {SystemAllocator}
+
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -165,7 +169,7 @@ impl Drop for Entry {
 
 effect fn build() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let entry0 = Entry {value: 3, marker: make<i32>()}
   let pending0 = append<Entry>(&mut values, move entry0)
@@ -194,9 +198,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const vectorEarlyDropSource = `import silk.core {SystemAllocator}
+export const vectorEarlyDropSource = `import silk.allocator {Allocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {SystemAllocator}
+
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -226,7 +232,7 @@ fn consume(values: Vector<Entry>) -> i32 {
 
 effect fn build() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let mut values = make<Entry>()
   let entry0 = Entry {value: 11, marker: make<i32>()}
   let pending0 = append<Entry>(&mut values, move entry0)
@@ -249,11 +255,11 @@ pub fn main() -> i32 {
 }
 `
 
-export const scannerSource = `import silk.core {Allocator}
+export const scannerSource = `import silk.allocator {Allocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
 import silk.effect as Effect
 
@@ -298,7 +304,7 @@ effect fn scan(source: &[U8]) -> Vector<Token>
 
 effect fn build() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let source = [
     U8 {value: 1},
     U8 {value: 2},

@@ -76,9 +76,9 @@ fn wrong() -> Status { return Mode.Ready }`
     }
     assert.deepEqual(
       Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['SEM0150', 'SEM0006', 'SEM0151'],
+      ['SEM0153', 'SEM0006', 'SEM0154'],
     )
-    const unknown = Analysis.diagnostics(self).find((diagnostic) => diagnostic.code === 'SEM0150')
+    const unknown = Analysis.diagnostics(self).find((diagnostic) => diagnostic.code === 'SEM0153')
     assert.strictEqual(
       unknown === undefined ? undefined : source.slice(unknown.span.start, unknown.span.end),
       'Unknown',

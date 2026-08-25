@@ -404,7 +404,7 @@ export const analyzeCallTypeArguments = (
       (Type.isReference(resolved.fact.type)
         ? Type.containsPositionRestrictedBorrow(resolved.fact.type.target)
         : Type.containsPositionRestrictedBorrow(resolved.fact.type))
-        ? Diagnostic.sliceTypePosition('type argument', node.span)
+        ? Diagnostic.borrowedViewTypePosition('type argument', node.span)
         : undefined
     return Object.freeze({
       fact: Object.freeze({
@@ -2011,15 +2011,43 @@ export const ownedProviderCaptureAccess = (
     ? 'Copy'
     : captureAccess(expression, index, assumptions)
 
-export const concreteCallableIdentity = (expression: ExpressionFact): boolean => {
+type ExactCallableFact = Extract<
+  ExpressionFact,
+  { readonly _tag: 'FunctionItem' | 'CallableSection' }
+>
+
+export const exactCallableOf = (
+  expression: ExpressionFact,
+  writtenBindings: ReadonlySet<number> = new Set(),
+): ExactCallableFact | undefined => {
+  if (expression._tag === 'Grouped' || expression._tag === 'Move') {
+    return exactCallableOf(
+      expression._tag === 'Grouped' ? expression.expression : expression.subject,
+      writtenBindings,
+    )
+  }
+  if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') return expression
+  if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
+    if (writtenBindings.has(expression.reference.binding.id.ordinal)) return undefined
+    return expression.reference.binding.exactCallable
+  }
+  return undefined
+}
+
+export const concreteCallableIdentity = (
+  expression: ExpressionFact,
+  writtenBindings: ReadonlySet<number> = new Set(),
+): boolean => {
+  if (exactCallableOf(expression, writtenBindings) !== undefined) return true
   if (expression._tag === 'Grouped' || expression._tag === 'Move') {
     return concreteCallableIdentity(
       expression._tag === 'Grouped' ? expression.expression : expression.subject,
+      writtenBindings,
     )
   }
-  if (expression._tag === 'FunctionItem' || expression._tag === 'CallableSection') return true
   if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding') {
-    return concreteCallableIdentity(expression.reference.binding.initializer)
+    if (writtenBindings.has(expression.reference.binding.id.ordinal)) return false
+    return expression.reference.binding.concreteCallableIdentity === true
   }
   return expression._tag === 'Call' && expression.reference._tag === 'Resolved'
 }
@@ -2072,13 +2100,10 @@ export const sectionCallableType = (
 
 export const callableSectionOf = (
   expression: ExpressionFact,
+  writtenBindings: ReadonlySet<number> = new Set(),
 ): CallableSectionExpressionFact | undefined => {
-  if (expression._tag === 'CallableSection') return expression
-  if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
-    return callableSectionOf(expression.reference.binding.initializer)
-  if (expression._tag === 'Move') return callableSectionOf(expression.subject)
-  if (expression._tag === 'Grouped') return callableSectionOf(expression.expression)
-  return undefined
+  const exact = exactCallableOf(expression, writtenBindings)
+  return exact?._tag === 'CallableSection' ? exact : undefined
 }
 
 export function executableSite(
@@ -2239,7 +2264,9 @@ export const finishCallableApplication = (
     ...argumentsResult.diagnostics,
     ...callTypeArguments.diagnostics,
   ]
-  const section = callableSectionOf(callee.fact)
+  const writtenBindings = resolution?.writtenCallableBindings ?? new Set<number>()
+  const exactCallable = exactCallableOf(callee.fact, writtenBindings)
+  const section = exactCallable?._tag === 'CallableSection' ? exactCallable : undefined
   const directSection = callee.fact._tag === 'CallableSection' ? callee.fact : undefined
   const stagedSection =
     directSection !== undefined &&
@@ -2250,6 +2277,32 @@ export const finishCallableApplication = (
     caller !== undefined
       ? directSection
       : undefined
+  const returnedBorrowParameter = (reference: CallReferenceFact): number | undefined => {
+    if (reference._tag === 'ResolvedBuiltin') return reference.returnedBorrowParameter
+    if (reference._tag !== 'Resolved') return undefined
+    return DeclarationFacts.returnedBorrow(reference.declaration)?.parameter.id.ordinal
+  }
+  const returnedBorrowSource = (() => {
+    if (exactCallable?._tag === 'FunctionItem') {
+      const parameter = returnedBorrowParameter(exactCallable.reference)
+      return parameter === undefined || argumentsResult.facts.at(parameter) === undefined
+        ? undefined
+        : Object.freeze({ _tag: 'Argument' as const, ordinal: parameter })
+    }
+    if (section !== undefined) {
+      const parameter = returnedBorrowParameter(section.reference)
+      if (parameter === undefined) return undefined
+      const ordinal = section.remainingParameters.indexOf(parameter)
+      if (ordinal >= 0 && argumentsResult.facts.at(ordinal) !== undefined) {
+        return Object.freeze({ _tag: 'Argument' as const, ordinal })
+      }
+      const capture = section.captures.find((candidate) => candidate.parameterOrdinal === parameter)
+      return capture === undefined
+        ? undefined
+        : Object.freeze({ _tag: 'Capture' as const, capture })
+    }
+    return undefined
+  })()
   const schema = callable?.schema
   const inferred = new Map<string, Type.GenericArgument>(
     schema?.substitution ?? section?.substitution ?? [],
@@ -2265,6 +2318,16 @@ export const finishCallableApplication = (
     )
   }
   if (
+    callable !== undefined &&
+    (Type.isReference(callable.result) || Type.isSlice(callable.result)) &&
+    returnedBorrowSource === undefined &&
+    stagedSection === undefined &&
+    callable.parameters.length === argumentsResult.facts.length
+  ) {
+    diagnostics.push(Diagnostic.unknownCallableBorrowSource(node.span))
+    valid = false
+  }
+  if (
     callable?.mode === 'Exclusive' &&
     callee.fact._tag === 'Identifier' &&
     callee.fact.reference._tag === 'ResolvedBinding' &&
@@ -2275,7 +2338,7 @@ export const finishCallableApplication = (
     )
     valid = false
   }
-  if (schema !== undefined && !concreteCallableIdentity(callee.fact)) {
+  if (schema !== undefined && !concreteCallableIdentity(callee.fact, writtenBindings)) {
     diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', node.span))
     valid = false
   }
@@ -2586,6 +2649,7 @@ export const finishCallableApplication = (
       ...(callable === undefined ? {} : { contract: callable }),
       substitution: inferred,
       inferredProviderSelectors,
+      ...(returnedBorrowSource === undefined ? {} : { returnedBorrowSource }),
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,
       syntax: node,

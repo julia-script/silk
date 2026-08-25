@@ -221,7 +221,7 @@ pub fn main() -> i32 {
       assert.strictEqual(good.declaration.members.at(0)?.discriminant._tag, 'Available')
       assert.deepEqual(
         Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
-        ['SEM0148', 'SEM0146'],
+        ['SEM0151', 'SEM0149'],
       )
     }),
 )

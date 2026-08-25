@@ -51,7 +51,7 @@ import silk.char as char
 
 import silk.allocator { Allocator }
 
-import silk.effect as Effect
+import silk.effect { Effect }
 
 import silk.option as Option
 

@@ -23,6 +23,31 @@ const evaluatedValue = (name: string, source: string) =>
     return outcome._tag === 'Completed' ? Number(outcome.result.value) : undefined
   })
 
+it.effect('allows a mutable owned witness parameter without changing interface conformance', () =>
+  evaluatedValue(
+    'user-witness/mutable-owned-parameter',
+    `interface Transform {
+  fn transform(self: &Self, value: Counter) -> Counter
+}
+struct Counter { value: i32 }
+struct Increment {}
+fn transform(self: &Increment, mut value: Counter) -> Counter {
+  value.value = value.value + 1
+  return move value
+}
+impl Transform for Increment { transform: Increment.transform }
+fn apply<T: Transform>(transform: &T, value: Counter) -> Counter {
+  return Transform.transform(transform, move value)
+}
+pub fn main() -> i32 {
+  let transform = Increment {}
+  let counter = Counter { value: 41 }
+  let result = apply<Increment>(&transform, move counter)
+  return result.value
+}`,
+  ),
+)
+
 it.effect('enforces unsafe operation variance and bound-call acknowledgement', () =>
   Effect.gen(function* () {
     const accepted = yield* analyzed(

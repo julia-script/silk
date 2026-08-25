@@ -1507,10 +1507,17 @@ it.effect('offers no code action for a diagnostic that carries no edit', () =>
 
 const inventoryOf = (
   modules: ReadonlyArray<ProjectModule>,
+  stdlibModules: ReadonlyArray<string> = [],
 ): WorkspaceInventory.WorkspaceInventory =>
   WorkspaceInventory.make({
     project: modules.map(({ module, text }) => {
       const source = SourceFile.make(module, encoder.encode(text))
+      return [module, ModuleSummary.make(Parser.parse(Lexer.lex(source)))] as const
+    }),
+    toolchain: stdlibModules.map((module) => {
+      const bytes = Stdlib.sources.get(module)
+      if (bytes === undefined) throw new Error(`missing stdlib module ${module}`)
+      const source = SourceFile.make(module, bytes)
       return [module, ModuleSummary.make(Parser.parse(Lexer.lex(source)))] as const
     }),
   })
@@ -1548,7 +1555,7 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
   }),
 )
 
-it.effect('completes partial and complete Effect spellings with a namespace import', () =>
+it.effect('completes partial and complete Effect spellings with a member import', () =>
   Effect.gen(function* () {
     for (const spelling of ['Eff', 'Effect']) {
       const source = `pub fn main() -> i32 { ${spelling} return 0 }`
@@ -1557,10 +1564,15 @@ it.effect('completes partial and complete Effect spellings with a namespace impo
         document,
         snapshot,
         positionAt(source, source.indexOf(spelling) + spelling.length),
-        inventoryOf([{ module: 'main', text: source }]),
+        inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+      )
+      // The anchored Effect member makes the namespace form redundant.
+      assert.notInclude(
+        completion.items.map((item) => item.detail),
+        'Import namespace from silk/effect',
       )
       const imported = completion.items.find(
-        (item) => item.label === 'Effect' && item.detail === 'Import namespace from silk/effect',
+        (item) => item.label === 'Effect' && item.detail === 'Import from silk/effect',
       )
       assert.deepEqual(imported?.textEdit, {
         range: {
@@ -1572,7 +1584,7 @@ it.effect('completes partial and complete Effect spellings with a namespace impo
       assert.deepEqual(imported?.additionalTextEdits, [
         {
           range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-          newText: 'import silk.effect as Effect\n',
+          newText: 'import silk.effect { Effect }\n',
         },
       ])
     }
@@ -1587,11 +1599,12 @@ it.effect('keeps Effect type completion import-free', () =>
       document,
       snapshot,
       positionAt(source, source.indexOf('Eff') + 'Eff'.length),
-      inventoryOf([{ module: 'main', text: source }]),
+      inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
     )
-    const effect = completion.items.find((item) => item.label === 'Effect')
+    const effect = completion.items.find(
+      (item) => item.label === 'Effect' && item.additionalTextEdits === undefined,
+    )
     assert.isDefined(effect)
-    assert.isUndefined(effect?.additionalTextEdits)
     assert.notInclude(
       completion.items.map((item) => item.detail),
       'Import namespace from silk/effect',
@@ -1599,7 +1612,7 @@ it.effect('keeps Effect type completion import-free', () =>
   }),
 )
 
-it.effect('aliases a colliding Effect namespace completion deterministically', () =>
+it.effect('aliases a colliding Effect member completion deterministically', () =>
   Effect.gen(function* () {
     const source = 'struct Effect {}\npub fn main() -> i32 { Eff return 0 }'
     const { document, snapshot } = yield* open(source)
@@ -1607,36 +1620,55 @@ it.effect('aliases a colliding Effect namespace completion deterministically', (
       document,
       snapshot,
       positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
-      inventoryOf([{ module: 'main', text: source }]),
+      inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+    )
+    assert.notInclude(
+      completion.items.map((item) => item.detail),
+      'Import namespace from silk/effect',
     )
     const imported = completion.items.find(
-      (item) => item.detail === 'Import namespace from silk/effect',
+      (item) => item.label === 'Effect' && item.detail === 'Import from silk/effect',
     )
-    assert.strictEqual(imported?.textEdit?.newText, 'SilkEffect')
+    assert.strictEqual(imported?.textEdit?.newText, 'EffectEffect')
     assert.strictEqual(
       imported?.additionalTextEdits?.[0]?.newText,
-      'import silk.effect as SilkEffect\n',
+      'import silk.effect { Effect as EffectEffect }\n',
     )
   }),
 )
 
-it.effect('does not duplicate an existing equivalent Effect namespace import', () =>
+it.effect('does not duplicate an existing equivalent Effect import', () =>
   Effect.gen(function* () {
-    const source = 'import silk.effect as Effect\npub fn main() -> i32 { Eff return 0 }'
-    const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(
-      document,
-      snapshot,
-      positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
-      inventoryOf([{ module: 'main', text: source }]),
-    )
-    assert.strictEqual(
-      completion.items.filter((item) => item.detail === 'Import namespace from silk/effect').length,
-      0,
-    )
-    const effect = completion.items.find((item) => item.label === 'Effect')
-    assert.isDefined(effect)
-    assert.isUndefined(effect?.additionalTextEdits)
+    for (const declaration of ['import silk.effect { Effect }', 'import silk.effect as Effect']) {
+      const source = `${declaration}\npub fn main() -> i32 { Eff return 0 }`
+      const { document, snapshot } = yield* open(source)
+      const completion = Document.completion(
+        document,
+        snapshot,
+        positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
+        inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+      )
+      assert.strictEqual(
+        completion.items.filter((item) => item.detail === 'Import namespace from silk/effect')
+          .length,
+        0,
+        declaration,
+      )
+      // The member form is the canonical import: with it in place nothing re-imports Effect. The
+      // legacy namespace alias leaves the member unimported, so the ordinary collision-aliased
+      // member suggestion may still appear there.
+      if (declaration === 'import silk.effect { Effect }')
+        assert.strictEqual(
+          completion.items.filter(
+            (item) => item.label === 'Effect' && item.detail === 'Import from silk/effect',
+          ).length,
+          0,
+          declaration,
+        )
+      const effect = completion.items.find((item) => item.label === 'Effect')
+      assert.isDefined(effect, declaration)
+      assert.isUndefined(effect?.additionalTextEdits, declaration)
+    }
   }),
 )
 

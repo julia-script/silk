@@ -53,13 +53,13 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
     })),
     [
       {
-        code: 'SEM0143',
+        code: 'SEM0146',
         reason: { _tag: 'EmptyEnum', enum: 'Empty' },
         span: [0, 12],
         related: undefined,
       },
       {
-        code: 'SEM0144',
+        code: 'SEM0147',
         reason: {
           _tag: 'UnsupportedEnumRepresentation',
           spelling: 'usize',
@@ -69,19 +69,19 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0145',
+        code: 'SEM0148',
         reason: { _tag: 'DuplicateEnumMemberName', spelling: 'Ready', originalSpan: first },
         span: [24, 29],
         related: [[16, 21]],
       },
       {
-        code: 'SEM0146',
+        code: 'SEM0149',
         reason: { _tag: 'DuplicateEnumDiscriminant', value: '3', originalSpan: first },
         span: [24, 29],
         related: [[16, 21]],
       },
       {
-        code: 'SEM0147',
+        code: 'SEM0150',
         reason: {
           _tag: 'EnumDiscriminantOutOfRange',
           representation: 'i8',
@@ -93,7 +93,7 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0148',
+        code: 'SEM0151',
         reason: {
           _tag: 'EnumImplicitDiscriminantOverflow',
           representation: 'u8',
@@ -104,7 +104,7 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0149',
+        code: 'SEM0152',
         reason: {
           _tag: 'UnsignedEnumNegativeDiscriminant',
           representation: 'u8',
@@ -114,19 +114,19 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0150',
+        code: 'SEM0153',
         reason: { _tag: 'UnknownEnumMember', enum: 'Status', member: 'Missing' },
         span: [24, 29],
         related: undefined,
       },
       {
-        code: 'SEM0151',
+        code: 'SEM0154',
         reason: { _tag: 'WrongEnumMember', expected: 'Status', actual: 'Other' },
         span: [24, 29],
         related: undefined,
       },
       {
-        code: 'SEM0152',
+        code: 'SEM0155',
         reason: {
           _tag: 'EnumIntegerMismatch',
           enum: 'Status',
@@ -137,7 +137,7 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0152',
+        code: 'SEM0155',
         reason: {
           _tag: 'EnumIntegerMismatch',
           enum: 'Status',
@@ -148,13 +148,13 @@ it('publishes structured scalar enum diagnostics with exact related spans', () =
         related: undefined,
       },
       {
-        code: 'SEM0153',
+        code: 'SEM0156',
         reason: { _tag: 'CrossEnumEquality', left: 'Status', right: 'Other' },
         span: [24, 29],
         related: undefined,
       },
       {
-        code: 'SEM0154',
+        code: 'SEM0157',
         reason: { _tag: 'EnumOrdering', enum: 'Status', operator: '<' },
         span: [24, 29],
         related: undefined,
@@ -186,31 +186,31 @@ it('publishes structured scalar enum match diagnostics with exact related spans'
     })),
     [
       {
-        code: 'SEM0155',
+        code: 'SEM0158',
         reason: { _tag: 'IncompleteEnumMatch', enum: 'Status', missing: ['Status.Unknown'] },
         span: [0, 40],
         related: undefined,
       },
       {
-        code: 'SEM0156',
+        code: 'SEM0159',
         reason: { _tag: 'DuplicateEnumMatchArm', member: 'Status.Ready', originalSpan: first },
         span: [20, 32],
         related: [[4, 16]],
       },
       {
-        code: 'SEM0157',
+        code: 'SEM0160',
         reason: { _tag: 'EnumMatchArmAfterWildcard', wildcardSpan: wildcard },
         span: [10, 20],
         related: [[2, 8]],
       },
       {
-        code: 'SEM0158',
+        code: 'SEM0161',
         reason: { _tag: 'ForeignEnumPattern', expected: 'Status', actual: 'Other' },
         span: [20, 32],
         related: undefined,
       },
       {
-        code: 'SEM0159',
+        code: 'SEM0162',
         reason: { _tag: 'IntegerPatternAgainstEnum', enum: 'Status', value: '1' },
         span: [10, 20],
         related: undefined,

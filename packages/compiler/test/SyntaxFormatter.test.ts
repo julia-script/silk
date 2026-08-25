@@ -243,6 +243,30 @@ fn main(attempt: Effect<i32>) -> i32 {
     }),
 )
 
+it.effect('formats mutable owned parameters canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'fn update( mut counter:Counter,mut amount:i32)->Counter { return move counter } effect fn process(mut state:i32)->i32{return state}'
+    const first = yield* SyntaxFormatter.format(parse('memory://mutable-parameters.silk', source))
+    const text = formattedText(first)
+
+    assert.strictEqual(
+      text,
+      `fn update(mut counter: Counter, mut amount: i32) -> Counter {
+  return move counter
+}
+
+effect fn process(mut state: i32) -> i32 {
+  return state
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://mutable-parameters.silk', text))
+    assert.deepEqual(second.bytes, first.bytes)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats effect contracts, run, and fail canonically and idempotently', () =>
   Effect.gen(function* () {
     const source = `effect   fn work(problem:Problem)->i32 ! Problem|Other { if true { fail   move problem } return 42 }

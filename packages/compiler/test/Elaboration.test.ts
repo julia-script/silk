@@ -2,6 +2,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
 import * as Analysis from '../src/Analysis.js'
+import * as CallableContract from '../src/CallableContract.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
@@ -270,6 +272,10 @@ fn main() -> i32 { return 0 }`,
     `struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value }
 fn make(token: Token) -> once fn(i32) -> i32 { return consume(move token) }
+fn relay(token: Token) -> once fn(i32) -> i32 {
+  let callback = make(move token)
+  return move callback
+}
 fn main() -> i32 { return 0 }`,
   )
 
@@ -1920,6 +1926,26 @@ it('is deterministic across repeated fresh multi-function results', () => {
   assert.deepEqual(
     Elaboration.declarationByName(first, 'same'),
     Elaboration.declarationByName(second, 'same'),
+  )
+})
+
+it('retains parameter mutability while erasing it from callable identity', () => {
+  const result = analyzeText(
+    'fixture://mutable-parameter-contract.silk',
+    `struct Counter { value: i32 }
+fn immutable(counter: Counter) -> Counter { return move counter }
+fn mutable(mut counter: Counter) -> Counter { return move counter }
+pub fn main() -> i32 { return 0 }`,
+  )
+  const immutable = functionAt(result, 0).declaration
+  const mutable = functionAt(result, 1).declaration
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(immutable.parameters.at(0)?.bindingMutability, 'Immutable')
+  assert.strictEqual(mutable.parameters.at(0)?.bindingMutability, 'Mutable')
+  assert.strictEqual(
+    CallableContract.key(DeclarationFacts.callableContract(immutable)),
+    CallableContract.key(DeclarationFacts.callableContract(mutable)),
   )
 })
 

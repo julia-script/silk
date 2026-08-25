@@ -111,6 +111,77 @@ pub fn main() -> i32 { return 0 }`)
   assert.strictEqual(result.functions.at(1)?.returnedBorrow?.access, 'Shared')
 })
 
+it('applies the one-source returned-view contract to ordinary references', () => {
+  const result = analyze(`struct Counter { value: i32 }
+fn shared(counter: &Counter) -> &Counter { return counter }
+fn exclusive(counter: &mut Counter) -> &mut Counter { return move counter }
+fn projected(counter: &Counter) -> &i32 { return &counter.value }
+pub fn main() -> i32 { return 0 }`)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(result.functions.at(0)?.returnedBorrow?.access, 'Shared')
+  assert.strictEqual(result.functions.at(1)?.returnedBorrow?.access, 'Exclusive')
+  assert.strictEqual(result.functions.at(2)?.returnedBorrow?.parameter.id.ordinal, 0)
+})
+
+it('uses returned-view and ordinary argument diagnostics for reference failures', () => {
+  const invalidReturns = analyze(`struct Counter { value: i32 }
+fn ambiguous(left: &Counter, right: &Counter) -> &Counter { return left }
+fn strengthen(counter: &Counter) -> &mut Counter { return &mut counter }
+fn local(counter: &Counter) -> &Counter {
+  let owned = Counter { value: 0 }
+  return &owned
+}
+pub fn main() -> i32 { return 0 }`)
+  const returnCodes = invalidReturns.diagnostics.map((diagnostic) => diagnostic.code)
+  assert.isAtLeast(returnCodes.filter((code) => code === 'SEM0091').length, 2)
+  assert.include(returnCodes, 'SEM0092')
+
+  const ownedArguments = analyze(`struct Counter { value: i32 }
+fn take(counter: Counter) -> i32 { return counter.value }
+fn direct(counter: &Counter) -> i32 { return take(counter) }
+fn piped(counter: &Counter) -> i32 { return counter |> take }
+pub fn main() -> i32 { return 0 }`)
+  const argumentCodes = ownedArguments.diagnostics.map((diagnostic) => diagnostic.code)
+
+  assert.deepEqual(argumentCodes, ['SEM0012', 'SEM0012'])
+  assert.notInclude(argumentCodes, 'SEM0055')
+})
+
+it('validates mutable owned parameter storage at the declaration boundary', () => {
+  const result = analyze(`struct Counter { value: i32 }
+fn immutable(counter: Counter) -> Counter {
+  counter.value = counter.value + 1
+  return move counter
+}
+fn borrowed(mut counter: &mut Counter) -> i32 { return counter.value }
+fn borrowedSlice(mut values: &mut [i32]) -> i32 { return values[0] }
+service Transformer {
+  fn transform(mut counter: Counter) -> Counter
+}
+interface Transformable {
+  fn transform(mut counter: Counter) -> Counter
+}
+pub fn main() -> i32 { return 0 }`)
+
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      context:
+        diagnostic.reason._tag === 'InvalidMutableParameter'
+          ? diagnostic.reason.context
+          : undefined,
+    })),
+    [
+      { code: 'SEM0035', context: undefined },
+      { code: 'SEM0143', context: 'BorrowedView' },
+      { code: 'SEM0143', context: 'BorrowedView' },
+      { code: 'SEM0143', context: 'Contract' },
+      { code: 'SEM0143', context: 'Contract' },
+    ],
+  )
+})
+
 it('rejects a returned view whose body does not preserve the declared source', () => {
   const result = analyze(`fn invalid(values: &[i32]) -> &[i32] {
   let local = [1, 2]
@@ -370,7 +441,7 @@ pub fn main() -> i32 { return make<&[i32]>() }`)
     result.diagnostics.map((diagnostic) => diagnostic.code),
     ['SEM0054'],
   )
-  assert.strictEqual(result.diagnostics.at(0)?.reason._tag, 'SliceTypePosition')
+  assert.strictEqual(result.diagnostics.at(0)?.reason._tag, 'BorrowedViewTypePosition')
 })
 
 it('retains an unavailable borrow fact after damaged operand syntax', () => {
@@ -433,6 +504,7 @@ pub fn main() -> i32 { let left = short() let right = long() return left + right
       (instance) => instance.key.declaration.name === 'scan',
     )
 
+    assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(scans.length, 1)
     assert.deepEqual(scans.at(0)?.key.typeArguments, ['i32'])
     assert.strictEqual(

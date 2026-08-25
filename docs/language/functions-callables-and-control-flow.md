@@ -38,6 +38,12 @@ Every parameter declares its type. Omitting a result annotation declares `()`, n
 result. For an effect function, the declared success, failure, and requirement channels describe
 the Effect produced by calling it.
 
+An ordinary or Effect function may prefix an owned parameter name with `mut`. This creates mutable local
+storage for the transferred value without changing the callable's parameter type or identity.
+Borrowed parameters use `&` or `&mut` and do not accept the binding-level `mut` prefix. Service and
+interface operations describe contracts rather than local storage, so their parameters do not
+accept it either.
+
 ```silk
 struct LoadError {}
 
@@ -164,7 +170,8 @@ directly.
 
 **Boundary:** `subtract(10, true)` is invalid rather than converting `true`. Passing an affine
 binding to an owned parameter requires explicit `move`; passing a fixed array to a slice parameter
-requires an explicit borrow.
+requires an explicit borrow. Parameter `mut` affects only the callee's local storage and never
+weakens either transfer rule.
 
 **Diagnostics:** Too many arguments or another non-section arity mismatch reports `SEM0007`.
 Incompatible argument types report `SEM0012` at the argument. Applying a non-callable reports
@@ -351,6 +358,12 @@ The expression groups as `(2 |> add(3)) |> multiply(4)` and produces `20`.
 
 The pipeline does not insert an argument into syntax. `add(3)` is first an ordinary section waiting
 for `left`; the pipeline then invokes that callable with `2`.
+
+The left expression may be an explicit `&` or `&mut` borrow when the callable expects a borrowed
+view. If the invoked function returns that view under the one-source return contract, the result
+retains the same source provenance and loan lifetime as the equivalent direct call. The same rule
+applies when the exact source is a supplied argument or a trailing capture of a known section;
+opaque callable values do not invent a source.
 
 **Boundary:** The right side may be a function item, section, binding, grouped expression, or any
 other compatible unary callable. It does not perform method lookup, open a namespace, import a name,

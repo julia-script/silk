@@ -727,7 +727,7 @@ export type Operation =
       readonly selectors: ReadonlyArray<PlaceSelector>
       readonly sourceType: Type
       readonly type: Extract<Type, { readonly _tag: 'Slice' | 'Reference' }>
-      readonly access: SilkType.Slice['access']
+      readonly access: SilkType.BorrowAccess
       readonly reborrow: boolean
       readonly suspendsParent: boolean
       readonly provenance: Provenance

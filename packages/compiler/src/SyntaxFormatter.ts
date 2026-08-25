@@ -990,9 +990,15 @@ const printNode = (
         tokenOf(node, 'RightParenthesis'),
         prefix,
       )
-    case 'ParameterDeclaration':
+    case 'ParameterDeclaration': {
+      const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank),
+        ...(mut === undefined
+          ? [printToken(context, tokenOf(node, 'Identifier'), prefix, preserveBlank)]
+          : [
+              printToken(context, mut, prefix, preserveBlank),
+              printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
+            ]),
         printToken(context, tokenOf(node, 'Colon')),
         printNode(
           context,
@@ -1000,6 +1006,7 @@ const printNode = (
           FormatDocument.text(' '),
         ),
       )
+    }
     case 'ReturnType':
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Arrow'), prefix, preserveBlank),

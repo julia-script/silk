@@ -416,21 +416,21 @@ pub fn main() -> i32 {
 
 import silk.i32 as i32
 
-import silk.logging {InMemoryLogger}
+import silk.logger {Logger}
 
-import silk.logging {LogLevel}
+import silk.logger {LogLevel}
 
-import silk.logging {LogError}
+import silk.logger {LogError}
 
 import silk.u8 as u8
 
-import silk.logging {length, messageByteAt}
+import silk.logger {length, messageByteAt}
 
 effect fn program() -> i32
 ! LogError {
-  let mut logger = InMemoryLogger.memory()
+  let mut logger = Logger.inMemoryService()
   let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
-  let second = run Effect.provideMut(Effect.logAt(LogLevel.warning(), "second\\nline"), &mut logger)
+  let second = run Effect.provideMut(Effect.logAt(Logger.warning(), "second\\nline"), &mut logger)
   if length(&logger) != 2 {
     return 0
   }
@@ -465,11 +465,11 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Self-contained Allocation contract',
-    `import silk.core {Allocator}
+    `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -481,7 +481,7 @@ import silk.slot as Slot
 
 effect fn store() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -508,11 +508,11 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Early drop releases the buffer once',
-    `import silk.core {Allocator}
+    `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -522,7 +522,7 @@ import silk.raw_buffer as RawBuffer
 
 effect fn store() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -547,11 +547,11 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Zero-sized elements keep distinct owners',
-    `import silk.core {Allocator}
+    `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -563,7 +563,7 @@ struct Empty {}
 
 effect fn store() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[Empty; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -588,11 +588,11 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'fail · Raw storage outside unsafe is rejected',
-    `import silk.core {Allocator}
+    `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -600,7 +600,7 @@ import silk.layout {Layout}
 
 effect fn store() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -622,11 +622,11 @@ pub fn main() -> i32 {
   one(
     'allocation',
     'ok · Drop hook runs before field cleanup',
-    `import silk.core {Allocator}
+    `import silk.allocator {Allocator}
 
-import silk.core {SystemAllocator}
+import silk.allocator {SystemAllocator}
 
-import silk.core {OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
 
 import silk.effect as Effect
 
@@ -646,7 +646,7 @@ impl Drop for Guard {
 
 effect fn store() -> i32
 ! OutOfMemoryError {
-  let mut allocator = SystemAllocator.make()
+  let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)

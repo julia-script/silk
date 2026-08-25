@@ -240,15 +240,15 @@ enum Good { Ready }`
         ),
       })),
       [
-        { code: 'SEM0143', text: 'enum Empty {}', related: undefined },
-        { code: 'SEM0144', text: 'usize', related: undefined },
-        { code: 'SEM0145', text: 'Same', related: ['Same'] },
-        { code: 'SEM0146', text: 'Second = 3', related: ['First = 3'] },
-        { code: 'SEM0149', text: '-1', related: undefined },
-        { code: 'SEM0147', text: '-129', related: undefined },
-        { code: 'SEM0147', text: '128', related: undefined },
-        { code: 'SEM0147', text: '18446744073709551616', related: undefined },
-        { code: 'SEM0148', text: 'After', related: undefined },
+        { code: 'SEM0146', text: 'enum Empty {}', related: undefined },
+        { code: 'SEM0147', text: 'usize', related: undefined },
+        { code: 'SEM0148', text: 'Same', related: ['Same'] },
+        { code: 'SEM0149', text: 'Second = 3', related: ['First = 3'] },
+        { code: 'SEM0152', text: '-1', related: undefined },
+        { code: 'SEM0150', text: '-129', related: undefined },
+        { code: 'SEM0150', text: '128', related: undefined },
+        { code: 'SEM0150', text: '18446744073709551616', related: undefined },
+        { code: 'SEM0151', text: 'After', related: undefined },
       ],
     )
     assert.strictEqual(byName('Unsupported')?.representation._tag, 'Unavailable')
@@ -1066,7 +1066,9 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
       index.diagnostics.map((diagnostic) => ({
         code: diagnostic.code,
         position:
-          diagnostic.reason._tag === 'SliceTypePosition' ? diagnostic.reason.position : undefined,
+          diagnostic.reason._tag === 'BorrowedViewTypePosition'
+            ? diagnostic.reason.position
+            : undefined,
       })),
       [
         { code: 'SEM0054', position: 'parameter' },

@@ -48,6 +48,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
 import type * as SourceSpan from './SourceSpan.js'
+import * as SyntaxTree from './SyntaxTree.js'
 import * as Type from './Type.js'
 
 /** Makes resolved executable-representation bounds visible while closing their declaration. */
@@ -1111,12 +1112,21 @@ export const complete = (
       if (member._tag === 'ConstantDeclaration') continue
       if (member._tag === 'FunctionDeclaration') {
         for (const parameter of member.parameters) {
+          const mut = SyntaxTree.directToken(parameter.syntax, 'MutKeyword')
+          if (
+            mut !== undefined &&
+            parameter.declaredType._tag === 'Resolved' &&
+            (Type.isReference(parameter.declaredType.type) ||
+              Type.isSlice(parameter.declaredType.type))
+          ) {
+            diagnostics.push(Diagnostic.invalidMutableParameter('BorrowedView', mut.span))
+          }
           if (
             parameter.declaredType._tag === 'Resolved' &&
             !Type.isParameterBorrowType(parameter.declaredType.type)
           ) {
             diagnostics.push(
-              Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),
+              Diagnostic.borrowedViewTypePosition('parameter', parameter.declaredType.syntax.span),
             )
           }
         }
@@ -1127,12 +1137,12 @@ export const complete = (
             containsPositionRestrictedBorrow(
               Type.typeArgumentAt(member.returnType.type, 0) ?? 'never',
             )) &&
-          (!Type.isSlice(member.returnType.type) || returnedBorrow(member) === undefined)
+          (!Type.isViewBorrow(member.returnType.type) || returnedBorrow(member) === undefined)
         ) {
           diagnostics.push(
-            Type.isSlice(member.returnType.type)
+            Type.isViewBorrow(member.returnType.type)
               ? Diagnostic.invalidReturnedBorrowSignature(member.returnType.syntax.span)
-              : Diagnostic.sliceTypePosition('return', member.returnType.syntax.span),
+              : Diagnostic.borrowedViewTypePosition('return', member.returnType.syntax.span),
           )
         }
         continue
@@ -1140,12 +1150,19 @@ export const complete = (
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         for (const operation of member.operations) {
           for (const parameter of operation.parameters) {
+            const mut = SyntaxTree.directToken(parameter.syntax, 'MutKeyword')
+            if (mut !== undefined) {
+              diagnostics.push(Diagnostic.invalidMutableParameter('Contract', mut.span))
+            }
             if (
               parameter.declaredType._tag === 'Resolved' &&
               !Type.isParameterBorrowType(parameter.declaredType.type)
             )
               diagnostics.push(
-                Diagnostic.sliceTypePosition('parameter', parameter.declaredType.syntax.span),
+                Diagnostic.borrowedViewTypePosition(
+                  'parameter',
+                  parameter.declaredType.syntax.span,
+                ),
               )
           }
           if (
@@ -1157,7 +1174,9 @@ export const complete = (
               ))
           )
             diagnostics.push(
-              Diagnostic.sliceTypePosition('return', operation.returnType.syntax.span),
+              Type.isViewBorrow(operation.returnType.type)
+                ? Diagnostic.invalidReturnedBorrowSignature(operation.returnType.syntax.span)
+                : Diagnostic.borrowedViewTypePosition('return', operation.returnType.syntax.span),
             )
         }
         continue
@@ -1168,7 +1187,9 @@ export const complete = (
           field.declaredType._tag === 'Resolved' &&
           containsPositionRestrictedBorrow(field.declaredType.type)
         ) {
-          diagnostics.push(Diagnostic.sliceTypePosition('field', field.declaredType.syntax.span))
+          diagnostics.push(
+            Diagnostic.borrowedViewTypePosition('field', field.declaredType.syntax.span),
+          )
         }
       }
     }

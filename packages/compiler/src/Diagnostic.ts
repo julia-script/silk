@@ -131,8 +131,8 @@ export const duplicateTypeParameterCode = 'SEM0050' as const
 export const typeArgumentArityCode = 'SEM0051' as const
 export const typeArgumentInferenceCode = 'SEM0052' as const
 export const polymorphicRecursionCode = 'SEM0053' as const
-/** Stable code for a borrowed slice type outside a direct ordinary-function parameter. */
-export const sliceTypePositionCode = 'SEM0054' as const
+/** Stable code for a borrowed view outside an allowed direct type position. */
+export const borrowedViewTypePositionCode = 'SEM0054' as const
 export const invalidBorrowPositionCode = 'SEM0055' as const
 export const invalidBorrowOperandCode = 'SEM0056' as const
 export const exclusiveBorrowRequiresMutableCode = 'SEM0057' as const
@@ -183,40 +183,46 @@ export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
 export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 /** Stable code for a statically known execution-package allocation/layout mismatch. */
 export const executionLayoutMismatchCode = 'SEM0142' as const
+/** Stable code for `mut` where no mutable owned parameter storage exists. */
+export const invalidMutableParameterCode = 'SEM0143' as const
+/** Stable code for applying a callable whose borrowed result has no exact source identity. */
+export const unknownCallableBorrowSourceCode = 'SEM0144' as const
+/** Stable code for mutating an outer callable from a deferred effect recipe. */
+export const deferredCallableMutationCode = 'SEM0145' as const
 /** Stable code for a scalar enum with no declared members. */
-export const emptyEnumCode = 'SEM0143' as const
+export const emptyEnumCode = 'SEM0146' as const
 /** Stable code for a scalar enum representation outside the fixed-width integer set. */
-export const unsupportedEnumRepresentationCode = 'SEM0144' as const
+export const unsupportedEnumRepresentationCode = 'SEM0147' as const
 /** Stable code for a scalar enum member name repeated after its first declaration. */
-export const duplicateEnumMemberNameCode = 'SEM0145' as const
+export const duplicateEnumMemberNameCode = 'SEM0148' as const
 /** Stable code for a scalar enum discriminant repeated after its first declaration. */
-export const duplicateEnumDiscriminantCode = 'SEM0146' as const
+export const duplicateEnumDiscriminantCode = 'SEM0149' as const
 /** Stable code for an explicit scalar enum discriminant outside its representation range. */
-export const enumDiscriminantOutOfRangeCode = 'SEM0147' as const
+export const enumDiscriminantOutOfRangeCode = 'SEM0150' as const
 /** Stable code for an implicit scalar enum successor outside its representation range. */
-export const enumImplicitDiscriminantOverflowCode = 'SEM0148' as const
+export const enumImplicitDiscriminantOverflowCode = 'SEM0151' as const
 /** Stable code for a negative discriminant under an unsigned scalar enum representation. */
-export const unsignedEnumNegativeDiscriminantCode = 'SEM0149' as const
+export const unsignedEnumNegativeDiscriminantCode = 'SEM0152' as const
 /** Stable code for a member missing from a resolved scalar enum. */
-export const unknownEnumMemberCode = 'SEM0150' as const
+export const unknownEnumMemberCode = 'SEM0153' as const
 /** Stable code for a canonical member used through or required by another enum. */
-export const wrongEnumMemberCode = 'SEM0151' as const
+export const wrongEnumMemberCode = 'SEM0154' as const
 /** Stable code for implicit mixing between a scalar enum and an integer. */
-export const enumIntegerMismatchCode = 'SEM0152' as const
+export const enumIntegerMismatchCode = 'SEM0155' as const
 /** Stable code for equality between distinct canonical scalar enums. */
-export const crossEnumEqualityCode = 'SEM0153' as const
+export const crossEnumEqualityCode = 'SEM0156' as const
 /** Stable code for direct ordering of scalar enum values. */
-export const enumOrderingCode = 'SEM0154' as const
+export const enumOrderingCode = 'SEM0157' as const
 /** Stable code for a scalar enum match that leaves canonical members uncovered. */
-export const incompleteEnumMatchCode = 'SEM0155' as const
+export const incompleteEnumMatchCode = 'SEM0158' as const
 /** Stable code for a repeated unguarded scalar enum member arm. */
-export const duplicateEnumMatchArmCode = 'SEM0156' as const
+export const duplicateEnumMatchArmCode = 'SEM0159' as const
 /** Stable code for a scalar enum arm following an unguarded wildcard. */
-export const enumMatchArmAfterWildcardCode = 'SEM0157' as const
+export const enumMatchArmAfterWildcardCode = 'SEM0160' as const
 /** Stable code for a scalar enum pattern naming a member of another enum. */
-export const foreignEnumPatternCode = 'SEM0158' as const
+export const foreignEnumPatternCode = 'SEM0161' as const
 /** Stable code for an integer literal pattern used against a scalar enum. */
-export const integerPatternAgainstEnumCode = 'SEM0159' as const
+export const integerPatternAgainstEnumCode = 'SEM0162' as const
 /** Stable code for a raw storage operation outside lexical unsafe authority. */
 export const missingUnsafeBoundaryCode = 'SEM0082' as const
 /** Stable code for an invalid source-declared capability implementation. */
@@ -320,7 +326,7 @@ export const matchBorrowEscapeCode = 'OWN0006' as const
 export const exclusiveMatchRequiresMutableCode = 'OWN0007' as const
 export const guardConsumesPatternCode = 'OWN0008' as const
 export const invalidMatchScrutineePlaceCode = 'OWN0009' as const
-export const conflictingSliceLoanCode = 'OWN0010' as const
+export const conflictingViewLoanCode = 'OWN0010' as const
 export const ownerAccessDuringLoanCode = 'OWN0011' as const
 export const borrowedMoveCode = 'OWN0012' as const
 
@@ -403,7 +409,7 @@ export type Code =
   | typeof typeArgumentArityCode
   | typeof typeArgumentInferenceCode
   | typeof polymorphicRecursionCode
-  | typeof sliceTypePositionCode
+  | typeof borrowedViewTypePositionCode
   | typeof invalidBorrowPositionCode
   | typeof invalidBorrowOperandCode
   | typeof exclusiveBorrowRequiresMutableCode
@@ -439,6 +445,9 @@ export type Code =
   | typeof missingExplicitExecutionOwnerCode
   | typeof invalidExecutablePropertyConjunctCode
   | typeof executionLayoutMismatchCode
+  | typeof invalidMutableParameterCode
+  | typeof unknownCallableBorrowSourceCode
+  | typeof deferredCallableMutationCode
   | typeof emptyEnumCode
   | typeof unsupportedEnumRepresentationCode
   | typeof duplicateEnumMemberNameCode
@@ -511,7 +520,7 @@ export type Code =
   | typeof exclusiveMatchRequiresMutableCode
   | typeof guardConsumesPatternCode
   | typeof invalidMatchScrutineePlaceCode
-  | typeof conflictingSliceLoanCode
+  | typeof conflictingViewLoanCode
   | typeof ownerAccessDuringLoanCode
   | typeof borrowedMoveCode
   | typeof storedCallableInvocationAccessCode
@@ -624,6 +633,12 @@ export type Reason =
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
   | { readonly _tag: 'InvalidReturnedBorrowSignature' }
   | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
+  | {
+      readonly _tag: 'InvalidMutableParameter'
+      readonly context: 'BorrowedView' | 'Contract'
+    }
+  | { readonly _tag: 'UnknownCallableBorrowSource' }
+  | { readonly _tag: 'DeferredCallableMutation'; readonly spelling: string }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly operation: string
@@ -1008,7 +1023,7 @@ export type Reason =
         | { readonly _tag: 'NonFiniteRequirementRow' }
     }
   | {
-      readonly _tag: 'SliceTypePosition'
+      readonly _tag: 'BorrowedViewTypePosition'
       readonly position: 'parameter' | 'return' | 'field' | 'type argument'
     }
   | { readonly _tag: 'InvalidBorrowPosition' }
@@ -1050,7 +1065,7 @@ export type Reason =
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
   | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
   | {
-      readonly _tag: 'ConflictingSliceLoan'
+      readonly _tag: 'ConflictingViewLoan'
       readonly existing: 'Shared' | 'Exclusive'
       readonly requested: 'Shared' | 'Exclusive'
       readonly loanSpan: SourceSpan.SourceSpan
@@ -3351,20 +3366,20 @@ export const polymorphicRecursion = (
     span,
   })
 
-export const sliceTypePosition = (
+export const borrowedViewTypePosition = (
   position: 'parameter' | 'return' | 'field' | 'type argument',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
-    code: sliceTypePositionCode,
+    code: borrowedViewTypePositionCode,
     severity: 'error',
     message:
       position === 'parameter'
-        ? 'A slice must be the complete type of an ordinary function parameter'
-        : `A slice cannot appear in a ${position} type`,
-    reason: Object.freeze({ _tag: 'SliceTypePosition', position }),
+        ? 'A borrowed view must be the complete type of an ordinary function parameter'
+        : `A borrowed view cannot appear in a ${position} type`,
+    reason: Object.freeze({ _tag: 'BorrowedViewTypePosition', position }),
     span,
   })
 
@@ -3375,7 +3390,7 @@ export const invalidReturnedBorrowSignature = (span: SourceSpan.SourceSpan): Dia
     code: invalidReturnedBorrowSignatureCode,
     severity: 'error',
     message:
-      'A returned slice must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter',
+      'A returned borrowed view must belong to an ordinary function with exactly one borrowed parameter; an exclusive result requires an exclusive parameter',
     reason: Object.freeze({ _tag: 'InvalidReturnedBorrowSignature' }),
     span,
   })
@@ -3386,7 +3401,8 @@ export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagno
     phase: 'semantic',
     code: invalidReturnedBorrowOriginCode,
     severity: 'error',
-    message: "The returned slice does not originate from the function's single borrowed parameter",
+    message:
+      "The returned borrowed view does not originate from the function's single borrowed parameter",
     reason: Object.freeze({ _tag: 'InvalidReturnedBorrowOrigin' }),
     span,
   })
@@ -3509,7 +3525,7 @@ export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =
     phase: 'semantic',
     code: invalidBorrowPositionCode,
     severity: 'error',
-    message: 'A slice borrow is only valid as an immediate ordinary-call argument',
+    message: 'A borrowed view is not valid in this expression position',
     reason: Object.freeze({ _tag: 'InvalidBorrowPosition' }),
     span,
   })
@@ -3847,6 +3863,51 @@ export const invalidServiceDeclaration = (
     span,
   })
 
+export const invalidMutableParameter = (
+  context: 'BorrowedView' | 'Contract',
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidMutableParameterCode,
+    severity: 'error',
+    message:
+      context === 'Contract'
+        ? '`mut` declares function-local owned parameter storage and is not valid in a service or interface contract'
+        : '`mut` declares mutable owned parameter storage; use `&mut` for exclusive borrowed access',
+    reason: Object.freeze({ _tag: 'InvalidMutableParameter', context }),
+    span,
+  })
+
+/** Rejects a borrowed callable result when no unchanged exact function or section identifies it. */
+export const unknownCallableBorrowSource = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownCallableBorrowSourceCode,
+    severity: 'error',
+    message:
+      'A callable returning a borrowed view requires one unchanged exact function or section identity',
+    reason: Object.freeze({ _tag: 'UnknownCallableBorrowSource' }),
+    span,
+  })
+
+/** Rejects mutation whose execution time cannot preserve the outer callable's exact recipe. */
+export const deferredCallableMutation = (
+  spelling: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: deferredCallableMutationCode,
+    severity: 'error',
+    message: `A deferred effect cannot mutate captured callable binding ${spelling}`,
+    reason: Object.freeze({ _tag: 'DeferredCallableMutation', spelling }),
+    span,
+  })
+
 export const invalidDropHook = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -3864,7 +3925,7 @@ export const invalidBorrowOperand = (span: SourceSpan.SourceSpan): Diagnostic =>
     phase: 'semantic',
     code: invalidBorrowOperandCode,
     severity: 'error',
-    message: 'A slice borrow requires a direct stable array binding or slice parameter',
+    message: 'A borrowed view requires a direct stable owner or borrowed view',
     reason: Object.freeze({ _tag: 'InvalidBorrowOperand' }),
     span,
   })
@@ -4147,7 +4208,7 @@ export const invalidMatchScrutineePlace = (
     span,
   })
 
-export const conflictingSliceLoan = (
+export const conflictingViewLoan = (
   existing: 'Shared' | 'Exclusive',
   requested: 'Shared' | 'Exclusive',
   loanSpan: SourceSpan.SourceSpan,
@@ -4156,10 +4217,10 @@ export const conflictingSliceLoan = (
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'ownership',
-    code: conflictingSliceLoanCode,
+    code: conflictingViewLoanCode,
     severity: 'error',
-    message: `${requested} slice loan conflicts with an active ${existing.toLowerCase()} loan`,
-    reason: Object.freeze({ _tag: 'ConflictingSliceLoan', existing, requested, loanSpan }),
+    message: `${requested} borrowed-view loan conflicts with an active ${existing.toLowerCase()} loan`,
+    reason: Object.freeze({ _tag: 'ConflictingViewLoan', existing, requested, loanSpan }),
     span,
     relatedSpans: Object.freeze([
       Object.freeze({ label: 'active loan begins here', span: loanSpan }),
@@ -4177,7 +4238,7 @@ export const ownerAccessDuringLoan = (
     phase: 'ownership',
     code: ownerAccessDuringLoanCode,
     severity: 'error',
-    message: `${access.toLowerCase()} access to ${spelling} conflicts with an active slice loan`,
+    message: `${access.toLowerCase()} access to ${spelling} conflicts with an active borrowed-view loan`,
     reason: Object.freeze({ _tag: 'OwnerAccessDuringLoan', spelling, access, loanSpan }),
     span,
     relatedSpans: Object.freeze([
@@ -4191,7 +4252,7 @@ export const borrowedMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     phase: 'ownership',
     code: borrowedMoveCode,
     severity: 'error',
-    message: 'A non-Copy value cannot be moved out through a borrowed slice place',
+    message: 'A non-Copy value cannot be moved out through a borrowed-view place',
     reason: Object.freeze({ _tag: 'BorrowedMove' }),
     span,
   })

@@ -1071,6 +1071,8 @@ const analyzeParameter = (
       _tag: 'ParameterDeclaration',
       id: Object.freeze({ _tag: 'ParameterId', function: functionId, ordinal }),
       name,
+      bindingMutability:
+        SyntaxTree.directToken(node, 'MutKeyword') === undefined ? 'Immutable' : 'Mutable',
       declaredType: type.fact,
       syntax: node,
     }),

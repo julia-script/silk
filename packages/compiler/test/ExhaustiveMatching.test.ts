@@ -165,7 +165,7 @@ fn inspect(value: Status) -> i32 {
     missing.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
     [
       {
-        code: 'SEM0155',
+        code: 'SEM0158',
         reason: {
           _tag: 'IncompleteEnumMatch',
           enum: 'enum-missing.Status',
@@ -197,7 +197,7 @@ fn inspect(value: Status) -> i32 {
     })),
     [
       {
-        code: 'SEM0156',
+        code: 'SEM0159',
         span: [secondMember, secondMember + 'Status.Unknown'.length],
         related: [[firstMember, firstMember + 'Status.Unknown'.length]],
       },
@@ -219,7 +219,7 @@ fn inspect(value: Status) -> i32 {
     })),
     [
       {
-        code: 'SEM0157',
+        code: 'SEM0160',
         span: [laterArm, laterArm + 'Status.Ready => 1'.length],
         related: [[wildcardStart, wildcardStart + '_ => 0'.length]],
       },
@@ -239,8 +239,8 @@ fn integer(value: Status) -> i32 { return match value { 0 => 0 _ => 1 } }`
       span: [diagnostic.span.start, diagnostic.span.end],
     })),
     [
-      { code: 'SEM0158', span: [foreignStart, foreignStart + 'Other.Ready'.length] },
-      { code: 'SEM0159', span: [integerStart, integerStart + 1] },
+      { code: 'SEM0161', span: [foreignStart, foreignStart + 'Other.Ready'.length] },
+      { code: 'SEM0162', span: [integerStart, integerStart + 1] },
     ],
   )
 })
