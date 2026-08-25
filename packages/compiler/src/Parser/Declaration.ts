@@ -14,7 +14,11 @@ import {
 import * as Operator from '../Operator.js'
 import * as SyntaxTree from '../SyntaxTree.js'
 import * as Token from '../Token.js'
-import { hasContextualSpelling, parseExpression } from './Expression.js'
+import {
+  hasContextualSpelling,
+  parseExpression,
+  parseIntegerLiteralExpression,
+} from './Expression.js'
 import { expressionStarts, topLevelFollowing, typeStarts } from './Grammar.js'
 import { parseImportDeclaration } from './Import.js'
 import { parseBlock } from './Statement.js'
@@ -38,6 +42,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     kind === 'EffectKeyword' ||
     kind === 'UnsafeKeyword' ||
     kind === 'StructKeyword' ||
+    kind === 'EnumKeyword' ||
     kind === 'ServiceKeyword' ||
     kind === 'InterfaceKeyword' ||
     kind === 'RoleKeyword' ||
@@ -52,6 +57,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     (following === 'UnsafeKeyword' &&
       (peek(state, 2) === 'FnKeyword' || peek(state, 2) === 'EffectKeyword')) ||
     following === 'StructKeyword' ||
+    following === 'EnumKeyword' ||
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
     following === 'RoleKeyword' ||
@@ -121,6 +127,96 @@ export const parseStructField = (initial: State): NodeResult => {
       ...colon.elements,
       type.node,
     ]),
+  })
+}
+
+export const parseEnumMember = (initial: State): NodeResult => {
+  const name = expect(initial, 'Identifier', [
+    'Equals',
+    'Comma',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  if (nextSignificantKind(name.state) !== 'Equals') {
+    return Object.freeze({
+      state: name.state,
+      node: syntaxNode(name.state, 'EnumMember', name.elements),
+    })
+  }
+
+  const equals = expect(name.state, 'Equals', [
+    'Minus',
+    'DecimalInteger',
+    'Comma',
+    'RightBrace',
+    ...topLevelFollowing,
+  ])
+  const discriminant = parseIntegerLiteralExpression(equals.state)
+  return Object.freeze({
+    state: discriminant.state,
+    node: syntaxNode(discriminant.state, 'EnumMember', [
+      ...name.elements,
+      ...equals.elements,
+      discriminant.node,
+    ]),
+  })
+}
+
+export const parseEnumDeclaration = (initial: State): NodeResult => {
+  const hasPublicModifier = nextSignificantKind(initial) === 'PubKeyword'
+  const pubKeyword = hasPublicModifier
+    ? expect(initial, 'PubKeyword', ['EnumKeyword', 'LeftParenthesis', 'Identifier', 'LeftBrace'])
+    : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'EnumKeyword', [
+    'LeftParenthesis',
+    'Identifier',
+    'LeftBrace',
+  ])
+  const representationLeft =
+    nextSignificantKind(keyword.state) === 'LeftParenthesis'
+      ? expect(keyword.state, 'LeftParenthesis', [...typeStarts, 'RightParenthesis', 'Identifier'])
+      : undefined
+  const representation =
+    representationLeft === undefined
+      ? undefined
+      : parseType(representationLeft.state, ['RightParenthesis', 'Identifier', 'LeftBrace'])
+  const representationRight =
+    representation === undefined
+      ? undefined
+      : expect(representation.state, 'RightParenthesis', ['Identifier', 'LeftBrace'])
+  const afterRepresentation = representationRight?.state ?? keyword.state
+  const name = expect(afterRepresentation, 'Identifier', ['LeftBrace', ...topLevelFollowing])
+  const left = expect(name.state, 'LeftBrace', ['Identifier', 'RightBrace', ...topLevelFollowing])
+  let state = left.state
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...(representationLeft?.elements ?? []),
+    ...(representation === undefined ? [] : [representation.node]),
+    ...(representationRight?.elements ?? []),
+    ...name.elements,
+    ...left.elements,
+  ])
+
+  while (
+    !beginsTopLevelDeclaration(state) &&
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
+    const member = parseEnumMember(state)
+    children = Object.freeze([...children, member.node])
+    state = member.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightBrace', ...topLevelFollowing])
+    children = Object.freeze([...children, ...comma.elements])
+    state = comma.state
+    if (nextSignificantKind(state) === 'RightBrace') break
+  }
+
+  const right = expect(state, 'RightBrace', topLevelFollowing)
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'EnumDeclaration', [...children, ...right.elements]),
   })
 }
 
@@ -381,6 +477,7 @@ const parseServiceLikeDeclaration = (initial: State, kind: 'Service' | 'Interfac
     nextSignificantKind(state) !== 'PubKeyword' &&
     nextSignificantKind(state) !== 'ConstKeyword' &&
     nextSignificantKind(state) !== 'StructKeyword' &&
+    nextSignificantKind(state) !== 'EnumKeyword' &&
     nextSignificantKind(state) !== 'ServiceKeyword' &&
     nextSignificantKind(state) !== 'InterfaceKeyword' &&
     nextSignificantKind(state) !== 'ImplKeyword'
@@ -478,28 +575,23 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
   })
 }
 
-export const parseTopLevelDeclaration = (state: State): NodeResult =>
-  nextSignificantKind(state) === 'ImportKeyword'
-    ? parseImportDeclaration(state)
-    : nextSignificantKind(state) === 'ConstKeyword' ||
-        (nextSignificantKind(state) === 'PubKeyword' && peek(state, 1) === 'ConstKeyword')
-      ? parseConstantDeclaration(state)
-      : nextSignificantKind(state) === 'RoleKeyword' ||
-          (nextSignificantKind(state) === 'PubKeyword' && peek(state, 1) === 'RoleKeyword')
-        ? parseRoleDeclaration(state)
-        : nextSignificantKind(state) === 'ImplKeyword'
-          ? parseImplDeclaration(state)
-          : nextSignificantKind(state) === 'InterfaceKeyword' ||
-              (nextSignificantKind(state) === 'PubKeyword' && peek(state, 1) === 'InterfaceKeyword')
-            ? parseInterfaceDeclaration(state)
-            : nextSignificantKind(state) === 'ServiceKeyword' ||
-                (nextSignificantKind(state) === 'PubKeyword' && peek(state, 1) === 'ServiceKeyword')
-              ? parseServiceDeclaration(state)
-              : nextSignificantKind(state) === 'StructKeyword' ||
-                  (nextSignificantKind(state) === 'PubKeyword' &&
-                    peek(state, 1) === 'StructKeyword')
-                ? parseStructDeclaration(state)
-                : parseFunctionDeclaration(state)
+export const parseTopLevelDeclaration = (state: State): NodeResult => {
+  const kind = nextSignificantKind(state)
+  const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
+  if (kind === 'ImportKeyword') return parseImportDeclaration(state)
+  if (kind === 'ConstKeyword' || following === 'ConstKeyword')
+    return parseConstantDeclaration(state)
+  if (kind === 'RoleKeyword' || following === 'RoleKeyword') return parseRoleDeclaration(state)
+  if (kind === 'ImplKeyword') return parseImplDeclaration(state)
+  if (kind === 'InterfaceKeyword' || following === 'InterfaceKeyword')
+    return parseInterfaceDeclaration(state)
+  if (kind === 'ServiceKeyword' || following === 'ServiceKeyword')
+    return parseServiceDeclaration(state)
+  if (kind === 'StructKeyword' || following === 'StructKeyword')
+    return parseStructDeclaration(state)
+  if (kind === 'EnumKeyword' || following === 'EnumKeyword') return parseEnumDeclaration(state)
+  return parseFunctionDeclaration(state)
+}
 
 export const parseFunctionDeclaration = (initial: State, allowDropName = false): NodeResult => {
   let lookahead = initial.index
@@ -511,6 +603,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'EffectKeyword' &&
     lookaheadToken.kind !== 'UnsafeKeyword' &&
     lookaheadToken.kind !== 'StructKeyword' &&
+    lookaheadToken.kind !== 'EnumKeyword' &&
     lookaheadToken.kind !== 'ServiceKeyword' &&
     lookaheadToken.kind !== 'InterfaceKeyword' &&
     lookaheadToken.kind !== 'RoleKeyword' &&

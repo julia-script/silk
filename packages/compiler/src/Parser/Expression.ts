@@ -263,6 +263,7 @@ export const primaryKind = (
       token.kind === 'FailKeyword' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'EnumKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'EffectKeyword' ||
       token.kind === 'ImportKeyword' ||
@@ -287,6 +288,7 @@ export const remainingRightParentheses = (state: State): number => {
       token.kind === 'RightBrace' ||
       token.kind === 'PubKeyword' ||
       token.kind === 'StructKeyword' ||
+      token.kind === 'EnumKeyword' ||
       token.kind === 'FnKeyword' ||
       token.kind === 'ImportKeyword' ||
       token.kind === 'EndOfFile'
@@ -320,6 +322,7 @@ export const expectCallRightParenthesis = (
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'EnumKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -332,6 +335,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     'RightBrace',
     'PubKeyword',
     'StructKeyword',
+    'EnumKeyword',
     'FnKeyword',
     'ImportKeyword',
   ])
@@ -345,6 +349,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
     kind !== 'RightBrace' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'EnumKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -359,6 +364,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       kind === 'RightBrace' ||
       kind === 'PubKeyword' ||
       kind === 'StructKeyword' ||
+      kind === 'EnumKeyword' ||
       kind === 'FnKeyword' ||
       kind === 'ImportKeyword'
     )
@@ -370,6 +376,7 @@ export function parseArgumentList(initial: State, reservedForEnclosingCalls: num
       'RightBrace',
       'PubKeyword',
       'StructKeyword',
+      'EnumKeyword',
       'FnKeyword',
       'ImportKeyword',
     ])
@@ -468,6 +475,7 @@ export function parseStructLiteralExpression(
     kind !== 'ReturnKeyword' &&
     kind !== 'PubKeyword' &&
     kind !== 'StructKeyword' &&
+    kind !== 'EnumKeyword' &&
     kind !== 'FnKeyword' &&
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
@@ -613,6 +621,39 @@ export const isNominalPatternStart = (state: State): boolean => {
   return following === 'Dot' && peek(state, 3) === 'LeftBrace'
 }
 
+export const isEnumMemberPatternStart = (state: State): boolean => {
+  if (
+    nextSignificantKind(state) !== 'Identifier' ||
+    peek(state, 1) !== 'Dot' ||
+    peek(state, 2) !== 'Identifier'
+  )
+    return false
+  const following = peek(state, 3)
+  return following === 'IfKeyword' || following === 'FatArrow' || following === 'RightBrace'
+}
+
+export const parseEnumMemberPattern = (initial: State): NodeResult => {
+  const qualifier = expect(initial, 'Identifier', ['Dot', 'IfKeyword', 'FatArrow', 'RightBrace'])
+  const dot = expect(qualifier.state, 'Dot', ['Identifier', 'IfKeyword', 'FatArrow', 'RightBrace'])
+  const member = expect(dot.state, 'Identifier', ['IfKeyword', 'FatArrow', 'RightBrace'])
+  return Object.freeze({
+    state: member.state,
+    node: syntaxNode(member.state, 'EnumMemberPattern', [
+      ...qualifier.elements,
+      ...dot.elements,
+      ...member.elements,
+    ]),
+  })
+}
+
+export const parseIntegerPattern = (initial: State): NodeResult => {
+  const literal = parseIntegerLiteralExpression(initial)
+  return Object.freeze({
+    state: literal.state,
+    node: syntaxNode(literal.state, 'IntegerPattern', literal.node.children),
+  })
+}
+
 export const parseErrorPattern = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
@@ -653,7 +694,7 @@ export const parseErrorPattern = (
       Diagnostic.unexpectedTokens(
         unexpected.map((item) => item.kind),
         'syntax',
-        ['a nominal pattern', '`_`'],
+        ['a nominal pattern', 'a qualified enum member', 'an integer literal', '`_`'],
         error.span,
       ),
     ),
@@ -672,7 +713,10 @@ export function parsePattern(
       node: syntaxNode(identifier.state, 'UniversalPattern', identifier.elements),
     })
   }
+  if (isEnumMemberPatternStart(initial)) return parseEnumMemberPattern(initial)
   const kind = nextSignificantKind(initial)
+  if (kind === 'DecimalInteger' || (kind === 'Minus' && peek(initial, 1) === 'DecimalInteger'))
+    return parseIntegerPattern(initial)
   const nonNominalTypePrimary =
     kind === 'Ampersand' ||
     kind === 'LeftBracket' ||
@@ -854,6 +898,7 @@ export const reservedTemplateBoundaries: ReadonlyArray<Token.TokenKind> = Object
   'ElseKeyword',
   'PubKeyword',
   'StructKeyword',
+  'EnumKeyword',
   'FnKeyword',
   'ImportKeyword',
   'EndOfFile',

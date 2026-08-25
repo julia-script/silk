@@ -4,7 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as BootstrapEvaluation from '../src/BootstrapEvaluation.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
-import { corpus } from './support/corpus.js'
+import { corpus, scalarEnumSignedAcceptance } from './support/corpus.js'
 import * as Json from './support/Json.js'
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
@@ -54,6 +54,27 @@ it.effect(
     }),
   // The corpus replays every pinned program; it outgrew the default 60s ceiling on CI hosts.
   300_000,
+)
+
+it.effect('evaluates scalar enums as immutable logical member values', () =>
+  Effect.gen(function* () {
+    const outcome = yield* evaluateSource(scalarEnumSignedAcceptance)
+
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42n)
+    const binding = outcome.trace.find(
+      (event) => event._tag === 'Binding' && event.target.name === 'copyStatus',
+    )
+    assert.strictEqual(binding?._tag, 'Binding')
+    if (binding?._tag !== 'Binding') return
+    assert.strictEqual(binding.value._tag, 'EnumValue')
+    if (binding.value._tag !== 'EnumValue') return
+    assert.strictEqual(binding.value.enum.name, 'Status')
+    assert.strictEqual(binding.value.member.name, 'Unknown')
+    assert.strictEqual(binding.value.discriminant, -1n)
+    assert.strictEqual(binding.value.representation.scalar, 'i8')
+  }),
 )
 
 it.effect('traces the identity program in order with bound and returned values', () =>

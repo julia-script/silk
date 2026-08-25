@@ -19,6 +19,9 @@ export type Presentation =
       readonly functionKind: DeclarationFacts.DeclarationFact['functionKind']
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'EnumPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'EnumMemberPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'EnumOperationPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServicePresentation'; readonly name: string })
   | (Base & { readonly _tag: 'RolePresentation'; readonly name: string })
   | (Base & { readonly _tag: 'ServiceOperationPresentation'; readonly name: string })
@@ -118,6 +121,42 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
     text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
   })
 }
+
+/** Renders a scalar enum declaration without expanding its members. */
+export const enumDeclaration = (self: DeclarationFacts.EnumFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  const representation = self.representation.explicit
+    ? `(${self.representation._tag === 'Available' ? self.representation.scalar.spelling : (self.representation.spelling ?? '_')})`
+    : ''
+  return Object.freeze({
+    _tag: 'EnumPresentation',
+    name,
+    text: `${visibility}enum${representation} ${name}`,
+  })
+}
+
+export const enumMember = (
+  enum_: DeclarationFacts.EnumFact,
+  member: DeclarationFacts.EnumMemberFact,
+): Presentation => {
+  const enumName = enum_.name._tag === 'Present' ? enum_.name.spelling : '_'
+  const name = member.name._tag === 'Present' ? member.name.spelling : '_'
+  return Object.freeze({
+    _tag: 'EnumMemberPresentation',
+    name,
+    text: `${enumName}.${name}: ${enumName}`,
+  })
+}
+
+export const enumAssociatedOperation = (
+  self: DeclarationFacts.EnumAssociatedOperationFact,
+): Presentation =>
+  Object.freeze({
+    _tag: 'EnumOperationPresentation',
+    name: self.name,
+    text: `fn ${self.name}(value: ${self.parameter.name}) -> ${self.result.spelling}`,
+  })
 
 /** Renders a nominal type declaration without expanding its body. */
 export const structDeclaration = (self: DeclarationFacts.StructFact): Presentation => {

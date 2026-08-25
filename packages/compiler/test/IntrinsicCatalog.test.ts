@@ -319,6 +319,17 @@ effect fn hostWorkingDirectory(output: &mut [u8], reason: &mut i32, code: &mut u
 }`,
 ])
 
+it('models enumValue as a sealed declaration-dependent rule with no generic type hole', () => {
+  const operation = Intrinsic.findOperation('Intrinsic', 'enumValue')
+  assert.isDefined(operation)
+  if (operation === undefined) return
+  assert.strictEqual(operation.rule._tag, 'EnumValueRule')
+  assert.deepEqual(operation.typeParameters, [])
+  assert.deepEqual(operation.parameters, [{ name: 'value', type: '<owning enum>' }])
+  assert.strictEqual(operation.result, '<owning enum representation>')
+  assert.strictEqual(operation.consumer, 'language:scalar-enum-value')
+})
+
 it('uses one binding contract for inventory, admission, and the proof-only post hook', () => {
   for (const name of ['bindRequirement', 'bindRequirementMut', 'bindRequirementOwned']) {
     const operation = Intrinsic.findOperation('Intrinsic', name)
@@ -363,7 +374,9 @@ it.effect(
         for (const operation of operationKeys(snapshot)) observed.add(operation)
       }
       const catalog = Intrinsic.all().flatMap((actor) =>
-        actor.operations.map((operation) => key(actor.spelling, operation.spelling)),
+        actor.operations.flatMap((operation) =>
+          operation.rule._tag === 'EnumValueRule' ? [] : [key(actor.spelling, operation.spelling)],
+        ),
       )
       assert.deepEqual([...observed].sort(), [...catalog].sort())
     }),
@@ -374,6 +387,7 @@ it.effect('keeps every intrinsic identifiable and presentable in rejected calls'
   Effect.gen(function* () {
     for (const actor of Intrinsic.all())
       for (const operation of actor.operations) {
+        if (operation.rule._tag === 'EnumValueRule') continue
         const arguments_ = operation.parameters.length === 0 ? '0' : ''
         const source =
           operation.rule._tag === 'PlaceRule'

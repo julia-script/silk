@@ -32,6 +32,12 @@ export type CallingShapeNode =
   | { readonly _tag: 'EmptyShape'; readonly type: Type.Bottom; readonly laneCount: 0 }
   | { readonly _tag: 'ScalarShape'; readonly type: Type.Builtin; readonly laneCount: 1 }
   | {
+      readonly _tag: 'ScalarEnumShape'
+      readonly type: Type.Nominal
+      readonly lane: Type.Builtin
+      readonly laneCount: 1
+    }
+  | {
       readonly _tag: 'ProductShape'
       readonly type: Type.Nominal
       readonly fields: ReadonlyArray<{

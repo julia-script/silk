@@ -19,6 +19,17 @@ pub struct Token {
 
 pub struct End {}
 
+enum AssertionResult {
+  Pass,
+  Fail,
+  Skip,
+}
+
+pub enum(u8) ExitCode {
+  Success = 0,
+  Failure = 1,
+}
+
 pub role Clock
 
 fn helper(value: i32, other: i32) -> i32 {

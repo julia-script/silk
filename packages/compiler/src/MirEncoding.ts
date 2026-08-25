@@ -1,6 +1,7 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
+import * as Match from './Match.js'
 import type {
   CoroutineFramePathPlan,
   LocalId,
@@ -48,6 +49,12 @@ const operationText = (operation: Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = literal ${operation.value} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'EnumConstant':
+      return `${localText(operation.destination)} = enum-member ${operation.member.enum.module}.${operation.member.enum.name}.${operation.member.name} discriminant=${operation.discriminant} lane=${operation.representation.scalar} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'EnumValue':
+      return `${localText(operation.destination)} = enum-value ${localText(operation.source)} ${operation.enum.module}.${operation.enum.name} lane=${operation.representation.scalar} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'EnumEquality':
+      return `${localText(operation.destination)} = enum-${operation.negated ? 'not-equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)} ${operation.enum.module}.${operation.enum.name} lane=${operation.representation.scalar} : bool ${provenanceText(operation.provenance)}`
     case 'StaticView':
       return `${localText(operation.destination)} = static-view ${operation.data} length=${operation.length} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'StaticString':
@@ -199,13 +206,13 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
   if (operation._tag !== 'Match') return [`${indent}${operationText(operation)}`]
   return [
     `${indent}${operationText(operation)}`,
-    `${indent}  members ${operation.members.map(SilkType.encode).join(', ')}`,
+    `${indent}  members ${operation.members.map(Match.encodeIdentity).join(', ')}`,
     ...operation.decisions.map(
       (decision) =>
-        `${indent}  decision ${SilkType.encode(decision.member)} candidates=${decision.candidates.map((candidate) => `#${candidate.ordinal}`).join(',')}`,
+        `${indent}  decision ${Match.encodeIdentity(decision.member)} candidates=${decision.candidates.map((candidate) => `#${candidate.ordinal}`).join(',')}`,
     ),
     ...operation.arms.flatMap((arm) => [
-      `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : SilkType.encode(arm.member)} before=${arm.before.map(SilkType.encode).join(',') || 'empty'} after=${arm.after.map(SilkType.encode).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
+      `${indent}  arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
       ...arm.bindings.map(
         (binding) =>
           `${indent}    bind #${binding.id.ordinal} ${localText(binding.destination)} <- ${fieldPathText(binding.path)} : ${typeText(binding.type)} access=${binding.access} ${provenanceText(binding.provenance)}`,

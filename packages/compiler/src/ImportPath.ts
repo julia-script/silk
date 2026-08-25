@@ -5,6 +5,7 @@ import type * as Token from './Token.js'
 const reservedSegmentKinds: ReadonlySet<Token.TokenKind> = new Set([
   'PubKeyword',
   'StructKeyword',
+  'EnumKeyword',
   'ServiceKeyword',
   'InterfaceKeyword',
   'RoleKeyword',

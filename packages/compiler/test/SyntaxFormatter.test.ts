@@ -96,6 +96,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ConstantDeclaration',
   'DropStatement',
   'EffectExpression',
+  'EnumDeclaration',
+  'EnumMember',
   'FieldProjectionExpression',
   'FailStatement',
   'FailureRow',
@@ -167,6 +169,32 @@ it.effect('formats a generic effect catch pipeline canonically and idempotently'
     )
     const second = yield* SyntaxFormatter.format(parse('memory://effect-catch-pipeline.silk', text))
     assert.strictEqual(formattedText(second), text)
+  }),
+)
+
+it.effect('formats implicit and explicitly represented enums canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'enum AssertionResult{Pass,Fail,Skip} pub enum ( u8 ) ExitCode { Success=0,Failure=1 }'
+    const first = yield* SyntaxFormatter.format(parse('memory://enum-format.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `enum AssertionResult {
+  Pass,
+  Fail,
+  Skip,
+}
+
+pub enum(u8) ExitCode {
+  Success = 0,
+  Failure = 1,
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://enum-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
   }),
 )
 
@@ -908,6 +936,8 @@ pub struct Pair {
 pub struct Span { start: i32 end: i32 }
 pub struct Token { span: Span }
 pub struct End {}
+enum AssertionResult { Pass, Fail, Skip }
+pub enum(u8) ExitCode { Success = 0, Failure = 1 }
 pub role Clock
 fn helper(value: i32, other: i32) -> i32 {
   let mut moved = move value

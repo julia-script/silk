@@ -182,7 +182,7 @@ export class FunctionLowering {
       storedCallableValueType(this.layout, specialized) ??
       storedEffectValueType(this.layout, specialized) ??
       representedValueType(this.layout, this.opaqueRealizations, type, this.substitution) ??
-      mirType(specialized)
+      mirType(specialized, new Map(), this.layout)
     )
   }
 

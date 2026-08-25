@@ -1589,13 +1589,29 @@ export const symbols = (
         },
       ]
     }
-    if (member._tag === 'RoleDeclaration') {
+    if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') {
+      const children =
+        member._tag === 'EnumDeclaration'
+          ? member.members.flatMap((enumMember) =>
+              enumMember.name._tag === 'Present'
+                ? [
+                    {
+                      name: enumMember.name.spelling,
+                      kind: SymbolKind.EnumMember,
+                      range: LineIndex.rangeOf(self.index, SyntaxTree.span(enumMember.syntax)),
+                      selectionRange: LineIndex.rangeOf(self.index, enumMember.name.token.span),
+                    },
+                  ]
+                : [],
+            )
+          : []
       return [
         {
           name: member.name.spelling,
           kind: SymbolKind.Enum,
           range,
           selectionRange,
+          ...(children.length > 0 ? { children } : {}),
         },
       ]
     }

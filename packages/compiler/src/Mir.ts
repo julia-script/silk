@@ -40,6 +40,11 @@ export type Type =
   | ScalarType
   | { readonly _tag: 'Bottom'; readonly type: SilkType.Bottom }
   | { readonly _tag: 'Nominal'; readonly type: SilkType.Nominal }
+  | {
+      readonly _tag: 'Enum'
+      readonly type: SilkType.Nominal
+      readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
+    }
   | { readonly _tag: 'FixedArray'; readonly type: SilkType.FixedArray }
   | { readonly _tag: 'String'; readonly type: SilkType.String }
   | { readonly _tag: 'Slice'; readonly type: SilkType.Slice }
@@ -98,6 +103,7 @@ export const semanticType = (self: Type): DeclarationFacts.SemanticType => {
     return self.storage?.type ?? self.type
   if (self._tag === 'EffectComposite') return self.type
   return self._tag === 'Nominal' ||
+    self._tag === 'Enum' ||
     self._tag === 'Bottom' ||
     self._tag === 'FixedArray' ||
     self._tag === 'String' ||
@@ -273,6 +279,36 @@ export type Operation =
       readonly destination: LocalId
       readonly type: Type
       readonly value: number | bigint
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'EnumConstant'
+      readonly destination: LocalId
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly member: DeclarationFacts.CanonicalEnumMemberId
+      readonly discriminant: bigint
+      readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
+      readonly type: Extract<Type, { readonly _tag: 'Enum' }>
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'EnumValue'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
+      readonly type: ScalarType
+      readonly provenance: Provenance
+    }
+  | {
+      readonly _tag: 'EnumEquality'
+      readonly destination: LocalId
+      readonly left: LocalId
+      readonly right: LocalId
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly negated: boolean
+      readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
+      readonly type: Extract<Type, { readonly _tag: 'bool' }>
       readonly provenance: Provenance
     }
   | {
@@ -1084,10 +1120,10 @@ export interface MatchBinding {
 
 export interface MatchArm {
   readonly id: Match.ArmId
-  readonly member?: SilkType.Type
+  readonly member?: Match.CoverageIdentity
   readonly universal: boolean
-  readonly before: ReadonlyArray<SilkType.Type>
-  readonly after: ReadonlyArray<SilkType.Type>
+  readonly before: ReadonlyArray<Match.CoverageIdentity>
+  readonly after: ReadonlyArray<Match.CoverageIdentity>
   readonly bindings: ReadonlyArray<MatchBinding>
   readonly guard?: {
     readonly operations: ReadonlyArray<Operation>
@@ -1117,9 +1153,9 @@ export interface MatchOperation {
   readonly access: Match.Access
   /** Statement patterns retain selected locals beyond this operation; expression matches do not. */
   readonly retainsBindings: boolean
-  readonly members: ReadonlyArray<SilkType.Type>
+  readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly decisions: ReadonlyArray<{
-    readonly member: SilkType.Type
+    readonly member: Match.CoverageIdentity
     readonly candidates: ReadonlyArray<Match.ArmId>
   }>
   readonly arms: ReadonlyArray<MatchArm>
@@ -1547,6 +1583,7 @@ export interface Violation {
     | 'InvalidLoan'
     | 'InvalidSliceOperation'
     | 'InvalidStringOperation'
+    | 'InvalidEnumOperation'
     | 'InvalidMatchLayout'
     | 'InvalidMatchDecision'
     | 'InvalidMatchBinding'

@@ -152,7 +152,7 @@ export const lowerInstance = (
             storedCallableValueType(layout, specialized) ??
             storedEffectValueType(layout, specialized) ??
             representedValueType(layout, opaqueRealizations, type, instance.substitution) ??
-            mirType(type, instance.substitution)
+            mirType(type, instance.substitution, layout)
           return lowered === undefined ? [] : [lowered]
         })
       : Array.from({ length: fn.declaration.parameterCount }, () => i32)
@@ -200,7 +200,7 @@ export const lowerInstance = (
           effectOutcome ?? instance.specialization.result,
           new Map(),
         ) ??
-        mirType(effectOutcome ?? instance.specialization.result))
+        mirType(effectOutcome ?? instance.specialization.result, new Map(), layout))
       : i32)
   if (resultType === undefined) {
     return trapFunction(instance, 'unavailable contract type', bodySpan(fn))

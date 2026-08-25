@@ -19,6 +19,9 @@ type Operation = Extract<
     readonly _tag:
       | 'BindMatch'
       | 'Literal'
+      | 'EnumConstant'
+      | 'EnumValue'
+      | 'EnumEquality'
       | 'StaticView'
       | 'StaticString'
       | 'StringFromUtf8Unchecked'
@@ -78,6 +81,53 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('LLVM match binding disagrees with its payload lanes')
       }
       nativeStorage.locals.set(operation.binding.destination.ordinal, Object.freeze(selected))
+      break
+    }
+    case 'EnumConstant': {
+      const lane = NativeType.lanesFor(types, operation.type).at(0)
+      if (lane === undefined) throw new RangeError('LLVM enum constant lost its lane')
+      const physicalType = NativeType.laneType(types, lane)
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        Object.freeze([
+          operation.representation.signedness === 'Signed'
+            ? yield* Constant.integerSigned(builder, physicalType, operation.discriminant)
+            : yield* Constant.integerUnsigned(builder, physicalType, operation.discriminant),
+        ]),
+      )
+      break
+    }
+    case 'EnumValue': {
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        NativeStorage.readLocal(nativeStorage, operation.source),
+      )
+      break
+    }
+    case 'EnumEquality': {
+      const left = NativeStorage.readLocal(nativeStorage, operation.left).at(0)
+      const right = NativeStorage.readLocal(nativeStorage, operation.right).at(0)
+      if (left === undefined || right === undefined)
+        throw new RangeError('LLVM enum equality lost an operand lane')
+      const compared = yield* FunctionBody.integerCompare(
+        body,
+        operation.negated ? 'ne' : 'eq',
+        left,
+        right,
+        `enum${operation.destination.ordinal}_${operation.negated ? 'not_equal' : 'equal'}`,
+      )
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        Object.freeze([
+          yield* FunctionBody.cast(
+            body,
+            'zext',
+            compared,
+            i32,
+            `enum${operation.destination.ordinal}_result`,
+          ),
+        ]),
+      )
       break
     }
     case 'Literal': {

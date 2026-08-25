@@ -56,6 +56,9 @@ export const emit = Effect.fnUntraced(function* (
   switch (operation._tag) {
     case 'BindMatch':
     case 'Literal':
+    case 'EnumConstant':
+    case 'EnumValue':
+    case 'EnumEquality':
     case 'StaticView':
     case 'StaticString':
     case 'StringFromUtf8Unchecked':

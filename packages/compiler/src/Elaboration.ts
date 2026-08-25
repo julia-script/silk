@@ -169,6 +169,19 @@ export type CallReferenceFact =
       readonly returnedBorrowParameter?: number
     }
   | {
+      readonly _tag: 'ResolvedEnumOperation'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly operation: DeclarationFacts.EnumAssociatedOperationFact
+    }
+  | {
+      readonly _tag: 'ResolvedEnumEquality'
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly enum: DeclarationFacts.CanonicalId
+      readonly operator: 'Equals' | 'NotEquals'
+    }
+  | {
       readonly _tag: 'ResolvedIntrinsicContract'
       readonly spelling: string
       readonly token: Token.Token
@@ -382,6 +395,30 @@ export type PatternFact =
       readonly syntax: SyntaxTree.Node
     }
   | {
+      readonly _tag: 'EnumMemberPattern'
+      readonly id: Match.PatternId
+      readonly enum?: DeclarationFacts.EnumFact
+      readonly member?: DeclarationFacts.EnumMemberFact
+      readonly coverage?: Match.CoverageIdentity
+      readonly qualifierToken?: Token.Token
+      readonly memberToken?: Token.Token
+      readonly span: SourceSpan.SourceSpan
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
+      readonly complete: boolean
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
+      readonly _tag: 'IntegerPattern'
+      readonly id: Match.PatternId
+      readonly value?: bigint
+      readonly span: SourceSpan.SourceSpan
+      readonly bindings: ReadonlyArray<PatternBindingFact>
+      readonly omitted: ReadonlyArray<ReadonlyArray<DeclarationFacts.FieldId>>
+      readonly complete: false
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'TypePattern'
       readonly id: Match.PatternId
       readonly member?: Type.Type
@@ -418,8 +455,8 @@ export interface MatchArmFact {
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly guard?: ExpressionFact
   readonly result: ExpressionFact
-  readonly before: ReadonlyArray<Type.Type>
-  readonly after: ReadonlyArray<Type.Type>
+  readonly before: ReadonlyArray<Match.CoverageIdentity>
+  readonly after: ReadonlyArray<Match.CoverageIdentity>
   readonly reachable: boolean
   readonly syntax: SyntaxTree.Node
 }
@@ -429,7 +466,7 @@ export interface MatchExpressionFact {
   readonly id: Match.MatchId
   readonly access: Match.Access
   readonly scrutinee: ExpressionFact
-  readonly members: ReadonlyArray<Type.Type>
+  readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly arms: ReadonlyArray<MatchArmFact>
   readonly exhaustive: boolean
   readonly type: ExpressionTypeFact
@@ -445,7 +482,7 @@ export interface PatternSelectionFact {
   /** Authored initializer, retaining an outer move/borrow for ownership loan analysis. */
   readonly source: ExpressionFact
   readonly subject: ExpressionFact
-  readonly members: ReadonlyArray<Type.Type>
+  readonly members: ReadonlyArray<Match.CoverageIdentity>
   readonly pattern: PatternFact
   readonly bindings: ReadonlyArray<PatternBindingFact>
   readonly irrefutable: boolean
@@ -785,6 +822,29 @@ export interface EffectExpressionFact {
   readonly syntax: SyntaxTree.Node
 }
 
+/** One qualified payload-free enum member value with canonical declaration identity. */
+export interface EnumMemberExpressionFact {
+  readonly _tag: 'EnumMember'
+  readonly enum: DeclarationFacts.EnumFact
+  readonly member?: DeclarationFacts.EnumMemberFact
+  readonly cause?: Diagnostic.Identity
+  readonly qualifierToken: Token.Token
+  readonly memberToken: Token.Token
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
+/** One declaration-owned projection of an enum member's exact representation value. */
+export interface EnumValueExpressionFact {
+  readonly _tag: 'EnumValue'
+  readonly operation: DeclarationFacts.EnumAssociatedOperationFact
+  readonly argument: ExpressionFact
+  readonly qualifierToken: Token.Token
+  readonly operationToken: Token.Token
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One semantic expression fact at any returned or argument position. */
 export type ExpressionFact =
   | {
@@ -808,6 +868,8 @@ export type ExpressionFact =
     }
   | BooleanExpressionFact
   | ConstantExpressionFact
+  | EnumMemberExpressionFact
+  | EnumValueExpressionFact
   | IdentifierExpressionFact
   | MoveExpressionFact
   | BorrowExpressionFact

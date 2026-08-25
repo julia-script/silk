@@ -68,6 +68,24 @@ const forgeFirstSubstitution = Effect.fnUntraced(function* (
   })
 })
 
+it.effect('projects scalar enum declarations deterministically into module surfaces', () =>
+  Effect.gen(function* () {
+    const first = yield* surface('pub enum(u16) Status { Pending, Ready = 5, Done }')
+    const repeated = yield* surface('pub enum(u16) Status { Pending, Ready = 5, Done }')
+    const defaultRepresentation = yield* surface('pub enum Status { Pending, Ready = 5, Done }')
+    const reordered = yield* surface('pub enum(u16) Status { Ready = 5, Pending, Done }')
+    const unavailable = yield* surface('pub enum(usize) Status { Pending }')
+
+    assert.strictEqual(ModuleSurface.equals(first, repeated), true)
+    assert.strictEqual(ModuleSurface.equals(first, defaultRepresentation), false)
+    assert.strictEqual(ModuleSurface.equals(first, reordered), false)
+    assert.strictEqual(ModuleSurface.equals(first, unavailable), false)
+    assert.include(first.canonical, 'AvailableEnumRepresentation')
+    assert.include(first.canonical, 'AvailableEnumDiscriminant')
+    assert.include(unavailable.canonical, 'UnavailableEnumRepresentation')
+  }),
+)
+
 it.effect('compares independently allocated equal facts exactly', () =>
   Effect.gen(function* () {
     const source = `pub fn answer(value: i32) -> i32 { return value }

@@ -630,6 +630,57 @@ pub fn main() -> i32 { return Effect.catch< }`
   }),
 )
 
+it.effect(
+  'uses canonical scalar enum identities for hover, completion, navigation, references, and symbols',
+  () =>
+    Effect.gen(function* () {
+      const source = `enum Status { Unknown = 1, Ready }
+pub fn main() -> i32 {
+  let status = Status.Ready
+  return match status { Status.Unknown => 0 Status.Ready => 42 }
+}`
+      const { document, snapshot } = yield* open(source)
+      const readyReference = positionOf(source, 'Ready', 1)
+      const hover = Document.hover(document, snapshot, readyReference)
+      assert.deepEqual(hover?.contents, {
+        kind: 'markdown',
+        value: '```silk\nStatus.Ready: Status\n```',
+      })
+
+      const completion = Document.completion(
+        document,
+        snapshot,
+        positionAt(source, source.indexOf('Status.Ready') + 'Status.'.length),
+      )
+      assert.deepEqual(
+        completion.items.map((item) => item.label),
+        ['Ready', 'Unknown', 'value'],
+      )
+      assert.strictEqual(
+        completion.items.find((item) => item.label === 'Ready')?.detail,
+        'Status.Ready: Status',
+      )
+
+      const definition = Document.definition(document, snapshot, readyReference, () => undefined)
+      assert.deepEqual(definition?.targetSelectionRange.start, positionOf(source, 'Ready', 0))
+      assert.deepEqual(
+        Document.references(document, snapshot, readyReference, true, () => undefined)?.map(
+          ({ range }) => range.start,
+        ),
+        [positionOf(source, 'Ready', 0), readyReference, positionOf(source, 'Ready', 2)],
+      )
+
+      const symbols = Document.symbols(document, snapshot)
+      assert.deepEqual(
+        symbols[0]?.children?.map((symbol) => [symbol.name, symbol.kind]),
+        [
+          ['Unknown', SymbolKind.EnumMember],
+          ['Ready', SymbolKind.EnumMember],
+        ],
+      )
+    }),
+)
+
 it.effect('lists constants, roles, functions, and structs with fields as document symbols', () =>
   Effect.gen(function* () {
     const source = `pub const defaultAnswer: i32 = 42

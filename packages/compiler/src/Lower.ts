@@ -35,9 +35,14 @@ export const isOsOperation = (
 export const mirType = (
   type: Type.Type,
   substitution: Type.Substitution = new Map(),
+  layout?: Layout.Plan,
 ): Mir.Type | undefined => {
   const specialized = Type.substitute(type, substitution)
   if (!Type.isRuntimeConcrete(specialized)) return undefined
+  const representation =
+    layout === undefined ? undefined : Layout.entry(layout, specialized)?.representation
+  if (Type.isNominal(specialized) && representation?._tag === 'ScalarEnum')
+    return Object.freeze({ _tag: 'Enum', type: specialized, representation })
   return typeof specialized === 'string'
     ? Type.isBuiltin(specialized)
       ? Object.freeze({ _tag: specialized })

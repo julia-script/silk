@@ -24,6 +24,7 @@ import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as LocalSharedLifecycle from './LocalSharedLifecycle.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
@@ -47,6 +48,7 @@ import type {
   AggregateValue,
   ArrayValue,
   CharacterValue,
+  EnumValue,
   ExecutionValue,
   FloatValue,
   IntegerValue,
@@ -70,6 +72,7 @@ export type {
   EffectCompositeValue,
   EffectOutcomeValue,
   EffectValue,
+  EnumValue,
   ExecutionValue,
   FloatValue,
   IntegerValue,
@@ -1861,6 +1864,42 @@ function* executeFunction(
         }
         state.steps += 1
         switch (operation._tag) {
+          case 'EnumConstant': {
+            const value: EnumValue = Object.freeze({
+              _tag: 'EnumValue',
+              enum: operation.enum,
+              member: operation.member,
+              discriminant: operation.discriminant,
+              representation: operation.representation,
+            })
+            write(operation.destination, { value, fromCall: false })
+            break
+          }
+          case 'EnumValue': {
+            const source = read(operation.source).value
+            if (source._tag !== 'EnumValue')
+              throw new RangeError('Verified enum projection lost its logical enum value')
+            write(operation.destination, {
+              value: integerValue(operation.representation.scalar, source.discriminant),
+              fromCall: false,
+            })
+            break
+          }
+          case 'EnumEquality': {
+            const left = read(operation.left).value
+            const right = read(operation.right).value
+            if (left._tag !== 'EnumValue' || right._tag !== 'EnumValue')
+              throw new RangeError('Verified enum equality lost a logical enum operand')
+            const equal =
+              left.enum.module === right.enum.module &&
+              left.enum.name === right.enum.name &&
+              left.member.name === right.member.name
+            write(operation.destination, {
+              value: integerValue('i32', equal !== operation.negated ? 1n : 0n),
+              fromCall: false,
+            })
+            break
+          }
           case 'ShortCircuit': {
             const decided = readInteger(operation.left, 'i32').value !== 0n
             // `&&` decides on a false left operand, `||` on a true one. Only the undecided case
@@ -1879,12 +1918,18 @@ function* executeFunction(
           }
           case 'Match': {
             const scrutinee = read(operation.scrutinee).value
+            const activeIdentity =
+              scrutinee._tag === 'EnumValue'
+                ? Match.enumMember(scrutinee.enum, scrutinee.member)
+                : undefined
             const activeMember =
-              scrutinee._tag === 'UnionValue'
-                ? scrutinee.member
-                : scrutinee._tag === 'AggregateValue'
-                  ? scrutinee.type
-                  : Mir.semanticType(operation.scrutineeType)
+              activeIdentity !== undefined
+                ? activeIdentity.type
+                : scrutinee._tag === 'UnionValue'
+                  ? scrutinee.member
+                  : scrutinee._tag === 'AggregateValue'
+                    ? scrutinee.type
+                    : Mir.semanticType(operation.scrutineeType)
             const payload =
               scrutinee._tag === 'UnionValue'
                 ? scrutinee.payload
@@ -1905,7 +1950,9 @@ function* executeFunction(
               }),
             )
             const decision = operation.decisions.find((candidate) =>
-              Type.equals(candidate.member, activeMember),
+              activeIdentity === undefined
+                ? Type.equals(Match.sourceType(candidate.member), activeMember)
+                : Match.identityEquals(candidate.member, activeIdentity),
             )
             if (decision === undefined) {
               throw new RangeError('MIR verifier allowed a match without its active member')

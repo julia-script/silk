@@ -14,11 +14,13 @@ import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeDebug from './NativeDebug.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeType from './NativeType.js'
 
 export interface Context {
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
   readonly i32: LlvmType.Type
+  readonly types: NativeType.LoweringContext
   readonly blocks: ReadonlyMap<number, LlvmBlock.Block>
   readonly locals: ReadonlyMap<number, ReadonlyArray<Value.Input>>
   readonly entry: NativeLoweringContext.DeclaredFunction
@@ -77,6 +79,34 @@ export const branch = Effect.fnUntraced(function* (
     condition,
     targetBlock(context.blocks, terminator.taken, 'Backend branch'),
     targetBlock(context.blocks, terminator.otherwise, 'Backend branch'),
+  )
+})
+
+export const enumMatchBranch = Effect.fnUntraced(function* (
+  context: Context,
+  terminator: Extract<LinearTerminator, { readonly _tag: 'EnumMatchBranch' }>,
+  blockOrdinal: number,
+): Effect.fn.Return<void, LlvmError.LlvmError> {
+  const value = scalar(context, terminator.scrutinee)
+  const lane = NativeType.lanesFor(context.types, terminator.type).at(0)
+  if (lane === undefined) throw new RangeError('LLVM enum match lost its scalar lane')
+  const type = NativeType.laneType(context.types, lane)
+  const expected =
+    terminator.representation.signedness === 'Signed'
+      ? yield* Constant.integerSigned(context.builder, type, terminator.discriminant)
+      : yield* Constant.integerUnsigned(context.builder, type, terminator.discriminant)
+  const condition = yield* FunctionBody.integerCompare(
+    context.body,
+    'eq',
+    value,
+    expected,
+    `enum_match${blockOrdinal}_member`,
+  )
+  yield* FunctionBody.conditionalBranch(
+    context.body,
+    condition,
+    targetBlock(context.blocks, terminator.taken, 'LLVM enum match branch'),
+    targetBlock(context.blocks, terminator.otherwise, 'LLVM enum match branch'),
   )
 })
 
@@ -231,6 +261,10 @@ export const emit = Effect.fnUntraced(function* (
     }
     case 'MatchBranch': {
       yield* matchBranch(context, terminator, block.id.ordinal)
+      break
+    }
+    case 'EnumMatchBranch': {
+      yield* enumMatchBranch(context, terminator, block.id.ordinal)
       break
     }
     case 'Trap': {

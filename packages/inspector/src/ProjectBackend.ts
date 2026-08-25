@@ -20,7 +20,7 @@ import type {
   NameResolution,
   Ownership,
 } from '@silk-effect/compiler'
-import { Mir } from '@silk-effect/compiler'
+import { Match, Mir } from '@silk-effect/compiler'
 import * as MirVerification from '@silk-effect/compiler/MirVerification'
 import * as Type from '@silk-effect/compiler/Type'
 import type { RowModel, Span } from './Row.js'
@@ -121,6 +121,13 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
       : `<${member.typeParameters.map((parameter) => typeText(parameter.type)).join(', ')}>`
   if (member._tag === 'StructDeclaration')
     return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
+  if (member._tag === 'EnumDeclaration') {
+    const representation =
+      member.representation._tag === 'Available'
+        ? member.representation.scalar.spelling
+        : (member.representation.spelling ?? 'unavailable')
+    return `enum(${representation}) · ${member.members.length} member${member.members.length === 1 ? '' : 's'} · ${member.validity._tag.toLowerCase()}`
+  }
   if (member._tag === 'ConstantDeclaration')
     return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
   if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration')
@@ -188,6 +195,20 @@ export const indexRows = (index: DeclarationIndex.Index): ReadonlyArray<RowModel
         detail: `${memberSignature(member)}${duplicate ? ' · duplicate' : ''}`,
         span,
       })
+      if (member._tag === 'EnumDeclaration')
+        for (const enumMember of member.members) {
+          const memberSpan = asSpan(enumMember.syntax.span)
+          rows.push({
+            key: `idx-${module.module}-${member.id.ordinal}-enum-member-${enumMember.id.ordinal}`,
+            depth: 2,
+            label: declaredName(enumMember.name),
+            detail:
+              enumMember.discriminant._tag === 'Available'
+                ? `discriminant ${enumMember.discriminant.value}`
+                : 'unavailable discriminant',
+            span: memberSpan,
+          })
+        }
     }
 
     for (const conformance of module.conformances) {
@@ -492,7 +513,7 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
         rows.push({
           key: `own-${fn.declaration.id.ordinal}-match-${match.span.start}-arm${arm.id.ordinal}`,
           depth: 2,
-          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
+          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)}`,
           detail: `${arm.provisionalGuard ? 'provisional guard' : 'direct selection'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · cleanup ${cleanup || 'none'}`,
           span: matchSpan,
         })
@@ -704,6 +725,12 @@ const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
     case 'Literal':
       return `${localText(operation.destination)} = const ${operation.value}`
+    case 'EnumConstant':
+      return `${localText(operation.destination)} = enum ${operation.enum.name}.${operation.member.name} · ${operation.discriminant}`
+    case 'EnumValue':
+      return `${localText(operation.destination)} = enum value ${localText(operation.source)} → ${operation.representation.scalar}`
+    case 'EnumEquality':
+      return `${localText(operation.destination)} = enum ${operation.negated ? 'not equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)} · ${operation.enum.name}`
     case 'StaticView':
       return `${localText(operation.destination)} = static ${operation.data} · ${operation.length} bytes`
     case 'StaticString':
@@ -929,9 +956,9 @@ export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
         if (operation._tag === 'Match') {
           for (const decision of operation.decisions) {
             rows.push({
-              key: `${fnKey}-r${region.id.ordinal}-${ordinal}-decision-${typeText(decision.member)}`,
+              key: `${fnKey}-r${region.id.ordinal}-${ordinal}-decision-${Match.encodeIdentity(decision.member)}`,
               depth: 3,
-              label: `decision ${typeText(decision.member)}`,
+              label: `decision ${Match.encodeIdentity(decision.member)}`,
               detail: decision.candidates
                 .map((candidate) => `arm #${candidate.ordinal}`)
                 .join(' → '),
@@ -942,7 +969,7 @@ export const mirRows = (module: Mir.Module): ReadonlyArray<RowModel> => {
             rows.push({
               key: `${fnKey}-r${region.id.ordinal}-${ordinal}-arm${arm.id.ordinal}`,
               depth: 3,
-              label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : typeText(arm.member)}`,
+              label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)}`,
               detail: `${arm.guard === undefined ? 'selected' : `guard ${localText(arm.guard.result)}`} · result ${localText(arm.selected.result)} → ${localText(operation.destination)} · cleanup ${arm.selected.cleanup.length}`,
               span: armSpan,
             })
@@ -1085,7 +1112,9 @@ const valueText = (value: BootstrapEvaluation.Value): string =>
                                           ? `${typeText(value.type)} package #${value.ticket} generation ${value.generation}`
                                           : value._tag === 'ReferenceValue'
                                             ? `borrow f${value.frame}.c${value.cell}`
-                                            : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
+                                            : value._tag === 'EnumValue'
+                                              ? `${value.enum.module}.${value.enum.name}.${value.member.name} = ${value.discriminant}`
+                                              : `${typeText(value.type)} { ${value.fields.map((entry) => valueText(entry.value)).join(', ')} }`
 
 const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
   switch (event._tag) {

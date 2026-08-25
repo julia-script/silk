@@ -84,6 +84,94 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   assert.strictEqual(inner.arguments.at(0)?._tag, 'IntegerLiteral')
 })
 
+it('retains canonical scalar enum member, value, and equality identities in typed HIR', () => {
+  const result = elaborate(
+    'hir://enum-values.silk',
+    `enum(i8) Status { Unknown = -1, Ready = 1 }
+fn raw(value: Status) -> i8 { return Status.value(value) }
+fn same(left: Status, right: Status) -> bool { return left == right }
+fn ready() -> Status { return Status.Ready }`,
+  )
+  assert.deepEqual(result.diagnostics, [])
+
+  const raw = result.hir.functions.at(0)
+  const conversion = raw === undefined ? undefined : Hir.returned(raw)
+  assert.strictEqual(conversion?._tag, 'EnumValue')
+  if (conversion?._tag === 'EnumValue') {
+    assert.deepEqual(conversion.enum, {
+      _tag: 'CanonicalDeclarationId',
+      module: 'hir://enum-values.silk',
+      name: 'Status',
+    })
+    assert.strictEqual(conversion.intrinsic.name, 'enumValue')
+    assert.strictEqual(conversion.type, 'i8')
+  }
+
+  const same = result.hir.functions.at(1)
+  const equality = same === undefined ? undefined : Hir.returned(same)
+  assert.strictEqual(equality?._tag, 'EnumEquality')
+  if (equality?._tag === 'EnumEquality') assert.strictEqual(equality.type, 'bool')
+
+  const ready = result.hir.functions.at(2)
+  const member = ready === undefined ? undefined : Hir.returned(ready)
+  assert.strictEqual(member?._tag, 'EnumMember')
+  if (member?._tag === 'EnumMember') {
+    assert.strictEqual(member.member.name, 'Ready')
+    assert.strictEqual(member.discriminant, 1n)
+    assert.strictEqual(Type.encode(member.type), 'hir://enum-values.silk.Status')
+  }
+  const encoded = Hir.encode(result.hir)
+  assert.include(encoded, 'enum-value hir://enum-values.silk.Status via Intrinsic.enumValue : i8')
+  assert.include(encoded, 'enum-equals hir://enum-values.silk.Status : bool')
+  assert.include(encoded, 'enum-member hir://enum-values.silk.Status.Ready discriminant=1')
+})
+
+it('retains scalar enum pattern identities and nominal scrutinee type in typed HIR', () => {
+  const result = elaborate(
+    'hir://enum-match.silk',
+    `enum Status { Unknown, Ready }
+fn inspect(value: Status) -> i32 {
+  return match value { Status.Unknown => 0 Status.Ready => 1 }
+}`,
+  )
+  const inspect = result.hir.functions.at(0)
+  const match = inspect === undefined ? undefined : Hir.returned(inspect)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.strictEqual(match?._tag, 'Match')
+  if (match?._tag !== 'Match') return
+  assert.notStrictEqual(match.scrutinee._tag, 'Unavailable')
+  if (match.scrutinee._tag === 'Unavailable') return
+  assert.strictEqual(Type.encode(match.scrutinee.type), 'hir://enum-match.silk.Status')
+  assert.deepEqual(
+    match.members.map((member) => ({
+      tag: member._tag,
+      name: member._tag === 'EnumMember' ? member.member.name : undefined,
+      type: Type.encode(member.type),
+    })),
+    [
+      { tag: 'EnumMember', name: 'Unknown', type: 'hir://enum-match.silk.Status' },
+      { tag: 'EnumMember', name: 'Ready', type: 'hir://enum-match.silk.Status' },
+    ],
+  )
+  assert.deepEqual(
+    match.arms.map((arm) => ({
+      member: arm.member?._tag === 'EnumMember' ? arm.member.member.name : undefined,
+      before: arm.before.map((member) =>
+        member._tag === 'EnumMember' ? member.member.name : Type.encode(member.type),
+      ),
+      after: arm.after.map((member) =>
+        member._tag === 'EnumMember' ? member.member.name : Type.encode(member.type),
+      ),
+    })),
+    [
+      { member: 'Unknown', before: ['Unknown', 'Ready'], after: ['Ready'] },
+      { member: 'Ready', before: ['Ready'], after: [] },
+    ],
+  )
+  assert.deepEqual(Hir.verify(result.hir), [])
+})
+
 it('preserves unsafe declaration and section contracts in typed HIR', () => {
   const result = elaborate(
     'hir://unsafe-callable.silk',

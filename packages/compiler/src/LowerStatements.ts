@@ -65,8 +65,16 @@ export const lowerPatternSelection = (
   const resultType = fn.type(resultSemantic)
   if (subject === undefined || subjectType === undefined || resultType === undefined)
     return undefined
+  if (
+    selection.members.some((member) => member._tag === 'EnumMember') ||
+    selection.member?._tag === 'EnumMember'
+  )
+    return undefined
   const members = Match.membersOf(semanticSubject)
-  const member = selection.member === undefined ? undefined : fn.semantic(selection.member)
+  const member =
+    selection.member?._tag === 'StructuralTypeMember'
+      ? Match.structuralMember(fn.semantic(selection.member.type))
+      : undefined
   const literal = (value: boolean): LoweredExpression | undefined =>
     lowerExpression(
       fn,
@@ -107,10 +115,13 @@ export const lowerPatternSelection = (
   }
   const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
   if (selectedResult === undefined) return undefined
+  const emptyCoverage: ReadonlyArray<Match.CoverageIdentity> = Object.freeze([])
   const selectedAfter = selection.universal
-    ? Object.freeze<Type.Type[]>([])
+    ? emptyCoverage
     : Object.freeze(
-        members.filter((candidate) => member === undefined || !Type.equals(candidate, member)),
+        members.filter(
+          (candidate) => member === undefined || !Match.identityEquals(candidate, member),
+        ),
       )
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
@@ -183,7 +194,7 @@ export const lowerPatternSelection = (
             candidates: Object.freeze(
               selection.universal
                 ? [selection.arm]
-                : member !== undefined && Type.equals(candidate, member)
+                : member !== undefined && Match.identityEquals(candidate, member)
                   ? needsFallback
                     ? [selection.arm, fallbackId]
                     : [selection.arm]

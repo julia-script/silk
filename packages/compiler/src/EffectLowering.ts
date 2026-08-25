@@ -19,7 +19,7 @@ import type { ProvidedRequirement } from './Lower.js'
 import { borrowKey, specializeProvider } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpression } from './LowerExpression.js'
-import type * as Match from './Match.js'
+import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -607,8 +607,10 @@ export const lowerEffectCatch = (
     function: declaration,
     span: innerSpan,
   })
+  const failureCoverage = Object.freeze(failureMembers.map(Match.structuralMember))
   const innerArms: Array<Mir.MatchArm> = []
   for (const [ordinal, member] of failureMembers.entries()) {
+    const memberCoverage = Match.structuralMember(member)
     const armId: Match.ArmId = Object.freeze({
       _tag: 'MatchArmId',
       match: innerMatch,
@@ -703,10 +705,10 @@ export const lowerEffectCatch = (
     innerArms.push(
       Object.freeze({
         id: armId,
-        member,
+        member: memberCoverage,
         universal: false,
-        before: Object.freeze(failureMembers.slice(ordinal)),
-        after: Object.freeze(failureMembers.slice(ordinal + 1)),
+        before: Object.freeze(failureCoverage.slice(ordinal)),
+        after: Object.freeze(failureCoverage.slice(ordinal + 1)),
         bindings: Object.freeze([
           Object.freeze({
             id: bindingId,
@@ -738,9 +740,9 @@ export const lowerEffectCatch = (
     scrutineeShape: Layout.callingShape(fn.layout, reified.failureValueType) ?? resultUnionShape,
     access: 'Move',
     retainsBindings: false,
-    members: failureMembers,
+    members: failureCoverage,
     decisions: Object.freeze(
-      failureMembers.map((member, ordinal) =>
+      failureCoverage.map((member, ordinal) =>
         Object.freeze({
           member,
           candidates: Object.freeze([innerArms.at(ordinal)?.id].flatMap((id) => id ?? [])),
@@ -763,11 +765,11 @@ export const lowerEffectCatch = (
       scrutineeShape: resultUnionShape,
       access: 'Move' as const,
       retainsBindings: false,
-      members: reified.resultUnion.members,
+      members: Object.freeze(reified.resultUnion.members.map(Match.structuralMember)),
       decisions: Object.freeze(
         reified.resultUnion.members.map((member) =>
           Object.freeze({
-            member,
+            member: Match.structuralMember(member),
             candidates: Object.freeze([
               Type.equals(member, reified.successType) ? successArm : failureArm,
             ]),
@@ -777,10 +779,10 @@ export const lowerEffectCatch = (
       arms: Object.freeze([
         Object.freeze({
           id: successArm,
-          member: reified.successType,
+          member: Match.structuralMember(reified.successType),
           universal: false,
-          before: reified.resultUnion.members,
-          after: Object.freeze([reified.failureType]),
+          before: Object.freeze(reified.resultUnion.members.map(Match.structuralMember)),
+          after: Object.freeze([Match.structuralMember(reified.failureType)]),
           bindings: Object.freeze([
             Object.freeze({
               id: successBinding,
@@ -802,9 +804,9 @@ export const lowerEffectCatch = (
         }),
         Object.freeze({
           id: failureArm,
-          member: reified.failureType,
+          member: Match.structuralMember(reified.failureType),
           universal: false,
-          before: Object.freeze([reified.failureType]),
+          before: Object.freeze([Match.structuralMember(reified.failureType)]),
           after: Object.freeze([]),
           bindings: Object.freeze([
             Object.freeze({

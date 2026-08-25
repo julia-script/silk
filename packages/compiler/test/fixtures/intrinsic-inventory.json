@@ -5395,6 +5395,14 @@
       "identity": "ContractRule.CatchFailure"
     },
     {
+      "operation": "Intrinsic.enumValue",
+      "signature": "fn Intrinsic.enumValue(value: <owning enum>) -> <owning enum representation>",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "language:scalar-enum-value",
+      "identity": "EnumValueRule"
+    },
+    {
       "operation": "Intrinsic.replace",
       "signature": "fn Intrinsic.replace<T>(place: &mut T, value: T) -> T",
       "unsafe": false,

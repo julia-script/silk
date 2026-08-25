@@ -35,6 +35,7 @@ import {
   analyzeExpression,
   analyzePattern,
   bindingName,
+  enumFactByType,
   statementExpressionNode,
   unsafeCallAuthorized,
 } from './ExpressionAnalysis.js'
@@ -288,6 +289,8 @@ export const analyzeStatements = (
     const arm: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal: 0 })
     const patternNode =
       SyntaxTree.directNode(element, 'ErrorPattern') ??
+      SyntaxTree.directNode(element, 'EnumMemberPattern') ??
+      SyntaxTree.directNode(element, 'IntegerPattern') ??
       SyntaxTree.directNode(element, 'NominalPattern') ??
       SyntaxTree.directNode(element, 'BindingPattern') ??
       SyntaxTree.directNode(element, 'UniversalPattern')
@@ -301,21 +304,35 @@ export const analyzeStatements = (
       context.resolution,
       context.declaration,
       { pattern: 0, binding: 0, invalid: false },
+      subject.type._tag === 'Available' ? subject.type.type : undefined,
     )
     context.diagnostics.push(...pattern.diagnostics)
-    const members = subject.type._tag === 'Available' ? Match.membersOf(subject.type.type) : []
-    const member =
-      pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern'
-        ? pattern.fact.member
+    const subjectEnum =
+      subject.type._tag === 'Available'
+        ? enumFactByType(context.resolution.index, subject.type.type)
         : undefined
+    const members =
+      subject.type._tag !== 'Available'
+        ? []
+        : subjectEnum === undefined
+          ? Match.membersOf(subject.type.type)
+          : Match.enumMembersOf(subjectEnum)
+    const member =
+      pattern.fact._tag === 'EnumMemberPattern'
+        ? pattern.fact.coverage
+        : (pattern.fact._tag === 'NominalPattern' || pattern.fact._tag === 'TypePattern') &&
+            pattern.fact.member !== undefined
+          ? Match.structuralMember(pattern.fact.member)
+          : undefined
     if (
-      member !== undefined &&
+      subjectEnum === undefined &&
+      member?._tag === 'StructuralTypeMember' &&
       subject.type._tag === 'Available' &&
-      !members.some((candidate) => Type.equals(candidate, member))
+      !members.some((candidate) => Match.identityEquals(candidate, member))
     ) {
       context.diagnostics.push(
         Diagnostic.matchMemberNotInScrutinee(
-          Type.encode(member),
+          Type.encode(member.type),
           Type.encode(subject.type.type),
           pattern.fact.syntax.span,
         ),
@@ -566,7 +583,14 @@ export const analyzeStatements = (
             ),
           )
       } else if (selection.pattern._tag !== 'UnavailablePattern' && !selection.irrefutable) {
-        const selected = selection.pattern.member
+        const selected =
+          selection.pattern._tag === 'EnumMemberPattern'
+            ? selection.pattern.coverage
+            : (selection.pattern._tag === 'NominalPattern' ||
+                  selection.pattern._tag === 'TypePattern') &&
+                selection.pattern.member !== undefined
+              ? Match.structuralMember(selection.pattern.member)
+              : undefined
         context.diagnostics.push(
           Diagnostic.refutableLetPattern(
             selection.subject.type._tag === 'Available'
@@ -577,8 +601,8 @@ export const analyzeStatements = (
                 )
               : '<unavailable>',
             selection.members
-              .filter((member) => selected === undefined || !Type.equals(member, selected))
-              .map(Type.encode),
+              .filter((member) => selected === undefined || !Match.identityEquals(member, selected))
+              .map(Match.encodeIdentity),
             selection.pattern.syntax.span,
           ),
         )

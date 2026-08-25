@@ -434,6 +434,60 @@ fn main() -> i32 { return 42 }`
   assert.deepEqual(Array.from(reconstructedBytes(result)), result.source.bytes)
 })
 
+it('retains qualified enum-member and signed integer patterns losslessly', () => {
+  const source = `enum(i8) Status { Unknown = -1, Ready = 1 }
+fn inspect(value: Status) -> i32 {
+  return match value {
+    -1 => 1
+    Status.Unknown => 0
+    Status.Ready => 2
+  }
+}`
+  const result = parseText('memory://enum-patterns.silk', source)
+  const patterns = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'EnumMemberPattern' || element.kind === 'IntegerPattern'),
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(
+    patterns.map((pattern) => ({
+      kind: pattern.kind,
+      text: source.slice(pattern.span.start, pattern.span.end).trim(),
+    })),
+    [
+      { kind: 'IntegerPattern', text: '-1' },
+      { kind: 'EnumMemberPattern', text: 'Status.Unknown' },
+      { kind: 'EnumMemberPattern', text: 'Status.Ready' },
+    ],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('keeps qualified generic nominal patterns distinct from enum members', () => {
+  const source = `fn inspect(value: Result.Result<i32, Problem>) -> i32 {
+  return match move value {
+    Result.Result<i32, Problem> {value} => value
+  }
+}`
+  const result = parseText('memory://qualified-generic-pattern.silk', source)
+  const patterns = descendants(result.root).filter(
+    (element): element is SyntaxTree.Node =>
+      SyntaxTree.isNode(element) &&
+      (element.kind === 'NominalPattern' || element.kind === 'EnumMemberPattern'),
+  )
+
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(
+    patterns.map((pattern) => pattern.kind),
+    ['NominalPattern'],
+  )
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
 it('parses whole-member binding patterns losslessly', () => {
   const source = `struct Empty {}
 struct Full { value: i32 }
@@ -2389,6 +2443,67 @@ it('parses nominal struct declarations and qualified field types losslessly', ()
   )
   assert.strictEqual(SyntaxTree.directNodes(structs.at(1) ?? result.root, 'StructField').length, 0)
   assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses enums with implicit and explicitly represented integer members losslessly', () => {
+  const source = `enum AssertionResult {
+  Pass,
+  Fail,
+  Skip,
+}
+pub enum(u8) ExitCode {
+  Success = 0,
+  Failure = 1,
+}`
+  const result = parseText('memory/enums', source)
+  const enums = SyntaxTree.directNodes(result.root, 'EnumDeclaration')
+  const implicit = enums.at(0) ?? result.root
+  const represented = enums.at(1) ?? result.root
+  const implicitMembers = SyntaxTree.directNodes(implicit, 'EnumMember')
+  const representedMembers = SyntaxTree.directNodes(represented, 'EnumMember')
+  const representation = SyntaxTree.directNode(represented, 'TypePath')
+
+  assert.strictEqual(enums.length, 2)
+  assert.deepEqual(
+    implicitMembers.map((member) => directTokenText(result, member, 'Identifier')),
+    ['Pass', 'Fail', 'Skip'],
+  )
+  assert.strictEqual(SyntaxTree.directNode(implicit, 'TypePath'), undefined)
+  assert.strictEqual(
+    representation === undefined
+      ? undefined
+      : directTokenText(result, representation, 'Identifier'),
+    'u8',
+  )
+  assert.deepEqual(
+    representedMembers.map((member) => {
+      const discriminant = SyntaxTree.directNode(member, 'IntegerLiteralExpression')
+      return discriminant === undefined
+        ? undefined
+        : directTokenText(result, discriminant, 'DecimalInteger')
+    }),
+    ['0', '1'],
+  )
+  assert.notStrictEqual(SyntaxTree.directToken(represented, 'PubKeyword'), undefined)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('recovers damaged enum members before the following declaration', () => {
+  const source = 'enum Broken { Pass Fail = } pub fn after() -> i32 { return 1 }'
+  const result = parseText('memory/damaged-enum', source)
+  const declaration = SyntaxTree.directNode(result.root, 'EnumDeclaration')
+  const after = SyntaxTree.directNode(result.root, 'FunctionDeclaration')
+
+  assert.deepEqual(
+    missingLeaves(declaration ?? result.root).map((leaf) => leaf.expected),
+    ['Comma', 'DecimalInteger'],
+  )
+  assert.notStrictEqual(after, undefined)
+  assert.deepEqual(after === undefined ? [] : missingLeaves(after), [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })

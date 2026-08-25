@@ -7,7 +7,7 @@
  */
 
 import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
-import { Diagnostic, SyntaxTree } from '@silk-effect/compiler'
+import { Diagnostic, Match, SyntaxTree } from '@silk-effect/compiler'
 import * as Type from '@silk-effect/compiler/Type'
 import type { FlowModel } from './FlowModel.js'
 import type { RowModel, RowTone, Span } from './Row.js'
@@ -224,7 +224,7 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
     case 'UnionConvert':
       return `${expression.conversion.toLowerCase()} → ${hirTypeText(expression.target)}`
     case 'Match':
-      return `match ${expression.access.toLowerCase()} · ${expression.members.map(hirTypeText).join(' | ')}`
+      return `match ${expression.access.toLowerCase()} · ${expression.members.map(Match.encodeIdentity).join(' | ')}`
     case 'Construct':
       return `construct ${hirTypeText(expression.nominal)}`
     case 'ArrayConstruct':
@@ -341,8 +341,8 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         rows.push({
           key: `${path}.arm${arm.id.ordinal}`,
           depth: depth + 1,
-          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : hirTypeText(arm.member)}`,
-          detail: `${arm.guard === undefined ? 'selected directly' : 'guarded'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · ${arm.before.map(hirTypeText).join(' | ') || 'empty'} → ${arm.after.map(hirTypeText).join(' | ') || 'empty'}`,
+          label: `arm #${arm.id.ordinal} ${arm.universal ? '_' : arm.member === undefined ? 'unknown' : Match.encodeIdentity(arm.member)}`,
+          detail: `${arm.guard === undefined ? 'selected directly' : 'guarded'} · ${arm.bindings.length} binding${arm.bindings.length === 1 ? '' : 's'} · ${arm.before.map(Match.encodeIdentity).join(' | ') || 'empty'} → ${arm.after.map(Match.encodeIdentity).join(' | ') || 'empty'}`,
           span: armSpan,
         })
         if (arm.guard !== undefined) {
@@ -370,7 +370,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       rows.push({
         key: `${path}-pattern-bind-${span.start}`,
         depth,
-        label: `let pattern ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        label: `let pattern ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : Match.encodeIdentity(node.selection.member)}`,
         detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
         span,
       })
@@ -397,7 +397,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
       rows.push({
         key: `${path}-if-let-${span.start}`,
         depth,
-        label: `if let ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : hirTypeText(node.selection.member)}`,
+        label: `if let ${node.selection.universal ? '_' : node.selection.member === undefined ? 'unknown' : Match.encodeIdentity(node.selection.member)}`,
         detail: `${node.selection.access.toLowerCase()} · ${node.selection.bindings.length} binding${node.selection.bindings.length === 1 ? '' : 's'} · r${node.region.ordinal}`,
         span,
       })

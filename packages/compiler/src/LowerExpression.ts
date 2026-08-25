@@ -126,6 +126,88 @@ export function lowerExpressionInner(
       )
       return { result: destination }
     }
+    case 'EnumMember': {
+      const type = fn.type(expression.type)
+      if (
+        type?._tag !== 'Enum' ||
+        type.representation.enum.module !== expression.enum.module ||
+        type.representation.enum.name !== expression.enum.name
+      )
+        return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'EnumConstant',
+          destination,
+          enum: expression.enum,
+          member: expression.member,
+          discriminant: expression.discriminant,
+          representation: type.representation,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'EnumValue': {
+      const value = lowerExpression(fn, expression.value)
+      const sourceType = value === undefined ? undefined : fn.localTypes.at(value.result.ordinal)
+      const type = fn.type(expression.type)
+      if (
+        value === undefined ||
+        sourceType?._tag !== 'Enum' ||
+        type?._tag !== expression.type ||
+        sourceType.representation.enum.module !== expression.enum.module ||
+        sourceType.representation.enum.name !== expression.enum.name ||
+        sourceType.representation.scalar !== expression.type
+      )
+        return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'EnumValue',
+          destination,
+          source: value.result,
+          enum: expression.enum,
+          representation: sourceType.representation,
+          type,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
+    case 'EnumEquality': {
+      const left = lowerExpression(fn, expression.left)
+      const right = lowerExpression(fn, expression.right)
+      const leftType = left === undefined ? undefined : fn.localTypes.at(left.result.ordinal)
+      const rightType = right === undefined ? undefined : fn.localTypes.at(right.result.ordinal)
+      if (
+        left === undefined ||
+        right === undefined ||
+        leftType?._tag !== 'Enum' ||
+        rightType?._tag !== 'Enum' ||
+        leftType.representation.enum.module !== expression.enum.module ||
+        leftType.representation.enum.name !== expression.enum.name ||
+        rightType.representation.enum.module !== expression.enum.module ||
+        rightType.representation.enum.name !== expression.enum.name
+      )
+        return undefined
+      const destination = fn.alloc(bool)
+      fn.emit(
+        Object.freeze({
+          _tag: 'EnumEquality',
+          destination,
+          left: left.result,
+          right: right.result,
+          enum: expression.enum,
+          negated: expression.negated,
+          representation: leftType.representation,
+          type: bool,
+          provenance: authored(expression.span),
+        }),
+      )
+      return Object.freeze({ result: destination })
+    }
     case 'StaticStringLiteral': {
       const type = fn.type(expression.type)
       if (type?._tag !== 'String') return undefined
@@ -1285,8 +1367,11 @@ export function lowerExpressionInner(
           candidate.id.span.start === expression.id.span.start &&
           candidate.id.span.end === expression.id.span.end,
       )
-      const specializeMember = (member: Type.Type): Type.Type => fn.semantic(member)
-      const members = Match.membersOf(fn.semantic(expression.scrutinee.type))
+      const specializeMember = (member: Match.CoverageIdentity): Match.CoverageIdentity =>
+        member._tag === 'StructuralTypeMember'
+          ? Match.structuralMember(fn.semantic(member.type))
+          : member
+      const members = Object.freeze(expression.members.map(specializeMember))
       const specializedCoverage = Match.cover(
         members,
         expression.arms.map((arm) =>
@@ -1405,7 +1490,8 @@ export function lowerExpressionInner(
             arms
               .filter(
                 (arm) =>
-                  arm.universal || (arm.member !== undefined && Type.equals(arm.member, member)),
+                  arm.universal ||
+                  (arm.member !== undefined && Match.identityEquals(arm.member, member)),
               )
               .map((arm) => arm.id),
           ),
@@ -1426,6 +1512,12 @@ export function lowerExpressionInner(
         })
         if (endedOnEveryPath) fn.loanLocals.delete(key)
       }
+      const mirDecisions = decisions.map((decision) =>
+        Object.freeze({
+          member: decision.member,
+          candidates: decision.candidates,
+        }),
+      )
       fn.emit(
         Object.freeze({
           _tag: 'Match',
@@ -1437,7 +1529,7 @@ export function lowerExpressionInner(
           access: expression.access,
           retainsBindings: false,
           members: Object.freeze(members),
-          decisions: Object.freeze(decisions),
+          decisions: Object.freeze(mirDecisions),
           arms: Object.freeze(arms),
           type: resultType,
           resultShape,

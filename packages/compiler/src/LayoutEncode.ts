@@ -16,33 +16,35 @@ const representationText = (representation: Representation): string =>
     ? `signed-i${representation.bits}`
     : representation._tag === 'UnsignedInteger'
       ? `unsigned-i${representation.bits}`
-      : representation._tag === 'Floating'
-        ? `float${representation.bits}`
-        : representation._tag === 'Boolean'
-          ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
-          : representation._tag === 'CallableEnvironment'
-            ? `callable-environment target=${
-                representation.realization.target._tag === 'Declaration'
-                  ? `${representation.realization.target.module}.${representation.realization.target.name}`
-                  : `${representation.realization.target.actor}.${representation.realization.target.operation}`
-              } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
-            : representation._tag === 'StoredEffectEnvironment'
-              ? `stored-effect-environment runner=${representation.realization.runner.module}.${representation.realization.runner.name} identity=${representation.realization.runnerIdentity} access=${representation.realization.access.toLowerCase()} suspendable=${representation.realization.suspendable ? 'yes' : 'no'} tail-padding=${representation.tailPadding}`
-              : representation._tag === 'Repeated'
-                ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
-                : representation._tag === 'Slice'
-                  ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
-                  : representation._tag === 'String'
-                    ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
-                    : representation._tag === 'Reference'
-                      ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
-                      : representation._tag === 'Union'
-                        ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
-                        : `aggregate cleanup-hook=${
-                            representation.cleanupHook === undefined
-                              ? 'none'
-                              : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
-                          } tail-padding=${representation.tailPadding}`
+      : representation._tag === 'ScalarEnum'
+        ? `scalar-enum ${representation.enum.module}.${representation.enum.name} lane=${representation.scalar} bits=${representation.bits} signedness=${representation.signedness.toLowerCase()} members=${representation.members.map((member) => `${member.member.name}=${member.discriminant}`).join(',')}`
+        : representation._tag === 'Floating'
+          ? `float${representation.bits}`
+          : representation._tag === 'Boolean'
+            ? `bool-i${representation.bits} false=${representation.falseValue} true=${representation.trueValue}`
+            : representation._tag === 'CallableEnvironment'
+              ? `callable-environment target=${
+                  representation.realization.target._tag === 'Declaration'
+                    ? `${representation.realization.target.module}.${representation.realization.target.name}`
+                    : `${representation.realization.target.actor}.${representation.realization.target.operation}`
+                } environment=${representation.realization.environment === undefined ? 'none' : Type.callableEnvironmentKey(representation.realization.environment)} tail-padding=${representation.tailPadding}`
+              : representation._tag === 'StoredEffectEnvironment'
+                ? `stored-effect-environment runner=${representation.realization.runner.module}.${representation.realization.runner.name} identity=${representation.realization.runnerIdentity} access=${representation.realization.access.toLowerCase()} suspendable=${representation.realization.suspendable ? 'yes' : 'no'} tail-padding=${representation.tailPadding}`
+                : representation._tag === 'Repeated'
+                  ? `repeated element=${Type.encode(representation.element)} length=${representation.length} stride=${representation.stride}`
+                  : representation._tag === 'Slice'
+                    ? `slice element=${Type.encode(representation.element)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment} length=usize@${representation.length.offset}/${representation.length.size} address-padding=${representation.addressPadding} tail-padding=${representation.tailPadding} stride=${representation.stride}`
+                    : representation._tag === 'String'
+                      ? `string storage=${representation.storage.provenance}:i${representation.storage.bits}@${representation.storage.offset}/${representation.storage.size}/${representation.storage.alignment} byte-length=usize@${representation.byteLength.offset}/${representation.byteLength.size} storage-padding=${representation.storagePadding} tail-padding=${representation.tailPadding}`
+                      : representation._tag === 'Reference'
+                        ? `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
+                        : representation._tag === 'Union'
+                          ? `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+                          : `aggregate cleanup-hook=${
+                              representation.cleanupHook === undefined
+                                ? 'none'
+                                : `${representation.cleanupHook.hook.module}.${representation.cleanupHook.hook.name}<${representation.cleanupHook.typeArguments.map(Type.encodeGenericArgument).join(',')}>`
+                            } tail-padding=${representation.tailPadding}`
 
 const entryLines = (candidate: Entry): ReadonlyArray<string> => [
   `layout ${Type.encode(candidate.type)} size=${candidate.size} align=${candidate.alignment} repr=${representationText(candidate.representation)}${candidate.executable === undefined ? '' : ` executable=${candidate.executable._tag.toLowerCase()}`}`,

@@ -104,6 +104,20 @@ import * as TargetConstant from './TargetConstant.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
 
+const integerLiteralSpan = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  token: Token.Token,
+): SourceSpan.SourceSpan => {
+  const minusToken = directToken(node, 'Minus')
+  return minusToken === undefined
+    ? token.span
+    : Option.getOrElse(
+        SourceSpan.make(source, minusToken.span.start, token.span.end),
+        () => token.span,
+      )
+}
+
 export const analyzeInteger = (
   source: SourceFile.SourceFile,
   node: SyntaxTree.Node,
@@ -122,13 +136,7 @@ export const analyzeInteger = (
 
   const minusToken = directToken(node, 'Minus')
   const negative = minusToken !== undefined
-  const literalSpan =
-    minusToken === undefined
-      ? token.span
-      : Option.getOrElse(
-          SourceSpan.make(source, minusToken.span.start, token.span.end),
-          () => token.span,
-        )
+  const literalSpan = integerLiteralSpan(source, node, token)
   const bytes = Option.getOrThrowWith(
     SourceFile.slice(source, token.span),
     () => new RangeError(`Semantic integer span does not belong to source ${source.id}`),
@@ -435,6 +443,170 @@ export const analyzeIdentifier = (
     diagnostics: resolution.diagnostics,
     type: resolution.type._tag === 'Available' ? resolution.type.type : undefined,
     syntax: node,
+  })
+}
+
+export const enumFactByType = (
+  index: DeclarationIndex.Index,
+  type: SemanticType,
+): DeclarationFacts.EnumFact | undefined =>
+  Type.isNominal(type)
+    ? index.modules
+        .find((module) => module.module === type.module)
+        ?.enums.find(
+          (declaration) =>
+            declaration.canonical._tag === 'Canonical' &&
+            declaration.canonical.id.name === type.name,
+        )
+    : undefined
+
+export const analyzeEnumMember = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  resolution: ResolutionContext,
+  expected?: SemanticType,
+): ExpressionResult | undefined => {
+  const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+  const qualifierToken = identifiers.at(0)
+  const memberToken = identifiers.at(1)
+  if (qualifierToken === undefined || memberToken === undefined || identifiers.length !== 2)
+    return undefined
+  const qualifier = spelling(source, qualifierToken)
+  const enumLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+  if (enumLookup._tag !== 'Resolved' || enumLookup.declaration._tag !== 'EnumDeclaration')
+    return undefined
+  const enum_ = enumLookup.declaration
+  const memberName = spelling(source, memberToken)
+  const memberLookup = DeclarationFacts.lookupEnumMember(enum_.members, memberName)
+  const member = memberLookup._tag === 'Resolved' ? memberLookup.member : undefined
+  const nominal =
+    enum_.canonical._tag === 'Canonical'
+      ? Type.nominal(enum_.canonical.id.module, enum_.canonical.id.name)
+      : undefined
+  const expectedEnum =
+    expected === undefined ? undefined : enumFactByType(resolution.index, expected)
+  const memberPathSpan = Option.getOrElse(
+    SourceSpan.make(source, qualifierToken.span.start, memberToken.span.end),
+    () => node.span,
+  )
+  const wrongEnum =
+    nominal !== undefined &&
+    expected !== undefined &&
+    expectedEnum?.canonical._tag === 'Canonical' &&
+    !Type.equals(nominal, expected)
+      ? Diagnostic.wrongEnumMember(Type.encode(expected), Type.encode(nominal), memberPathSpan)
+      : nominal !== undefined && typeof expected === 'string' && Scalar.isIntegerSpelling(expected)
+        ? Diagnostic.enumIntegerMismatch(
+            Type.encode(nominal),
+            expected,
+            'EnumToInteger',
+            memberPathSpan,
+          )
+        : undefined
+  const unknown =
+    member === undefined
+      ? Diagnostic.unknownEnumMember(qualifier, memberName, memberToken.span)
+      : undefined
+  const invalidMember =
+    member !== undefined &&
+    (member.canonical._tag !== 'Canonical' || member.discriminant._tag !== 'Available')
+  const diagnostic = unknown ?? wrongEnum
+  const type =
+    nominal !== undefined && member !== undefined && !invalidMember && diagnostic === undefined
+      ? availableExpressionType(nominal)
+      : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EnumMember',
+      enum: enum_,
+      ...(member === undefined ? {} : { member }),
+      ...(diagnostic === undefined ? {} : { cause: Diagnostic.identity(diagnostic) }),
+      qualifierToken,
+      memberToken,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze(diagnostic === undefined ? [] : [diagnostic]),
+    type: type._tag === 'Available' ? type.type : undefined,
+  })
+}
+
+const analyzeEnumValueCall = (
+  source: SourceFile.SourceFile,
+  node: SyntaxTree.Node,
+  argumentsResult: ArgumentsResult,
+  resolution: ResolutionContext,
+): ExpressionResult | undefined => {
+  const identifiers = callReferenceTokens(node)
+  const qualifierToken = identifiers.at(0)
+  const operationToken = identifiers.at(1)
+  if (qualifierToken === undefined || operationToken === undefined || identifiers.length !== 2)
+    return undefined
+  const qualifier = spelling(source, qualifierToken)
+  const operationName = spelling(source, operationToken)
+  const qualifierLookup = NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+  if (qualifierLookup._tag !== 'Resolved' || qualifierLookup.declaration._tag !== 'EnumDeclaration')
+    return undefined
+  const operation = qualifierLookup.declaration.associatedOperations.find(
+    (candidate) => candidate.name === operationName,
+  )
+  if (operation === undefined) return undefined
+  const argument = argumentsResult.facts.at(0)
+  const actual = argument?.type._tag === 'Available' ? argument.type.type : undefined
+  const mismatch =
+    actual === undefined || Type.equals(actual, operation.parameter)
+      ? undefined
+      : enumFactByType(resolution.index, actual) !== undefined
+        ? Diagnostic.wrongEnumMember(
+            Type.encode(operation.parameter),
+            Type.encode(actual),
+            argument?.syntax.span ?? node.span,
+          )
+        : typeof actual === 'string' && Scalar.isIntegerSpelling(actual)
+          ? Diagnostic.enumIntegerMismatch(
+              Type.encode(operation.parameter),
+              actual,
+              'IntegerToEnum',
+              argument?.syntax.span ?? node.span,
+            )
+          : Diagnostic.argumentTypeMismatch(
+              Type.encode(operation.parameter),
+              Type.encode(actual),
+              argument?.syntax.span ?? node.span,
+            )
+  const arity =
+    argumentsResult.facts.length === 1
+      ? undefined
+      : Diagnostic.wrongCallArity(
+          Object.freeze({
+            _tag: 'BuiltinTarget',
+            actor: qualifier,
+            operation: 'value',
+          }),
+          1,
+          argumentsResult.facts.length,
+          node.span,
+        )
+  const valid = argument !== undefined && mismatch === undefined && arity === undefined
+  const type = valid
+    ? availableExpressionType(operation.result.spelling)
+    : unavailableExpressionType
+  return Object.freeze({
+    fact: Object.freeze({
+      _tag: 'EnumValue',
+      operation,
+      argument: argument?.expression ?? unavailableExpression(node),
+      qualifierToken,
+      operationToken,
+      type,
+      syntax: node,
+    }),
+    diagnostics: Object.freeze([
+      ...argumentsResult.diagnostics,
+      ...(mismatch === undefined ? [] : [mismatch]),
+      ...(arity === undefined ? [] : [arity]),
+    ]),
+    type: type._tag === 'Available' ? type.type : undefined,
   })
 }
 
@@ -1114,6 +1286,7 @@ export const analyzePattern = (
   resolution: ResolutionContext,
   declaration: DeclarationFact,
   counters: PatternCounters,
+  expected?: SemanticType,
   prefix: ReadonlyArray<DeclarationFacts.FieldId> = Object.freeze([]),
   localNames = new Map<string, SourceSpan.SourceSpan>(),
 ): PatternResult => {
@@ -1146,6 +1319,127 @@ export const analyzePattern = (
         syntax: node,
       }),
       diagnostics: Object.freeze([]),
+    })
+  }
+
+  if (node.kind === 'IntegerPattern') {
+    const integer = analyzeInteger(source, node)
+    const expectedEnum =
+      expected === undefined ? undefined : enumFactByType(resolution.index, expected)
+    const value = integer.fact._tag === 'Available' ? integer.fact.value : undefined
+    const integerToken = directToken(node, 'DecimalInteger')
+    const minusToken = directToken(node, 'Minus')
+    const patternSpan =
+      integerToken === undefined
+        ? node.span
+        : Option.getOrElse(
+            SourceSpan.make(
+              source,
+              minusToken?.span.start ?? integerToken.span.start,
+              integerToken.span.end,
+            ),
+            () => node.span,
+          )
+    const diagnostic =
+      expectedEnum?.canonical._tag === 'Canonical' && value !== undefined
+        ? Diagnostic.integerPatternAgainstEnum(
+            Type.encode(
+              Type.nominal(expectedEnum.canonical.id.module, expectedEnum.canonical.id.name),
+            ),
+            value,
+            patternSpan,
+          )
+        : undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'IntegerPattern',
+        id,
+        ...(value === undefined ? {} : { value }),
+        span: patternSpan,
+        bindings: Object.freeze([]),
+        omitted: Object.freeze([]),
+        complete: false,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([
+        ...integer.diagnostics,
+        ...(diagnostic === undefined ? [] : [diagnostic]),
+      ]),
+    })
+  }
+
+  if (node.kind === 'EnumMemberPattern') {
+    const identifiers = SyntaxTree.tokens(node).filter((token) => token.kind === 'Identifier')
+    const qualifierToken = identifiers.at(0)
+    const memberToken = identifiers.at(1)
+    const qualifier = qualifierToken === undefined ? undefined : spelling(source, qualifierToken)
+    const enumLookup =
+      qualifier === undefined
+        ? undefined
+        : NameResolution.lookup(resolution.scope, resolution.index, qualifier)
+    const enum_ =
+      enumLookup?._tag === 'Resolved' && enumLookup.declaration._tag === 'EnumDeclaration'
+        ? enumLookup.declaration
+        : undefined
+    const pathSpan =
+      qualifierToken === undefined || memberToken === undefined
+        ? node.span
+        : Option.getOrElse(
+            SourceSpan.make(source, qualifierToken.span.start, memberToken.span.end),
+            () => node.span,
+          )
+    const memberName = memberToken === undefined ? undefined : spelling(source, memberToken)
+    const memberLookup =
+      enum_ === undefined || memberName === undefined
+        ? undefined
+        : DeclarationFacts.lookupEnumMember(enum_.members, memberName)
+    const member = memberLookup?._tag === 'Resolved' ? memberLookup.member : undefined
+    const coverage =
+      enum_?.canonical._tag === 'Canonical' && member?.canonical._tag === 'Canonical'
+        ? Match.enumMember(enum_.canonical.id, member.canonical.id)
+        : undefined
+    const expectedEnum =
+      expected === undefined ? undefined : enumFactByType(resolution.index, expected)
+    const unknown =
+      enum_ !== undefined && member === undefined && memberName !== undefined
+        ? Diagnostic.unknownEnumMember(
+            qualifier ?? '<unavailable>',
+            memberName,
+            memberToken?.span ?? node.span,
+          )
+        : undefined
+    const foreign =
+      coverage?._tag === 'EnumMember' &&
+      expectedEnum?.canonical._tag === 'Canonical' &&
+      (coverage.enum.module !== expectedEnum.canonical.id.module ||
+        coverage.enum.name !== expectedEnum.canonical.id.name)
+        ? Diagnostic.foreignEnumPattern(
+            Type.encode(
+              Type.nominal(expectedEnum.canonical.id.module, expectedEnum.canonical.id.name),
+            ),
+            Type.encode(coverage.type),
+            pathSpan,
+          )
+        : undefined
+    return Object.freeze({
+      fact: Object.freeze({
+        _tag: 'EnumMemberPattern',
+        id,
+        ...(enum_ === undefined ? {} : { enum: enum_ }),
+        ...(member === undefined ? {} : { member }),
+        ...(coverage === undefined ? {} : { coverage }),
+        ...(qualifierToken === undefined ? {} : { qualifierToken }),
+        ...(memberToken === undefined ? {} : { memberToken }),
+        span: pathSpan,
+        bindings: Object.freeze([]),
+        omitted: Object.freeze([]),
+        complete: coverage !== undefined && unknown === undefined && foreign === undefined,
+        syntax: node,
+      }),
+      diagnostics: Object.freeze([
+        ...(unknown === undefined ? [] : [unknown]),
+        ...(foreign === undefined ? [] : [foreign]),
+      ]),
     })
   }
 
@@ -1279,6 +1573,7 @@ export const analyzePattern = (
         resolution,
         declaration,
         counters,
+        undefined,
         resolvedField === undefined ? prefix : Object.freeze([...prefix, resolvedField.id]),
         localNames,
       )
@@ -1444,12 +1739,21 @@ export const analyzeMatch = (
       ? undefined
       : analyzeExpression(source, scrutineeNode, declarations, declaration, scope, resolution)
   const diagnostics: Array<Diagnostic.Diagnostic> = [...(scrutinee?.diagnostics ?? [])]
-  const members = scrutinee?.type === undefined ? undefined : Match.membersOf(scrutinee.type)
+  const enumScrutinee =
+    scrutinee?.type === undefined ? undefined : enumFactByType(resolution.index, scrutinee.type)
+  const members =
+    scrutinee?.type === undefined
+      ? undefined
+      : enumScrutinee === undefined
+        ? Match.membersOf(scrutinee.type)
+        : Match.enumMembersOf(enumScrutinee)
 
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
     const patternNode =
       SyntaxTree.directNode(armNode, 'ErrorPattern') ??
+      SyntaxTree.directNode(armNode, 'EnumMemberPattern') ??
+      SyntaxTree.directNode(armNode, 'IntegerPattern') ??
       SyntaxTree.directNode(armNode, 'NominalPattern') ??
       SyntaxTree.directNode(armNode, 'BindingPattern') ??
       SyntaxTree.directNode(armNode, 'UniversalPattern')
@@ -1467,40 +1771,96 @@ export const analyzeMatch = (
         binding: 0,
         invalid: false,
       },
+      scrutinee?.type,
     )
     diagnostics.push(...pattern.diagnostics)
     return Object.freeze({ armNode, armId, pattern: pattern.fact })
   })
+  const coverageIdentity = (pattern: PatternFact): Match.CoverageIdentity | undefined => {
+    if (pattern._tag === 'EnumMemberPattern') return pattern.coverage
+    return (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
+      pattern.member !== undefined
+      ? Match.structuralMember(pattern.member)
+      : undefined
+  }
   const coverage = Match.cover(
     members ?? Object.freeze([]),
-    preliminary.map(({ armNode, pattern }) =>
-      Object.freeze({
-        ...((pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
-        pattern.member !== undefined
-          ? { member: pattern.member }
-          : {}),
+    preliminary.map(({ armNode, pattern }) => {
+      const member = coverageIdentity(pattern)
+      return Object.freeze({
+        ...(member === undefined ? {} : { member }),
         universal: pattern._tag === 'UniversalPattern',
         guarded: directToken(armNode, 'IfKeyword') !== undefined,
-      }),
-    ),
+      })
+    }),
   )
+  const semanticPatternSpan = (pattern: PatternFact): SourceSpan.SourceSpan => {
+    if (pattern._tag === 'EnumMemberPattern' || pattern._tag === 'IntegerPattern')
+      return pattern.span
+    const first = SyntaxTree.tokens(pattern.syntax).find(
+      (token) =>
+        token.kind !== 'Whitespace' &&
+        token.kind !== 'LineComment' &&
+        token.kind !== 'DocComment' &&
+        token.kind !== 'ModuleDocComment',
+    )
+    return first === undefined
+      ? pattern.syntax.span
+      : Option.getOrElse(
+          SourceSpan.make(source, first.span.start, pattern.syntax.span.end),
+          () => pattern.syntax.span,
+        )
+  }
+  const semanticArmSpan = (pattern: PatternFact, armNode: SyntaxTree.Node): SourceSpan.SourceSpan =>
+    Option.getOrElse(
+      SourceSpan.make(source, semanticPatternSpan(pattern).start, armNode.span.end),
+      () => armNode.span,
+    )
+  const firstCoveringArm = new Map<string, SourceSpan.SourceSpan>()
+  let wildcardArm: SourceSpan.SourceSpan | undefined
   const arms = preliminary.map(({ armNode, armId, pattern }, ordinal): MatchArmFact => {
     const transition = coverage.transitions.at(ordinal)
     if (transition === undefined) throw new RangeError('Match coverage lost an arm')
+    const member = coverageIdentity(pattern)
+    const guarded = directToken(armNode, 'IfKeyword') !== undefined
+    const memberInDomain =
+      member !== undefined && members?.some((candidate) => Match.identityEquals(candidate, member))
     if (
-      (pattern._tag === 'NominalPattern' || pattern._tag === 'TypePattern') &&
-      pattern.member !== undefined &&
+      enumScrutinee === undefined &&
+      member?._tag === 'StructuralTypeMember' &&
       members !== undefined &&
-      !members.some((member) => Type.equals(member, pattern.member ?? member))
+      !memberInDomain
     ) {
       diagnostics.push(
         Diagnostic.matchMemberNotInScrutinee(
-          Type.encode(pattern.member),
+          Type.encode(member.type),
           scrutinee?.type === undefined ? 'unknown' : Type.encode(scrutinee.type),
           pattern.syntax.span,
         ),
       )
     } else if (
+      enumScrutinee !== undefined &&
+      pattern._tag !== 'UnavailablePattern' &&
+      !transition.reachable &&
+      (members?.length ?? 0) > 0
+    ) {
+      if (wildcardArm !== undefined) {
+        diagnostics.push(
+          Diagnostic.enumMatchArmAfterWildcard(wildcardArm, semanticArmSpan(pattern, armNode)),
+        )
+      } else if (member !== undefined && memberInDomain) {
+        const original = firstCoveringArm.get(Match.encodeIdentity(member))
+        if (original !== undefined)
+          diagnostics.push(
+            Diagnostic.duplicateEnumMatchArm(
+              Match.encodeIdentity(member),
+              original,
+              semanticPatternSpan(pattern),
+            ),
+          )
+      }
+    } else if (
+      enumScrutinee === undefined &&
       pattern._tag !== 'UnavailablePattern' &&
       !transition.reachable &&
       (members?.length ?? 0) > 0
@@ -1509,15 +1869,20 @@ export const analyzeMatch = (
         Diagnostic.unreachableMatchArm(
           pattern._tag === 'UniversalPattern'
             ? '_'
-            : pattern.member === undefined
+            : member === undefined
               ? 'unknown'
-              : Type.encode(pattern.member),
+              : Match.encodeIdentity(member),
           armNode.span,
         ),
       )
     }
+    if (!guarded) {
+      if (pattern._tag === 'UniversalPattern' && wildcardArm === undefined)
+        wildcardArm = semanticArmSpan(pattern, armNode)
+      else if (member !== undefined && memberInDomain && transition.reachable)
+        firstCoveringArm.set(Match.encodeIdentity(member), semanticPatternSpan(pattern))
+    }
     const armExpressions = armNode.children.filter(isExpressionNode)
-    const guarded = directToken(armNode, 'IfKeyword') !== undefined
     const guardNode = guarded ? armExpressions.at(0) : undefined
     const resultNode = armExpressions.at(guarded ? 1 : 0)
     const armScope: Scope = Object.freeze({
@@ -1569,7 +1934,24 @@ export const analyzeMatch = (
     !coverage.exhaustive &&
     !preliminary.some(({ pattern }) => pattern._tag === 'UnavailablePattern')
   ) {
-    diagnostics.push(Diagnostic.incompleteMatch(coverage.missing.map(Type.encode), node.span))
+    diagnostics.push(
+      enumScrutinee?.canonical._tag === 'Canonical'
+        ? Diagnostic.incompleteEnumMatch(
+            Type.encode(
+              Type.nominal(enumScrutinee.canonical.id.module, enumScrutinee.canonical.id.name),
+            ),
+            coverage.missing.map(Match.encodeIdentity),
+            Option.getOrElse(
+              SourceSpan.make(
+                source,
+                directToken(node, 'MatchKeyword')?.span.start ?? node.span.start,
+                node.span.end,
+              ),
+              () => node.span,
+            ),
+          )
+        : Diagnostic.incompleteMatch(coverage.missing.map(Match.encodeIdentity), node.span),
+    )
   }
   const reachableTypes = arms.flatMap((arm) =>
     arm.reachable && arm.result.type._tag === 'Available' ? [arm.result.type.type] : [],
@@ -1670,6 +2052,7 @@ export const analyzeMatch = (
       (arm) =>
         arm.reachable &&
         (arm.pattern._tag === 'UniversalPattern' ||
+          (arm.pattern._tag === 'EnumMemberPattern' && arm.pattern.complete) ||
           ((arm.pattern._tag === 'NominalPattern' || arm.pattern._tag === 'TypePattern') &&
             arm.pattern.complete)),
     ) &&
@@ -3801,6 +4184,110 @@ export const analyzeOperatorExpression = (
     )
   }
   const selectedFirstType = argumentsResult.facts.at(0)?.type
+  const selectedSecondType = argumentsResult.facts.at(1)?.type
+  const firstEnum =
+    selectedFirstType?._tag === 'Available'
+      ? enumFactByType(resolution.index, selectedFirstType.type)
+      : undefined
+  const secondEnum =
+    selectedSecondType?._tag === 'Available'
+      ? enumFactByType(resolution.index, selectedSecondType.type)
+      : undefined
+  if (firstEnum !== undefined || secondEnum !== undefined) {
+    const isEquality = operator === 'Equals' || operator === 'NotEquals'
+    const isOrdering =
+      operator === 'LessThan' ||
+      operator === 'LessOrEqual' ||
+      operator === 'GreaterThan' ||
+      operator === 'GreaterOrEqual'
+    const firstTypeText =
+      selectedFirstType?._tag === 'Available' ? Type.encode(selectedFirstType.type) : '?'
+    const secondTypeText =
+      selectedSecondType?._tag === 'Available' ? Type.encode(selectedSecondType.type) : '?'
+    const sameEnum =
+      firstEnum?.canonical._tag === 'Canonical' &&
+      secondEnum?.canonical._tag === 'Canonical' &&
+      firstEnum.canonical.id.module === secondEnum.canonical.id.module &&
+      firstEnum.canonical.id.name === secondEnum.canonical.id.name
+    if (
+      isEquality &&
+      sameEnum &&
+      firstEnum !== undefined &&
+      firstEnum.canonical._tag === 'Canonical'
+    ) {
+      const reference: CallReferenceFact = Object.freeze({
+        _tag: 'ResolvedEnumEquality',
+        spelling: spelling(source, operatorToken),
+        token: operatorToken,
+        enum: firstEnum.canonical.id,
+        operator,
+      })
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Operator',
+          operator,
+          reference,
+          arguments: argumentsResult.facts,
+          mappings: Object.freeze([]),
+          contract: Object.freeze({
+            _tag: 'Compatible',
+            expectedCount: 2,
+            actualCount: argumentsResult.facts.length,
+            typeArguments: Object.freeze([]),
+            substitution: new Map(),
+            evidence: Object.freeze([]),
+            inferredProviderSelectors: Object.freeze([]),
+          }),
+          type: availableBoolExpressionType,
+          syntax: node,
+        }),
+        diagnostics: argumentsResult.diagnostics,
+        type: 'bool',
+      })
+    }
+    const diagnostic = isOrdering
+      ? Diagnostic.enumOrdering(
+          firstEnum === undefined ? secondTypeText : firstTypeText,
+          spelling(source, operatorToken),
+          operatorToken.span,
+        )
+      : isEquality && firstEnum !== undefined && secondEnum !== undefined
+        ? Diagnostic.crossEnumEquality(firstTypeText, secondTypeText, operatorToken.span)
+        : isEquality
+          ? Diagnostic.enumIntegerMismatch(
+              firstEnum === undefined ? secondTypeText : firstTypeText,
+              firstEnum === undefined ? firstTypeText : secondTypeText,
+              firstEnum === undefined ? 'IntegerToEnum' : 'EnumToInteger',
+              operatorToken.span,
+            )
+          : undefined
+    if (diagnostic !== undefined) {
+      const reference: CallReferenceFact = Object.freeze({
+        _tag: 'Missing',
+        spelling: spelling(source, operatorToken),
+        token: operatorToken,
+        cause: Diagnostic.identity(diagnostic),
+      })
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Operator',
+          operator,
+          reference,
+          arguments: argumentsResult.facts,
+          mappings: Object.freeze([]),
+          contract: Object.freeze({
+            _tag: 'Unavailable',
+            reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: node }),
+            cause: Diagnostic.identity(diagnostic),
+          }),
+          type: unavailableExpressionType,
+          syntax: node,
+        }),
+        diagnostics: Object.freeze([...argumentsResult.diagnostics, diagnostic]),
+        type: undefined,
+      })
+    }
+  }
   const builtinOperand =
     selectedFirstType?._tag === 'Available' &&
     (Type.isString(selectedFirstType.type) || Scalar.isSpelling(selectedFirstType.type))
@@ -4515,19 +5002,36 @@ export function analyzeExpression(
   }
 
   if (node.kind === 'IntegerLiteralExpression') {
-    const integer = analyzeInteger(source, node, expected)
+    const expectedEnum =
+      expected === undefined ? undefined : enumFactByType(resolution.index, expected)
+    const integer = analyzeInteger(source, node, expectedEnum === undefined ? expected : undefined)
+    const mismatch =
+      expectedEnum?.canonical._tag === 'Canonical' && integer.fact._tag === 'Available'
+        ? Diagnostic.enumIntegerMismatch(
+            Type.encode(
+              Type.nominal(expectedEnum.canonical.id.module, expectedEnum.canonical.id.name),
+            ),
+            Type.encode(integer.fact.type),
+            'IntegerToEnum',
+            integerLiteralSpan(source, node, integer.fact.token),
+          )
+        : undefined
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Integer',
         integer: integer.fact,
         type:
-          integer.fact._tag === 'Available'
+          integer.fact._tag === 'Available' && mismatch === undefined
             ? availableExpressionType(integer.fact.type)
             : unavailableExpressionType,
         syntax: node,
       }),
-      diagnostics: integer.diagnostics,
-      type: integer.fact._tag === 'Available' ? integer.fact.type : undefined,
+      diagnostics: Object.freeze([
+        ...integer.diagnostics,
+        ...(mismatch === undefined ? [] : [mismatch]),
+      ]),
+      type:
+        integer.fact._tag === 'Available' && mismatch === undefined ? integer.fact.type : undefined,
     })
   }
 
@@ -4780,6 +5284,7 @@ export function analyzeExpression(
 
   if (node.kind === 'FieldProjectionExpression') {
     return (
+      analyzeEnumMember(source, node, resolution, expected) ??
       analyzeConstantReference(source, node, resolution) ??
       analyzeFunctionItem(source, node, declarations, resolution) ??
       analyzeProjection(source, node, declarations, declaration, scope, resolution)
@@ -4835,6 +5340,9 @@ export function analyzeExpression(
     resolution,
     callTypeArguments,
   )
+
+  const enumValue = analyzeEnumValueCall(source, node, argumentsResult, resolution)
+  if (enumValue !== undefined) return enumValue
 
   const calleeNode = callCallee(node)
   const calleeResult = analyzeExpression(

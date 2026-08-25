@@ -29,6 +29,11 @@ export type Identity =
   | { readonly _tag: 'BindingIdentity'; readonly id: Hir.BindingId }
   | { readonly _tag: 'PatternBindingIdentity'; readonly id: Match.BindingId }
   | { readonly _tag: 'FieldIdentity'; readonly id: DeclarationFacts.FieldId }
+  | { readonly _tag: 'EnumMemberIdentity'; readonly id: DeclarationFacts.CanonicalEnumMemberId }
+  | {
+      readonly _tag: 'EnumAssociatedOperationIdentity'
+      readonly id: DeclarationFacts.EnumAssociatedOperationId
+    }
   | {
       readonly _tag: 'ServiceOperationIdentity'
       readonly id: DeclarationFacts.ServiceOperationId
@@ -135,6 +140,13 @@ const locationOfBinding = (
     ? location(binding.name.token.span.sourceId, binding.syntax.span, binding.name.token.span)
     : undefined
 
+const locationOfEnumMember = (
+  member: DeclarationFacts.EnumMemberFact,
+): DeclarationLocation | undefined =>
+  member.name._tag === 'Present'
+    ? location(member.name.token.span.sourceId, member.syntax.span, member.name.token.span)
+    : undefined
+
 const locationOfField = (
   index: DeclarationIndex.Index,
   field: DeclarationFacts.FieldFact,
@@ -186,9 +198,11 @@ const isNominalDeclaration = (
   declaration: DeclarationFacts.MemberFact,
 ): declaration is
   | DeclarationFacts.StructFact
+  | DeclarationFacts.EnumFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact =>
   declaration._tag === 'StructDeclaration' ||
+  declaration._tag === 'EnumDeclaration' ||
   declaration._tag === 'ServiceDeclaration' ||
   declaration._tag === 'InterfaceDeclaration'
 
@@ -197,6 +211,7 @@ const declarationByNominal = (
   nominal: Type.Nominal,
 ):
   | DeclarationFacts.StructFact
+  | DeclarationFacts.EnumFact
   | DeclarationFacts.ServiceFact
   | DeclarationFacts.InterfaceFact
   | undefined =>
@@ -207,6 +222,7 @@ const declarationByNominal = (
         declaration,
       ): declaration is
         | DeclarationFacts.StructFact
+        | DeclarationFacts.EnumFact
         | DeclarationFacts.ServiceFact
         | DeclarationFacts.InterfaceFact =>
         isNominalDeclaration(declaration) &&
@@ -756,7 +772,23 @@ const collectPattern = (
         available(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
         locationOfBinding(binding),
       )
-  if (pattern._tag === 'NominalPattern') {
+  if (pattern._tag === 'EnumMemberPattern') {
+    if (pattern.enum !== undefined)
+      push(
+        pending,
+        pattern.qualifierToken?.span,
+        'Type',
+        available(identityOfDeclaration(pattern.enum)),
+        locationOfDeclaration(index, pattern.enum),
+      )
+    if (pattern.member?.canonical._tag === 'Canonical')
+      push(
+        pending,
+        pattern.memberToken?.span,
+        'Value',
+        available(Object.freeze({ _tag: 'EnumMemberIdentity', id: pattern.member.canonical.id })),
+      )
+  } else if (pattern._tag === 'NominalPattern') {
     const token = pattern.target._tag === 'Resolved' ? pattern.target.token : undefined
     if (pattern.target._tag === 'Resolved')
       push(
@@ -790,6 +822,56 @@ const collectExpression = (
   pending: Array<Pending>,
 ): void => {
   switch (expression._tag) {
+    case 'EnumMember':
+      push(
+        pending,
+        expression.qualifierToken.span,
+        'Type',
+        available(identityOfDeclaration(expression.enum)),
+        locationOfDeclaration(index, expression.enum),
+      )
+      push(
+        pending,
+        expression.memberToken.span,
+        'Value',
+        expression.member?.canonical._tag === 'Canonical'
+          ? available(
+              Object.freeze({
+                _tag: 'EnumMemberIdentity',
+                id: expression.member.canonical.id,
+              }),
+            )
+          : Object.freeze({
+              _tag: 'Unavailable',
+              ...(expression.cause === undefined ? {} : { cause: expression.cause }),
+            }),
+      )
+      return
+    case 'EnumValue':
+      push(
+        pending,
+        expression.qualifierToken.span,
+        'Type',
+        available(
+          Object.freeze({
+            _tag: 'DeclarationIdentity',
+            id: expression.operation.enum,
+          }),
+        ),
+      )
+      push(
+        pending,
+        expression.operationToken.span,
+        'Operation',
+        available(
+          Object.freeze({
+            _tag: 'EnumAssociatedOperationIdentity',
+            id: expression.operation.id,
+          }),
+        ),
+      )
+      collectExpression(expression.argument, index, scope, pending)
+      return
     case 'Constant':
       push(
         pending,
@@ -1106,6 +1188,18 @@ const collectMember = (
     }
     return
   }
+  if (member._tag === 'EnumDeclaration') {
+    for (const enumMember of member.members)
+      if (enumMember.name._tag === 'Present' && enumMember.canonical._tag === 'Canonical')
+        push(
+          pending,
+          enumMember.name.token.span,
+          'Declaration',
+          available(Object.freeze({ _tag: 'EnumMemberIdentity', id: enumMember.canonical.id })),
+          locationOfEnumMember(enumMember),
+        )
+    return
+  }
   if (member._tag === 'RoleDeclaration') return
   for (const field of member.fields) {
     if (field.name._tag === 'Present')
@@ -1344,6 +1438,10 @@ export const identityKey = (identity: Identity): string => {
       return `pattern:${JSON.stringify(identity.id)}`
     case 'FieldIdentity':
       return `field:${identity.id.struct.sourceId}:${identity.id.struct.ordinal}:${identity.id.ordinal}`
+    case 'EnumMemberIdentity':
+      return `enum-member:${identity.id.enum.module}.${identity.id.enum.name}.${identity.id.name}`
+    case 'EnumAssociatedOperationIdentity':
+      return `enum-operation:${identity.id.enum.module}.${identity.id.enum.name}.${identity.id.name}`
     case 'ServiceOperationIdentity':
       return `service-operation:${identity.id.service.sourceId}:${identity.id.service.ordinal}:${identity.id.name}`
     case 'ImportNamespaceIdentity':

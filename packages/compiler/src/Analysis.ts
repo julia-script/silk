@@ -343,6 +343,21 @@ const syntaxForIdentity = (
   if (identity._tag === 'DeclarationIdentity') return declarationForIdentity(self, identity)?.syntax
   if (identity._tag === 'ServiceOperationIdentity')
     return serviceOperationForIdentity(self, identity)?.syntax
+  if (identity._tag === 'EnumMemberIdentity')
+    return self.index.modules
+      .flatMap((module) => module.enums)
+      .find(
+        (enum_) =>
+          enum_.canonical._tag === 'Canonical' &&
+          enum_.canonical.id.module === identity.id.enum.module &&
+          enum_.canonical.id.name === identity.id.enum.name,
+      )
+      ?.members.find(
+        (member) =>
+          member.canonical._tag === 'Canonical' && member.canonical.id.name === identity.id.name,
+      )?.syntax
+  if (identity._tag === 'EnumAssociatedOperationIdentity')
+    return DeclarationFacts.byCanonical(self.index, identity.id.enum)?.syntax
   if (identity._tag === 'TypeParameterIdentity') {
     for (const headers of self.index.modules)
       for (const member of headers.members) {
@@ -426,7 +441,10 @@ const hoverPresentation = (
     : Object.freeze({ presentation, ...(type === undefined ? {} : { type }) })
 
 const nominalDeclarationType = (
-  declaration: DeclarationFacts.StructFact | DeclarationFacts.ContractFact,
+  declaration:
+    | DeclarationFacts.StructFact
+    | DeclarationFacts.EnumFact
+    | DeclarationFacts.ContractFact,
 ): Type.Nominal | undefined =>
   declaration.canonical._tag === 'Canonical'
     ? Type.nominal(
@@ -455,6 +473,11 @@ const presentationOfIdentity = (
     if (declaration?._tag === 'StructDeclaration')
       return hoverPresentation(
         Presentation.structDeclaration(declaration),
+        nominalDeclarationType(declaration),
+      )
+    if (declaration?._tag === 'EnumDeclaration')
+      return hoverPresentation(
+        Presentation.enumDeclaration(declaration),
         nominalDeclarationType(declaration),
       )
     if (declaration?._tag === 'ServiceDeclaration')
@@ -606,6 +629,31 @@ const presentationOfIdentity = (
       : hoverPresentation(
           Presentation.serviceOperation(operation),
           declaredType(operation.returnType),
+        )
+  }
+  if (identity._tag === 'EnumMemberIdentity') {
+    const enum_ = DeclarationFacts.byCanonical(self.index, identity.id.enum)
+    if (enum_?._tag !== 'EnumDeclaration') return undefined
+    const member = enum_.members.find(
+      (candidate) =>
+        candidate.canonical._tag === 'Canonical' &&
+        candidate.canonical.id.name === identity.id.name,
+    )
+    return member === undefined
+      ? undefined
+      : hoverPresentation(Presentation.enumMember(enum_, member), nominalDeclarationType(enum_))
+  }
+  if (identity._tag === 'EnumAssociatedOperationIdentity') {
+    const enum_ = DeclarationFacts.byCanonical(self.index, identity.id.enum)
+    const operation =
+      enum_?._tag === 'EnumDeclaration'
+        ? enum_.associatedOperations.find((candidate) => candidate.id.name === identity.id.name)
+        : undefined
+    return operation === undefined
+      ? undefined
+      : hoverPresentation(
+          Presentation.enumAssociatedOperation(operation),
+          operation.result.spelling,
         )
   }
   if (identity._tag === 'IntrinsicActorIdentity') {
@@ -904,12 +952,26 @@ export const declarationByName = (
   spelling: string,
 ): DeclarationFacts.DeclarationLookup => DeclarationFacts.lookup(self.index, module, spelling)
 
-/** Looks up a function or struct in the shared module-level namespace. */
+/** Looks up one declaration in the shared module-level namespace. */
 export const memberByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
 ): DeclarationFacts.MemberLookup => DeclarationFacts.member(self.index, module, spelling)
+
+/** Looks up one nominal scalar enum declaration. */
+export const enumByName = (
+  self: FrontendSnapshot,
+  module: string,
+  spelling: string,
+): DeclarationFacts.EnumLookup => DeclarationFacts.enumByName(self.index, module, spelling)
+
+/** Looks up one declaration-ordered member from a resolved scalar enum. */
+export const enumMemberByName = (
+  declaration: DeclarationFacts.EnumFact,
+  spelling: string,
+): DeclarationFacts.EnumMemberLookup =>
+  DeclarationFacts.lookupEnumMember(declaration.members, spelling)
 
 /** Looks up one nominal struct declaration. */
 export const structByName = (

@@ -85,6 +85,12 @@ export type Lookup =
       readonly spelling: string
       readonly declaration: DeclarationFacts.MemberFact
     }
+  | {
+      readonly _tag: 'EnumMember'
+      readonly spelling: string
+      readonly enum: DeclarationFacts.EnumFact
+      readonly member: DeclarationFacts.EnumMemberFact
+    }
   | { readonly _tag: 'Intrinsic'; readonly spelling: string; readonly actor: IntrinsicActor }
   | { readonly _tag: 'Namespace'; readonly spelling: string; readonly module: string }
   | { readonly _tag: 'Missing'; readonly spelling: string }
@@ -369,6 +375,7 @@ export const lookup = (
     ? Object.freeze({ _tag: 'Unavailable', spelling })
     : Object.freeze({ _tag: 'Resolved', spelling, declaration })
 }
+
 /**
  * A nominal declaration doubles as its module's scope only when its name matches the module's
  * basename — case-insensitively, ignoring underscores, so `hash_map` names `HashMap`. Returns the
@@ -377,6 +384,7 @@ export const lookup = (
 export const scopedModule = (declaration: DeclarationFacts.MemberFact): string | undefined => {
   if (
     declaration._tag !== 'StructDeclaration' &&
+    declaration._tag !== 'EnumDeclaration' &&
     declaration._tag !== 'ServiceDeclaration' &&
     declaration._tag !== 'InterfaceDeclaration'
   )
@@ -404,6 +412,23 @@ export const lookupQualified = (
     qualifier._tag === 'Missing'
   )
     return qualifier
+  if (qualifier._tag === 'Resolved' && qualifier.declaration._tag === 'EnumDeclaration') {
+    const selected = DeclarationFacts.lookupEnumMember(qualifier.declaration.members, member)
+    if (selected._tag === 'Resolved')
+      return Object.freeze({
+        _tag: 'EnumMember',
+        spelling: member,
+        enum: qualifier.declaration,
+        member: selected.member,
+      })
+    const diagnostic = Diagnostic.unknownEnumMember(namespace, member, token.span)
+    return Object.freeze({
+      _tag: 'Unavailable',
+      spelling: member,
+      cause: Diagnostic.identity(diagnostic),
+      declaration: qualifier.declaration,
+    })
+  }
   const module =
     qualifier._tag === 'Namespace'
       ? qualifier.module
@@ -510,6 +535,7 @@ const resolvedType = (
 
 const nominalOf = (declaration: DeclarationFacts.MemberFact): Type.Nominal | undefined =>
   (declaration._tag === 'StructDeclaration' ||
+    declaration._tag === 'EnumDeclaration' ||
     declaration._tag === 'ServiceDeclaration' ||
     declaration._tag === 'InterfaceDeclaration') &&
   declaration.canonical._tag === 'Canonical'
@@ -559,6 +585,8 @@ export const resolveType = (
     if (nominal !== undefined) return resolvedType(path, nominal)
     return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   }
+  if (result._tag === 'EnumMember')
+    return unresolved(path, Diagnostic.expectedType(path.spelling, typeUseSpan(path)))
   if (result._tag === 'Inaccessible') {
     const nominal = nominalOf(result.declaration)
     const diagnostic = Diagnostic.inaccessibleImportedMember(
@@ -609,6 +637,7 @@ export const resolveItem = (
       : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
   if (result._tag === 'Resolved')
     return Object.freeze({ _tag: 'Resolved', declaration: result.declaration })
+  if (result._tag === 'EnumMember') return Object.freeze({ _tag: 'Missing' })
   if (result._tag === 'Inaccessible')
     return Object.freeze({
       _tag: 'Inaccessible',

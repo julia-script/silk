@@ -9,6 +9,7 @@ import * as Hir from '../src/Hir.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Type from '../src/Type.js'
 import { invalidMatchCorpus } from './support/corpus.js'
 import * as Projections from './support/projections.js'
@@ -31,6 +32,199 @@ const snapshot = (
     Effect.provide(SourceResolver.memory(imports)),
   )
 }
+
+it.effect(
+  'connects immutable scalar enum facts across every facade phase and invalid recovery',
+  () =>
+    Effect.gen(function* () {
+      const module = 'enum/Facade'
+      const source = `pub enum(i16) Status { Unknown = -1, Ready, Done = 12 }
+pub fn main() -> i32 {
+  let status = Status.Ready
+  let copy = status
+  let raw = Status.value(copy)
+  drop raw
+  if copy == Status.Ready {
+    return match copy {
+      Status.Unknown => 0
+      Status.Ready => 42
+      Status.Done => 12
+    }
+  }
+  return 0
+}`
+      const self = yield* Analysis.ofSourceRealized(module, ascii(source), 'wasm32-unknown-unknown')
+      const lookup = Analysis.enumByName(self, module, 'Status')
+
+      assert.strictEqual(lookup._tag, 'Resolved')
+      assert.strictEqual(Analysis.memberByName(self, module, 'Status')._tag, 'Resolved')
+      if (lookup._tag !== 'Resolved') return
+      assert.strictEqual(lookup.declaration.representation._tag, 'Available')
+      assert.strictEqual(
+        lookup.declaration.representation._tag === 'Available'
+          ? lookup.declaration.representation.scalar.spelling
+          : undefined,
+        'i16',
+      )
+      assert.deepEqual(
+        lookup.declaration.members.map((member) =>
+          member.discriminant._tag === 'Available'
+            ? member.discriminant.value
+            : member.discriminant._tag,
+        ),
+        [-1n, 0n, 12n],
+      )
+      assert.strictEqual(Analysis.enumMemberByName(lookup.declaration, 'Ready')._tag, 'Resolved')
+      assert.strictEqual(Analysis.enumMemberByName(lookup.declaration, 'Missing')._tag, 'Missing')
+      assert.deepEqual(
+        lookup.declaration.associatedOperations.map((operation) => ({
+          tag: operation._tag,
+          name: operation.name,
+          parameter: Type.encode(operation.parameter),
+          result: operation.result.spelling,
+          intrinsic: operation.intrinsic.name,
+        })),
+        [
+          {
+            tag: 'EnumAssociatedOperation',
+            name: 'value',
+            parameter: `${module}.Status`,
+            result: 'i16',
+            intrinsic: 'enumValue',
+          },
+        ],
+      )
+      assert.strictEqual(
+        SyntaxTree.directNodes(lookup.declaration.syntax, 'FunctionDeclaration').length,
+        0,
+      )
+      assert.strictEqual(Object.isFrozen(lookup.declaration.members), true)
+
+      const memberOccurrence = Analysis.semanticOccurrenceAt(
+        self,
+        module,
+        source.indexOf('Ready', 70),
+      )
+      const operationOccurrence = Analysis.semanticOccurrenceAt(
+        self,
+        module,
+        source.indexOf('value'),
+      )
+      assert.strictEqual(
+        memberOccurrence?.resolution._tag === 'Available'
+          ? memberOccurrence.resolution.identity._tag
+          : undefined,
+        'EnumMemberIdentity',
+      )
+      assert.strictEqual(
+        operationOccurrence?.resolution._tag === 'Available'
+          ? operationOccurrence.resolution.identity._tag
+          : undefined,
+        'EnumAssociatedOperationIdentity',
+      )
+      assert.strictEqual(
+        operationOccurrence === undefined
+          ? undefined
+          : Analysis.occurrencePresentation(self, module, operationOccurrence)?.text,
+        'fn value(value: Status) -> i16',
+      )
+
+      const analysis = Analysis.moduleAnalysis(self, module)
+      const hirExpressions =
+        analysis?.hir.functions.flatMap((fn) =>
+          fn.statements.flatMap(Hir.statementExpressions).flatMap(Hir.expressionTree),
+        ) ?? []
+      assert.strictEqual(
+        hirExpressions.some(
+          (expression) => expression._tag === 'EnumMember' && expression.member.name === 'Ready',
+        ),
+        true,
+      )
+      assert.strictEqual(
+        hirExpressions.some((expression) => expression._tag === 'EnumValue'),
+        true,
+      )
+      assert.strictEqual(
+        hirExpressions.some((expression) => expression._tag === 'EnumEquality'),
+        true,
+      )
+
+      const match = Analysis.expressionsOf(self, module).find(
+        (expression) => expression._tag === 'Match',
+      )
+      assert.strictEqual(match?._tag, 'Match')
+      if (match?._tag === 'Match') {
+        assert.strictEqual(match.exhaustive, true)
+        assert.deepEqual(
+          match.members.map((member) =>
+            member._tag === 'EnumMember' ? member.member.name : member._tag,
+          ),
+          ['Unknown', 'Ready', 'Done'],
+        )
+      }
+
+      const ownership = Analysis.ownershipOf(self, module)
+      const mainOwnership = ownership?.functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'main',
+      )
+      assert.deepEqual(
+        mainOwnership?.bindings
+          .filter((binding) => binding.name === 'status' || binding.name === 'copy')
+          .map((binding) => [binding.name, binding.category._tag, binding.cleanup._tag]),
+        [
+          ['status', 'Copyable', 'NoCleanup'],
+          ['copy', 'Copyable', 'NoCleanup'],
+        ],
+      )
+
+      const layout = Analysis.nominalLayout(self, Type.nominal(module, 'Status'))
+      assert.strictEqual(layout?._tag, 'LayoutEntry')
+      if (layout?._tag === 'LayoutEntry') {
+        assert.strictEqual(layout.representation._tag, 'ScalarEnum')
+        assert.strictEqual(layout.size, 2)
+        assert.strictEqual(layout.alignment, 2)
+      }
+      const mirMatch = Analysis.mirMatchesOf(self).at(0)
+      assert.strictEqual(mirMatch?.scrutineeType._tag, 'Enum')
+      assert.deepEqual(
+        mirMatch?.decisions.map((decision) =>
+          decision.member._tag === 'EnumMember'
+            ? decision.member.member.name
+            : decision.member._tag,
+        ),
+        ['Unknown', 'Ready', 'Done'],
+      )
+
+      const evaluated = Analysis.evaluate(self)
+      assert.strictEqual(evaluated._tag, 'Completed')
+      if (evaluated._tag === 'Completed') assert.strictEqual(evaluated.result.value, 42n)
+      const artifact = yield* Analysis.codegenWasm(self, { mode: 'release' })
+      assert.strictEqual(artifact.control.length > 0, true)
+      assert.strictEqual(
+        artifact.control.every((entry) => entry.span.sourceId === module),
+        true,
+      )
+      assert.deepEqual(Analysis.diagnostics(self), [])
+
+      const invalid = yield* Analysis.ofSource(
+        'enum/Recovery',
+        ascii('enum Broken { Last = 255, Overflow, Duplicate = 255 }\nenum Good { Ready }'),
+      )
+      const broken = Analysis.enumByName(invalid, 'enum/Recovery', 'Broken')
+      const good = Analysis.enumByName(invalid, 'enum/Recovery', 'Good')
+      assert.strictEqual(broken._tag, 'Resolved')
+      assert.strictEqual(good._tag, 'Resolved')
+      if (broken._tag !== 'Resolved' || good._tag !== 'Resolved') return
+      assert.strictEqual(broken.declaration.validity._tag, 'Invalid')
+      assert.strictEqual(broken.declaration.members.at(1)?.discriminant._tag, 'Unavailable')
+      assert.strictEqual(good.declaration.validity._tag, 'Valid')
+      assert.strictEqual(good.declaration.members.at(0)?.discriminant._tag, 'Available')
+      assert.deepEqual(
+        Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+        ['SEM0151', 'SEM0149'],
+      )
+    }),
+)
 
 it.effect('answers multi-module queries from one snapshot', () =>
   Effect.gen(function* () {

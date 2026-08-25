@@ -81,6 +81,58 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
+export const scalarEnumSignedAcceptance = `import silk.i8 as i8
+enum(i8) Status {
+  Unknown = -1,
+  Ready = 7,
+}
+fn copyStatus(value: Status) -> Status {
+  let copied = value
+  if copied != Status.Ready { return copied }
+  return Status.Unknown
+}
+pub fn main() -> i32 {
+  let status = copyStatus(Status.Unknown)
+  let raw = Status.value(status)
+  if status == Status.Ready { return 1 }
+  return match status {
+    Status.Unknown => i8.toI32(raw) + 43
+    Status.Ready => 2
+  }
+}`
+
+export const scalarEnumLaneAcceptance = `enum(i8) SignedFlag {
+  Negative = -1,
+  Positive = 1,
+}
+enum(u8) ByteFlag {
+  Low = 1,
+  High = 255,
+}
+enum(i64) WideCode {
+  Selected = 4294967297,
+  Other = 9,
+}
+struct StoredFlags {
+  signed: SignedFlag
+  unsigned: ByteFlag
+}
+fn wideIdentity(value: WideCode) -> WideCode { return value }
+fn inspect(flags: &StoredFlags) -> i32 {
+  if flags.signed != SignedFlag.Negative { return 1 }
+  if flags.unsigned != ByteFlag.High { return 2 }
+  let selected = wideIdentity(WideCode.Selected)
+  if WideCode.value(selected) != 4294967297 { return 3 }
+  return match selected {
+    WideCode.Selected => 42
+    WideCode.Other => 4
+  }
+}
+pub fn main() -> i32 {
+  let flags = StoredFlags { signed: SignedFlag.Negative, unsigned: ByteFlag.High }
+  return inspect(&flags)
+}`
+
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
 export const independentExecutionNonLifo = `import silk.allocator { Allocator }
 import silk.allocator { Allocator }
@@ -951,6 +1003,16 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'literal',
     source: 'pub fn main() -> i32 { return 42 }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scalar-enum-signed',
+    source: scalarEnumSignedAcceptance,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scalar-enum-lanes',
+    source: scalarEnumLaneAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

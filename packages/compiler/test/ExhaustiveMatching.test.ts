@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Match from '../src/Match.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
@@ -44,15 +45,15 @@ pub fn inspect(event: Token | End) -> i32 {
 
   assert.deepEqual(result.diagnostics, [])
   assert.strictEqual(match.access, 'Shared')
-  assert.deepEqual(match.members.map(Type.encode), ['main.End', 'main.Token'])
+  assert.deepEqual(match.members.map(Match.encodeIdentity), ['main.End', 'main.Token'])
   assert.deepEqual(
     match.arms.map((arm) => ({
       member:
         arm.pattern._tag === 'NominalPattern' && arm.pattern.member !== undefined
           ? Type.encode(arm.pattern.member)
           : '_',
-      before: arm.before.map(Type.encode),
-      after: arm.after.map(Type.encode),
+      before: arm.before.map(Match.encodeIdentity),
+      after: arm.after.map(Match.encodeIdentity),
       reachable: arm.reachable,
     })),
     [
@@ -86,6 +87,162 @@ pub fn inspect(event: Token | End) -> i32 {
     1,
   )
   assert.include(Hir.encode(result.hir), 'match shared members=main.End,main.Token : i32')
+})
+
+it('covers scalar enums by canonical member identity without payload bindings', () => {
+  const result = analyze(
+    'enum-coverage',
+    `enum Status { Unknown, Ready }
+fn inspect(value: Status) -> i32 {
+  return match value {
+    Status.Unknown if false => 9
+    Status.Unknown => 0
+    Status.Ready => 1
+  }
+}`,
+  )
+  const match = returnedMatch(result)
+
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(match.members.map(Match.encodeIdentity), [
+    'enum-coverage.Status.Unknown',
+    'enum-coverage.Status.Ready',
+  ])
+  assert.deepEqual(
+    match.arms.map((arm) => ({
+      pattern: arm.pattern._tag,
+      bindings: arm.bindings.length,
+      before: arm.before.map(Match.encodeIdentity),
+      after: arm.after.map(Match.encodeIdentity),
+      reachable: arm.reachable,
+    })),
+    [
+      {
+        pattern: 'EnumMemberPattern',
+        bindings: 0,
+        before: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
+        after: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
+        reachable: true,
+      },
+      {
+        pattern: 'EnumMemberPattern',
+        bindings: 0,
+        before: ['enum-coverage.Status.Unknown', 'enum-coverage.Status.Ready'],
+        after: ['enum-coverage.Status.Ready'],
+        reachable: true,
+      },
+      {
+        pattern: 'EnumMemberPattern',
+        bindings: 0,
+        before: ['enum-coverage.Status.Ready'],
+        after: [],
+        reachable: true,
+      },
+    ],
+  )
+  assert.strictEqual(match.type._tag, 'Available')
+  assert.strictEqual(match.scrutinee.type._tag, 'Available')
+  if (match.scrutinee.type._tag === 'Available')
+    assert.strictEqual(Type.encode(match.scrutinee.type.type), 'enum-coverage.Status')
+  const returned = result.hir.functions.at(0)?.statements.at(-1)
+  assert.strictEqual(returned?._tag, 'Return')
+  if (returned?._tag !== 'Return' || returned.expression._tag !== 'Match') return
+  assert.strictEqual(returned.expression.arms[0]?.member?._tag, 'EnumMember')
+  assert.deepEqual(Hir.verify(result.hir), [])
+  assert.include(
+    Hir.encode(result.hir),
+    'match copy members=enum-coverage.Status.Unknown,enum-coverage.Status.Ready : i32',
+  )
+})
+
+it('reports scalar enum coverage diagnostics with stable codes and exact spans', () => {
+  const missingSource = `enum Status { Unknown, Ready }
+fn inspect(value: Status) -> i32 {
+  return match value { Status.Unknown if false => 0 Status.Ready => 1 }
+}`
+  const missing = analyze('enum-missing', missingSource)
+  assert.deepEqual(
+    missing.diagnostics.map((diagnostic) => ({ code: diagnostic.code, reason: diagnostic.reason })),
+    [
+      {
+        code: 'SEM0158',
+        reason: {
+          _tag: 'IncompleteEnumMatch',
+          enum: 'enum-missing.Status',
+          missing: ['enum-missing.Status.Unknown'],
+        },
+      },
+    ],
+  )
+  const missingMatchStart = missingSource.indexOf('match value')
+  const functionEnd = missingSource.lastIndexOf('}')
+  const missingMatchEnd = missingSource.lastIndexOf('}', functionEnd - 1) + 1
+  assert.deepEqual(
+    missing.diagnostics.map((diagnostic) => [diagnostic.span.start, diagnostic.span.end]),
+    [[missingMatchStart, missingMatchEnd]],
+  )
+
+  const duplicateSource = `enum Status { Unknown, Ready }
+fn inspect(value: Status) -> i32 {
+  return match value { Status.Unknown => 0 Status.Unknown => 1 Status.Ready => 2 }
+}`
+  const duplicate = analyze('enum-duplicate', duplicateSource)
+  const firstMember = duplicateSource.indexOf('Status.Unknown')
+  const secondMember = duplicateSource.indexOf('Status.Unknown', firstMember + 1)
+  assert.deepEqual(
+    duplicate.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: [diagnostic.span.start, diagnostic.span.end],
+      related: diagnostic.relatedSpans?.map((related) => [related.span.start, related.span.end]),
+    })),
+    [
+      {
+        code: 'SEM0159',
+        span: [secondMember, secondMember + 'Status.Unknown'.length],
+        related: [[firstMember, firstMember + 'Status.Unknown'.length]],
+      },
+    ],
+  )
+
+  const wildcardSource = `enum Status { Unknown, Ready }
+fn inspect(value: Status) -> i32 {
+  return match value { _ => 0 Status.Ready => 1 }
+}`
+  const wildcard = analyze('enum-wildcard', wildcardSource)
+  const wildcardStart = wildcardSource.indexOf('_ => 0')
+  const laterArm = wildcardSource.indexOf('Status.Ready')
+  assert.deepEqual(
+    wildcard.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: [diagnostic.span.start, diagnostic.span.end],
+      related: diagnostic.relatedSpans?.map((related) => [related.span.start, related.span.end]),
+    })),
+    [
+      {
+        code: 'SEM0160',
+        span: [laterArm, laterArm + 'Status.Ready => 1'.length],
+        related: [[wildcardStart, wildcardStart + '_ => 0'.length]],
+      },
+    ],
+  )
+
+  const invalidSource = `enum Status { Ready }
+enum Other { Ready }
+fn foreign(value: Status) -> i32 { return match value { Other.Ready => 0 _ => 1 } }
+fn integer(value: Status) -> i32 { return match value { 0 => 0 _ => 1 } }`
+  const invalid = analyze('enum-invalid-patterns', invalidSource)
+  const foreignStart = invalidSource.indexOf('Other.Ready')
+  const integerStart = invalidSource.indexOf('0 => 0')
+  assert.deepEqual(
+    invalid.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: [diagnostic.span.start, diagnostic.span.end],
+    })),
+    [
+      { code: 'SEM0161', span: [foreignStart, foreignStart + 'Other.Ready'.length] },
+      { code: 'SEM0162', span: [integerStart, integerStart + 1] },
+    ],
+  )
 })
 
 it('diagnoses incomplete, unreachable, foreign-member, guard, field, and result failures', () => {
@@ -230,7 +387,7 @@ it('selects exact non-nominal members with whole-value bindings', () => {
   const match = returnedMatch(result)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.deepEqual(match.members.map(Type.encode), ['i32', 'string'])
+  assert.deepEqual(match.members.map(Match.encodeIdentity), ['i32', 'string'])
   assert.deepEqual(
     match.arms.map((arm) =>
       arm.pattern._tag === 'TypePattern' && arm.pattern.member !== undefined

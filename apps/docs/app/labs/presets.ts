@@ -1156,6 +1156,30 @@ pub fn main() -> i32 {
   ),
 
   // ---- syntax ---------------------------------------------------------------------------
+  one(
+    'syntax',
+    'ok · Scalar enum across phases',
+    `enum(i16) Status {
+  Unknown = -1,
+  Ready,
+  Done = 12,
+}
+
+pub fn main() -> i32 {
+  let status = Status.Ready
+  let raw = Status.value(status)
+  drop raw
+  if status != Status.Unknown {
+    return match status {
+      Status.Unknown => 0
+      Status.Ready => 42
+      Status.Done => 12
+    }
+  }
+  return 0
+}
+`,
+  ),
   one('syntax', 'ok · Literal result', `pub fn main() -> i32 {
   return 42
 }

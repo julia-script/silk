@@ -32,7 +32,9 @@ status.
 ## Authority and lifecycle
 
 The human author owns the proposal and its outcome. AI agents may draft, challenge, and revise a
-Candidate within a bounded review loop; their agreement is evidence rather than approval.
+Candidate within a bounded review loop; their agreement is evidence rather than approval. The author
+also decides whether a bounded change needs the SLP route at all; see the direct OpenSpec exception
+below.
 
 ```text
 Draft -> Candidate --review/revision--> Candidate -> outcome
@@ -50,6 +52,20 @@ Draft -> Candidate --review/revision--> Candidate -> outcome
 - **Deferred** — record a concrete `Revisit when` trigger; return to Candidate when it occurs.
 - **Declined** and **Withdrawn** — preserve the reasoning and resolution.
 - **Superseded** — link both the old and replacement SLP.
+
+### Author-approved direct OpenSpec exception
+
+An SLP remains the default for broad, uncertain, or strongly cross-cutting whole-language direction.
+The human author may nevertheless explicitly authorize a bounded change to proceed directly to
+OpenSpec on a case-by-case basis. An explicit request for direct OpenSpec is sufficient approval;
+agents must not require an SLP to be created, revised, reviewed, or accepted first.
+
+A direct OpenSpec change records that author approval and is self-contained design evidence. Its
+proposal and design must carry the intended model and invariants, closed decisions, rejected
+alternatives, whole-language interaction map, minimal compiler-privilege boundary, affected current
+specs, and risks or falsifiers; its delta specs must carry the normative requirements and scenarios
+that an SLP handoff would otherwise transfer. Skipping the SLP changes the route, not the required
+quality or traceability of the resulting change.
 
 Drafts may change in place while incrementing `Revision` after substantive changes. Every formal
 review targets the proposal digest and revision recorded in its review file. Clarify accepted text
@@ -217,48 +233,61 @@ stays in Candidate; only the author assigns an outcome. Clean is a review result
 
 ## OpenSpec handoff
 
-Acceptance transfers the selected model and invariants, closed decisions, rejected alternatives,
-affected current specs, falsifiers/evidence gates, and capability-level realization map. It does not
-transfer task lists or file plans.
+For the SLP-backed route, acceptance transfers the selected model and invariants, closed decisions,
+rejected alternatives, affected current specs, falsifiers/evidence gates, and capability-level
+realization map. It does not transfer task lists or file plans.
 
-Create linked OpenSpec changes only after the author accepts the direction and requests handoff.
-Each change identifies the SLP slice it realizes. OpenSpec may refine mechanics but cannot silently
-reverse the accepted thesis; return the SLP to Candidate or supersede it when implementation exposes
-a conceptual flaw.
+Create linked SLP-backed OpenSpec changes only after the author accepts the direction and requests
+handoff. Each change identifies the SLP slice it realizes. OpenSpec may refine mechanics but cannot
+silently reverse the accepted thesis; return the SLP to Candidate or supersede it when implementation
+exposes a conceptual flaw.
+
+For an author-approved direct OpenSpec change, identify the approval in the proposal and carry the
+same design evidence directly in the change artifacts. If implementation exposes a conceptual flaw,
+revise the OpenSpec design and requirements with the author rather than inventing a missing SLP after
+the fact.
 
 ## Traceability gates
 
-Treat the accepted SLP, OpenSpec change, and implementation as three distinct authorities:
+Trace the selected route through one of these authority chains:
 
 ```text
-SLP direction and invariants
+Accepted SLP direction and invariants
   -> OpenSpec normative requirements and scenarios
     -> design and tasks
       -> implementation, tests, generated artifacts, and documentation
+
+Author-approved direct OpenSpec normative requirements and scenarios
+  -> design and tasks
+    -> implementation, tests, generated artifacts, and documentation
 ```
 
-Trace in both directions. Every accepted SLP decision that a program can observe needs an OpenSpec
-requirement and scenario. Every normative scenario needs implementation and verification work.
+Trace in both directions. Every accepted SLP decision, or direct-OpenSpec design decision, that a
+program can observe needs an OpenSpec requirement and scenario. Every normative scenario needs implementation and verification work.
 Every task and implementation behavior must trace back to a requirement, design necessity, or named
 repository obligation. Artifact existence, checked task boxes, and passing tests are supporting
 evidence, not proof of coverage or fidelity.
 
-Audit an OpenSpec change before implementation. Freeze the SLP revision and artifact digests, then
-check direction coverage, normative completeness, internal consistency, task and evidence coverage,
-and the compiler/standard-library boundary. A planning audit is ready only when no conceptual
+Audit an OpenSpec change before implementation. For the SLP-backed route, freeze the SLP revision
+and artifact digests; for the direct route, freeze the author-approval record and OpenSpec artifact
+digests. Then check direction coverage, normative completeness, internal consistency, task and
+evidence coverage, and the compiler/standard-library boundary. A planning audit is ready only when no conceptual
 decision is invented, omitted, or contradicted and every observable contract has verification work.
 
 Audit the implementation after its tasks are complete and before archive. Review the actual code,
-tests, documentation, generated artifacts, and behavior against both the fixed SLP and OpenSpec
-contract. Classify every mismatch by its correct source of truth:
+tests, documentation, generated artifacts, and behavior against the fixed OpenSpec contract and,
+when the SLP-backed route was used, the fixed SLP. Classify every mismatch by its correct source of
+truth:
 
 - **Realization refinement** — an implementation detail that changes no normative behavior; record
   it in design or tasks when durable explanation is useful.
-- **OpenSpec gap or divergence** — the SLP direction remains intact but a normative requirement,
+- **OpenSpec gap or divergence** — the selected direction remains intact but a normative requirement,
   scenario, or task is missing or wrong; revise OpenSpec and re-audit.
-- **Justified SLP divergence** — implementation evidence exposes a necessary or materially better
-  conceptual model; revise the SLP back to Candidate, update its examples and interaction map, and
-  review the new direction before treating the implementation as conformant.
+- **Justified direction divergence** — implementation evidence exposes a necessary or materially
+  better conceptual model. For an SLP-backed change, revise the SLP back to Candidate, update its
+  examples and interaction map, and review the new direction. For a direct change, return the revised
+  model and its OpenSpec consequences to the author for explicit approval before treating the
+  implementation as conformant.
 - **Unjustified implementation divergence** — the implementation departed from the accepted
   contracts for convenience or without sufficient evidence; request concrete implementation changes.
 - **Author decision fork** — competing models depend on taste, values, or missing research; present

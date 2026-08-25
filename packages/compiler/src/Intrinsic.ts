@@ -75,6 +75,10 @@ export type Rule =
       readonly providerMode?: Constraint.ProviderMode
     }
   | { readonly _tag: 'PlaceRule'; readonly operation: 'Replace' }
+  | {
+      /** Result and parameter types are derived from the owning canonical enum declaration. */
+      readonly _tag: 'EnumValueRule'
+    }
 
 /** One compiler-provided operation shared by analysis, presentation, and completion. */
 export interface Operation {
@@ -722,6 +726,20 @@ const stringOperations = Object.freeze([
 ])
 
 const stringActor = actor('string', 'Type', Object.freeze([]))
+
+const enumValueOperation: Operation = Object.freeze({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', 'enumValue'),
+  spelling: 'enumValue',
+  typeParameters: Object.freeze([]),
+  parameters: Object.freeze([valueParameter('value', '<owning enum>')]),
+  result: '<owning enum representation>',
+  unsafe: false,
+  admission: 'Representation',
+  consumer: 'language:scalar-enum-value',
+  targets: executionTargets,
+  rule: Object.freeze({ _tag: 'EnumValueRule' }),
+})
 
 const replaceOperation: Operation = Object.freeze({
   _tag: 'IntrinsicOperation',
@@ -1522,6 +1540,7 @@ const intrinsicOperations = Object.freeze([
       contract: catchContract,
     }),
   ]),
+  enumValueOperation,
   replaceOperation,
 ])
 
@@ -1613,7 +1632,9 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
             ? `${operation.rule._tag}.${operation.rule.operation}`
             : operation.rule._tag === 'ContractRule'
               ? `${operation.rule._tag}.${operation.rule.post}`
-              : `${operation.rule._tag}.${operation.rule.operation}`
+              : operation.rule._tag === 'EnumValueRule'
+                ? operation.rule._tag
+                : `${operation.rule._tag}.${operation.rule.operation}`
       return Object.freeze({
         operation: `Intrinsic.${operation.spelling}`,
         signature: signature(operation),
