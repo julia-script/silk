@@ -83,8 +83,11 @@ jobs:
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: node scripts/turbo.mjs run build
+      # Mirrors test:parallel's flags; `pnpm --filter … run script -- args` drops the args
+      # (observed in run 33014303799: every shard ran the full suite), so invoke vitest directly.
       - run: >
-          pnpm --filter @silk-effect/compiler run test:parallel --
+          pnpm --filter @silk-effect/compiler exec vitest run
+          --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts
           --shard=${{ matrix.shard }}/4
           --reporter=default --reporter=json
           --outputFile.json=compiler-shard-${{ matrix.shard }}.json
