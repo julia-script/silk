@@ -1997,7 +1997,8 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   const binderScope = new Map<string, number>()
   const inBinderScope = (parameterKey: string): boolean => binderScope.has(parameterKey)
   const pushBinders = (binders: ReadonlyArray<Parameter>): void => {
-    for (const binder of binders) binderScope.set(key(binder), (binderScope.get(key(binder)) ?? 0) + 1)
+    for (const binder of binders)
+      binderScope.set(key(binder), (binderScope.get(key(binder)) ?? 0) + 1)
   }
   const popBinders = (binders: ReadonlyArray<Parameter>): void => {
     for (const binder of binders) {

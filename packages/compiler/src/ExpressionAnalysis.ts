@@ -4214,13 +4214,12 @@ export const analyzeOperatorExpression = (
   // not drive the operand retry when another operand carries a declared scalar type: `5 + x`
   // must type like `x + 5`. When every operand is a literal, the first (defaulted) one drives.
   const drivingOrdinal = operandNodes.findIndex((operand, ordinal) => {
-    if (
-      operand.kind === 'IntegerLiteralExpression' ||
-      operand.kind === 'FloatingLiteralExpression'
-    )
+    if (operand.kind === 'IntegerLiteralExpression' || operand.kind === 'FloatingLiteralExpression')
       return false
     const type = argumentsResult.facts.at(ordinal)?.type
-    return type?._tag === 'Available' && typeof type.type === 'string' && Scalar.isSpelling(type.type)
+    return (
+      type?._tag === 'Available' && typeof type.type === 'string' && Scalar.isSpelling(type.type)
+    )
   })
   const firstType = argumentsResult.facts.at(drivingOrdinal === -1 ? 0 : drivingOrdinal)?.type
   if (

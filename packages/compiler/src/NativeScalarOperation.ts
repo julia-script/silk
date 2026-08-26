@@ -66,7 +66,13 @@ export const emitFloatToIntegerGuard = Effect.fnUntraced(function* (
     lowConstant,
     `${name}_below`,
   )
-  const above = yield* FunctionBody.floatingCompare(body, 'uge', value, highConstant, `${name}_above`)
+  const above = yield* FunctionBody.floatingCompare(
+    body,
+    'uge',
+    value,
+    highConstant,
+    `${name}_above`,
+  )
   const invalid = yield* FunctionBody.binary(body, 'or', below, above, `${name}_invalid`)
   if (context.state.trapBlock === undefined)
     context.state.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')

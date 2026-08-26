@@ -28,7 +28,10 @@ it('rounds a 64-bit integer to f32 in a single step', () => {
   const single = FloatingPoint.fromBigInt(value, 32)
   const expected = FloatingPoint.toNumber(single)
   assert.strictEqual(expected, 2 ** 60 + 2 ** 37)
-  assert.notStrictEqual(expected, FloatingPoint.toNumber(FloatingPoint.fromNumber(Number(value), 32)))
+  assert.notStrictEqual(
+    expected,
+    FloatingPoint.toNumber(FloatingPoint.fromNumber(Number(value), 32)),
+  )
   // Within f64's exact range the two paths agree.
   assert.deepEqual(FloatingPoint.fromBigInt(-12345n, 32), FloatingPoint.fromNumber(-12345, 32))
   assert.deepEqual(FloatingPoint.fromBigInt(value, 64), FloatingPoint.fromNumber(Number(value), 64))
