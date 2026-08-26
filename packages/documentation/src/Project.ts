@@ -252,10 +252,21 @@ const serviceOperationItem = (
   })
 }
 
-const enumMemberItem = (parent: string, member: DeclarationFacts.EnumMemberFact): Item => {
+const enumMemberItem = (
+  snapshot: Analysis.FrontendSnapshot,
+  module: string,
+  source: SourceFile.SourceFile,
+  parent: string,
+  member: DeclarationFacts.EnumMemberFact,
+): Item => {
   const name = nameOf(member.name, '_')
   const discriminant =
     member.discriminant._tag === 'Available' ? ` = ${member.discriminant.value}` : ''
+  const documentation = resolveDocumentation(
+    snapshot,
+    module,
+    parsedDocumentation(snapshot, module, source, member.syntax),
+  )
   return Object.freeze({
     id: `${parent}::member:${member.id.ordinal}`,
     kind: 'EnumMember',
@@ -263,6 +274,7 @@ const enumMemberItem = (parent: string, member: DeclarationFacts.EnumMemberFact)
     visibility: 'Inherited',
     signature: Object.freeze({ text: `${name}${discriminant}` }),
     source: rangeOf(member.syntax),
+    ...(documentation === undefined ? {} : { documentation }),
     children: Object.freeze([]),
   })
 }
@@ -303,7 +315,9 @@ const ownedChildren = (
         .filter((field) => options.includePrivate === true || field.visibility === 'Public')
         .map((field) => fieldItem(snapshot, module, source, id, field))
     case 'EnumDeclaration':
-      return member.members.map((enumMember) => enumMemberItem(id, enumMember))
+      return member.members.map((enumMember) =>
+        enumMemberItem(snapshot, module, source, id, enumMember),
+      )
     case 'ServiceDeclaration':
     case 'InterfaceDeclaration':
       return member.operations.map((operation) =>

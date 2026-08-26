@@ -409,7 +409,8 @@ rendered bytes or one provider's physical writes as the canonical event.
 _Avoid_: stdout bytes, log line fragment, stream chunk
 
 **Logger service**:
-The portable explicit service consumed by `Effect.log`. A Logger receives a severity and one
+The portable explicit service consumed by `Effect.log` and its level-specific aliases. A Logger
+receives a closed `LogLevel` severity and one
 complete borrowed message in call order and decides whether to render it to standard output, retain
 it in memory, forward it to browser or OpenTelemetry facilities, fan it out, or discard it according
 to explicit provider policy. Logging is not `StandardStreams.writeAll`, does not expose

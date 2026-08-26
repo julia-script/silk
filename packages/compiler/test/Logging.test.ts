@@ -33,15 +33,28 @@ import silk.logger {
 
 effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryService()
-  let first = run Effect.provideMut(Effect.log("first"), &mut logger)
-  let second = run Effect.provideMut(Effect.logAt(Logger.warning(), "second\nline"), &mut logger)
-  if length(&logger) != 2 { return 1 }
-  if Logger.levelCode(levelAt(&logger, 0)) != 2 { return 2 }
-  if Logger.levelCode(levelAt(&logger, 1)) != 3 { return 3 }
-  if messageLengthAt(&logger, 0) != 5 { return 4 }
-  if messageByteAt(&logger, 0, 0) != 102 { return 5 }
-  if messageLengthAt(&logger, 1) != 11 { return 6 }
-  if messageByteAt(&logger, 1, 6) != 10 { return 7 }
+  let trace = run Effect.provideMut(Effect.logTrace("trace"), &mut logger)
+  let debug = run Effect.provideMut(Effect.logDebug("debug"), &mut logger)
+  let info = run Effect.provideMut(Effect.log("info"), &mut logger)
+  let infoAlias = run Effect.provideMut(Effect.logInfo("info alias"), &mut logger)
+  let warning = run Effect.provideMut(Effect.logWarning("warning"), &mut logger)
+  let error = run Effect.provideMut(Effect.logError("error"), &mut logger)
+  let selected = run Effect.provideMut(
+    Effect.logAt(LogLevel.Warning, "second\nline"),
+    &mut logger
+  )
+  if length(&logger) != 7 { return 1 }
+  if Logger.levelAt(&logger, 0) != LogLevel.Trace { return 2 }
+  if Logger.levelAt(&logger, 1) != LogLevel.Debug { return 3 }
+  if Logger.levelAt(&logger, 2) != LogLevel.Info { return 4 }
+  if Logger.levelAt(&logger, 3) != LogLevel.Info { return 5 }
+  if Logger.levelAt(&logger, 4) != LogLevel.Warning { return 6 }
+  if Logger.levelAt(&logger, 5) != LogLevel.Error { return 7 }
+  if Logger.levelAt(&logger, 6) != LogLevel.Warning { return 8 }
+  if messageLengthAt(&logger, 0) != 5 { return 9 }
+  if messageByteAt(&logger, 0, 0) != 116 { return 10 }
+  if messageLengthAt(&logger, 6) != 11 { return 11 }
+  if messageByteAt(&logger, 6, 6) != 10 { return 12 }
   return 42
 }
 
@@ -54,12 +67,27 @@ pub fn main() -> i32 {
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('logging/main', encoder.encode(source), target)
 
+it.effect('realizes an imported Logger accessor returning LogLevel', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.logger { LogLevel, Logger }
+pub fn main() -> i32 {
+  let logger = Logger.inMemoryService()
+  if Logger.levelAt(&logger, 0) == LogLevel.Trace { return 42 }
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self)
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
 it.effect('dispatches complete ordered messages through an ordinary source Logger', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(memorySource)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const outcome = Analysis.evaluate(self)
-    assert.strictEqual(outcome._tag, 'Completed')
+    assert.strictEqual(outcome._tag, 'Completed', JSON.stringify(outcome, Json.bigIntReplacer, 2))
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
 
     const hir = Projections.hirOf(self, 'silk/effect')
@@ -84,7 +112,7 @@ import silk.logger { Logger }
 import silk.logger { length }
 
 effect fn logAndKeep(value: i32) -> i32 ! LogError ? &mut Logger {
-  let logged = run Effect.logAt(Logger.debug(), "composed")
+  let logged = run Effect.logDebug("composed")
   return value
 }
 
@@ -250,7 +278,7 @@ import silk.logger { Logger }
 pub effect fn main() -> () ! LogError {
   let mut logger = Logger.stdoutService()
   let first = run Effect.provideMut(Effect.log("one\n"), &mut logger)
-  let second = run Effect.provideMut(Effect.logAt(Logger.error(), "two"), &mut logger)
+  let second = run Effect.provideMut(Effect.logError("two"), &mut logger)
   return ()
 }`
     const self = yield* snapshot(source)

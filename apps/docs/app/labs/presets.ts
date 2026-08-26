@@ -430,7 +430,7 @@ effect fn program() -> i32
 ! LogError {
   let mut logger = Logger.inMemoryService()
   let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
-  let second = run Effect.provideMut(Effect.logAt(Logger.warning(), "second\\nline"), &mut logger)
+  let second = run Effect.provideMut(Effect.logWarning("second\\nline"), &mut logger)
   if length(&logger) != 2 {
     return 0
   }

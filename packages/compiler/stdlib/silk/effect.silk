@@ -134,7 +134,7 @@ import silk.usize as usize
 /// `Effect<A ! E ? R>` type, which needs no import.
 pub struct Effect {}
 
-/// Sends one complete message at `Logger.info()` through the required mutable [`Logger`].
+/// Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`].
 ///
 /// # Details
 ///
@@ -143,7 +143,7 @@ pub struct Effect {}
 pub effect fn log(
   message: string
 ) -> () ! LogError ? &mut Logger {
-  return run Logger.log(Logger.info(), message)
+  return run logAt(LogLevel.Info, message)
 }
 
 /// Sends one complete message at `level` through the required mutable [`Logger`].
@@ -157,6 +157,41 @@ pub effect fn logAt(
   message: string
 ) -> () ! LogError ? &mut Logger {
   return run Logger.log(move level, message)
+}
+
+/// Sends one complete message at `LogLevel.Trace` through the required mutable [`Logger`].
+pub effect fn logTrace(
+  message: string
+) -> () ! LogError ? &mut Logger {
+  return run logAt(LogLevel.Trace, message)
+}
+
+/// Sends one complete message at `LogLevel.Debug` through the required mutable [`Logger`].
+pub effect fn logDebug(
+  message: string
+) -> () ! LogError ? &mut Logger {
+  return run logAt(LogLevel.Debug, message)
+}
+
+/// Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`].
+pub effect fn logInfo(
+  message: string
+) -> () ! LogError ? &mut Logger {
+  return run logAt(LogLevel.Info, message)
+}
+
+/// Sends one complete message at `LogLevel.Warning` through the required mutable [`Logger`].
+pub effect fn logWarning(
+  message: string
+) -> () ! LogError ? &mut Logger {
+  return run logAt(LogLevel.Warning, message)
+}
+
+/// Sends one complete message at `LogLevel.Error` through the required mutable [`Logger`].
+pub effect fn logError(
+  message: string
+) -> () ! LogError ? &mut Logger {
+  return run logAt(LogLevel.Error, message)
 }
 
 /// Executes `protected` once and converts its success or typed failure into ordinary [`Result`] data.

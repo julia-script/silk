@@ -19,8 +19,9 @@ ownership, shared and exclusive borrowing, deterministic `Drop`, explicit alloca
 and byte data, and typed `Effect` computations with explicit service requirements. Canonical
 `Result`, `Effect`, and `Vector` operations are ordinary navigable Silk source rather than
 compiler-recognized library names. Portable semantic logging is likewise source-defined:
-`Effect.log` submits one complete borrowed `string` through an explicit replaceable `Logger`, with
-stdout and deterministic in-memory providers supplied by the standard library.
+`Effect.log` and its level-specific aliases submit one complete borrowed `string` and a closed
+`LogLevel` through an explicit replaceable `Logger`, with stdout and deterministic in-memory
+providers supplied by the standard library.
 Portable whole-file interaction is source-defined as well: normalized provider-absolute `Path`
 values and a seven-operation mutable `FileSystem` service can be implemented by application-owned
 native, browser, Wasm, or test providers without introducing ambient storage or host imports.

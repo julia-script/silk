@@ -12,7 +12,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/bytes`](./bytes.md) | `Bytes` | 8 | Owned arbitrary bytes for file contents, process output, and other encoding-neutral data. |
 | [`silk/char`](./char.md) | `char` | 8 | Checked construction, integer inspection, equality, and ordering for Unicode scalar char values. |
 | [`silk/child_process`](./child-process.md) | `ChildProcess` | 41 | Portable blocking child execution from structured byte arguments to fully captured output. |
-| [`silk/effect`](./effect.md) | `Effect` | 27 | Builds lazy computations by transforming success, recovering typed failure, supplying services, and controlling sequencing and cleanup. |
+| [`silk/effect`](./effect.md) | `Effect` | 32 | Builds lazy computations by transforming success, recovering typed failure, supplying services, and controlling sequencing and cleanup. |
 | [`silk/execution`](./execution.md) | `Execution` | 4 | Independently owned, caller-funded lazy computations with explicit external parking. |
 | [`silk/f32`](./f32.md) | `f32` | 50 | IEEE binary32 values with deterministic representation, classification, and math operations. |
 | [`silk/f64`](./f64.md) | `f64` | 50 | IEEE binary64 values and Silk's default floating-point arithmetic. |
@@ -30,7 +30,7 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/isize`](./isize.md) | `isize` | 60 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
 | [`silk/layout`](./layout.md) | `Layout` | 6 | Checked size-and-alignment descriptions used to request storage from an allocator. |
 | [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
-| [`silk/logger`](./logger.md) | `Logger` | 20 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
+| [`silk/logger`](./logger.md) | `Logger` | 14 | Typed semantic logging with replaceable stdout and bounded in-memory providers. |
 | [`silk/metrics`](./metrics.md) | `AllocationMetrics` | 6 | Provider-owned allocation counters that can be published as ordinary copyable data. |
 | [`silk/numeric`](./numeric.md) | `Integer` | 2 | Shared compile-time addition witness for generic algorithms over primitive integers. |
 | [`silk/option`](./option.md) | `Option` | 8 | Optional owned values that distinguish presence from absence without a failure channel. |

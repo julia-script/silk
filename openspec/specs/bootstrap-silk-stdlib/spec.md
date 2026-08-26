@@ -126,20 +126,21 @@ primitive call SHALL be explicit in its source body through `Intrinsic`.
 
 ### Requirement: Logging is canonical visible Silk source
 
-The standard library SHALL ship canonical `.silk` declarations for LogLevel, LogError, Logger,
-`Effect.log`, the level-selecting logging operation, the initial stdout and in-memory providers,
-and provider-owned recorded observation values where needed. These declarations SHALL participate
-in the deterministic standard-library manifest, retain ordinary source spans in diagnostics and
-editor facts, and receive no semantic privilege from their module identity.
+The standard library SHALL ship canonical `.silk` declarations for the scalar `LogLevel` enum,
+`LogError`, Logger, `Effect.log`, `Effect.logAt`, `Effect.logTrace`, `Effect.logDebug`,
+`Effect.logInfo`, `Effect.logWarning`, `Effect.logError`, the initial stdout and in-memory
+providers, and provider-owned recorded observation values where needed. These declarations SHALL
+participate in the deterministic standard-library manifest, retain ordinary source spans in
+diagnostics and editor facts, and receive no semantic privilege from their module identity.
 
 #### Scenario: Navigate to the Logger contract
 
-- **WHEN** editor tooling resolves a Logger implementation or `Effect.log` call
+- **WHEN** editor tooling resolves a Logger implementation, a `LogLevel` member, or an Effect logging helper
 - **THEN** go-to-definition opens the canonical shipped Silk declaration rather than a generated TypeScript signature
 
 #### Scenario: Copy the logging contract into user source
 
-- **WHEN** equivalent logging declarations are written in a user module
+- **WHEN** equivalent enum, service, provider, and helper declarations are written in a user module
 - **THEN** they receive the same parsing, conformance, ownership, Effect, and lowering behavior without intrinsic registration
 
 ### Requirement: Vector provides canonical lexical slice accessors
@@ -286,14 +287,15 @@ be independently testable without changing compiler type identity or target ABI.
 ### Requirement: Semantic text boundaries use string
 
 Shipped standard-library APIs SHALL use `string` for complete logging messages, normalized path
-construction and resolution, path text accessors, and native filesystem roots. Implementations
-SHALL request UTF-8 byte views explicitly where text reaches byte storage, standard streams, or raw
-OS operations. APIs whose domain is arbitrary bytes, including `Bytes`, whole-file contents, and
-standard streams, SHALL remain byte-oriented.
+construction and resolution, path text accessors, and native filesystem roots. This SHALL include
+`Effect.log`, `Effect.logAt`, every level-specific Effect logging helper, and `Logger.log`.
+Implementations SHALL request UTF-8 byte views explicitly where text reaches byte storage, standard
+streams, or raw OS operations. APIs whose domain is arbitrary bytes, including `Bytes`, whole-file
+contents, and standard streams, SHALL remain byte-oriented.
 
 #### Scenario: Log semantic text
 
-- **WHEN** source submits a complete message through `Effect.log`, `Effect.logAt`, or `Logger.log`
+- **WHEN** source submits a complete message through any Effect logging helper or `Logger.log`
 - **THEN** the API accepts `string` and a provider converts it to bytes only if its output boundary requires an encoding
 
 #### Scenario: Construct and inspect paths as text
@@ -303,8 +305,8 @@ standard streams, SHALL remain byte-oriented.
 
 #### Scenario: Preserve binary boundaries
 
-- **WHEN** source writes arbitrary file contents or standard-stream bytes, or a provider invokes a raw OS intrinsic
-- **THEN** that boundary continues to use byte views and any textual caller performs an explicit UTF-8 conversion
+- **WHEN** source reads file contents, writes standard streams, or manipulates arbitrary byte collections
+- **THEN** those APIs continue to use byte-oriented values rather than reclassifying binary data as text
 
 ### Requirement: StandardInput and its native provider are separate canonical modules
 

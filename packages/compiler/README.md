@@ -80,8 +80,9 @@ The bootstrap language currently includes:
 The compiler-shipped standard library lives as canonical `.silk` files under [`stdlib/silk`](stdlib/silk).
 `Result`, Effect transformations, Option, and the generic growable `Vector<T>` compile through the
 same declaration, ownership, specialization, and lowering paths as user code. `Logger`,
-`Effect.log`, `StdoutLogger`, and `InMemoryLogger` use those same paths: callers submit complete
-borrowed `string` messages, while providers own formatting, retention, and physical output strategy.
+`Effect.log`, its level-specific aliases, `StdoutLogger`, and `InMemoryLogger` use those same paths:
+callers submit a closed `LogLevel` and complete borrowed `string` messages, while providers own
+formatting, retention, and physical output strategy.
 Owned `Bytes`, normalized provider-absolute `Path`, allocation-free `FileError`, and the seven-
 operation mutable `FileSystem` service are also ordinary source. No platform provider is selected by
 an import; native, browser, test, and Wasm applications explicitly provide their implementation.

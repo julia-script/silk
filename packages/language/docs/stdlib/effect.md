@@ -129,7 +129,7 @@ pub fn main() -> i32 {
 
 Import as `Effect` with `import silk.effect`.
 
-Public declarations: 27.
+Public declarations: 32.
 
 <a id="declaration-73696c6b2f6566666563743a3a456666656374"></a>
 
@@ -156,7 +156,7 @@ combinator resolve through it exactly as through a module alias. It is unrelated
 pub effect fn log(message: string) -> () ! LogError ? &mut Logger
 ```
 
-Sends one complete message at `Logger.info()` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
+Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
 
 ### Details
 
@@ -177,6 +177,56 @@ Sends one complete message at `level` through the required mutable [`Logger`](./
 
 The message is one logging event rather than a fragment. The provider controls formatting and
 destination; its [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72) propagates unchanged.
+
+<a id="declaration-73696c6b2f6566666563743a3a6c6f675472616365"></a>
+
+## `logTrace`
+
+```silk
+pub effect fn logTrace(message: string) -> () ! LogError ? &mut Logger
+```
+
+Sends one complete message at `LogLevel.Trace` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
+
+<a id="declaration-73696c6b2f6566666563743a3a6c6f674465627567"></a>
+
+## `logDebug`
+
+```silk
+pub effect fn logDebug(message: string) -> () ! LogError ? &mut Logger
+```
+
+Sends one complete message at `LogLevel.Debug` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
+
+<a id="declaration-73696c6b2f6566666563743a3a6c6f67496e666f"></a>
+
+## `logInfo`
+
+```silk
+pub effect fn logInfo(message: string) -> () ! LogError ? &mut Logger
+```
+
+Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
+
+<a id="declaration-73696c6b2f6566666563743a3a6c6f675761726e696e67"></a>
+
+## `logWarning`
+
+```silk
+pub effect fn logWarning(message: string) -> () ! LogError ? &mut Logger
+```
+
+Sends one complete message at `LogLevel.Warning` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
+
+<a id="declaration-73696c6b2f6566666563743a3a6c6f674572726f72"></a>
+
+## `logError`
+
+```silk
+pub effect fn logError(message: string) -> () ! LogError ? &mut Logger
+```
+
+Sends one complete message at `LogLevel.Error` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
 
 <a id="declaration-73696c6b2f6566666563743a3a726573756c74"></a>
 

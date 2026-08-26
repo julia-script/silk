@@ -496,10 +496,10 @@ import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {
-  return run Effect.logAt(Logger.warning(), "ready")
+  return run Effect.logWarning("ready")
 }
 effect fn direct() -> () ! LogError ? &mut Logger {
-  return run Logger.log(Logger.info(), "direct")
+  return run Logger.log(LogLevel.Info, "direct")
 }
 pub fn main() -> i32 {
   let memory = Logger.inMemoryService()
@@ -509,13 +509,13 @@ pub fn main() -> i32 {
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const logger = occurrenceAt(snapshot, source, 'Logger', 3)
-      assert.strictEqual(logger?.role, 'Type')
+      assert.strictEqual(logger?.role, 'Actor')
       assert.strictEqual(logger?.declaration?.module, 'silk/logger')
 
       for (const [spelling, module, ordinal] of [
-        ['logAt', 'silk/effect', 0],
+        ['logWarning', 'silk/effect', 0],
         ['log(', 'silk/logger', 0],
-        ['warning', 'silk/logger', 0],
+        ['Info', 'silk/logger', 0],
         ['inMemoryService', 'silk/logger', 0],
         ['stdoutService', 'silk/logger', 0],
       ] as const) {
@@ -533,29 +533,13 @@ pub fn main() -> i32 {
       assert.strictEqual(
         documentationText(
           snapshot,
-          Analysis.documentationAt(snapshot, 'main', source.indexOf('logAt')),
+          Analysis.documentationAt(snapshot, 'main', source.indexOf('logWarning')),
         ),
-        `/// Sends one complete message at \`level\` through the required mutable [\`Logger\`].
-///
-/// # Details
-///
-/// The message is one logging event rather than a fragment. The provider controls formatting and
-/// destination; its [\`LogError\`] propagates unchanged.`,
+        `/// Sends one complete message at \`LogLevel.Warning\` through the required mutable [\`Logger\`].`,
       )
-      assert.strictEqual(
-        documentationText(
-          snapshot,
-          Analysis.documentationAt(snapshot, 'main', source.indexOf('warning')),
-        ),
-        '/// Returns the Warning severity for a recoverable abnormal condition.',
-      )
-
       for (const [prefix, expected] of [
-        ['Effect.', ['log', 'logAt']],
-        [
-          'Logger.',
-          ['log', 'trace', 'warning', 'inMemoryService', 'stdoutService', 'length', 'levelAt'],
-        ],
+        ['Effect.', ['log', 'logAt', 'logTrace', 'logDebug', 'logInfo', 'logWarning', 'logError']],
+        ['Logger.', ['log', 'LogLevel', 'inMemoryService', 'stdoutService', 'length', 'levelAt']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
