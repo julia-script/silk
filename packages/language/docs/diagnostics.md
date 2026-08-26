@@ -17,10 +17,10 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
 | `SEM` | Semantic | 154 |
-| `OWN` | Ownership | 15 |
+| `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 184 codes in total.
+There are 185 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -229,6 +229,7 @@ There are 184 codes in total.
 | `OWN0014` | Stable code for invoking a stored callable through too weak an aggregate receiver access. | `Cannot invoke field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0015` | Stable code for running a stored Effect through too weak an aggregate receiver access. | `Cannot run field <field> of <aggregate> through <toLowerCase> aggregate access: <contract> requires <toLowerCase> access to the whole aggregate` |
 | `OWN0016` | Stable code for an access-scoped local-shared borrow escaping or crossing suspension. | `Local-shared access cannot suspend while its exclusive borrow is live`<br>`Local-shared access cannot invoke an external readiness callback while its exclusive borrow is live`<br>`Local-shared access callback cannot return a value that retains its exclusive borrow` |
+| `OWN0017` | Stable code for an owner consumed in only some arms of a branch merge. | `Branches merge with incompatible owner liveness for <spelling>` |
 
 ## Layout (`LAY`)
 

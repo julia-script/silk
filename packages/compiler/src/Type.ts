@@ -1979,8 +1979,11 @@ export const opaqueRepresentationEvidence = (
 }
 
 interface FoldVisitor<A> {
-  readonly type?: (self: Type) => A | undefined
-  readonly argument?: (self: GenericArgument) => A | undefined
+  readonly type?: (self: Type, inBinderScope: (parameterKey: string) => boolean) => A | undefined
+  readonly argument?: (
+    self: GenericArgument,
+    inBinderScope: (parameterKey: string) => boolean,
+  ) => A | undefined
 }
 
 /**
@@ -1991,11 +1994,24 @@ interface FoldVisitor<A> {
  */
 const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   const found: Array<A> = []
+  const binderScope = new Map<string, number>()
+  const inBinderScope = (parameterKey: string): boolean => binderScope.has(parameterKey)
+  const pushBinders = (binders: ReadonlyArray<Parameter>): void => {
+    for (const binder of binders)
+      binderScope.set(key(binder), (binderScope.get(key(binder)) ?? 0) + 1)
+  }
+  const popBinders = (binders: ReadonlyArray<Parameter>): void => {
+    for (const binder of binders) {
+      const count = binderScope.get(key(binder)) ?? 0
+      if (count <= 1) binderScope.delete(key(binder))
+      else binderScope.set(key(binder), count - 1)
+    }
+  }
   const append = (value: A | undefined): void => {
     if (value !== undefined) found.push(value)
   }
   const visitArgument = (argument: GenericArgument): void => {
-    append(visitor.argument?.(argument))
+    append(visitor.argument?.(argument, inBinderScope))
     if (isTypeArgument(argument)) visitType(argument)
     else if (isRepresentationParameterArgument(argument)) visitType(argument.parameter)
     else if (isOpaqueRepresentationArgument(argument)) {
@@ -2090,12 +2106,13 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     for (const constraint of contract.constraints) visitConstraint(constraint)
   }
   const visitType = (type: Type): void => {
-    append(visitor.type?.(type))
+    append(visitor.type?.(type, inBinderScope))
     if (isNominal(type)) {
       for (const argument of type.arguments) visitArgument(argument)
     } else if (isFixedArray(type) || isSlice(type)) visitType(type.element)
     else if (isReference(type)) visitType(type.target)
     else if (isCallable(type)) {
+      if (type.schema !== undefined) pushBinders(type.schema.binders)
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
       if (type.schema !== undefined) {
@@ -2107,6 +2124,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
         for (const constraint of type.schema.constraints) visitConstraint(constraint)
         for (const evidence of type.schema.evidence) visitEvidence(evidence)
         for (const argument of type.schema.substitution.values()) visitArgument(argument)
+        popBinders(type.schema.binders)
       }
     } else if (isEffect(type)) {
       visitType(type.success)
@@ -2276,20 +2294,16 @@ export const isStrictStructuralSubterm = (candidate: Type, whole: Type): boolean
 /** Returns every declaration-owned parameter nested in a type, without duplicates. */
 export const parameters = (self: Type): ReadonlyArray<Parameter> => {
   const found = new Map<string, Parameter>()
-  const nested = new Set<string>()
   fold(self, {
-    type: (type) => {
-      if (isCallable(type)) for (const binder of type.schema?.binders ?? []) nested.add(key(binder))
-      else if (isParameter(type)) found.set(key(type), type)
+    type: (type, inBinderScope) => {
+      if (isParameter(type) && !inBinderScope(key(type))) found.set(key(type), type)
     },
-    argument: (argument) => {
-      if (isRepresentationParameterArgument(argument))
+    argument: (argument, inBinderScope) => {
+      if (isRepresentationParameterArgument(argument) && !inBinderScope(key(argument.parameter)))
         found.set(key(argument.parameter), argument.parameter)
     },
   })
-  return Object.freeze(
-    [...found.values()].filter((parameter_) => !nested.has(key(parameter_))).sort(compare),
-  )
+  return Object.freeze([...found.values()].sort(compare))
 }
 
 /** Tests whether a type contains no open generic parameters. */

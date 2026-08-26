@@ -18,3 +18,6 @@ apps/docs/content/*-api/
 .scratch
 .vercel
 .env*
+
+# Turborepo
+.turbo

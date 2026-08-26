@@ -584,6 +584,30 @@ const normalizeSubword = (bits: number, signed: boolean): ReadonlyArray<Instr.In
   return [Instr.i32Const(shift), Instr.op('i32.shl'), Instr.i32Const(shift), Instr.op('i32.shr_s')]
 }
 
+/**
+ * Traps when a float truncated into a subword integer falls outside the target's exact range,
+ * matching the interpreter's range check; word-size truncation already traps in hardware.
+ */
+const subwordTruncationCheck = (
+  target: Scalar.IntegerScalar,
+  slot: number,
+  pointerBits: 32 | 64,
+): ReadonlyArray<Instr.Instr> => {
+  if (Scalar.bits(target, pointerBits) >= 32) return []
+  const range = Scalar.range(target, pointerBits)
+  const signed = target.signedness === 'Signed'
+  return [
+    Instr.localGet(slot),
+    Instr.i32Const(Number(range.minimum)),
+    Instr.op(signed ? 'i32.lt_s' : 'i32.lt_u'),
+    Instr.localGet(slot),
+    Instr.i32Const(Number(range.maximum)),
+    Instr.op(signed ? 'i32.gt_s' : 'i32.gt_u'),
+    Instr.op('i32.or'),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+  ]
+}
+
 const saturatingSubwordArithmetic = (
   shape: OverflowShape,
   left: number,
@@ -672,27 +696,24 @@ const shiftOrRotate = (
   const prefix = bits === 64 ? 'i64' : 'i32'
   const constant = (value: number): Instr.Instr =>
     bits === 64 ? Instr.i64Const(BigInt(value)) : Instr.i32Const(value)
-  const validate = [
-    Instr.localGet(right),
-    constant(bits),
-    Instr.op(`${prefix}.ge_u`),
-    Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
-  ]
   if (operator === 'ShiftLeft' || operator === 'ShiftRight') {
     const signedness = signed ? 's' : 'u'
     const operation: Instr.PlainMnemonic =
       operator === 'ShiftLeft' ? `${prefix}.shl` : `${prefix}.shr_${signedness}`
     return [
-      ...validate,
+      Instr.localGet(right),
+      constant(bits),
+      Instr.op(`${prefix}.ge_u`),
+      Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
       Instr.localGet(left),
       Instr.localGet(right),
       Instr.op(operation),
       ...(operator === 'ShiftLeft' ? normalizeSubword(bits, signed) : []),
     ]
   }
+  // Rotate counts wrap modulo the width, matching the interpreter and native rotl/rotr.
   if (bits >= 32) {
     return [
-      ...validate,
       Instr.localGet(left),
       Instr.localGet(right),
       Instr.op(`${prefix}.${operator === 'RotateLeft' ? 'rotl' : 'rotr'}`),
@@ -701,18 +722,18 @@ const shiftOrRotate = (
   const mask = 2 ** bits - 1
   const leftShift = operator === 'RotateLeft' ? 'i32.shl' : 'i32.shr_u'
   const rightShift = operator === 'RotateLeft' ? 'i32.shr_u' : 'i32.shl'
+  const wrappedCount = [Instr.localGet(right), Instr.i32Const(bits - 1), Instr.op('i32.and')]
   return [
-    ...validate,
     Instr.localGet(left),
     Instr.i32Const(mask),
     Instr.op('i32.and'),
-    Instr.localGet(right),
+    ...wrappedCount,
     Instr.op(leftShift),
     Instr.localGet(left),
     Instr.i32Const(mask),
     Instr.op('i32.and'),
     Instr.i32Const(bits),
-    Instr.localGet(right),
+    ...wrappedCount,
     Instr.op('i32.sub'),
     Instr.op(rightShift),
     Instr.op('i32.or'),
@@ -1749,15 +1770,24 @@ const makeOperationContext = (
     ): ReadonlyArray<number> =>
       environment.fields.flatMap((field) => {
         if (field.representation === 'Borrow') return [base + field.offset]
-        if (field.effectIdentity !== undefined) {
-          const nested = memory.plan.effectEnvironments.find(
-            (candidate) =>
-              candidate._tag === 'EffectEnvironment' &&
-              Instances.effectIdentity(candidate.instance, candidate.site) === field.effectIdentity,
-          )
-          return nested?._tag === 'EffectEnvironment'
-            ? environmentOffsets(nested, base + field.offset)
+        if (field.callableIdentity !== undefined) {
+          const nested =
+            field.callableIdentity.environment === undefined
+              ? undefined
+              : LayoutPlan.callableEnvironmentByIdentity(
+                  memory.plan,
+                  field.callableIdentity.environment,
+                )
+          return nested?._tag === 'CallableEnvironment'
+            ? callableEnvironmentOffsets(nested, base + field.offset)
             : []
+        }
+        if (field.effectIdentity !== undefined) {
+          const nested = LayoutPlan.effectEnvironmentByFieldIdentity(
+            memory.plan,
+            field.effectIdentity,
+          )
+          return nested !== undefined ? environmentOffsets(nested, base + field.offset) : []
         }
         const shape = LayoutPlan.callingShape(memory.plan, field.type)
         return (
@@ -3077,7 +3107,7 @@ const emitAllocateOperation = (
   }
   const fail = [
     Instr.i32Const(operation.failureTag),
-    ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
+    ...propagationShape.lanes.slice(1).map((lane) => zeroConst(laneValueType(plan, lane))),
     Instr.op('return'),
   ]
   if (context.heapAllocate === undefined) {
@@ -3138,7 +3168,7 @@ const emitHostWriteOperation = (
       Instr.emptyBlockType,
       [
         Instr.i32Const(operation.failureTag),
-        ...Array.from({ length: propagationShape.laneCount - 1 }, () => Instr.i32Const(0)),
+        ...propagationShape.lanes.slice(1).map((lane) => zeroConst(laneValueType(plan, lane))),
         Instr.op('return'),
       ],
       [],
@@ -3804,17 +3834,26 @@ const emitExecutionReadyNotification = (
     throw new RangeError('Wasm readiness notification lost its exact package callback authority')
   const captureOperands = (environment?.fields ?? [])
     .flatMap((field) => {
-      const lanes = LayoutPlan.callableFieldLanes(plan, field)
       if (field.representation !== 'Borrow')
         return [
           Object.freeze({
             parameterOrdinal: field.parameterOrdinal,
-            instructions: lanes.flatMap((lane) => {
-              const offset = LayoutVerify.laneOffset(plan, field.type, lane.path)
-              if (offset === undefined)
-                throw new RangeError('Wasm readiness callback lost a capture lane')
-              return loadAt(base, (callbackOffset ?? 0) + field.offset + offset, lane)
-            }),
+            // Mirrors the placement-driven store side so nested callable captures agree.
+            instructions: LayoutPlan.callableFieldLanePlacements(plan, field).flatMap(
+              (placement) => {
+                const laneOffset =
+                  placement.root === undefined
+                    ? 0
+                    : LayoutVerify.laneOffset(plan, placement.root, placement.lane.path)
+                if (laneOffset === undefined)
+                  throw new RangeError('Wasm readiness callback lost a capture lane')
+                return loadAt(
+                  base,
+                  (callbackOffset ?? 0) + placement.byteOffset + laneOffset,
+                  placement.lane,
+                )
+              },
+            ),
           }),
         ]
       const shape = LayoutPlan.callingShape(plan, field.type)
@@ -6061,11 +6100,16 @@ const emitApplyCallableOperation = (
           source.spelling,
           conversionTarget.signedness === 'Signed',
         )
+        const destination = scalar(operation.destination)
         return [
           Instr.localGet(left),
           Instr.op(mnemonic),
-          ...normalizeSubword(bits, conversionTarget.signedness === 'Signed'),
-          Instr.localSet(scalar(operation.destination)),
+          Instr.localSet(destination),
+          ...subwordTruncationCheck(
+            conversionTarget,
+            destination,
+            plan.target.pointerSize === 4 ? 32 : 64,
+          ),
         ]
       }
       if (source === undefined || source.category !== 'Integer')
@@ -6331,8 +6375,8 @@ const emitConvertScalarOperation = (
     return [
       Instr.localGet(sourceSlot),
       Instr.op(mnemonic),
-      ...normalizeSubword(bits, target.signedness === 'Signed'),
       Instr.localSet(targetSlot),
+      ...subwordTruncationCheck(target, targetSlot, plan.target.pointerSize === 4 ? 32 : 64),
     ]
   }
   throw new RangeError('Wasm scalar conversion was not numeric')

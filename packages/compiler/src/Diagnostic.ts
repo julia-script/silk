@@ -337,6 +337,8 @@ export const storedCallableInvocationAccessCode = 'OWN0014' as const
 export const storedEffectRunAccessCode = 'OWN0015' as const
 /** Stable code for an access-scoped local-shared borrow escaping or crossing suspension. */
 export const localSharedAccessEscapeCode = 'OWN0016' as const
+/** Stable code for an owner consumed in only some arms of a branch merge. */
+export const incompatibleArmMergeCode = 'OWN0017' as const
 
 /** Stable code for an exact `usize` magnitude outside the selected target word. */
 export const usizeTargetOutOfRangeCode = 'LAY0001' as const
@@ -526,6 +528,7 @@ export type Code =
   | typeof storedCallableInvocationAccessCode
   | typeof storedEffectRunAccessCode
   | typeof localSharedAccessEscapeCode
+  | typeof incompatibleArmMergeCode
   | typeof usizeTargetOutOfRangeCode
 
 /** A semantic declaration identity carried structurally to avoid a module cycle. */
@@ -1060,6 +1063,7 @@ export type Reason =
   | { readonly _tag: 'ExplicitMoveRequired'; readonly spelling: string }
   | { readonly _tag: 'OverlappingAssignment'; readonly spelling: string }
   | { readonly _tag: 'IncompatibleLoopHeader'; readonly loop: number }
+  | { readonly _tag: 'IncompatibleArmMerge'; readonly spelling: string }
   | { readonly _tag: 'MatchBorrowEscape'; readonly spelling: string }
   | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
@@ -4170,6 +4174,17 @@ export const incompatibleLoopHeader = (loop: number, span: SourceSpan.SourceSpan
     severity: 'error',
     message: `Loop ${loop} repeats with incompatible owner liveness`,
     reason: Object.freeze({ _tag: 'IncompatibleLoopHeader', loop }),
+    span,
+  })
+
+export const incompatibleArmMerge = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: incompatibleArmMergeCode,
+    severity: 'error',
+    message: `Branches merge with incompatible owner liveness for ${spelling}`,
+    reason: Object.freeze({ _tag: 'IncompatibleArmMerge', spelling }),
     span,
   })
 

@@ -988,18 +988,17 @@ effect fn driveIdentity(driver: &mut Driver, identity: Scheduler.TaskId) -> ()
   let Extraction { slot } = move extraction
   let mut state = ActivationState { slot: NoExecution {}, completed: false }
   run driveSelected(move slot, &mut state)
-  if state.completed {
+  let ActivationState { slot: parked, completed: parkedComplete } = move state
+  let restored = match move parked {
+    NoExecution {} => false
+    StoredExecution { execution } => HashMap.withMut(
+      &mut driver.tasks,
+      identity,
+      restore(move execution),
+    )
+  }
+  if parkedComplete {
     let marked = HashMap.withMut(&mut driver.tasks, identity, markCompleted(()))
-  } else {
-    let ActivationState { slot: parked, completed: parkedComplete } = move state
-    let restored = match move parked {
-      NoExecution {} => false
-      StoredExecution { execution } => HashMap.withMut(
-        &mut driver.tasks,
-        identity,
-        restore(move execution),
-      )
-    }
   }
   let mut terminal = CompletionAudit { completed: false }
   let inspected = HashMap.withMut(&mut driver.tasks, identity, phaseCompleted(&mut terminal))

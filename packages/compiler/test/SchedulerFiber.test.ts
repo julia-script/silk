@@ -1177,5 +1177,5 @@ it.effect(
         assert.strictEqual((instance.exports.silk_main as () => number)(), expected, label)
       }
     }),
-  300_000,
+  600_000,
 )

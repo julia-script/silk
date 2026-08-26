@@ -11,6 +11,7 @@ import * as NativeCall from './NativeCall.js'
 import * as NativeDebug from './NativeDebug.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
+import * as NativeScalarOperation from './NativeScalarOperation.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
@@ -138,6 +139,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               integerTypes.get(
                 Scalar.bits(conversionTarget, program.layout.target.pointerSize === 4 ? 32 : 64),
               ) ?? i32
+            yield* NativeScalarOperation.emitFloatToIntegerGuard(
+              context,
+              first,
+              sourceScalar,
+              conversionTarget,
+              `callable_convert${operation.destination.ordinal}`,
+            )
             const result = yield* FunctionBody.cast(
               body,
               conversionTarget.signedness === 'Signed' ? 'fptosi' : 'fptoui',
