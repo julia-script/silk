@@ -36,7 +36,7 @@ import silk.usize as usize
 
 effect fn program() -> i32
 ! Logger.LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let logged = run Effect.logWarning("cache miss")
     |> Effect.provideMut(&mut logger)
   if Logger.length(&logger) != usize.ONE {
@@ -201,12 +201,12 @@ A [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that 
 The provider ignores the severity for physical formatting and writes only the UTF-8 message
 bytes. It adds no newline and performs no message allocation.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a7374646f757453657276696365"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a7374646f757450726f7669646572"></a>
 
-## `stdoutService`
+## `stdoutProvider`
 
 ```silk
-pub fn stdoutService() -> StdoutLogger
+pub fn stdoutProvider() -> StdoutLogger
 ```
 
 Creates a logger that forwards each complete message to process standard output.
@@ -253,12 +253,12 @@ The provider copies each committed message into fixed internal storage. It recor
 calls separately from committed events. Capacity failure and configured failure do not commit an
 event.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727953657276696365"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572"></a>
 
-## `inMemoryService`
+## `inMemoryProvider`
 
 ```silk
-pub fn inMemoryService() -> InMemoryLogger
+pub fn inMemoryProvider() -> InMemoryLogger
 ```
 
 Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
@@ -268,12 +268,12 @@ Creates an empty in-memory logger with capacity for eight events and 64 message 
 A call fails when eight events are already committed. A call also fails when its bytes exceed
 the remaining 64-byte total. Neither failure commits the event.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f7279536572766963654661696c4174"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f76696465724661696c4174"></a>
 
-## `inMemoryServiceFailAt`
+## `inMemoryProviderFailAt`
 
 ```silk
-pub fn inMemoryServiceFailAt(failAt: usize) -> InMemoryLogger
+pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger
 ```
 
 Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
@@ -282,7 +282,7 @@ Creates an in-memory logger that rejects one zero-based attempted-call ordinal.
 
 The configured attempt increases [`attempts`](#declaration-73696c6b2f6c6f676765723a3a617474656d707473) but does not increase [`length`](#declaration-73696c6b2f6c6f676765723a3a6c656e677468) or consume
 message capacity. Other attempts retain the eight-event and 64-byte limits of
-[`inMemoryService`](#declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727953657276696365).
+[`inMemoryProvider`](#declaration-73696c6b2f6c6f676765723a3a696e4d656d6f727950726f7669646572).
 
 <a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
 

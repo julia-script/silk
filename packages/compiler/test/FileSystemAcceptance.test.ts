@@ -194,7 +194,7 @@ fn checksum(values: &[u8]) -> i32 {
 }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = MemoryFileSystem {
     contents: emptyContents(),
     fileExists: false,
@@ -265,7 +265,7 @@ fn matchesParent(possible: Option<Path>, expected: string) -> bool {
 }
 
 effect fn check() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let canonicalRoot = run root() |> Effect.provideMut(&mut allocator)
   if isRoot(&canonicalRoot) == false { return 3 }
   if name(&canonicalRoot) != "" { return 4 }
@@ -328,20 +328,20 @@ import silk.effect as Effect
 import silk.filesystem { FileError, joinUtf8, make, resolve }
 
 effect fn construct(value: string) -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let path = run make(value) |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn resolveEscape() -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let escaped = run resolve(&base, "../../b") |> Effect.provideMut(&mut allocator)
   return false
 }
 
 effect fn rejectProviderBytes() -> bool ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let base = run make("/a") |> Effect.provideMut(&mut allocator)
   let invalid = run joinUtf8(&base, b"\\xff") |> Effect.provideMut(&mut allocator)
   return false
@@ -398,7 +398,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   return run Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
 }
 

@@ -67,7 +67,7 @@ fn scalarCode(step: String.ScalarStep) -> i32 {
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let copying = String.copy("é")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut text = run copying

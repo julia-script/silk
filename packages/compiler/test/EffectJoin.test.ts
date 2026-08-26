@@ -143,7 +143,7 @@ fn choose(input: First | Second, storage: Allocation) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -197,7 +197,7 @@ fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe

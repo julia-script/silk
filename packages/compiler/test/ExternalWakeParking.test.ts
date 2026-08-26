@@ -196,7 +196,7 @@ effect fn parked(storage: Allocation, state: Shared.Shared<WaiterState>) -> () {
 }
 fn ready(state: &()) -> () { return () }
 effect fn program() -> () ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let guardStorage = run Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let state = run Shared.make<WaiterState>(WaiterState { slot: Empty {} })
@@ -346,7 +346,7 @@ effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let mut execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -717,7 +717,7 @@ effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&readyState)
@@ -1116,7 +1116,7 @@ effect fn parked(holder: Allocation) -> () {
 }
 fn ready(state: &()) -> () { return () }
 effect fn program() -> () ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let holder = run Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let execution = run Execution.make(parked(move holder), (), ready)

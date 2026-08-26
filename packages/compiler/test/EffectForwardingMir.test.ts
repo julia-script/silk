@@ -189,7 +189,7 @@ effect fn executeBody(program: once Effect<i32 ? &mut Value>) -> i32
   let provider = Provider { value: 42 }
   let bound = Effect.bindRequirementOwned<Value>(move program, move provider)
   let transferred = effect { return run move bound }
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let execution = run Execution.make(move transferred, (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {}, result: 0 }

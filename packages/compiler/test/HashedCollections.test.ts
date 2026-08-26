@@ -88,7 +88,7 @@ import silk.effect as Effect
 ${imports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 ${body}
 }
 
@@ -275,7 +275,7 @@ effect fn grow(map: &mut HashMap<Word, i32>) -> i32 ! OutOfMemoryError ? &mut Al
 effect fn noRoom(error: OutOfMemoryError) -> i32 { return 1 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Budget { inner: Allocator.systemAllocatorService(), remaining: 2 }
+  let mut allocator = Budget { inner: Allocator.systemAllocatorProvider(), remaining: 2 }
   let mut map = make<Word, i32>(Hash.seed(5))
   let mut key = 0
   while key < 6 {
@@ -425,7 +425,7 @@ ${mapImports}
 struct Unhashed { tag: i32 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut map = make<Unhashed, i32>(Hash.seed(1))
   let placed = run insert<Unhashed, i32>(&mut map, Unhashed { tag: 1 }, 2)
     |> Effect.provideMut(&mut allocator)

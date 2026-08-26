@@ -58,7 +58,7 @@ import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
-    inner: Allocator.systemAllocatorService(),
+    inner: Allocator.systemAllocatorProvider(),
     metrics: zeroedMetrics()
   }
   let firstLayout = Layout.of<[i32; 2]>()
@@ -144,7 +144,7 @@ import silk.layout { Layout }
 ${provider}
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = CountingAllocator {
-    inner: Allocator.systemAllocatorService(),
+    inner: Allocator.systemAllocatorProvider(),
     metrics: zeroedMetrics()
   }
   let firstLayout = Layout.of<[i32; 2]>()
@@ -219,7 +219,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let block = run pending

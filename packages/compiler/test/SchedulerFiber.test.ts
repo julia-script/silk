@@ -53,7 +53,7 @@ fn verifyFreshTaskId(error: Scheduler.TaskIdExhausted, fresh: Scheduler.TaskId) 
 }
 
 effect fn taskIdBoundary() -> i32 ! OutOfMemoryError | Scheduler.TaskIdExhausted {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let nearLimit = run Shared.make<TaskIdSource>(TaskIdSource {
     next: 18446744073709551614,
     exhausted: false,
@@ -125,7 +125,7 @@ effect fn allocate(
 ) -> Allocation ! Allocator.OutOfMemoryError {
   let admitted = Shared.withMut(&self.control, claimAllocation)
   if !admitted { fail Allocator.OutOfMemoryError {} }
-  let mut system = Allocator.systemAllocatorService()
+  let mut system = Allocator.systemAllocatorProvider()
   let pending = AllocationService.allocate(move layout)
     |> Effect.provideMut<AllocationService>(&mut system)
   return run pending
@@ -303,7 +303,7 @@ const allocationOrdinalSource = (quota: number): string => {
     )
     .replace('if self.identity.value == 3 {', 'if self.identity.value == 1 {')
     .replace(
-      '  let mut allocator = Allocator.systemAllocatorService()\n  let preparedFiber',
+      '  let mut allocator = Allocator.systemAllocatorProvider()\n  let preparedFiber',
       `  let mut allocator = QuotaAllocator {
     control: Shared.clone<Audit>(&self.audit),
   }
@@ -380,10 +380,10 @@ const allocationOrdinalSource = (quota: number): string => {
     )
     .replace(
       `effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let audit =`,
       `effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
-  let mut bootstrap = Allocator.systemAllocatorService()
+  let mut bootstrap = Allocator.systemAllocatorProvider()
   let audit =`,
     )
     .replace(

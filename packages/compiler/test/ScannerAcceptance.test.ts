@@ -15,7 +15,7 @@ export const scannerSource = readFileSync(
 const quotaScannerSource = (quota: number): string =>
   scannerSource
     .replace(
-      'let mut allocator = Allocator.systemAllocatorService()',
+      'let mut allocator = Allocator.systemAllocatorProvider()',
       `let mut allocator = QuotaAllocator {remaining: ${quota}}`,
     )
     .replace(
@@ -38,7 +38,7 @@ effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation
     fail OutOfMemoryError {}
   }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut inner)
   let allocation = run pending

@@ -131,14 +131,14 @@ fn walkBox(view: &[Chain]) -> i32 {
 }
 
 effect fn buildOnly() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run recursiveBuild(${depth}) |> Effect.provideMut(&mut allocator)
   iterativeDrop(move built)
   return 42
 }
 
 effect fn walkOnly() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run iterativeBuild(${depth}) |> Effect.provideMut(&mut allocator)
   let answer = walk(&built)
   iterativeDrop(move built)
@@ -147,7 +147,7 @@ effect fn walkOnly() -> i32 ! OutOfMemoryError {
 }
 
 effect fn dropOnly() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run iterativeBuild(${depth}) |> Effect.provideMut(&mut allocator)
   drop built
   return 42

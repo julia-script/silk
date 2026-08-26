@@ -121,7 +121,7 @@ import silk.effect as Effect
 ${owners}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 ${body}
 }
 

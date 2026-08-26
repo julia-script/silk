@@ -295,7 +295,7 @@ effect fn recoverOutOfMemory(error: OutOfMemoryError) -> i32 {
 }
 
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(
     dispatch(selectSuccess())
       |> Effect.provideMut(&mut allocator),

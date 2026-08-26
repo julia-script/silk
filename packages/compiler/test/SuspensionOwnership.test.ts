@@ -65,7 +65,7 @@ effect fn branched(flag: bool, left: i32, right: i32) -> i32 {
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
   let scalarValue = run scalar()
-  let mut ownedAllocator = Allocator.systemAllocatorService()
+  let mut ownedAllocator = Allocator.systemAllocatorProvider()
   let ownedPending = owned() |> Effect.provideMut(&mut ownedAllocator)
   let ownedValue = run Effect.catchAll(move ownedPending, recover)
   let mut owner = Owner { value: 20 }

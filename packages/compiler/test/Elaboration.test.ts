@@ -710,7 +710,7 @@ fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemoryError ? &mut 
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
-  let allocator = Allocator.systemAllocatorService()
+  let allocator = Allocator.systemAllocatorProvider()
   return 42
 }`,
     )
@@ -749,7 +749,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn use(layout: Layout) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
   drop allocation

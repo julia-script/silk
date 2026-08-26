@@ -18,7 +18,7 @@
 //!
 //! effect fn writeMessage() -> ()
 //! ! StandardStreams.StreamWriteError {
-//!   let mut streams = StandardStreams.nativeStandardStreamService()
+//!   let mut streams = StandardStreams.nativeStandardStreamProvider()
 //!   return run StandardStreams.send(StandardStreams.stdout(), b"Silk\n")
 //!     |> Effect.provideMut<StandardStreams>(&mut streams)
 //! }
@@ -63,7 +63,7 @@ pub fn stderr() -> bool {
 }
 
 /// Creates a process-backed standard-stream provider.
-pub fn nativeStandardStreamService() -> NativeStandardStreams {
+pub fn nativeStandardStreamProvider() -> NativeStandardStreams {
   return NativeStandardStreams {}
 }
 

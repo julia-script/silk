@@ -166,7 +166,7 @@ struct Prepared {
   outer: Intrinsic.Execution<i32>
 }
 effect fn prepare() -> Prepared ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let reactor = run Shared.make<TimerReactor>(TimerReactor { slot: Empty {}, fires: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let wakeSlot = run Shared.make<WakeSlot>(WakeSlot { slot: OuterEmpty {}, childSignals: 0 })

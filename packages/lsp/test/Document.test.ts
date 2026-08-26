@@ -156,7 +156,7 @@ it.effect('distinguishes a binding and a source-owned standard-library namespace
   Effect.gen(function* () {
     const source = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -173,8 +173,8 @@ pub fn main() -> i32 {
     )
     assert.include(hoverText('Allocator', 2) ?? '', 'pub service Allocator')
     assert.strictEqual(
-      hoverText('systemAllocatorService'),
-      '```silk\npub fn systemAllocatorService() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Allocator`',
+      hoverText('systemAllocatorProvider'),
+      '```silk\npub fn systemAllocatorProvider() -> SystemAllocator\n```\n\nCreates a process-backed allocator provider without allocating storage.\n\n**Implements**\n\n- `Allocator`',
     )
   }),
 )
@@ -293,7 +293,7 @@ it.effect('returns inferred local type inlay hints in the requested range', () =
   Effect.gen(function* () {
     const source = `import silk.allocator { Allocator, SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -321,7 +321,7 @@ it.effect('renders proved hover contracts and inferred provider selectors', () =
 import silk.effect as Effect
 
 pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamService()
+  let mut streams = Streams.nativeStandardStreamProvider()
   // π🙂 keeps the selector position on UTF-16 coordinates
   return run Streams.send(Streams.stdout(), b"Hello\\n")
     |> Effect.provideMut(&mut streams)
@@ -439,7 +439,7 @@ it.effect('does not duplicate an explicitly written provider selector', () =>
     const source = `import silk.standard_streams as Streams
 import silk.effect as Effect
 pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamService()
+  let mut streams = Streams.nativeStandardStreamProvider()
   return run Streams.send(Streams.stdout(), b"ok\\n")
     |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
 }`
@@ -460,7 +460,7 @@ it.effect('clips inferred hints, skips unavailable bindings, and maps Unicode sn
 pub fn main() -> i32 {
   let broken = missing()
   // π🙂
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }`
     const { document, snapshot } = yield* open(source)
@@ -843,7 +843,7 @@ it.effect('navigates local declaration names but not library imports', () =>
 struct Problem {}
 fn recover<T>(error: Problem, value: T) -> T { return value }
 pub fn main() -> i32 {
-  let allocator = Allocator.systemAllocatorService()
+  let allocator = Allocator.systemAllocatorProvider()
   return recover<i32>(0, 0)
 }`
     const { document, snapshot } = yield* open(source)

@@ -144,7 +144,7 @@ import silk.u64 as u64
 ${mapImports}
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut map = make<Word, i32>(Hash.seed(${seed}))
 ${fill('map')}
 ${foldOrder('map', 'folded')}

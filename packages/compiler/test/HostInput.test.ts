@@ -197,7 +197,7 @@ import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.add(0, 3))
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
@@ -237,7 +237,7 @@ import silk.effect as Effect
 import silk.host_input { HostInputError }
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.ONE)
   let past = run Effect.provideMut(
     Effect.provideMut(argument(usize.add(0, 9)), &mut allocator),
@@ -280,7 +280,7 @@ import silk.host_input { HostInputError }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = scripted(usize.ONE)
   let found = run Effect.provideMut(
     Effect.provideMut(variableNamed("PATH"), &mut allocator),
@@ -345,7 +345,7 @@ import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 3) { return 1 }
@@ -423,7 +423,7 @@ import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
   let found = run Effect.provideMut(
     Effect.provideMut(argument(usize.ZERO), &mut allocator),
@@ -548,7 +548,7 @@ import silk.os_host_input { OsHostInput }
 import silk.u8 as u8
 import silk.usize as usize
 effect fn program() -> i32 ! HostInputError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = OsHostInput.make()
   let total = run Effect.provideMut(argumentCount(), &mut provider)
   if total != usize.add(0, 4) { return 1 }

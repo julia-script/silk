@@ -28,7 +28,7 @@
 //!
 //! effect fn program() -> i32
 //! ! Logger.LogError {
-//!   let mut logger = Logger.inMemoryService()
+//!   let mut logger = Logger.inMemoryProvider()
 //!   let logged = run Effect.logWarning("cache miss")
 //!     |> Effect.provideMut(&mut logger)
 //!   if Logger.length(&logger) != usize.ONE {
@@ -55,7 +55,7 @@ import silk.result { Failure, Result, Success }
 import silk.standard_streams {
   NativeStandardStreams,
   StreamWriteError,
-  nativeStandardStreamService as nativeStreams,
+  nativeStandardStreamProvider as nativeStreams,
   send
 }
 import silk.string { utf8Bytes as stringUtf8Bytes }
@@ -136,7 +136,7 @@ pub struct StdoutLogger {}
 ///
 /// The caller must include a newline in `message` when line separation is required. A standard-
 /// output write failure becomes a provider-defined [`LogError`].
-pub fn stdoutService() -> StdoutLogger { return StdoutLogger {} }
+pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
 
 effect fn writeStdoutCounted(
   streams: &mut NativeStandardStreams,
@@ -224,7 +224,7 @@ fn emptyMessages() -> [i32; 64] {
 ///
 /// A call fails when eight events are already committed. A call also fails when its bytes exceed
 /// the remaining 64-byte total. Neither failure commits the event.
-pub fn inMemoryService() -> InMemoryLogger {
+pub fn inMemoryProvider() -> InMemoryLogger {
   return InMemoryLogger {
     levels: emptyLevels(),
     offsets: emptyIndexes(),
@@ -244,9 +244,9 @@ pub fn inMemoryService() -> InMemoryLogger {
 ///
 /// The configured attempt increases [`attempts`] but does not increase [`length`] or consume
 /// message capacity. Other attempts retain the eight-event and 64-byte limits of
-/// [`inMemoryService`].
-pub fn inMemoryServiceFailAt(failAt: usize) -> InMemoryLogger {
-  let mut logger = inMemoryService()
+/// [`inMemoryProvider`].
+pub fn inMemoryProviderFailAt(failAt: usize) -> InMemoryLogger {
+  let mut logger = inMemoryProvider()
   logger.failEnabled = true
   logger.failAt = failAt
   return move logger

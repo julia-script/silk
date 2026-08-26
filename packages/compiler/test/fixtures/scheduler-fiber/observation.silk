@@ -76,7 +76,7 @@ effect fn resume(owner: &mut Owner) -> () {
 fn constructionComplete() -> () { return () }
 
 effect fn scenario() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 
   let immediateSuccess = run Fiber.prepare<i32, Problem>()
     |> Effect.provideMut<Allocator>(&mut allocator)

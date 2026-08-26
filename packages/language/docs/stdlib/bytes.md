@@ -30,7 +30,7 @@ import silk.u8 as u8
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"AB"
   let copying = Bytes.copy(&source)
     |> Effect.provideMut<Allocator>(&mut allocator)

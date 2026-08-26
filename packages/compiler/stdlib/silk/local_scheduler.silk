@@ -264,7 +264,7 @@ effect fn prepareChild<A, E>(
 ) -> Scheduler.PendingPublication<A, E>
 ! OutOfMemoryError | Scheduler.TaskIdExhausted {
   let identity = run reserve(&self.identities)
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let prepared = run Fiber.prepare<A, E>() |> Effect.provideMut<Allocator>(&mut allocator)
   let response = run Shared.make<Scheduler.PublicationResponse>(Scheduler.PublicationResponse {
     phase: Scheduler.ResponseWaiting {},
@@ -513,7 +513,7 @@ effect fn adopt(
   let found = HashMap.withMut(&mut driver.tasks, parent, copyFirstChild(&mut links))
   let LinkOutput { link } = move links
   let entry = makeEntry(move task, move link)
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let inserted = HashMap.insert<Scheduler.TaskId, TaskEntry>(&mut driver.tasks, child, move entry)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let outcome = run Effect.result(move inserted)
@@ -1084,7 +1084,7 @@ pub effect fn execute<A, E>(
   program: once Effect<A ! E ? &mut Scheduler.Scheduler>,
 ) -> A
 ! E | OutOfMemoryError | Stalled {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let queue = run Shared.make<ReadyQueue>(ReadyQueue {
     head: NoLink {},
     tail: NoLink {},

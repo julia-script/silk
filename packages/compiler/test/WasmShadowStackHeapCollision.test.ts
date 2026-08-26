@@ -170,7 +170,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
   let released = drain(move built)
@@ -188,7 +188,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let released = drain(move built)
   if released == depth { return 0 }
@@ -556,7 +556,7 @@ ${lanes.map((lane) => `    lane${lane}: wide.lane${lane}`).join(',\n')}
 }
 
 effect fn probing() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(8) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
   let released = drain(move built)

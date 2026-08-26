@@ -45,7 +45,7 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
       )
       const binding = occurrenceAt(snapshot, source, 'allocator', 2)
       const actor = occurrenceAt(snapshot, source, 'Allocator', 2)
-      const operation = occurrenceAt(snapshot, source, 'systemAllocatorService')
+      const operation = occurrenceAt(snapshot, source, 'systemAllocatorProvider')
       assert.strictEqual(binding?.role, 'Declaration')
       assert.strictEqual(actor?.role, 'Actor')
       assert.strictEqual(operation?.role, 'Value')
@@ -62,7 +62,7 @@ it.effect('indexes allocator tokens as source binding, actor, and function ident
         operation === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', operation)?.text,
-        'pub fn systemAllocatorService() -> SystemAllocator',
+        'pub fn systemAllocatorProvider() -> SystemAllocator',
       )
       return undefined
     }),
@@ -502,8 +502,8 @@ effect fn direct() -> () ! LogError ? &mut Logger {
   return run Logger.log(LogLevel.Info, "direct")
 }
 pub fn main() -> i32 {
-  let memory = Logger.inMemoryService()
-  let output = Logger.stdoutService()
+  let memory = Logger.inMemoryProvider()
+  let output = Logger.stdoutProvider()
   return 42
 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
@@ -516,8 +516,8 @@ pub fn main() -> i32 {
         ['logWarning', 'silk/effect', 0],
         ['log(', 'silk/logger', 0],
         ['Info', 'silk/logger', 0],
-        ['inMemoryService', 'silk/logger', 0],
-        ['stdoutService', 'silk/logger', 0],
+        ['inMemoryProvider', 'silk/logger', 0],
+        ['stdoutProvider', 'silk/logger', 0],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.isDefined(occurrence, spelling)
@@ -539,7 +539,7 @@ pub fn main() -> i32 {
       )
       for (const [prefix, expected] of [
         ['Effect.', ['log', 'logAt', 'logTrace', 'logDebug', 'logInfo', 'logWarning', 'logError']],
-        ['Logger.', ['log', 'LogLevel', 'inMemoryService', 'stdoutService', 'length', 'levelAt']],
+        ['Logger.', ['log', 'LogLevel', 'inMemoryProvider', 'stdoutProvider', 'length', 'levelAt']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
         const labels = Analysis.completionAt(snapshot, 'main', offset)?.candidates.map(
@@ -704,7 +704,7 @@ import silk.effect as Effect
 fn inspect(value: Streams.NativeStandardStreams) -> () { return () }
 
 pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamService()
+  let mut streams = Streams.nativeStandardStreamProvider()
   return run Streams.send(Streams.stdout(), b"Hello, world!\\n")
     |> Effect.provideMut(&mut streams)
 }`
@@ -722,13 +722,13 @@ pub effect fn main() -> () ! Streams.StreamWriteError {
       }
 
       assert.deepEqual(contractsAt('NativeStandardStreams'), ['Streams.StandardStreams'])
-      assert.deepEqual(contractsAt('nativeStandardStreamService'), ['Streams.StandardStreams'])
+      assert.deepEqual(contractsAt('nativeStandardStreamProvider'), ['Streams.StandardStreams'])
       assert.deepEqual(contractsAt('streams', 1), ['Streams.StandardStreams'])
       assert.deepEqual(
         Analysis.hoverSubjectAt(
           snapshot,
           'main',
-          source.indexOf('nativeStandardStreamService()') + 'nativeStandardStreamService'.length,
+          source.indexOf('nativeStandardStreamProvider()') + 'nativeStandardStreamProvider'.length,
         )?.implementedContracts.map((contract) => contract.text) ?? [],
         ['Streams.StandardStreams'],
       )
@@ -768,7 +768,7 @@ it.effect('presents selected imports and shared and owned provider selectors', (
 import silk.effect as Effect
 
 pub effect fn main() -> () ! StandardStreams.StreamWriteError {
-  let mut streams = StandardStreams.nativeStandardStreamService()
+  let mut streams = StandardStreams.nativeStandardStreamProvider()
   return run StandardStreams.send(StandardStreams.stdout(), b"selected\\n")
     |> Effect.provideMut(&mut streams)
 }`
@@ -877,7 +877,7 @@ it.effect('omits explicit provider selectors while retaining binding hints', () 
 import silk.effect as Effect
 
 pub effect fn main() -> () ! Streams.StreamWriteError {
-  let mut streams = Streams.nativeStandardStreamService()
+  let mut streams = Streams.nativeStandardStreamProvider()
   return run Streams.send(Streams.stdout(), b"ok\\n")
     |> Effect.provideMut<Streams.StandardStreams>(&mut streams)
 }`
@@ -1045,7 +1045,7 @@ import silk.allocator { SystemAllocator }
 struct Pair { left: i32 }
 fn pick() -> i32 {
   let pair = Pair { left: 1 }
-  let allocator = Allocator.systemAllocatorService()
+  let allocator = Allocator.systemAllocatorProvider()
   return pair.left
 }`),
     ).pipe(
@@ -1395,7 +1395,7 @@ import silk.allocator { SystemAllocator }
 // π🙂
 struct Problem {}
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }
 fn damaged( -> {`

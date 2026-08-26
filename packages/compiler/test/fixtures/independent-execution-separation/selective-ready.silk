@@ -113,7 +113,7 @@ effect fn driveIdentity(tasks: &Shared.Shared<Tasks>, identity: i32) -> () {
 }
 
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let inbox = run Shared.make<Inbox>(Inbox { first: 0, second: 0, length: 0, taken: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let tasks = run Shared.make<Tasks>(Tasks {

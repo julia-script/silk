@@ -21,7 +21,7 @@ import silk.standard_streams { NativeStandardStreams }
 import silk.standard_streams { StreamWriteError }
 import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
-  let mut native = StandardStream.nativeStandardStreamService()
+  let mut native = StandardStream.nativeStandardStreamProvider()
   let first = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("heading\\n")), &mut native)
   let second = run Effect.provideMut(StandardStream.send(StandardStream.stderr(), b"warning\\n"), &mut native)
   let third = run Effect.provideMut(StandardStream.send(StandardStream.stdout(), Intrinsic.stringUtf8Bytes("row\\n")), &mut native)

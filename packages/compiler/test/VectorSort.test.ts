@@ -25,7 +25,7 @@ import silk.vector { Vector, make, append, sort, binarySearch, get, length }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 ${body}
 }
 
@@ -175,7 +175,7 @@ import silk.usize as usize
 import silk.vector { Vector, make, append, sort, get, length }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut narrow = make<u8>()
   let n0 = run append<u8>(&mut narrow, 9) |> Effect.provideMut(&mut allocator)
   let n1 = run append<u8>(&mut narrow, 2) |> Effect.provideMut(&mut allocator)
@@ -338,7 +338,7 @@ fn itemLess(left: &Item, right: &Item) -> bool {
 impl Order for Item { lessThan: Item.itemLess }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut items = make<Item>()
   let a = run append<Item>(&mut items, Item { key: 1, tag: 1 }) |> Effect.provideMut(&mut allocator)
   let b = run append<Item>(&mut items, Item { key: 0, tag: 2 }) |> Effect.provideMut(&mut allocator)
@@ -400,7 +400,7 @@ effect fn hold(key: i32) -> Tracked ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut items = make<Tracked>()
   let first = run hold(3) |> Effect.provideMut(&mut allocator)
   let a = run append<Tracked>(&mut items, move first) |> Effect.provideMut(&mut allocator)

@@ -76,7 +76,7 @@ import silk.u8 as u8
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
@@ -129,7 +129,7 @@ import silk.filesystem { FileError }
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let target = run pathMake("/tree") |> Effect.provideMut(&mut allocator)
   let removed = run Intrinsic.bindRequirementMut(
@@ -157,7 +157,7 @@ import silk.u8 as u8
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/many") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
@@ -207,7 +207,7 @@ import silk.filesystem { FileError }
 ${prelude}
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let parent = run pathMake("/scopes") |> Effect.provideMut(&mut allocator)
   let scope = run Intrinsic.bindRequirementMut(

@@ -640,7 +640,7 @@ effect fn check(source: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator {
 }
 
 pub effect fn main() -> () ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let source = b"pub fn main() -> i32 { return 42 }\n"
   return run check(source) |> Effect.provideMut(&mut allocator)

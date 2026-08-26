@@ -47,7 +47,7 @@ fn read(value: &Counter) -> i32 { return value.value }
 
 effect fn useCell() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let creating = make<Counter>(Counter { value: 20 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let cell = run creating

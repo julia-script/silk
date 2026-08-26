@@ -99,7 +99,7 @@ import silk.filesystem { DirectoryEntry, FileError, FileSystem, Path, root as pa
 import silk.vector { Vector }
 
 pub effect fn main() -> () ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("/tmp") |> Effect.provideMut(&mut allocator)
   let path = run pathRoot() |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
@@ -171,7 +171,7 @@ import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/message") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
@@ -290,7 +290,7 @@ fn pathMatches(entries: &[DirectoryEntry], index: usize, expected: string) -> bo
 }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("/root") |> Effect.provideMut(&mut allocator)
   let root = run pathRoot() |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
@@ -614,7 +614,7 @@ import silk.filesystem { FileError, FileSystem, make as pathMake }
 import silk.result { Failure, Result, Success }
 
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run osMake("${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let path = run pathMake("/hello.txt") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]

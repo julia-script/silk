@@ -58,7 +58,7 @@ effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
   }
 }
 effect fn program() -> () ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
 }
 effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
@@ -198,7 +198,7 @@ effect fn create<
   return absurd<Intrinsic.Execution<i32>>()
 }
 effect fn package() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let bodyLayout = Layout.of<i32>()
   let bodyStorage = run Intrinsic.systemAllocationAcquire(move bodyLayout)
   let readyLayout = Layout.of<i32>()
@@ -301,7 +301,7 @@ effect fn packaged(state: &mut State) -> () ! Allocator.OutOfMemoryError ? &mut 
   return run Execution.drive(move execution, move state, move onComplete, move onSuspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut state = State { value: 7 }
   run packaged(&mut state) |> Effect.provideMut<Allocator>(&mut allocator)
   return state.value
@@ -388,7 +388,7 @@ effect fn packaged() -> i32 ! Allocator.OutOfMemoryError ? &mut Allocator {
   return result
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
 }
 effect fn recover(error: Allocator.OutOfMemoryError) -> i32 { return 0 }
@@ -436,7 +436,7 @@ effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
   return ()
 }
 effect fn program() -> () ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
 }
 effect fn recover(error: Allocator.OutOfMemoryError) -> () { return () }
@@ -538,7 +538,7 @@ effect fn create<
   return absurd<Intrinsic.Execution<i32>>()
 }
 effect fn package() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let creating = create(effect { return 42 }, ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let execution = run creating
@@ -581,7 +581,7 @@ effect fn packaged(state: &mut State) -> () ! Allocator.OutOfMemoryError ? &mut 
   return run Execution.drive(move execution, move state, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut state = State { value: 7 }
   run packaged(&mut state) |> Effect.provideMut<Allocator>(&mut allocator)
   return state.value
@@ -645,7 +645,7 @@ effect fn packaged() -> () ! Allocator.OutOfMemoryError ? &mut Allocator {
   return run Execution.drive(move first, Branch { tag: 1 }, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   run packaged() |> Effect.provideMut<Allocator>(&mut allocator)
   return 42
 }
@@ -707,7 +707,7 @@ effect fn packaged(state: &mut State) -> () ! Allocator.OutOfMemoryError ? &mut 
   return run Execution.drive(move execution, move state, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut state = State { value: 7 }
   run packaged(&mut state) |> Effect.provideMut<Allocator>(&mut allocator)
   return state.value

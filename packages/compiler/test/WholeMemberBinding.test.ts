@@ -47,7 +47,7 @@ import silk.layout { LayoutOverflow }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let element = Layout.of<i32>()
   let plan = Layout.repeat(move element, 3)
   let layout = match move plan {
@@ -82,7 +82,7 @@ import silk.layout { Layout }
 struct Empty {}
 struct Full { storage: Allocation }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

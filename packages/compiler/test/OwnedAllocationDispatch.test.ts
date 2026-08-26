@@ -44,7 +44,7 @@ import silk.layout { Layout }
 struct QuotaAllocator { tag: i32 }
 
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut inner)
   let block = run recipe
   return move block
@@ -145,7 +145,7 @@ effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut good = Allocator.systemAllocatorService()
+  let mut good = Allocator.systemAllocatorProvider()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let first = Layout.of<[i32; 2]>()
   let recipeA = Allocator.allocate(move first) |> Effect.provideMut(&mut ${providers[0]})
@@ -221,7 +221,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run recipe
   return move block
@@ -299,7 +299,7 @@ struct CountingAllocator { hits: i32 }
 
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   self.hits = self.hits + 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block

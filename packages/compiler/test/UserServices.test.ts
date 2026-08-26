@@ -643,7 +643,7 @@ effect fn program() -> i32 ? &mut Value | &mut Allocator {
 }
 pub fn main() -> i32 {
   let mut fixed = Fixed { value: 42 }
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.provideMut<Allocator>(
     Effect.provideMut<Value>(program(), &mut fixed),
     &mut allocator,
@@ -709,7 +709,7 @@ struct Provider { storage: Allocation }
 effect fn read(self: &mut Provider) -> i32 { return 42 }
 impl Value for Provider { read: Provider.read }
 effect fn open() -> Provider ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   return Provider { storage: move allocation }

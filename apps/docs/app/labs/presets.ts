@@ -425,7 +425,7 @@ import silk.u8 as u8
 import silk.logger {length, messageByteAt}
 
 effect fn program() -> i32 ! LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
   let second = run Effect.provideMut(Effect.logWarning("second\\nline"), &mut logger)
   if length(&logger) != 2 {
@@ -477,7 +477,7 @@ import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -517,7 +517,7 @@ import silk.layout {Layout}
 import silk.raw_buffer as RawBuffer
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -557,7 +557,7 @@ import silk.raw_buffer as RawBuffer
 struct Empty {}
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[Empty; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -593,7 +593,7 @@ import silk.effect as Effect
 import silk.layout {Layout}
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)
@@ -638,7 +638,7 @@ impl Drop for Guard {
 }
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
     |> Effect.provideMut(&mut allocator)

@@ -50,7 +50,7 @@ import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let sourceLayout = Layout.of<[i32; 4]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
   let targetLayout = Layout.of<[i32; 4]>()
@@ -121,7 +121,7 @@ import silk.slot as Slot
 struct Guard { storage: Allocation }
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let sourceLayout = Layout.of<[Guard; 2]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
   let targetLayout = Layout.of<[Guard; 2]>()
@@ -206,7 +206,7 @@ import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u8 as u8
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[u8; 4]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   unsafe {
@@ -269,7 +269,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.layout { Layout }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 4]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let spare = Layout.of<[i32; 4]>()
@@ -402,7 +402,7 @@ import silk.usize as usize
 fn octet(value: u8) -> u8 { return value }
 
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let recipe = build() |> Effect.provideMut(&mut allocator)
   return run recipe
 }
@@ -451,7 +451,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 import silk.vector { Vector }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let recipe = build() |> Effect.provideMut(&mut allocator)
   return run recipe
 }
@@ -501,7 +501,7 @@ import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let sourceLayout = Layout.of<[i32; 2]>()
   let sourceAllocation = run Allocator.allocate(move sourceLayout) |> Effect.provideMut(&mut allocator)
   let targetLayout = Layout.of<[i32; 2]>()

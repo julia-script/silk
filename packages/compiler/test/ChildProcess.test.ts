@@ -140,7 +140,7 @@ import silk.filesystem { FileError }
 ${imports}
 ${scriptedProvider}
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = ${provider}
 ${vocabulary}
 ${body}
@@ -157,7 +157,7 @@ ${imports}
 import silk.os_child_process { make as osChildMake }
 
 effect fn program() -> i32 ! ProcessError | OutOfMemoryError | FileError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = osChildMake()
 ${vocabulary}
 ${body}

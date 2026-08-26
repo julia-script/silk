@@ -33,7 +33,7 @@ import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -127,7 +127,7 @@ import silk.effect as Effect
 import silk.vector { make, append, asSlice, asMutSlice }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let empty = asSlice<i32>(&values)
   if empty.length == 0 {} else { return 1 }
@@ -188,7 +188,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block
@@ -279,7 +279,7 @@ impl Drop for Entry {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 3, marker: make<i32>() }
   let pending0 = append<Entry>(&mut values, move entry0) |> Effect.provideMut(&mut allocator)
@@ -360,7 +360,7 @@ fn consume(values: Vector<Entry>) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let entry0 = Entry { value: 11, marker: make<i32>() }
   let pending0 = append<Entry>(&mut values, move entry0) |> Effect.provideMut(&mut allocator)
@@ -422,7 +422,7 @@ import silk.vector { Vector, make, append, get }
 struct Marker {}
 impl Copy for Marker {}
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Marker>()
   let pending = append<Marker>(&mut values, Marker {}) |> Effect.provideMut(&mut allocator)
   let appended = run pending
@@ -472,7 +472,7 @@ fn observe(event: Step | Diagnostic) -> i32 {
   }
 }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut events = make<Step | Diagnostic>()
   let step = Step { value: 7 }
   let diagnostic = Diagnostic { marker: 3, value: 11 }
@@ -522,7 +522,7 @@ struct Guard { storage: Allocation }
 struct Marker { value: i32 }
 fn guarded(storage: Allocation) -> Guard | Marker { return Guard { storage: move storage } }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 1]>()
   let allocation = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let mut events = make<Guard | Marker>()
@@ -592,7 +592,7 @@ import silk.option { Some }
 import silk.vector { Vector, make, append, get, length, capacity, pop }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -664,7 +664,7 @@ effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let s0 = run (seed(&mut values, 10) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 11) |> Effect.provideMut(&mut allocator))
@@ -703,7 +703,7 @@ effect fn seed(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let s0 = run (seed(&mut values, 10) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 11) |> Effect.provideMut(&mut allocator))
@@ -763,7 +763,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -815,7 +815,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -878,7 +878,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 3) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 5) |> Effect.provideMut(&mut allocator))
@@ -931,7 +931,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run pending
   return move block
@@ -1001,7 +1001,7 @@ struct Entry {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let entry = Entry { value: 42, marker: make<i32>() }
   let pending = append<Entry>(&mut values, move entry) |> Effect.provideMut(&mut allocator)
@@ -1039,7 +1039,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
@@ -1083,7 +1083,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 1) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 2) |> Effect.provideMut(&mut allocator))
@@ -1133,7 +1133,7 @@ effect fn seed(values: &mut Vector<Entry>, value: i32) -> () ! OutOfMemoryError 
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<Entry>()
   let s0 = run (seed(&mut values, 20) |> Effect.provideMut(&mut allocator))
   let s1 = run (seed(&mut values, 22) |> Effect.provideMut(&mut allocator))

@@ -843,7 +843,7 @@ the complete selected row is supplied as the first generic argument. A partially
 section retains that selection obligation until a statically visible Effect application completes
 it.
 
-Here `Logger.stdoutService()` returns a `StdoutLogger`, which conforms to `Logger`. The explicit
+Here `Logger.stdoutProvider()` returns a `StdoutLogger`, which conforms to `Logger`. The explicit
 selected row removes `&mut Logger` while preserving `&mut Clock`, independently of canonical row
 order:
 
@@ -861,7 +861,7 @@ effect fn read() -> i32 ! LogError ? &mut Clock | &mut Logger {
 }
 
 effect fn withLogger() -> i32 ! LogError ? &mut Clock {
-  let mut logger = Logger.stdoutService()
+  let mut logger = Logger.stdoutProvider()
   return run Effect.provideMut<Logger>(read(), &mut logger)
 }
 ```

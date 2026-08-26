@@ -30,7 +30,7 @@ import silk.usize as usize
 
 effect fn copyMessage() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"Silk"
   let copying = Bytes.copy(&source)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -106,12 +106,12 @@ pub struct SystemAllocator
 
 A process-backed provider for [`Allocator`](#declaration-73696c6b2f616c6c6f6361746f723a3a416c6c6f6361746f72).
 
-<a id="declaration-73696c6b2f616c6c6f6361746f723a3a73797374656d416c6c6f6361746f7253657276696365"></a>
+<a id="declaration-73696c6b2f616c6c6f6361746f723a3a73797374656d416c6c6f6361746f7250726f7669646572"></a>
 
-## `systemAllocatorService`
+## `systemAllocatorProvider`
 
 ```silk
-pub fn systemAllocatorService() -> SystemAllocator
+pub fn systemAllocatorProvider() -> SystemAllocator
 ```
 
 Creates a process-backed allocator provider without allocating storage.

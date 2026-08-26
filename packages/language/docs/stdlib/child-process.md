@@ -57,7 +57,7 @@ impl Process.ChildProcess for Completed {
 
 effect fn program() -> i32
 ! Path.FileError | Allocator.OutOfMemoryError | Process.ProcessError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut provider = Completed {}
   let path = run Path.make("/tool")
     |> Effect.provideMut<Allocator>(&mut allocator)
