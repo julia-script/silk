@@ -39,9 +39,8 @@ const installedPackageRoot = (name: string): string =>
   realpathSync(resolve(compilerCliPackageRoot, `node_modules/${name}`))
 
 const lspInstalledVersion = (name: string): string =>
-  JSON.parse(
-    readFileSync(resolve(lspPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
-  ).version
+  JSON.parse(readFileSync(resolve(lspPackageRoot, `node_modules/${name}/package.json`), 'utf8'))
+    .version
 
 const installedDependencyNames = (parent: string): ReadonlyArray<string> =>
   Object.keys(
