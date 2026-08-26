@@ -1014,3 +1014,66 @@ ${modifiers} fn inspect(input: Left | Right) -> i32 {
   assert.deepEqual(names(Ownership.allBindings(lazy)), ['value', 'value'])
   assert.deepEqual(Ownership.allBindings(undefined), [])
 })
+
+it('reports an incompatible loop header when the while condition consumes an owner', () => {
+  const facts = check(
+    'ownership://while-condition-consumes.silk',
+    `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+fn consume(token: Token) -> i32 { return 0 }
+fn spin(token: Token) -> () {
+  while consume(move token) == 1 {
+  }
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0005'],
+  )
+})
+
+it('reports an owner moved in only some branch arms and accepts a move in every arm', () => {
+  const oneArm = check(
+    'ownership://if-one-arm-move.silk',
+    `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+fn consume(token: Token) -> () { return () }
+fn branch(token: Token) -> () {
+  if 1 == 1 {
+    consume(move token)
+  }
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+  const bothArms = check(
+    'ownership://if-both-arms-move.silk',
+    `struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () { return () }
+}
+fn consume(token: Token) -> () { return () }
+fn branch(token: Token) -> () {
+  if 1 == 1 {
+    consume(move token)
+  } else {
+    consume(move token)
+  }
+  return ()
+}
+pub fn main() -> i32 { return 0 }`,
+  )
+
+  assert.deepEqual(
+    oneArm.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0017'],
+  )
+  assert.deepEqual(bothArms.diagnostics, [])
+})

@@ -369,24 +369,26 @@ const notifyReady = Effect.fnUntraced(function* (
   }> = []
   for (const field of environment?.fields ?? []) {
     const values: Array<Value.Input> = []
-    for (const [ordinal, lane] of Layout.callableFieldLanes(
+    // Mirrors the placement-driven storePackageValue so nested callable captures agree.
+    for (const [ordinal, placement] of Layout.callableFieldLanePlacements(
       context.program.layout,
       field,
     ).entries()) {
-      const offset =
-        field.representation === 'Borrow'
+      const laneOffset =
+        placement.root === undefined
           ? 0
-          : LayoutVerify.laneOffset(context.program.layout, field.type, lane.path)
-      if (offset === undefined) throw new RangeError('LLVM readiness callback lost a capture lane')
+          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
+      if (laneOffset === undefined)
+        throw new RangeError('LLVM readiness callback lost a capture lane')
       values.push(
         yield* FunctionBody.load(
           context.body,
-          NativeType.laneType(context.types, lane),
+          NativeType.laneType(context.types, placement.lane),
           yield* NativeLanePointer.lanePointer(
             context.lanePointers,
             context.body,
             base,
-            (callbackOffset ?? 0) + field.offset + offset,
+            (callbackOffset ?? 0) + placement.byteOffset + laneOffset,
             `${tag}_capture${field.parameterOrdinal}_${ordinal}_ptr`,
           ),
           `${tag}_capture${field.parameterOrdinal}_${ordinal}`,

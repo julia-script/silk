@@ -1063,3 +1063,30 @@ it('keeps neutral witness identity specialization-complete and origin-distinct',
     Constraint.providerMatchKey({ _tag: 'Conformance', witness: sourceI32 }),
   )
 })
+
+it('keeps a free parameter open when a nested callable schema binds the same parameter', () => {
+  const parameter = Type.parameter({ module: 'work', name: 'wrap' }, 0, 'T')
+  const contract = CallableContract.make({
+    functionKind: 'Function',
+    binders: [parameter],
+    parameters: [{ type: parameter, mode: 'Shared' }],
+    result: parameter,
+  })
+  const quantified = Type.callable([parameter], parameter, 'Shared', {
+    contract,
+    binders: [parameter],
+    constraints: [],
+    evidence: [],
+    substitution: new Map(),
+    contractKey: CallableContract.key(contract),
+    constraintKeys: [],
+    evidenceKeys: [],
+    origins: [span('work', 0, 1)],
+  })
+  assert.deepEqual(Type.parameters(quantified), [])
+  assert.strictEqual(Type.isConcrete(quantified), true)
+
+  const wrapped = Type.callable([parameter], quantified)
+  assert.deepEqual(Type.parameters(wrapped), [parameter])
+  assert.strictEqual(Type.isConcrete(wrapped), false)
+})

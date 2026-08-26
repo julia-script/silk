@@ -1089,8 +1089,8 @@ function* executeFunction(
       const first = arguments_.at(0)
       if (first === undefined || first._tag !== 'IntegerValue')
         throw new RangeError('MIR verifier allowed invalid integer-to-float callable')
-      const encoded = FloatingPoint.fromNumber(
-        Number(BigInt(first.value)),
+      const encoded = FloatingPoint.fromBigInt(
+        BigInt(first.value),
         floatTarget.spelling === 'f32' ? 32 : 64,
       )
       return Object.freeze({ _tag: 'Value', value: floatValue(floatTarget.spelling, encoded.bits) })
@@ -3793,8 +3793,8 @@ function* executeFunction(
               break
             }
             if (sourceType?.category === 'Integer' && targetType?.category === 'Floating') {
-              const encoded = FloatingPoint.fromNumber(
-                Number(BigInt(readInteger(operation.source).value)),
+              const encoded = FloatingPoint.fromBigInt(
+                BigInt(readInteger(operation.source).value),
                 targetType.spelling === 'f32' ? 32 : 64,
               )
               write(operation.destination, {

@@ -132,6 +132,16 @@ export const fromNumber = (value: number, width: 32 | 64): Bits => {
   return Object.freeze({ width, bits: view.getBigUint64(0, true) })
 }
 
+/**
+ * Correctly rounds an exact integer to IEEE bits in a single rounding step.
+ *
+ * Converting through the host `Number` first would round twice for 64-bit integers targeting
+ * `f32` (i64 -> f64 -> f32), which native `sitofp` and wasm `f32.convert_i64_s` do not do.
+ */
+export const fromBigInt = (value: bigint, width: 32 | 64): Bits =>
+  // A bigint's decimal spelling always parses, so the fallback is unreachable.
+  fromDecimal(value.toString(), width) ?? fromNumber(Number(value), width)
+
 export const isNotANumber = (value: Bits): boolean => {
   const spec = specification(value.width)
   const exponent =

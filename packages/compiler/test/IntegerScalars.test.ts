@@ -119,6 +119,32 @@ it.effect('checks Unicode scalar construction and preserves total char-to-u32 co
   }),
 )
 
+const rotation = `import silk.u8 as u8
+import silk.u64 as u64
+pub fn main() -> i32 {
+  let wrapped = u8.rotateLeft(42, 8)
+  let shifted = u8.rotateRight(u8.rotateLeft(42, 9), 65)
+  let wide = u64.rotateLeft(42, 64)
+  return u8.toI32(wrapped) + u8.toI32(shifted) + u64.toI32(wide) - 84
+}`
+
+it.effect('wraps rotate counts modulo the width in the evaluator and Wasm', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/rotate-wrap',
+      new TextEncoder().encode(rotation),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+    const wasm = yield* Analysis.codegenWasm(snapshot, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
 const integerArguments = (operation: Scalar.Operation): string => {
   switch (operation.code) {
     case 'Subtract':
@@ -334,6 +360,26 @@ it.effect('uses concrete call and pipeline parameters as exact integer literal c
     assert.include(Hir.encode(Analysis.rootAnalysis(snapshot).hir), 'literal 13 : u8')
     assert.include(MirEncoding.encode(Analysis.loweredMir(snapshot)), 'literal 42 : u8')
 
+    const outcome = Analysis.evaluate(snapshot)
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('lets a declared scalar operand drive literal-first infix arithmetic', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'integer/literal-first-infix',
+      new TextEncoder().encode(`import silk.u16 as u16
+fn mixed(value: u16) -> i32 {
+  let literalFirst = 5 + value
+  let literalLast = value + 5
+  let defaulted = 5 + 5
+  return u16.toI32(literalFirst) + u16.toI32(literalLast) - defaulted
+}
+pub fn main() -> i32 { return mixed(21) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)

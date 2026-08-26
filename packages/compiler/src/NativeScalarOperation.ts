@@ -30,6 +30,51 @@ type Operation = Extract<
   }
 >
 
+/**
+ * Branches to the shared trap block when a float would truncate outside the integer range or is
+ * NaN, matching the deterministic evaluator trap instead of LLVM's poison on `fptosi`/`fptoui`.
+ */
+export const emitFloatToIntegerGuard = Effect.fnUntraced(function* (
+  context: Context,
+  value: Value.Input,
+  source: Scalar.FloatScalar,
+  target: Scalar.IntegerScalar,
+  name: string,
+) {
+  const { body, builder, program } = context
+  const floatType = source.spelling === 'f32' ? context.f32 : context.f64
+  const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+  const range = Scalar.range(target, pointerBits)
+  const width = Scalar.bits(target, pointerBits)
+  const precision = source.spelling === 'f32' ? 24 : 53
+  // The first value at or above `maximum + 1` truncates out of range; that bound is a power of
+  // two, exact in either float width.
+  const high = Number(range.maximum + 1n)
+  // Below the low bound the truncation falls under `minimum`. When `minimum - 1` is exactly
+  // representable the test uses it inclusively; otherwise no float lies strictly between
+  // `minimum - 1` and `minimum`, so the exclusive test against `minimum` is equivalent.
+  const exactLow = target.signedness === 'Unsigned' || width <= precision
+  const low = exactLow ? Number(range.minimum - 1n) : Number(range.minimum)
+  const constant = source.spelling === 'f32' ? Constant.floatFromNumber : Constant.doubleFromNumber
+  const lowConstant = yield* constant(builder, floatType, low)
+  const highConstant = yield* constant(builder, floatType, high)
+  // Unordered predicates make NaN inputs trap as well.
+  const below = yield* FunctionBody.floatingCompare(
+    body,
+    exactLow ? 'ule' : 'ult',
+    value,
+    lowConstant,
+    `${name}_below`,
+  )
+  const above = yield* FunctionBody.floatingCompare(body, 'uge', value, highConstant, `${name}_above`)
+  const invalid = yield* FunctionBody.binary(body, 'or', below, above, `${name}_invalid`)
+  if (context.state.trapBlock === undefined)
+    context.state.trapBlock = yield* LlvmBlock.make(body, 'arith_trap')
+  const continueBlock = yield* LlvmBlock.make(body, `${name}_ok`)
+  yield* FunctionBody.conditionalBranch(body, invalid, context.state.trapBlock, continueBlock)
+  yield* LlvmBlock.setInsertionPoint(body, continueBlock)
+})
+
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
     body,
@@ -98,6 +143,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           kind = 'fpext'
         }
       } else if (source.category === 'Floating' && target.category === 'Integer') {
+        yield* emitFloatToIntegerGuard(
+          context,
+          sourceValue,
+          source,
+          target,
+          `convert${operation.destination.ordinal}`,
+        )
         if (target.signedness === 'Signed') {
           kind = 'fptosi'
         } else {

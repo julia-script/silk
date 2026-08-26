@@ -776,33 +776,6 @@ export const solveCallableConstraints = (
       ? []
       : [Object.freeze({ constraint, ordinal })],
   )
-  for (const entry of checked) {
-    const wanted = Constraint.substitute(entry.constraint, substitution)
-    if (givens.some((given) => Constraint.key(given) === Constraint.key(wanted))) {
-      evidence.push(Constraint.assumed(wanted, substitution))
-      continue
-    }
-    if (wanted._tag === 'ProviderSelectionConstraint')
-      throw new RangeError('substitution changed a checked constraint into a provider selection')
-    const proof = Constraint.proveStructural(wanted)
-    if (proof !== undefined) {
-      evidence.push(proof)
-      continue
-    }
-    diagnostics.push(
-      wanted._tag === 'RequirementSubsetConstraint'
-        ? Diagnostic.invalidEffectProvision(
-            'selected requirement row is not an exact subset of the source row',
-            span,
-          )
-        : Diagnostic.invalidEffectHandler(
-            wanted._tag === 'NominalMemberConstraint'
-              ? 'selected failure is absent or remains underconstrained'
-              : 'selected failure type is not an exact subset of the source failure type',
-            span,
-          ),
-    )
-  }
   const providers = constraints.flatMap((constraint, ordinal) =>
     constraint._tag === 'ProviderSelectionConstraint'
       ? [Object.freeze({ constraint, ordinal })]
@@ -881,6 +854,35 @@ export const solveCallableConstraints = (
           ),
         )
     }
+  }
+  // Checked constraints run after provider selection so rows bound by inferred
+  // provider selectors are visible to structural proofs.
+  for (const entry of checked) {
+    const wanted = Constraint.substitute(entry.constraint, substitution)
+    if (givens.some((given) => Constraint.key(given) === Constraint.key(wanted))) {
+      evidence.push(Constraint.assumed(wanted, substitution))
+      continue
+    }
+    if (wanted._tag === 'ProviderSelectionConstraint')
+      throw new RangeError('substitution changed a checked constraint into a provider selection')
+    const proof = Constraint.proveStructural(wanted)
+    if (proof !== undefined) {
+      evidence.push(proof)
+      continue
+    }
+    diagnostics.push(
+      wanted._tag === 'RequirementSubsetConstraint'
+        ? Diagnostic.invalidEffectProvision(
+            'selected requirement row is not an exact subset of the source row',
+            span,
+          )
+        : Diagnostic.invalidEffectHandler(
+            wanted._tag === 'NominalMemberConstraint'
+              ? 'selected failure is absent or remains underconstrained'
+              : 'selected failure type is not an exact subset of the source failure type',
+            span,
+          ),
+    )
   }
   return Object.freeze({
     substitution,

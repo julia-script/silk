@@ -463,6 +463,27 @@ const storedEffectRunAccess = (
   )
 }
 
+const mergeArmLive = (
+  state: CheckState,
+  continuing: ReadonlyArray<ReadonlySet<string>>,
+  span: SourceSpan.SourceSpan,
+): Set<string> => {
+  const [first, ...rest] = continuing
+  const merged = new Set([...(first ?? [])].filter((site) => rest.every((arm) => arm.has(site))))
+  const reported = new Set<string>()
+  for (const candidate of continuing) {
+    for (const key of candidate) {
+      if (merged.has(key) || reported.has(key)) continue
+      reported.add(key)
+      const binding = state.bindings.get(key)
+      if (binding?.category._tag === 'MoveOnly') {
+        state.diagnostics.push(Diagnostic.incompatibleArmMerge(binding.name ?? '?', span))
+      }
+    }
+  }
+  return merged
+}
+
 const checkUse = (
   state: CheckState,
   live: Set<string>,
@@ -1156,6 +1177,8 @@ const checkExpression = (
         continuing.push(armLive)
       }
       if (continuing.length > 0) {
+        // ponytail: plain intersection, no arm-merge diagnostic — expression arms cannot signal
+        // divergence (`absurd()`) and one-arm Take-callable consumption is an accepted idiom here.
         const intersection = new Set(
           [...(continuing.at(0) ?? [])].filter((site) =>
             continuing.every((candidate) => candidate.has(site)),
@@ -2907,11 +2930,7 @@ const checkFunction = (
           }
         }
         if (continuing.length === 0) return Object.freeze({ returned: true, live })
-        live = new Set(
-          [...(continuing.at(0) ?? [])].filter((site) =>
-            continuing.every((candidate) => candidate.has(site)),
-          ),
-        )
+        live = mergeArmLive(state, continuing, statement.span)
         continue
       }
       if (statement._tag === 'IfLet') {
@@ -2969,7 +2988,7 @@ const checkFunction = (
           }),
         )
         if (continuing.length === 0) return Object.freeze({ returned: true, live })
-        live = intersection(continuing)
+        live = mergeArmLive(state, continuing, statement.span)
         continue
       }
       if (statement._tag === 'Write') {
@@ -3009,8 +3028,10 @@ const checkFunction = (
         continue
       }
       if (statement._tag === 'While') {
-        checkExpression(state, live, statement.condition, false)
+        // The condition re-runs every iteration, so the loop-header baseline is the state at
+        // loop entry: a condition that consumes an owner must show up as a back-edge mismatch.
         const incoming = new Set(live)
+        checkExpression(state, live, statement.condition, false)
         const previousContinues = continueStates.get(statement.loop.ordinal)?.length ?? 0
         const previousBreaks = breakStates.get(statement.loop.ordinal)?.length ?? 0
         const loopFrames = [...frames.map((frame) => [...frame]), []]

@@ -2045,7 +2045,15 @@ export const analyzeMatch = (
     )
   }
   const reachableEffectArms =
-    joinedEffect === undefined ? 0 : arms.filter((arm) => arm.reachable).length
+    joinedEffect === undefined
+      ? 0
+      : arms.filter(
+          (arm) =>
+            arm.reachable &&
+            // Mirrors Match.join: diverging (never-typed) arms do not contribute to the join,
+            // so they are not required to carry an exact static Effect representation.
+            !(arm.result.type._tag === 'Available' && Type.isNever(arm.result.type.type)),
+        ).length
   const unavailableEffectComposite =
     joinedEffect !== undefined && effectAlternatives.length !== reachableEffectArms
   if (unavailableEffectComposite)
@@ -4202,7 +4210,19 @@ export const analyzeOperatorExpression = (
     })
   }
 
-  const firstType = argumentsResult.facts.at(0)?.type
+  // A bare numeric literal's scalar type is only a default (Scalar.defaultInteger), so it must
+  // not drive the operand retry when another operand carries a declared scalar type: `5 + x`
+  // must type like `x + 5`. When every operand is a literal, the first (defaulted) one drives.
+  const drivingOrdinal = operandNodes.findIndex((operand, ordinal) => {
+    if (
+      operand.kind === 'IntegerLiteralExpression' ||
+      operand.kind === 'FloatingLiteralExpression'
+    )
+      return false
+    const type = argumentsResult.facts.at(ordinal)?.type
+    return type?._tag === 'Available' && typeof type.type === 'string' && Scalar.isSpelling(type.type)
+  })
+  const firstType = argumentsResult.facts.at(drivingOrdinal === -1 ? 0 : drivingOrdinal)?.type
   if (
     firstType?._tag === 'Available' &&
     typeof firstType.type === 'string' &&

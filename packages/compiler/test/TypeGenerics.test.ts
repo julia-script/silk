@@ -135,6 +135,33 @@ pub effect fn main() -> () { return run erase<i32, i32>() }`),
   }),
 )
 
+it.effect('binds provider-selected rows before checking subset constraints', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'generics/provider-bound-subset',
+      new TextEncoder().encode(`import silk.effect as Effect
+service Clock { effect fn value() -> i32 ? &mut Clock }
+struct FixedClock {}
+effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
+impl Clock for FixedClock { value: FixedClock.clockValue }
+effect fn read() -> i32 ? &mut Clock { return 7 }
+effect fn provideBoth<?S, A, P, E, ?R>(
+  self: once Effect<A ! E ? R>,
+  provider: &mut P
+) -> A ! E ? Without<R, S>
+where &mut P provides S from R, S in R {
+  return run Effect.provideMut<S>(move self, move provider)
+}
+pub fn main() -> i32 {
+  let mut clock = FixedClock {}
+  let provided = provideBoth(read(), &mut clock)
+  return run provided
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it('parses declaration parameters and explicit call specialization losslessly', () => {
   const syntax = Parser.parse(Lexer.lex(file))
   const kinds = descendants(syntax.root).map((node) => node.kind)
