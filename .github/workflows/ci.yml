@@ -10,6 +10,8 @@ permissions:
   contents: read
 
 jobs:
+  # Spike (openspec/changes/spike-ci-test-sharding): the compiler vitest payload runs in the
+  # compiler-tests matrix below; validate keeps everything else `pnpm check` ran.
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -35,8 +37,63 @@ jobs:
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm exec biome check .
+      - run: node scripts/turbo.mjs run build
+      - run: node scripts/turbo.mjs run typecheck
+      - run: node scripts/turbo.mjs run test --filter='!@silk-effect/compiler'
+      # The non-vitest parts of @silk-effect/compiler#test (its vitest payload is sharded below).
+      - run: |
+          pnpm --filter @silk-effect/compiler run unicode:check
+          pnpm --filter @silk-effect/compiler run stdlib:check
+          pnpm --filter @silk-effect/compiler run toolchain:check
+          pnpm --filter @silk-effect/compiler run documentation:policy
+          pnpm --filter @silk-effect/compiler run documentation:check
+          pnpm --filter @silk-effect/compiler run documentation:examples
+      - run: pnpm --filter @silk-effect/compiler run test:native-acceptance
+      - run: pnpm test:scripts
       - run: pnpm release:candidate
+
+  compiler-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      # Restore-only: the native-executable cache is populated by test:native-acceptance in
+      # validate; four shards saving the same key would race for nothing.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/silk-effect/native
+          key: silk-native-${{ runner.os }}-${{ github.sha }}
+          restore-keys: silk-native-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/turbo.mjs run build
+      - run: >
+          pnpm --filter @silk-effect/compiler run test:parallel --
+          --shard=${{ matrix.shard }}/4
+          --reporter=default --reporter=json
+          --outputFile.json=compiler-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compiler-shard-${{ matrix.shard }}-timings
+          path: packages/compiler/compiler-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
 
   webcontainer-browser:
     runs-on: ubuntu-latest
