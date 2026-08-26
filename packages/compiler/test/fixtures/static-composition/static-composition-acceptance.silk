@@ -46,9 +46,7 @@ fn numberDecode(value: &NumberSchema) -> i32 {
   return value.value
 }
 
-effect fn completeNumberDecode(self: &NumberSchema, encoded: i32) -> i32
-! DecodeProblem
-? &Clock {
+effect fn completeNumberDecode(self: &NumberSchema, encoded: i32) -> i32 ! DecodeProblem ? &Clock {
   return self.value + encoded + run Clock.tick()
 }
 
@@ -126,8 +124,7 @@ effect fn delayed(guard: Guard) -> i32 {
   return base + guard.value
 }
 
-effect fn selectionFailure() -> i32
-! SelectionProblem {
+effect fn selectionFailure() -> i32 ! SelectionProblem {
   fail SelectionProblem {code: 20}
 }
 
@@ -135,8 +132,7 @@ effect fn recoverSelection(problem: SelectionProblem) -> i32 {
   return problem.code
 }
 
-effect fn decodeFailure() -> i32
-! DecodeProblem {
+effect fn decodeFailure() -> i32 ! DecodeProblem {
   fail DecodeProblem {code: 30}
 }
 
@@ -259,27 +255,21 @@ fn runCase(value: i32) -> i32 {
   return opaque(exact(handled, complete - value) - 1)
 }
 
-effect fn uncalledCleanupCase(value: i32) -> i32
-! OutOfMemoryError
-? &mut Allocator {
+effect fn uncalledCleanupCase(value: i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
   let deferred = defer(guarded(move guard))
   return 40
 }
 
-effect fn calledCleanupCase(value: i32) -> i32
-! OutOfMemoryError
-? &mut Allocator {
+effect fn calledCleanupCase(value: i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
   let deferred = defer(guarded(move guard))
   return run deferred.operation
 }
 
-effect fn suspensionCase(value: i32) -> i32
-! OutOfMemoryError
-? &mut Allocator {
+effect fn suspensionCase(value: i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
   let storage = run Allocator.allocate(Layout.of<i32>())
   let guard = Guard {value: value, storage: move storage}
   let deferred = defer(delayed(move guard))
@@ -288,9 +278,7 @@ effect fn suspensionCase(value: i32) -> i32
 
 effect fn dispatch(
   request: RunRequest | HelpRequest | SelectionFailureRequest | DecodeFailureRequest | UncalledCleanupRequest | CalledCleanupRequest | SuspensionRequest,
-) -> i32
-! OutOfMemoryError
-? &mut Allocator {
+) -> i32 ! OutOfMemoryError ? &mut Allocator {
   return match move request {
     RunRequest {value} => runCase(value)
     HelpRequest {} => helpCase()

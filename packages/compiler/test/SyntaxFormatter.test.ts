@@ -275,8 +275,7 @@ fn main()->i32 { let pending=work(Problem { code:1 }) return run   pending }`
     const text = formattedText(first)
     assert.strictEqual(
       text,
-      `effect fn work(problem: Problem) -> i32
-! Problem | Other {
+      `effect fn work(problem: Problem) -> i32 ! Problem | Other {
   if true {
     fail move problem
   }
@@ -532,9 +531,7 @@ effect fn work()->i32!Problem?&FileSystem|&mut Allocator at Scratch{return 1}`
   }
 }
 
-effect fn work() -> i32
-! Problem
-? &FileSystem | &mut Allocator at Scratch {
+effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch {
   return 1
 }
 `,

@@ -269,8 +269,7 @@ struct Problem {
   code: i32
 }
 
-effect fn retrying() -> i32
-! Problem {
+effect fn retrying() -> i32 ! Problem {
   let mut counter = 0
   let attempt = effect {
     counter = counter + 1
@@ -316,8 +315,7 @@ impl Clock for FixedClock {
   value: FixedClock.clockValue
 }
 
-effect fn read() -> i32
-? &Clock at Primary {
+effect fn read() -> i32 ? &Clock at Primary {
   return 42
 }
 
@@ -426,8 +424,7 @@ import silk.u8 as u8
 
 import silk.logger {length, messageByteAt}
 
-effect fn program() -> i32
-! LogError {
+effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryService()
   let first = run Effect.provideMut(Effect.log("ready"), &mut logger)
   let second = run Effect.provideMut(Effect.logWarning("second\\nline"), &mut logger)
@@ -479,8 +476,7 @@ import silk.raw_buffer as RawBuffer
 
 import silk.slot as Slot
 
-effect fn store() -> i32
-! OutOfMemoryError {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -520,8 +516,7 @@ import silk.layout {Layout}
 
 import silk.raw_buffer as RawBuffer
 
-effect fn store() -> i32
-! OutOfMemoryError {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -561,8 +556,7 @@ import silk.raw_buffer as RawBuffer
 
 struct Empty {}
 
-effect fn store() -> i32
-! OutOfMemoryError {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[Empty; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -598,8 +592,7 @@ import silk.effect as Effect
 
 import silk.layout {Layout}
 
-effect fn store() -> i32
-! OutOfMemoryError {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -644,8 +637,7 @@ impl Drop for Guard {
   }
 }
 
-effect fn store() -> i32
-! OutOfMemoryError {
+effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout)
@@ -685,16 +677,14 @@ struct Problem {
   code: i32
 }
 
-effect fn risky<T>(value: T, selector: i32) -> T
-! Problem {
+effect fn risky<T>(value: T, selector: i32) -> T ! Problem {
   if selector == 0 {
     fail move Problem {code: 41}
   }
   return move value
 }
 
-effect fn relay(value: i32) -> i32
-! Problem {
+effect fn relay(value: i32) -> i32 ! Problem {
   let pending = risky<i32>(value, value)
   return run pending
 }
@@ -722,8 +712,7 @@ struct Problem {
   code: i32
 }
 
-effect fn begin() -> i32
-! Problem {
+effect fn begin() -> i32 ! Problem {
   return 20
 }
 
@@ -731,13 +720,11 @@ fn increment(value: i32) -> i32 {
   return value + 1
 }
 
-effect fn double(value: i32) -> i32
-! Problem {
+effect fn double(value: i32) -> i32 ! Problem {
   return value * 2
 }
 
-effect fn observe(value: i32) -> i32
-! Problem {
+effect fn observe(value: i32) -> i32 ! Problem {
   return value
 }
 
@@ -770,8 +757,7 @@ struct FinalProblem {
   code: i32
 }
 
-effect fn failFirst() -> i32
-! FirstProblem {
+effect fn failFirst() -> i32 ! FirstProblem {
   fail FirstProblem {code: 40}
 }
 
@@ -820,8 +806,7 @@ impl Clock for FixedClock {
   value: FixedClock.clockValue
 }
 
-effect fn read() -> i32
-? &mut Clock {
+effect fn read() -> i32 ? &mut Clock {
   return 40
 }
 
@@ -849,8 +834,7 @@ pub fn main() -> i32 {
   code: i32
 }
 
-effect fn risky() -> i32
-! Problem {
+effect fn risky() -> i32 ! Problem {
   fail move Problem {code: 41}
 }
 
@@ -1030,8 +1014,7 @@ effect fn succeed(value: i32) -> i32 {
   return value
 }
 
-effect fn log(value: i32) -> i32
-? &TapLogger {
+effect fn log(value: i32) -> i32 ? &TapLogger {
   return value
 }
 
@@ -3150,9 +3133,7 @@ interface Decoder<Arguments, A, E, ?R> {
   effect fn decode(self: &Self, encoded: Arguments) -> A ! E ? R
 }
 
-effect fn schemaDecode(self: &Schema, encoded: i32) -> i32
-! DecodeError
-? &Clock {
+effect fn schemaDecode(self: &Schema, encoded: i32) -> i32 ! DecodeError ? &Clock {
   if encoded < 0 {
     fail move DecodeError {}
   }

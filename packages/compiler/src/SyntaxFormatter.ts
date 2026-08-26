@@ -588,13 +588,19 @@ const printFunctionDeclaration = (
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
     printNode(context, nodeOf(node, 'ReturnType'), FormatDocument.text(' ')),
-    ...(failureRow === undefined ? [] : [printNode(context, failureRow, FormatDocument.hardLine)]),
-    ...(requirementRow === undefined
-      ? []
-      : [printNode(context, requirementRow, FormatDocument.hardLine)]),
-    ...(whereClause === undefined
-      ? []
-      : [printNode(context, whereClause, FormatDocument.hardLine)]),
+    FormatDocument.group(
+      FormatDocument.concat(
+        ...(failureRow === undefined
+          ? []
+          : [printNode(context, failureRow, FormatDocument.softLine)]),
+        ...(requirementRow === undefined
+          ? []
+          : [printNode(context, requirementRow, FormatDocument.softLine)]),
+        ...(whereClause === undefined
+          ? []
+          : [printNode(context, whereClause, FormatDocument.softLine)]),
+      ),
+    ),
     printNode(context, nodeOf(node, 'Block'), FormatDocument.text(' ')),
   )
 }

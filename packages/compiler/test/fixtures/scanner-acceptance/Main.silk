@@ -24,9 +24,7 @@ fn observe(kind: i32) -> i32 {
   return kind
 }
 
-effect fn scan(source: &[U8]) -> Vector<Token>
-! OutOfMemoryError
-? &mut Allocator {
+effect fn scan(source: &[U8]) -> Vector<Token> ! OutOfMemoryError ? &mut Allocator {
   let mut tokens = make<Token>()
   let mut index = usize.add(0, 0)
   while index < source.length {
@@ -45,8 +43,7 @@ effect fn scan(source: &[U8]) -> Vector<Token>
   return move tokens
 }
 
-effect fn build() -> i32
-! OutOfMemoryError {
+effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorService()
   let source = [
     U8 {value: 1},
