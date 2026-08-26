@@ -15,11 +15,11 @@
 
 ## 2. Measurement (needs branch pushed — checkpoint with user)
 
-- [ ] 2.1 Push spike branch, open draft PR, complete 3 green runs of the sharded workflow
-- [ ] 2.2 Collect per-run wall clock, per-shard durations (balance spread), and per-file
+- [x] 2.1 Push spike branch, open draft PR, complete 3 green runs of the sharded workflow
+- [x] 2.2 Collect per-run wall clock, per-shard durations (balance spread), and per-file
       timings from the artifacts
 
 ## 3. Findings
 
-- [ ] 3.1 Append a Findings section to design.md answering the proposal's four questions,
+- [x] 3.1 Append a Findings section to design.md answering the proposal's four questions,
       with an adopt / adjust shard count / abandon recommendation

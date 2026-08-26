@@ -71,3 +71,46 @@ the spike lives entirely in `.github/workflows/ci.yml`.
 - Final shard count (2/4/6) — answered by the spike's own timing data.
 - Whether `DriverNativeAcceptance` + checks should later move off `validate`'s critical path —
   answered by where the measured critical path lands.
+
+## Findings (2026-08-26, runs 33016472786 / 33018344159 attempts 1–2 on PR #265)
+
+Caveat: the first run (33014303799) was invalid — `pnpm --filter … run script -- args`
+silently drops the forwarded args, so every "shard" ran the full 222-file suite. Fixed by
+invoking vitest directly via `pnpm exec` (flags mirrored from `test:parallel`). That invalid
+run still measured a useful baseline: the full compiler suite on a dedicated 4-core runner
+is ~17 min.
+
+**1. Wall time.** Shard jobs finish in 3–9 min (cache-warm; ~80 s of that is setup + turbo
+build). But the gate's wall time is now `validate` at 22–23 min — down from ~30, and the
+compiler vitest suite is entirely off the critical path. The ≤12 min target is NOT met by
+sharding alone: `validate` still serializes non-compiler package tests (~500–545 s) and
+`test:native-acceptance` (~680–734 s, `--maxWorkers=1`).
+
+**2. Turbo caching.** Build steps cache-hit on every shard (~60 s including restore);
+concurrent same-key saves are benign warnings as predicted. Shard vitest runs are not
+turbo-cached (they always execute) — accepted spike cost, unchanged.
+
+**3. Flakes.** 0 failures across 12 shard jobs + 3 validate runs. No load-amplification
+timeouts observed on shard runners. Small sample, but no counterexample.
+
+**4. Time concentration.** Per-file totals (run 33016472786): 3,150 s across 222 files.
+`SchedulerFiber.test.ts` alone is 454 s (14%); the top 6 files
+(SchedulerFiber, TemporaryDirectoryAcceptance, StackVmPressure, LexerPressure,
+BootstrapEvaluation, LocalSharedPressure) are ~1,020 s (~⅓). Shard imbalance is driven by
+SchedulerFiber: its shard consistently walls at ~8.5 min while the others run 3–4.5 min.
+More shards cannot cut the max below one file's duration.
+
+### Recommendation: adopt, with two adjustments
+
+1. Keep 4 shards. Raising the count is pointless until `SchedulerFiber.test.ts` (454 s) is
+   split or duration-aware sharding is introduced — the max shard is single-file-bound.
+2. Split `validate` on adoption: `test:native-acceptance` as its own job (~13 min including
+   setup/build) and non-compiler tests as another (~10–11 min). Projected gate ≈ 13 min,
+   bounded by native acceptance — within sight of the 12 min target; further gains come
+   from that suite, not from sharding.
+
+Operational notes for adoption: artifact names carry a `run_attempt` suffix because v4
+artifact names are immutable across reruns; a full re-run *deletes* the prior attempt's
+artifacts, so download timings before rerunning; empty commits did not trigger
+`pull_request` workflow runs on this repo — trigger measurement runs with real changes or
+re-runs.
