@@ -306,7 +306,11 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'Move') return callTargets(expression.subject, index, substitution)
     if (expression._tag === 'RuntimeStringView')
       return callTargets(expression.source, index, substitution)
-    if (expression._tag === 'StringEquality' || expression._tag === 'ShortCircuit') {
+    if (
+      expression._tag === 'StringEquality' ||
+      expression._tag === 'EnumEquality' ||
+      expression._tag === 'ShortCircuit'
+    ) {
       return [
         ...callTargets(expression.left, index, substitution),
         ...callTargets(expression.right, index, substitution),

@@ -34,6 +34,12 @@ pub struct Problem {
   pub code: i32
   privateCode: i32
 }
+
+/// One recovery state.
+pub enum State {
+  /// The operation can start.
+  Ready
+}
 `
     const snapshot = yield* Analysis.ofSource('project/main', encode(source))
     const publicProject = Project.make(snapshot)
@@ -42,7 +48,7 @@ pub struct Problem {
     assert.strictEqual(module.documentation?.markdown, 'Recovery utilities.')
     assert.deepStrictEqual(
       module.items.filter((item) => item.kind !== 'Implementation').map((item) => item.name),
-      ['defaultCode', 'Primary', 'recover', 'Problem'],
+      ['defaultCode', 'Primary', 'recover', 'Problem', 'State'],
     )
     const defaultCode = module.items.find((item) => item.name === 'defaultCode')
     assert.strictEqual(defaultCode?.kind, 'Constant')
@@ -59,6 +65,11 @@ pub struct Problem {
       problem?.children.map((item) => item.name),
       ['code'],
     )
+    const state = module.items.find((item) => item.name === 'State')
+    assert.strictEqual(state?.kind, 'Enum')
+    assert.strictEqual(state?.documentation?.markdown, 'One recovery state.')
+    assert.strictEqual(state?.children.at(0)?.name, 'Ready')
+    assert.strictEqual(state?.children.at(0)?.documentation?.markdown, 'The operation can start.')
 
     const privateProject = Project.make(snapshot, { includePrivate: true })
     assert.isTrue(privateProject.modules[0]?.items.some((item) => item.name === 'helper'))

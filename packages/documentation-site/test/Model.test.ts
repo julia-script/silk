@@ -47,6 +47,12 @@ it('decodes the canonical signature object and required declaration fields', () 
   )
 })
 
+it('decodes enum, enum-member, and role declaration kinds', () => {
+  for (const kind of ['Enum', 'EnumMember', 'Role']) {
+    assert.strictEqual(Model.decode(project(item({ kind })))._tag, 'Decoded', kind)
+  }
+})
+
 it('rejects historical signatures and missing declaration fields atomically', () => {
   assert.strictEqual(
     Model.decode(project(item({ signature: 'pub fn add() -> i32' })))._tag,

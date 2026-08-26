@@ -42,6 +42,11 @@ pub struct Problem {
   /// Numeric code.
   pub code: i32
 }
+/// One recovery state.
+pub enum State {
+  /// The operation can start.
+  Ready
+}
 /// Recovers a problem.
 pub effect fn recover(
   /// Problem to inspect.
@@ -68,6 +73,13 @@ impl Allocator for SystemAllocator {
     spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'StructField')), source),
     ['/// Numeric code.'],
   )
+  assert.deepEqual(
+    spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'EnumDeclaration')), source),
+    ['/// One recovery state.'],
+  )
+  assert.deepEqual(spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'EnumMember')), source), [
+    '/// The operation can start.',
+  ])
   assert.deepEqual(
     spellings(DocBlock.ofNode(syntax, requiredNode(syntax, 'FunctionDeclaration')), source),
     ['/// Recovers a problem.'],

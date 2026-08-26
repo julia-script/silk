@@ -22,18 +22,19 @@
 //! import silk.effect { Effect }
 //!
 //! import silk.logger { Logger }
+//! import silk.logger { LogLevel }
 //!
 //! import silk.usize as usize
 //!
 //! effect fn program() -> i32
 //! ! Logger.LogError {
 //!   let mut logger = Logger.inMemoryService()
-//!   let logged = run Effect.logAt(Logger.warning(), "cache miss")
+//!   let logged = run Effect.logWarning("cache miss")
 //!     |> Effect.provideMut(&mut logger)
 //!   if Logger.length(&logger) != usize.ONE {
 //!     return 1
 //!   }
-//!   if Logger.levelCode(Logger.levelAt(&logger, usize.ZERO)) != 3 {
+//!   if Logger.levelAt(&logger, usize.ZERO) != LogLevel.Warning {
 //!     return 2
 //!   }
 //!   return 42
@@ -61,28 +62,19 @@ import silk.string { utf8Bytes as stringUtf8Bytes }
 import silk.u8 as u8
 import silk.usize as usize
 
-/// One logging severity from Trace through Error.
-pub struct LogLevel {
-  code: i32
+/// One closed logging severity from Trace through Error.
+pub enum LogLevel {
+  /// Detailed diagnostic events.
+  Trace,
+  /// Development diagnostic events.
+  Debug,
+  /// Ordinary operational events.
+  Info,
+  /// Recoverable abnormal conditions.
+  Warning,
+  /// Operations that did not complete as intended.
+  Error
 }
-
-/// Returns the Trace severity for detailed diagnostic events.
-pub fn trace() -> LogLevel { return LogLevel { code: 0 } }
-
-/// Returns the Debug severity for development diagnostic events.
-pub fn debug() -> LogLevel { return LogLevel { code: 1 } }
-
-/// Returns the Info severity for ordinary operational events.
-pub fn info() -> LogLevel { return LogLevel { code: 2 } }
-
-/// Returns the Warning severity for a recoverable abnormal condition.
-pub fn warning() -> LogLevel { return LogLevel { code: 3 } }
-
-/// Returns the Error severity for an operation that did not complete as intended.
-pub fn error() -> LogLevel { return LogLevel { code: 4 } }
-
-/// Returns the stable ordinal from `0` for Trace through `4` for Error.
-pub fn levelCode(level: LogLevel) -> i32 { return level.code }
 
 /// A typed failure reported by one [`Logger`] provider.
 ///
@@ -187,7 +179,7 @@ impl Logger for StdoutLogger {
 /// calls separately from committed events. Capacity failure and configured failure do not commit an
 /// event.
 pub struct InMemoryLogger {
-  levels: [i32; 8]
+  levels: [LogLevel; 8]
   offsets: [usize; 8]
   lengths: [usize; 8]
   messages: [i32; 64]
@@ -198,7 +190,18 @@ pub struct InMemoryLogger {
   failAt: usize
 }
 
-fn emptyLevels() -> [i32; 8] { return [0, 0, 0, 0, 0, 0, 0, 0] }
+fn emptyLevels() -> [LogLevel; 8] {
+  return [
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace,
+    LogLevel.Trace
+  ]
+}
 
 fn emptyIndexes() -> [usize; 8] { return [0, 0, 0, 0, 0, 0, 0, 0] }
 
@@ -274,7 +277,7 @@ effect fn record(
   let mut levels = Intrinsic.replace(self.levels, emptyLevels())
   let mut offsets = Intrinsic.replace(self.offsets, emptyIndexes())
   let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
-  levels[self.count] = levelCode(move level)
+  levels[self.count] = level
   offsets[self.count] = offset
   lengths[self.count] = values.length
   self.messages = move messages
@@ -308,7 +311,7 @@ pub fn length(self: &InMemoryLogger) -> usize {
 /// value instead of trapping. An index of eight or more traps.
 pub fn levelAt(self: &InMemoryLogger, index: usize) -> LogLevel {
   let levels = self.levels
-  return LogLevel { code: levels[index] }
+  return levels[index]
 }
 
 /// Returns the UTF-8 byte length of one committed message.

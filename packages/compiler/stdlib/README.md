@@ -46,8 +46,10 @@ The `==` and `!=` operators on `string` compare the exact UTF-8 bytes. They do n
 fold case, segment graphemes, or compare locale-sensitive text. Scalar traversal is explicit, and
 neither scalar nor grapheme indexing is available.
 
-`Logger` is the portable semantic logging boundary. Each `Effect.log` or `Effect.logAt` invocation
-supplies one complete borrowed `string` message; callers cannot append fragments to an open event.
+`Logger` is the portable semantic logging boundary. `LogLevel` is the closed enum from `Trace`
+through `Error`. Each `Effect.log`, level-specific helper such as `Effect.logDebug`, or
+`Effect.logAt` invocation supplies one complete borrowed `string` message; callers cannot append
+fragments to an open event.
 Providers own formatting, allocation, destinations, buffering, and physical writes. The initial
 `StdoutLogger` explicitly borrows UTF-8 bytes at the `StandardStreams` boundary, while
 `InMemoryLogger` copies message bytes only

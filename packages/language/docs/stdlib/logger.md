@@ -30,18 +30,19 @@ In-memory accessors require an event index less than [`length`](#declaration-736
 import silk.effect { Effect }
 
 import silk.logger { Logger }
+import silk.logger { LogLevel }
 
 import silk.usize as usize
 
 effect fn program() -> i32
 ! Logger.LogError {
   let mut logger = Logger.inMemoryService()
-  let logged = run Effect.logAt(Logger.warning(), "cache miss")
+  let logged = run Effect.logWarning("cache miss")
     |> Effect.provideMut(&mut logger)
   if Logger.length(&logger) != usize.ONE {
     return 1
   }
-  if Logger.levelCode(Logger.levelAt(&logger, usize.ZERO)) != 3 {
+  if Logger.levelAt(&logger, usize.ZERO) != LogLevel.Warning {
     return 2
   }
   return 42
@@ -58,77 +59,67 @@ pub fn main() -> i32 {
 
 Import as `Logger` with `import silk.logger`.
 
-Public declarations: 20.
+Public declarations: 14.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c"></a>
 
 ## `LogLevel`
 
 ```silk
-pub struct LogLevel
+pub enum LogLevel
 ```
 
-One logging severity from Trace through Error.
+One closed logging severity from Trace through Error.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a7472616365"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c3a3a6d656d6265723a30"></a>
 
-## `trace`
+### `Trace`
 
 ```silk
-pub fn trace() -> LogLevel
+Trace = 0
 ```
 
-Returns the Trace severity for detailed diagnostic events.
+Detailed diagnostic events.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a6465627567"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c3a3a6d656d6265723a31"></a>
 
-## `debug`
+### `Debug`
 
 ```silk
-pub fn debug() -> LogLevel
+Debug = 1
 ```
 
-Returns the Debug severity for development diagnostic events.
+Development diagnostic events.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696e666f"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c3a3a6d656d6265723a32"></a>
 
-## `info`
+### `Info`
 
 ```silk
-pub fn info() -> LogLevel
+Info = 2
 ```
 
-Returns the Info severity for ordinary operational events.
+Ordinary operational events.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a7761726e696e67"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c3a3a6d656d6265723a33"></a>
 
-## `warning`
+### `Warning`
 
 ```silk
-pub fn warning() -> LogLevel
+Warning = 3
 ```
 
-Returns the Warning severity for a recoverable abnormal condition.
+Recoverable abnormal conditions.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a6572726f72"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c3a3a6d656d6265723a34"></a>
 
-## `error`
+### `Error`
 
 ```silk
-pub fn error() -> LogLevel
+Error = 4
 ```
 
-Returns the Error severity for an operation that did not complete as intended.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a6c6576656c436f6465"></a>
-
-## `levelCode`
-
-```silk
-pub fn levelCode(level: LogLevel) -> i32
-```
-
-Returns the stable ordinal from `0` for Trace through `4` for Error.
+Operations that did not complete as intended.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72"></a>
 
