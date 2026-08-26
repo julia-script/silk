@@ -53,7 +53,7 @@ fn observe(result: Result<Token, i32>) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let storage = run Intrinsic.bindRequirementMut(Allocator.allocate(move layout), &mut allocator)
   let token = Token { storage: move storage }
@@ -113,7 +113,7 @@ effect fn attempt() -> Result<Allocation, OutOfMemoryError> ? &mut Allocator {
 }
 
 effect fn build() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let completed = run Intrinsic.bindRequirementMut(attempt(), &mut allocator)
   return match move completed {
     Result<Allocation, OutOfMemoryError> { value: outcome } => match move outcome {

@@ -5599,7 +5599,7 @@ export function analyzeExpression(
       qualifierLookup.declaration.canonical._tag === 'Canonical'
     ) {
       // A member resolves through the declaring module only when the type names its own module
-      // (`Logger.inMemoryService()` in logger.silk), or when an interface's own operation is invoked without
+      // (`Logger.inMemoryProvider()` in logger.silk), or when an interface's own operation is invoked without
       // a bound in scope (`HashKey.hash(...)`). Any other member is unknown.
       const actorModule =
         NameResolution.scopedModule(qualifierLookup.declaration) ??

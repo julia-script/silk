@@ -202,7 +202,7 @@ effect fn prepare<A, E>(
   let owner = self.identity
   let preparationRecorded = Shared.withMut(&self.audit, recordPreparation(owner))
   let identity = Shared.withMut(&self.identities, reserveIdentity)
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let preparedFiber = run Fiber.prepare<A, E>()
     |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
   let Fiber.PreparedFiber<A, E> { producer, canceller, fiber } = move preparedFiber
@@ -510,7 +510,7 @@ fn auditResult(self: &Audit) -> i32 {
 }
 
 effect fn scenario() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let audit = run Shared.make<Audit>(Audit {
     rootPreparations: 0,
     nestedPreparations: 0,

@@ -40,7 +40,7 @@ import silk.vector as Vector
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = Vector.make<i32>()
   let first = run Vector.append<i32>(&mut values, 10)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -77,7 +77,7 @@ import silk.vector as Vector
 
 effect fn search() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = Vector.make<i32>()
   let first = run Vector.append<i32>(&mut values, 3)
     |> Effect.provideMut<Allocator>(&mut allocator)

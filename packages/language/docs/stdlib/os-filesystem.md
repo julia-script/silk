@@ -44,7 +44,7 @@ import silk.os_filesystem as OsFileSystem
 
 effect fn program() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let provider = run OsFileSystem.make("/tmp")
     |> Effect.provideMut<Allocator>(&mut allocator)
   drop provider

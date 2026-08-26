@@ -38,7 +38,7 @@ import silk.hash_map { HashMap, contains, get, insert, length, make, remove }
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut map = make<Word, i32>(Hash.seed(12345))
   let mut key = 0
   while key < 20 {

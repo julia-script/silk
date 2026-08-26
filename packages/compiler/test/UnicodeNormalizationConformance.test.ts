@@ -154,7 +154,7 @@ effect fn checkFrom(
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let data = ${literal(cases.flatMap(encode))}
   let mut offset = usize.ZERO
   let mut remaining = usize.add(0, ${cases.length})

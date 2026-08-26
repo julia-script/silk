@@ -2,7 +2,7 @@
 export const allocatorSource = `import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }`
 
@@ -37,6 +37,6 @@ export const recoveredMemberSource = `import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return Effect.
 }`

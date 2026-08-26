@@ -205,7 +205,7 @@ struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -274,7 +274,7 @@ impl Drop for Guard {
 struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let primary = run (Shared.make<Cell>(Cell { value: 1 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let replacement = run (Shared.make<Cell>(Cell { value: 2 })

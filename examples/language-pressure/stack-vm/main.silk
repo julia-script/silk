@@ -308,8 +308,8 @@ effect fn logVerified(value: ()) -> () ! LogError ? &mut Logger {
 }
 
 pub effect fn main() -> () ! OutOfMemoryError | LogError {
-  let mut allocator = Allocator.systemAllocatorService()
-  let mut logger = Logger.inMemoryService()
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut logger = Logger.inMemoryProvider()
   // PRESSURE_INPUT: the harness replaces this literal only.
   let bytecode = b"\x01\x00\x06\x06\x01\x63\x01\x06\x01\x07\x04\x00"
   let completed = run execute(bytecode)

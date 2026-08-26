@@ -231,7 +231,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -328,7 +328,7 @@ effect fn failing(guard: Guard) -> i32 ! Problem {
   fail Problem { code: result }
 }
 effect fn build() -> i32 ! Problem | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let guard = Guard { tag: 7, storage: move storage }
   let deferred = defer(failing(move guard))
@@ -417,7 +417,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 

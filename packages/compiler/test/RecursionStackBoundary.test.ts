@@ -161,7 +161,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let counted = stepDepth(&built.step)
   let released = drain(move built)
@@ -179,7 +179,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   let released = drain(move built)
   if released == depth { return 0 }
@@ -200,7 +200,7 @@ import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect as Effect
 effect fn measure(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 0
@@ -228,7 +228,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

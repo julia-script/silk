@@ -433,7 +433,7 @@ fn consume(token: Token) -> i32 { return token.value }
 effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 1 }
   let deferred = Deferred { operation: effect { return consume(move token) } }
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let allocation = run Allocator.allocate(Layout.of<[i32; 2]>()) |> Effect.provideMut(&mut allocator)
   return 42
 }

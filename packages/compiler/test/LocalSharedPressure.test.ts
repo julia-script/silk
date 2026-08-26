@@ -68,7 +68,7 @@ effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let execution = run Execution.make(body(true), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut owner = Owner { slot: Empty {}, result: 0 }
@@ -93,7 +93,7 @@ effect fn body(state: Shared.Shared<State>) -> i32 {
   return value
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<State>(State { value: 42 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   return run body(move state)
@@ -193,8 +193,8 @@ const runWasm = Effect.fnUntraced(function* (snapshot: Analysis.Snapshot) {
 const rejectingSource = (source: string, ordinal: 0 | 1): string => {
   const declaration =
     ordinal === 0
-      ? 'let mut firstAllocator = Allocator.systemAllocatorService()'
-      : 'let mut secondAllocator = Allocator.systemAllocatorService()'
+      ? 'let mut firstAllocator = Allocator.systemAllocatorProvider()'
+      : 'let mut secondAllocator = Allocator.systemAllocatorProvider()'
   const rejected =
     ordinal === 0
       ? 'let mut firstAllocator = ExhaustedAllocator {}'
@@ -711,7 +711,7 @@ fn schedule<F: once Effect<i32> + Intrinsic.Detached>(child: F) -> () {
 }
 pub fn main() -> () {
   let scheduler = LocalScheduler {}
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let child = nested()
     |> Effect.provide<Scheduler>(&scheduler)
     |> Effect.provideMut<Allocator>(&mut allocator)

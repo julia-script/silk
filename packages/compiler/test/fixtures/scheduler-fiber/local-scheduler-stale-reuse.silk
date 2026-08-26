@@ -115,7 +115,7 @@ effect fn scenario() -> i32
   | Scheduler.TaskIdExhausted
   | Fiber.Cancelled
   | LocalScheduler.Stalled {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<RetainedWake>(RetainedWake { slot: WakeEmpty {} })
     |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
   let mut scheduler = LocalScheduler.make()

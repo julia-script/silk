@@ -136,7 +136,7 @@ effect fn acquire() -> Allocation ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let first = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let second = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)
   let third = run Intrinsic.bindRequirementMut(acquire(), &mut allocator)

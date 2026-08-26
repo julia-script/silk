@@ -294,7 +294,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }
@@ -303,7 +303,7 @@ impl Allocator for QuotaAllocator { allocate: QuotaAllocator.allocate }`,
   )
   return replaceExactlyOnce(
     withAllocator,
-    '  let mut allocator = Allocator.systemAllocatorService()',
+    '  let mut allocator = Allocator.systemAllocatorProvider()',
     `  let mut allocator = QuotaAllocator { remaining: ${quota} }`,
   )
 }

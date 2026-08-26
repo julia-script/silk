@@ -55,7 +55,7 @@ fn notifySecond(owner: &mut Owner) -> () {
 }
 
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let marker = run Shared.make<Marker>(Marker { value: 0, callbacks: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let firstMarker = Shared.clone<Marker>(&marker)

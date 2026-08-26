@@ -97,7 +97,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
 import silk.allocator { SystemAllocator }
 
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return 0
 }`
     didOpen(client, hintUri, hintText)

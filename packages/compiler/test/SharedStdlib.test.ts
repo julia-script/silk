@@ -19,7 +19,7 @@ struct Counter { value: i32 }
 fn increment(value: &mut Counter) -> i32 { value.value = value.value + 1 return value.value }
 fn read(value: &Counter) -> i32 { return value.value }
 effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let creating = Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let first = run creating
@@ -52,7 +52,7 @@ fn consume(value: Empty | Token) -> i32 {
 }
 fn release(storage: Allocation) -> i32 { drop storage return 42 }
 effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let storage = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator))
   let mailbox = run (Shared.make<Mailbox>(Mailbox {
@@ -77,7 +77,7 @@ effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemo
 }
 impl Allocator for Exhausted { allocate: Exhausted.reject }
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut system = Allocator.systemAllocatorService()
+  let mut system = Allocator.systemAllocatorProvider()
   let payload = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut system))
   let token = Token { storage: move payload }
@@ -103,7 +103,7 @@ effect fn badAllocate(self: &mut BadAllocator, layout: Layout) -> Allocation ! O
 }
 impl Allocator for BadAllocator { allocate: BadAllocator.badAllocate }
 effect fn good() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let shared = run (Shared.make<i32>(41)
     |> Effect.provideMut<Allocator>(&mut allocator))
   drop shared
@@ -183,7 +183,7 @@ fn increment(value: &mut Counter) -> i32 {
   return value.value
 }
 effect fn runOther() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let first = run (create<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let second = retain<Counter>(&first)
@@ -212,7 +212,7 @@ fn nested(value: ${outerReference}, alias: Shared.Shared<Counter>) -> i32 {
   return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
 }
 effect fn conflictCase() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let first = run (Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let alias = Shared.clone<Counter>(&first)

@@ -164,7 +164,7 @@ effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut firstOwner = Owner { slot: Empty {}, result: 0 }
   let mut secondOwner = Owner { slot: Empty {}, result: 0 }
   let first = run Execution.make(body(20), (), ready)
@@ -209,7 +209,7 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
   }
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {} }
   let execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -290,7 +290,7 @@ effect fn driveOnce<
   return run Execution.drive(move execution, move state, complete, move onSuspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let owner = run Shared.make<Owner>(Owner { slot: Empty {} })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&owner)
@@ -367,7 +367,7 @@ effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut State) -> (
   return run Execution.drive(move execution, move state, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut state = State { completed: 0 }
   let execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -417,7 +417,7 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
   }
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut firstOwner = Owner { slot: Empty {}, result: 0 }
   let mut secondOwner = Owner { slot: Empty {}, result: 0 }
   let first = run Execution.make(firstBody(), (), ready)
@@ -481,7 +481,7 @@ effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
   return run Execution.drive(move execution, move state, complete, cancel)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mailbox = run Shared.make<Mailbox>(Mailbox { slot: Empty {} })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let registrationMailbox = Shared.clone(&mailbox)
@@ -560,7 +560,7 @@ effect fn driveOnce<
   return run Execution.drive(move execution, move state, complete, move onSuspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let owner = run Shared.make<Owner>(Owner { slot: Empty {} })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let endpoint = Shared.clone(&owner)
@@ -629,7 +629,7 @@ effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
   }
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let reactor = run Shared.make<Reactor>(Reactor { slot: Empty {} })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let bodyReactor = Shared.clone(&reactor)
@@ -677,7 +677,7 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
   }
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -712,7 +712,7 @@ effect fn drive(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
   return run Execution.drive(move execution, move owner, complete, suspend)
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {} }
   let execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -768,7 +768,7 @@ effect fn driveStored(selected: Empty | Stored, owner: &mut Owner) -> () {
   }
 }
 effect fn program() -> i32 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut owner = Owner { slot: Empty {}, result: 0 }
   let execution = run Execution.make(body(), (), ready)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -865,7 +865,7 @@ struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
 effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run pending
@@ -903,7 +903,7 @@ struct Selected { code: i32 }
 struct Owned { storage: Allocation }
 struct Wide { code: f64 }
 effect fn risky() -> i32 ! Selected | Owned | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let storage = run pending
   fail Owned { storage: move storage }
@@ -1073,7 +1073,7 @@ fn choose(input: First | Second, guard: Guard) -> once Effect<i32> {
   }
 }
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let storage = run recipe
@@ -1589,7 +1589,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if literal == "A\\u{a2}" {} else { return 1 }
   if literal != "A\\u{a3}" {} else { return 2 }
 
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let copying = copy(literal) |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
   let appending = append(&mut owned, "\\u{20ac}\\u{10348}")
@@ -1618,7 +1618,7 @@ import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
   let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
   if view(&left) == view(&right) {} else { return 1 }
@@ -1727,7 +1727,7 @@ import silk.hash_map { HashMap, bucketCount, contains, get, insert, length, make
 import silk.option { Option, Some, None }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut map = make<Word, i32>(Hash.seed(4242))
   let mut key = 0
   while key < 40 {
@@ -1765,7 +1765,7 @@ import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -1805,7 +1805,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   let block = run recipe
   return move block
@@ -1896,7 +1896,7 @@ fn increment(value: &mut Counter) -> i32 {
 fn read(value: &Counter) -> i32 { return value.value }
 
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let first = run (Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let second = Shared.clone<Counter>(&first)
@@ -1959,7 +1959,7 @@ import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 import silk.u8 as u8
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[u8; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -1995,7 +1995,7 @@ import silk.layout { Layout }
 import silk.raw_buffer as RawBuffer
 import silk.slot as Slot
 effect fn store() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[f64; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -2042,7 +2042,7 @@ fn checksum(values: &[u8]) -> i32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let source = [octet(0), octet(255), octet(128), octet(1)]
   let copying = copy(&source) |> Effect.provideMut(&mut allocator)
   let mut bytes = run copying
@@ -2087,7 +2087,7 @@ import silk.slot as Slot
 struct Element { value: i32 }
 
 effect fn build(count: usize) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[Element; 4]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -2231,7 +2231,7 @@ struct Holder<F: once fn(i32) -> i32> { step: F }
 fn consume(value: i32, guard: Guard) -> i32 { return value + guard.tag }
 fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 42 }
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -2271,7 +2271,7 @@ effect fn allocate(self: &mut ExhaustedAllocator, layout: Layout) -> Allocation 
 impl Allocator for ExhaustedAllocator { allocate: ExhaustedAllocator.allocate }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut empty = ExhaustedAllocator { tag: 0 }
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
@@ -2438,8 +2438,8 @@ const schedulerFiber = (name: string): string =>
 const localSharedPressureFailure = (ordinal: 0 | 1): string =>
   localSharedPressure.replace(
     ordinal === 0
-      ? 'let mut firstAllocator = Allocator.systemAllocatorService()'
-      : 'let mut secondAllocator = Allocator.systemAllocatorService()',
+      ? 'let mut firstAllocator = Allocator.systemAllocatorProvider()'
+      : 'let mut secondAllocator = Allocator.systemAllocatorProvider()',
     ordinal === 0
       ? 'let mut firstAllocator = ExhaustedAllocator {}'
       : 'let mut secondAllocator = ExhaustedAllocator {}',
@@ -2579,7 +2579,7 @@ fn nested(value: ${outerReference}, alias: Shared.Shared<Counter>) -> i32 {
   return Shared.${inner}<Counter, i32>(&alias, ${innerCallback})
 }
 effect fn conflictCase() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let first = run (Shared.make<Counter>(Counter { value: 41 })
     |> Effect.provideMut<Allocator>(&mut allocator))
   let alias = Shared.clone<Counter>(&first)
@@ -2612,7 +2612,7 @@ fn consume(value: Empty | Token) -> i32 {
 }
 fn release(storage: Allocation) -> i32 { drop storage return 42 }
 effect fn useCell() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let storage = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut allocator))
   let mailbox = run (Shared.make<Mailbox>(Mailbox {
@@ -2661,7 +2661,7 @@ effect fn reject(self: &mut Exhausted, layout: Layout) -> Allocation ! OutOfMemo
 }
 impl Allocator for Exhausted { allocate: Exhausted.reject }
 effect fn construct() -> i32 ! OutOfMemoryError {
-  let mut system = Allocator.systemAllocatorService()
+  let mut system = Allocator.systemAllocatorProvider()
   let payload = run (Allocator.allocate(Layout.of<i32>())
     |> Effect.provideMut<Allocator>(&mut system))
   let token = Token { storage: move payload }

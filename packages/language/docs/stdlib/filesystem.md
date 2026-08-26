@@ -40,7 +40,7 @@ import silk.filesystem as FileSystem
 
 effect fn example() -> i32
 ! FileSystem.FileError | Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let path = run FileSystem.make("/workspace")
     |> Effect.provideMut(&mut allocator)
   if FileSystem.name(&path) == "workspace" {

@@ -92,7 +92,7 @@ effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn sum() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
   drop built
@@ -168,7 +168,7 @@ import silk.usize as usize
 import silk.box { Box, make as boxMake, get as boxGet, getMut as boxGetMut, into as boxInto }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut boxed = run boxMake<i32>(20) |> Effect.provideMut(&mut allocator)
 
   let borrowed = boxGet<i32>(&boxed)
@@ -227,7 +227,7 @@ import silk.box { Box, make as boxMake, into as boxInto }
 import silk.vector { Vector, make as vectorMake, append as vectorAppend, length as vectorLength }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = vectorMake<i32>()
   let first = run vectorAppend<i32>(&mut values, 21) |> Effect.provideMut(&mut allocator)
   let boxed = run boxMake<Vector<i32>>(move values) |> Effect.provideMut(&mut allocator)
@@ -297,7 +297,7 @@ effect fn extend(depth: i32) -> Chain ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn build(depth: i32) -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run extend(depth) |> Effect.provideMut(&mut allocator)
   drop built
   return 42

@@ -26,7 +26,7 @@ import silk.standard_streams { StandardStreams }
 
 effect fn writeMessage() -> ()
 ! StandardStreams.StreamWriteError {
-  let mut streams = StandardStreams.nativeStandardStreamService()
+  let mut streams = StandardStreams.nativeStandardStreamProvider()
   return run StandardStreams.send(StandardStreams.stdout(), b"Silk\n")
     |> Effect.provideMut<StandardStreams>(&mut streams)
 }
@@ -109,12 +109,12 @@ pub fn stderr() -> bool
 
 Returns the destination value that selects process standard error.
 
-<a id="declaration-73696c6b2f7374616e646172645f73747265616d733a3a6e61746976655374616e6461726453747265616d53657276696365"></a>
+<a id="declaration-73696c6b2f7374616e646172645f73747265616d733a3a6e61746976655374616e6461726453747265616d50726f7669646572"></a>
 
-## `nativeStandardStreamService`
+## `nativeStandardStreamProvider`
 
 ```silk
-pub fn nativeStandardStreamService() -> NativeStandardStreams
+pub fn nativeStandardStreamProvider() -> NativeStandardStreams
 ```
 
 Creates a process-backed standard-stream provider.

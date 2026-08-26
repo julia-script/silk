@@ -388,7 +388,7 @@ effect fn program() -> () ? &mut Logger {
 }
 
 pub effect fn main() {
-  let mut logger = Logger.stdoutService()
+  let mut logger = Logger.stdoutProvider()
   return run Effect.provideMut<Logger>(program(), &mut logger)
 }
 ```

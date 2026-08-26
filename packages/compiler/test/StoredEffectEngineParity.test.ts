@@ -413,7 +413,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -608,7 +608,7 @@ effect fn drive() -> i32 ! Problem | OutOfMemoryError ? &mut Allocator {
   return total
 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1
@@ -656,7 +656,7 @@ import silk.layout { Layout }
 ${cleanupSurface(kind)}
 effect fn recover(error: ${failures}) -> i32 { return ${recoverValue} }
 effect fn build() -> i32 ! ${failures} {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let storage = run Allocator.allocate(Layout.of<i32>()) |> Effect.provideMut(&mut allocator)
   let guard = Guard { tag: ${tag}, storage: move storage }
   let deferred = defer(${construct})
@@ -768,7 +768,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return run deferred.operation
 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(build() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -934,7 +934,7 @@ effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return 42
 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
 }`
 
@@ -961,7 +961,7 @@ effect fn drive() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return ${Array.from({ length: count }, (_, index) => `value${index}`).join(' + ')}
 }
 pub fn main() -> i32 {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let total = run Effect.catchAll(drive() |> Effect.provideMut(&mut allocator), recover)
   if total == ${count * 42} { return 42 }
   return 1

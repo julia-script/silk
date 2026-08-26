@@ -37,7 +37,7 @@ import silk.unicode as Unicode
 
 effect fn normalize() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let composing = Unicode.normalizeNfc("e\u{301}")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let composed = run composing

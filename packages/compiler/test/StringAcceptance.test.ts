@@ -65,7 +65,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
   if literal == "A\\u{a2}" {} else { return 1 }
   if literal != "A\\u{a3}" {} else { return 2 }
 
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let copying = copy(literal) |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
   let appending = append(&mut owned, "\\u{20ac}\\u{10348}")
@@ -124,7 +124,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

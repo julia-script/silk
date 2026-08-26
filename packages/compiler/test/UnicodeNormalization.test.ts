@@ -57,7 +57,7 @@ import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let precomposed = "\\u{e9}"
   let decomposed = "e\\u{301}"
 
@@ -104,7 +104,7 @@ import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let left = run normalizeNfc("\\u{e9}") |> Effect.provideMut(&mut allocator)
   let right = run normalizeNfc("e\\u{301}") |> Effect.provideMut(&mut allocator)
   if view(&left) == view(&right) {} else { return 1 }
@@ -138,7 +138,7 @@ import silk.string { String, view, ownedByteLength }
 import silk.unicode { normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 
   // A precomposed scalar becomes its base plus its combining mark.
   let simple = run normalizeNfd("\\u{e9}") |> Effect.provideMut(&mut allocator)
@@ -179,7 +179,7 @@ import silk.string { String, view }
 import silk.unicode { normalizeNfc }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 
   // Recomposition puts a decomposed sequence back together.
   let simple = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
@@ -322,7 +322,7 @@ struct QuotaAllocator { remaining: i32 }
 effect fn allocate(self: &mut QuotaAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   if self.remaining == 0 { fail OutOfMemoryError {} }
   self.remaining = self.remaining - 1
-  let mut inner = Allocator.systemAllocatorService()
+  let mut inner = Allocator.systemAllocatorProvider()
   let pending = Allocator.allocate(move layout) |> Effect.provideMut(&mut inner)
   return run pending
 }

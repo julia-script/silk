@@ -107,7 +107,7 @@ impl Drop for Guard {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe
@@ -187,7 +187,7 @@ effect fn build() -> Tree ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn sum() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let built = run build() |> Effect.provideMut(&mut allocator)
   let answer = total(&built)
   drop built

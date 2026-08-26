@@ -104,7 +104,7 @@ import silk.string { String, view }
 import silk.unicode { normalizeNfc, normalizeNfd }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let composed = run normalizeNfc("E\\u{304}\\u{300}") |> Effect.provideMut(&mut allocator)
   if view(&composed) == "\\u{1e14}" {} else { return 1 }
   let decomposed = run normalizeNfd("\\u{ac01}") |> Effect.provideMut(&mut allocator)

@@ -19,7 +19,7 @@ import silk.layout { Layout }
 struct Clock { storage: Allocation }
 
 effect fn openClock() -> Clock ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

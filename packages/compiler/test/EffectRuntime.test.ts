@@ -268,7 +268,7 @@ fn discard(self: once Effect<Payload>) -> () {
   return ()
 }
 pub effect fn main() -> () ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<i32>()
   let storage = run Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let payload = Payload { storage: move storage }

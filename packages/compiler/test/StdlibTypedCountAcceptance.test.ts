@@ -60,7 +60,7 @@ import silk.effect as Effect
 import silk.vector { Vector, make, append, get, length, capacity }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let mut values = make<i32>()
   let pending0 = append<i32>(&mut values, 10) |> Effect.provideMut(&mut allocator)
   let appended0 = run pending0
@@ -171,7 +171,7 @@ fn continueSum(value: string, step: ScalarStep) -> u32 {
 }
 
 effect fn build() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let copying = copy("A\\u{a2}\\u{20ac}\\u{10348}") |> Effect.provideMut(&mut allocator)
   let mut owned = run copying
   let borrowed = view(&owned)

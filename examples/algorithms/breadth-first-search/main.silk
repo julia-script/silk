@@ -80,7 +80,7 @@ fn verifyShortestDistance(distance: usize) -> () {
 }
 
 pub effect fn main() -> () ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   return run search()
     |> Effect.map(verifyShortestDistance)
     |> Effect.provideMut(&mut allocator)

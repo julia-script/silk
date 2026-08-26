@@ -22,7 +22,7 @@ effect fn clockValue(self: &mut FixedClock) -> i32 { return 0 }
 impl Clock for FixedClock { value: FixedClock.clockValue }
 
 effect fn openClock() -> FixedClock ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Allocator.allocate(move layout) |> Effect.provideMut(&mut allocator)
   let allocation = run recipe

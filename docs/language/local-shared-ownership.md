@@ -27,7 +27,7 @@ fn increment(counter: &mut Counter) -> i32 {
 fn read(counter: &Counter) -> i32 { return counter.value }
 
 effect fn useCounter() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
 
   // make allocates the Counter. clone adds an owner without copying the Counter.
   let counter = run Shared.make<Counter>(Counter { value: 41 })

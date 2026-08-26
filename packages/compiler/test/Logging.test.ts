@@ -32,7 +32,7 @@ import silk.logger {
 }
 
 effect fn program() -> i32 ! LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let trace = run Effect.provideMut(Effect.logTrace("trace"), &mut logger)
   let debug = run Effect.provideMut(Effect.logDebug("debug"), &mut logger)
   let info = run Effect.provideMut(Effect.log("info"), &mut logger)
@@ -71,7 +71,7 @@ it.effect('realizes an imported Logger accessor returning LogLevel', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.logger { LogLevel, Logger }
 pub fn main() -> i32 {
-  let logger = Logger.inMemoryService()
+  let logger = Logger.inMemoryProvider()
   if Logger.levelAt(&logger, 0) == LogLevel.Trace { return 42 }
   return 0
 }`)
@@ -124,7 +124,7 @@ effect fn storedLog() -> i32 ! LogError ? &mut Logger {
 effect fn value(number: i32) -> i32 { return number }
 
 effect fn program() -> i32 ! LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let direct = run Effect.provideMut(Effect.log("direct"), &mut logger)
   let piped = run (Effect.log("piped") |> Effect.provideMut(&mut logger))
   let stored = storedLog()
@@ -211,7 +211,7 @@ import silk.logger { LogError }
 import silk.logger { attempts, length }
 effect fn ignore(error: LogError) -> () { return () }
 effect fn program() -> i32 ! LogError {
-  let mut logger = Logger.inMemoryServiceFailAt(1)
+  let mut logger = Logger.inMemoryProviderFailAt(1)
   let first = run Effect.provideMut(Effect.log("first"), &mut logger)
   let attempted = Effect.provideMut(Effect.log("second"), &mut logger) |> Effect.catchAll(ignore)
   let second = run attempted
@@ -236,7 +236,7 @@ import silk.logger { LogError }
 import silk.logger { attempts, length }
 effect fn ignore(error: LogError) -> () { return () }
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let attempted = Effect.provideMut(
     Effect.log("12345678901234567890123456789012345678901234567890123456789012345"),
     &mut logger
@@ -276,7 +276,7 @@ import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.stdoutService()
+  let mut logger = Logger.stdoutProvider()
   let first = run Effect.provideMut(Effect.log("one\n"), &mut logger)
   let second = run Effect.provideMut(Effect.logError("two"), &mut logger)
   return ()
@@ -315,7 +315,7 @@ effect fn read() -> ()
 
 pub effect fn main() -> ()
 ! LogError {
-  let mut logger = Logger.stdoutService()
+  let mut logger = Logger.stdoutProvider()
   run ${bind}
 }`
 
@@ -357,7 +357,7 @@ pub effect fn main() -> ()
 import silk.effect as Effect
 import silk.logger { Logger, LogError }
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   return run (Effect.log("pipeline") |> Intrinsic.bindRequirementMut(&mut logger))
 }`)
     assert.deepEqual(Analysis.diagnostics(executablePipeline), [])
@@ -367,7 +367,7 @@ pub effect fn main() -> () ! LogError {
 import silk.effect as Effect
 import silk.logger { Logger, LogError }
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let mut bind = Intrinsic.bindRequirementMut(&mut logger)
   return run bind(Effect.log("stored"))
 }`)
@@ -395,7 +395,7 @@ effect fn read() -> () ! LogError ? &mut Logger {
 }
 
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.stdoutService()
+  let mut logger = Logger.stdoutProvider()
   return run bind(read(), &mut logger)
 }`
 
@@ -473,7 +473,7 @@ import silk.logger { Logger }
 effect fn read() -> i32 ? &mut Logger { return 42 }
 
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let direct = Intrinsic.bindRequirementMut<Logger>(&mut logger)
   ${aliases}
   return run bind(read())
@@ -512,7 +512,7 @@ fn observeThenForward<F>(value: F) -> F {
 effect fn read() -> i32 ? &mut Logger { return 42 }
 
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let bind = observeThenForward(Effect.provideMut<Logger>(&mut logger))
   return run bind(read())
 }`)
@@ -548,7 +548,7 @@ import silk.logger { Logger }
 fn forward<F>(value: F) -> F { return move value }
 
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   ${bindings}
   drop bind
   return 42
@@ -580,7 +580,7 @@ fn store<F>(value: F) -> [F; 1] {
   return [move value]
 }
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let escaped = store(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
@@ -589,7 +589,7 @@ import silk.logger { InMemoryLogger }
 import silk.logger { Logger }
 fn consume<F>(value: F) -> () { return () }
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let consumed = consume(Effect.provideMut<Logger>(&mut logger))
   return 42
 }`,
@@ -600,7 +600,7 @@ fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F
   return operation(move value)
 }
 pub fn main() -> i32 {
-  let mut logger = Logger.inMemoryService()
+  let mut logger = Logger.inMemoryProvider()
   let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect"))
   return 42
 }`,

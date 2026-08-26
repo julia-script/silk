@@ -36,7 +36,7 @@ import silk.string as String
 
 effect fn convert() -> i32
 ! Allocator.OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let parsed = Format.signedValue("-42")
     |> Result.unwrapOr<i64, Format.ParseError>(0)
   let rendering = Format.signedText(parsed)

@@ -22,7 +22,7 @@
 //!
 //! effect fn copyMessage() -> i32
 //! ! Allocator.OutOfMemoryError {
-//!   let mut allocator = Allocator.systemAllocatorService()
+//!   let mut allocator = Allocator.systemAllocatorProvider()
 //!   let source = b"Silk"
 //!   let copying = Bytes.copy(&source)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -64,7 +64,7 @@ pub service Allocator {
 pub struct SystemAllocator {}
 
 /// Creates a process-backed allocator provider without allocating storage.
-pub fn systemAllocatorService() -> SystemAllocator {
+pub fn systemAllocatorProvider() -> SystemAllocator {
   return SystemAllocator {}
 }
 

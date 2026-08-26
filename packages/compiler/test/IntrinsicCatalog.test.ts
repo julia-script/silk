@@ -89,7 +89,7 @@ pub fn main() -> i32 {
   let layout = Layout.of<i32>()
   let repeated = Layout.repeat(move layout, 2)
   let made = Layout.make(4, 4)
-  let allocator = Allocator.systemAllocatorService()
+  let allocator = Allocator.systemAllocatorProvider()
   let unit = ()
   return i00
 }`,
@@ -104,7 +104,7 @@ import silk.slot as Slot
 fn useShared(value: &mut i32) -> i32 { return 42 }
 fn conflictShared() -> i32 { return 0 }
 effect fn storage() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorService()
+  let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[i32; 2]>()
   let recipe = Effect.provideMut(Allocator.allocate(move layout), &mut allocator)
   let allocation = run recipe
@@ -236,7 +236,7 @@ import silk.standard_streams { NativeStandardStreams }
 import silk.standard_streams { StreamWriteError }
 import silk.effect as Effect
 pub effect fn main() -> () ! StreamWriteError {
-  let mut native = StandardStream.nativeStandardStreamService()
+  let mut native = StandardStream.nativeStandardStreamProvider()
   let stdout = StandardStream.stdout()
   let stderr = StandardStream.stderr()
   let first = run Effect.provideMut(StandardStream.send(stdout, b"out"), &mut native)
