@@ -94,7 +94,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: compiler-shard-${{ matrix.shard }}-timings
+          # run_attempt suffix keeps reruns from colliding with v4's immutable artifact names.
+          name: compiler-shard-${{ matrix.shard }}-timings-a${{ github.run_attempt }}
           path: packages/compiler/compiler-shard-${{ matrix.shard }}.json
           if-no-files-found: warn
 
