@@ -82,16 +82,14 @@ fn callbacks(
   return shared(1, true)
 }
 
-effect fn delayed(problem: Token) -> i32
-! Token {
+effect fn delayed(problem: Token) -> i32 ! Token {
   if false {
     fail move problem
   }
   return 1
 }
 
-effect fn timed() -> i32
-? &End at Clock {
+effect fn timed() -> i32 ? &End at Clock {
   return 1
 }
 
