@@ -28,9 +28,9 @@ const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcon
 // which is not what was installed — so every ranged dependency needs an exact override here.
 // Read each from its installed copy rather than pinning a literal, which silently drifts out of
 // the store the next time the dependency is bumped.
-// pnpm's isolated store keeps these under the consuming package, not the workspace root.
-const installedVersion = (name: string): string =>
-  JSON.parse(readFileSync(resolve(cliPackageRoot, `node_modules/${name}/package.json`), 'utf8'))
+// pnpm's isolated store keeps these under the package that declares them, not the workspace root.
+const installedVersion = (packageRoot: string, name: string): string =>
+  JSON.parse(readFileSync(resolve(packageRoot, `node_modules/${name}/package.json`), 'utf8'))
     .version
 
 const installedPackageRoot = (name: string): string =>
@@ -322,16 +322,16 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './HostInput',
       './ImportPath',
       './ImportPlan',
-      './Instances',
-      './InterfaceWitnessCompatibility',
-      './Intrinsic',
-      './IntrinsicAvailability',
       './InspectorFlowModel',
       './InspectorPanels',
       './InspectorProjectBackend',
       './InspectorProjectSyntax',
       './InspectorRegistry',
       './InspectorRow',
+      './Instances',
+      './InterfaceWitnessCompatibility',
+      './Intrinsic',
+      './IntrinsicAvailability',
       './Layout',
       './LayoutEncode',
       './LayoutVerify',
@@ -471,7 +471,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion('smol-toml')}\n`,
+        `  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -804,16 +804,16 @@ console.log(
       'HostInput',
       'ImportPath',
       'ImportPlan',
-      'Instances',
-      'InterfaceWitnessCompatibility',
-      'Intrinsic',
-      'IntrinsicAvailability',
       'InspectorFlowModel',
       'InspectorPanels',
       'InspectorProjectBackend',
       'InspectorProjectSyntax',
       'InspectorRegistry',
       'InspectorRow',
+      'Instances',
+      'InterfaceWitnessCompatibility',
+      'Intrinsic',
+      'IntrinsicAvailability',
       'Layout',
       'LayoutEncode',
       'LayoutVerify',
@@ -1063,8 +1063,8 @@ test('the docgen release candidate exposes all documentation actors', () => {
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './CodeFence',
-      './Document',
       './Doctest',
+      './Document',
       './Example',
       './Highlight',
       './Html',
@@ -1100,7 +1100,7 @@ test('the docgen release candidate exposes all documentation actors', () => {
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1117,8 +1117,8 @@ test('the docgen release candidate exposes all documentation actors', () => {
     )
     expect(api).toEqual([
       'CodeFence',
-      'Document',
       'Doctest',
+      'Document',
       'Example',
       'Highlight',
       'Html',
@@ -1200,7 +1200,7 @@ test('the formatter release candidate installs offline with root and deep API pa
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1334,7 +1334,7 @@ test('the CLI release candidate installs with its project-first command surface'
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1387,6 +1387,8 @@ test('the CLI release candidate installs with its project-first command surface'
       'CheckCommand',
       'Cli',
       'DocCommand',
+      'DoctestCommand',
+      'DocumentationSiteCommand',
       'DocumentationWorkflow',
       'FormatCommand',
       'FormatWorkflow',
@@ -1628,7 +1630,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
