@@ -20,7 +20,7 @@ import silk.logger { Logger }
 pub effect fn main() -&gt; () ! Logger.LogError {
   let mut logger = Logger.stdoutProvider()
 
-  run Effect.log(&quot;Hello, world!\n&quot;)
+  run Effect.log(&quot;Hello, world!&quot;)
     |&gt; Effect.provideMut(&amp;mut logger)
 }</silk-snippet></figure><p class="live-note">Live means the Silk compiler is running in your browser: hover a name for its type and docs — underlines are real diagnostics. Fragments are illustrative sketches and are not compiled.</p>
 <p>Yes, this is a fairly verbose way to say “Hello, world!”</p>
@@ -344,7 +344,7 @@ effect fn boxedAnswer() -&gt; i32
 <figure class="pane"><div class="panebar"><span class="lang">silk</span><span class="spacer"></span><span class="live">live · hover for types</span></div><silk-snippet diagnostics hover inlay-hints>
 import silk.allocator { OutOfMemoryError }
 import silk.effect { Effect }
-import silk.fiber { Fiber } 
+import silk.fiber { Fiber }
 import silk.local_scheduler { LocalScheduler }
 import silk.scheduler { Scheduler }
 

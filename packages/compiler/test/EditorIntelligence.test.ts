@@ -705,7 +705,7 @@ fn inspect(value: Streams.NativeStandardStreams) -> () { return () }
 
 pub effect fn main() -> () ! Streams.StreamWriteError {
   let mut streams = Streams.nativeStandardStreamProvider()
-  return run Streams.send(Streams.stdout(), b"Hello, world!\\n")
+  return run Streams.send(Streams.stdout(), b"Hello, world!")
     |> Effect.provideMut(&mut streams)
 }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
