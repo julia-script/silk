@@ -24,7 +24,7 @@ it('escapes a code block and its language', () => {
   const rendered = Prose.document([
     {
       _tag: 'CodeBlock',
-      language: 'silk',
+      language: 'ebnf',
       value: 'let a = b < c && d > e',
       example: false,
       source,
@@ -32,8 +32,37 @@ it('escapes a code block and its language', () => {
   ])
   assert.strictEqual(
     rendered,
-    '<pre><code class="language-silk">let a = b &lt; c &amp;&amp; d &gt; e</code></pre>',
+    '<pre><code class="language-ebnf">let a = b &lt; c &amp;&amp; d &gt; e</code></pre>',
   )
+})
+
+it('renders a silk fence as a live snippet element with diagnostics and hover', () => {
+  const rendered = Prose.document([
+    {
+      _tag: 'CodeBlock',
+      language: 'silk',
+      value: 'pub fn main() -> i32 { return a < b }',
+      example: true,
+      source,
+    },
+  ])
+  assert.strictEqual(
+    rendered,
+    '<silk-snippet diagnostics hover>\npub fn main() -&gt; i32 { return a &lt; b }</silk-snippet>',
+  )
+})
+
+it('renders an ignore fence as a highlight-only snippet element', () => {
+  const rendered = Prose.document([
+    {
+      _tag: 'CodeBlock',
+      language: 'silk,ignore',
+      value: 'fn incomplete(',
+      example: false,
+      source,
+    },
+  ])
+  assert.strictEqual(rendered, '<silk-snippet>\nfn incomplete(</silk-snippet>')
 })
 
 it('renders the block kinds the emitter writes', () => {

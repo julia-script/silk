@@ -19,6 +19,12 @@ export interface Site {
 export interface Options {
   /** Shown in the page title and the index heading. */
   readonly title?: string
+  /**
+   * Contents of the self-registering `<silk-snippet>` element script. When present it is shipped
+   * as `silk-snippet.js` and every page loads it relatively, so Silk fences come alive; rendering
+   * stays a pure function of its inputs either way.
+   */
+  readonly snippetBundle?: string
 }
 
 export const defaultTitle = 'Silk documentation'
@@ -167,6 +173,20 @@ header nav { color: var(--muted); font-size: 0.9rem; }
 .summary { color: var(--muted); }
 .modules { list-style: none; padding: 0; }
 .modules li { border-top: 1px solid var(--line); padding: 0.6rem 0; }
+/* A snippet element that never upgrades — no JavaScript, or no element script — still reads as a
+   code block. Once defined, its shadow styles take over and this fallback withdraws. */
+silk-snippet:not(:defined) {
+  display: block;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+silk-snippet { margin: 1em 0; }
 `
 
 const searchWidget = `<div class="search">
@@ -174,7 +194,9 @@ const searchWidget = `<div class="search">
       <ul class="results" data-search-results hidden></ul>
     </div>`
 
-const page = (title: string, heading: string, body: string): string =>
+const snippetScriptPath = 'silk-snippet.js'
+
+const page = (title: string, heading: string, body: string, snippetScript: boolean): string =>
   `<!doctype html>
 <html lang="en">
   <head>
@@ -190,7 +212,9 @@ const page = (title: string, heading: string, body: string): string =>
     </header>
 ${body}
     <script src="search-index.js"></script>
-    <script>${Search.script()}</script>
+    <script>${Search.script()}</script>${
+      snippetScript ? `\n    <script type="module" src="${snippetScriptPath}"></script>` : ''
+    }
   </body>
 </html>
 `
@@ -243,6 +267,7 @@ ${
     ? '    <p class="summary">This module declares nothing.</p>'
     : module.items.map((item) => declaration(module, item, layout, links)).join('\n')
 }`,
+    options.snippetBundle !== undefined,
   )
   return Html.file(path, contents)
 }
@@ -277,6 +302,7 @@ const indexPage = (
     <ul class="modules">
 ${rows}
     </ul>`,
+      options.snippetBundle !== undefined,
     ),
   )
 }
@@ -296,6 +322,9 @@ export const render = (documentation: Model.Documentation, options: Options = {}
       ...documentation.modules.map((module) => modulePage(module, layout, links, options)),
       Html.file('style.css', style),
       Search.indexFile(entries),
+      ...(options.snippetBundle === undefined
+        ? []
+        : [Html.file(snippetScriptPath, options.snippetBundle)]),
     ]),
   })
 }

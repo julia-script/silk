@@ -45,6 +45,23 @@ export const inline = (nodes: ReadonlyArray<Model.Inline>, links: Links = noLink
 const blockSequence = (nodes: ReadonlyArray<Model.Block>, links: Links): string =>
   nodes.map((node) => block(node, links)).join('')
 
+/**
+ * Renders one Silk fence as the live snippet element.
+ *
+ * The fence's language token carries its comma-delimited attributes exactly as authored
+ * (`silk,ignore`). A plain `silk` fence gets diagnostics and hover; a fence with any attribute —
+ * `ignore` foremost — degrades to a highlight-only element whose content is never compiled in the
+ * reader's browser. The leading newline is the element's authoring convenience and is trimmed on
+ * upgrade; without JavaScript the element shows its text as-is.
+ */
+const silkSnippet = (language: string, value: string): string | undefined => {
+  const parts = language.split(',').map((part) => part.trim())
+  if (parts.at(0)?.toLocaleLowerCase() !== 'silk') return undefined
+  const attributes = parts.slice(1).filter((part) => part !== '')
+  const flags = attributes.length === 0 ? ' diagnostics hover' : ''
+  return `<silk-snippet${flags}>\n${Html.escapeText(value)}</silk-snippet>`
+}
+
 /** Renders one validated block node. */
 export const block = (node: Model.Block, links: Links = noLinks): string => {
   switch (node._tag) {
@@ -57,6 +74,9 @@ export const block = (node: Model.Block, links: Links = noLinks): string => {
       return `<h${level}>${inline(node.children, links)}</h${level}>`
     }
     case 'CodeBlock': {
+      const snippet =
+        node.language === undefined ? undefined : silkSnippet(node.language, node.value)
+      if (snippet !== undefined) return snippet
       const attribute =
         node.language === undefined
           ? ''
