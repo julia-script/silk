@@ -35,7 +35,7 @@ effect fn work() -> i32 {
 }
 
 effect fn program() -> i32
-! OutOfMemoryError | Scheduler.TaskIdExhausted | Fiber.Cancelled
+! OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<i32, never>(work())
   return run Fiber.join<i32, never>(move child)
@@ -43,9 +43,9 @@ effect fn program() -> i32
 
 effect fn recover(
   error: OutOfMemoryError
-    | Scheduler.TaskIdExhausted
+    | Scheduler.TaskIdExhaustedError
     | Fiber.Cancelled
-    | LocalScheduler.Stalled,
+    | LocalScheduler.StalledError,
 ) -> i32 {
   drop error
   return -1
@@ -100,7 +100,7 @@ response and notifies the parent first. It then reports the stored child's initi
 Deterministic FIFO order lets `forkChild` return the Fiber before the child's first body activation.
 
 **Boundary:** Preparation failure or task-store insertion refusal returns no Fiber and leaves no
-runnable child. Task identity exhaustion raises `Scheduler.TaskIdExhausted`; allocation refusal
+runnable child. Task identity exhaustion raises `Scheduler.TaskIdExhaustedError`; allocation refusal
 raises `Allocator.OutOfMemoryError`. Neither failure is converted to a child outcome.
 
 **Diagnostics:** A child Effect with additional unresolved runtime requirements fails ordinary
@@ -178,7 +178,7 @@ name a task from a later `execute` call.
 
 `LocalScheduler.execute` returns the root's exact success value or raises its exact typed failure.
 If no task is ready while the root remains incomplete, it cancels the remaining task tree and raises
-`LocalScheduler.Stalled`. Setup or task-store allocation refusal raises
+`LocalScheduler.StalledError`. Setup or task-store allocation refusal raises
 `Allocator.OutOfMemoryError`. Fatal traps remain outside typed recovery.
 
 Before any typed return or failure, shutdown removes every task, drains prepared submissions,

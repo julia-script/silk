@@ -10,11 +10,11 @@ effect fn prepare<A, E>(
   self: &mut RenamedDispatcher,
   child: once Effect<A ! E ? &mut RuntimePolicy.Scheduler>,
 ) -> RuntimePolicy.PendingPublication<A, E>
-! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhausted {
+! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError {
   drop child
   self.calls = self.calls + 1
   renamedPrepareCalled()
-  fail RuntimePolicy.TaskIdExhausted {}
+  fail RuntimePolicy.TaskIdExhaustedError {}
 }
 
 impl RuntimePolicy.Scheduler for RenamedDispatcher {
@@ -24,7 +24,7 @@ impl RuntimePolicy.Scheduler for RenamedDispatcher {
 effect fn child() -> i32 ? &mut RuntimePolicy.Scheduler { return 1 }
 
 effect fn request() -> i32
-! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhausted
+! Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError
 ? &mut RuntimePolicy.Scheduler {
   let pending = run RuntimePolicy.prepare<i32, never>(child())
   drop pending
@@ -32,7 +32,7 @@ effect fn request() -> i32
 }
 
 effect fn refused(
-  error: Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhausted,
+  error: Allocator.OutOfMemoryError | RuntimePolicy.TaskIdExhaustedError,
 ) -> i32 {
   drop error
   return 42

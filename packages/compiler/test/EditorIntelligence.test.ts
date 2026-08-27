@@ -208,13 +208,13 @@ import silk.scheduler as Scheduler
 effect fn child() -> i32 ? &mut Scheduler.Scheduler { return 42 }
 
 effect fn prepareOnly() -> Scheduler.PendingPublication<i32, never>
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   return run Scheduler.prepare<i32, never>(child())
 }
 
 effect fn program() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | Fiber.Cancelled
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
 ? &mut Scheduler.Scheduler {
   let childFiber = run Fiber.forkChild<i32, never>(child())
   return run Fiber.join<i32, never>(move childFiber)
@@ -225,16 +225,16 @@ effect fn observe(fiber: Fiber.Fiber<i32, never>) -> Fiber.Outcome<i32, never> {
 }
 
 fn inspectErrors(
-  exhausted: &Scheduler.TaskIdExhausted,
+  exhausted: &Scheduler.TaskIdExhaustedError,
   cancelled: &Fiber.Cancelled,
-  stalled: &LocalScheduler.Stalled,
+  stalled: &LocalScheduler.StalledError,
 ) -> () { return () }
 
 effect fn runProgram(scheduler: &mut LocalScheduler.LocalScheduler) -> i32
 ! Allocator.OutOfMemoryError
-  | Scheduler.TaskIdExhausted
+  | Scheduler.TaskIdExhaustedError
   | Fiber.Cancelled
-  | LocalScheduler.Stalled {
+  | LocalScheduler.StalledError {
   return run LocalScheduler.execute(move scheduler, program())
 }
 
@@ -293,10 +293,10 @@ pub fn main() -> i32 {
             '/// A prepared child Fiber and the canonical data required for atomic publication.',
           ],
           [
-            'Scheduler.TaskIdExhausted',
+            'Scheduler.TaskIdExhaustedError',
             'Scheduler.'.length,
             'silk/scheduler',
-            'pub struct TaskIdExhausted',
+            'pub struct TaskIdExhaustedError',
             '/// A typed failure that reports exhaustion of the task identity space.',
           ],
           [
@@ -328,10 +328,10 @@ pub fn main() -> i32 {
             '/// Runs one lazy root program under this Scheduler and returns its typed outcome.',
           ],
           [
-            'LocalScheduler.Stalled',
+            'LocalScheduler.StalledError',
             'LocalScheduler.'.length,
             'silk/local_scheduler',
-            'pub struct Stalled',
+            'pub struct StalledError',
             '/// Reports that no task is ready while the root is incomplete.',
           ],
         ] as const) {

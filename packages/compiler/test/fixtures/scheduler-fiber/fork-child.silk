@@ -198,7 +198,7 @@ effect fn prepare<A, E>(
   self: &mut RenamedDispatcher,
   child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
 ) -> Scheduler.PendingPublication<A, E>
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted {
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError {
   let owner = self.identity
   let preparationRecorded = Shared.withMut(&self.audit, recordPreparation(owner))
   let identity = Shared.withMut(&self.identities, reserveIdentity)
@@ -424,7 +424,7 @@ effect fn closedWork() -> i32 {
 }
 
 effect fn nestedWork() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   nestedBodyActivated()
   let child = run Fiber.forkChild<i32, never>(closedWork())
@@ -439,7 +439,7 @@ effect fn rejectedWork() -> i32 {
 }
 
 effect fn forkRejected() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<i32, never>(rejectedWork())
   drop child
@@ -447,11 +447,11 @@ effect fn forkRejected() -> i32
 }
 
 effect fn recoverRejected(
-  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
 ) -> i32 {
   return match move error {
     Allocator.OutOfMemoryError {} => observePublicationRejection()
-    Scheduler.TaskIdExhausted {} => observeWrongRejectionFailure()
+    Scheduler.TaskIdExhaustedError {} => observeWrongRejectionFailure()
   }
 }
 
@@ -466,24 +466,24 @@ fn observeWrongRejectionFailure() -> i32 {
 }
 
 effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<
     i32,
-    Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
   >(nestedWork())
   rootForkReturned()
   let outcome = run Fiber.await<
     i32,
-    Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
   >(move child)
   let nested = match move outcome {
     Fiber.Outcome<
       i32,
-      Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+      Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
     > { value } => match move value {
       Fiber.Success<i32> { value: success } => success
-      Fiber.Failure<Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted> { error } => -200
+      Fiber.Failure<Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError> { error } => -200
       Fiber.Cancelled {} => -300
     }
   }
@@ -494,7 +494,7 @@ effect fn rootWork(audit: Shared.Shared<Audit>) -> ()
 }
 
 effect fn recoverRoot(
-  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
 ) -> () {
   drop error
   return ()

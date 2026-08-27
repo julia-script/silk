@@ -71,7 +71,7 @@ effect fn staleChild() -> i32 {
 }
 
 effect fn staleReadyRoot() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<i32, never>(staleChild())
   drop child
@@ -85,7 +85,7 @@ effect fn currentChild() -> i32 {
 }
 
 effect fn freshRoot(state: Shared.Shared<RetainedWake>) -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | Fiber.Cancelled
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | Fiber.Cancelled
 ? &mut Scheduler.Scheduler {
   freshStarted()
   consumeRetainedWake(&state)
@@ -96,12 +96,12 @@ effect fn freshRoot(state: Shared.Shared<RetainedWake>) -> i32
 }
 
 effect fn recoverRetainedRun(
-  error: RetainedRootFailure | Allocator.OutOfMemoryError | LocalScheduler.Stalled,
+  error: RetainedRootFailure | Allocator.OutOfMemoryError | LocalScheduler.StalledError,
 ) -> i32 {
   return match move error {
     RetainedRootFailure {} => 0
     Allocator.OutOfMemoryError {} => 0
-    LocalScheduler.Stalled {} => markRetainedRecovery()
+    LocalScheduler.StalledError {} => markRetainedRecovery()
   }
 }
 
@@ -112,9 +112,9 @@ fn markRetainedRecovery() -> i32 {
 
 effect fn scenario() -> i32
 ! Allocator.OutOfMemoryError
-  | Scheduler.TaskIdExhausted
+  | Scheduler.TaskIdExhaustedError
   | Fiber.Cancelled
-  | LocalScheduler.Stalled {
+  | LocalScheduler.StalledError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<RetainedWake>(RetainedWake { slot: WakeEmpty {} })
     |> Effect.provideMut<Allocator.Allocator>(&mut allocator)
@@ -140,9 +140,9 @@ effect fn scenario() -> i32
 
 effect fn recoverScenario(
   error: Allocator.OutOfMemoryError
-    | Scheduler.TaskIdExhausted
+    | Scheduler.TaskIdExhaustedError
     | Fiber.Cancelled
-    | LocalScheduler.Stalled,
+    | LocalScheduler.StalledError,
 ) -> i32 {
   drop error
   return -99

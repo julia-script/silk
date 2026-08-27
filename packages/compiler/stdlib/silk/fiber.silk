@@ -524,7 +524,7 @@ effect fn publishPending<A, E>(
 pub effect fn forkChild<A, E>(
   child: once Effect<A ! E ? &mut Scheduler.Scheduler>
 ) -> Fiber<A, E>
-! OutOfMemoryError | Scheduler.TaskIdExhausted
+! OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let pending = run Scheduler.prepare<A, E>(move child)
   return run publishPending<A, E>(move pending)

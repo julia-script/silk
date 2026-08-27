@@ -43,7 +43,7 @@ fn taskIdHash(identity: &TaskId, seed: &HashSeed) -> u64 {
 impl HashKey for TaskId { equals: TaskId.taskIdEquals hash: TaskId.taskIdHash }
 
 /// A typed failure that reports exhaustion of the task identity space.
-pub struct TaskIdExhausted {}
+pub struct TaskIdExhaustedError {}
 
 /// A response that records whether one prepared child was published or rejected.
 ///
@@ -180,7 +180,7 @@ pub service Scheduler {
   effect fn prepare<A, E>(
     child: once Effect<A ! E ? &mut Scheduler>
   ) -> PendingPublication<A, E>
-  ! OutOfMemoryError | TaskIdExhausted
+  ! OutOfMemoryError | TaskIdExhaustedError
   ? &mut Scheduler
 }
 
@@ -193,7 +193,7 @@ pub service Scheduler {
 pub effect fn prepare<A, E>(
   child: once Effect<A ! E ? &mut Scheduler>
 ) -> PendingPublication<A, E>
-! OutOfMemoryError | TaskIdExhausted
+! OutOfMemoryError | TaskIdExhaustedError
 ? &mut Scheduler {
   return run Scheduler.prepare<A, E>(move child)
 }

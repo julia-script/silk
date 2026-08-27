@@ -32,7 +32,7 @@ pub struct LocalScheduler {}
 /// # Details
 ///
 /// [`execute`] cancels and releases the incomplete task tree before it raises this error.
-pub struct Stalled {}
+pub struct StalledError {}
 
 /// Constructs a reusable local Scheduler value.
 pub fn make() -> LocalScheduler {
@@ -170,12 +170,12 @@ fn reserveStep(source: &mut TaskIdSource) -> Reserved | Refused {
   return Reserved { identity: Scheduler.TaskId { value: selected } }
 }
 
-effect fn exhausted() -> Scheduler.TaskId ! Scheduler.TaskIdExhausted {
-  fail Scheduler.TaskIdExhausted {}
+effect fn exhausted() -> Scheduler.TaskId ! Scheduler.TaskIdExhaustedError {
+  fail Scheduler.TaskIdExhaustedError {}
 }
 
 effect fn reserve(source: &Shared.Shared<TaskIdSource>) -> Scheduler.TaskId
-! Scheduler.TaskIdExhausted {
+! Scheduler.TaskIdExhaustedError {
   let selected = Shared.withMut<TaskIdSource, Reserved | Refused>(source, reserveStep)
   return match move selected {
     Reserved { identity } => move identity
@@ -262,7 +262,7 @@ effect fn prepareChild<A, E>(
   self: &mut SchedulerClient,
   child: once Effect<A ! E ? &mut Scheduler.Scheduler>,
 ) -> Scheduler.PendingPublication<A, E>
-! OutOfMemoryError | Scheduler.TaskIdExhausted {
+! OutOfMemoryError | Scheduler.TaskIdExhaustedError {
   let identity = run reserve(&self.identities)
   let mut allocator = Allocator.systemAllocatorProvider()
   let prepared = run Fiber.prepare<A, E>() |> Effect.provideMut<Allocator>(&mut allocator)
@@ -1016,9 +1016,9 @@ effect fn finishDrive(
   return ()
 }
 
-effect fn stalledDriver(driver: Driver) -> Driver ! Stalled {
+effect fn stalledDriver(driver: Driver) -> Driver ! StalledError {
   drop driver
-  fail Stalled {}
+  fail StalledError {}
 }
 
 fn noReady() -> bool { return false }
@@ -1038,7 +1038,7 @@ effect fn driveReady(driver: &mut Driver, selected: QueueEmpty | ReadyIdentity) 
 }
 
 effect fn driveUntilRoot(driver: Driver) -> Driver
-! OutOfMemoryError | Stalled {
+! OutOfMemoryError | StalledError {
   let mut owned = move driver
   while !owned.rootComplete {
     let selected = takeReady(&owned.queue)
@@ -1078,12 +1078,12 @@ fn missingRoot<A>() -> A { let invalid = 1 / 0 return missingRoot<A>() }
 /// Scheduler client to each task, and dispatches ready tasks in FIFO order. Before it returns a
 /// root value or raises a typed error, it cancels every unfinished descendant and releases the
 /// run state. If the root is incomplete when no task is ready, it performs the same cleanup and
-/// raises [`Stalled`].
+/// raises [`StalledError`].
 pub effect fn execute<A, E>(
   self: &mut LocalScheduler,
   program: once Effect<A ! E ? &mut Scheduler.Scheduler>,
 ) -> A
-! E | OutOfMemoryError | Stalled {
+! E | OutOfMemoryError | StalledError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let queue = run Shared.make<ReadyQueue>(ReadyQueue {
     head: NoLink {},

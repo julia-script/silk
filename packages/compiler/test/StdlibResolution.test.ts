@@ -135,10 +135,10 @@ it('declares one discoverable namespace for every standard-library module', () =
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
   assert.deepEqual(Stdlib.find('silk/random')?.aliases, ['Xoshiro256StarStar'])
   assert.includeMembers([...(Stdlib.find('silk/fiber')?.aliases ?? [])], ['Cancelled', 'Outcome'])
-  assert.deepEqual(Stdlib.find('silk/local_scheduler')?.aliases, ['Stalled'])
+  assert.deepEqual(Stdlib.find('silk/local_scheduler')?.aliases, ['StalledError'])
   assert.includeMembers(
     [...(Stdlib.find('silk/scheduler')?.aliases ?? [])],
-    ['PendingPublication', 'TaskId', 'TaskIdExhausted'],
+    ['PendingPublication', 'TaskId', 'TaskIdExhaustedError'],
   )
 })
 

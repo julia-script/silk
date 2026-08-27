@@ -65,7 +65,7 @@ pub effect fn execute<A, E>(
   self: &mut LocalScheduler,
   program: once Effect<A ! E ? &mut Scheduler>
 ) -> A
-! E | Allocator.OutOfMemoryError | LocalScheduler.Stalled
+! E | Allocator.OutOfMemoryError | LocalScheduler.StalledError
 ```
 
 The lazy program has no application borrow when it becomes detached. A closed Effect is valid in
@@ -201,7 +201,7 @@ The scheduler driver owns one ordinary `HashMap<TaskId, TaskEntry>`; it is not S
 appears in a task capture. `TaskId` is a monotonic `u64` reserved from a small Shared identity source.
 IDs are never reused within one `execute`, so stale ready nodes cannot name a different task. The
 counter resets only after the previous run's complete typed shutdown and a new ready inbox has been
-created. Overflow raises a typed `Scheduler.TaskIdExhausted` during fork preparation.
+created. Overflow raises a typed `Scheduler.TaskIdExhaustedError` during fork preparation.
 
 `TaskEntry` stores the optional suspended/initial Execution, parent and intrusive child links,
 mailbox and completion-signal handles, its ready node, and one cancellation-worklist link. While an
@@ -286,7 +286,7 @@ language does not otherwise need.
 `execute` allocates fresh run state, prepares task zero through the same completion and task-entry
 shape as children, queues it, and repeatedly drains ready nodes. Root success or failure triggers
 descendant cancellation before the result is returned or raised. An empty ready queue with a
-pending root is `Stalled`; the same cancellation path runs before raising it. Prepared submissions
+pending root is `StalledError`; the same cancellation path runs before raising it. Prepared submissions
 which have not been adopted are destroyed while their mailboxes are drained.
 
 After typed shutdown, the TaskStore and ready queue are empty, all per-run Shared roots are dropped,

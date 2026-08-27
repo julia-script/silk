@@ -35,7 +35,7 @@ The compiler MUST NOT select, construct, recognize, or enter a Scheduler implici
 `LocalScheduler.execute` SHALL return the root program's success value and SHALL propagate its typed
 failure unchanged. Root Execution construction or scheduler-owned storage allocation refusal SHALL
 raise `Allocator.OutOfMemoryError`; exhaustion of runnable work while the root remains incomplete
-SHALL raise `LocalScheduler.Stalled`. Fatal traps SHALL remain fatal traps outside typed recovery.
+SHALL raise `LocalScheduler.StalledError`. Fatal traps SHALL remain fatal traps outside typed recovery.
 
 #### Scenario: Return root success
 
@@ -55,7 +55,7 @@ SHALL raise `LocalScheduler.Stalled`. Fatal traps SHALL remain fatal traps outsi
 #### Scenario: Report a stalled root
 
 - **WHEN** the root is incomplete and the local ready queue becomes empty
-- **THEN** `execute` raises `LocalScheduler.Stalled` after cancelling and cleaning the remaining task tree
+- **THEN** `execute` raises `LocalScheduler.StalledError` after cancelling and cleaning the remaining task tree
 
 ### Requirement: Child creation is atomic and deferred
 
