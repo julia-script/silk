@@ -4,13 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "api": "typedoc && node scripts/label-api-folders.mjs",
-    "build": "pnpm api && next build",
+    "build": "next build",
     "clean": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
-    "dev": "pnpm api && next dev",
+    "dev": "next dev",
     "start": "next start",
     "test": "vitest run",
-    "typecheck": "pnpm api && next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
@@ -42,7 +41,6 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@silk-lang/formatter": "workspace:*",
-    "@silk-lang/llvm": "workspace:*",
     "@silk-lang/wasm": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/mdast": "^4.0.4",
@@ -52,8 +50,6 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.24",
     "tailwindcss": "^4.3.3",
-    "typedoc": "^0.28.20",
-    "typedoc-plugin-markdown": "^4.12.0",
     "typescript": "5.9.3"
   }
 }
