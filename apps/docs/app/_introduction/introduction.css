@@ -263,8 +263,6 @@
 /* ── the element, in workbench colors ─────────── */
 .silk-intro silk-snippet {
   display: block;
-  white-space: pre;
-  overflow-x: auto;
   font-family: var(--mono);
   font-size: 12.5px;
   border: 0 !important;
@@ -291,6 +289,16 @@
   --silk-snippet-token-comment: var(--ink-4);
   --silk-snippet-token-operator: var(--ink-2);
   --silk-snippet-token-punctuation: var(--ink-3);
+}
+
+/* Before the element upgrades (or without JavaScript) its text content is the code; only then
+   does the host need pre formatting and its own scrollbar. The upgraded editor scrolls itself,
+   and white-space is inherited, so leaving `pre` on the host would stop hover-tooltip prose
+   from wrapping inside the shadow DOM. */
+.silk-intro silk-snippet:not(:defined) {
+  white-space: pre;
+  overflow-x: auto;
+  padding: 10px 12px;
 }
 
 .silk-intro :focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }

@@ -7,7 +7,7 @@
  * show a false diagnostic, and the live set can never go stale against the compiler.
  */
 
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-lang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import type { BlockContent, PhrasingContent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
