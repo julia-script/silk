@@ -5,8 +5,8 @@ import { TextMate } from '@silk-lang/language';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**
- * Package docs and generated TSDoc are plain Markdown with no frontmatter — they ship to npm and
- * are read on GitHub, where a frontmatter block would render as noise.
+ * The language and compiler docs are plain Markdown with no frontmatter — they also ship with
+ * `@silk-lang/language` and render on GitHub, where a frontmatter block would be noise.
  *
  * Frontmatter is validated before remark runs, so the title falls back to the file name here and
  * `remarkH1Title` upgrades it to the document's `# H1`. An author-written title always wins.
@@ -25,14 +25,11 @@ function fallbackTitle(path: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-// ponytail: one collection over `content/`, which is entirely symlinks + generated output.
-// Loader record keys are type discriminators, not slug prefixes, so namespacing per package has
-// to come from the directory layout:
+// ponytail: one collection over `content/`, whose language directory is a symlink to the package
+// documentation. Loader record keys are type discriminators, not slug prefixes, so namespacing
+// comes from the directory layout:
 //
-//   content/<pkg>      -> symlink to packages/<pkg>/docs  (read in place, never copied)
-//   content/<pkg>-api  -> typedoc markdown from `pnpm api` (gitignored)
-//
-// Adding a package is one symlink plus one entryPoints line in typedoc.json — no code change.
+//   content/language -> symlink to packages/language/docs (read in place, never copied)
 const docs = defineDocs({
   dir: './content',
   docs: {
@@ -57,7 +54,6 @@ const docs = defineDocs({
 /** Sidebar label for each top-level content folder, keyed by directory name. */
 const folderTitles: Record<string, string> = {
   language: '@silk-lang/language',
-  llvm: '@silk-lang/llvm',
 };
 
 export const source = loader({
@@ -74,7 +70,7 @@ export const source = loader({
     ],
   },
   // Package docs use `README.md` as their entry (that's what GitHub and npm render), where
-  // Fumadocs expects `index.md`. Treat them the same so `/docs/llvm` resolves.
+  // Fumadocs expects `index.md`. Treat them the same so `/docs/language` resolves.
   slugs(file) {
     const slugs = getSlugs(file.path);
     return slugs.at(-1) === 'README' ? slugs.slice(0, -1) : undefined;

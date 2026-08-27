@@ -6,10 +6,10 @@
       "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/*/docs/**",
+        "$TURBO_ROOT$/packages/language/docs/**",
         "$TURBO_ROOT$/packages/*/src/**"
       ],
-      "outputs": [".next/**", "!.next/cache/**", "content/*-api/**"]
+      "outputs": [".next/**", "!.next/cache/**"]
     },
     "dev": {
       "dependsOn": ["^build"]

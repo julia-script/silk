@@ -90,12 +90,36 @@ const recovered = Type.integer(builder, 0).pipe(
 
 ## Documentation
 
-- [Build Tiny, a compiled language](./docs/tutorials/tiny-language/01-meet-tiny.md)
-- [Build a tiny expression compiler](./docs/tutorials/tiny-expression-compiler.md)
-- [How-to guides](./docs/README.md#solve-a-task)
+The package documentation is ordinary Markdown kept alongside the code and shipped in the npm
+package. Start from the track that matches what you need:
+
+### Learn by building
+
+- [Build Tiny, a compiled language](./docs/tutorials/tiny-language/01-meet-tiny.md) — a 13-lesson
+  path from source text to a native executable.
+- [Build a tiny expression compiler](./docs/tutorials/tiny-expression-compiler.md) — a shorter
+  path for readers already familiar with compiler frontends.
+
+### Solve a task
+
+- [Declare globals, aliases, and functions](./docs/how-to/declarations.md)
+- [Build branching control flow](./docs/how-to/control-flow.md)
+- [Emit memory, atomic, and intrinsic operations](./docs/how-to/memory-atomics-intrinsics.md)
+- [Add debug metadata](./docs/how-to/debug-metadata.md)
+- [Emit and validate LLVM output](./docs/how-to/output.md)
+
+### Look up behavior
+
 - [Actor reference](./docs/reference/actors.md)
 - [Behavior and guarantees](./docs/reference/behavior.md)
-- [Design explanations](./docs/README.md#understand-the-design)
+
+### Understand the design
+
+- [Why the builder is Effect-native](./docs/explanation/effect-native-builder.md)
+- [Why text and bitcode share one model](./docs/explanation/text-and-bitcode.md)
+
+The [documentation index](./docs/README.md) provides the same paths from within the `docs`
+directory.
 
 The package is organized as actor modules with explicit subpath exports. Prefer imports such as
 `@silk-lang/llvm/Builder` and `@silk-lang/llvm/FunctionBody` over a growing import from the root
