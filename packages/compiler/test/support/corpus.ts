@@ -1052,6 +1052,25 @@ fn choose(input: First | Second) -> Effect<i32> {
 pub fn main() -> i32 { return run choose(First {}) }`,
     expected: { _tag: 'Completes', result: 41 },
   },
+  // Alternatives with different capture arities exercise the composite's unified payload lanes:
+  // every executor must place and read alternative captures through the registered calling shape.
+  {
+    name: 'finite-effect-join-capture-arity',
+    source: `struct First {}
+struct Second {}
+fn choose(input: First | Second, a: i32, b: i32, c: i32) -> Effect<i32> {
+  return match move input {
+    First {} => effect { return a + b + c }
+    Second {} => effect { return c }
+  }
+}
+pub fn main() -> i32 {
+  let wide = run choose(First {}, 11, 13, 16)
+  let narrow = run choose(Second {}, 11, 13, 2)
+  return wide + narrow
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   {
     name: 'finite-effect-join-selected-cleanup',
     source: `import silk.allocator { Allocator }
@@ -1307,6 +1326,92 @@ return (40 + 2) * 1
     name: 'remainder-sign',
     source:
       'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // MIN % -1 traps identically everywhere: the quotient overflows even though the mathematical
+  // remainder is 0, matching ordinary arithmetic's invalid-remainder trap rule.
+  {
+    name: 'arith-convergence-remainder-min-trap',
+    source: `import silk.i32 as i32
+pub fn main() -> i32 { return i32.remainder(i32.subtract(-2147483647, 1), -1) }`,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'arith-convergence-remainder-min-trap-i64',
+    source: `import silk.i64 as i64
+pub fn main() -> i32 {
+  let minimum = i64.subtract(-9223372036854775807, 1)
+  if i64.remainder(minimum, -1) != 0 { return 1 }
+  return 2
+}`,
+    expected: { _tag: 'Trap' },
+  },
+  // The checked variant answers None exactly where the ordinary operation traps.
+  {
+    name: 'arith-convergence-checked-remainder-min-none',
+    source: `import silk.i32 as i32
+import silk.option { Option }
+pub fn main() -> i32 {
+  let minimum = i32.subtract(-2147483647, 1)
+  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, -1), 42) != 42 { return 1 }
+  if Option.unwrapOr<i32>(i32.checkedRemainder(7, -1), -1) != 0 { return 2 }
+  if Option.unwrapOr<i32>(i32.checkedRemainder(minimum, 2), -1) != 0 { return 3 }
+  if Option.unwrapOr<i32>(i32.checkedRemainder(7, 0), 42) != 42 { return 4 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Rotate counts wrap unsigned modulo the lane width, so negative counts rotate the other way
+  // instead of degenerating into a plain shift.
+  {
+    name: 'arith-convergence-rotate-negative-count',
+    source: `import silk.i32 as i32
+import silk.i64 as i64
+pub fn main() -> i32 {
+  if i32.rotateLeft(5, -1) != i32.rotateLeft(5, 31) { return 1 }
+  if i32.rotateLeft(5, -1) != -2147483646 { return 2 }
+  if i32.rotateRight(5, -1) != i32.rotateRight(5, 31) { return 3 }
+  if i32.rotateLeft(5, 33) != i32.rotateLeft(5, 1) { return 4 }
+  if i64.rotateLeft(5, -1) != i64.rotateLeft(5, 63) { return 5 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Float remainder is exact IEEE fmod on every executor: no intermediate overflow for extreme
+  // exponent differences and bit-exact results for ordinary operands.
+  {
+    name: 'arith-convergence-float-remainder-exact',
+    source: `import silk.f32 as f32
+import silk.f64 as f64
+fn infinity() -> f64 { return 1e308 * 10.0 }
+pub fn main() -> i32 {
+  if f64.toBits(f64.remainder(10.5, 3.25)) != 4604930618986332160 { return 1 }
+  if f64.toBits(f64.remainder(1e308, 1e-308)) != 708093261633040 { return 2 }
+  if f64.remainder(5.0, infinity()) != 5.0 { return 3 }
+  if !f64.isNaN(f64.remainder(infinity(), 3.0)) { return 4 }
+  if !f64.isNaN(f64.remainder(5.0, 0.0)) { return 5 }
+  if !f64.isNaN(f64.remainder(f64.fromBits(9221120237041090560), 3.0)) { return 6 }
+  if !f64.isSignNegative(f64.remainder(-5.0, 1.0)) { return 7 }
+  if f64.remainder(-5.0, 1.0) != 0.0 { return 8 }
+  if f32.toBits(f32.remainder(3.4e38, 1.2e-38)) != 3993146 { return 9 }
+  if f32.toBits(f32.remainder(10.5, 3.25)) != 1061158912 { return 10 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // A binding referenced only as an enum-value argument still becomes an effect capture.
+  {
+    name: 'arith-convergence-effect-enum-value-capture',
+    source: `import silk.i8 as i8
+enum(i8) Status {
+  Unknown = -1,
+  Ready = 41,
+}
+pub fn main() -> i32 {
+  let status = Status.Ready
+  let deferred = effect { return i8.toI32(Status.value(status)) + 1 }
+  return run deferred
+}`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2401,6 +2506,49 @@ pub fn main() -> i32 {
   {
     name: 'mixed-service-provider-suspension',
     source: mixedServiceProviderSuspension,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Two suspendable specializations of the same wrapper differ only in contractRow (which
+  // provider satisfies the requirement). Each carries its own coroutine frame entry, so frame
+  // lookups must key on the full suspension identity including contractRow — a name-and-type-
+  // arguments match selects the wrong specialization's frame.
+  {
+    name: 'contract-row-suspension-frames',
+    source: `import silk.effect as Effect
+service Value {
+  effect fn read() -> i32 ? &mut Value
+}
+struct DelayedA { value: i32 }
+effect fn readA(self: &mut DelayedA) -> i32 {
+  let value = self.value
+  return run Effect.suspend(effect { return value })
+}
+impl Value for DelayedA { read: DelayedA.readA }
+struct DelayedB { value: i32 }
+effect fn readB(self: &mut DelayedB) -> i32 {
+  let value = self.value + 1
+  return run Effect.suspend(effect { return value })
+}
+impl Value for DelayedB { read: DelayedB.readB }
+effect fn use() -> i32 ? &mut Value {
+  let base = 1
+  let got = run Value.read()
+  return got + base
+}
+effect fn first() -> i32 {
+  let mut provider = DelayedA { value: 19 }
+  return run Intrinsic.bindRequirementMut<Value>(use(), &mut provider)
+}
+effect fn second() -> i32 {
+  let mut provider = DelayedB { value: 20 }
+  return run Intrinsic.bindRequirementMut<Value>(use(), &mut provider)
+}
+effect fn program() -> i32 {
+  return (run first()) + (run second())
+}
+pub fn main() -> i32 {
+  return run program()
+}`,
     expected: { _tag: 'Completes', result: 42 },
   },
   // The float math conformance programs join the corpus so the native differential compiles and

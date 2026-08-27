@@ -1105,25 +1105,10 @@ const callableEnvironmentByIdentity = (
       FieldRealization.matchesIdentity(identity, candidate.callable),
   )
 
-const effectFieldLaneCount = (
-  layout: Layout.Plan,
-  field: Layout.EffectEnvironmentField,
-): number | undefined => {
-  if (field.representation === 'Borrow') return 1
-  if (field.effectIdentity !== undefined) {
-    const environment = effectEnvironmentByIdentity(layout, field.effectIdentity)
-    return environment === undefined
-      ? undefined
-      : Layout.effectEnvironmentLanes(layout, environment).length
-  }
-  if (field.callableIdentity !== undefined) {
-    const environment = callableEnvironmentByIdentity(layout, field.callableIdentity)
-    return environment === undefined
-      ? undefined
-      : Layout.callableEnvironmentLanes(layout, environment).length
-  }
-  return Layout.callingShape(layout, field.type)?.laneCount
-}
+// Offsets must mirror the runner ABI exactly, so the count comes from the same Layout helper
+// that materializes environment lanes for cleanup emission and the backends — never re-derived.
+const effectFieldLaneCount = (layout: Layout.Plan, field: Layout.EffectEnvironmentField): number =>
+  Layout.effectFieldLanes(layout, field).length
 
 const callableEnvironmentCleanupValid = (
   layout: Layout.Plan,
@@ -1196,7 +1181,7 @@ const effectEnvironmentCleanupValid = (
   const expected = environment.fields.flatMap((field, ordinal) => {
     const laneCount = effectFieldLaneCount(layout, field)
     const currentOffset = laneOffset
-    if (laneCount !== undefined) laneOffset += laneCount
+    laneOffset += laneCount
     const noCleanup: CleanupPlan.CleanupPlan = Object.freeze({
       _tag: 'NoCleanup',
       type: field.type,
@@ -1217,7 +1202,6 @@ const effectEnvironmentCleanupValid = (
       const candidate = [...expected].reverse().at(ordinal)
       return (
         candidate !== undefined &&
-        candidate.laneCount !== undefined &&
         slot.ordinal === candidate.ordinal &&
         slot.laneOffset === candidate.laneOffset &&
         slot.laneCount === candidate.laneCount &&

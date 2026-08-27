@@ -316,6 +316,9 @@ export const missingOpaqueRealizationCode = 'SEM0117' as const
 /** Stable code for an opaque result declared where no producer body can establish its identity. */
 export const bodylessOpaqueResultCode = 'SEM0118' as const
 
+/** Stable code for effect-block return sites whose success types disagree. */
+export const effectBlockReturnMismatchCode = 'SEM0163' as const
+
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
 export const partialMoveCode = 'OWN0002' as const
@@ -513,6 +516,7 @@ export type Code =
   | typeof invalidOpaqueResultBinderCode
   | typeof missingOpaqueRealizationCode
   | typeof bodylessOpaqueResultCode
+  | typeof effectBlockReturnMismatchCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -953,6 +957,7 @@ export type Reason =
       readonly originalSpan: SourceSpan.SourceSpan
     }
   | { readonly _tag: 'IncompatibleMatchResults'; readonly types: ReadonlyArray<string> }
+  | { readonly _tag: 'EffectBlockReturnMismatch'; readonly types: ReadonlyArray<string> }
   | {
       readonly _tag: 'DuplicateTypeParameter'
       readonly spelling: string
@@ -3146,6 +3151,24 @@ export const incompatibleMatchResults = (
     message: `Match arms have incompatible result types: ${types.join(', ')}`,
     reason: Object.freeze({
       _tag: 'IncompatibleMatchResults',
+      types: Object.freeze([...types]),
+    }),
+    span,
+  })
+
+/** Creates the diagnostic for an effect-block return whose type disagrees with the block's. */
+export const effectBlockReturnMismatch = (
+  types: ReadonlyArray<string>,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: effectBlockReturnMismatchCode,
+    severity: 'error',
+    message: `Effect block return sites have incompatible types: ${types.join(', ')}`,
+    reason: Object.freeze({
+      _tag: 'EffectBlockReturnMismatch',
       types: Object.freeze([...types]),
     }),
     span,

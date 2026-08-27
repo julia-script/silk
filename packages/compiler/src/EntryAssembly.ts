@@ -311,7 +311,9 @@ export const lowerEffectRunner = (
       const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
       return represented === undefined ? [] : [represented]
     }
-    const lowered = mirType(field.type)
+    // The layout resolves scalar-enum nominals to their Enum representation; without it a
+    // captured enum lowers as a bare Nominal and every enum operation in the runner body fails.
+    const lowered = mirType(field.type, new Map(), layout)
     if (lowered === undefined) return []
     if (field.representation === 'Value') return [lowered]
     if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
@@ -549,7 +551,9 @@ export const lowerWitnessEffectRunner = (
   opaqueRealizations: OpaqueRealization.Catalog,
 ): Mir.MirFunction | undefined => {
   const parameterTypes = spec.type.environment.fields.flatMap((field) => {
-    const type = mirType(field.type)
+    // The layout resolves scalar-enum nominals to their Enum representation, exactly as in
+    // lowerEffectRunner — without it a captured enum silently fails every enum operation.
+    const type = mirType(field.type, new Map(), layout)
     return type === undefined ? [] : [type]
   })
   if (parameterTypes.length !== spec.type.environment.fields.length) return undefined

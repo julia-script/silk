@@ -145,14 +145,10 @@ export const stateLayout = (
   program: Mir.Module,
   point: Mir.SuspensionPointId,
 ): Mir.CoroutineFrameTargetStateLayout | undefined =>
+  // The full instance key — contractRow included — selects the entry, matching pointKey and the
+  // wasm backend's Backend.suspensionPointKey; specializations can differ only in contractRow.
   program.coroutineFrames?.entries
-    .find(
-      (entry) =>
-        entry.function.declaration.module === point.owner.declaration.module &&
-        entry.function.declaration.name === point.owner.declaration.name &&
-        entry.function.typeArguments.map(SilkType.genericArgumentKey).join(',') ===
-          point.owner.typeArguments.map(SilkType.genericArgumentKey).join(','),
-    )
+    .find((entry) => Instances.keyText(entry.function) === Instances.keyText(point.owner))
     ?.states.find((state) => pointKey(state.point) === pointKey(point))
 
 export type CleanupPayloadField = Mir.CoroutineFramePayloadField & {

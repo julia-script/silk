@@ -46,6 +46,13 @@ export const integralBinary = (
     return Object.freeze({ _tag: 'Trap', reason: 'division by zero' })
   const width = Scalar.bits(scalar, pointerBits)
   if (
+    operation === 'Remainder' &&
+    scalar.signedness === 'Signed' &&
+    right === -1n &&
+    left === Scalar.range(scalar, pointerBits).minimum
+  )
+    return Object.freeze({ _tag: 'Trap', reason: 'arithmetic overflow' })
+  if (
     (operation === 'ShiftLeft' || operation === 'ShiftRight') &&
     (right < 0n || right >= BigInt(width))
   )
@@ -54,7 +61,7 @@ export const integralBinary = (
     scalar.signedness === 'Signed' ? BigInt.asIntN(width, input) : BigInt.asUintN(width, input)
   const leftBits = BigInt.asUintN(width, left)
   const rightBits = BigInt.asUintN(width, right)
-  const rotate = Number(right % BigInt(width))
+  const rotate = Number(((right % BigInt(width)) + BigInt(width)) % BigInt(width))
   const rotatedLeft =
     rotate === 0
       ? leftBits
@@ -131,11 +138,15 @@ export const integralBinary = (
   return Object.freeze({ _tag: 'Integer', type: scalar.spelling, value })
 }
 
-/** Computes the exact checked integer result; undefined represents trap/None. */
+/**
+ * Computes the exact checked integer result; undefined represents trap/None. `minimum` is the
+ * source scalar's lower bound, used to reject the `MIN % -1` remainder whose quotient overflows.
+ */
 export const checked = (
   operation: string,
   left: bigint,
   right: bigint | undefined,
+  minimum: bigint,
 ): bigint | undefined => {
   if (operation.startsWith('CheckedConvertTo')) {
     return left
@@ -153,6 +164,7 @@ export const checked = (
     return left / right
   }
   if (operation === 'CheckedRemainder' && right !== undefined && right !== 0n) {
+    if (left === minimum && right === -1n) return undefined
     return left % right
   }
   return undefined

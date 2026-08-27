@@ -131,9 +131,9 @@ const unsignedComparisons: Readonly<Partial<Record<Mir.BinaryOperator, Instr.Pla
   })
 
 /**
- * Wasm's `i32.div_s` and `i32.rem_s` already trap on a zero divisor and on `MIN / -1`, matching
- * MIR's trapping division exactly — no guard expansion is needed, unlike the LLVM backend's
- * explicit compare-and-branch sequence.
+ * Wasm's `i32.div_s` traps on a zero divisor and on `MIN / -1`, matching MIR's trapping division
+ * exactly. `i32.rem_s` traps on a zero divisor but is defined to return 0 for `MIN % -1`, so
+ * signed remainder emits an explicit MIN/-1 guard that traps through `unreachable` to match MIR.
  */
 const divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> = Object.freeze(
   {
@@ -170,6 +170,107 @@ const i64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemo
 
 const unsignedI64Divisions: Readonly<Partial<Record<Mir.BinaryOperator, Instr.PlainMnemonic>>> =
   Object.freeze({ Divide: 'i64.div_u', Remainder: 'i64.rem_u' })
+
+/**
+ * Exact IEEE fmod for the wasm backend, which has no float remainder instruction. A naive
+ * `x - trunc(x/y) * y` expansion rounds at every step and overflows for extreme exponent
+ * differences, so the helper instead reduces `|x|` by the largest `|y| * 2^k` at or below it
+ * until it drops under `|y|`: power-of-two scaling is exact, and every subtraction satisfies
+ * Sterbenz's lemma (`t <= ax < 2t`), so the final value is the mathematically exact remainder —
+ * matching LLVM's `frem` and the interpreter's `%`. Params: 0 = dividend, 1 = divisor; locals
+ * 2..4 are `|x|`, `|y|`, and the scaled step `t`.
+ */
+const floatRemainderBody = (prefix: 'f32' | 'f64'): ReadonlyArray<Instr.Instr> => {
+  const constant = prefix === 'f64' ? Instr.f64Const : Instr.f32Const
+  const [x, y, ax, ay, t] = [0, 1, 2, 3, 4]
+  return [
+    Instr.localGet(x),
+    Instr.op(`${prefix}.abs`),
+    Instr.localSet(ax),
+    Instr.localGet(y),
+    Instr.op(`${prefix}.abs`),
+    Instr.localSet(ay),
+    // NaN operand, zero divisor, or infinite dividend: `(x*y)/(x*y)` is NaN in exactly these
+    // cases and propagates an operand NaN.
+    Instr.localGet(x),
+    Instr.localGet(x),
+    Instr.op(`${prefix}.ne`),
+    Instr.localGet(y),
+    Instr.localGet(y),
+    Instr.op(`${prefix}.ne`),
+    Instr.op('i32.or'),
+    Instr.localGet(ay),
+    constant(0),
+    Instr.op(`${prefix}.eq`),
+    Instr.op('i32.or'),
+    Instr.localGet(ax),
+    constant(Number.POSITIVE_INFINITY),
+    Instr.op(`${prefix}.eq`),
+    Instr.op('i32.or'),
+    Instr.ifElse(
+      Instr.emptyBlockType,
+      [
+        Instr.localGet(x),
+        Instr.localGet(y),
+        Instr.op(`${prefix}.mul`),
+        Instr.localGet(x),
+        Instr.localGet(y),
+        Instr.op(`${prefix}.mul`),
+        Instr.op(`${prefix}.div`),
+        Instr.op('return'),
+      ],
+      [],
+    ),
+    // |x| < |y| (including an infinite divisor): x is already the remainder, sign intact.
+    Instr.localGet(ax),
+    Instr.localGet(ay),
+    Instr.op(`${prefix}.lt`),
+    Instr.ifElse(Instr.emptyBlockType, [Instr.localGet(x), Instr.op('return')], []),
+    // t = largest |y| * 2^k at or below |x| (a doubling that overflows to inf ends the scan).
+    Instr.localGet(ay),
+    Instr.localSet(t),
+    Instr.block(Instr.emptyBlockType, [
+      Instr.loop(Instr.emptyBlockType, [
+        Instr.localGet(t),
+        constant(2),
+        Instr.op(`${prefix}.mul`),
+        Instr.localGet(ax),
+        Instr.op(`${prefix}.gt`),
+        Instr.brIf(1),
+        Instr.localGet(t),
+        constant(2),
+        Instr.op(`${prefix}.mul`),
+        Instr.localSet(t),
+        Instr.br(0),
+      ]),
+    ]),
+    // Each pass subtracts t when it fits, then halves it; exits once |x| dropped under |y|.
+    Instr.block(Instr.emptyBlockType, [
+      Instr.loop(Instr.emptyBlockType, [
+        Instr.localGet(ax),
+        Instr.localGet(ay),
+        Instr.op(`${prefix}.lt`),
+        Instr.brIf(1),
+        Instr.localGet(ax),
+        Instr.localGet(t),
+        Instr.op(`${prefix}.ge`),
+        Instr.ifElse(
+          Instr.emptyBlockType,
+          [Instr.localGet(ax), Instr.localGet(t), Instr.op(`${prefix}.sub`), Instr.localSet(ax)],
+          [],
+        ),
+        Instr.localGet(t),
+        constant(0.5),
+        Instr.op(`${prefix}.mul`),
+        Instr.localSet(t),
+        Instr.br(0),
+      ]),
+    ]),
+    Instr.localGet(ax),
+    Instr.localGet(x),
+    Instr.op(`${prefix}.copysign`),
+  ]
+}
 
 /**
  * Wasm's `i32.add`, `i32.sub`, and `i32.mul` wrap on overflow, but MIR specifies that signed
@@ -989,9 +1090,28 @@ const emitIntegerBinaryValue = (
   const unsignedDivisionsForWidth = bits === 64 ? unsignedI64Divisions : unsignedDivisions
   const division = (unsigned ? unsignedDivisionsForWidth : divisionsForWidth)[operator]
   if (division !== undefined) {
-    const result = [Instr.localGet(left), Instr.localGet(right), Instr.op(division)]
-    if (bits >= 32 || operator !== 'Divide') return result
+    const prefix = bits === 64 ? 'i64' : 'i32'
     const range = Scalar.range(integer, pointerBits)
+    const overflowGuard: ReadonlyArray<Instr.Instr> =
+      unsigned || operator !== 'Remainder'
+        ? []
+        : [
+            Instr.localGet(left),
+            bits === 64 ? Instr.i64Const(range.minimum) : Instr.i32Const(Number(range.minimum)),
+            Instr.op(`${prefix}.eq`),
+            Instr.localGet(right),
+            bits === 64 ? Instr.i64Const(-1n) : Instr.i32Const(-1),
+            Instr.op(`${prefix}.eq`),
+            Instr.op('i32.and'),
+            Instr.ifElse(Instr.emptyBlockType, [Instr.op('unreachable')], []),
+          ]
+    const result = [
+      ...overflowGuard,
+      Instr.localGet(left),
+      Instr.localGet(right),
+      Instr.op(division),
+    ]
+    if (bits >= 32 || operator !== 'Divide') return result
     return [
       ...result,
       Instr.localSet(layout.scratch),
@@ -1764,65 +1884,32 @@ const makeOperationContext = (
       hookReleaseWalk(plan_, (nestedOffset) =>
         frameAddress(planned.offset + byteOffset + nestedOffset),
       )
+    // Byte offsets come from the same Layout placement walk that materializes environment lanes
+    // for every backend — never re-derived here, so a new field representation cannot desync
+    // hook release from the runner ABI (commit 7a8434b fixed exactly that drift once).
+    const placementOffsets = (
+      placements: ReadonlyArray<LayoutPlan.EnvironmentLanePlacement>,
+    ): ReadonlyArray<number> =>
+      placements.map((placement) => {
+        const laneOffset =
+          placement.root === undefined
+            ? 0
+            : LayoutVerify.laneOffset(memory.plan, placement.root, placement.lane.path)
+        if (laneOffset === undefined)
+          throw new RangeError('Wasm hook cleanup lost an environment lane offset')
+        return placement.byteOffset + laneOffset
+      })
     const environmentOffsets = (
       environment: Extract<LayoutPlan.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>,
-      base = 0,
     ): ReadonlyArray<number> =>
-      environment.fields.flatMap((field) => {
-        if (field.representation === 'Borrow') return [base + field.offset]
-        if (field.callableIdentity !== undefined) {
-          const nested =
-            field.callableIdentity.environment === undefined
-              ? undefined
-              : LayoutPlan.callableEnvironmentByIdentity(
-                  memory.plan,
-                  field.callableIdentity.environment,
-                )
-          return nested?._tag === 'CallableEnvironment'
-            ? callableEnvironmentOffsets(nested, base + field.offset)
-            : []
-        }
-        if (field.effectIdentity !== undefined) {
-          const nested = LayoutPlan.effectEnvironmentByFieldIdentity(
-            memory.plan,
-            field.effectIdentity,
-          )
-          return nested !== undefined ? environmentOffsets(nested, base + field.offset) : []
-        }
-        const shape = LayoutPlan.callingShape(memory.plan, field.type)
-        return (
-          shape?.lanes.flatMap((lane) => {
-            const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
-            return offset === undefined ? [] : [base + field.offset + offset]
-          }) ?? []
-        )
-      })
+      placementOffsets(LayoutPlan.effectEnvironmentLanePlacements(memory.plan, environment))
     const callableEnvironmentOffsets = (
       environment: Extract<
         LayoutPlan.CallableEnvironment,
         { readonly _tag: 'CallableEnvironment' }
       >,
-      base = 0,
     ): ReadonlyArray<number> =>
-      environment.fields.flatMap((field) => {
-        if (field.representation === 'Borrow') return [base + field.offset]
-        if (field.callableIdentity?.environment !== undefined) {
-          const nested = LayoutPlan.callableEnvironmentByIdentity(
-            memory.plan,
-            field.callableIdentity.environment,
-          )
-          return nested?._tag === 'CallableEnvironment'
-            ? callableEnvironmentOffsets(nested, base + field.offset)
-            : []
-        }
-        const shape = LayoutPlan.callingShape(memory.plan, field.type)
-        return (
-          shape?.lanes.flatMap((lane) => {
-            const offset = LayoutVerify.laneOffset(memory.plan, field.type, lane.path)
-            return offset === undefined ? [] : [base + field.offset + offset]
-          }) ?? []
-        )
-      })
+      placementOffsets(LayoutPlan.callableEnvironmentLanePlacements(memory.plan, environment))
     if (
       cleanup._tag === 'CallableCleanup' &&
       localType?._tag === 'CallableValue' &&
@@ -6258,18 +6345,17 @@ const emitApplyCallableOperation = (
           Instr.op(mnemonic),
           Instr.localSet(scalar(operation.destination)),
         ]
-      if (target.operation === 'Remainder')
+      if (target.operation === 'Remainder') {
+        const remainder = state.emitter.floatRemainder?.[prefix]
+        if (remainder === undefined)
+          throw new RangeError('Wasm float remainder lost its helper function')
         return [
           Instr.localGet(left),
-          Instr.localGet(left),
           Instr.localGet(right),
-          Instr.op(`${prefix}.div`),
-          Instr.op(`${prefix}.trunc`),
-          Instr.localGet(right),
-          Instr.op(`${prefix}.mul`),
-          Instr.op(`${prefix}.sub`),
+          Instr.call(remainder),
           Instr.localSet(scalar(operation.destination)),
         ]
+      }
       throw new RangeError(`Wasm callable float ${target.operation} is unavailable`)
     }
     const integer = scalarActor
@@ -6805,7 +6891,8 @@ const emitCheckedScalarOperation = (
   }
   const minimum = Scalar.range(target, pointerBits).minimum
   const signedOverflow =
-    target.signedness === 'Signed' && operation.operation === 'CheckedDivide'
+    target.signedness === 'Signed' &&
+    (operation.operation === 'CheckedDivide' || operation.operation === 'CheckedRemainder')
       ? [
           Instr.localGet(leftSlot),
           targetConstant(minimum),
@@ -6897,18 +6984,17 @@ const emitBinaryOperation = (
         Instr.op(arithmetic),
         Instr.localSet(scalar(operation.destination)),
       ]
-    if (operation.operator === 'Remainder')
+    if (operation.operator === 'Remainder') {
+      const remainder = state.emitter.floatRemainder?.[prefix]
+      if (remainder === undefined)
+        throw new RangeError('Wasm float remainder lost its helper function')
       return [
         Instr.localGet(scalar(operation.left)),
-        Instr.localGet(scalar(operation.left)),
         Instr.localGet(scalar(operation.right)),
-        Instr.op(`${prefix}.div`),
-        Instr.op(`${prefix}.trunc`),
-        Instr.localGet(scalar(operation.right)),
-        Instr.op(`${prefix}.mul`),
-        Instr.op(`${prefix}.sub`),
+        Instr.call(remainder),
         Instr.localSet(scalar(operation.destination)),
       ]
+    }
     throw new RangeError(`Wasm float operation ${operation.operator} is unavailable`)
   }
   if (
@@ -8155,6 +8241,14 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
   const needsHostWrite = program.functions.some((fn) =>
     MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
   )
+  // Over-approximates "a float remainder is reachable": both remainder emit paths operate on
+  // float-typed locals, so a program with no float local can never call the helper.
+  const needsFloatRemainder = program.functions.some((fn) =>
+    fn.localTypes.some((type) => {
+      const semantic = Mir.semanticType(type)
+      return semantic === 'f32' || semantic === 'f64'
+    }),
+  )
   const needsMemory =
     staticOffsets.size > 0 ||
     needsHeap ||
@@ -8308,6 +8402,32 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
       locals: [debug ? { type: i32, name: 'list' } : { type: i32 }],
       body: heapReleaseBody(privateMemory),
     })
+  }
+  let floatRemainder: { readonly f32: FuncActor.Func; readonly f64: FuncActor.Func } | undefined
+  if (needsFloatRemainder) {
+    const helperLocals = (valueType: ValType.ValType): ReadonlyArray<FuncActor.Local> =>
+      ['dividend_magnitude', 'divisor_magnitude', 'step'].map((name) =>
+        debug ? { type: valueType, name } : { type: valueType },
+      )
+    const remainder32 = yield* FuncActor.declare(
+      builder,
+      yield* WasmType.func(builder, [f32, f32], [f32]),
+      debugName('silk_f32_remainder'),
+    )
+    yield* FuncActor.define(builder, remainder32, {
+      locals: helperLocals(f32),
+      body: floatRemainderBody('f32'),
+    })
+    const remainder64 = yield* FuncActor.declare(
+      builder,
+      yield* WasmType.func(builder, [f64, f64], [f64]),
+      debugName('silk_f64_remainder'),
+    )
+    yield* FuncActor.define(builder, remainder64, {
+      locals: helperLocals(f64),
+      body: floatRemainderBody('f64'),
+    })
+    floatRemainder = { f32: remainder32, f64: remainder64 }
   }
 
   // Declare every function first so calls resolve regardless of definition order, mirroring the
@@ -8563,6 +8683,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         memory: helperMemory,
         executionPackageCleanups,
         executionCleanup: executionCleanupHelper,
+        ...(floatRemainder === undefined ? {} : { floatRemainder }),
         ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
       }),
     )
@@ -8649,6 +8770,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
         ...(executionCleanupHelper === undefined
           ? {}
           : { executionCleanup: executionCleanupHelper }),
+        ...(floatRemainder === undefined ? {} : { floatRemainder }),
         ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
       }),
     )
@@ -8725,6 +8847,7 @@ const emitProgramUnmapped = Effect.fnUntraced(function* (
           ...(executionCleanupHelper === undefined
             ? {}
             : { executionCleanup: executionCleanupHelper }),
+          ...(floatRemainder === undefined ? {} : { floatRemainder }),
           ...(suspensionRuntime === undefined ? {} : { suspensionRuntime }),
         }),
       )

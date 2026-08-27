@@ -317,6 +317,29 @@ it.effect('keeps every valid match corpus case in three-engine agreement', () =>
   }),
 )
 
+it.effect('keeps arithmetic convergence corpus cases in engine agreement', () =>
+  Effect.gen(function* () {
+    // Remainder MIN/-1 traps, checked remainder answers None, rotate counts wrap, and float
+    // remainder is exact fmod — identically on wasm and the interpreter (the native acceptance
+    // differential covers the same programs through nativeCorpus).
+    const programs = corpus.filter(
+      (candidate) =>
+        candidate.name.startsWith('arith-convergence-') ||
+        candidate.name === 'finite-effect-join-capture-arity',
+    )
+    assert.isAbove(programs.length, 0)
+    for (const program of programs) {
+      const executed = yield* run(program.source)
+      assert.strictEqual(executed, yield* interpret(program.source), program.name)
+      assert.strictEqual(
+        executed,
+        program.expected._tag === 'Completes' ? program.expected.result : 'trap',
+        program.name,
+      )
+    }
+  }),
+)
+
 it.effect('agrees with the interpreter on partially annotated generic calls', () =>
   Effect.gen(function* () {
     // A substitution seeded from an explicit prefix specializes the same way an inferred one
@@ -643,7 +666,9 @@ it.effect(
         ['subtract', (a, b) => a - b],
         ['multiply', (a, b) => a * b],
         ['divide', (a, b) => (b === 0 ? undefined : Math.trunc(a / b))],
-        ['remainder', (a, b) => (b === 0 ? undefined : a % b)],
+        // MIN % -1 traps like the overflowing division it implies, even though wasm rem_s
+        // itself would answer 0.
+        ['remainder', (a, b) => (b === 0 || (a === minimum && b === -1) ? undefined : a % b)],
       ]
 
       const mismatches: Array<string> = []

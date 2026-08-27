@@ -4840,10 +4840,21 @@ export const effectCaptureFacts = (
         for (const capture of fact.captures)
           recordReference(capture.reference, capture.access, capture.span, false)
         return
+      case 'EnumValue':
+        expression(fact.argument)
+        return
       case 'Integer':
+      case 'Floating':
       case 'Boolean':
       case 'Character':
       case 'Constant':
+      case 'StaticText':
+      case 'Unit':
+      case 'EnumMember':
+        return
+      default:
+        // Exhaustive so a new expression fact kind cannot silently skip capture registration.
+        fact satisfies never
         return
     }
   }
@@ -5004,24 +5015,48 @@ export function analyzeExpression(
     }
     const statements = analyzeStatements(nested, block, scope)
     const returned: Array<ExpressionFact> = []
-    const failures: Array<Type.Nominal> = []
+    // The fail statement's analysis already validated the failure type, so every recorded
+    // failure — nominal or a value-kind type parameter — belongs in the block's failure row.
+    const failures: Array<Type.Type> = []
     const collectTerminals = (items: ReadonlyArray<StatementFact>): void => {
       for (const statement of items) {
         if (statement._tag === 'ReturnStatement') returned.push(statement.expression)
-        else if (
-          statement._tag === 'FailStatement' &&
-          statement.failure !== undefined &&
-          Type.isNominal(statement.failure)
-        )
+        else if (statement._tag === 'FailStatement' && statement.failure !== undefined)
           failures.push(statement.failure)
         else if (statement._tag === 'IfStatement' || statement._tag === 'IfLetStatement') {
           collectTerminals(statement.taken)
           collectTerminals(statement.otherwise)
         } else if (statement._tag === 'WhileStatement') collectTerminals(statement.body)
+        else if (statement._tag === 'UnsafeStatement') collectTerminals(statement.statements)
       }
     }
     collectTerminals(statements)
-    const success = returned.at(-1)?.type
+    // Every return site contributes to the success type through the one canonical join rule;
+    // disagreeing sites are diagnosed instead of silently adopting the last return's type.
+    const returnedTypes = returned.flatMap((expression) =>
+      expression.type._tag === 'Available' ? [expression.type.type] : [],
+    )
+    let success: Type.Type | undefined
+    if (returned.length > 0 && returnedTypes.length === returned.length) {
+      const joined = Match.join(returnedTypes)
+      if (joined._tag === 'Joined') success = joined.type
+      else {
+        const first = returnedTypes.at(0)
+        const offender =
+          first === undefined
+            ? undefined
+            : returned.find(
+                (expression) =>
+                  expression.type._tag === 'Available' && !Type.equals(expression.type.type, first),
+              )
+        nested.diagnostics.push(
+          Diagnostic.effectBlockReturnMismatch(
+            joined.types.map(Type.encode),
+            offender?.syntax.span ?? node.span,
+          ),
+        )
+      }
+    }
     const captures = effectCaptureFacts(
       statements,
       firstLocalBinding,
@@ -5049,8 +5084,8 @@ export function analyzeExpression(
       ...captures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
     )
     const type =
-      success?._tag === 'Available'
-        ? availableExpressionType(Type.effect(success.type, failures, access))
+      success !== undefined
+        ? availableExpressionType(Type.effect(success, failures, access))
         : unavailableExpressionType
     return Object.freeze({
       fact: Object.freeze({

@@ -437,7 +437,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
             scope,
             target,
             [object.artifact, shim.artifact],
-            [],
+            // Float remainder lowers to LLVM `frem`, which becomes an fmod/fmodf libcall on
+            // targets whose libm is separate from libc (Linux); macOS folds it into libSystem.
+            ['m'],
             request.destination,
           ),
           () => 1,

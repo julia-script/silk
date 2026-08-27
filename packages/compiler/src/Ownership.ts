@@ -1515,15 +1515,34 @@ const analyzeLoans = (
       case 'CallableSection':
         for (const capture of expression.captures) scanRunEnds(capture.expression, region)
         return
+      case 'PlaceReplace':
+        scanRunEnds(expression.destination, region)
+        scanRunEnds(expression.value, region)
+        return
+      case 'EnumValue':
+        scanRunEnds(expression.argument, region)
+        return
       case 'EffectCatch':
         scanRunEnds(expression.protected, region)
         scanRunEnds(expression.handler, region)
+        return
+      case 'EffectResult':
+        scanRunEnds(expression.protected, region)
+        return
+      case 'EffectBindRequirement':
+        scanRunEnds(expression.protected, region)
         return
       case 'EffectBlock':
       case 'FunctionItem':
         return
       case 'Integer':
+      case 'Floating':
       case 'Boolean':
+      case 'Character':
+      case 'Constant':
+      case 'StaticText':
+      case 'Unit':
+      case 'EnumMember':
         return
       case 'Identifier': {
         const site = directSite(expression)?.site
@@ -1558,6 +1577,10 @@ const analyzeLoans = (
         }
         return
       }
+      default:
+        // Exhaustive so a new expression fact kind cannot silently hide loan-relevant uses.
+        expression satisfies never
+        return
     }
   }
   const scanStatementRunEnds = (facts: ReadonlyArray<Elaboration.StatementFact>): void => {

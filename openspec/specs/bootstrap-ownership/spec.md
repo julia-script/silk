@@ -122,8 +122,6 @@ path-sensitive analysis.
 - **WHEN** one arm moves a body binding and the trailing return reads it
 - **THEN** the later read is an `OWN0001` violation even though the move was conditional
 
-
-
 ### Requirement: Copy is one sealed validated property
 
 A type SHALL be Copy only through the compiler's single sealed Copy property. A user MAY declare
@@ -1027,3 +1025,12 @@ rules, and cleanup plans SHALL contain no enum-specific release or drop operatio
 
 - **WHEN** endpoint invocation borrows `O` and reentrant source destroys the Execution
 - **THEN** ownership records deferred cleanup and does not end the endpoint borrow or clean `O` or `R` until invocation returns
+
+### Requirement: Loan live-ranges account for uses nested in place and effect expressions
+
+Loan-end analysis SHALL treat identifier and callable occurrences nested inside place-replace, effect-result, and requirement-binding expressions as uses at that occurrence: they SHALL extend the enclosing loan's live range and SHALL invalidate any earlier record that treated the callable's last invocation as its final use.
+
+#### Scenario: View used inside a place replace keeps its loan live
+- **WHEN** a shared view's last use sits inside a place-replace expression's value operand and the borrowed owner is mutated between the view's direct uses and that nested use
+- **THEN** ownership analysis reports owner access during the loan — the view loan's live range extends through the place-replace use rather than ending at the last direct use
+

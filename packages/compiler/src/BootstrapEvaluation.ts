@@ -1145,8 +1145,14 @@ function* executeFunction(
         rightValue !== undefined && rightValue._tag === 'IntegerValue'
           ? BigInt(rightValue.value)
           : undefined
-      const exact = BootstrapArithmetic.checked(operation, left, right)
-      const range = Scalar.range(resultScalar, program.layout.target.pointerSize === 4 ? 32 : 64)
+      const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
+      const exact = BootstrapArithmetic.checked(
+        operation,
+        left,
+        right,
+        Scalar.range(source, pointerBits).minimum,
+      )
+      const range = Scalar.range(resultScalar, pointerBits)
       const succeeded = exact !== undefined && exact >= range.minimum && exact <= range.maximum
       const semantic = Type.option(resultScalar.spelling)
       if (!Type.isUnion(semantic))
@@ -3854,7 +3860,12 @@ function* executeFunction(
               (target?.category !== 'Integer' && !characterConversion)
             )
               throw new RangeError('MIR verifier allowed an invalid checked scalar operation')
-            const arithmetic = BootstrapArithmetic.checked(operation.operation, left, right)
+            const arithmetic = BootstrapArithmetic.checked(
+              operation.operation,
+              left,
+              right,
+              Scalar.range(source, program.layout.target.pointerSize === 4 ? 32 : 64).minimum,
+            )
             const success =
               arithmetic !== undefined &&
               (characterConversion

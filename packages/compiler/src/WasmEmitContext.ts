@@ -32,5 +32,7 @@ export interface WasmEmitContext<FunctionLayout, SuspensionRuntime> {
   readonly executionPackageCleanups: ReadonlyMap<string, ExecutionPackageCleanup>
   /** Runtime-recursive owner release for opaque Execution packages. */
   readonly executionCleanup?: FuncActor.Func
+  /** Exact-fmod helpers, present whenever the program can reach a float remainder. */
+  readonly floatRemainder?: { readonly f32: FuncActor.Func; readonly f64: FuncActor.Func }
   readonly suspensionRuntime?: SuspensionRuntime
 }
