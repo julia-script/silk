@@ -1,8 +1,8 @@
-import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
-import * as CompilerStdlib from '@silk-effect/compiler/Stdlib'
-import * as DocumentationProject from '@silk-effect/documentation/Project'
+import * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
+import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
+import * as CompilerStdlib from '@silk-lang/compiler/Stdlib'
+import * as DocumentationProject from '@silk-lang/documentation/Project'
 import * as Effect from 'effect/Effect'
 import type * as Sources from './Sources.js'
 

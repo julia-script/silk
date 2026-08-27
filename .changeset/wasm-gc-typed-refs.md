@@ -1,8 +1,8 @@
 ---
-'@silk-effect/wasm': patch
+'@silk-lang/wasm': patch
 ---
 
-Add GC and typed function references to `@silk-effect/wasm`, completing the Chrome-unflagged
+Add GC and typed function references to `@silk-lang/wasm`, completing the Chrome-unflagged
 feature surface: parameterized reference types with abstract and concrete heap types, struct
 and array types in canonicalized recursive groups with declared supertypes, subtype-aware
 validation, the GC/cast/typed-call instruction set, and type names. `ValType.RefType` changes

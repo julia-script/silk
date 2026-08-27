@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/inspector",
+  "name": "@silk-lang/inspector",
   "version": "0.0.0",
   "description": "Compiler-phase view projections for Silk Effect inspectors: the view registry and row models shared by the docs workbench and the language server.",
   "license": "MIT",
@@ -65,7 +65,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/compiler": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

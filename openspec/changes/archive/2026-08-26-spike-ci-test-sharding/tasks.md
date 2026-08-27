@@ -3,7 +3,7 @@
 ## 1. Workflow changes (ci.yml only)
 
 - [x] 1.1 Split `validate`: replace `pnpm check` with explicit steps — biome, `turbo run build`,
-      `turbo run typecheck`, `turbo run test --filter=!@silk-effect/compiler`, compiler
+      `turbo run typecheck`, `turbo run test --filter=!@silk-lang/compiler`, compiler
       non-vitest checks (`unicode:check`, `stdlib:check`, `toolchain:check`,
       `documentation:policy`, `documentation:check`, `documentation:examples`),
       `test:native-acceptance`, `test:scripts` — keeping `release:candidate`

@@ -36,13 +36,13 @@ it('declares no workspace runtime dependency beyond the snippet asset', () => {
       ? Object.keys(manifest.dependencies as Record<string, string>)
       : []
   assert.isAbove(dependencies.length, 0, 'the renderer is expected to have runtime dependencies')
-  // `@silk-effect/snippet` is the one deliberate exception: the command shell ships its prebuilt
+  // `@silk-lang/snippet` is the one deliberate exception: the command shell ships its prebuilt
   // element bundle with generated sites as opaque file contents. No renderer module imports it,
   // which the source scan below still enforces, so the renderer keeps reading the documentation
   // JSON and nothing else.
   assert.deepStrictEqual(
-    dependencies.filter((name) => name.startsWith('@silk-effect/')),
-    ['@silk-effect/snippet'],
+    dependencies.filter((name) => name.startsWith('@silk-lang/')),
+    ['@silk-lang/snippet'],
     'the renderer must read the documentation JSON and nothing else',
   )
 })
@@ -52,7 +52,7 @@ it('imports no compiler or workspace module from its own sources', () => {
   // module stays free of workspace imports so no compiler type can reach the rendering.
   const offenders = sourceFiles(join(packageRoot, 'src'))
     .filter((file) => !file.endsWith('/Cli.ts'))
-    .filter((file) => readFileSync(file, 'utf8').includes('@silk-effect/'))
+    .filter((file) => readFileSync(file, 'utf8').includes('@silk-lang/'))
     .map((file) => file.slice(packageRoot.length))
   assert.deepStrictEqual(offenders, [])
 })

@@ -1,22 +1,22 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
-import type * as AutoImport from '@silk-effect/compiler/AutoImport'
-import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
-import * as Diagnostic from '@silk-effect/compiler/Diagnostic'
-import * as FormattedDocument from '@silk-effect/compiler/FormattedDocument'
-import * as ImportPath from '@silk-effect/compiler/ImportPath'
-import * as ImportPlan from '@silk-effect/compiler/ImportPlan'
-import * as Presentation from '@silk-effect/compiler/Presentation'
-import * as SemanticOccurrence from '@silk-effect/compiler/SemanticOccurrence'
-import type * as SourceAction from '@silk-effect/compiler/SourceAction'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import * as SourceSpan from '@silk-effect/compiler/SourceSpan'
-import * as Stdlib from '@silk-effect/compiler/Stdlib'
-import type * as SyntaxFile from '@silk-effect/compiler/SyntaxFile'
-import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
-import type * as Token from '@silk-effect/compiler/Token'
-import type * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
-import * as Documentation from '@silk-effect/documentation/Document'
-import * as Formatter from '@silk-effect/formatter/Formatter'
+import * as Analysis from '@silk-lang/compiler/Analysis'
+import type * as AutoImport from '@silk-lang/compiler/AutoImport'
+import type * as DeclarationFacts from '@silk-lang/compiler/DeclarationFacts'
+import * as Diagnostic from '@silk-lang/compiler/Diagnostic'
+import * as FormattedDocument from '@silk-lang/compiler/FormattedDocument'
+import * as ImportPath from '@silk-lang/compiler/ImportPath'
+import * as ImportPlan from '@silk-lang/compiler/ImportPlan'
+import * as Presentation from '@silk-lang/compiler/Presentation'
+import * as SemanticOccurrence from '@silk-lang/compiler/SemanticOccurrence'
+import type * as SourceAction from '@silk-lang/compiler/SourceAction'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
+import * as SourceSpan from '@silk-lang/compiler/SourceSpan'
+import * as Stdlib from '@silk-lang/compiler/Stdlib'
+import type * as SyntaxFile from '@silk-lang/compiler/SyntaxFile'
+import * as SyntaxTree from '@silk-lang/compiler/SyntaxTree'
+import type * as Token from '@silk-lang/compiler/Token'
+import type * as WorkspaceInventory from '@silk-lang/compiler/WorkspaceInventory'
+import * as Documentation from '@silk-lang/documentation/Document'
+import * as Formatter from '@silk-lang/formatter/Formatter'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
@@ -1646,7 +1646,7 @@ export const symbols = (
  *
  * Every entry is reachable from a Silk token kind or occurrence role, so the legend advertises no
  * type the server never sends. `keyword`, `comment`, `string`, `number`, and `operator` come from
- * the lexer's own kinds — the same kinds `@silk-effect/language`'s TextMate grammar colors — while
+ * the lexer's own kinds — the same kinds `@silk-lang/language`'s TextMate grammar colors — while
  * an identifier's type is decided by the semantic occurrence covering it, which is what separates a
  * type name from a variable name that the grammar's regular expressions must color alike.
  */

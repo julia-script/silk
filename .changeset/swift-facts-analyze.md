@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': minor
+'@silk-lang/compiler': minor
 ---
 
 Add immutable semantic facts, declaration lookup, and phase-owned diagnostics for the first

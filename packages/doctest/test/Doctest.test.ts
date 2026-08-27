@@ -1,6 +1,6 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-effect/compiler/Analysis'
-import * as DocumentationProject from '@silk-effect/documentation/Project'
+import * as Analysis from '@silk-lang/compiler/Analysis'
+import * as DocumentationProject from '@silk-lang/documentation/Project'
 import * as Effect from 'effect/Effect'
 import * as Doctest from '../src/Doctest.js'
 import * as Report from '../src/Report.js'

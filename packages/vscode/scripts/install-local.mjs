@@ -45,8 +45,8 @@ const run = (command, commandArgs, cwd) => {
   }
 }
 
-console.log('Building @silk-effect/lsp and silk-language…')
-run('pnpm', ['--filter', '@silk-effect/lsp', '--filter', 'silk-language', 'run', 'build'], repoRoot)
+console.log('Building @silk-lang/lsp and silk-language…')
+run('pnpm', ['--filter', '@silk-lang/lsp', '--filter', 'silk-language', 'run', 'build'], repoRoot)
 
 const entrypoint = join(packageRoot, 'dist/extension.js')
 if (!existsSync(entrypoint)) {

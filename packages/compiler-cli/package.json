@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/compiler-cli",
+  "name": "@silk-lang/compiler-cli",
   "version": "0.0.0",
   "description": "Command line interface for the Silk Effect bootstrap compiler.",
   "license": "MIT",
@@ -130,9 +130,9 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.103",
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/documentation": "workspace:*",
-    "@silk-effect/formatter": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/documentation": "workspace:*",
+    "@silk-lang/formatter": "workspace:*",
     "effect": "catalog:",
     "smol-toml": "^1.7.1"
   },

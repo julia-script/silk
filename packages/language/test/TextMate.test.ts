@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import * as Lexer from '@silk-effect/compiler/Lexer'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as Lexer from '@silk-lang/compiler/Lexer'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
 import { assert, it } from 'vitest'
 import * as TextMate from '../src/TextMate.js'
 

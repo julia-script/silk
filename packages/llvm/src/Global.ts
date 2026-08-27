@@ -88,10 +88,10 @@ export interface Properties extends GlobalDescription.Common {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/llvm/Builder'
- * import * as Global from '@silk-effect/llvm/Global'
- * import * as Type from '@silk-effect/llvm/Type'
- * import * as Variable from '@silk-effect/llvm/Variable'
+ * import * as Builder from '@silk-lang/llvm/Builder'
+ * import * as Global from '@silk-lang/llvm/Global'
+ * import * as Type from '@silk-lang/llvm/Type'
+ * import * as Variable from '@silk-lang/llvm/Variable'
  *
  * const matches = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

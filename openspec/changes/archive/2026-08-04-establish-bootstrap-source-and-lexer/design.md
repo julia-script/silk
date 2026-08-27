@@ -1,6 +1,6 @@
 ## Context
 
-See `proposal.md` for motivation. `@silk-effect/llvm` and the Tiny-language tutorial exist, but no
+See `proposal.md` for motivation. `@silk-lang/llvm` and the Tiny-language tutorial exist, but no
 package owns Silk source text or tokenization. The accepted compiler architecture requires later
 syntax artifacts to retain exact source bytes, trivia, stable identities, and byte spans, so the
 first implementation should establish only that substrate.
@@ -24,7 +24,7 @@ first implementation should establish only that substrate.
 
 ## Decisions
 
-### Create a narrow `@silk-effect/compiler` package
+### Create a narrow `@silk-lang/compiler` package
 
 Create `packages/compiler` with public `SourceFile`, `SourceSpan`, `Token`, `LexicalDiagnostic`, and
 `Lexer` actors. The explicit package barrel re-exports those actors as namespaces, and each public

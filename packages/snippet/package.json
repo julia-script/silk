@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/snippet",
+  "name": "@silk-lang/snippet",
   "version": "0.0.0",
   "description": "Embeddable framework-free <silk-snippet> custom element: compiler-driven highlighting with opt-in diagnostics, hover, and inlay hints.",
   "license": "MIT",
@@ -66,9 +66,9 @@
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.8",
     "@lezer/highlight": "^1.2.3",
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/language": "workspace:*",
-    "@silk-effect/lsp": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/language": "workspace:*",
+    "@silk-lang/lsp": "workspace:*",
     "effect": "catalog:",
     "mdast-util-from-markdown": "^2.0.3",
     "vscode-languageserver-types": "3.17.5"

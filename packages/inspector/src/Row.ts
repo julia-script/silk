@@ -12,7 +12,7 @@
  * belongs to whichever surface renders the row.
  */
 
-import type * as SourceSpan from '@silk-effect/compiler/SourceSpan'
+import type * as SourceSpan from '@silk-lang/compiler/SourceSpan'
 
 /**
  * A half-open byte range in one module's source.

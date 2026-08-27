@@ -1,7 +1,7 @@
 'use client'
 
 import { useAtomSet, useAtomSubscribe, useAtomValue } from '@effect/atom-react'
-import * as WebContainerError from '@silk-effect/platform-webcontainer/WebContainerError'
+import * as WebContainerError from '@silk-lang/platform-webcontainer/WebContainerError'
 import * as Result from 'effect/Result'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useCallback, useEffect, useRef, useState } from 'react'

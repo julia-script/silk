@@ -40,16 +40,16 @@ jobs:
       - run: pnpm exec biome check .
       - run: node scripts/turbo.mjs run build
       - run: node scripts/turbo.mjs run typecheck
-      - run: node scripts/turbo.mjs run test --filter='!@silk-effect/compiler'
-      # The non-vitest parts of @silk-effect/compiler#test (its vitest payload is sharded below).
+      - run: node scripts/turbo.mjs run test --filter='!@silk-lang/compiler'
+      # The non-vitest parts of @silk-lang/compiler#test (its vitest payload is sharded below).
       - run: |
-          pnpm --filter @silk-effect/compiler run unicode:check
-          pnpm --filter @silk-effect/compiler run stdlib:check
-          pnpm --filter @silk-effect/compiler run toolchain:check
-          pnpm --filter @silk-effect/compiler run documentation:policy
-          pnpm --filter @silk-effect/compiler run documentation:check
-          pnpm --filter @silk-effect/compiler run documentation:examples
-      - run: pnpm --filter @silk-effect/compiler run test:native-acceptance
+          pnpm --filter @silk-lang/compiler run unicode:check
+          pnpm --filter @silk-lang/compiler run stdlib:check
+          pnpm --filter @silk-lang/compiler run toolchain:check
+          pnpm --filter @silk-lang/compiler run documentation:policy
+          pnpm --filter @silk-lang/compiler run documentation:check
+          pnpm --filter @silk-lang/compiler run documentation:examples
+      - run: pnpm --filter @silk-lang/compiler run test:native-acceptance
       - run: pnpm test:scripts
       - run: pnpm release:candidate
 
@@ -86,7 +86,7 @@ jobs:
       # Mirrors test:parallel's flags; `pnpm --filter … run script -- args` drops the args
       # (observed in run 33014303799: every shard ran the full suite), so invoke vitest directly.
       - run: >
-          pnpm --filter @silk-effect/compiler exec vitest run
+          pnpm --filter @silk-lang/compiler exec vitest run
           --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts
           --shard=${{ matrix.shard }}/4
           --reporter=default --reporter=json
@@ -110,5 +110,5 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @silk-effect/platform-webcontainer exec playwright install --with-deps chromium
-      - run: pnpm --filter @silk-effect/platform-webcontainer test:browser
+      - run: pnpm --filter @silk-lang/platform-webcontainer exec playwright install --with-deps chromium
+      - run: pnpm --filter @silk-lang/platform-webcontainer test:browser

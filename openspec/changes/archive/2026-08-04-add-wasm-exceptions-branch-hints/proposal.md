@@ -1,4 +1,4 @@
-# Add exception handling and branch hinting to `@silk-effect/wasm`
+# Add exception handling and branch hinting to `@silk-lang/wasm`
 
 ## Why
 

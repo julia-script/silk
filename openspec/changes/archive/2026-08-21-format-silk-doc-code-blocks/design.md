@@ -3,7 +3,7 @@
 The compiler-owned formatter currently accepts a lossless `SyntaxFile`, validates complete outer
 syntax, and prints comments as opaque byte slices. The CLI and LSP both invoke that operation, which
 is why their whole-document results agree. Parsed documentation lives in the optional
-`@silk-effect/documentation` package: it normalizes `///` and `//!` tokens, parses CommonMark, and
+`@silk-lang/documentation` package: it normalizes `///` and `//!` tokens, parses CommonMark, and
 maps document nodes back to source bytes. That package depends on the compiler, deliberately keeping
 Markdown out of ordinary compiler parsing and analysis.
 
@@ -42,8 +42,8 @@ complete modules, while `silk,ignore` permits illustrative fragments. See the mo
 
 ### Put canonical orchestration in an optional formatter package
 
-Create `@silk-effect/formatter` with public `Formatter` and package-owned error actors. It depends on
-`@silk-effect/compiler` for Silk syntax and layout and on `@silk-effect/documentation` for CommonMark
+Create `@silk-lang/formatter` with public `Formatter` and package-owned error actors. It depends on
+`@silk-lang/compiler` for Silk syntax and layout and on `@silk-lang/documentation` for CommonMark
 documents and lossless documentation rewriting. The compiler's current `Formatter` actor becomes
 `SyntaxFormatter`: a lower-level, Markdown-neutral operation that validates and lays out one Silk
 syntax artifact while preserving comment atoms. `FormattedDocument` remains compiler-owned because
@@ -57,7 +57,7 @@ than retained as an alias.
 This layering keeps the dependency graph acyclic:
 
 ```text
-@silk-effect/compiler
+@silk-lang/compiler
         ▲       ▲
         │       │
 documentation  formatter ◀── compiler-cli / lsp
@@ -67,7 +67,7 @@ documentation  formatter ◀── compiler-cli / lsp
 
 Alternatives considered:
 
-- Making the compiler depend on `@silk-effect/documentation` creates a cycle and violates the
+- Making the compiler depend on `@silk-lang/documentation` creates a cycle and violates the
   established optional Markdown boundary.
 - Adding another Markdown parser or fence scanner to the compiler duplicates CommonMark semantics
   and will disagree on containers, fence forms, or info strings.
@@ -135,7 +135,7 @@ same semantic trailing spaces from physical comment lines.
 
 ### Let a documentation-owned CodeFence actor own lossless reconstruction
 
-Add a `CodeFence` actor to `@silk-effect/documentation`. It parses one compiler-owned `DocBlock`
+Add a `CodeFence` actor to `@silk-lang/documentation`. It parses one compiler-owned `DocBlock`
 against its owning `SourceFile` through the same internal CommonMark seam as `Document`, and returns
 source-ordered immutable fence values carrying the raw info string, CommonMark language and metadata,
 whether an authored matching closer exists, body value, and outer source range. Keeping these fields
@@ -255,7 +255,7 @@ the release-candidate check.
    compiler-owned complete documentation-block inventory, migrate compiler-owned tests, and delete
    the old formatter export.
 2. Add and verify the documentation-owned `CodeFence` parsing and reconstruction actor.
-3. Add `@silk-effect/formatter`, its public actors, package exports, error mapping, staged pipeline,
+3. Add `@silk-lang/formatter`, its public actors, package exports, error mapping, staged pipeline,
    and focused tests.
 4. Move compiler CLI and LSP whole-document adapters to the public formatter and add parity tests.
 5. Format shipped Silk sources, regenerate any changed source inventory, add release metadata, and

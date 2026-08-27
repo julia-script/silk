@@ -1,5 +1,5 @@
-import * as LiteralForm from '@silk-effect/compiler/LiteralForm'
-import type * as Token from '@silk-effect/compiler/Token'
+import * as LiteralForm from '@silk-lang/compiler/LiteralForm'
+import type * as Token from '@silk-lang/compiler/Token'
 
 /** Every keyword token kind the compiler defines. */
 export type KeywordKind = Extract<Token.TokenKind, `${string}Keyword`>

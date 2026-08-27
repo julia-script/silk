@@ -169,7 +169,7 @@ export interface Service {
  * @since 0.0.0
  */
 export class WebContainer extends Context.Service<WebContainer, Service>()(
-  '@silk-effect/platform-webcontainer/WebContainer',
+  '@silk-lang/platform-webcontainer/WebContainer',
 ) {}
 
 /**
@@ -566,8 +566,8 @@ export const layerWith = (
  *
  * ```ts
  * import * as Layer from 'effect/Layer'
- * import * as WebContainer from '@silk-effect/platform-webcontainer/WebContainer'
- * import * as WebContainerFileSystem from '@silk-effect/platform-webcontainer/WebContainerFileSystem'
+ * import * as WebContainer from '@silk-lang/platform-webcontainer/WebContainer'
+ * import * as WebContainerFileSystem from '@silk-lang/platform-webcontainer/WebContainerFileSystem'
  *
  * const runtimeLayer = WebContainer.layer({ workdirName: 'playground' })
  * const fileSystemLayer = WebContainerFileSystem.layer.pipe(Layer.provide(runtimeLayer))

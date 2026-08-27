@@ -50,8 +50,8 @@ consumer can reuse them.
 
 ## Impact
 
-- New package: `packages/inspector` (`@silk-effect/inspector`), depending only on
-  `@silk-effect/compiler`.
+- New package: `packages/inspector` (`@silk-lang/inspector`), depending only on
+  `@silk-lang/compiler`.
 - `apps/docs/app/labs`: registry and `row/project-*` modules move out; imports and the
   `onActivate` wiring change, behavior does not.
 - `packages/lsp`: new request/notification handlers in `Server.ts`; single-root realization

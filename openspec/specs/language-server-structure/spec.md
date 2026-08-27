@@ -27,7 +27,7 @@ requests the whole document.
 The semantic token legend SHALL name only standard protocol token types, and every type it names
 SHALL be reachable from a compiler token kind or a semantic occurrence. The keyword, comment,
 string, number, and operator types SHALL be decided by the lexer's own token kinds — the same kinds
-the TextMate grammar in `@silk-effect/language` colors — so a keyword added to the compiler reaches
+the TextMate grammar in `@silk-lang/language` colors — so a keyword added to the compiler reaches
 both the grammar and the legend from one definition.
 
 #### Scenario: Compare the legend with the grammar's keywords

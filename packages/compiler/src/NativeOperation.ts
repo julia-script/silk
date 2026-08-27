@@ -1,4 +1,4 @@
-import type * as LlvmBlock from '@silk-effect/llvm/Block'
+import type * as LlvmBlock from '@silk-lang/llvm/Block'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as Mir from './Mir.js'

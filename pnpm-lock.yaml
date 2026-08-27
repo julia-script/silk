@@ -56,22 +56,22 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
-      '@silk-effect/inspector':
+      '@silk-lang/inspector':
         specifier: workspace:*
         version: link:../../packages/inspector
-      '@silk-effect/language':
+      '@silk-lang/language':
         specifier: workspace:*
         version: link:../../packages/language
-      '@silk-effect/lsp':
+      '@silk-lang/lsp':
         specifier: workspace:*
         version: link:../../packages/lsp
-      '@silk-effect/platform-webcontainer':
+      '@silk-lang/platform-webcontainer':
         specifier: workspace:*
         version: link:../../packages/platform-webcontainer
-      '@silk-effect/snippet':
+      '@silk-lang/snippet':
         specifier: workspace:*
         version: link:../../packages/snippet
       '@xterm/addon-fit':
@@ -114,13 +114,13 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-effect/formatter':
+      '@silk-lang/formatter':
         specifier: workspace:*
         version: link:../../packages/formatter
-      '@silk-effect/llvm':
+      '@silk-lang/llvm':
         specifier: workspace:*
         version: link:../../packages/llvm
-      '@silk-effect/wasm':
+      '@silk-lang/wasm':
         specifier: workspace:*
         version: link:../../packages/wasm
       '@tailwindcss/postcss':
@@ -159,10 +159,10 @@ importers:
 
   packages/compiler:
     dependencies:
-      '@silk-effect/llvm':
+      '@silk-lang/llvm':
         specifier: workspace:*
         version: link:../llvm
-      '@silk-effect/wasm':
+      '@silk-lang/wasm':
         specifier: workspace:*
         version: link:../wasm
       effect:
@@ -184,13 +184,13 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
-      '@silk-effect/formatter':
+      '@silk-lang/formatter':
         specifier: workspace:*
         version: link:../formatter
       effect:
@@ -212,10 +212,10 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
       effect:
@@ -231,7 +231,7 @@ importers:
 
   packages/documentation:
     dependencies:
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
       effect:
@@ -256,7 +256,7 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-effect/snippet':
+      '@silk-lang/snippet':
         specifier: workspace:*
         version: link:../snippet
       effect:
@@ -266,10 +266,10 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
       '@types/node':
@@ -278,10 +278,10 @@ importers:
 
   packages/formatter:
     dependencies:
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
       effect:
@@ -300,7 +300,7 @@ importers:
 
   packages/inspector:
     dependencies:
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
       effect:
@@ -313,10 +313,10 @@ importers:
 
   packages/language:
     dependencies:
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
     devDependencies:
@@ -357,19 +357,19 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/compiler-cli':
+      '@silk-lang/compiler-cli':
         specifier: workspace:*
         version: link:../compiler-cli
-      '@silk-effect/documentation':
+      '@silk-lang/documentation':
         specifier: workspace:*
         version: link:../documentation
-      '@silk-effect/formatter':
+      '@silk-lang/formatter':
         specifier: workspace:*
         version: link:../formatter
-      '@silk-effect/inspector':
+      '@silk-lang/inspector':
         specifier: workspace:*
         version: link:../inspector
       effect:
@@ -388,7 +388,7 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-effect/language':
+      '@silk-lang/language':
         specifier: workspace:*
         version: link:../language
       '@types/node':
@@ -437,13 +437,13 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
-      '@silk-effect/compiler':
+      '@silk-lang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-effect/language':
+      '@silk-lang/language':
         specifier: workspace:*
         version: link:../language
-      '@silk-effect/lsp':
+      '@silk-lang/lsp':
         specifier: workspace:*
         version: link:../lsp
       effect:
@@ -471,7 +471,7 @@ importers:
 
   packages/vscode:
     dependencies:
-      '@silk-effect/lsp':
+      '@silk-lang/lsp':
         specifier: workspace:*
         version: link:../lsp
       effect:

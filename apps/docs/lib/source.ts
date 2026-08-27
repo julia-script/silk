@@ -1,7 +1,7 @@
 import { getSlugs, loader } from 'fumadocs-core/source';
 import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
 import { defineDocs } from 'fumadocs-mdx/macro';
-import { TextMate } from '@silk-effect/language';
+import { TextMate } from '@silk-lang/language';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**
@@ -56,8 +56,8 @@ const docs = defineDocs({
 
 /** Sidebar label for each top-level content folder, keyed by directory name. */
 const folderTitles: Record<string, string> = {
-  language: '@silk-effect/language',
-  llvm: '@silk-effect/llvm',
+  language: '@silk-lang/language',
+  llvm: '@silk-lang/llvm',
 };
 
 export const source = loader({

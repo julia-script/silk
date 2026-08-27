@@ -1,10 +1,10 @@
 import { assert, it } from '@effect/vitest'
-import * as Backend from '@silk-effect/compiler/Backend'
-import type * as Diagnostic from '@silk-effect/compiler/Diagnostic'
-import type * as Driver from '@silk-effect/compiler/Driver'
-import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
-import * as Target from '@silk-effect/compiler/Target'
-import * as ToolchainIntegrity from '@silk-effect/compiler/ToolchainIntegrity'
+import * as Backend from '@silk-lang/compiler/Backend'
+import type * as Diagnostic from '@silk-lang/compiler/Diagnostic'
+import type * as Driver from '@silk-lang/compiler/Driver'
+import * as NativeToolchain from '@silk-lang/compiler/NativeToolchain'
+import * as Target from '@silk-lang/compiler/Target'
+import * as ToolchainIntegrity from '@silk-lang/compiler/ToolchainIntegrity'
 import * as Report from '../src/Report.js'
 
 const ascii = (text: string): Uint8Array =>

@@ -1,4 +1,4 @@
-# `@silk-effect/llvm`
+# `@silk-lang/llvm`
 
 Effect-native LLVM IR construction and deterministic text and bitcode emission, ported from Zig's
 standard-library LLVM builder.
@@ -8,14 +8,14 @@ executables. It returns LLVM assembly as a `string` and bitcode as a `Uint8Array
 
 ```typescript
 import * as Effect from 'effect/Effect'
-import * as Bitcode from '@silk-effect/llvm/Bitcode'
-import * as Block from '@silk-effect/llvm/Block'
-import * as Builder from '@silk-effect/llvm/Builder'
-import * as FunctionActor from '@silk-effect/llvm/Function'
-import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
-import * as IrText from '@silk-effect/llvm/IrText'
-import * as Type from '@silk-effect/llvm/Type'
-import * as Value from '@silk-effect/llvm/Value'
+import * as Bitcode from '@silk-lang/llvm/Bitcode'
+import * as Block from '@silk-lang/llvm/Block'
+import * as Builder from '@silk-lang/llvm/Builder'
+import * as FunctionActor from '@silk-lang/llvm/Function'
+import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
+import * as IrText from '@silk-lang/llvm/IrText'
+import * as Type from '@silk-lang/llvm/Type'
+import * as Value from '@silk-lang/llvm/Value'
 
 const program = Effect.gen(function* () {
   const builder = yield* Builder.make({ sourceFilename: 'add.ll' })
@@ -71,9 +71,9 @@ Immutable option actors support both data-first and pipeable transformations:
 ```typescript
 import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
-import * as Builder from '@silk-effect/llvm/Builder'
-import * as IntegerMath from '@silk-effect/llvm/IntegerMath'
-import * as Type from '@silk-effect/llvm/Type'
+import * as Builder from '@silk-lang/llvm/Builder'
+import * as IntegerMath from '@silk-lang/llvm/IntegerMath'
+import * as Type from '@silk-lang/llvm/Type'
 
 declare const builder: Builder.Builder
 
@@ -98,7 +98,7 @@ const recovered = Type.integer(builder, 0).pipe(
 - [Design explanations](./docs/README.md#understand-the-design)
 
 The package is organized as actor modules with explicit subpath exports. Prefer imports such as
-`@silk-effect/llvm/Builder` and `@silk-effect/llvm/FunctionBody` over a growing import from the root
+`@silk-lang/llvm/Builder` and `@silk-lang/llvm/FunctionBody` over a growing import from the root
 barrel.
 
 ## Scope and compatibility
@@ -113,8 +113,8 @@ sources, and [the parity report](./parity/REPORT.md) for the supported upstream 
 ## Development verification
 
 ```sh
-pnpm --filter @silk-effect/llvm fixtures:verify
-pnpm --filter @silk-effect/llvm parity:validate
+pnpm --filter @silk-lang/llvm fixtures:verify
+pnpm --filter @silk-lang/llvm parity:validate
 ```
 
 Fixture generation uses pinned Zig and LLVM tools, but runtime APIs never invoke them.

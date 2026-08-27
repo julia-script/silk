@@ -1,6 +1,6 @@
 # Upstream provenance
 
-`@silk-effect/wasm` implements the WebAssembly specification directly; it ports no upstream
+`@silk-lang/wasm` implements the WebAssembly specification directly; it ports no upstream
 implementation. Its correctness is anchored to one pinned oracle release used by development-time
 verification only — the published runtime never invokes it.
 
@@ -29,12 +29,12 @@ validated through text round-trips rather than a feature flag.
 
 ## Verification layers
 
-1. `pnpm --filter @silk-effect/wasm test` — unit tests plus committed-fixture comparison
+1. `pnpm --filter @silk-lang/wasm test` — unit tests plus committed-fixture comparison
    (byte-identical binary, character-identical text). No external tools; runs in CI.
-2. `pnpm --filter @silk-effect/wasm parity:oracle` — oracle validation of every fixture binary,
+2. `pnpm --filter @silk-lang/wasm parity:oracle` — oracle validation of every fixture binary,
    text→binary round-trip equality, and negative-corpus agreement (constructs the builder
    rejects must be rejected by the oracle). Requires the pinned `wasm-tools`.
-3. `pnpm --filter @silk-effect/wasm fixtures:regenerate` — rebuilds committed fixtures after an
+3. `pnpm --filter @silk-lang/wasm fixtures:regenerate` — rebuilds committed fixtures after an
    intentional output change; rerun the oracle afterwards.
 
 ## Name section note

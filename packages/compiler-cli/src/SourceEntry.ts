@@ -1,4 +1,4 @@
-import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

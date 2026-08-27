@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
-import * as NodeHeapObservation from '@silk-effect/compiler/NodeHeapObservation'
+import * as NodeHeapObservation from '@silk-lang/compiler/NodeHeapObservation'
 import * as Effect from 'effect/Effect'
 import { Command } from 'effect/unstable/cli'
 import * as Cli from './Cli.js'

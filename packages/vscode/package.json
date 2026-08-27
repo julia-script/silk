@@ -57,7 +57,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/lsp": "workspace:*",
+    "@silk-lang/lsp": "workspace:*",
     "effect": "catalog:",
     "vscode-languageclient": "^9.0.1"
   },

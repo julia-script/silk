@@ -64,7 +64,7 @@ Token spans are byte offsets; decorations need UTF-16 offsets.
 Following the repo's stable-public-subpath convention:
 
 ```
-packages/language                 @silk-effect/language
+packages/language                 @silk-lang/language
   src/CodeMirror.ts               extension factory + highlight theme (actor module)
   src/TextMate.ts                 grammar + language configuration (the source of truth)
   scripts/sync-vscode.mjs         generates the extension's JSON files from dist/TextMate.js
@@ -101,7 +101,7 @@ that set exactly (both directions).
 ### 5. Shiki wiring
 
 Add the grammar to `rehypeCodeOptions.langs` in `apps/docs/lib/source.ts` by importing the JSON
-from `@silk-effect/language`. Shiki accepts raw TextMate grammar objects in `langs`; existing
+from `@silk-lang/language`. Shiki accepts raw TextMate grammar objects in `langs`; existing
 `fallbackLanguage` behavior is untouched.
 
 ### 6. Workbench editor swap

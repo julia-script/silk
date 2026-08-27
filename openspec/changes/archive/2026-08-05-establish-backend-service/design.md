@@ -4,7 +4,7 @@
 
 See proposal.md — Why. The lowered MIR program exists per snapshot; ticket 06 pins codegen as a
 nominal `Backend` service whose bootstrap implementation lowers MIR through the existing Silk
-LLVM builder (`@silk-effect/llvm`) and emits deterministic bitcode directly — no `libLLVM`, no C
+LLVM builder (`@silk-lang/llvm`) and emits deterministic bitcode directly — no `libLLVM`, no C
 API, no native FFI. The Clang object step is the next proposal's.
 
 ## Goals / Non-Goals
@@ -56,7 +56,7 @@ API, no native FFI. The Clang object step is the next proposal's.
    bitcode golden would be an opaque binary blob in review; the digest pins bytes just as hard
    and diffs legibly. The IR text golden stays human-readable alongside.
 
-6. **The compiler package gains `@silk-effect/llvm` as a real dependency**; the release-candidate
+6. **The compiler package gains `@silk-lang/llvm` as a real dependency**; the release-candidate
    packs both tarballs and installs the compiler with an override pointing at the packed llvm,
    keeping the packed-consumer check honest.
 

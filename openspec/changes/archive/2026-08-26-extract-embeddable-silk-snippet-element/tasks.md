@@ -2,7 +2,7 @@
 
 ## 1. Package scaffold
 
-- [x] 1.1 Create `packages/snippet` (`@silk-effect/snippet`) mirroring an existing package's
+- [x] 1.1 Create `packages/snippet` (`@silk-lang/snippet`) mirroring an existing package's
       tsconfig/vitest/turbo wiring, with deps on `compiler`, `lsp`, `language`, CodeMirror
       packages, and `mdast-util-from-markdown`
 - [x] 1.2 Add the package to workspace/turbo config and verify `node scripts/turbo.mjs run build`

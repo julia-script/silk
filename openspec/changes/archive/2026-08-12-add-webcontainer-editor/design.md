@@ -1,6 +1,6 @@
 ## Context
 
-See `proposal.md` for motivation. The docs application is a Next.js App Router application with an existing `/labs` client workbench and one route-local Atom registry. It does not currently depend on xterm.js or `@silk-effect/platform-webcontainer`, and its Next configuration does not set cross-origin isolation headers.
+See `proposal.md` for motivation. The docs application is a Next.js App Router application with an existing `/labs` client workbench and one route-local Atom registry. It does not currently depend on xterm.js or `@silk-lang/platform-webcontainer`, and its Next configuration does not set cross-origin isolation headers.
 
 The WebContainer package already supplies three boundaries this change needs:
 
@@ -25,7 +25,7 @@ The package requires consumers to construct one WebContainer layer value and reu
 - Add a source editor, file tree, preview iframe, package manager UI, persistence, collaboration, or multiple terminal tabs in this change.
 - Introduce a second runtime for the future features above.
 - Expose the raw WebContainer instance, raw promises, xterm objects, or manual process teardown as shared application state.
-- Change the public API or behavioral contracts of `@silk-effect/platform-webcontainer` unless implementation proves its current actors insufficient.
+- Change the public API or behavioral contracts of `@silk-lang/platform-webcontainer` unless implementation proves its current actors insufficient.
 - Support separate stdout and stderr, operating-system signals, PIDs, or other semantics WebContainer does not provide.
 
 ## Decisions

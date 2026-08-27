@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler-cli': major
+'@silk-lang/compiler-cli': major
 ---
 
 Replace the single `silk compile` workflow with the project-oriented `build`, `check`, and `run`

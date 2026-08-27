@@ -65,14 +65,14 @@ export const run = Effect.fn('Cli.run')(function* (
   const bundle = yield* Effect.result(
     Effect.flatMap(
       Effect.try({
-        try: () => fileURLToPath(import.meta.resolve('@silk-effect/snippet/bundle')),
+        try: () => fileURLToPath(import.meta.resolve('@silk-lang/snippet/bundle')),
         catch: (cause) => cause,
       }),
       (bundlePath) => fileSystem.readFileString(bundlePath),
     ),
   )
   if (Result.isFailure(bundle)) {
-    yield* Console.error('Cannot load the silk-snippet element bundle from @silk-effect/snippet')
+    yield* Console.error('Cannot load the silk-snippet element bundle from @silk-lang/snippet')
     return 2
   }
 

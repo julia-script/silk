@@ -461,7 +461,7 @@ const verifyFunction = (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Verify from '@silk-effect/llvm/Verify'
+ * import * as Verify from '@silk-lang/llvm/Verify'
  *
  * const check = Effect.gen(function* () {
  *   const violations = yield* Verify.verify(builder)

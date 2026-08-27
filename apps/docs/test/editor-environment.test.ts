@@ -1,6 +1,6 @@
 import { assert, it } from '@effect/vitest'
-import * as WebContainer from '@silk-effect/platform-webcontainer/WebContainer'
-import * as WebContainerProcess from '@silk-effect/platform-webcontainer/WebContainerProcess'
+import * as WebContainer from '@silk-lang/platform-webcontainer/WebContainer'
+import * as WebContainerProcess from '@silk-lang/platform-webcontainer/WebContainerProcess'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'

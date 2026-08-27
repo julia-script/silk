@@ -1,4 +1,4 @@
-# `@silk-effect/docs`
+# `@silk-lang/docs`
 
 The documentation site for every package in this monorepo. Next.js + Fumadocs + Tailwind.
 

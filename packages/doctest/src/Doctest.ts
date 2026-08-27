@@ -1,4 +1,4 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-lang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import * as Example from './Example.js'
 import * as Sources from './Sources.js'

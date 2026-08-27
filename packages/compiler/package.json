@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/compiler",
+  "name": "@silk-lang/compiler",
   "version": "0.0.0",
   "description": "Byte-oriented bootstrap compiler primitives for Silk Effect.",
   "license": "MIT",
@@ -427,13 +427,13 @@
     "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
     "documentation:check": "node scripts/generate-documentation.mjs --check",
-    "documentation:examples": "pnpm --filter @silk-effect/doctest stdlib:check",
+    "documentation:examples": "pnpm --filter @silk-lang/doctest stdlib:check",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
     "documentation:policy": "node scripts/check-stdlib-documentation.mjs"
   },
   "dependencies": {
-    "@silk-effect/llvm": "workspace:*",
-    "@silk-effect/wasm": "workspace:*",
+    "@silk-lang/llvm": "workspace:*",
+    "@silk-lang/wasm": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

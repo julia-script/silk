@@ -10,9 +10,9 @@
  * `1 err`) and optional one-line fact strip, and only the view knows them.
  */
 
-import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-effect/compiler'
-import { Analysis, Hir, ToolchainPlan } from '@silk-effect/compiler'
-import * as MirVerification from '@silk-effect/compiler/MirVerification'
+import type { BootstrapEvaluation, ToolchainPlan as ToolchainPlanNs } from '@silk-lang/compiler'
+import { Analysis, Hir, ToolchainPlan } from '@silk-lang/compiler'
+import * as MirVerification from '@silk-lang/compiler/MirVerification'
 import { projectDataFlow } from './FlowModel.js'
 import { backendEmission, execute, toolchainCommands } from './Panels.js'
 import {

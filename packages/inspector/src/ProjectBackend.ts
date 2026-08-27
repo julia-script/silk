@@ -1,5 +1,5 @@
-import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
-import type * as DeclarationIndex from '@silk-effect/compiler/DeclarationIndex'
+import type * as DeclarationFacts from '@silk-lang/compiler/DeclarationFacts'
+import type * as DeclarationIndex from '@silk-lang/compiler/DeclarationIndex'
 /**
  * Module, name, ownership, lowering and backend phases as rows.
  *
@@ -19,10 +19,10 @@ import type {
   ModuleClosure,
   NameResolution,
   Ownership,
-} from '@silk-effect/compiler'
-import { Match, Mir } from '@silk-effect/compiler'
-import * as MirVerification from '@silk-effect/compiler/MirVerification'
-import * as Type from '@silk-effect/compiler/Type'
+} from '@silk-lang/compiler'
+import { Match, Mir } from '@silk-lang/compiler'
+import * as MirVerification from '@silk-lang/compiler/MirVerification'
+import * as Type from '@silk-lang/compiler/Type'
 import type { RowModel, Span } from './Row.js'
 import { spanOf as asSpan } from './Row.js'
 

@@ -1,5 +1,5 @@
 ---
-'@silk-effect/language': minor
+'@silk-lang/language': minor
 ---
 
 New package: editor language support for Silk. A CodeMirror 6 extension whose highlighting is

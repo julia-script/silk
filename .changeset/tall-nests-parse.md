@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': minor
+'@silk-lang/compiler': minor
 ---
 
 Parse recursively nested call arguments as lossless concrete syntax while preserving an explicit

@@ -1,7 +1,7 @@
 # IndicConjunctBreak.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Fields: code point range; Indic_Conjunct_Break value. Drives rule GB9c.
-# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
 094D; Linker
 09CD; Linker
 0ACD; Linker

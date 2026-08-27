@@ -44,7 +44,7 @@ interface TaggedFields extends Options {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as AddrSpace from '@silk-effect/llvm/AddrSpace'
+ * import * as AddrSpace from '@silk-lang/llvm/AddrSpace'
  *
  * const description = await Effect.runPromise(
  *   AddrSpace.make(-1).pipe(

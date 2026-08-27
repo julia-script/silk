@@ -1,5 +1,5 @@
 ---
-'@silk-effect/llvm': major
+'@silk-lang/llvm': major
 ---
 
 Add the LLVM-specific `LlvmError` contract, make expected validation and state-transition failures

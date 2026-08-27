@@ -24,7 +24,7 @@ function fakeSpawn({ stdout = '', stderr = '', code = 0 }) {
 }
 
 test('forwards publish output', async () => {
-  const output = 'New tag: @silk-effect/llvm@0.1.0\n'
+  const output = 'New tag: @silk-lang/llvm@0.1.0\n'
   let seen = ''
   const code = await runPublish('pnpm', ['run', 'release:publish'], {
     onOutput: (chunk) => {
@@ -39,7 +39,7 @@ test('forwards publish output', async () => {
 
 test('passes through a clean publish', async () => {
   const result = await publishWithGuard({
-    spawnImpl: fakeSpawn({ stdout: 'New tag: @silk-effect/llvm@0.1.0\n' }),
+    spawnImpl: fakeSpawn({ stdout: 'New tag: @silk-lang/llvm@0.1.0\n' }),
   })
 
   assert.deepEqual(result, { exitCode: 0, skippedOidc: false })

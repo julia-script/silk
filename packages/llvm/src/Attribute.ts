@@ -289,8 +289,8 @@ const internSet = Effect.fn('Attribute.internSet')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Attribute from '@silk-effect/llvm/Attribute'
- * import * as Builder from '@silk-effect/llvm/Builder'
+ * import * as Attribute from '@silk-lang/llvm/Attribute'
+ * import * as Builder from '@silk-lang/llvm/Builder'
  *
  * const attributes = await Effect.runPromise(
  *   Effect.gen(function* () {

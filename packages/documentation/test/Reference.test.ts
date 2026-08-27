@@ -1,5 +1,5 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-lang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import * as Project from '../src/Project.js'
 import * as Reference from '../src/Reference.js'

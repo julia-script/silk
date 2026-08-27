@@ -2,7 +2,7 @@
 
 ## Why
 
-Code review of `@silk-effect/platform-webcontainer` found two gaps that block its primary
+Code review of `@silk-lang/platform-webcontainer` found two gaps that block its primary
 consumer, the upcoming browser IDE. First, filesystem watching fails explicitly even though the
 upstream `@webcontainer/api` exposes `fs.watch` — without it, a file tree and editor cannot learn
 that a terminal command (`silk build`, `npm install`) changed files. Second, `stat` reads the

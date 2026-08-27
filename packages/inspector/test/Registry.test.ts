@@ -1,4 +1,4 @@
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import { Analysis, ToolchainPlan } from '@silk-lang/compiler'
 import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
 import type { ViewContext, ViewResult } from '../src/Registry.js'

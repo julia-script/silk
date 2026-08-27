@@ -177,8 +177,8 @@ corpus **PASS**, 1 test / all programs, 120.16s. No second conformance pass was 
 
 ## Verification history
 
-- Initial focused command could not resolve unbuilt workspace package `@silk-effect/llvm/Bitcode`;
-  building `@silk-effect/llvm` relocalized the same prerequisite to `@silk-effect/wasm/Binary`.
+- Initial focused command could not resolve unbuilt workspace package `@silk-lang/llvm/Bitcode`;
+  building `@silk-lang/llvm` relocalized the same prerequisite to `@silk-lang/wasm/Binary`.
   Building both workspace packages supplied fresh-worktree outputs; this was environment setup, not
   a semantic repair.
 - Focused transition/Wake/package/external-parking sequence — **PASS**, 4 files / 33 tests.

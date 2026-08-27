@@ -163,7 +163,7 @@ export const operationCode: Readonly<Record<AtomicOperation, number>> = Object.f
  *
  * ```ts
  * import { pipe } from 'effect/Function'
- * import * as MemoryAccess from '@silk-effect/llvm/MemoryAccess'
+ * import * as MemoryAccess from '@silk-lang/llvm/MemoryAccess'
  *
  * const access = pipe(
  *   MemoryAccess.make({ kind: 'volatile' }),

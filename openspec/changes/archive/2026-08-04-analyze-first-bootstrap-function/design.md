@@ -1,6 +1,6 @@
 ## Context
 
-`@silk-effect/compiler` currently ends at `Parser.ParseResult`, which retains the lexical result,
+`@silk-lang/compiler` currently ends at `Parser.ParseResult`, which retains the lexical result,
 a closed lossless concrete tree, and parser diagnostics. The grammar guarantees one recovered
 function region, one return-type region, and one decimal-integer-expression region even when their
 required tokens are missing. See `proposal.md` for motivation and the delta specs for observable

@@ -1,5 +1,5 @@
-import * as NativeToolchain from '@silk-effect/compiler/NativeToolchain'
-import * as Target from '@silk-effect/compiler/Target'
+import * as NativeToolchain from '@silk-lang/compiler/NativeToolchain'
+import * as Target from '@silk-lang/compiler/Target'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 

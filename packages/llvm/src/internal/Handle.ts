@@ -3,7 +3,7 @@ import type * as Builder from '../Builder.js'
 import { invalidState, type LlvmError } from '../LlvmError.js'
 import type * as OwnedHandle from './OwnedHandle.js'
 
-const HandleTypeId: unique symbol = Symbol.for('@silk-effect/llvm/internal/Handle')
+const HandleTypeId: unique symbol = Symbol.for('@silk-lang/llvm/internal/Handle')
 
 export interface Handle<Tag extends string> {
   readonly _tag: Tag

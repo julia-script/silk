@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/language",
+  "name": "@silk-lang/language",
   "version": "0.0.0",
   "description": "Editor language support for Silk Effect: lexer-driven CodeMirror highlighting and the Silk TextMate grammar.",
   "license": "MIT",
@@ -51,8 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/documentation": "workspace:*"
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/documentation": "workspace:*"
   },
   "peerDependencies": {
     "@codemirror/language": "^6.12.0",

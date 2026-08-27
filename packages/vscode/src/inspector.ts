@@ -5,7 +5,7 @@
  * `silk/inspectorView` (the server already holds the committed analysis, and re-realizes a
  * single-root snapshot per document for backend views), and the view registry itself is fetched
  * over `silk/inspectorViews` — the extension host is CommonJS and cannot import the ESM
- * `@silk-effect/inspector` package that defines it.
+ * `@silk-lang/inspector` package that defines it.
  */
 import * as vscode from 'vscode'
 

@@ -38,10 +38,10 @@ See proposal.md for motivation. Current state that shapes the design:
 
 ## Decisions
 
-### D1: New package `packages/inspector` (`@silk-effect/inspector`)
+### D1: New package `packages/inspector` (`@silk-lang/inspector`)
 
 The registry (`ViewDefinition`, `views`, `viewById`, `siblingsOf`), row model types, and the
-`project-*`/`flow-model` row builders move here. Depends only on `@silk-effect/compiler`.
+`project-*`/`flow-model` row builders move here. Depends only on `@silk-lang/compiler`.
 
 *Alternative — fold into the compiler's tooling namespace:* rejected; row models and fact strips
 are a presentation vocabulary, not compiler analysis, and the compiler package should not grow a

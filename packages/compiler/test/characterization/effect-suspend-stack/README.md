@@ -14,7 +14,7 @@ paths. The fixture does not suppress cleanup or intentionally leak storage.
 Run it after building the compiler:
 
 ```sh
-pnpm --filter @silk-effect/compiler build
+pnpm --filter @silk-lang/compiler build
 node packages/compiler/test/characterization/effect-suspend-stack/characterize.mjs \
   --engine wasm --case scalar-non-tail --depth 8000
 ```
@@ -49,7 +49,7 @@ portable thresholds.
 | native release | borrowed Box walk | 100,000 | 320,000 | `SIGSEGV` |
 | native release | recursive Box Drop | 100,000 | 320,000 | `SIGSEGV` |
 
-The matrix was produced after `pnpm --filter @silk-effect/compiler build`. Each Wasm row used:
+The matrix was produced after `pnpm --filter @silk-lang/compiler build`. Each Wasm row used:
 
 ```sh
 node packages/compiler/test/characterization/effect-suspend-stack/characterize.mjs \

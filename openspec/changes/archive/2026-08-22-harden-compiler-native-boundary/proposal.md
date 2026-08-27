@@ -25,4 +25,4 @@ The compiler's native-toolchain boundary violates the effect-patterns boundary r
 
 ## Impact
 
-Observable: native-toolchain failures now surface as typed errors (callers can recover on stage and cause), and invalid backend requests no longer bypass `BackendError`. Everything else is internal refactoring. Node-only code stays a deep import; `@silk-effect/compiler` root becomes genuinely browser-safe.
+Observable: native-toolchain failures now surface as typed errors (callers can recover on stage and cause), and invalid backend requests no longer bypass `BackendError`. Everything else is internal refactoring. Node-only code stays a deep import; `@silk-lang/compiler` root becomes genuinely browser-safe.

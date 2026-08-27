@@ -34,8 +34,8 @@ import type { WasmError } from './WasmError.js'
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/wasm/Builder'
- * import * as WatText from '@silk-effect/wasm/WatText'
+ * import * as Builder from '@silk-lang/wasm/Builder'
+ * import * as WatText from '@silk-lang/wasm/WatText'
  *
  * const text = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

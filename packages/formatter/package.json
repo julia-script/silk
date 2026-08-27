@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/formatter",
+  "name": "@silk-lang/formatter",
   "version": "0.0.0",
   "description": "Canonical whole-source formatting for Silk Effect, including active Silk examples in source documentation.",
   "license": "MIT",
@@ -51,8 +51,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/documentation": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/documentation": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

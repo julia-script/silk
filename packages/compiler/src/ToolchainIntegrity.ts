@@ -211,7 +211,7 @@ const runtimeId = (target: Intrinsic.ExecutionTarget, operation: string): string
 const installedComponents = (): ReadonlyArray<Component> => {
   const compiler: Component = Object.freeze({
     kind: 'Compiler',
-    id: '@silk-effect/compiler',
+    id: '@silk-lang/compiler',
     digest: compilerDigest,
     dependencies: Object.freeze([]),
   })

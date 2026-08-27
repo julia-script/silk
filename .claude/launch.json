@@ -4,14 +4,14 @@
     {
       "name": "docs",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@silk-effect/docs", "dev"],
+      "runtimeArgs": ["--filter", "@silk-lang/docs", "dev"],
       "port": 3000,
       "autoPort": true
     },
     {
       "name": "docs-next",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@silk-effect/docs", "exec", "next", "dev"],
+      "runtimeArgs": ["--filter", "@silk-lang/docs", "exec", "next", "dev"],
       "port": 3000,
       "autoPort": true
     }

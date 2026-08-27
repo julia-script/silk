@@ -1,8 +1,8 @@
-import type * as Builder from '@silk-effect/llvm/Builder'
-import * as Constant from '@silk-effect/llvm/Constant'
-import * as FunctionBody from '@silk-effect/llvm/FunctionBody'
-import type * as LlvmType from '@silk-effect/llvm/Type'
-import type * as Value from '@silk-effect/llvm/Value'
+import type * as Builder from '@silk-lang/llvm/Builder'
+import * as Constant from '@silk-lang/llvm/Constant'
+import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
+import type * as LlvmType from '@silk-lang/llvm/Type'
+import type * as Value from '@silk-lang/llvm/Value'
 import * as Effect from 'effect/Effect'
 
 export interface Context {

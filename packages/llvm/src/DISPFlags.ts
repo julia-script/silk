@@ -67,7 +67,7 @@ export const none: DISPFlags = Object.freeze({ bits: 0 })
  * **Example** (Packing subprogram flags)
  *
  * ```ts
- * import * as DISPFlags from '@silk-effect/llvm/DISPFlags'
+ * import * as DISPFlags from '@silk-lang/llvm/DISPFlags'
  *
  * const flags = DISPFlags.make({ definition: true, optimized: true })
  * // DISPFlags.toText(flags) equals ['DISPFlagDefinition', 'DISPFlagOptimized']

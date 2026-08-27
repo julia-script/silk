@@ -136,11 +136,11 @@ export interface Definition {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/wasm/Builder'
- * import * as Func from '@silk-effect/wasm/Func'
- * import * as Instr from '@silk-effect/wasm/Instr'
- * import * as Type from '@silk-effect/wasm/Type'
- * import * as ValType from '@silk-effect/wasm/ValType'
+ * import * as Builder from '@silk-lang/wasm/Builder'
+ * import * as Func from '@silk-lang/wasm/Func'
+ * import * as Instr from '@silk-lang/wasm/Instr'
+ * import * as Type from '@silk-lang/wasm/Type'
+ * import * as ValType from '@silk-lang/wasm/ValType'
  *
  * const program = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

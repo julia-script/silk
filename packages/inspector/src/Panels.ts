@@ -7,8 +7,8 @@
  * three clang invocations. Both are shapes the row projections consume.
  */
 
-import type { Backend } from '@silk-effect/compiler'
-import { Analysis, ToolchainPlan } from '@silk-effect/compiler'
+import type { Backend } from '@silk-lang/compiler'
+import { Analysis, ToolchainPlan } from '@silk-lang/compiler'
 import * as Effect from 'effect/Effect'
 
 const clang = '/usr/bin/clang'

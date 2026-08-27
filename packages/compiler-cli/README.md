@@ -1,4 +1,4 @@
-# @silk-effect/compiler-cli
+# @silk-lang/compiler-cli
 
 The project-oriented command line interface for the Silk Effect bootstrap compiler.
 

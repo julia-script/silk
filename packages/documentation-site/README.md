@@ -1,4 +1,4 @@
-# `@silk-effect/documentation-site`
+# `@silk-lang/documentation-site`
 
 Renders a static HTML documentation site and a static search index from the documentation JSON that
 `silk doc` emits.

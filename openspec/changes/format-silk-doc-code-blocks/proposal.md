@@ -41,8 +41,8 @@ None.
 
 - Affects `packages/compiler` formatter naming and exports, documentation parsing/rewrite support,
   compiler CLI formatting, LSP whole-document formatting, and their tests.
-- Adds a workspace formatter package depending on `@silk-effect/compiler` and
-  `@silk-effect/documentation`; ordinary compiler parsing and analysis retain no Markdown runtime
+- Adds a workspace formatter package depending on `@silk-lang/compiler` and
+  `@silk-lang/documentation`; ordinary compiler parsing and analysis retain no Markdown runtime
   dependency.
 - Changes canonical bytes for `.silk` files whose active fenced examples are not already formatted,
   including generated standard-library source inventory when those files change.

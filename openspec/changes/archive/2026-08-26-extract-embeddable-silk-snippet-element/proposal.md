@@ -11,8 +11,8 @@ any reporter that emits plain HTML embed live, compiler-accurate snippets with o
 ## What Changes
 
 - New framework-free package exposing a `<silk-snippet>` custom element built on the existing
-  CodeMirror integration (`@silk-effect/language`) and the synchronous language-server surface
-  (`@silk-effect/lsp/Document`). The element compiles its own content in the browser exactly as
+  CodeMirror integration (`@silk-lang/language`) and the synchronous language-server surface
+  (`@silk-lang/lsp/Document`). The element compiles its own content in the browser exactly as
   doctest does: one snippet, one standalone module.
 - Per-snippet feature flags as boolean attributes: syntax highlighting is always on; `diagnostics`,
   `hover`, `inlay-hints`, and `editable` are opt-in. Without semantic flags the element never
@@ -50,7 +50,7 @@ any reporter that emits plain HTML embed live, compiler-accurate snippets with o
 
 ## Impact
 
-- New package (working name `@silk-effect/snippet`), depending on `compiler`, `lsp`, `language`,
+- New package (working name `@silk-lang/snippet`), depending on `compiler`, `lsp`, `language`,
   and CodeMirror. `packages/language` keeps its current dependency boundary (no `lsp` dependency).
 - `apps/docs/app/labs/editor.tsx` and `Hover.tsx` shrink to wrappers or are deleted in favor of
   the element; `workbench.tsx` and the rest of labs are untouched.

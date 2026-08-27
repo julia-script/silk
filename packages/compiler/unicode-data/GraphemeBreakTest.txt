@@ -1,7 +1,7 @@
 # GraphemeBreakTest.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Conformance data. ÷ marks a cluster boundary and × marks a prohibited break.
-# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
 ÷ 0020 ÷ 0020 ÷
 ÷ 0020 × 0308 ÷ 0020 ÷
 ÷ 0020 ÷ 000D ÷

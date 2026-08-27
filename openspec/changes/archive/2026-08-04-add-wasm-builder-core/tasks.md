@@ -72,4 +72,4 @@
 - [x] 7.1 README with the add-two-numbers example (build → validate → both outputs) and scope
       statement listing deferred features and the Chrome-baseline destination
 - [x] 7.2 JSDoc on all public modules per repository documentation conventions
-- [x] 7.3 Changeset for the initial `@silk-effect/wasm` release
+- [x] 7.3 Changeset for the initial `@silk-lang/wasm` release

@@ -1,9 +1,9 @@
 ---
-'@silk-effect/compiler': minor
-'@silk-effect/compiler-cli': minor
-'@silk-effect/documentation': minor
-'@silk-effect/language': minor
-'@silk-effect/lsp': minor
+'@silk-lang/compiler': minor
+'@silk-lang/compiler-cli': minor
+'@silk-lang/documentation': minor
+'@silk-lang/language': minor
+'@silk-lang/lsp': minor
 ---
 
 Add raw `///` and `//!` documentation source facts, lazy CommonMark documentation models,

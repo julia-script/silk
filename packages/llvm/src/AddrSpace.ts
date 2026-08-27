@@ -37,7 +37,7 @@ export const defaultAddrSpace: AddrSpace = Object.freeze({ _tag: 'AddrSpace', va
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as AddrSpace from '@silk-effect/llvm/AddrSpace'
+ * import * as AddrSpace from '@silk-lang/llvm/AddrSpace'
  *
  * const rendered = await Effect.runPromise(
  *   Effect.gen(function* () {

@@ -1,11 +1,11 @@
-# `@silk-effect/formatter`
+# `@silk-lang/formatter`
 
 Formats one complete Silk source artifact with the canonical project policy. In addition to ordinary
 syntax layout, active fenced `silk` examples in attached `///` and leading `//!` documentation are
 formatted recursively in the source file that owns them.
 
 ```ts
-import * as Formatter from '@silk-effect/formatter/Formatter'
+import * as Formatter from '@silk-lang/formatter/Formatter'
 
 const formatted = yield* Formatter.format(syntax)
 ```

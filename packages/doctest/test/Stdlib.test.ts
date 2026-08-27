@@ -1,6 +1,6 @@
 import { assert, it } from '@effect/vitest'
-import * as CompilerStdlib from '@silk-effect/compiler/Stdlib'
-import * as Json from '@silk-effect/documentation/Json'
+import * as CompilerStdlib from '@silk-lang/compiler/Stdlib'
+import * as Json from '@silk-lang/documentation/Json'
 import * as Effect from 'effect/Effect'
 import * as Doctest from '../src/Doctest.js'
 import * as Report from '../src/Report.js'

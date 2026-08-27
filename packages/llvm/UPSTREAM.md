@@ -69,7 +69,7 @@ summary is [parity/REPORT.md](./parity/REPORT.md).
 Run the candidate workflow with an explicit commit:
 
 ```sh
-pnpm --filter @silk-effect/llvm upstream:candidate -- <zig-commit>
+pnpm --filter @silk-lang/llvm upstream:candidate -- <zig-commit>
 ```
 
 The command downloads only the selected three sources, prints their hashes, extracts a candidate

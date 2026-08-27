@@ -1,5 +1,5 @@
 /**
- * The language server's inspector surface: projects `@silk-effect/inspector` views for workspace
+ * The language server's inspector surface: projects `@silk-lang/inspector` views for workspace
  * documents from the committed analysis, so editor clients can render compiler-phase views
  * without running the compiler themselves.
  *
@@ -10,12 +10,12 @@
  * whole cache with the view it belonged to.
  */
 
-import * as Analysis from '@silk-effect/compiler/Analysis'
-import type * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
-import type { Fact, RowModel } from '@silk-effect/inspector'
-import { viewById, views } from '@silk-effect/inspector'
+import * as Analysis from '@silk-lang/compiler/Analysis'
+import type * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
+import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
+import type { Fact, RowModel } from '@silk-lang/inspector'
+import { viewById, views } from '@silk-lang/inspector'
 import * as Effect from 'effect/Effect'
 import type * as ProjectSnapshot from './ProjectSnapshot.js'
 

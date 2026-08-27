@@ -1,5 +1,5 @@
 ---
-'@silk-effect/platform-webcontainer': major
+'@silk-lang/platform-webcontainer': major
 ---
 
 Add an Effect-native WebContainer platform package with a scoped runtime, standard virtual

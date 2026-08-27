@@ -1,4 +1,4 @@
-import type * as SourceSpan from '@silk-effect/compiler/SourceSpan'
+import type * as SourceSpan from '@silk-lang/compiler/SourceSpan'
 import type { Position, Range } from 'vscode-languageserver-types'
 
 const decoder = new TextDecoder()

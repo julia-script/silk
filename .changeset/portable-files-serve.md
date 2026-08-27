@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': minor
+'@silk-lang/compiler': minor
 ---
 
 Add owned normalized `Path`, allocation-free portable filesystem values and failures, and the

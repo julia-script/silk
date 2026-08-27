@@ -1,6 +1,6 @@
 # Lexer benchmark
 
-Run `pnpm --filter @silk-effect/compiler lexer:bench` to scan a deterministic one-mebibyte source
+Run `pnpm --filter @silk-lang/compiler lexer:bench` to scan a deterministic one-mebibyte source
 snapshot ten times after three warm-up runs. The script reports median and minimum throughput and
 retains the observed token count so the work cannot be discarded.
 

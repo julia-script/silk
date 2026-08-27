@@ -1,4 +1,4 @@
-import type * as Instr from '@silk-effect/wasm/Instr'
+import type * as Instr from '@silk-lang/wasm/Instr'
 import type * as CleanupPlan from './CleanupPlan.js'
 
 export interface Child<State> {

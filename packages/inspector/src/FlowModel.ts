@@ -1,5 +1,5 @@
-import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-effect/compiler'
-import * as Type from '@silk-effect/compiler/Type'
+import type { BootstrapEvaluation, Elaboration, SourceSpan } from '@silk-lang/compiler'
+import * as Type from '@silk-lang/compiler/Type'
 
 const typeText = (type: Type.Type): string => {
   if (typeof type === 'string') return type

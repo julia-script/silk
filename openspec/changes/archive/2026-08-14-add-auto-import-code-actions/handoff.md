@@ -16,7 +16,7 @@ One local release-check run on 2026-08-14 produced these baseline observations:
   semantic project revision still contained only the open `Main` root.
 
 These values are a development-machine baseline rather than performance budgets. Re-run with
-`SILK_AUTO_IMPORT_MEASURE=1 pnpm --filter @silk-effect/lsp exec vitest run
+`SILK_AUTO_IMPORT_MEASURE=1 pnpm --filter @silk-lang/lsp exec vitest run
 test/AutoImportScale.test.ts` when changing discovery, invalidation, or indexing behavior.
 
 ## Verification

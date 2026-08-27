@@ -94,9 +94,9 @@ interface TaggedFields extends Options {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/wasm/Builder'
- * import * as Type from '@silk-effect/wasm/Type'
- * import * as ValType from '@silk-effect/wasm/ValType'
+ * import * as Builder from '@silk-lang/wasm/Builder'
+ * import * as Type from '@silk-lang/wasm/Type'
+ * import * as ValType from '@silk-lang/wasm/ValType'
  *
  * const reasonTag = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

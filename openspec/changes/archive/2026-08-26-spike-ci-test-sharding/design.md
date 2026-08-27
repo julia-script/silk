@@ -7,7 +7,7 @@ See proposal.md for motivation. Constraints that shape the approach:
 - `pnpm check` = `biome check` → `turbo run build` → `turbo run typecheck test` → `test:scripts`.
   All turbo entry points go through `scripts/turbo.mjs`, which derives `--concurrency` from the
   host — shard jobs must keep using it for builds.
-- `@silk-effect/compiler#test` is not just vitest: it chains generator checks
+- `@silk-lang/compiler#test` is not just vitest: it chains generator checks
   (`unicode:check`, `stdlib:check`, `toolchain:check`), documentation checks/policy/examples,
   `test:parallel` (vitest, all files except `DriverNativeAcceptance.test.ts`), and
   `test:native-acceptance` (that one file, `--maxWorkers=1`). Only `test:parallel` is the
@@ -29,7 +29,7 @@ the spike lives entirely in `.github/workflows/ci.yml`.
 ## Decisions
 
 1. **Shard `test:parallel` only, via vitest's native `--shard=N/4`.**
-   `pnpm --filter @silk-effect/compiler run test:parallel -- --shard=N/4`.
+   `pnpm --filter @silk-lang/compiler run test:parallel -- --shard=N/4`.
    The generator/documentation checks are seconds — they stay serial. `DriverNativeAcceptance`
    is already forced to `--maxWorkers=1` and runs once, not per shard.
    *Alternative rejected:* splitting the turbo task — that's the follow-up cache work, not the
@@ -38,7 +38,7 @@ the spike lives entirely in `.github/workflows/ci.yml`.
 2. **Job topology: `validate` keeps everything except compiler vitest; a 4-way `compiler-tests`
    matrix runs the payload.**
    - `validate`: biome, `turbo run build`, `turbo run typecheck`,
-     `turbo run test --filter=!@silk-effect/compiler`, then the compiler's non-vitest checks and
+     `turbo run test --filter=!@silk-lang/compiler`, then the compiler's non-vitest checks and
      `test:native-acceptance` as explicit steps, then `test:scripts` and `release:candidate`.
      (Typecheck runs unfiltered so `compiler#typecheck` isn't lost.)
    - `compiler-tests` (matrix shard 1–4): checkout/setup/caches/install → `turbo run build` →

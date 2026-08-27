@@ -1,7 +1,7 @@
 # CompositionExclusions.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Script-listed composition exclusions. The derived exclusions are computed by the generator.
-# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
 0958
 0959
 095A

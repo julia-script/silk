@@ -7,7 +7,7 @@
  * code never disagree.
  */
 
-import * as SilkCodeMirror from '@silk-effect/language/CodeMirror'
+import * as SilkCodeMirror from '@silk-lang/language/CodeMirror'
 import type { BlockContent, PhrasingContent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 

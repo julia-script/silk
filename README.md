@@ -32,19 +32,19 @@ than compatibility commitments.
 
 ## Packages
 
-- [`@silk-effect/compiler`](packages/compiler) — the stage-0 compiler, evaluator, LLVM backend,
+- [`@silk-lang/compiler`](packages/compiler) — the stage-0 compiler, evaluator, LLVM backend,
   direct WebAssembly backend, embedded Silk standard library, and supported analysis facade.
-- [`@silk-effect/compiler-cli`](packages/compiler-cli) — project initialization, checking,
+- [`@silk-lang/compiler-cli`](packages/compiler-cli) — project initialization, checking,
   multi-target builds, native execution, formatting, and documentation generation through `silk`.
-- [`@silk-effect/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
+- [`@silk-lang/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
   and bitcode emission.
-- [`@silk-effect/wasm`](packages/wasm) — deterministic WebAssembly module construction and binary
+- [`@silk-lang/wasm`](packages/wasm) — deterministic WebAssembly module construction and binary
   emission.
-- [`@silk-effect/language`](packages/language) — lexer-driven CodeMirror support and the Silk
+- [`@silk-lang/language`](packages/language) — lexer-driven CodeMirror support and the Silk
   TextMate grammar consumed by Shiki and VS Code-compatible editors.
-- [`@silk-effect/lsp`](packages/lsp) — project-aware diagnostics, hover, navigation, completion,
+- [`@silk-lang/lsp`](packages/lsp) — project-aware diagnostics, hover, navigation, completion,
   inlay hints, symbols, and canonical formatting over stdio.
-- [`@silk-effect/documentation`](packages/documentation) — CommonMark documentation interpretation,
+- [`@silk-lang/documentation`](packages/documentation) — CommonMark documentation interpretation,
   semantic links, examples, highlighting, and deterministic documentation models.
 - [`silk-language`](packages/vscode) — the private Cursor/VS Code extension package.
 
