@@ -10,7 +10,7 @@ answer.
 
 ### The opt-out marker is `silk,ignore`, not `silk ignore`
 
-The prose documents under `packages/language/docs/` already spell a non-compiled example
+The prose documents under `apps/docs/content/language/` already spell a non-compiled example
 ```` ```silk ignore ````, and `DocumentationExamples.test.ts` reads that form straight out of the
 Markdown. A doctest workflow cannot reuse it.
 

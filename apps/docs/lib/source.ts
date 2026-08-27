@@ -5,8 +5,8 @@ import { TextMate } from '@silk-lang/language';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**
- * The language and compiler docs are plain Markdown with no frontmatter — they also ship with
- * `@silk-lang/language` and render on GitHub, where a frontmatter block would be noise.
+ * The language and compiler docs are plain Markdown with no frontmatter, so they remain useful
+ * when read directly on GitHub and do not carry site-specific metadata.
  *
  * Frontmatter is validated before remark runs, so the title falls back to the file name here and
  * `remarkH1Title` upgrades it to the document's `# H1`. An author-written title always wins.
@@ -25,11 +25,8 @@ function fallbackTitle(path: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-// ponytail: one collection over `content/`, whose language directory is a symlink to the package
-// documentation. Loader record keys are type discriminators, not slug prefixes, so namespacing
-// comes from the directory layout:
-//
-//   content/language -> symlink to packages/language/docs (read in place, never copied)
+// ponytail: one collection over the app-owned `content/` tree. Loader record keys are type
+// discriminators, not slug prefixes, so namespacing comes from the directory layout.
 const docs = defineDocs({
   dir: './content',
   docs: {
@@ -53,7 +50,8 @@ const docs = defineDocs({
 
 /** Sidebar label for each top-level content folder, keyed by directory name. */
 const folderTitles: Record<string, string> = {
-  language: '@silk-lang/language',
+  language: 'Silk language',
+  reference: 'Prescriptive reference',
 };
 
 export const source = loader({
@@ -69,8 +67,8 @@ export const source = loader({
       },
     ],
   },
-  // Package docs use `README.md` as their entry (that's what GitHub and npm render), where
-  // Fumadocs expects `index.md`. Treat them the same so `/docs/language` resolves.
+  // The app-owned sections use `README.md` as their entry so GitHub renders a useful landing page,
+  // where Fumadocs expects `index.md`. Treat them the same so their section routes resolve.
   slugs(file) {
     const slugs = getSlugs(file.path);
     return slugs.at(-1) === 'README' ? slugs.slice(0, -1) : undefined;

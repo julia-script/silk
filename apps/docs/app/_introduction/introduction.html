@@ -136,12 +136,10 @@ struct FixedClock {
   value: i32
 }
 
-effect fn clockValue(self: &amp;FixedClock) -&gt; i32 {
-  return self.value
-}
-
 impl Clock for FixedClock {
-  value: FixedClock.clockValue
+  effect fn value(self: &amp;Self) -&gt; i32 {
+    return self.value
+  }
 }
 
 effect fn readClock() -&gt; i32 ? &amp;Clock {

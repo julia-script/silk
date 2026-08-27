@@ -21,4 +21,6 @@ import * as SilkCodeMirror from '@silk-lang/language/CodeMirror'
 new EditorView({ extensions: [SilkCodeMirror.extension()] })
 ```
 
-See [docs/README.md](docs/README.md) for details.
+The language documentation is owned by the documentation app. Start with the
+[language guide](../../apps/docs/content/language/README.md) or the
+[prescriptive reference](../../apps/docs/content/reference/README.md).

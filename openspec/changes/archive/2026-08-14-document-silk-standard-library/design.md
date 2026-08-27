@@ -141,9 +141,9 @@ emit resolved semantic links.
 
 ### Generate an index and deterministic module pages
 
-Replace the single generated `packages/language/docs/stdlib.md` with:
+Replace the single generated `apps/docs/content/language/stdlib.md` with:
 
-- `packages/language/docs/stdlib/README.md` as the stable index and `/docs/language/stdlib` landing
+- `apps/docs/content/language/stdlib/README.md` as the stable index and `/docs/language/stdlib` landing
   page; and
 - one generated Markdown file per manifest module beneath that directory.
 

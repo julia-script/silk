@@ -6,14 +6,15 @@ program constructs a provider-absolute `Path`, passes one complete byte view to
 `FileError | OutOfMemoryError` failures at the application boundary.
 
 The provider is deliberately ordinary Silk source. A native application can instead provide the
-planned confined `OsFileSystem`; a browser or Wasm application can provide a virtual filesystem
-without changing the consumer operations. Importing `silk.filesystem` never selects a platform or
-an ambient current directory.
+confined `OsFileSystem`; a browser or Wasm application can provide a virtual filesystem without
+changing the consumer operations. Importing `silk.filesystem` never selects a platform or an
+ambient current directory.
 
-Run it with the compiler CLI from the repository root:
+This source is a standalone acceptance fixture rather than a manifest-based CLI project. Compile
+and execute its evaluator and direct-WebAssembly checks from the repository root with:
 
 ```sh
-pnpm silk run examples/file-system/main.silk
+pnpm --filter @silk-lang/compiler exec vitest run test/FileSystemAcceptance.test.ts
 ```
 
 The process exits with `42`, the checksum of the four bytes written and read back.

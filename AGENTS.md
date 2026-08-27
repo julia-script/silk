@@ -23,8 +23,8 @@ skill and update this file rather than preserving an older convention.
 
 Follow [ATOM-REACT-STYLEGUIDE.md](ATOM-REACT-STYLEGUIDE.md) for Effect Atom and `@effect/atom-react` code.
 
-Plan Silk language and standard-library changes through OpenSpec (`openspec/`). The language
-definition and reference live in `docs/language/`.
+Plan Silk language and standard-library changes through OpenSpec (`openspec/`). The prescriptive
+language definition and reference live in `apps/docs/content/reference/`.
 
 ## Repository workflow
 

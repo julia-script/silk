@@ -26,9 +26,26 @@ Portable whole-file interaction is source-defined as well: normalized provider-a
 values and a seven-operation mutable `FileSystem` service can be implemented by application-owned
 native, browser, Wasm, or test providers without introducing ambient storage or host imports.
 
-This is still an alpha language. APIs may break freely, and concurrency, networking, a package
-registry, broad FFI, and self-hosting remain future work chosen from executable evidence rather
-than compatibility commitments.
+## Language documentation
+
+- [Getting started](apps/docs/content/language/tutorial.md) — build a first project and learn the core
+  language through compiler-checked programs.
+- [Language reference](apps/docs/content/language/reference.md) — compact syntax, type, ownership,
+  Effect, declaration, and control-flow rules.
+- [Ownership](apps/docs/content/language/ownership.md),
+  [Effects and services](apps/docs/content/language/effects.md), and
+  [Fibers](apps/docs/content/language/fibers.md) — focused explanations of Silk's central model.
+- [Alpha status](apps/docs/content/language/alpha-status.md) — implemented scope, supported targets,
+  and compatibility boundaries.
+- [Standard library](apps/docs/content/language/stdlib/README.md) and
+  [diagnostics](apps/docs/content/language/diagnostics.md) — generated lookup references.
+- [Prescriptive reference](apps/docs/content/reference/README.md) — intended language rules,
+  boundaries, diagnostics, and supporting evidence.
+
+This is still an alpha language. APIs may break freely. Cooperative single-threaded Fibers are
+implemented; parallelism, multithreading, networking, a package registry, broad FFI, and
+self-hosting remain future work chosen from executable evidence rather than compatibility
+commitments.
 
 ## Packages
 
@@ -54,9 +71,9 @@ The compiler is exercised by seven familiar algorithms plus Silk-written lexer a
 VM pressure programs. Their acceptance gates compare evaluation, native LLVM, and direct
 WebAssembly behavior, including allocation-failure rollback and fresh-process determinism.
 
-The current direction and committed work live in [`roadmaps/project.md`](roadmaps/project.md).
-Detailed implemented behavior lives under [`openspec/specs`](openspec/specs); completed changes and
-their design records live under [`openspec/changes/archive`](openspec/changes/archive).
+Current specifications live under [`openspec/specs`](openspec/specs); active changes live under
+[`openspec/changes`](openspec/changes), and completed design records live under
+[`openspec/changes/archive`](openspec/changes/archive).
 
 ## Development
 

@@ -58,11 +58,11 @@ it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels'
 it('contains no obsolete suspension-allocation surface in shipped source or documentation', () => {
   const roots = [
     'apps/docs/app',
-    'docs/language',
+    'apps/docs/content/language',
+    'apps/docs/content/reference',
     'packages/compiler/src',
     'packages/compiler/stdlib',
     'packages/inspector/src',
-    'packages/language/docs',
   ]
   const forbidden = [
     'ContinuationAllocator',

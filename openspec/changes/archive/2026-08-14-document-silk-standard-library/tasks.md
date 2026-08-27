@@ -18,8 +18,8 @@
 - [x] 3.2 Implement recursive item rendering for every documentation-model kind, honoring model visibility and source order for root declarations, type parameters, fields, parameters, service or interface operations, implementations, and implementation operations.
 - [x] 3.3 Derive declaration anchors and cross-page link destinations from canonical identities and reject deterministic path or anchor collisions.
 - [x] 3.4 Add renderer tests for nested public items, hidden private items, accurate public counts, heading rebasing, multiple titled examples, resolved and unresolved links, and byte-identical repeated output.
-- [x] 3.5 Replace monolithic stdlib generation with `packages/language/docs/stdlib/README.md` plus one deterministic page per manifest module, preserving the `/docs/language/stdlib` landing route.
-- [x] 3.6 Update repository documentation links for the module-page layout and remove the obsolete generated `packages/language/docs/stdlib.md` in the same change.
+- [x] 3.5 Replace monolithic stdlib generation with `apps/docs/content/language/stdlib/README.md` plus one deterministic page per manifest module, preserving the `/docs/language/stdlib` landing route.
+- [x] 3.6 Update repository documentation links for the module-page layout and remove the obsolete generated `apps/docs/content/language/stdlib.md` in the same change.
 - [x] 3.7 Extend documentation freshness checking to detect missing, extra, stale, renamed, and byte-different generated stdlib pages.
 
 ## 4. Example Verification

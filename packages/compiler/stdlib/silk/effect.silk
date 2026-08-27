@@ -64,6 +64,8 @@
 //! ```
 //!
 //! ## Supply a custom service for one lexical computation
+//!
+//! Operation is declared inline below.
 //! ```silk
 //! import silk.effect { Effect }
 //!
@@ -75,12 +77,10 @@
 //!   value: i32
 //! }
 //!
-//! effect fn clockValue(self: &FixedClock) -> i32 {
-//!   return self.value
-//! }
-//!
 //! impl Clock for FixedClock {
-//!   value: FixedClock.clockValue
+//!   effect fn value(self: &Self) -> i32 {
+//!     return self.value
+//!   }
 //! }
 //!
 //! effect fn readClock() -> i32

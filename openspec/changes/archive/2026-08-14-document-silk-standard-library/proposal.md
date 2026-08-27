@@ -47,7 +47,7 @@ None.
 ## Impact
 
 - Affects all canonical sources under `packages/compiler/stdlib/silk/` and the generated language
-  reference under `packages/language/docs/`.
+  reference under `apps/docs/content/language/`.
 - Affects the standard-library Markdown generator, documentation-policy checks, doctest wiring, and
   documentation-site navigation or content layout.
 - Produces a large documentation-only source diff and regenerated documentation artifacts, but does

@@ -10,9 +10,15 @@ Run this from the repository root so Turbo also watches the local packages consu
 
 ## Content
 
-The language and compiler documentation is read in place from `packages/language/docs`; nothing is
-copied into this app. The `content/language` symlink keeps the package directory as the single
-source of truth while exposing it to Fumadocs at `/docs/language/**`.
+This app owns the documentation content directly:
+
+- `content/language` contains tutorials, focused guides, the compact reference, and generated
+  standard-library and diagnostic lookup pages, exposed at `/docs/language/**`.
+- `content/reference` contains the prescriptive language definition, exposed at
+  `/docs/reference/**`.
+
+Compiler documentation generators write their checked output into `content/language`; compiler
+tests compile examples from both sections.
 
 The standalone `@silk-lang/llvm` package has its own Markdown documentation, indexed from
 [`packages/llvm/README.md`](../../packages/llvm/README.md). It is deliberately not published on
