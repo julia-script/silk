@@ -28,7 +28,7 @@ const sourceFiles = (directory: string): ReadonlyArray<string> =>
  * dependencies are exempt on purpose: the tests generate real documentation JSON to render, and
  * that generation never ships.
  */
-it('declares no workspace runtime dependency', () => {
+it('declares no workspace runtime dependency beyond the snippet asset', () => {
   const manifest: unknown = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
   assert.isTrue(typeof manifest === 'object' && manifest !== null)
   const dependencies =
@@ -36,15 +36,22 @@ it('declares no workspace runtime dependency', () => {
       ? Object.keys(manifest.dependencies as Record<string, string>)
       : []
   assert.isAbove(dependencies.length, 0, 'the renderer is expected to have runtime dependencies')
+  // `@silk-effect/snippet` is the one deliberate exception: the command shell ships its prebuilt
+  // element bundle with generated sites as opaque file contents. No renderer module imports it,
+  // which the source scan below still enforces, so the renderer keeps reading the documentation
+  // JSON and nothing else.
   assert.deepStrictEqual(
     dependencies.filter((name) => name.startsWith('@silk-effect/')),
-    [],
+    ['@silk-effect/snippet'],
     'the renderer must read the documentation JSON and nothing else',
   )
 })
 
 it('imports no compiler or workspace module from its own sources', () => {
+  // The command shell (Cli.ts) resolves the snippet element bundle's file path; every renderer
+  // module stays free of workspace imports so no compiler type can reach the rendering.
   const offenders = sourceFiles(join(packageRoot, 'src'))
+    .filter((file) => !file.endsWith('/Cli.ts'))
     .filter((file) => readFileSync(file, 'utf8').includes('@silk-effect/'))
     .map((file) => file.slice(packageRoot.length))
   assert.deepStrictEqual(offenders, [])
@@ -103,6 +110,34 @@ it.effect(
     }),
   240_000,
 )
+
+it('ships the snippet element script and references it relatively when supplied', () => {
+  const decoded = Model.decode({
+    schema: Model.schemaName,
+    experimental: true,
+    modules: [{ name: 'project/main', sourceId: 'project/main', items: [] }],
+  })
+  assert.strictEqual(decoded._tag, 'Decoded')
+  if (decoded._tag !== 'Decoded') return
+  const bare = Site.render(decoded.documentation)
+  assert.notInclude(
+    bare.files.map((file) => file.path),
+    'silk-snippet.js',
+    'no bundle supplied, none shipped',
+  )
+  assert.notInclude(
+    bare.files.find((file) => file.path === 'index.html')?.contents ?? '',
+    'silk-snippet.js',
+  )
+  const site = Site.render(decoded.documentation, { snippetBundle: 'registered()' })
+  const shipped = site.files.find((file) => file.path === 'silk-snippet.js')
+  assert.strictEqual(shipped?.contents, 'registered()')
+  assert.include(
+    site.files.find((file) => file.path === 'index.html')?.contents ?? '',
+    '<script type="module" src="silk-snippet.js"></script>',
+    'pages reference the shipped script relatively',
+  )
+})
 
 it.effect(
   'renders the same bytes twice',

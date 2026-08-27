@@ -67,11 +67,22 @@ it.effect('writes a site from a documentation JSON file', () =>
         'index.html',
         'project-main.html',
         'search-index.js',
+        'silk-snippet.js',
         'style.css',
       ])
       const page = readFileSync(join(output, 'project-main.html'), 'utf8')
       assert.include(page, 'Adds two values.')
       assert.include(page, 'pub fn add(left: i32, right: i32) -&gt; i32')
+      assert.include(
+        page,
+        '<script type="module" src="silk-snippet.js"></script>',
+        'every page loads the element script relatively',
+      )
+      assert.include(
+        readFileSync(join(output, 'silk-snippet.js'), 'utf8'),
+        'silk-snippet',
+        'the shipped bundle registers the element',
+      )
       assert.include(readFileSync(join(output, 'search-index.js'), 'utf8'), '"name":"add"')
     } finally {
       rmSync(root, { recursive: true, force: true })

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -57,8 +58,27 @@ export const run = Effect.fn('Cli.run')(function* (
     return 2
   }
 
+  // The `<silk-snippet>` element script ships with every generated site so Silk fences come
+  // alive when served statically. It is resolved here in the command shell, never in the
+  // renderer: the renderer reads the documentation JSON and nothing else, and the bundle crosses
+  // this boundary as opaque file contents.
+  const bundle = yield* Effect.result(
+    Effect.flatMap(
+      Effect.try({
+        try: () => fileURLToPath(import.meta.resolve('@silk-effect/snippet/bundle')),
+        catch: (cause) => cause,
+      }),
+      (bundlePath) => fileSystem.readFileString(bundlePath),
+    ),
+  )
+  if (Result.isFailure(bundle)) {
+    yield* Console.error('Cannot load the silk-snippet element bundle from @silk-effect/snippet')
+    return 2
+  }
+
   const site = Site.render(decoded.documentation, {
     ...(options.title === undefined ? {} : { title: options.title }),
+    snippetBundle: bundle.success,
   })
   const written = yield* Effect.result(
     Effect.gen(function* () {

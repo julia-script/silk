@@ -662,6 +662,20 @@
   overflow: hidden;
   color: var(--wb-ink);
   tab-size: 2;
+  /* The shared snippet editor core reads --silk-snippet-* properties; the workbench is always
+     dark, so its own palette is mapped onto them here. */
+  --silk-snippet-font: var(--wb-font);
+  --silk-snippet-font-size: 11.5px;
+  --silk-snippet-line-height: 19px;
+  --silk-snippet-padding: 5px 0 5px 8px;
+  --silk-snippet-ink: var(--wb-ink);
+  --silk-snippet-ink-muted: var(--wb-ink-2);
+  --silk-snippet-selection: rgba(198, 166, 120, 0.22);
+  --silk-snippet-error: var(--wb-error);
+  --silk-snippet-tooltip-bg: var(--wb-bg-pane);
+  --silk-snippet-border: var(--wb-hairline-strong);
+  --silk-snippet-code-bg: var(--wb-active-strong);
+  --silk-snippet-accent: var(--wb-violet);
 }
 
 .editor :global(.cm-editor) {
