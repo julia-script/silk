@@ -16,7 +16,10 @@ pages. Package acquisition and version selection are outside the language.
 - A **namespace binding** is a local name that qualifies members of one imported module.
 - A **selected binding** is one imported declaration available directly under a local name.
 - An **alias** is an explicit local name replacing a namespace or selected binding's default name.
-- A **qualified name** begins with a namespace binding, as in `User.make`.
+- A **qualified name** begins with a namespace binding or nominal module-scope binding, as in
+  `User.make`.
+- A **nominal module scope** is a struct, service, or interface name that also qualifies the
+  public declarations of the module whose file basename it matches.
 - A **module scope** is the set of top-level declaration and import names visible throughout one
   module.
 - A **module closure** is the root module and every module reachable through its transitive imports.
@@ -481,6 +484,58 @@ redundancy defined by IMPORT-005.
 **Evidence:** [explicit import aliases](../../openspec/specs/bootstrap-name-resolution/spec.md),
 [namespace alias tests](../../packages/compiler/test/NameResolution.test.ts).
 
+### NAME-005 — A file-named struct or contract also scopes that module's public members
+
+**Status:** Confirmed
+
+A top-level struct, service, or interface doubles as its defining module's qualifier only when its
+declaration name matches the module's final path segment after removing underscores and ignoring
+case. For example, declaration `UserProfile` in module `model/user_profile` is that module's nominal
+scope.
+
+```silk
+// model/user_profile.silk
+pub struct UserProfile {}
+
+pub fn answer() -> i32 {
+  return 42
+}
+```
+
+```silk
+// app/main.silk
+import model.user_profile { UserProfile }
+
+pub fn main() -> i32 {
+  return UserProfile.answer()
+}
+```
+
+`UserProfile.answer` resolves the public function in `model/user_profile`. The same rule applies to
+qualified type paths and follows the canonical declaration through a selected-import alias: an
+alias changes the local qualifier spelling, not whether the declaration names its module.
+
+**Boundary:** A different nominal declaration in the same file does not expose the module's
+functions or types. For example, `Provider.answer()` is unavailable when `Provider` is declared in
+`model/user_profile`; only `UserProfile` matches the basename. The comparison ignores only case and
+underscores, not arbitrary punctuation or path segments.
+
+Scalar enums are deliberately different: their qualifier is reserved for declared members and the
+generated `value` operation, so even a file-named enum does not expose other top-level module
+members. Service and interface operations remain operations of their declaring contract regardless
+of the file name. The filename rule governs their access to other top-level module members. It never
+turns a private member or an imported binding into a public re-export.
+
+**Diagnostics:** An unknown type path through a valid nominal module scope reports `SEM0014`. An
+unknown call through a struct, service, or interface qualifier—including a declaration that does
+not name its module—reports the actor-operation diagnostic `SEM0010` instead of searching that
+declaration's defining module. A private module member remains inaccessible as `SEM0015`.
+
+**Evidence:** [nominal scope selection](../../packages/compiler/src/NameResolution.ts),
+[call resolution](../../packages/compiler/src/CallResolution.ts),
+[expression resolution](../../packages/compiler/src/ExpressionAnalysis.ts),
+[completion coverage](../../packages/compiler/test/EditorIntelligence.test.ts).
+
 ## Visibility
 
 ### VIS-001 — Declarations are private by default and `pub` exposes them
@@ -503,9 +558,10 @@ fn hidden() -> i32 {
 Both functions are available inside their defining module. Another module may import or qualify
 `answer` but not `hidden`.
 
-The same default applies to nominal types, constants, services, interfaces, and other top-level
-declarations that support cross-module access. Struct fields have their own `pub` marker under the
-same private-by-default principle.
+The same default applies to nominal types, scalar enums, constants, services, interfaces, and other
+top-level declarations that support cross-module access. Struct fields have their own `pub` marker
+under the same private-by-default principle. A scalar enum's `pub` marker exposes its type and
+complete member set; individual enum members have no separate visibility marker.
 
 **Boundary:** `pub` grants name accessibility; it does not import the declaration anywhere,
 re-export it from an importing module, execute it, or weaken its type, Effect, ownership, or target
@@ -690,8 +746,7 @@ namespace alias or a selected-member list so the import never creates a binding 
 otherwise reserved.
 
 ```silk
-import silk.effect as Effect
-import silk.effect { suspend }
+import silk.effect { Effect, suspend }
 ```
 
 Reserved segments in any nonfinal position are ordinary parts of the canonical module identity.
@@ -700,8 +755,9 @@ path segments.
 
 **Boundary:** Contextual acceptance is limited to import paths. A reserved word remains invalid as a
 declaration name or explicit alias. `import silk.effect` is invalid because its implicit namespace
-binding would be named `effect`; `import silk.effect as Effect` and selected-member imports are
-valid because they state legal bindings explicitly.
+binding would be named `effect`; selected-member imports such as `import silk.effect { Effect }`
+are valid because they state legal bindings explicitly. A legal explicit namespace alias remains
+valid under IMPORT-002 when a caller specifically needs the module namespace.
 
 **Diagnostics:** A reserved final segment without an alias or selected-member list reports
 `PAR0004` at that segment and explains that the import needs an explicit binding form. The parser
@@ -722,7 +778,7 @@ without imports. Ordinary standard-library actor namespaces are not. A module im
 standard-library API it names.
 
 ```silk
-import silk.option as Option
+import silk.option { Option }
 
 pub fn main() -> i32 {
   let value = Option.some<i32>(42)
@@ -732,17 +788,19 @@ pub fn main() -> i32 {
 ```
 
 The type spelling `i32` needs no import because it is part of the language. `Option.some` needs the
-explicit `silk.option` namespace binding because `Option` is an ordinary standard-library actor.
-The same rule applies to `Effect`, `Vector`, `Result`, filesystem services, target providers, and
-primitive actor operations:
+explicit `Option` actor binding because `Option` is an ordinary standard-library actor. Because
+the actor matches the module filename, that selected declaration also qualifies the module's public
+operations under NAME-005. The same rule applies to `Effect`, `Vector`, `Result`, filesystem
+services, target providers, and primitive actor operations:
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.i32
 ```
 
-`Effect<A ! E ? R>` remains language type syntax. The namespace binding imported as `Effect` names
-ordinary standard-library functions such as `Effect.provide`.
+`Effect<A ! E ? R>` remains language type syntax. The selected actor binding `Effect` names the
+matching nominal declaration and qualifies ordinary standard-library functions such as
+`Effect.provide`.
 
 **Boundary:** The toolchain may resolve the reserved `silk/` source origin differently from project
 files, but that packaging privilege does not inject its declarations into every module scope.
@@ -750,8 +808,9 @@ Tooling may add missing imports automatically; auto-import is a source edit, not
 
 A foundational type spelling does not create an ordinary nominal declaration in the module scope.
 Therefore `import silk.i32` may bind actor namespace `i32` while type positions continue to use the
-closed language spelling `i32`; `import silk.effect as Effect` behaves similarly beside Effect
-type syntax. This does not create general separate type and value namespaces for user declarations.
+closed language spelling `i32`; selecting the matching `Effect` actor behaves similarly beside
+Effect type syntax. This does not create general separate type and value namespaces for user
+declarations.
 
 **Diagnostics:** Naming an unimported standard-library namespace uses the ordinary unknown-name
 diagnostic. Catalog-backed completion may add a visible, collision-aware import edit.

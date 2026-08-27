@@ -72,7 +72,7 @@ behavior.
 retain defined trap behavior. The language documentation has not previously separated detected
 debug violations from the portable undefined-behavior boundary this explicitly.
 
-**Evidence:** [fatal traps](typed-failures.md#fail-012--fatal-trap-is-unrecoverable-and-promises-no-cleanup),
+**Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
 [safe-code vocabulary](../../CONTEXT.md),
 [intrinsic unsafe invariants](../../packages/compiler/test/fixtures/intrinsic-inventory.json).
 
@@ -118,7 +118,7 @@ source callables.
 
 **Status:** Confirmed
 
-Proposed syntax:
+Source syntax:
 
 ```silk,ignore
 pub unsafe fn fromUtf8Unchecked(bytes: &[u8]) -> string {
@@ -366,13 +366,14 @@ untracked transition visible by convention or comments.
 unsafe region use their ordinary diagnostics. A diagnostic should not suggest adding `unsafe` when
 no unsafe operation exists that expresses the required transition.
 
-**Current compiler:** Largely aligned for lexical unsafe blocks: ordinary semantic and ownership
-analysis remains active inside them. The intrinsic audit must verify that every raw state transition
-has a precise post-state rather than relying on an ambient unsafe exemption.
+**Current compiler:** Aligned for the current checked inventory. Ordinary semantic and ownership
+analysis remains active inside lexical unsafe blocks, and each unsafe catalog entry carries the
+specific invariant acknowledged by its call site rather than relying on an ambient exemption.
 
 **Evidence:** [ownership and borrowing](ownership-and-borrowing.md),
-[fatal-trap cleanup boundary](typed-failures.md#fail-012--fatal-trap-is-unrecoverable-and-promises-no-cleanup),
-[intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md).
+[fatal-trap cleanup boundary](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
+[intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
+[checked intrinsic inventory](../../packages/compiler/test/IntrinsicCatalog.test.ts).
 
 ### UNSAFE-007 — Partial application preserves unsafety but does not invoke it
 
@@ -467,9 +468,10 @@ language.
 documentation is an LSP warning and does not fail parsing, semantic analysis, execution, or a
 compiler-only build. Ordinary visibility and import errors retain their ordinary diagnostics.
 
-**Current compiler:** Partially aligned. Documentation comments already attach to declarations and
-flow into editor information, while ordinary source-declared unsafe functions and the corresponding
-LSP warning do not yet exist.
+**Current compiler:** Aligned for source-declared unsafe functions, visibility, call-site
+acknowledgement, formatting, and editor presentation. Documentation comments attach to declarations
+and flow into editor information. The non-blocking LSP warning for a missing or empty `# Safety`
+section is not yet implemented.
 
 **Evidence:** [module and visibility rules](modules-names-and-visibility.md),
 [documentation block model](../../packages/compiler/src/DocBlock.ts),
@@ -514,9 +516,9 @@ collision. An unknown member reports an unknown-intrinsic diagnostic and does no
 modules for a fallback. A same-named ordinary operation under another qualifier resolves normally
 and receives no intrinsic-specific diagnostic or lowering.
 
-**Current compiler:** Largely aligned. Intrinsic operations carry canonical identities and scalar
-actor spellings now resolve to shipped source wrappers. The complete catalog and every remaining
-name-based compiler branch still require reconciliation against this rule.
+**Current compiler:** Aligned. Intrinsic operations carry canonical identities in one checked
+catalog, scalar actor spellings resolve to shipped source wrappers, and same-spelled ordinary source
+operations receive no intrinsic identity or lowering.
 
 **Evidence:** [intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
 [intrinsic catalog tests](../../packages/compiler/test/IntrinsicCatalog.test.ts),
@@ -589,9 +591,9 @@ program-error condition. The deterministic inventory records the admission reaso
 consumer. Repository verification rejects missing consumers, unregistered compiler branches,
 unregistered public host imports, or duplicate abstraction-shaped operations.
 
-**Current compiler:** Partially aligned. The inventory records admission and consumer metadata and
-the bootstrap intrinsic specification has repeatedly replaced domain-shaped operations with narrow
-primitives. A stabilization audit must still remove any survivor that cannot meet this rule.
+**Current compiler:** Aligned for the current catalog. The checked inventory records a nonempty
+admission reason and concrete consumer for every operation, and catalog tests compare that inventory
+with every accepted semantic intrinsic call.
 
 **Evidence:** [minimal intrinsic requirement](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
 [current deterministic inventory](../../packages/compiler/test/IntrinsicCatalog.test.ts).
@@ -638,10 +640,9 @@ missing-boundary error. Invalid wrapper logic receives only the diagnostics just
 Silk analysis; the compiler does not claim to have proven its semantic safety argument. LSP wrapper
 suggestions are optional actions, not correctness diagnostics.
 
-**Current compiler:** Architecturally aligned. Shipped source wrappers call narrow intrinsics from
-ordinary Silk and the compiler resolves only the intrinsic identity. A stabilization audit must
-remove any remaining name-based wrapper privilege and ensure direct intrinsic calls are treated
-uniformly.
+**Current compiler:** Aligned. Shipped source wrappers call narrow intrinsics from ordinary Silk,
+the compiler resolves only the sealed intrinsic identity, and same-spelled ordinary operations are
+verified to remain ordinary source.
 
 **Evidence:** [minimal compiler privilege](../../AGENTS.md#minimal-compiler-privilege),
 [intrinsic boundary specification](../../openspec/specs/bootstrap-intrinsic-boundary/spec.md),
@@ -698,7 +699,7 @@ before evaluation or emission.
 
 **Evidence:** [intrinsic target availability specification](../../openspec/specs/bootstrap-intrinsic-target-availability/spec.md),
 [availability selection](../../packages/compiler/src/IntrinsicAvailability.ts),
-[target-availability tests](../../packages/compiler/test/IntrinsicTargetAvailability.test.ts).
+[target-availability tests](../../packages/compiler/test/IntrinsicAvailability.test.ts).
 
 ### TARGET-002 — Unreachable target-specific primitives have no artifact cost
 

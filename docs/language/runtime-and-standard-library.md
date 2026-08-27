@@ -122,7 +122,7 @@ Only closed language bindings exist without source imports. Standard-library act
 types—enter a module scope only through explicit imports.
 
 ```silk
-import silk.option as Option
+import silk.option { Option }
 
 pub fn main() -> i32 {
   let value = Option.some<i32>(42)
@@ -132,8 +132,8 @@ pub fn main() -> i32 {
 ```
 
 The type spellings `i32` and `Effect<A ! E ? R>` remain language syntax. Importing `silk.i32` or
-`silk.effect as Effect` creates an ordinary value namespace containing actor operations; it does
-not define or replace the language type.
+selecting `Effect` from `silk.effect` creates an ordinary value binding containing actor operations;
+it does not define or replace the language type.
 
 Canonical standard-library modules occupy the reserved `silk.*` distribution identity. Project
 source cannot declare, replace, or shadow that identity. This reservation lets one import resolve
@@ -245,10 +245,11 @@ distribution-policy violation identifying both modules and the dependency edge. 
 import its portable contract. Catalog verification rejects a dependency cycle that makes the
 portable closure depend transitively on target-provider source.
 
-**Current standard library:** Largely aligned. Filesystem, standard input, host input, and child
-process contracts are separate from their OS providers. Allocation (`silk.allocator`) and standard
-streams (`silk.standard_streams`) are their own modules; the manifest still needs classification
-against this boundary.
+**Current standard library:** Partially aligned. The manifest now classifies every module as
+`portable` or `target-provider`, and filesystem, standard input, host input, and child-process
+contracts are separate from their OS providers. Allocation (`silk.allocator`) and standard streams
+(`silk.standard_streams`) are still classified as portable while also containing their
+process-backed providers, so those two module boundaries remain to be reconciled with this rule.
 
 **Evidence:** [portable/provider separation](../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [requirements and services](requirements-and-services.md),
@@ -265,7 +266,7 @@ resource.
 
 ```silk,ignore
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.vector as Vector
+import silk.vector { Vector }
 
 effect fn copyValues(values: &[i32]) -> Vector<i32> ! OutOfMemoryError ? &mut Allocator {
   let mut result = Vector.make<i32>()
@@ -344,10 +345,10 @@ checked only when a provider operation and its restricted intrinsic enter the se
 closure. Provider names, module paths, and conformances do not create module-level target semantics.
 
 ```silk,ignore
-import silk.os_filesystem as OsFileSystem
+import silk.os_filesystem { OsFileSystem }
 
 pub fn main() -> i32 {
-  // Importing the provider namespace is valid even when this target cannot execute its OS calls.
+  // Importing the provider actor is valid even when this target cannot execute its OS calls.
   return 0
 }
 ```
@@ -380,14 +381,14 @@ runtime do not automatically provide an allocator, logger, filesystem, clock, ho
 stream, or other service merely because an official implementation ships with the toolchain.
 
 ```silk,ignore
-import silk.effect as Effect
-import silk.logger { Logger }
+import silk.effect { Effect }
+import silk.logger { LogError, LogLevel, Logger }
 
-effect fn program() -> () ? &mut Logger {
-  return run Logger.log("ready")
+effect fn program() -> () ! LogError ? &mut Logger {
+  return run Logger.log(LogLevel.Info, "ready")
 }
 
-pub effect fn main() {
+pub effect fn main() ! LogError {
   let mut logger = Logger.stdoutProvider()
   return run Effect.provideMut<Logger>(program(), &mut logger)
 }
@@ -454,7 +455,7 @@ justified by the retained executable inventory.
 closure, while executable support follows reachable specialized operations.
 
 **Evidence:** [TARGET-002](unsafe-intrinsics-and-targets.md#target-002--unreachable-target-specific-primitives-have-no-artifact-cost),
-[explicit module closure](modules-names-and-visibility.md#mod-003--imports-build-one-deterministic-transitive-module-closure),
+[explicit module closure](modules-names-and-visibility.md#module-004--compilation-loads-only-the-transitively-reachable-module-closure),
 [current intrinsic availability](../../packages/compiler/src/IntrinsicAvailability.ts).
 
 ### RUNTIME-003 — Toolchain runtime support guarantees contracts, not implementation ABI
@@ -534,13 +535,15 @@ and target behavior. It does not select an executor. None of these contracts is 
 unprovided service receives a requirement diagnostic. The compiler must not silently initialize a
 runtime facility to make either program succeed.
 
-**Current compiler:** Directionally aligned but not fully audited. The native adapter and bootstrap
-runtime contain host support used by provider intrinsics; stabilization must verify that none becomes
-ambient source behavior or unavoidable artifact cost.
+**Current compiler:** Aligned for the current inventory. Entry and intrinsic reachability retain
+only explicitly selected facilities, while direct-Wasm and pressure tests keep trivial programs
+free of host imports, Scheduler, Fiber, LocalScheduler, Execution, and Wake machinery.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
 [Effect suspension](effect-suspension.md),
-[entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved).
+[entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
+[runtime-tier pressure tests](../../packages/compiler/test/LocalSharedPressure.test.ts),
+[intrinsic availability tests](../../packages/compiler/test/IntrinsicAvailability.test.ts).
 
 ### RUNTIME-005 — The compiler-generated adapter is the only mandatory program runtime boundary
 

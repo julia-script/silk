@@ -46,7 +46,7 @@ content, and each example heading. Declaration comments use this form:
 /// Explain a choice only when the code cannot show it.
 ///
 /// ```silk
-/// import silk.option as Option
+/// import silk.option { Option }
 ///
 /// pub fn main() -> i32 {
 ///   let value = Option.some<i32>(2)
@@ -365,18 +365,20 @@ each line after the example.
 Order multiple examples from the most common case to the most specialized case. Give each example
 a different title.
 
-### Namespace imports
+### Actor imports
 
-Use a namespace import in standard-library code and examples. Call an operation through its
-actor or module name. This form keeps the operation name contextual and follows
-[STYLE-003](style-guide.md#style-003--examples-prefer-namespace-imports-and-qualified-operations).
+When a standard-library module contains a struct, service, or interface matching its filename,
+import that actor directly in documentation examples. The imported actor makes the module's public
+operations available through its qualifier, so calls remain qualified and contextual. Service and
+interface contract operations still take precedence over same-named module members. This follows
+[STYLE-003](style-guide.md#style-003--examples-prefer-actor-imports-and-qualified-operations).
 
 Preferred:
 
 ```silk
 import silk.usize as usize
 
-import silk.vector as Vector
+import silk.vector { Vector }
 
 pub fn main() -> i32 {
   let values = Vector.make<i32>()
@@ -386,11 +388,12 @@ pub fn main() -> i32 {
 }
 ```
 
-Do not destructure a module when that form removes useful context. For example, avoid importing
-`make`, `append`, `get`, and `length` as unqualified names from `silk.vector`.
+Use a namespace import when a module has no matching struct, service, or interface. A matching
+scalar enum does not expose the module's top-level operations. Do not import actor operations such
+as `make`, `append`, `get`, and `length` as unqualified names when that removes useful context.
 
-`Vector.length` gives context that `length` does not give. This rule is mandatory in the standard
-library and official examples.
+`Vector.length` gives context that `length` does not give. This rule is mandatory in official
+documentation examples.
 
 ### Pipe operator
 
@@ -483,7 +486,7 @@ This comment documents `Vector.length`. The signature gives the remaining inform
 /// ## Use a present and an absent value
 ///
 /// ```silk
-/// import silk.option as Option
+/// import silk.option { Option }
 ///
 /// pub fn main() -> i32 {
 ///   let present = Option.some<i32>(7)
@@ -500,8 +503,8 @@ This comment documents `Vector.length`. The signature gives the remaining inform
 /// ```
 ````
 
-This comment documents `Option.unwrapOr`. The example uses a namespace import and an owned value
-pipeline.
+This comment documents `Option.unwrapOr`. The example imports the matching `Option` actor and uses
+an owned value pipeline.
 
 ### Gotchas state a trap condition
 
@@ -528,11 +531,11 @@ pipeline.
 /// ```silk
 /// import silk.allocator { Allocator }
 ///
-/// import silk.effect as Effect
+/// import silk.effect { Effect }
 ///
 /// import silk.usize as usize
 ///
-/// import silk.vector as Vector
+/// import silk.vector { Vector }
 ///
 /// pub effect fn main() -> ()
 /// ! Allocator.OutOfMemoryError {

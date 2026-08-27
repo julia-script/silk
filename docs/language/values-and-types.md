@@ -7,7 +7,8 @@ language's explicitly defined compatibility relations.
 Ownership behavior is defined by [ownership and borrowing](ownership-and-borrowing.md). Function,
 callable, and match result types are defined by
 [functions, callables, and control flow](functions-callables-and-control-flow.md). This page defines
-the identities, construction rules, and ordinary compatibility of foundational values.
+the identities, construction rules, and ordinary compatibility of foundational values, nominal
+structs and scalar enums, arrays, references, slices, and structural unions.
 
 ## Terminology
 
@@ -20,7 +21,8 @@ the identities, construction rules, and ordinary compatibility of foundational v
 - **Contextual literal selection** chooses a representable type for an exact literal that has not
   yet become a typed value.
 - **Compatibility** determines whether an already-typed source value may satisfy an expected type.
-- A **scalar** is `bool`, `char`, an integer type, or a floating-point type.
+- A **foundational scalar** is `bool`, `char`, an integer type, or a floating-point type. A
+  **scalar enum** is instead a nominal type with one fixed-width integer representation.
 - A **nominal type** is identified by its declaration rather than by the shape of its fields.
 - An **aggregate** is a value containing other values, such as a struct, fixed array, or structural
   union payload.
@@ -130,11 +132,11 @@ runtime value fits, an array does not decay into a slice, and `string` does not 
 
 **Diagnostics:** The enclosing boundary selects the diagnostic: arguments use `SEM0012`, struct
 fields `SEM0025`, array elements `SEM0030`, assignments `SEM0037`, and incompatible union widening
-`SEM0040`. Return mismatches still need one stable general semantic code.
+`SEM0040`. Return mismatches report `SEM0129`.
 
 **Evidence:** [compatibility implementation](../../packages/compiler/src/TypeCompatibility.ts),
 [callable modes](functions-callables-and-control-flow.md#callable-003--invocation-mode-describes-access-to-the-callable-environment),
-[Effect access](ownership-and-borrowing.md#effect-own-002--effect-run-access-derives-from-how-each-run-uses-the-environment).
+[Effect access](ownership-and-borrowing.md#effect-own-002--run-access-derives-from-use-of-the-effect-environment).
 
 ## Scalar values and literals
 
@@ -492,6 +494,151 @@ memory cannot request Copy merely because its physical representation contains a
 
 **Evidence:** [owned value classification](ownership-and-borrowing.md#own-001--every-value-type-is-either-copy-or-affine).
 
+## Scalar enum values
+
+### ENUM-001 — A scalar enum declares one closed nominal member set
+
+**Status:** Confirmed
+
+`enum Name { ... }` declares one nonempty, source-ordered set of uniquely named, fieldless members.
+The declaration creates a nominal type identified by its canonical module and name. Only a
+qualified member path such as `Status.Ready` constructs a value; the bare spelling `Ready` does not
+become a module binding.
+
+```silk
+enum Status {
+  Pending,
+  Ready,
+  Done,
+}
+
+fn initial() -> Status {
+  return Status.Pending
+}
+```
+
+Two enum declarations remain different types even when they use the same representation, member
+names, and discriminants. Every safe value of an enum names exactly one declared member. Members
+have no payload, generic arguments, fields, or independent visibility marker; the enum
+declaration's visibility governs the complete member set.
+
+**Boundary:** Silk does not infer an enum from an unqualified member name, an integer, or another
+enum's same-spelled member. An empty enum, a repeated member name, or a payload-bearing member is
+invalid rather than creating an open or data-carrying sum type. Use structural unions of nominal
+structs when alternatives need payloads.
+
+**Diagnostics:** An empty enum reports `SEM0146`; a repeated member name reports `SEM0148` at the
+later name and relates the first declaration. An unknown qualified member reports `SEM0153`.
+Using a member through another canonical enum reports `SEM0154`. A bare member name receives the
+ordinary unknown-name diagnostic.
+
+**Evidence:** [scalar enum specification](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[enum declaration tests](../../packages/compiler/test/DeclarationIndex.test.ts),
+[enum name-resolution tests](../../packages/compiler/test/NameResolution.test.ts).
+
+### ENUM-002 — The representation and discriminant sequence are explicit and checked
+
+**Status:** Confirmed
+
+An enum without a representation uses exactly `u8`. `enum(R) Name` may select only `u8`, `u16`,
+`u32`, `u64`, `i8`, `i16`, `i32`, or `i64`; Silk never infers a wider representation from member
+values.
+
+The first implicit discriminant is `0`. Every later implicit member takes the preceding member's
+discriminant plus one, including after an explicit optionally negative decimal integer literal.
+
+```silk
+enum(i16) ExitCode {
+  Success,
+  Interrupted = 130,
+  Failed,
+}
+```
+
+The discriminants are `0`, `130`, and `131`. Each explicit value and implicit successor must fit
+the selected representation, and discriminants must be unique.
+
+**Boundary:** `usize`, `isize`, floating types, aliases, nominal integer wrappers, and inferred
+representations are unavailable. An explicit discriminant is not a general constant expression;
+the current syntax accepts an optionally negative decimal integer literal. An unsigned enum cannot
+use a negative discriminant.
+
+**Diagnostics:** An unsupported representation reports `SEM0147`; a duplicate discriminant
+reports `SEM0149` at the later member and relates the first. An explicit out-of-range discriminant
+reports `SEM0150`, an overflowing implicit successor `SEM0151`, and a negative discriminant under
+an unsigned representation `SEM0152`.
+
+**Evidence:** [scalar enum representation rules](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[enum parser tests](../../packages/compiler/test/Parser.test.ts),
+[discriminant tests](../../packages/compiler/test/DeclarationIndex.test.ts).
+
+### ENUM-003 — A scalar enum has its representation's layout but keeps nominal identity
+
+**Status:** Confirmed
+
+A valid enum has exactly the size, alignment, and calling shape of its selected fixed-width integer,
+with no hidden tag or metadata. This representation choice is not visible as type compatibility:
+the source value remains the enum's nominal type through storage, calls, equality, and matching.
+
+Every scalar enum is a compiler-sealed Copy value with no cleanup obligation. Reading or passing an
+enum copies its member value without consuming the original binding.
+
+```silk
+enum Mode { Read, Write }
+
+fn same(value: Mode) -> bool {
+  let copy = value
+  return copy == value
+}
+```
+
+**Boundary:** Matching integer layout does not permit implicit integer conversion, cross-enum
+conversion, or arbitrary bit patterns to inhabit an enum. User code cannot implement or replace
+the enum's sealed `Copy` behavior, and an enum cannot admit a `Drop` implementation.
+
+**Diagnostics:** An attempted user `Copy` conformance uses the invalid-conformance diagnostic
+`SEM0083`; an invalid `Drop` implementation uses `SEM0084`. Mixing an enum with its representation
+integer reports `SEM0155` at the incompatible boundary.
+
+**Evidence:** [sealed enum ownership](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[layout tests](../../packages/compiler/test/Layout.test.ts),
+[enum ownership tests](../../packages/compiler/test/Ownership.test.ts).
+
+### ENUM-004 — `Enum.value` exposes the backing integer in one direction
+
+**Status:** Confirmed
+
+For an enum `E` represented by integer type `R`, `E.value(value)` accepts exactly `E` and returns
+that member's declared discriminant as `R`. The generated operation is total, allocation-free,
+failure-free, and requirement-free.
+
+```silk
+enum(i8) Status {
+  Unknown = -1,
+  Ready,
+}
+
+fn code(status: Status) -> i8 {
+  return Status.value(status)
+}
+```
+
+`Status.value(Status.Unknown)` returns `-1`. There is no built-in inverse operation because only
+declared discriminants are valid enum inhabitants.
+
+**Boundary:** An enum does not become an integer in arithmetic, ordering, assignment, arguments, or
+returns. An integer does not become an enum even when its value equals a member discriminant.
+`Enum.value` exposes representation; it does not erase the nominal type of the original value or
+promise that arbitrary representation bits can be reconstructed safely.
+
+**Diagnostics:** Either implicit enum-to-integer or integer-to-enum use reports `SEM0155`. A wrong
+enum argument uses the ordinary argument mismatch or the more specific canonical-enum diagnostic
+where applicable.
+
+**Evidence:** [enum value operation](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[analysis facade tests](../../packages/compiler/test/Analysis.test.ts),
+[backend enum tests](../../packages/compiler/test/Backend.test.ts).
+
 ## Fixed arrays, references, and slices
 
 ### ARRAY-001 — A fixed array type includes its element type and length
@@ -614,8 +761,8 @@ returned views, storage restrictions, and loan endings follow the ownership refe
 uses `SEM0058`; implicit array decay uses `SEM0059`.
 
 **Evidence:** [runtime slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
-[borrow rules](ownership-and-borrowing.md#borrow-001--shared-borrows-permit-only-shared-access-while-live),
-[returned views](ownership-and-borrowing.md#view-001--an-ordinary-function-may-return-one-source-borrowed-view).
+[borrow rules](ownership-and-borrowing.md#borrow-001--a-shared-borrow-grants-temporary-read-access),
+[returned views](ownership-and-borrowing.md#view-001--an-ordinary-function-may-return-a-view-from-one-borrowed-parameter).
 
 ## Structural unions and inference
 

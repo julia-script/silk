@@ -137,7 +137,7 @@ channel or reach the automatic entry boundary.
 
 **Diagnostics:** No marker interface or formatting diagnostic applies to a valid error type.
 
-**Evidence:** [ordinary error values](typed-failures.md#fail-001--any-detached-owned-value-may-be-a-typed-failure),
+**Evidence:** [ordinary error values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure),
 [removal of Report ceremony](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures).
 
 ## TERM-006 — Recovery history becomes causal report context

@@ -140,7 +140,7 @@ concrete.
 
 **Evidence:** [generic application specification](../../openspec/specs/bootstrap-type-generics/spec.md),
 [nominal type identity](values-and-types.md),
-[type elaboration](../../packages/compiler/src/Elaboration.ts).
+[type resolution](../../packages/compiler/src/DeclarationResolution.ts).
 
 ### GEN-003 — A generic call infers only from supplied arguments and declared constraints
 
@@ -192,7 +192,7 @@ and stable rule use an ordered prefix because provider APIs and ordinary partial
 on it.
 
 **Evidence:** [current inference specification](../../openspec/specs/bootstrap-type-generics/spec.md),
-[call specialization](../../packages/compiler/src/Elaboration.ts),
+[call specialization](../../packages/compiler/src/CallResolution.ts),
 [provider inference](requirements-and-services.md#serv-007--provision-infers-exactly-one-compatible-requirement-key).
 
 ### GEN-004 — A generic body is checked once against its declared contract
@@ -236,6 +236,12 @@ Silk does not use duck typing, inspect a concrete type during body checking, or 
 type checking separately for each specialization. Copy and cleanup remain compiler-verified type
 properties rather than ordinary customizable interfaces.
 
+A value-kind parameter also remains an ordinary symbolic type when used as an Effect failure. If a
+generic body constructs `effect { fail move problem }` for `problem: E`, local contract collection
+retains `E` in the failure channel. A later concrete specialization must preserve that failure at
+every `run`; it cannot disappear merely because the generic body was checked before `E` became
+nominal or concrete.
+
 **Diagnostics:** An operation absent from the generic contract reports an unavailable-operation or
 missing-bound diagnostic at the use and names the parameter involved. A later conforming call does
 not suppress that declaration diagnostic. A declared bound with no visible interface reports an
@@ -243,6 +249,7 @@ unknown-interface diagnostic at the bound.
 
 **Evidence:** [generic body specification](../../openspec/specs/bootstrap-type-generics/spec.md),
 [ownership properties](ownership-and-borrowing.md),
+[generic Effect failure regression](../../packages/compiler/test/EffectBlockTyping.test.ts),
 [interface-bound tests](../../packages/compiler/test/InterfaceBounds.test.ts).
 
 ### GEN-005 — Every reachable generic application becomes finite monomorphic code
@@ -390,7 +397,7 @@ representation parameters after a written prefix, retains every origin, and reje
 conflicting evidence before HIR lowering.
 
 **Evidence:** [representation inference tests](../../packages/compiler/test/RepresentationInference.test.ts),
-[struct literal elaboration](../../packages/compiler/src/Elaboration.ts),
+[struct literal analysis](../../packages/compiler/src/ExpressionAnalysis.ts),
 [generic call inference](#gen-003--a-generic-call-infers-only-from-supplied-arguments-and-declared-constraints).
 
 ## Executable representation parameters
@@ -739,7 +746,7 @@ its written generic parameters contain only additional contract arguments. Bound
 conformances bind the provider without adding a duplicated interface argument.
 
 **Evidence:** [current interface parser](../../packages/compiler/src/Parser.ts),
-[current interface application](../../packages/compiler/src/DeclarationIndex.ts).
+[current interface application](../../packages/compiler/src/DeclarationFacts.ts).
 
 ### INTF-002 — An interface contains compile-time operation contracts, not implementations
 
@@ -844,7 +851,7 @@ application on its right; no provider argument is synthesized into that applicat
 
 **Evidence:** [current interface-bound tests](../../packages/compiler/test/InterfaceBounds.test.ts),
 [conditional conformance specification](../../openspec/specs/bootstrap-conditional-interface-conformance/spec.md),
-[bound elaboration](../../packages/compiler/src/DeclarationIndex.ts).
+[bound declaration facts](../../packages/compiler/src/DeclarationFacts.ts).
 
 ### INTF-004 — `+` joins independent bounds on one parameter
 
@@ -900,8 +907,8 @@ stop at whichever bound happens to be written first.
 **Current compiler:** Aligned. Parsing and declaration facts preserve every normalized conjunct,
 static calls can select operations from each contract, and duplicate conjuncts are diagnosed.
 
-**Evidence:** [single-bound parser](../../packages/compiler/src/Parser.ts),
-[bound facts](../../packages/compiler/src/DeclarationIndex.ts),
+**Evidence:** [bound parser](../../packages/compiler/src/Parser.ts),
+[bound facts](../../packages/compiler/src/DeclarationFacts.ts),
 [static operation selection](#intf-006--a-qualified-interface-call-requires-one-static-application).
 
 ### INTF-005 — Interface operations use their declared ownership and Effect contracts
@@ -1021,7 +1028,8 @@ unknown-interface-member diagnostic and does not fall back to a module function 
 the same `Self` substitution and witness selection. Operator eligibility remains the separate
 explicit-marker rule defined by OP-009.
 
-**Evidence:** [bound operation elaboration](../../packages/compiler/src/Elaboration.ts),
+**Evidence:** [bound operation resolution](../../packages/compiler/src/CallResolution.ts),
+[bound witness lowering](../../packages/compiler/src/WitnessLowering.ts),
 [bound-operation tests](../../packages/compiler/test/BoundOperationWitness.test.ts),
 [explicit operator eligibility](expressions-and-operators.md#op-009--an-interface-operation-may-opt-into-one-existing-operator-explicitly).
 
@@ -1074,7 +1082,7 @@ before operation mappings are checked. An invalid `Self` use retains the context
 operations inline, by mapping, or through both forms in one conformance.
 
 **Evidence:** [current impl parser](../../packages/compiler/src/Parser.ts),
-[current conformance index](../../packages/compiler/src/DeclarationIndex.ts).
+[current conformance facts](../../packages/compiler/src/DeclarationFacts.ts).
 
 ### IMPL-002 — A conformance supplies every interface operation exactly once
 
@@ -1190,7 +1198,7 @@ ordinary type names and never fall through to lowering as invalid MIR.
 result, failure, and requirement contracts for both interfaces and services.
 
 **Evidence:** [complete witness compatibility](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
-[witness compatibility implementation](../../packages/compiler/src/DeclarationIndex.ts),
+[witness compatibility implementation](../../packages/compiler/src/DeclarationResolution.ts),
 [interface witness tests](../../packages/compiler/test/InterfaceWitnessCompatibility.test.ts),
 [nested Effect contract](effects-and-execution.md#eff-004--nested-effects-are-ordinary-values).
 
@@ -1513,7 +1521,7 @@ selection.
 | Failure parameters | Generic OpenSpec and compiler use separate `!E` failure-row binders. | Use ordinary type parameter `E`; only `?R` remains a special Effect-channel kind. |
 | Explicit call arguments | Older type-system decision requires all arguments or none; current compiler accepts an ordered prefix. | Keep the current ordered-prefix model for calls and struct literals; the older rule is superseded. |
 | Provider application | `Decoder<Schema> for Schema` repeats the provider while `T: Decoder` hides an application. | Give every interface implicit `Self`; write only additional interface arguments and bind the provider after `for` or to the left of a bound. |
-| Generic operator calls | Current tests and elaboration infer bound operations from names such as `add`. | Use [OP-009](expressions-and-operators.md#op-009--an-interface-operation-may-opt-into-one-existing-operator-explicitly). |
+| Generic operator calls | Current tests and call resolution infer bound operations from names such as `add`. | Use [OP-009](expressions-and-operators.md#op-009--an-interface-operation-may-opt-into-one-existing-operator-explicitly). |
 | Service conformance | A service first passes dependency eligibility, then uses ordinary conformance proof and operation selection. | Keep only dependency eligibility special; do not introduce service-only witness behavior. |
 | Inline implementations | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function. | Implement the already confirmed general inline-or-mapped rule. |
 
