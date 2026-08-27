@@ -1,16 +1,16 @@
-import * as Analysis from '@silk-lang/compiler/Analysis'
-import type * as Backend from '@silk-lang/compiler/Backend'
-import * as Diagnostic from '@silk-lang/compiler/Diagnostic'
-import * as Driver from '@silk-lang/compiler/Driver'
-import * as FileSourceResolver from '@silk-lang/compiler/FileSourceResolver'
-import type * as HeapObservation from '@silk-lang/compiler/HeapObservation'
-import type * as NativeToolchain from '@silk-lang/compiler/NativeToolchain'
-import * as Project from '@silk-lang/compiler/Project'
-import type * as SourceEntry from '@silk-lang/compiler/SourceEntry'
-import * as SourceFile from '@silk-lang/compiler/SourceFile'
-import type * as Target from '@silk-lang/compiler/Target'
-import * as TargetSelector from '@silk-lang/compiler/TargetSelector'
-import type * as ToolchainPlan from '@silk-lang/compiler/ToolchainPlan'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as Backend from '@silklang/compiler/Backend'
+import * as Diagnostic from '@silklang/compiler/Diagnostic'
+import * as Driver from '@silklang/compiler/Driver'
+import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
+import type * as HeapObservation from '@silklang/compiler/HeapObservation'
+import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
+import * as Project from '@silklang/compiler/Project'
+import type * as SourceEntry from '@silklang/compiler/SourceEntry'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import type * as Target from '@silklang/compiler/Target'
+import * as TargetSelector from '@silklang/compiler/TargetSelector'
+import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -223,7 +223,7 @@ export const checkProject = Effect.fn('Workflow.checkProject')(function* (
   options: ProjectSelection,
 ): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
   const selectors = options.targets ?? project.build.targets
-  const resolved = TargetSelector.resolveAll(selectors)
+  const resolved = TargetSelector.resolveAll(selectors, NativeToolchain.hostSelection())
   if (Result.isFailure(resolved)) return yield* reportPreparationFailure(resolved.failure)
   const attempts = yield* Effect.forEach(
     resolved.success,

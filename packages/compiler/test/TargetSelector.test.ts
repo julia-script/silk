@@ -1,17 +1,17 @@
 import { assert, it } from '@effect/vitest'
 import * as Result from 'effect/Result'
+import * as Target from '../src/Target.js'
 import * as TargetSelector from '../src/TargetSelector.js'
 
 it('resolves host and canonical ids while preserving first-seen canonical order', () => {
-  const host = TargetSelector.resolve('host')
+  const hostSelection = Target.select('aarch64-apple-darwin')
+  const host = TargetSelector.resolve('host', hostSelection)
   assert.strictEqual(Result.isSuccess(host), true)
   if (Result.isFailure(host)) return
-  const resolved = TargetSelector.resolveAll([
-    'host',
-    host.success.id,
-    'wasm32-unknown-unknown',
-    'host',
-  ])
+  const resolved = TargetSelector.resolveAll(
+    ['host', host.success.id, 'wasm32-unknown-unknown', 'host'],
+    hostSelection,
+  )
   assert.strictEqual(Result.isSuccess(resolved), true)
   if (Result.isFailure(resolved)) return
   assert.deepStrictEqual(
@@ -21,7 +21,10 @@ it('resolves host and canonical ids while preserving first-seen canonical order'
 })
 
 it('rejects selectors outside the canonical target set', () => {
-  const resolved = TargetSelector.resolveAll(['unknown-target'])
+  const resolved = TargetSelector.resolveAll(
+    ['unknown-target'],
+    Target.select('aarch64-apple-darwin'),
+  )
   assert.strictEqual(Result.isFailure(resolved), true)
   if (Result.isFailure(resolved)) {
     assert.strictEqual(resolved.failure.reason._tag, 'UnavailableTarget')

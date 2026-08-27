@@ -1,4 +1,5 @@
 import * as BackendRegistry from '@silklang/compiler/BackendRegistry'
+import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as Project from '@silklang/compiler/Project'
 import * as TargetSelector from '@silklang/compiler/TargetSelector'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
@@ -49,7 +50,7 @@ export const make = (
     )
   }
   const selectors = options.targets ?? project.build.targets
-  const selectedTargets = TargetSelector.resolveAll(selectors)
+  const selectedTargets = TargetSelector.resolveAll(selectors, NativeToolchain.hostSelection())
   if (Result.isFailure(selectedTargets)) {
     return Result.fail(
       new BuildBatchError({

@@ -59,6 +59,8 @@ not belong in a language rule unless a program can observe them.
 
 ## Contents
 
+- [Lexical form](lexical-form.md) — identifiers, the closed keyword vocabulary, comments, numeric
+  spellings, text and byte forms, character literals, and longest tokenization.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
   unhandled typed failures, and requirement closure.
 - [Statements and discarded values](statements-and-discarding.md) — which expression results may be

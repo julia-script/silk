@@ -8,7 +8,7 @@ the language that the current alpha compiler implements.
 
 - **[Getting started](./tutorial.md)** — create a project and learn the core language by writing
   functions, loops, owned values, borrows, unions, Effects, typed failures, and a service provider.
-- **[Language reference](./reference.md)** — look up the exact lexical, type, ownership, Effect,
+- **[Language reference](../reference/)** — look up the exact lexical, type, ownership, Effect,
   declaration, and control-flow rules.
 - **[Alpha status](./alpha-status.md)** — see what is implemented, which targets are supported, and
   which compatibility promises the alpha does not make.
@@ -37,11 +37,10 @@ The standard-library and diagnostic pages are generated. Regenerate them with
 `pnpm --filter @silklang/compiler documentation:generate`. The compiler test suite rejects stale
 generated pages and compiles every active Silk example in the hand-written pages.
 
-## Deeper rule evidence
+## Rule evidence
 
-The compact reference is written for day-to-day use. The app also publishes a
-[prescriptive rule-by-rule reference](../reference/) with status, boundaries, diagnostics, and
-links to the tests and specifications behind each programmer-visible rule. It governs intended
+The [language reference](../reference/) records each programmer-visible rule with its status,
+boundaries, diagnostics, and links to the tests and specifications behind it. It governs intended
 language behavior and is also useful when contributing to the compiler or reconciling an edge case.
 
 The editor-support package is documented separately in the

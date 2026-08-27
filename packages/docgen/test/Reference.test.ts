@@ -76,6 +76,9 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     const result = yield* rendered()
     assert.strictEqual(result._tag, 'Success')
     if (result._tag !== 'Success') return
+    const index = result.reference.files.find((file) => file.path === 'index.md')?.contents
+    assert.isDefined(index)
+    assert.include(index, '[Language reference](../../reference/)')
     const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
     assert.isDefined(page)
     assert.include(page, 'Public declarations: 3.')

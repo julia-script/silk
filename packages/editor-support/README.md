@@ -15,6 +15,10 @@ support that can be reused independently of any one application:
 The standalone protocol server remains in `@silklang/lsp`; this package consumes its reusable
 document projections when adding semantic editor features.
 
+The language documentation is owned by the documentation app. Start with the
+[language guide](../../apps/docs/content/language/index.md) or the
+[prescriptive reference](../../apps/docs/content/reference/index.md).
+
 ```ts
 import * as SilkCodeMirror from '@silklang/editor-support/CodeMirror'
 

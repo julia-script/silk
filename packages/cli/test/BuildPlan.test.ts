@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as LlvmBackend from '@silklang/compiler/LlvmBackend'
+import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as Project from '@silklang/compiler/Project'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as Target from '@silklang/compiler/Target'
@@ -86,7 +87,7 @@ it('rejects incompatible backend-target pairs during planning', () => {
 })
 
 it('keeps run host-only and requires the LLVM native backend', () => {
-  const host = TargetSelector.resolve('host')
+  const host = TargetSelector.resolve('host', NativeToolchain.hostSelection())
   assert.strictEqual(Result.isSuccess(host), true)
   if (Result.isFailure(host)) return
   const accepted = BuildPlan.make(project(), {

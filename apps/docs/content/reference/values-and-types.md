@@ -350,6 +350,68 @@ conversions use the enclosing type-mismatch diagnostic.
 **Evidence:** [string access and conversion specification](../../../../openspec/specs/bootstrap-string/spec.md),
 [string type diagnostics](../../../../packages/compiler/test/DeclarationIndex.test.ts).
 
+## Constant values
+
+### CONST-001 — A constant has an explicit scalar or string type and one static initializer
+
+**Status:** Confirmed
+
+A `const` declaration requires a type annotation. Its type is one foundational scalar type or
+`string`, and its initializer is one matching literal whose value is valid for that type. Constants
+do not infer their type, evaluate computed expressions, or hold aggregate values.
+
+```silk
+pub const limit: i32 = 2
+const ratio: f64 = 1.5
+const enabled: bool = true
+const separator: char = ':'
+const pattern: string = r"\d+"
+```
+
+A constant lowers to an immediate value. It has no address and cannot be borrowed, assigned, or
+moved.
+
+**Boundary:** Function calls, operators, field access, aggregate construction, and other computed
+expressions are not constant initializers. An initializer of the wrong scalar type is also invalid.
+
+**Diagnostics:** A constant outside this contract reports `SEM0086` at its declaration.
+
+**Evidence:** [typed constant tests](../../../../packages/compiler/test/TypedConstants.test.ts),
+[numeric constant tests](../../../../packages/compiler/test/NumericConstants.test.ts),
+[constant analysis](../../../../packages/compiler/src/ExpressionAnalysis.ts).
+
+### CONST-002 — Target facts are the only non-literal constant initializers
+
+**Status:** Confirmed
+
+The following target facts may replace the literal in a constant declaration. The selected target
+determines their values.
+
+| Fact | Type | Value |
+| --- | --- | --- |
+| `Target.usizeMax` | `usize` | Largest `usize` at the target pointer width |
+| `Target.isizeMax` | `isize` | Largest `isize` at the target pointer width |
+| `Target.isizeMin` | `isize` | Smallest `isize` at the target pointer width |
+| `Target.pointerBits` | `u32` | Target pointer width in bits |
+
+```silk
+pub const MAX: usize = Target.usizeMax
+pub const BITS: u32 = Target.pointerBits
+```
+
+This vocabulary exists because one source literal cannot express every pointer-width bound on both
+32-bit and 64-bit targets.
+
+**Boundary:** `Target` is recognized only as the root of one of these initializers. An unknown fact,
+a fact used at the wrong declared type, a target fact in an ordinary expression, or a computed
+initializer such as `Target.pointerBits + 1` is invalid.
+
+**Diagnostics:** An invalid target-fact constant reports `SEM0086`. Outside a constant initializer,
+`Target` follows ordinary name resolution and is unresolved unless the program declares that name.
+
+**Evidence:** [target-fact catalog](../../../../packages/compiler/src/TargetConstant.ts),
+[target-dependent constant tests](../../../../packages/compiler/test/TargetDependentConstants.test.ts).
+
 ## Nominal struct values
 
 ### STRUCT-001 — A struct declaration creates one nominal type

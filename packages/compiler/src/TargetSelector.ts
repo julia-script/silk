@@ -1,6 +1,5 @@
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
-import * as NativeToolchain from './NativeToolchain.js'
 import * as Target from './Target.js'
 
 /** A portable host selector or one canonical compiler target id. */
@@ -23,9 +22,12 @@ export class TargetSelectorError extends Data.TaggedError('TargetSelectorError')
 export const isTargetSelector = (value: string): value is TargetSelector =>
   value === 'host' || Target.all.some((target) => target.id === value)
 
-/** Resolves one selector, treating `host` as a portable alias rather than a target id. */
-export const resolve = (selector: string): Result.Result<Target.Target, TargetSelectorError> => {
-  const selected = selector === 'host' ? NativeToolchain.hostSelection() : Target.select(selector)
+/** Resolves one selector against an explicit host selection supplied by the application edge. */
+export const resolve = (
+  selector: string,
+  host: Target.Selection,
+): Result.Result<Target.Target, TargetSelectorError> => {
+  const selected = selector === 'host' ? host : Target.select(selector)
   return selected._tag === 'Resolved'
     ? Result.succeed(selected.target)
     : Result.fail(
@@ -40,11 +42,12 @@ export const resolve = (selector: string): Result.Result<Target.Target, TargetSe
 /** Resolves and deduplicates selectors by canonical id while preserving first-seen order. */
 export const resolveAll = (
   selectors: ReadonlyArray<string>,
+  host: Target.Selection,
 ): Result.Result<ReadonlyArray<Target.Target>, TargetSelectorError> => {
   const targets: Array<Target.Target> = []
   const seen = new Set<Target.Id>()
   for (const selector of selectors) {
-    const resolved = resolve(selector)
+    const resolved = resolve(selector, host)
     if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
     if (seen.has(resolved.success.id)) continue
     seen.add(resolved.success.id)

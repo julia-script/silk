@@ -20,8 +20,9 @@
  */
 
 import { RegistryProvider, useAtom, useAtomSet, useAtomValue } from '@effect/atom-react'
-import { Analysis, ToolchainPlan } from '@silklang/compiler'
-import type { Target } from '@silklang/compiler'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as Target from '@silklang/compiler/Target'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import {
   type ViewContext,
   type ViewId,

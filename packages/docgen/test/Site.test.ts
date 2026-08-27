@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createContext, runInContext } from 'node:vm'
@@ -11,47 +11,32 @@ import { encoded, manifestModules } from './support/siteStdlibDocumentation.js'
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 
-const sourceFiles = (directory: string): ReadonlyArray<string> =>
-  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) return sourceFiles(path)
-    if (entry.name.endsWith('.ts')) return [path]
-    return []
-  })
+const rendererActors = ['Html.ts', 'Model.ts', 'Prose.ts', 'Search.ts', 'Site.ts'] as const
 
 /**
- * The requirement that the renderer reads no compiler internal type, checked structurally.
+ * The merged docgen package uses the compiler while generating and testing documentation, but the
+ * renderer remains a one-way JSON boundary. Its actors must not import compiler or workspace code.
  *
- * An import scan alone catches the obvious violation and misses a re-export. The stronger form is
- * that there is no workspace package installed under this one to import at runtime at all, which a
- * future import cannot pass without a deliberate, visible edit to `package.json`. Development
- * dependencies are exempt on purpose: the tests generate real documentation JSON to render, and
- * that generation never ships.
+ * The snippet bundle is resolved and passed as opaque text by the CLI, so editor support is not a
+ * docgen runtime dependency.
  */
-it('declares no workspace runtime dependency beyond the snippet asset', () => {
+it('declares the compiler as its only workspace runtime dependency', () => {
   const manifest: unknown = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
   assert.isTrue(typeof manifest === 'object' && manifest !== null)
   const dependencies =
     typeof manifest === 'object' && manifest !== null && 'dependencies' in manifest
       ? Object.keys(manifest.dependencies as Record<string, string>)
       : []
-  assert.isAbove(dependencies.length, 0, 'the renderer is expected to have runtime dependencies')
-  // `@silklang/editor-support` is the one deliberate exception: the command shell ships its prebuilt
-  // element bundle with generated sites as opaque file contents. No renderer module imports it,
-  // which the source scan below still enforces, so the renderer keeps reading the documentation
-  // JSON and nothing else.
   assert.deepStrictEqual(
     dependencies.filter((name) => name.startsWith('@silklang/')),
-    ['@silklang/editor-support'],
-    'the renderer must read the documentation JSON and nothing else',
+    ['@silklang/compiler'],
+    'docgen owns compiler-backed generation; snippet asset resolution belongs to the CLI',
   )
 })
 
-it('imports no compiler or workspace module from its own sources', () => {
-  // The command shell (Cli.ts) resolves the snippet element bundle's file path; every renderer
-  // module stays free of workspace imports so no compiler type can reach the rendering.
-  const offenders = sourceFiles(join(packageRoot, 'src'))
-    .filter((file) => !file.endsWith('/Cli.ts'))
+it('imports no compiler or workspace module from renderer actors', () => {
+  const offenders = rendererActors
+    .map((name) => join(packageRoot, 'src', name))
     .filter((file) => readFileSync(file, 'utf8').includes('@silklang/'))
     .map((file) => file.slice(packageRoot.length))
   assert.deepStrictEqual(offenders, [])

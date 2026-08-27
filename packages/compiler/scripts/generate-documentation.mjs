@@ -9,8 +9,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
-import * as DocumentationProject from '../../documentation/dist/Project.js'
-import * as DocumentationReference from '../../documentation/dist/Reference.js'
+import * as DocumentationProject from '../../docgen/dist/Project.js'
+import * as DocumentationReference from '../../docgen/dist/Reference.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
@@ -369,7 +369,7 @@ const diagnosticsPage = () => {
     '## See also',
     '',
     '- [Tutorial](./tutorial.md)',
-    '- [Language reference](./reference.md)',
+    '- [Language reference](../reference/)',
     '- [Standard library](./stdlib/)',
     '',
   )

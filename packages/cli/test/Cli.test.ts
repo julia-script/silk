@@ -18,6 +18,8 @@ it('exposes the project-first command surface without a compile alias', () => {
     'check',
     'clean',
     'doc',
+    'doctest',
+    'docs-site',
     'format',
     'run',
     'build-exe',

@@ -1,7 +1,7 @@
-import { getSlugs, loader } from 'fumadocs-core/source';
+import { loader } from 'fumadocs-core/source';
 import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
 import { defineDocs } from 'fumadocs-mdx/macro';
-import { TextMate } from '@silklang/editor-support';
+import * as TextMate from '@silklang/editor-support/TextMate';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**
@@ -66,11 +66,5 @@ export const source = loader({
         },
       },
     ],
-  },
-  // The app-owned sections use `README.md` as their entry so GitHub renders a useful landing page,
-  // where Fumadocs expects `index.md`. Treat them the same so their section routes resolve.
-  slugs(file) {
-    const slugs = getSlugs(file.path);
-    return slugs.at(-1) === 'README' ? slugs.slice(0, -1) : undefined;
   },
 });

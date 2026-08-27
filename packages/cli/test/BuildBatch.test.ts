@@ -1,4 +1,5 @@
 import { assert, it } from '@effect/vitest'
+import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import type * as Project from '@silklang/compiler/Project'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as TargetSelector from '@silklang/compiler/TargetSelector'
@@ -27,7 +28,7 @@ const project = (): Project.Project =>
   })
 
 it('preflights an ordered deduplicated multi-target LLVM batch', () => {
-  const host = TargetSelector.resolve('host')
+  const host = TargetSelector.resolve('host', NativeToolchain.hostSelection())
   assert.strictEqual(Result.isSuccess(host), true)
   if (Result.isFailure(host)) return
   const batch = BuildBatch.make(project(), {

@@ -348,11 +348,11 @@ const renderIndex = (
     '## See also',
     '',
     '- [Tutorial](../tutorial.md)',
-    '- [Language reference](../reference.md)',
+    '- [Language reference](../../reference/)',
     '- [Diagnostic index](../diagnostics.md)',
     '',
   )
-  return Object.freeze({ path: 'README.md', contents: lines.join('\n') })
+  return Object.freeze({ path: 'index.md', contents: lines.join('\n') })
 }
 
 /** Renders one deterministic index and one structured Markdown page per manifest module. */

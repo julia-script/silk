@@ -4,10 +4,10 @@ import type { ReactNode } from 'react';
 
 export const metadata = {
   title: {
-    default: 'Silk Effect',
-    template: '%s · Silk Effect',
+    default: 'Silk',
+    template: '%s · Silk',
   },
-  description: 'Documentation for the Silk Effect packages.',
+  description: 'Documentation for the Silk language and its packages.',
 };
 
 export default function Layout({ children }: { children: ReactNode }) {

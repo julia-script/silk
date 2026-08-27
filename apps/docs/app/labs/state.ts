@@ -10,8 +10,11 @@
  * cached until a dependency changes, instead of per-component `useMemo` chains.
  */
 
-import { Analysis, MirVerification, ToolchainPlan } from '@silklang/compiler'
-import type { BootstrapEvaluation, Target } from '@silklang/compiler'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as BootstrapEvaluation from '@silklang/compiler/BootstrapEvaluation'
+import * as MirVerification from '@silklang/compiler/MirVerification'
+import type * as Target from '@silklang/compiler/Target'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import {
   diagnosticCounts,
   diagnosticEntries,

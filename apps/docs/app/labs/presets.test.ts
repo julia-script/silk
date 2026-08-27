@@ -1,4 +1,4 @@
-import { Analysis } from '@silklang/compiler'
+import * as Analysis from '@silklang/compiler/Analysis'
 import { readFileSync } from 'node:fs'
 import * as Snapshot from './snapshot'
 import { describe, expect, it } from 'vitest'
