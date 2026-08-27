@@ -22,5 +22,5 @@ new EditorView({ extensions: [SilkCodeMirror.extension()] })
 ```
 
 The language documentation is owned by the documentation app. Start with the
-[language guide](../../apps/docs/content/language/README.md) or the
-[prescriptive reference](../../apps/docs/content/reference/README.md).
+[language guide](../../apps/docs/content/language/index.md) or the
+[prescriptive reference](../../apps/docs/content/reference/index.md).

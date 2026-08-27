@@ -90,22 +90,26 @@ const codeLiterals = [...diagnosticText.matchAll(/'([A-Z]{3}[0-9]{4})' as const/
   (match) => match[1] ?? raise('the literal pattern must capture a stable code'),
 )
 
-it('finds Silk examples in the tutorial and the reference', () => {
+it('finds Silk examples and both documentation entrypoints', () => {
   assert.isTrue(
     documents.includes('tutorial.md'),
-    'the getting-started tutorial must live beside the reference',
+    'the getting-started tutorial must live in the language section',
   )
-  assert.isTrue(documents.includes('reference.md'), 'the language reference must exist')
+  assert.isTrue(documents.includes('index.md'), 'the language section entrypoint must exist')
+  assert.isTrue(
+    readdirSync(languageReferenceRoot).includes('index.md'),
+    'the language reference entrypoint must exist',
+  )
   assert.isAbove(blocks.length, 0, 'the documentation must carry compilable Silk examples')
 })
 
 it('documents every standard library module and every diagnostic code', () => {
-  const stdlib = readFileSync(join(documentationRoot, 'stdlib', 'README.md'), 'utf8')
+  const stdlib = readFileSync(join(documentationRoot, 'stdlib', 'index.md'), 'utf8')
   for (const module of Stdlib.manifest)
     assert.include(
       stdlib,
       `\`${module.module}\``,
-      `${module.module} is missing from stdlib/README.md`,
+      `${module.module} is missing from stdlib/index.md`,
     )
 
   const diagnostics = readFileSync(join(documentationRoot, 'diagnostics.md'), 'utf8')

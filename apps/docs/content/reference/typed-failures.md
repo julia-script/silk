@@ -114,7 +114,7 @@ Using a non-nominal concrete type is valid and produces no diagnostic.
 types, type parameters, and structural unions, while `SEM0073` rejects payloads that would carry a
 lexical borrow out of scope.
 
-**Evidence:** [confirmed stabilization decision](README.md),
+**Evidence:** [confirmed stabilization decision](index.md),
 [current row validation](../../../../packages/compiler/test/DeclarationIndex.test.ts),
 [generic failure preservation](../../../../packages/compiler/test/EffectBlockTyping.test.ts),
 [detachment diagnostics](../../../../packages/compiler/test/Elaboration.test.ts).

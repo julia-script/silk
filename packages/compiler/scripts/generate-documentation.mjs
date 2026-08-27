@@ -369,7 +369,7 @@ const diagnosticsPage = () => {
     '## See also',
     '',
     '- [Tutorial](./tutorial.md)',
-    '- [Language reference](./reference.md)',
+    '- [Language reference](../reference/)',
     '- [Standard library](./stdlib/)',
     '',
   )

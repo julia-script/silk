@@ -122,7 +122,7 @@ inside one computation; use Fibers when computations must make cooperative progr
 
 - [Effects, failures, and services](./effects.md)
 - [Recursion and stack safety](./recursion.md)
-- [Language reference: Fibers and cooperative scheduling](./reference.md#58-fibers-and-cooperative-scheduling)
+- [Language reference: single-threaded schedulers and Fibers](../reference/single-threaded-fibers.md)
 - [Standard library: Fiber](./stdlib/fiber.md)
 - [Standard library: Scheduler](./stdlib/scheduler.md)
 - [Standard library: LocalScheduler](./stdlib/local-scheduler.md)

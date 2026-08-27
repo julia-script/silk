@@ -308,7 +308,7 @@ unconditional destructuring reports `SEM0133`; malformed `if let` syntax uses pa
 recovery diagnostics, and its member, field, binding, and ownership failures retain their ordinary
 codes.
 
-**Evidence:** [reference diagnostic policy](README.md),
+**Evidence:** [reference diagnostic policy](index.md),
 [parser recovery contract](../../../../openspec/specs/bootstrap-syntax/spec.md).
 
 ## PATT-013 — Exhaustive `match` keeps its existing semantics

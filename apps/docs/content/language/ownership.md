@@ -156,7 +156,7 @@ When an ownership diagnostic appears, ask these questions in order:
 ## See also
 
 - [Getting started](./tutorial.md#structs-and-ownership)
-- [Language reference: memory and ownership](./reference.md#4-memory-and-ownership)
+- [Language reference: ownership and borrowing](../reference/ownership-and-borrowing.md)
 - [Standard library: allocator](./stdlib/allocator.md)
 - [Standard library: Box](./stdlib/box.md)
 - [Standard library: Vector](./stdlib/vector.md)

@@ -330,7 +330,7 @@ says nothing about a teardown on another. Both are the same rule — a call cost
 
 ## See also
 
-- [Language reference](./reference.md) — `while`, `match`, and the ownership rules the loops above
+- [Language reference](../reference/) — `while`, `match`, and the ownership rules the loops above
   are working within.
 - [Effects, failures, and services](./effects.md) — Effect construction, execution, provision, and
   explicit suspension.

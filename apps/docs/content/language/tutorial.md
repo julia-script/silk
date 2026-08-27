@@ -346,7 +346,7 @@ without mocking compiler globals.
   layer.
 - [Alpha status and supported targets](./alpha-status.md) states the current implementation and
   compatibility boundaries.
-- The [language reference](./reference.md) states the rules in full: lexical form, types, memory
+- The [language reference](../reference/) states the rules in full: lexical form, types, memory
   and ownership, and the effect system.
 - The [standard library reference](./stdlib/) lists every module and public declaration.
 - The [diagnostic index](./diagnostics.md) explains every error code, including the `OWN0001` and

@@ -60,5 +60,5 @@ The compiler-shipped modules and their complete public documentation.
 ## See also
 
 - [Tutorial](../tutorial.md)
-- [Language reference](../reference.md)
+- [Language reference](../../reference/)
 - [Diagnostic index](../diagnostics.md)
