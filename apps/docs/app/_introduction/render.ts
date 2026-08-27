@@ -153,6 +153,41 @@ ${labels}
 </svg></figure>`
 }
 
+/** The service contract diagram: a requirement met by an implementation, drawn as a flow. */
+const contractDiagram = (): string => `<figure class="anatomy" aria-label="readClock requires the Clock contract; FixedClock provides it"><svg viewBox="0 0 640 216" role="img">
+<text x="40" y="30" font-size="15" fill="var(--ink)">readClock()</text>
+<path d="M 79 42 L 79 78" stroke="var(--amber)" stroke-opacity="0.7" stroke-width="1.5"/>
+<polygon points="74,78 84,78 79,88" fill="var(--amber)"/>
+<text x="94" y="68" font-size="12" fill="var(--amber)">requires</text>
+<text x="40" y="112" font-size="15" fill="var(--amber)">&amp;Clock</text>
+<text x="150" y="112" font-size="12" fill="var(--gutter)">· the contract</text>
+<path d="M 79 172 L 79 136" stroke="var(--violet)" stroke-opacity="0.7" stroke-width="1.5"/>
+<polygon points="74,136 84,136 79,126" fill="var(--violet)"/>
+<text x="94" y="158" font-size="12" fill="var(--violet)">provides</text>
+<text x="40" y="196" font-size="15" fill="var(--violet)">FixedClock { value: 42 }</text>
+<text x="290" y="196" font-size="12" fill="var(--gutter)">· one implementation</text>
+</svg></figure>`
+
+/** The structured-concurrency lifetime tree, with elbow connectors instead of box characters. */
+const fiberTreeDiagram = (): string => `<figure class="anatomy" aria-label="A root task owning Fiber A and Fiber B, with Fiber C under Fiber A"><svg viewBox="0 0 640 208" role="img">
+<text x="320" y="28" font-size="15" fill="var(--ink)" text-anchor="middle">root</text>
+<path d="M 320 40 L 320 56 Q 320 64 312 64 L 228 64 Q 220 64 220 72 L 220 88" fill="none" stroke="var(--ink-4)" stroke-width="1.5"/>
+<path d="M 320 40 L 320 56 Q 320 64 328 64 L 412 64 Q 420 64 420 72 L 420 88" fill="none" stroke="var(--ink-4)" stroke-width="1.5"/>
+<circle cx="320" cy="40" r="2.5" fill="var(--ink-4)"/>
+<text x="220" y="112" font-size="15" fill="var(--violet)" text-anchor="middle">Fiber A</text>
+<text x="420" y="112" font-size="15" fill="var(--violet)" text-anchor="middle">Fiber B</text>
+<path d="M 220 124 L 220 164" stroke="var(--ink-4)" stroke-width="1.5"/>
+<text x="220" y="188" font-size="15" fill="var(--violet)" text-anchor="middle">Fiber C</text>
+</svg></figure>`
+
+/** Root termination cancelling descendants, as a single emphatic arrow. */
+const rootTerminatesDiagram = (): string => `<figure class="anatomy" aria-label="When the root terminates, unfinished descendants cancel"><svg viewBox="0 0 640 128" role="img">
+<text x="40" y="30" font-size="15" fill="var(--ink)">root terminates</text>
+<path d="M 79 42 L 79 84" stroke="var(--error-ink)" stroke-opacity="0.8" stroke-width="1.5"/>
+<polygon points="74,84 84,84 79,94" fill="var(--error-ink)"/>
+<text x="40" y="118" font-size="15" fill="var(--error-ink)">unfinished descendants cancel</text>
+</svg></figure>`
+
 const block = (node: RootContent | BlockContent, state: State): string => {
   switch (node.type) {
     case 'heading':
@@ -197,6 +232,9 @@ const block = (node: RootContent | BlockContent, state: State): string => {
         return out
       }
       if (node.value.startsWith('Effect<A ! E ? R>')) return signatureAnatomy()
+      if (node.value.startsWith('readClock()')) return contractDiagram()
+      if (node.value.startsWith('root terminates')) return rootTerminatesDiagram()
+      if (node.value.trimStart().startsWith('root\n')) return fiberTreeDiagram()
       return `<pre class="diagram"><code>${escapeHtml(node.value.replace(/\s+$/, ''))}</code></pre>`
     }
     case 'thematicBreak':
