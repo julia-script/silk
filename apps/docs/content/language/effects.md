@@ -169,9 +169,9 @@ reported with status 1 after its payload is cleaned up.
 ## See also
 
 - [Getting started](./tutorial.md#effects-failure-in-the-type)
-- [Language reference: Effect system](./reference.md#5-effect-system)
+- [Language reference: effects and execution](../reference/effects-and-execution.md)
 - [Ownership, borrowing, and cleanup](./ownership.md)
 - [Fibers and local scheduling](./fibers.md)
 - [Recursion and stack safety](./recursion.md)
 - [Standard library: Effect](./stdlib/effect.md)
-- [Standard library: services and providers](./stdlib/README.md)
+- [Standard library: services and providers](./stdlib/)

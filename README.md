@@ -30,17 +30,15 @@ native, browser, Wasm, or test providers without introducing ambient storage or 
 
 - [Getting started](apps/docs/content/language/tutorial.md) — build a first project and learn the core
   language through compiler-checked programs.
-- [Language reference](apps/docs/content/language/reference.md) — compact syntax, type, ownership,
-  Effect, declaration, and control-flow rules.
+- [Language reference](apps/docs/content/reference/index.md) — prescriptive syntax, type,
+  ownership, Effect, declaration, and control-flow rules with supporting evidence.
 - [Ownership](apps/docs/content/language/ownership.md),
   [Effects and services](apps/docs/content/language/effects.md), and
   [Fibers](apps/docs/content/language/fibers.md) — focused explanations of Silk's central model.
 - [Alpha status](apps/docs/content/language/alpha-status.md) — implemented scope, supported targets,
   and compatibility boundaries.
-- [Standard library](apps/docs/content/language/stdlib/README.md) and
+- [Standard library](apps/docs/content/language/stdlib/index.md) and
   [diagnostics](apps/docs/content/language/diagnostics.md) — generated lookup references.
-- [Prescriptive reference](apps/docs/content/reference/README.md) — intended language rules,
-  boundaries, diagnostics, and supporting evidence.
 
 This is still an alpha language. APIs may break freely. Cooperative single-threaded Fibers are
 implemented; parallelism, multithreading, networking, a package registry, broad FFI, and

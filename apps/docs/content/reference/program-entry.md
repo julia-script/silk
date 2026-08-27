@@ -217,7 +217,7 @@ exception.
 and names both permitted types. A missing ordinary result annotation receives the ordinary
 missing-result diagnostic.
 
-**Evidence:** [confirmed stabilization decision](README.md),
+**Evidence:** [confirmed stabilization decision](index.md),
 [TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
 
 Exact process-report behavior is defined in

@@ -82,8 +82,8 @@ expose typed unsupported or platform failures where their contracts cannot be me
 
 Hand-written examples in this documentation are compiled by the repository test suite. The
 standard-library reference and diagnostic index are generated from compiler-owned sources and are
-checked for staleness. The compact reference is intended for language users; the deeper
-rule-by-rule reference records implementation boundaries and evidence for contributors.
+checked for staleness. The prescriptive reference records programmer-visible rules, implementation
+boundaries, and evidence.
 
 When prose and behavior disagree during alpha development, treat it as a bug. Report the smallest
 source example, selected target and backend, compiler revision, and diagnostic code or observed
@@ -92,7 +92,7 @@ result.
 ## See also
 
 - [Getting started](./tutorial.md)
-- [Language reference](./reference.md)
+- [Language reference](../reference/)
 - [Ownership, borrowing, and cleanup](./ownership.md)
 - [Effects, failures, and services](./effects.md)
 - [Fibers and local scheduling](./fibers.md)
