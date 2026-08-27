@@ -1,8 +1,8 @@
 ## Context
 
 See `proposal.md`,
-[IMPORT-007](../../../docs/language/modules-names-and-visibility.md#import-007--reserved-words-may-appear-in-import-paths-but-cannot-become-implicit-bindings),
-and [TOOLING-001](../../../docs/language/runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly)
+[IMPORT-007](../../../apps/docs/content/reference/modules-names-and-visibility.md#import-007--reserved-words-may-appear-in-import-paths-but-cannot-become-implicit-bindings),
+and [TOOLING-001](../../../apps/docs/content/reference/runtime-and-standard-library.md#tooling-001--tooling-presents-library-source-and-derived-availability-honestly)
 for motivation and language direction. Import-path parsing currently requires `Identifier` tokens,
 while downstream consumers independently filter path children by that token kind. The
 standard-library manifest names `silk/effects` and records `Effect` as its preferred namespace.

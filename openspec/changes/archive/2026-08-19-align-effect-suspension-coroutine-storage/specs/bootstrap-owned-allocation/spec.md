@@ -2,7 +2,7 @@
 
 ### Requirement: Continuation storage uses explicit typed allocation
 
-**Reason**: [SUSP-006](../../../../../../docs/language/effect-suspension.md#susp-006--execution-stack-exhaustion-is-a-fatal-trap)
+**Reason**: [SUSP-006](../../../../../../apps/docs/content/reference/effect-suspension.md#susp-006--execution-stack-exhaustion-is-a-fatal-trap)
 classifies coroutine frames as compiler-owned execution-stack storage. Their placement is not a
 source allocation, and exhaustion is a fatal trap rather than `OutOfMemory`.
 

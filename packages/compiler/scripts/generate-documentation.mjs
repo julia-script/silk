@@ -1,4 +1,4 @@
-// Regenerates packages/language/docs/stdlib/ and diagnostics.md.
+// Regenerates apps/docs/content/language/stdlib/ and diagnostics.md.
 //
 // The standard library page comes from the same documentation model `silk doc` emits, so the
 // rendered signatures and prose are exactly the `///` comments in stdlib/silk/*.silk. The
@@ -16,8 +16,12 @@ import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as Stdlib from '../dist/Stdlib.js'
 
-const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
-const stdlibRoot = fileURLToPath(new URL('../../language/docs/stdlib/', import.meta.url))
+const documentationRoot = fileURLToPath(
+  new URL('../../../apps/docs/content/language/', import.meta.url),
+)
+const stdlibRoot = fileURLToPath(
+  new URL('../../../apps/docs/content/language/stdlib/', import.meta.url),
+)
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
 
 const stdlibTree = async () => {

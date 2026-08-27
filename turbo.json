@@ -40,8 +40,8 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/vitest.shared.ts",
-        "$TURBO_ROOT$/packages/language/docs/diagnostics.md",
-        "$TURBO_ROOT$/packages/language/docs/stdlib/**"
+        "$TURBO_ROOT$/apps/docs/content/language/diagnostics.md",
+        "$TURBO_ROOT$/apps/docs/content/language/stdlib/**"
       ],
       "outputs": []
     }

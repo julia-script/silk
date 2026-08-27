@@ -63,7 +63,7 @@ A form that is meant to be read rather than compiled is fenced with a comma:
 /// ```
 ````
 
-**The comma is required.** The prose documents under `packages/language/docs/` spell a skipped
+**The comma is required.** The prose documents under `apps/docs/content/language/` spell a skipped
 example ```` ```silk ignore ````, and that form does not work inside a documentation comment:
 CommonMark splits a fence's info string into a language word and a trailing meta string, and the
 documentation model records only the language word. By the time the JSON is written,

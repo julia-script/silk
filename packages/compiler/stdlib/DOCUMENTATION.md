@@ -1,7 +1,7 @@
 # Standard-library documentation workflow
 
 The comments in `silk/*.silk` are the standard library's canonical API documentation. Follow the
-[Silk doc comment style guide](../../../docs/language/documentation-style-guide.md) for comment
+[Silk doc comment style guide](../../../apps/docs/content/reference/documentation-style-guide.md) for comment
 coverage, structure, examples, links, language, and review rules.
 
 This file defines the additional repository workflow for standard-library documentation.

@@ -5,6 +5,6 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: 'Silk Effect',
     },
-    githubUrl: 'https://github.com/julia-script/silk-effect',
+    githubUrl: 'https://github.com/julia-script/silk',
   };
 }

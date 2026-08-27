@@ -10,8 +10,12 @@ import { raise } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const documentationRoot = fileURLToPath(new URL('../../language/docs/', import.meta.url))
-const languageReferenceRoot = fileURLToPath(new URL('../../../docs/language/', import.meta.url))
+const documentationRoot = fileURLToPath(
+  new URL('../../../apps/docs/content/language/', import.meta.url),
+)
+const languageReferenceRoot = fileURLToPath(
+  new URL('../../../apps/docs/content/reference/', import.meta.url),
+)
 const diagnosticSource = fileURLToPath(new URL('../src/Diagnostic.ts', import.meta.url))
 
 interface Block {
@@ -169,7 +173,7 @@ for (const block of blocks) {
 }
 
 for (const block of featureExamples) {
-  it.effect(`compiles and runs docs/language/${block.file}:${block.line}`, () =>
+  it.effect(`compiles and runs apps/docs/content/reference/${block.file}:${block.line}`, () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
         `documentation/language-${block.file.replace(/[^A-Za-z0-9_-]/g, '-')}/${block.line}`,
@@ -180,7 +184,7 @@ for (const block of featureExamples) {
       assert.deepEqual(
         diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
         [],
-        `docs/language/${block.file}:${block.line}\n${block.source}`,
+        `apps/docs/content/reference/${block.file}:${block.line}\n${block.source}`,
       )
       const evaluated = Analysis.evaluate(snapshot)
       assert.strictEqual(evaluated._tag, 'Completed')

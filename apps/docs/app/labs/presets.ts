@@ -307,12 +307,10 @@ struct FixedClock {
   value: i32
 }
 
-effect fn clockValue(self: &FixedClock) -> i32 {
-  return self.value
-}
-
 impl Clock for FixedClock {
-  value: FixedClock.clockValue
+  effect fn value(self: &Self) -> i32 {
+    return self.value
+  }
 }
 
 effect fn read() -> i32 ? &Clock at Primary {
@@ -798,12 +796,10 @@ struct FixedClock {
   value: i32
 }
 
-effect fn clockValue(self: &mut FixedClock) -> i32 {
-  return self.value
-}
-
 impl Clock for FixedClock {
-  value: FixedClock.clockValue
+  effect fn value(self: &mut Self) -> i32 {
+    return self.value
+  }
 }
 
 effect fn read() -> i32 ? &mut Clock {
@@ -3121,12 +3117,10 @@ struct FixedClock {
   value: i32
 }
 
-effect fn clockValue(self: &mut FixedClock) -> i32 {
-  return self.value
-}
-
 impl Clock for FixedClock {
-  value: FixedClock.clockValue
+  effect fn value(self: &mut Self) -> i32 {
+    return self.value
+  }
 }
 
 interface Decoder<Arguments, A, E, ?R> {

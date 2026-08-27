@@ -128,7 +128,7 @@ pass because the resume has introduced no semantic implementation change.
   LLVM/Wasm subpaths. One root topological `pnpm build` supplied the missing workspace outputs; this
   is resume root-cause repair 1/3 and did not change tracked source.
 - `pnpm --filter @silk-lang/compiler documentation:generate` — **PASS** after the prerequisite
-  build; regenerated `packages/language/docs/diagnostics.md` with the `OWN0016` external-readiness-
+  build; regenerated `apps/docs/content/language/diagnostics.md` with the `OWN0016` external-readiness-
   callback form.
 - `pnpm --filter @silk-lang/compiler documentation:check` — **PASS**.
 - Focused post-conformance regression sequence over `ExternalWakeParking.test.ts`,
