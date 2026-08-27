@@ -38,6 +38,9 @@ const styles = `
   border: 1px solid var(--silk-snippet-border, #d0d7de);
   border-radius: 6px;
   background-color: var(--silk-snippet-bg, #f6f8fa);
+  /* Ligature fonts render operators like \`|>\` and \`->\` as single glyphs, hiding what the
+     reader would actually type. Source is shown character for character. */
+  font-variant-ligatures: none;
   --silk-snippet-token-keyword: #a626a4;
   --silk-snippet-token-type: #c18401;
   --silk-snippet-token-identifier: #383a42;

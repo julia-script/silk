@@ -197,6 +197,10 @@ const theme = EditorView.theme({
     fontFamily:
       'var(--silk-snippet-font, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
     fontSize: '0.92em',
+    // White-space is inherited and crosses the shadow boundary, so a host page that sets
+    // `white-space: pre` on the element (a common no-JS fallback style) must not stop tooltip
+    // prose from wrapping.
+    whiteSpace: 'normal',
   },
   '.cm-tooltip.cm-tooltip-hover': { padding: '3px 7px' },
   '.cm-tooltip-lint': { padding: '0' },
@@ -207,6 +211,10 @@ const theme = EditorView.theme({
   '.cm-silk-type-tooltip': {
     boxSizing: 'border-box',
     maxWidth: 'min(560px, calc(100vw - 24px))',
+    // Long documentation scrolls inside the tooltip instead of growing past the viewport.
+    maxHeight: 'min(340px, 45vh)',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
     lineHeight: '1.45',
   },
   '.cm-silk-type-tooltip > *': { margin: '0' },
