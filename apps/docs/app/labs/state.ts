@@ -10,10 +10,17 @@
  * cached until a dependency changes, instead of per-component `useMemo` chains.
  */
 
-import { Analysis, MirVerification, ToolchainPlan } from '@silk-lang/compiler'
-import type { BootstrapEvaluation, Target } from '@silk-lang/compiler'
-import { diagnosticCounts, diagnosticEntries, hirContract } from '@silk-lang/inspector/ProjectSyntax'
-import type { Span } from '@silk-lang/inspector/Row'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as BootstrapEvaluation from '@silklang/compiler/BootstrapEvaluation'
+import * as MirVerification from '@silklang/compiler/MirVerification'
+import type * as Target from '@silklang/compiler/Target'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
+import {
+  diagnosticCounts,
+  diagnosticEntries,
+  hirContract,
+} from '@silklang/compiler/InspectorProjectSyntax'
+import type { Span } from '@silklang/compiler/InspectorRow'
 import { KeyValueStore } from 'effect/unstable/persistence'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'
 import { presets } from './presets'

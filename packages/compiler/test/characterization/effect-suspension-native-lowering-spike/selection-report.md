@@ -19,4 +19,4 @@ Every candidate passed the frozen semantic and structural hard gates. The approv
 
 Switched-resume has no material advantage and regresses O2 compilation and frame size. That frame result triggered the bounded returned-continuation experiment. Retcon also has no material advantage and increases the allocator-visible frame from 24 to 64 bytes. Both LLVM candidates are rejected.
 
-The rejected `llvm.coro.*` constructions remain reproducible, disposable fixtures in this directory; no production compiler or `@silk-lang/llvm` surface was added. Production task 5.1 therefore implements direct iterative lowering behind target-neutral continuation descriptors. Exact raw operands and machine-readable decisions are in [evidence.json](evidence.json).
+The rejected `llvm.coro.*` constructions remain reproducible, disposable fixtures in this directory; no production compiler or `@silklang/llvm` surface was added. Production task 5.1 therefore implements direct iterative lowering behind target-neutral continuation descriptors. Exact raw operands and machine-readable decisions are in [evidence.json](evidence.json).

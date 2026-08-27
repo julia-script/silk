@@ -22,5 +22,5 @@ None.
 
 ## Impact
 
-Adds tutorial example source and tests for lexing. It uses Effect error channels and repository TypeScript conventions but does not modify `@silk-lang/llvm`.
+Adds tutorial example source and tests for lexing. It uses Effect error channels and repository TypeScript conventions but does not modify `@silklang/llvm`.
 

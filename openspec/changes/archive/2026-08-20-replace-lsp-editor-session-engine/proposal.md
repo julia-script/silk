@@ -54,7 +54,7 @@ make the end-to-end editor session coherent.
   `ProjectSession.ts` with a deep workspace engine and project-worker adapter.
 - Introduces a worker protocol carrying source revisions, query DTOs, diagnostics, editor edits,
   symbols, and health events while keeping compiler semantic graphs inside the worker.
-- Changes `packages/vscode` activation, restart, diagnostics, and inspector subscription ownership.
+- Changes `apps/vscode` activation, restart, diagnostics, and inspector subscription ownership.
 - Reworks LSP integration, pressure, worker-failure, cancellation, restart, and Extension
   Development Host tests around the production adapter behavior.
 - Preserves the compiler-owned immutable `ProjectAnalysis`/analysis-facade semantics initially;

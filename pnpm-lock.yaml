@@ -35,45 +35,21 @@ importers:
 
   apps/docs:
     dependencies:
-      '@codemirror/commands':
-        specifier: ^6.10.4
-        version: 6.10.4
-      '@codemirror/language':
-        specifier: ^6.12.4
-        version: 6.12.4
-      '@codemirror/lint':
-        specifier: ^6.9.1
-        version: 6.9.7
-      '@codemirror/state':
-        specifier: ^6.7.1
-        version: 6.7.1
-      '@codemirror/view':
-        specifier: ^6.43.8
-        version: 6.43.8
       '@effect/atom-react':
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(react@19.2.8)(scheduler@0.27.0)
-      '@lezer/highlight':
-        specifier: ^1.2.3
-        version: 1.2.3
-      '@silk-lang/compiler':
+      '@silklang/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
-      '@silk-lang/inspector':
+      '@silklang/editor-support':
         specifier: workspace:*
-        version: link:../../packages/inspector
-      '@silk-lang/language':
-        specifier: workspace:*
-        version: link:../../packages/language
-      '@silk-lang/lsp':
+        version: link:../../packages/editor-support
+      '@silklang/lsp':
         specifier: workspace:*
         version: link:../../packages/lsp
-      '@silk-lang/platform-webcontainer':
+      '@silklang/platform-webcontainer':
         specifier: workspace:*
         version: link:../../packages/platform-webcontainer
-      '@silk-lang/snippet':
-        specifier: workspace:*
-        version: link:../../packages/snippet
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -98,9 +74,6 @@ importers:
       fumadocs-ui:
         specifier: ^16.14.0
         version: 16.14.0(@types/mdx@2.0.14)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(fumadocs-core@16.14.0(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.18)(lucide-react@1.28.0(react@19.2.8))(next@16.2.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.4.3))(next@16.2.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
       next:
         specifier: 16.2.12
         version: 16.2.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -114,18 +87,15 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-lang/formatter':
+      '@silklang/formatter':
         specifier: workspace:*
         version: link:../../packages/formatter
-      '@silk-lang/wasm':
+      '@silklang/wasm':
         specifier: workspace:*
         version: link:../../packages/wasm
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
-      '@types/mdast':
-        specifier: ^4.0.4
-        version: 4.0.4
       '@types/mdx':
         specifier: ^2.0.14
         version: 2.0.14
@@ -148,42 +118,36 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
-  packages/compiler:
+  apps/vscode:
     dependencies:
-      '@silk-lang/llvm':
+      '@silklang/lsp':
         specifier: workspace:*
-        version: link:../llvm
-      '@silk-lang/wasm':
-        specifier: workspace:*
-        version: link:../wasm
+        version: link:../../packages/lsp
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
+      vscode-languageclient:
+        specifier: ^9.0.1
+        version: 9.0.1
     devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-beta.103
-        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.3
+      '@types/vscode':
+        specifier: ^1.90.0
+        version: 1.125.0
 
-  packages/compiler-cli:
+  packages/compiler:
     dependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-beta.103
-        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-lang/compiler':
+      '@silklang/llvm':
         specifier: workspace:*
-        version: link:../compiler
-      '@silk-lang/documentation':
+        version: link:../llvm
+      '@silklang/wasm':
         specifier: workspace:*
-        version: link:../documentation
-      '@silk-lang/formatter':
-        specifier: workspace:*
-        version: link:../formatter
+        version: link:../wasm
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -191,6 +155,9 @@ importers:
         specifier: ^1.7.1
         version: 1.7.1
     devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.103
+        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
@@ -198,17 +165,20 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
-  packages/doctest:
+  packages/cli:
     dependencies:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-lang/compiler':
+      '@silklang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-lang/documentation':
+      '@silklang/docgen':
         specifier: workspace:*
-        version: link:../documentation
+        version: link:../docgen
+      '@silklang/formatter':
+        specifier: workspace:*
+        version: link:../formatter
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -220,9 +190,9 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
-  packages/documentation:
+  packages/docgen:
     dependencies:
-      '@silk-lang/compiler':
+      '@silklang/compiler':
         specifier: workspace:*
         version: link:../compiler
       effect:
@@ -242,78 +212,17 @@ importers:
         specifier: ^24.10.1
         version: 24.13.3
 
-  packages/documentation-site:
+  packages/editor-support:
     dependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-beta.103
-        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-lang/snippet':
-        specifier: workspace:*
-        version: link:../snippet
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-lang/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@silk-lang/documentation':
-        specifier: workspace:*
-        version: link:../documentation
-      '@types/node':
-        specifier: ^24.10.1
-        version: 24.13.3
-
-  packages/formatter:
-    dependencies:
-      '@silk-lang/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@silk-lang/documentation':
-        specifier: workspace:*
-        version: link:../documentation
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
-    devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-beta.103
-        version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@types/node':
-        specifier: ^24.10.1
-        version: 24.13.3
-
-  packages/inspector:
-    dependencies:
-      '@silk-lang/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
-    devDependencies:
-      '@types/node':
-        specifier: ^24.10.1
-        version: 24.13.3
-
-  packages/language:
-    dependencies:
-      '@silk-lang/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@silk-lang/documentation':
-        specifier: workspace:*
-        version: link:../documentation
-    devDependencies:
+      '@codemirror/commands':
+        specifier: ^6.10.4
+        version: 6.10.4
       '@codemirror/language':
         specifier: ^6.12.4
         version: 6.12.4
+      '@codemirror/lint':
+        specifier: ^6.9.1
+        version: 6.9.7
       '@codemirror/state':
         specifier: ^6.7.1
         version: 6.7.1
@@ -323,12 +232,62 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
+      '@silklang/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@silklang/docgen':
+        specifier: workspace:*
+        version: link:../docgen
+      '@silklang/lsp':
+        specifier: workspace:*
+        version: link:../lsp
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
+      vscode-languageserver-types:
+        specifier: 3.17.5
+        version: 3.17.5
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.3
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      jsdom:
+        specifier: ^30.0.1
+        version: 30.0.1
       shiki:
         specifier: ^4.4.2
         version: 4.4.2
+
+  packages/formatter:
+    dependencies:
+      '@silklang/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      '@silklang/docgen':
+        specifier: workspace:*
+        version: link:../docgen
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.13.3
 
   packages/llvm:
     dependencies:
@@ -348,21 +307,15 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-beta.103
         version: 4.0.0-beta.103(effect@4.0.0-beta.102)(ioredis@5.11.1)
-      '@silk-lang/compiler':
+      '@silklang/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@silk-lang/compiler-cli':
+      '@silklang/docgen':
         specifier: workspace:*
-        version: link:../compiler-cli
-      '@silk-lang/documentation':
-        specifier: workspace:*
-        version: link:../documentation
-      '@silk-lang/formatter':
+        version: link:../docgen
+      '@silklang/formatter':
         specifier: workspace:*
         version: link:../formatter
-      '@silk-lang/inspector':
-        specifier: workspace:*
-        version: link:../inspector
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.102
@@ -379,9 +332,6 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@silk-lang/language':
-        specifier: workspace:*
-        version: link:../language
       '@types/node':
         specifier: ^24.10.1
         version: 24.13.3
@@ -407,80 +357,6 @@ importers:
       playwright:
         specifier: 1.62.1
         version: 1.62.1
-
-  packages/snippet:
-    dependencies:
-      '@codemirror/commands':
-        specifier: ^6.10.4
-        version: 6.10.4
-      '@codemirror/language':
-        specifier: ^6.12.4
-        version: 6.12.4
-      '@codemirror/lint':
-        specifier: ^6.9.1
-        version: 6.9.7
-      '@codemirror/state':
-        specifier: ^6.7.1
-        version: 6.7.1
-      '@codemirror/view':
-        specifier: ^6.43.8
-        version: 6.43.8
-      '@lezer/highlight':
-        specifier: ^1.2.3
-        version: 1.2.3
-      '@silk-lang/compiler':
-        specifier: workspace:*
-        version: link:../compiler
-      '@silk-lang/language':
-        specifier: workspace:*
-        version: link:../language
-      '@silk-lang/lsp':
-        specifier: workspace:*
-        version: link:../lsp
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
-      vscode-languageserver-types:
-        specifier: 3.17.5
-        version: 3.17.5
-    devDependencies:
-      '@types/mdast':
-        specifier: ^4.0.4
-        version: 4.0.4
-      '@types/node':
-        specifier: ^24.10.1
-        version: 24.13.3
-      esbuild:
-        specifier: ^0.28.2
-        version: 0.28.2
-      jsdom:
-        specifier: ^30.0.1
-        version: 30.0.1
-
-  packages/vscode:
-    dependencies:
-      '@silk-lang/lsp':
-        specifier: workspace:*
-        version: link:../lsp
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102
-      vscode-languageclient:
-        specifier: ^9.0.1
-        version: 9.0.1
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10)
-      '@types/node':
-        specifier: ^24.10.1
-        version: 24.13.3
-      '@types/vscode':
-        specifier: ^1.90.0
-        version: 1.125.0
 
   packages/wasm:
     dependencies:

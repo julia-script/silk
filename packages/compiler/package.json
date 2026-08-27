@@ -1,7 +1,7 @@
 {
-  "name": "@silk-lang/compiler",
+  "name": "@silklang/compiler",
   "version": "0.0.0",
-  "description": "Byte-oriented bootstrap compiler primitives for Silk Effect.",
+  "description": "Effect-native stage-0 compiler and reusable compiler tooling for Silk Effect.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -402,6 +402,46 @@
       "types": "./dist/WasmBackend.d.ts",
       "import": "./dist/WasmBackend.js"
     },
+    "./FileSourceResolver": {
+      "types": "./dist/FileSourceResolver.d.ts",
+      "import": "./dist/FileSourceResolver.js"
+    },
+    "./InspectorFlowModel": {
+      "types": "./dist/InspectorFlowModel.d.ts",
+      "import": "./dist/InspectorFlowModel.js"
+    },
+    "./InspectorPanels": {
+      "types": "./dist/InspectorPanels.d.ts",
+      "import": "./dist/InspectorPanels.js"
+    },
+    "./InspectorProjectBackend": {
+      "types": "./dist/InspectorProjectBackend.d.ts",
+      "import": "./dist/InspectorProjectBackend.js"
+    },
+    "./InspectorProjectSyntax": {
+      "types": "./dist/InspectorProjectSyntax.d.ts",
+      "import": "./dist/InspectorProjectSyntax.js"
+    },
+    "./InspectorRegistry": {
+      "types": "./dist/InspectorRegistry.d.ts",
+      "import": "./dist/InspectorRegistry.js"
+    },
+    "./InspectorRow": {
+      "types": "./dist/InspectorRow.d.ts",
+      "import": "./dist/InspectorRow.js"
+    },
+    "./Project": {
+      "types": "./dist/Project.d.ts",
+      "import": "./dist/Project.js"
+    },
+    "./SourceEntry": {
+      "types": "./dist/SourceEntry.d.ts",
+      "import": "./dist/SourceEntry.js"
+    },
+    "./TargetSelector": {
+      "types": "./dist/TargetSelector.d.ts",
+      "import": "./dist/TargetSelector.js"
+    },
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
@@ -427,14 +467,15 @@
     "typecheck": "pnpm unicode:check && pnpm stdlib:check && pnpm toolchain:check && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "documentation:generate": "node scripts/generate-documentation.mjs",
     "documentation:check": "node scripts/generate-documentation.mjs --check",
-    "documentation:examples": "pnpm --filter @silk-lang/doctest stdlib:check",
+    "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
     "documentation:policy": "node scripts/check-stdlib-documentation.mjs"
   },
   "dependencies": {
-    "@silk-lang/llvm": "workspace:*",
-    "@silk-lang/wasm": "workspace:*",
-    "effect": "catalog:"
+    "@silklang/llvm": "workspace:*",
+    "@silklang/wasm": "workspace:*",
+    "effect": "catalog:",
+    "smol-toml": "^1.7.1"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-beta.103",

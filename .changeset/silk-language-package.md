@@ -1,7 +1,7 @@
 ---
-'@silk-lang/language': minor
+'@silklang/editor-support': minor
 ---
 
-New package: editor language support for Silk. A CodeMirror 6 extension whose highlighting is
-driven by the compiler's bootstrap lexer, and the Silk TextMate grammar plus VS Code language
-configuration, exported for Shiki and VS Code-compatible editors.
+New package: portable editor support for Silk. It includes lexer-driven CodeMirror integration,
+the TextMate grammar and VS Code language configuration, semantic editor projections, and the
+framework-free `<silk-snippet>` custom element.

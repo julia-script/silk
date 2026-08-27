@@ -4,14 +4,14 @@
     {
       "name": "docs",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@silk-lang/docs", "dev"],
+      "runtimeArgs": ["--filter", "@silklang/docs", "dev"],
       "port": 3000,
       "autoPort": true
     },
     {
       "name": "docs-next",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@silk-lang/docs", "exec", "next", "dev"],
+      "runtimeArgs": ["--filter", "@silklang/docs", "exec", "next", "dev"],
       "port": 3000,
       "autoPort": true
     }

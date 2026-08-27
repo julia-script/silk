@@ -13,7 +13,7 @@ of all compiler test CPU) — so shard 1 walls at ~8.5 min while the others fini
 
 - Split `.github/workflows/ci.yml`'s `validate` job:
   - `test:native-acceptance` (plus whatever native-cache save it owns) → its own job;
-  - `turbo run test --filter='!@silk-lang/compiler'` → its own job;
+  - `turbo run test --filter='!@silklang/compiler'` → its own job;
   - `validate` keeps biome, build, typecheck, the compiler's generator/documentation
     checks, `test:scripts`, and `release:candidate`.
 - Re-measure the gate (expect ~13 min, bounded by native acceptance).

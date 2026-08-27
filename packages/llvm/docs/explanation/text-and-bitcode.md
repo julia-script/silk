@@ -3,7 +3,7 @@
 This explanation is about the relationship between module construction, textual LLVM IR, and LLVM
 bitcode. It does not describe the bitstream record format or provide output instructions.
 
-LLVM assembly and bitcode are two representations of the same module. `@silk-lang/llvm` reflects
+LLVM assembly and bitcode are two representations of the same module. `@silklang/llvm` reflects
 that relationship by keeping one semantic builder state and placing both output paths at its edge:
 `IrText.render` interprets the snapshot as text, while `Bitcode.encode` interprets it as bitstream
 records.

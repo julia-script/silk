@@ -55,13 +55,13 @@ export const argument = Effect.fn('Value.argument')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Block from '@silk-lang/llvm/Block'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Constant from '@silk-lang/llvm/Constant'
- * import * as FunctionActor from '@silk-lang/llvm/Function'
- * import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
- * import * as Type from '@silk-lang/llvm/Type'
- * import * as Value from '@silk-lang/llvm/Value'
+ * import * as Block from '@silklang/llvm/Block'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Constant from '@silklang/llvm/Constant'
+ * import * as FunctionActor from '@silklang/llvm/Function'
+ * import * as FunctionBody from '@silklang/llvm/FunctionBody'
+ * import * as Type from '@silklang/llvm/Type'
+ * import * as Value from '@silklang/llvm/Value'
  *
  * await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

@@ -37,7 +37,7 @@ None.
 - Adds public formatter and formatted-document actors and explicit package exports under
   `packages/compiler`.
 - Adds formatting workflow, command, filesystem traversal, reporting, exports, tests, and
-  documentation under `packages/compiler-cli`.
+  documentation under `packages/cli`.
 - Extends parser/formatter contract tests around documentation comments, idempotence, source
   equivalence, width boundaries, and damaged syntax.
 - Establishes a future LSP integration boundary without adding an LSP implementation or a new

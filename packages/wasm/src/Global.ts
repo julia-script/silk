@@ -47,10 +47,10 @@ export interface Options {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/wasm/Builder'
- * import * as Global from '@silk-lang/wasm/Global'
- * import * as Instr from '@silk-lang/wasm/Instr'
- * import * as ValType from '@silk-lang/wasm/ValType'
+ * import * as Builder from '@silklang/wasm/Builder'
+ * import * as Global from '@silklang/wasm/Global'
+ * import * as Instr from '@silklang/wasm/Instr'
+ * import * as ValType from '@silklang/wasm/ValType'
  *
  * const program = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

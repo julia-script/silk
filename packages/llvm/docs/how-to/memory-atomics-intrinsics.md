@@ -6,16 +6,16 @@ an LLVM memory intrinsic. It assumes familiarity with LLVM pointers and atomic o
 ```typescript
 import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
-import * as Alignment from '@silk-lang/llvm/Alignment'
-import * as Block from '@silk-lang/llvm/Block'
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as Constant from '@silk-lang/llvm/Constant'
-import * as FunctionActor from '@silk-lang/llvm/Function'
-import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
-import * as Intrinsic from '@silk-lang/llvm/Intrinsic'
-import * as MemoryAccess from '@silk-lang/llvm/MemoryAccess'
-import * as Type from '@silk-lang/llvm/Type'
-import * as Value from '@silk-lang/llvm/Value'
+import * as Alignment from '@silklang/llvm/Alignment'
+import * as Block from '@silklang/llvm/Block'
+import * as Builder from '@silklang/llvm/Builder'
+import * as Constant from '@silklang/llvm/Constant'
+import * as FunctionActor from '@silklang/llvm/Function'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
+import * as Intrinsic from '@silklang/llvm/Intrinsic'
+import * as MemoryAccess from '@silklang/llvm/MemoryAccess'
+import * as Type from '@silklang/llvm/Type'
+import * as Value from '@silklang/llvm/Value'
 
 const program = Effect.gen(function* () {
   const builder = yield* Builder.make()

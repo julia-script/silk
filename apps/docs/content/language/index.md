@@ -30,9 +30,11 @@ the language that the current alpha compiler implements.
   the Silk source doc comments.
 - **[Diagnostic index](./diagnostics.md)** — every stable compiler error code and its message
   shape.
+- **[Glossary](./glossary.md)** — canonical names for language, compiler, bootstrap, and runtime
+  concepts.
 
 The standard-library and diagnostic pages are generated. Regenerate them with
-`pnpm --filter @silk-lang/compiler documentation:generate`. The compiler test suite rejects stale
+`pnpm --filter @silklang/compiler documentation:generate`. The compiler test suite rejects stale
 generated pages and compiles every active Silk example in the hand-written pages.
 
 ## Rule evidence
@@ -42,5 +44,5 @@ boundaries, diagnostics, and links to the tests and specifications behind it. It
 language behavior and is also useful when contributing to the compiler or reconciling an edge case.
 
 The editor-support package is documented separately in the
-[package README](https://github.com/julia-script/silk/blob/main/packages/language/README.md). Its
+[package README](https://github.com/julia-script/silk/blob/main/packages/editor-support/README.md). Its
 CodeMirror and TextMate APIs are not part of the Silk language.

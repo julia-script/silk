@@ -1,4 +1,4 @@
-# Add `@silk-lang/language` package
+# Add `@silklang/editor-support` package
 
 ## Why
 
@@ -9,9 +9,9 @@ highlighting can be derived from the real token stream instead of a duplicated g
 
 ## What Changes
 
-- New workspace package `@silk-lang/language` (`packages/language`) providing:
+- New workspace package `@silklang/editor-support` (`packages/editor-support`) providing:
   - A lexer-driven CodeMirror 6 extension that highlights Silk by running the compiler's bootstrap
-    lexer (`@silk-lang/compiler/Lexer`) and mapping `TokenKind` to highlight styles. No Lezer
+    lexer (`@silklang/compiler/Lexer`) and mapping `TokenKind` to highlight styles. No Lezer
     grammar; the compiler lexer is the single source of truth.
   - A Silk TextMate grammar (`silk.tmLanguage.json`) plus a language configuration (brackets,
     comments, auto-closing pairs), exported for consumption by Shiki and by editors.
@@ -21,7 +21,7 @@ highlighting can be derived from the real token stream instead of a duplicated g
   extension, preserving existing behavior (URL-encoded source, span cursor on selection).
 - The docs app registers the TextMate grammar with fumadocs/Shiki so ` ```silk ` code fences
   highlight across the docs site.
-- A private, declarative Cursor/VS Code extension (`packages/vscode`, `private: true`): manifest
+- A private, declarative Cursor/VS Code extension app (`apps/vscode`, `private: true`): manifest
   contributing the `silk` language for `.silk` files, the TextMate grammar, and the language
   configuration. No extension code, no `vsce`, no marketplace — installed by symlinking the folder
   into `~/.cursor/extensions/`. Excluded from Changesets and release-candidate validation.
@@ -46,10 +46,10 @@ None — the compiler's specs are unchanged; this change only consumes the exist
 
 ## Impact
 
-- New packages: `packages/language` (publishable later, consumed via `workspace:*` for now) and
-  `packages/vscode` (private).
-- `apps/docs`: new dependency on `@silk-lang/language` and CodeMirror packages; workbench source
+- New package: `packages/editor-support` (publishable later, consumed via `workspace:*` for now) and
+  `apps/vscode` (private app).
+- `apps/docs`: new dependency on `@silklang/editor-support` and CodeMirror packages; workbench source
   pane and MDX/Shiki configuration change.
 - New third-party dependencies: `@codemirror/state`, `@codemirror/view`, `@codemirror/language`,
   `@lezer/highlight` (style tags only).
-- `@silk-lang/compiler` is unchanged but gains a new consumer of `Lexer` and `Token`.
+- `@silklang/compiler` is unchanged but gains a new consumer of `Lexer` and `Token`.

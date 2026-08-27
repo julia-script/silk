@@ -1,7 +1,7 @@
 # UnicodeData.subset.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Fields: code point; canonical combining class; canonical decomposition; simple uppercase; simple lowercase.
-# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silklang/compiler unicode:vendor
 0041;0;;;0061
 0042;0;;;0062
 0043;0;;;0063

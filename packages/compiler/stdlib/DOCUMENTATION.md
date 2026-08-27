@@ -14,10 +14,10 @@ editor hovers, policy validation, and doctests. Do not edit generated standard-l
 After a source comment changes, run:
 
 ```bash
-pnpm --filter @silk-lang/compiler documentation:policy
-pnpm --filter @silk-lang/compiler documentation:examples
-pnpm --filter @silk-lang/compiler documentation:generate
-pnpm --filter @silk-lang/compiler documentation:check
+pnpm --filter @silklang/compiler documentation:policy
+pnpm --filter @silklang/compiler documentation:examples
+pnpm --filter @silklang/compiler documentation:generate
+pnpm --filter @silklang/compiler documentation:check
 ```
 
 The full repository gate also runs these checks through `pnpm check`.

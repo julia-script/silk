@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Introduce the bootstrap compiler package with immutable byte-oriented sources, source-owned spans,

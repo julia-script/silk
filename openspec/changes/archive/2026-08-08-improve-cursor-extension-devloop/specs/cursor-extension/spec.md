@@ -2,12 +2,12 @@
 
 ### Requirement: Retargetable local install for the current checkout
 
-The extension package SHALL provide a documented install command that creates or replaces the local Cursor (and optionally VS Code) extensions-directory symlink so it points at this repository checkout's `packages/vscode` path, after ensuring the extension and language-server packages are built.
+The extension package SHALL provide a documented install command that creates or replaces the local Cursor (and optionally VS Code) extensions-directory symlink so it points at this repository checkout's `apps/vscode` path, after ensuring the extension and language-server packages are built.
 
 #### Scenario: Install from a worktree
 
 - **WHEN** a contributor runs the install command from a git worktree whose absolute path differs from any previous install
-- **THEN** the extensions-directory entry for Silk resolves to that worktree's `packages/vscode` folder and the extension entrypoint exists on disk
+- **THEN** the extensions-directory entry for Silk resolves to that worktree's `apps/vscode` folder and the extension entrypoint exists on disk
 
 #### Scenario: Replacing a dangling symlink
 
@@ -25,7 +25,7 @@ The extension README SHALL distinguish window reload (needed for contribution an
 
 #### Scenario: Contributor updates only the language server
 
-- **WHEN** a contributor rebuilds `@silk-lang/lsp` while the extension is already loaded from the correct checkout
+- **WHEN** a contributor rebuilds `@silklang/lsp` while the extension is already loaded from the correct checkout
 - **THEN** documentation tells them to run `Silk: Restart Language Server` rather than reinstalling the symlink
 
 ## MODIFIED Requirements

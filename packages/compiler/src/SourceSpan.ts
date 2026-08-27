@@ -2,7 +2,7 @@ import * as Option from 'effect/Option'
 import * as Canonical from './internal/Canonical.js'
 import type * as SourceFile from './SourceFile.js'
 
-const SourceSpanTypeId: unique symbol = Symbol.for('@silk-lang/compiler/SourceSpan')
+const SourceSpanTypeId: unique symbol = Symbol.for('@silklang/compiler/SourceSpan')
 
 /**
  * A half-open byte range owned by one logical source identity.

@@ -2,7 +2,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
-import type * as WebContainerProcess from '@silk-lang/platform-webcontainer/WebContainerProcess'
+import type * as WebContainerProcess from '@silklang/platform-webcontainer/WebContainerProcess'
 
 interface Disposable {
   readonly dispose: () => void

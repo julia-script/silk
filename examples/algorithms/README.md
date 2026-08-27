@@ -14,5 +14,5 @@ Pure entries use their deterministic fingerprint as the process result. Effectfu
 `()`: their manifest records process success separately from the algorithm result that the program
 checks before returning, while unhandled reportable failures become runtime execution errors.
 
-Run the suite with `pnpm --filter @silk-lang/compiler exec vitest run
+Run the suite with `pnpm --filter @silklang/compiler exec vitest run
 test/AlgorithmExamples.test.ts`.

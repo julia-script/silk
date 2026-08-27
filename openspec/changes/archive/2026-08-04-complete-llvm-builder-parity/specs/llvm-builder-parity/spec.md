@@ -50,7 +50,7 @@ The system SHALL maintain benchmark evidence for any imperative or untraced enco
 The system SHALL publish every public actor through an explicit root namespace and package subpath export, include usage and compatibility documentation, preserve required upstream notices, and pass the repository release-candidate validation.
 
 #### Scenario: Validate the packed package
-- **WHEN** the release-candidate suite packs and imports `@silk-lang/llvm`
+- **WHEN** the release-candidate suite packs and imports `@silklang/llvm`
 - **THEN** all documented root and deep imports resolve as self-contained ESM without source files or undeclared runtime dependencies
 
 ### Requirement: Reproducible upstream updates

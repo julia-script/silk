@@ -22,14 +22,14 @@ the compiler; the public error channel should retain both `CompileError` and `Ll
 Create `src/Compiler.ts` and import the package's public actor subpaths:
 
 ```typescript
-import * as Block from '@silk-lang/llvm/Block'
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as Constant from '@silk-lang/llvm/Constant'
-import * as FunctionActor from '@silk-lang/llvm/Function'
-import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
-import * as IrText from '@silk-lang/llvm/IrText'
-import type * as LlvmError from '@silk-lang/llvm/LlvmError'
-import * as Type from '@silk-lang/llvm/Type'
+import * as Block from '@silklang/llvm/Block'
+import * as Builder from '@silklang/llvm/Builder'
+import * as Constant from '@silklang/llvm/Constant'
+import * as FunctionActor from '@silklang/llvm/Function'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
+import * as IrText from '@silklang/llvm/IrText'
+import type * as LlvmError from '@silklang/llvm/LlvmError'
+import * as Type from '@silklang/llvm/Type'
 ```
 
 After validating the AST shape, create the module and signature:

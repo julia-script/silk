@@ -71,7 +71,7 @@ export const fast: FastMath = Object.freeze({
  * **Example** (Creating fast-math flags)
  *
  * ```ts
- * import * as FastMath from '@silk-lang/llvm/FastMath'
+ * import * as FastMath from '@silklang/llvm/FastMath'
  *
  * const flags = FastMath.make({ noNaNs: true, allowContract: true })
  * // FastMath.toText(flags) equals ['nnan', 'contract']
@@ -93,7 +93,7 @@ export const make = (input: Input = false): FastMath => {
  *
  * ```ts
  * import { pipe } from 'effect/Function'
- * import * as FastMath from '@silk-lang/llvm/FastMath'
+ * import * as FastMath from '@silklang/llvm/FastMath'
  *
  * const flags = pipe(FastMath.none, FastMath.combine({ noNaNs: true }))
  * ```

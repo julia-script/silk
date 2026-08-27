@@ -2,7 +2,7 @@
 
 ## Context
 
-Third change in the `@silk-lang/wasm` series (see the archived core and bulk-instruction
+Third change in the `@silklang/wasm` series (see the archived core and bulk-instruction
 changes). The extension points this change relies on are established: `ValType` is a tagged
 union (`exnref` slots in as a `RefType` variant), section framing is generic (tag section is id
 13), all instruction dispatchers carry `satisfies never` exhaustiveness guards, and byte

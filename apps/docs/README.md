@@ -1,4 +1,4 @@
-# `@silk-lang/docs`
+# `@silklang/docs`
 
 The live documentation site for the Silk language and compiler. Next.js + Fumadocs + Tailwind.
 
@@ -20,7 +20,7 @@ This app owns the documentation content directly:
 Compiler documentation generators write their checked output into `content/language`; compiler
 tests compile examples from both sections.
 
-The standalone `@silk-lang/llvm` package has its own Markdown documentation, indexed from
+The standalone `@silklang/llvm` package has its own Markdown documentation, indexed from
 [`packages/llvm/README.md`](../../packages/llvm/README.md). It is deliberately not published on
 this site because it documents using the LLVM library independently of the Silk language.
 

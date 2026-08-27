@@ -246,7 +246,7 @@ const parseUnsafe = (original: ByteString.ByteString): DataLayout => {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as DataLayout from '@silk-lang/llvm/DataLayout'
+ * import * as DataLayout from '@silklang/llvm/DataLayout'
  *
  * const width = await Effect.runPromise(
  *   Effect.gen(function* () {

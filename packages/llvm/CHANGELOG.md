@@ -1,4 +1,4 @@
-# @silk-lang/llvm
+# @silklang/llvm
 
 ## Unreleased
 

@@ -48,7 +48,7 @@ export const none: IntegerMath = Object.freeze({
  *
  * ```ts
  * import { pipe } from 'effect/Function'
- * import * as IntegerMath from '@silk-lang/llvm/IntegerMath'
+ * import * as IntegerMath from '@silklang/llvm/IntegerMath'
  *
  * const flags = pipe(
  *   IntegerMath.make(),

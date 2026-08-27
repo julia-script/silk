@@ -11,15 +11,15 @@ See proposal.md — Why. Current state that shapes the approach:
 - React's real footprint is two things: hook-based lifecycle glue in `SilkEditor`, and
   `Hover.tsx`, which renders hover CommonMark via `createRoot` into the CodeMirror tooltip.
 - `LspDocument.inlayHints` exists (packages/lsp/src/Document.ts) with no consumer.
-- Stdlib sources ship inside `@silk-lang/compiler` (`CompilerStdlib.sources`), so a browser
+- Stdlib sources ship inside `@silklang/compiler` (`CompilerStdlib.sources`), so a browser
   bundle of the compiler resolves stdlib imports with no fetching. Labs proves in-browser
   compilation works today.
 - Doctest compiles each fence as one standalone module via `Analysis.ofSourceRealized(identity,
   bytes, target)` with default target `wasm32-unknown-unknown`.
-- The static site (`packages/documentation-site`) renders fences as escaped `<pre><code>` strings
+- The static site renderer (`packages/docgen`) renders fences as escaped `<pre><code>` strings
   (Prose.ts) from documentation JSON, where a fence's `language` field carries the full comma-form
   token (`silk,ignore`).
-- `packages/language` depends only on `compiler` and `documentation`; CodeMirror is a peer
+- `packages/editor-support` owns compiler-aware CodeMirror and snippet integration; CodeMirror is a
   dependency there.
 
 ## Goals / Non-Goals
@@ -40,8 +40,8 @@ See proposal.md — Why. Current state that shapes the approach:
 
 ## Decisions
 
-**New package `@silk-lang/snippet`, not a `language` subpath.** The element needs
-`@silk-lang/lsp`; `packages/language` deliberately has no `lsp` dependency and other consumers
+**The element belongs in `@silklang/editor-support`.** The element needs
+`@silklang/lsp`; the portable editor-support package owns that editor-facing dependency and other consumers
 (TextMate, vscode) should not inherit one. Dependencies: `compiler`, `lsp`, `language`,
 CodeMirror packages, `mdast-util-from-markdown`. Two deliverables: an ESM library export (custom
 element class + registration function) and a self-registering IIFE/ESM bundle for script-tag use
@@ -89,11 +89,11 @@ type="module">` in the page template.
 
 **The renderer's dependency boundary survives the bundle** *(decided during implementation)*. The
 site package charters itself — via two guard tests — as reading the documentation JSON and nothing
-else: no `@silk-lang/*` runtime dependency, no workspace import in `src/`. The bundle crosses
+else: no `@silklang/*` runtime dependency, no workspace import in `src/`. The bundle crosses
 that boundary as data, not types: `Site.render` stays pure and takes the bundle *contents* as an
-option, and only the command shell (`Cli.ts`) resolves `@silk-lang/snippet/bundle` to a file
+option, and only the command shell resolves `@silklang/editor-support/bundle` to a file
 path and reads it. The guard tests were deliberately and visibly amended — exactly the edit their
-own comments anticipate — to allowlist `@silk-lang/snippet` as an opaque asset supplier and to
+own comments anticipate — to allowlist `@silklang/editor-support` as an opaque asset supplier and to
 exempt only `Cli.ts` from the source scan; every renderer module remains import-free. Generated
 pages also carry a `silk-snippet:not(:defined)` style so an element that never upgrades (no
 JavaScript, or a library caller who shipped no bundle) still reads as a code block.

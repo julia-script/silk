@@ -2,7 +2,7 @@
 
 ## Context
 
-The workspace already ships `@silk-lang/llvm`, whose conventions this package inherits at the
+The workspace already ships `@silklang/llvm`, whose conventions this package inherits at the
 repository level (Effect architecture rules, subpath exports, `@effect/vitest` testing, fixture
 oracles, changesets). Its internal architecture is *not* inherited: WebAssembly's module model —
 flat sections, index spaces, structured control flow, a closed instruction set — permits a

@@ -8,14 +8,14 @@ no debug state.
 
 ```typescript
 import * as Effect from 'effect/Effect'
-import * as Block from '@silk-lang/llvm/Block'
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as DISPFlags from '@silk-lang/llvm/DISPFlags'
-import * as FunctionActor from '@silk-lang/llvm/Function'
-import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
-import * as Metadata from '@silk-lang/llvm/Metadata'
-import { invalidState } from '@silk-lang/llvm/LlvmError'
-import * as Type from '@silk-lang/llvm/Type'
+import * as Block from '@silklang/llvm/Block'
+import * as Builder from '@silklang/llvm/Builder'
+import * as DISPFlags from '@silklang/llvm/DISPFlags'
+import * as FunctionActor from '@silklang/llvm/Function'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
+import * as Metadata from '@silklang/llvm/Metadata'
+import { invalidState } from '@silklang/llvm/LlvmError'
+import * as Type from '@silklang/llvm/Type'
 
 const program = Effect.gen(function* () {
   // Debug constructors only retain nodes when stripping is disabled.
@@ -32,7 +32,7 @@ const program = Effect.gen(function* () {
     })
   }
 
-  const producer = yield* Metadata.string(builder, '@silk-lang/llvm guide')
+  const producer = yield* Metadata.string(builder, '@silklang/llvm guide')
   const unit = yield* Metadata.compileUnit(builder, file, producer)
   if (unit === undefined) {
     return yield* invalidState({

@@ -338,9 +338,9 @@ const single = (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/wasm/Builder'
- * import * as Type from '@silk-lang/wasm/Type'
- * import * as ValType from '@silk-lang/wasm/ValType'
+ * import * as Builder from '@silklang/wasm/Builder'
+ * import * as Type from '@silklang/wasm/Type'
+ * import * as ValType from '@silklang/wasm/ValType'
  *
  * const program = Effect.gen(function* () {
  *   const builder = yield* Builder.make()
@@ -379,9 +379,9 @@ export const func = Effect.fn('Type.func')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/wasm/Builder'
- * import * as Type from '@silk-lang/wasm/Type'
- * import * as ValType from '@silk-lang/wasm/ValType'
+ * import * as Builder from '@silklang/wasm/Builder'
+ * import * as Type from '@silklang/wasm/Type'
+ * import * as ValType from '@silklang/wasm/ValType'
  *
  * const program = Effect.gen(function* () {
  *   const builder = yield* Builder.make()
@@ -456,9 +456,9 @@ export const array = Effect.fn('Type.array')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/wasm/Builder'
- * import * as Type from '@silk-lang/wasm/Type'
- * import * as ValType from '@silk-lang/wasm/ValType'
+ * import * as Builder from '@silklang/wasm/Builder'
+ * import * as Type from '@silklang/wasm/Type'
+ * import * as ValType from '@silklang/wasm/ValType'
  *
  * const program = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

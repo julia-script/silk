@@ -1,5 +1,5 @@
 ---
-'@silk-lang/llvm': patch
+'@silklang/llvm': patch
 ---
 
 Restructure the builder's internal state: collapse the parallel description/handle/key arrays into

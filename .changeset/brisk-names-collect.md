@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Replace singular semantic fields with ordered function facts, closed declaration-name lookup, and

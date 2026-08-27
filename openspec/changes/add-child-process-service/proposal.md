@@ -4,7 +4,7 @@ A self-hosted Silk compiler must invoke Clang and the linker itself, and Silk ca
 program at all. `OsRuntime.ts` has no spawn, fork, or exec of any kind: every OS intrinsic it offers
 is a file-system operation. That is a hard stage-2 self-hosting blocker.
 
-`CONTEXT.md` already fixes the shape — an executable path, ordered arguments, an optional working
+`apps/docs/content/language/glossary.md` already fixes the shape — an executable path, ordered arguments, an optional working
 directory, an exact environment, closed standard input, owned captured output, exit codes
 distinguished from signal termination, nonzero exit as result data, and no shell command string —
 so what remains is a representation question and the missing intrinsics.

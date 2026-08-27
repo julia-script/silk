@@ -1,13 +1,13 @@
 // Writes the source-located standard-library documentation inventory used by documentation passes.
 //
 // Run after building the compiler and documentation packages:
-//   pnpm --filter @silk-lang/compiler documentation:inventory
+//   pnpm --filter @silklang/compiler documentation:inventory
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
-import * as DocumentationProject from '../../documentation/dist/Project.js'
+import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'

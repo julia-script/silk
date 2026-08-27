@@ -1,4 +1,4 @@
-# @silk-lang/lsp
+# @silklang/lsp
 
 A Language Server Protocol server for Silk Effect, powered by the bootstrap compiler's analysis
 snapshot. Project-scoped analysis sessions feed every feature; the server adds only protocol

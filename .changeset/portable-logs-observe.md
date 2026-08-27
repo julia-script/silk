@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Add source-defined portable semantic logging with explicit Logger requirements, complete borrowed

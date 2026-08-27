@@ -46,7 +46,7 @@ operational failure.
 
 The compiler package gains a public `SourceResolver` actor and changes the request, closure,
 analysis, and driver APIs. `ModuleClosure`, `Analysis`, and their tests become Effectful consumers
-of the resolver service. The compiler CLI gains a filesystem resolver layer, source-root mapping,
+of the resolver service. The CLI gains a filesystem resolver layer, source-root mapping,
 multi-file reporting, and distinct source-rejection versus operational-failure exit behavior.
 Browser labs and other tooling consumers provide the in-memory implementation. Package exports,
 release-candidate validation, documentation, and changesets must reflect the new public surface.

@@ -20,15 +20,16 @@
  */
 
 import { RegistryProvider, useAtom, useAtomSet, useAtomValue } from '@effect/atom-react'
-import { Analysis, ToolchainPlan } from '@silk-lang/compiler'
-import type { Target } from '@silk-lang/compiler'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as Target from '@silklang/compiler/Target'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import {
   type ViewContext,
   type ViewId,
   siblingsOf,
   viewById,
   views,
-} from '@silk-lang/inspector/Registry'
+} from '@silklang/compiler/InspectorRegistry'
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react'
 import { DockviewReact } from 'dockview-react'
 import { Atom } from 'effect/unstable/reactivity'

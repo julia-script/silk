@@ -37,7 +37,7 @@ highlighting, LSP hover, and generated artifacts.
 ### The compiler owns only raw attachment
 
 Add a `ModuleDocComment` token kind for exact `//!` comments and a concept-oriented `DocBlock`
-actor in `@silk-lang/compiler`. `DocBlock` contains its kind, exact documentation tokens, and
+actor in `@silklang/compiler`. `DocBlock` contains its kind, exact documentation tokens, and
 source span. Sibling queries extract a leading module block from a `SyntaxFile` or the attached
 declaration block from a syntax node. They inspect only direct leading trivia and newline counts;
 they do not decode, normalize, or parse text.
@@ -52,7 +52,7 @@ every analysis for optional Markdown work and couple core semantic data to rende
 
 ### Parsed documentation is an optional package
 
-Create `@silk-lang/documentation`, depending on the compiler rather than the reverse. It owns
+Create `@silklang/docgen`, depending on the compiler rather than the reverse. It owns
 singular `Document`, `Project`, and `Json` actors with immutable data-first values and sibling
 operations. It normalizes comment markers, parses CommonMark on demand into a package-owned node
 vocabulary, recognizes examples, resolves intra-document links from compiler scope facts, and
@@ -63,7 +63,7 @@ by CommonMark recovery; if the external parser cannot produce a tree, the packag
 node containing the normalized source. No parser error or third-party AST crosses the public
 interface.
 
-Alternative: put parsed documentation in `@silk-lang/language`. Rejected because generation and
+Alternative: put parsed documentation in `@silklang/editor-support`. Rejected because generation and
 LSP hover are not editor adapters. Alternative: put the Markdown dependency in the compiler.
 Rejected because it expands the core package and weakens the opt-in performance boundary.
 

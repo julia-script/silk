@@ -13,7 +13,7 @@ import { defineConfig, mergeConfig, type ViteUserConfig } from 'vitest/config'
 /**
  * Vitest's default is 5 s, which is a budget for a test that does arithmetic, not for one that
  * drives a compiler. Two of the flaky-CI issues on this repo (#147, #173) were a test whose real
- * cost was well inside 5 s locally and outside it on a loaded shared runner: `packages/compiler-cli`
+ * cost was well inside 5 s locally and outside it on a loaded shared runner: `packages/cli`
  * measured an amplification of ~57x between an idle machine and a contended one, and
  * `packages/lsp`'s slowest test runs 2.3 s locally, which needs only a 2.2x amplification to be
  * reported as a timeout rather than as a result.
@@ -25,12 +25,12 @@ import { defineConfig, mergeConfig, type ViteUserConfig } from 'vitest/config'
  * `LexerPressureDeterminism` 30.3 s. Those pass only because each carries an explicit timeout;
  * `ChildProcess.test.ts > lowers the native execution to reachable native-only runtime symbols`
  * carries none, inherited a 30 s floor, and was reported as a timeout on CI. A floor a test in the
- * workspace already exceeds is not a floor. 60 s also matches the value `packages/compiler-cli`
+ * workspace already exceeds is not a floor. 60 s also matches the value `packages/cli`
  * arrived at independently from its own measurement.
  *
  * This is not a performance gate and nothing here asserts how fast anything is. It exists so that
  * a correctness assertion is never reported as a timeout. The cost of raising it is that a test
- * that genuinely hangs takes a minute to say so, which is the trade `packages/compiler-cli` had
+ * that genuinely hangs takes a minute to say so, which is the trade `packages/cli` had
  * already accepted for the same reason.
  */
 export const testTimeout = 60_000
@@ -46,7 +46,7 @@ export const wholeMachineWorkers = Math.max(1, availableParallelism())
  * Vitest's own default is already derived from the host — `availableParallelism() - 1` — and the
  * subtracted core is not an accident. It leaves something for the OS, the Turbo and pnpm
  * supervisors, and the I/O a test does outside its worker. An earlier revision of this file set
- * every package to the full core count and CI got worse, not better: `packages/compiler-cli` had
+ * every package to the full core count and CI got worse, not better: `packages/cli` had
  * been running on vitest's default, the override took its spare core away, and its watcher test —
  * which asserts that a 200-file non-atomic write burst is never read mid-truncate, and so depends
  * on its own writer being schedulable — started failing (#177).

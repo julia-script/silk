@@ -4,7 +4,7 @@
 [Next: Tokenize Tiny source](./04-tokenize-source.md)
 
 In this lesson, we will create a standalone TypeScript project that consumes
-`@silk-lang/llvm` exactly as an npm package. We will finish by rendering an empty LLVM module—a
+`@silklang/llvm` exactly as an npm package. We will finish by rendering an empty LLVM module—a
 small but real result that confirms the toolchain is ready before we write a lexer.
 
 ## Check the starting tools
@@ -30,7 +30,7 @@ Run these commands inside the empty directory:
 
 ```sh
 pnpm init
-pnpm add effect@4.0.0-beta.102 @silk-lang/llvm@^0.1.0
+pnpm add effect@4.0.0-beta.102 @silklang/llvm@^0.1.0
 pnpm add -D typescript@7.0.2 vitest@4.1.10 @effect/vitest@4.0.0-beta.102 @types/node@^22.13.0
 ```
 
@@ -51,7 +51,7 @@ Set `type` and the three scripts in `package.json` so it contains:
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@silk-lang/llvm": "^0.1.0",
+    "@silklang/llvm": "^0.1.0",
     "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
@@ -67,7 +67,7 @@ Set `type` and the three scripts in `package.json` so it contains:
 <summary>Repository maintainers: test before npm publication</summary>
 
 Build and pack the local package, then copy this project into a clean temporary directory. Delete
-the `@silk-lang/llvm` entry from the temporary `package.json` before running
+the `@silklang/llvm` entry from the temporary `package.json` before running
 `pnpm add /absolute/path/to/silk-effect-llvm-0.0.0.tgz --save-exact`. Removing the npm declaration
 first prevents pnpm from resolving the unpublished package before it considers the tarball. The
 tutorial's learner path remains the npm commands above; this substitution only verifies that the
@@ -108,8 +108,8 @@ requires code generation.
 Create `src/Cli.ts`:
 
 ```typescript
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as IrText from '@silk-lang/llvm/IrText'
+import * as Builder from '@silklang/llvm/Builder'
+import * as IrText from '@silklang/llvm/IrText'
 import * as Effect from 'effect/Effect'
 
 const program = Effect.gen(function* () {
@@ -148,7 +148,7 @@ what belongs in that module.
 
 ## Recover from setup problems
 
-**pnpm cannot find `@silk-lang/llvm`.** The package has not been published yet if you are reading
+**pnpm cannot find `@silklang/llvm`.** The package has not been published yet if you are reading
 the repository version of this lesson. Use the maintainer tarball procedure above; do not change
 the imports.
 

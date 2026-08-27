@@ -4,7 +4,7 @@ Browser applications need an Effect-native way to own and use the WebContainer r
 
 ## What Changes
 
-- Add a publishable `@silk-lang/platform-webcontainer` package that owns the `@webcontainer/api` boundary.
+- Add a publishable `@silklang/platform-webcontainer` package that owns the `@webcontainer/api` boundary.
 - Add a scoped WebContainer runtime service that boots one container, tears it down with its enclosing scope, and exposes mount, export, runtime metadata, and preview configuration as typed Effects.
 - Add `WebContainerFileSystem`, an implementation layer for Effect's `FileSystem.FileSystem` service with documented native, derived, partial, and unsupported capabilities.
 - Add a WebContainer-native process actor for spawning commands, consuming combined output, writing terminal input, awaiting exit, killing processes, and resizing terminals with scoped cleanup.
@@ -28,8 +28,8 @@ None.
 
 ## Impact
 
-- Adds `packages/platform-webcontainer` and the public package `@silk-lang/platform-webcontainer`.
+- Adds `packages/platform-webcontainer` and the public package `@silklang/platform-webcontainer`.
 - Adds `@webcontainer/api` as the package's external runtime dependency and `effect` as its Effect dependency.
 - Adds browser-specific build, test, and documentation requirements to the pnpm/Turbo workspace and release-candidate validation.
 - Introduces a reusable browser platform layer that existing consumers of `FileSystem.FileSystem`, including source resolution code, can use without a WebContainer-specific dependency.
-- Does not change existing compiler, compiler CLI, LLVM, or WebAssembly APIs.
+- Does not change existing compiler, CLI, LLVM, or WebAssembly APIs.

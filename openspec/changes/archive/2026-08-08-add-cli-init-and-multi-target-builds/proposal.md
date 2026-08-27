@@ -30,7 +30,7 @@ Silk projects can be discovered and built only after users hand-write a manifest
 
 ## Impact
 
-- `packages/compiler-cli`: command registration, project decoding, initialization, option resolution, build planning, workflows, reporting, tests, README, and exports.
+- `packages/cli`: command registration, project decoding, initialization, option resolution, build planning, workflows, reporting, tests, README, and exports.
 - `packages/compiler`: target/backend compatibility, driver artifact outcomes, LLVM Wasm emission/finalization, toolchain planning, tests, and public exports where actor seams change.
 - Existing `silk.toml` files and assertions using `.silk/build/...` require migration to the new manifest version field and visible backend-qualified layout.
 - LSP project discovery continues to use `silk.toml`, but its shared project decoding must accept and preserve the evolved schema.

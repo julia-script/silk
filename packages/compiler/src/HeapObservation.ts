@@ -5,7 +5,7 @@ import * as Layer from 'effect/Layer'
 export class HeapObservation extends Context.Service<
   HeapObservation,
   { readonly heapBytes: () => number }
->()('@silk-lang/compiler/HeapObservation') {}
+>()('@silklang/compiler/HeapObservation') {}
 
 /** Explicit zero-cost browser implementation for hosts without process heap telemetry. */
 export const layerBrowser = Layer.succeed(HeapObservation, Object.freeze({ heapBytes: () => 0 }))

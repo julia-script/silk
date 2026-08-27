@@ -39,7 +39,7 @@
 
 ## 4. Hidden Docs Inspector
 
-- [x] 4.1 Add `@silk-lang/compiler` as a docs workspace runtime dependency and create the direct
+- [x] 4.1 Add `@silklang/compiler` as a docs workspace runtime dependency and create the direct
   `/docs/labs/syntax-inspector` route outside the Fumadocs content and search trees.
 - [x] 4.2 Build the client-side inspector around in-memory text, UTF-8 source creation, lexing, and
   parsing with the accepted fixture restored on each page load.

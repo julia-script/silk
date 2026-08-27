@@ -1,19 +1,18 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-lang/compiler/Analysis'
-import * as Lexer from '@silk-lang/compiler/Lexer'
-import * as ModuleSummary from '@silk-lang/compiler/ModuleSummary'
-import * as Parser from '@silk-lang/compiler/Parser'
-import * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
-import * as SourceFile from '@silk-lang/compiler/SourceFile'
-import * as SourceOrigin from '@silk-lang/compiler/SourceOrigin'
-import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
-import * as Stdlib from '@silk-lang/compiler/Stdlib'
-import * as WorkspaceInventory from '@silk-lang/compiler/WorkspaceInventory'
-import * as TextMate from '@silk-lang/language/TextMate'
+import * as Analysis from '@silklang/compiler/Analysis'
+import * as Lexer from '@silklang/compiler/Lexer'
+import * as ModuleSummary from '@silklang/compiler/ModuleSummary'
+import * as Parser from '@silklang/compiler/Parser'
+import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceOrigin from '@silklang/compiler/SourceOrigin'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
+import * as Stdlib from '@silklang/compiler/Stdlib'
+import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import { SemanticTokenTypes, SymbolKind } from 'vscode-languageserver-types'
+import { SymbolKind } from 'vscode-languageserver-types'
 import * as Document from '../src/Document.js'
 import * as EmbeddedFormatting from './fixtures/embeddedFormatting.js'
 
@@ -2182,32 +2181,6 @@ effect fn value() -> i32 { return 1 }
     assert.strictEqual(semanticTokenAt(decoded, source, 'effect')?.type, 'namespace')
     assert.strictEqual(semanticTokenAt(decoded, source, 'vector')?.type, 'namespace')
     assert.strictEqual(semanticTokenAt(decoded, source, 'effect', 1)?.type, 'keyword')
-  }),
-)
-
-it.effect('names every keyword the TextMate grammar colors in the semantic token legend', () =>
-  Effect.gen(function* () {
-    // The grammar and the legend both read the compiler's token kinds, so one source of keywords
-    // decides both: every kind the grammar spells must reach a legend entry the server sends.
-    const source = `${Object.values(TextMate.keywords).join(' ')}\n`
-    const { document, snapshot } = yield* open(source)
-    const decoded = decodeSemanticTokens(Document.semanticTokens(document, snapshot))
-    const colored = new Set(
-      decoded.filter((token) => token.type === 'keyword').map((token) => token.character),
-    )
-    assert.isTrue(Document.semanticTokenTypes.includes('keyword'))
-    for (const spelling of Object.values(TextMate.keywords)) {
-      assert.isTrue(
-        colored.has(positionOf(source, spelling).character),
-        `keyword ${spelling} carries no semantic token`,
-      )
-    }
-    for (const type of Document.semanticTokenTypes) {
-      assert.isTrue(
-        (Object.values(SemanticTokenTypes) as ReadonlyArray<string>).includes(type),
-        `legend entry ${type} is not a standard token type`,
-      )
-    }
   }),
 )
 

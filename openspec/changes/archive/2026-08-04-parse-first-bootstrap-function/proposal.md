@@ -33,10 +33,10 @@ None.
 
 ## Impact
 
-- Extends `@silk-lang/compiler` with explicit syntax, parser-diagnostic, and parser actors and
+- Extends `@silklang/compiler` with explicit syntax, parser-diagnostic, and parser actors and
   their package subpath exports.
 - Adds parser fixtures and malformed-input coverage alongside the existing source and lexer tests.
-- Adds `@silk-lang/compiler` as a workspace dependency of the docs app and introduces a small
+- Adds `@silklang/compiler` as a workspace dependency of the docs app and introduces a small
   client-side inspector at a stable direct URL without adding it to normal navigation.
 - Does not add general expressions, parameters, multiple declarations, semantic AST lowering,
   name or type analysis, HIR, MIR, LLVM lowering, filesystem loading, or compilation commands.

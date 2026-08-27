@@ -2,7 +2,7 @@
 
 ## 1. Package scaffold
 
-- [x] 1.1 Create `packages/snippet` (`@silk-lang/snippet`) mirroring an existing package's
+- [x] 1.1 Add the snippet element to `packages/editor-support` (`@silklang/editor-support`) with
       tsconfig/vitest/turbo wiring, with deps on `compiler`, `lsp`, `language`, CodeMirror
       packages, and `mdast-util-from-markdown`
 - [x] 1.2 Add the package to workspace/turbo config and verify `node scripts/turbo.mjs run build`
@@ -46,7 +46,7 @@
 
 ## 5. Static site emission
 
-- [x] 5.1 In `packages/documentation-site` Prose.ts, parse the fence language token with the
+- [x] 5.1 In `packages/docgen` Prose.ts, parse the fence language token with the
       doctest comma convention; `silk` fences emit `<silk-snippet diagnostics hover>`,
       `silk,ignore` fences emit a bare `<silk-snippet>`, other languages keep `<pre><code>`
 - [x] 5.2 Copy the element bundle into generated output and reference it with a relative module

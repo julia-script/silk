@@ -214,9 +214,9 @@ const integerOf = Effect.fn('Constant.integerOf')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Constant from '@silk-lang/llvm/Constant'
- * import * as Type from '@silk-lang/llvm/Type'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Constant from '@silklang/llvm/Constant'
+ * import * as Type from '@silklang/llvm/Type'
  *
  * const bits = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()
@@ -325,9 +325,9 @@ const formatBytes: Record<FloatFormat, number> = {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Constant from '@silk-lang/llvm/Constant'
- * import * as Type from '@silk-lang/llvm/Type'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Constant from '@silklang/llvm/Constant'
+ * import * as Type from '@silklang/llvm/Type'
  *
  * const nan = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

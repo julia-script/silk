@@ -170,10 +170,10 @@ const setGlobalDebugExpressions = (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Constant from '@silk-lang/llvm/Constant'
- * import * as Type from '@silk-lang/llvm/Type'
- * import * as Variable from '@silk-lang/llvm/Variable'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Constant from '@silklang/llvm/Constant'
+ * import * as Type from '@silklang/llvm/Type'
+ * import * as Variable from '@silklang/llvm/Variable'
  *
  * const variable = await Effect.runPromise(
  *   Effect.gen(function* () {

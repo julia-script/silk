@@ -1,11 +1,11 @@
 import { assert, it } from '@effect/vitest'
-import * as Block from '@silk-lang/llvm/Block'
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as Constant from '@silk-lang/llvm/Constant'
-import * as FunctionActor from '@silk-lang/llvm/Function'
-import * as FunctionBody from '@silk-lang/llvm/FunctionBody'
-import * as IrText from '@silk-lang/llvm/IrText'
-import * as Type from '@silk-lang/llvm/Type'
+import * as Block from '@silklang/llvm/Block'
+import * as Builder from '@silklang/llvm/Builder'
+import * as Constant from '@silklang/llvm/Constant'
+import * as FunctionActor from '@silklang/llvm/Function'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
+import * as IrText from '@silklang/llvm/IrText'
+import * as Type from '@silklang/llvm/Type'
 import * as Effect from 'effect/Effect'
 
 it.effect('rolls back an unterminated body and permits a clean retry', () =>

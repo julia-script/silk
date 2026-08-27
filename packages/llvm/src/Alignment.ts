@@ -42,7 +42,7 @@ const isPowerOfTwo = (value: bigint): boolean => value > 0n && (value & (value -
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Alignment from '@silk-lang/llvm/Alignment'
+ * import * as Alignment from '@silklang/llvm/Alignment'
  *
  * const alignment = await Effect.runPromise(Alignment.fromByteUnits(16))
  * // Alignment.render(alignment) === '16'

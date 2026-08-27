@@ -1,4 +1,4 @@
-# `@silk-lang/platform-webcontainer`
+# `@silklang/platform-webcontainer`
 
 Effect-native access to the [WebContainer API](https://webcontainers.io/): one scoped browser
 runtime, the standard Effect `FileSystem` service, WebContainer-native processes, and typed event
@@ -8,7 +8,7 @@ state.
 ## Install
 
 ```sh
-pnpm add @silk-lang/platform-webcontainer effect
+pnpm add @silklang/platform-webcontainer effect
 ```
 
 The package can be imported during SSR because imports and layer construction do not touch browser
@@ -23,8 +23,8 @@ throughout the graph:
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
-import * as WebContainer from '@silk-lang/platform-webcontainer/WebContainer'
-import * as WebContainerFileSystem from '@silk-lang/platform-webcontainer/WebContainerFileSystem'
+import * as WebContainer from '@silklang/platform-webcontainer/WebContainer'
+import * as WebContainerFileSystem from '@silklang/platform-webcontainer/WebContainerFileSystem'
 
 const runtimeLayer = WebContainer.layer({ workdirName: 'playground' })
 const fileSystemLayer = WebContainerFileSystem.layer.pipe(Layer.provide(runtimeLayer))
@@ -53,8 +53,8 @@ kill, and resize. They intentionally do not invent PIDs, POSIX signals, or separ
 ```ts
 import * as Effect from 'effect/Effect'
 import * as Stream from 'effect/Stream'
-import * as WebContainer from '@silk-lang/platform-webcontainer/WebContainer'
-import * as WebContainerProcess from '@silk-lang/platform-webcontainer/WebContainerProcess'
+import * as WebContainer from '@silklang/platform-webcontainer/WebContainer'
+import * as WebContainerProcess from '@silklang/platform-webcontainer/WebContainerProcess'
 
 const run = Effect.gen(function* () {
   const process = yield* WebContainer.spawn('node', ['-e', 'console.log(42)'])

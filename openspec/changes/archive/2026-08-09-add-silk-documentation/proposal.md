@@ -9,7 +9,7 @@ generation tooling the same source of truth.
 
 - Add declaration documentation with `///` and module documentation with `//!`, retained as raw,
   source-owned comment blocks by the compiler without parsing Markdown during lexing or CST parsing.
-- Add an optional `@silk-lang/documentation` package that lazily and totally parses CommonMark,
+- Add an optional `@silklang/docgen` package that lazily and totally parses CommonMark,
   recognizes Rust-style intra-document links, preserves examples and provenance, and falls back to
   readable text for malformed content or unresolved links.
 - Enrich symbol hover with the complete declaration documentation, including examples, while
@@ -52,8 +52,8 @@ generation tooling the same source of truth.
 
 ## Impact
 
-- Affected packages: `@silk-lang/compiler`, `@silk-lang/language`, `@silk-lang/lsp`,
-  `@silk-lang/compiler-cli`, and a new `@silk-lang/documentation` package.
+- Affected packages: `@silklang/compiler`, `@silklang/editor-support`, `@silklang/lsp`,
+  `@silklang/cli`, and a new `@silklang/docgen` package.
 - The compiler token vocabulary and public subpath exports gain documentation actors and a module
   documentation token kind.
 - LSP hover output changes from a signature-only Markdown code block to a signature followed by the

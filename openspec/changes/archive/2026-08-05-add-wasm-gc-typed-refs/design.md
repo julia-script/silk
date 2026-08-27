@@ -2,7 +2,7 @@
 
 ## Context
 
-Final change in the `@silk-lang/wasm` series. Unlike the prior additive changes, GC
+Final change in the `@silklang/wasm` series. Unlike the prior additive changes, GC
 generalizes the package's deepest structures: the reference-type representation, the type
 interning tables, and the validator's notion of type compatibility. Every prior feature family
 is regression-gated by byte-stable fixtures, and the oracle (pinned `wasm-tools 1.255.0`)

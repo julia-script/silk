@@ -5,6 +5,6 @@
 
 ## 2. Verification
 
-- [x] 2.1 Run focused compiler CLI initializer and end-to-end command tests
+- [x] 2.1 Run focused CLI initializer and end-to-end command tests
 - [x] 2.2 Run `pnpm typecheck`, `pnpm exec biome check .`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`
 - [x] 2.3 Validate `initialize-effectful-main` strictly and confirm every implementation task is complete

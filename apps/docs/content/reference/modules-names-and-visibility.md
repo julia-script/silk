@@ -53,7 +53,7 @@ extensions, empty segments, `.`, and `..` are not valid module identities. A sou
 memory still has one explicit logical identity even when it has no filesystem path.
 
 **Diagnostics:** An import whose exact module does not exist reports `MOD0001` at the complete
-import path. A compilation request whose root identity itself is noncanonical is a compiler-client
+import path. A compilation request whose root identity itself is noncanonical is a client
 error rather than a Silk source diagnostic. A project module attempting to occupy the reserved
 `silk/` standard-library source space reports `MOD0004`.
 

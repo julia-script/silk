@@ -1,7 +1,7 @@
 # Native Effect suspension lowering spike
 
 This spike implements OpenSpec tasks 1.5–1.8 without introducing production suspension MIR or a
-public `@silk-lang/llvm` API. Its schema, harness, direct lowering, and LLVM construction are all
+public `@silklang/llvm` API. Its schema, harness, direct lowering, and LLVM construction are all
 local to this directory and are disposable after the native-strategy decision.
 
 The frozen schema has two reached suspension points and one untaken branch. Each reached point

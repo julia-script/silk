@@ -16,10 +16,9 @@ import { expect, test } from 'vitest'
 const workspaceRoot = resolve(dirname(new URL(import.meta.url).pathname), '..')
 const packageRoot = resolve(workspaceRoot, 'packages/llvm')
 const compilerPackageRoot = resolve(workspaceRoot, 'packages/compiler')
-const compilerCliPackageRoot = resolve(workspaceRoot, 'packages/compiler-cli')
-const documentationPackageRoot = resolve(workspaceRoot, 'packages/documentation')
+const cliPackageRoot = resolve(workspaceRoot, 'packages/cli')
+const docgenPackageRoot = resolve(workspaceRoot, 'packages/docgen')
 const formatterPackageRoot = resolve(workspaceRoot, 'packages/formatter')
-const inspectorPackageRoot = resolve(workspaceRoot, 'packages/inspector')
 const wasmPackageRoot = resolve(workspaceRoot, 'packages/wasm')
 const lspPackageRoot = resolve(workspaceRoot, 'packages/lsp')
 const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcontainer')
@@ -29,14 +28,13 @@ const webContainerPackageRoot = resolve(workspaceRoot, 'packages/platform-webcon
 // which is not what was installed — so every ranged dependency needs an exact override here.
 // Read each from its installed copy rather than pinning a literal, which silently drifts out of
 // the store the next time the dependency is bumped.
-// pnpm's isolated store keeps these under the consuming package, not the workspace root.
-const installedVersion = (name: string): string =>
-  JSON.parse(
-    readFileSync(resolve(compilerCliPackageRoot, `node_modules/${name}/package.json`), 'utf8'),
-  ).version
+// pnpm's isolated store keeps these under the package that declares them, not the workspace root.
+const installedVersion = (packageRoot: string, name: string): string =>
+  JSON.parse(readFileSync(resolve(packageRoot, `node_modules/${name}/package.json`), 'utf8'))
+    .version
 
 const installedPackageRoot = (name: string): string =>
-  realpathSync(resolve(compilerCliPackageRoot, `node_modules/${name}`))
+  realpathSync(resolve(cliPackageRoot, `node_modules/${name}`))
 
 const lspInstalledVersion = (name: string): string =>
   JSON.parse(readFileSync(resolve(lspPackageRoot, `node_modules/${name}/package.json`), 'utf8'))
@@ -76,7 +74,7 @@ const installConsumer = (cwd: string): void => {
 }
 
 test('the llvm release candidate is a self-contained ESM package', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -95,7 +93,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
 
-    expect(manifest.name).toBe('@silk-lang/llvm')
+    expect(manifest.name).toBe('@silklang/llvm')
     expect(manifest.private).not.toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -164,7 +162,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       JSON.stringify({
         private: true,
         type: 'module',
-        dependencies: { '@silk-lang/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
+        dependencies: { '@silklang/llvm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
     writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
@@ -179,7 +177,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/llvm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-lang/llvm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './LlvmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
+          `import * as api from '@silklang/llvm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silklang/llvm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './LlvmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
         ],
         {
           cwd: consumerRoot,
@@ -243,7 +241,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
 })
 
 test('the compiler release candidate exposes only its bootstrap ESM actors', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-compiler-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-compiler-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -265,13 +263,13 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     })
 
     const archive = readdirSync(archiveRoot).find(
-      (file) => file.startsWith('silk-lang-compiler-') && file.endsWith('.tgz'),
+      (file) => file.startsWith('silklang-compiler-') && file.endsWith('.tgz'),
     )
     const llvmArchive = readdirSync(archiveRoot).find(
-      (file) => file.startsWith('silk-lang-llvm-') && file.endsWith('.tgz'),
+      (file) => file.startsWith('silklang-llvm-') && file.endsWith('.tgz'),
     )
     const wasmArchive = readdirSync(archiveRoot).find(
-      (file) => file.startsWith('silk-lang-wasm-') && file.endsWith('.tgz'),
+      (file) => file.startsWith('silklang-wasm-') && file.endsWith('.tgz'),
     )
     expect(archive).toBeDefined()
     expect(llvmArchive).toBeDefined()
@@ -281,12 +279,13 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
 
-    expect(manifest.name).toBe('@silk-lang/compiler')
+    expect(manifest.name).toBe('@silklang/compiler')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
-      '@silk-lang/llvm',
-      '@silk-lang/wasm',
+      '@silklang/llvm',
+      '@silklang/wasm',
       'effect',
+      'smol-toml',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
@@ -314,6 +313,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './ExecutionLifecycle',
       './ExecutionPackage',
       './FieldRealization',
+      './FileSourceResolver',
       './FiniteRow',
       './FloatingPoint',
       './FormattedDocument',
@@ -322,6 +322,12 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './HostInput',
       './ImportPath',
       './ImportPlan',
+      './InspectorFlowModel',
+      './InspectorPanels',
+      './InspectorProjectBackend',
+      './InspectorProjectSyntax',
+      './InspectorRegistry',
+      './InspectorRow',
       './Instances',
       './InterfaceWitnessCompatibility',
       './Intrinsic',
@@ -351,6 +357,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './Parser',
       './PhaseReport',
       './Presentation',
+      './Project',
       './ProjectAnalysis',
       './ProviderSelection',
       './RepresentationField',
@@ -360,6 +367,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SemanticInvalidation',
       './SemanticOccurrence',
       './SourceAction',
+      './SourceEntry',
       './SourceFile',
       './SourceOrigin',
       './SourceResolver',
@@ -373,6 +381,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
       './SyntaxFormatter',
       './SyntaxTree',
       './Target',
+      './TargetSelector',
       './Termination',
       './Token',
       './ToolchainIntegrity',
@@ -454,7 +463,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/compiler': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/compiler': `file:${resolve(archiveRoot, archive ?? '')}`,
           effect: manifest.dependencies.effect,
         },
       }),
@@ -462,7 +471,7 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silk-lang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-lang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+        `  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -476,15 +485,15 @@ test('the compiler release candidate exposes only its bootstrap ESM actors', () 
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/compiler';
+          `import * as api from '@silklang/compiler';
 import * as Effect from 'effect/Effect';
-import * as evaluationModule from '@silk-lang/compiler/BootstrapEvaluation';
-import * as parserModule from '@silk-lang/compiler/Parser';
-import * as semanticModule from '@silk-lang/compiler/Elaboration';
-import * as syntaxTreeModule from '@silk-lang/compiler/SyntaxTree';
+import * as evaluationModule from '@silklang/compiler/BootstrapEvaluation';
+import * as parserModule from '@silklang/compiler/Parser';
+import * as semanticModule from '@silklang/compiler/Elaboration';
+import * as syntaxTreeModule from '@silklang/compiler/SyntaxTree';
 const paths = ${JSON.stringify(deepPaths)};
 const modules = await Promise.all(
-  paths.map((path) => import(\`@silk-lang/compiler/\${path.slice(2)}\`)),
+  paths.map((path) => import(\`@silklang/compiler/\${path.slice(2)}\`)),
 );
 const source = api.SourceFile.make(
   'memory/packed',
@@ -786,6 +795,7 @@ console.log(
       'ExecutionLifecycle',
       'ExecutionPackage',
       'FieldRealization',
+      'FileSourceResolver',
       'FiniteRow',
       'FloatingPoint',
       'FormattedDocument',
@@ -794,6 +804,12 @@ console.log(
       'HostInput',
       'ImportPath',
       'ImportPlan',
+      'InspectorFlowModel',
+      'InspectorPanels',
+      'InspectorProjectBackend',
+      'InspectorProjectSyntax',
+      'InspectorRegistry',
+      'InspectorRow',
       'Instances',
       'InterfaceWitnessCompatibility',
       'Intrinsic',
@@ -824,6 +840,7 @@ console.log(
       'Parser',
       'PhaseReport',
       'Presentation',
+      'Project',
       'ProjectAnalysis',
       'ProviderSelection',
       'RepresentationField',
@@ -833,6 +850,7 @@ console.log(
       'SemanticInvalidation',
       'SemanticOccurrence',
       'SourceAction',
+      'SourceEntry',
       'SourceFile',
       'SourceOrigin',
       'SourceResolver',
@@ -847,6 +865,7 @@ console.log(
       'SyntaxTree',
       'Target',
       'TargetConstant',
+      'TargetSelector',
       'Termination',
       'Token',
       'ToolchainIntegrity',
@@ -1009,50 +1028,55 @@ console.log(
   }
 }, 15_000)
 
-test('the documentation release candidate exposes its formatter-neutral actors', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-documentation-release-candidate-'))
+test('the docgen release candidate exposes all documentation actors', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-docgen-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
     const unpackRoot = resolve(temporary, 'unpacked')
     mkdirSync(archiveRoot)
     mkdirSync(unpackRoot)
-    for (const root of [
-      documentationPackageRoot,
-      compilerPackageRoot,
-      packageRoot,
-      wasmPackageRoot,
-    ])
+    for (const root of [docgenPackageRoot, compilerPackageRoot, packageRoot, wasmPackageRoot])
       execFileSync('pnpm', ['pack', '--pack-destination', archiveRoot], {
         cwd: root,
         stdio: 'pipe',
       })
 
     const archives = readdirSync(archiveRoot)
-    const archive = archives.find((file) => file.startsWith('silk-lang-documentation-'))
+    const archive = archives.find((file) => file.startsWith('silklang-docgen-'))
     const compilerArchive = archives.find(
-      (file) => file.startsWith('silk-lang-compiler-') && !file.includes('-cli-'),
+      (file) => file.startsWith('silklang-compiler-') && !file.includes('-cli-'),
     )
-    const llvmArchive = archives.find((file) => file.startsWith('silk-lang-llvm-'))
-    const wasmArchive = archives.find((file) => file.startsWith('silk-lang-wasm-'))
+    const llvmArchive = archives.find((file) => file.startsWith('silklang-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silklang-wasm-'))
     expect(archive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
-    expect(manifest.name).toBe('@silk-lang/documentation')
+    expect(manifest.name).toBe('@silklang/docgen')
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
-      '@silk-lang/compiler',
+      '@silklang/compiler',
       'effect',
       'mdast-util-from-markdown',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
       './CodeFence',
+      './Doctest',
       './Document',
+      './Example',
       './Highlight',
+      './Html',
       './Json',
+      './Model',
       './Project',
+      './Prose',
+      './Report',
+      './Search',
+      './Site',
+      './Sources',
+      './Stdlib',
     ])
     expect(existsSync(resolve(packedRoot, 'dist/index.js'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'dist/index.d.ts'))).toBe(true)
@@ -1069,14 +1093,14 @@ test('the documentation release candidate exposes its formatter-neutral actors',
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/documentation': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/docgen': `file:${resolve(archiveRoot, archive ?? '')}`,
         },
       }),
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silk-lang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-lang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-lang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1086,19 +1110,35 @@ test('the documentation release candidate exposes its formatter-neutral actors',
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/documentation'; console.log(JSON.stringify(Object.keys(api).sort()))`,
+          `import * as api from '@silklang/docgen'; console.log(JSON.stringify(Object.keys(api).sort()))`,
         ],
         { cwd: consumerRoot, encoding: 'utf8' },
       ),
     )
-    expect(api).toEqual(['CodeFence', 'Document', 'Highlight', 'Json', 'Project'])
+    expect(api).toEqual([
+      'CodeFence',
+      'Doctest',
+      'Document',
+      'Example',
+      'Highlight',
+      'Html',
+      'Json',
+      'Model',
+      'Project',
+      'Prose',
+      'Report',
+      'Search',
+      'Site',
+      'Sources',
+      'Stdlib',
+    ])
   } finally {
     rmSync(temporary, { recursive: true, force: true })
   }
 }, 30_000)
 
 test('the formatter release candidate installs offline with root and deep API parity', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-formatter-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-formatter-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -1107,7 +1147,7 @@ test('the formatter release candidate installs offline with root and deep API pa
     mkdirSync(unpackRoot)
     for (const root of [
       formatterPackageRoot,
-      documentationPackageRoot,
+      docgenPackageRoot,
       compilerPackageRoot,
       packageRoot,
       wasmPackageRoot,
@@ -1118,25 +1158,23 @@ test('the formatter release candidate installs offline with root and deep API pa
       })
 
     const archives = readdirSync(archiveRoot)
-    const archive = archives.find((file) => file.startsWith('silk-lang-formatter-'))
-    const documentationArchive = archives.find((file) =>
-      file.startsWith('silk-lang-documentation-'),
-    )
+    const archive = archives.find((file) => file.startsWith('silklang-formatter-'))
+    const docgenArchive = archives.find((file) => file.startsWith('silklang-docgen-'))
     const compilerArchive = archives.find(
-      (file) => file.startsWith('silk-lang-compiler-') && !file.includes('-cli-'),
+      (file) => file.startsWith('silklang-compiler-') && !file.includes('-cli-'),
     )
-    const llvmArchive = archives.find((file) => file.startsWith('silk-lang-llvm-'))
-    const wasmArchive = archives.find((file) => file.startsWith('silk-lang-wasm-'))
+    const llvmArchive = archives.find((file) => file.startsWith('silklang-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silklang-wasm-'))
     expect(archive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
-    expect(manifest.name).toBe('@silk-lang/formatter')
+    expect(manifest.name).toBe('@silklang/formatter')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
-      '@silk-lang/compiler',
-      '@silk-lang/documentation',
+      '@silklang/compiler',
+      '@silklang/docgen',
       'effect',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual(['.', './Formatter', './FormatterError'])
@@ -1155,14 +1193,14 @@ test('the formatter release candidate installs offline with root and deep API pa
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/formatter': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/formatter': `file:${resolve(archiveRoot, archive ?? '')}`,
         },
       }),
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silk-lang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-lang/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-lang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-lang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1173,9 +1211,9 @@ test('the formatter release candidate installs offline with root and deep API pa
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/formatter';
-import * as Formatter from '@silk-lang/formatter/Formatter';
-import * as FormatterError from '@silk-lang/formatter/FormatterError';
+          `import * as api from '@silklang/formatter';
+import * as Formatter from '@silklang/formatter/Formatter';
+import * as FormatterError from '@silklang/formatter/FormatterError';
 console.log(JSON.stringify({
   root: Object.keys(api).sort(),
   formatterRoot: Object.keys(api.Formatter).sort(),
@@ -1197,8 +1235,8 @@ console.log(JSON.stringify({
   }
 }, 30_000)
 
-test('the compiler CLI release candidate installs with its project-first command surface', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-compiler-cli-release-candidate-'))
+test('the CLI release candidate installs with its project-first command surface', () => {
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-cli-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -1207,9 +1245,9 @@ test('the compiler CLI release candidate installs with its project-first command
     mkdirSync(unpackRoot)
 
     for (const root of [
-      compilerCliPackageRoot,
+      cliPackageRoot,
       compilerPackageRoot,
-      documentationPackageRoot,
+      docgenPackageRoot,
       formatterPackageRoot,
       packageRoot,
       wasmPackageRoot,
@@ -1222,36 +1260,33 @@ test('the compiler CLI release candidate installs with its project-first command
 
     const archives = readdirSync(archiveRoot)
     const archive = archives.find(
-      (file) => file.startsWith('silk-lang-compiler-cli-') && file.endsWith('.tgz'),
+      (file) => file.startsWith('silklang-cli-') && file.endsWith('.tgz'),
     )
     const compilerArchive = archives.find(
-      (file) => file.startsWith('silk-lang-compiler-') && !file.includes('-cli-'),
+      (file) => file.startsWith('silklang-compiler-') && !file.includes('-cli-'),
     )
-    const llvmArchive = archives.find((file) => file.startsWith('silk-lang-llvm-'))
-    const wasmArchive = archives.find((file) => file.startsWith('silk-lang-wasm-'))
-    const documentationArchive = archives.find((file) =>
-      file.startsWith('silk-lang-documentation-'),
-    )
-    const formatterArchive = archives.find((file) => file.startsWith('silk-lang-formatter-'))
+    const llvmArchive = archives.find((file) => file.startsWith('silklang-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silklang-wasm-'))
+    const docgenArchive = archives.find((file) => file.startsWith('silklang-docgen-'))
+    const formatterArchive = archives.find((file) => file.startsWith('silklang-formatter-'))
     expect(archive).toBeDefined()
     expect(compilerArchive).toBeDefined()
     expect(llvmArchive).toBeDefined()
     expect(wasmArchive).toBeDefined()
-    expect(documentationArchive).toBeDefined()
+    expect(docgenArchive).toBeDefined()
     expect(formatterArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
-    expect(manifest.name).toBe('@silk-lang/compiler-cli')
+    expect(manifest.name).toBe('@silklang/cli')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@effect/platform-node',
-      '@silk-lang/compiler',
-      '@silk-lang/documentation',
-      '@silk-lang/formatter',
+      '@silklang/compiler',
+      '@silklang/docgen',
+      '@silklang/formatter',
       'effect',
-      'smol-toml',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
@@ -1262,19 +1297,17 @@ test('the compiler CLI release candidate installs with its project-first command
       './CheckCommand',
       './Cli',
       './DocCommand',
+      './DoctestCommand',
+      './DocumentationSiteCommand',
       './DocumentationWorkflow',
-      './FileSourceResolver',
       './FormatCommand',
       './FormatWorkflow',
       './InitCommand',
       './Program',
-      './Project',
       './ProjectInitializer',
       './ProjectOptions',
       './Report',
       './RunCommand',
-      './SourceEntry',
-      './TargetSelector',
       './Workflow',
     ])
     expect(manifest.exports).not.toHaveProperty('./CompileCommand')
@@ -1294,14 +1327,14 @@ test('the compiler CLI release candidate installs with its project-first command
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/compiler-cli': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/cli': `file:${resolve(archiveRoot, archive ?? '')}`,
         },
       }),
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-lang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-lang/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-lang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-lang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-lang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1313,6 +1346,8 @@ test('the compiler CLI release candidate installs with its project-first command
     expect(help).toContain(
       'doc          Generate experimental formatter-neutral documentation JSON.',
     )
+    expect(help).toContain('doctest      Compile the fenced Silk examples')
+    expect(help).toContain('docs-site    Render a static HTML documentation site')
     expect(help).toContain(
       'format       Format Silk project source into its canonical representation.',
     )
@@ -1339,7 +1374,7 @@ test('the compiler CLI release candidate installs with its project-first command
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/compiler-cli'; console.log(JSON.stringify(Object.keys(api).sort()))`,
+          `import * as api from '@silklang/cli'; console.log(JSON.stringify(Object.keys(api).sort()))`,
         ],
         { cwd: consumerRoot, encoding: 'utf8' },
       ),
@@ -1352,19 +1387,17 @@ test('the compiler CLI release candidate installs with its project-first command
       'CheckCommand',
       'Cli',
       'DocCommand',
+      'DoctestCommand',
+      'DocumentationSiteCommand',
       'DocumentationWorkflow',
-      'FileSourceResolver',
       'FormatCommand',
       'FormatWorkflow',
       'InitCommand',
       'Program',
-      'Project',
       'ProjectInitializer',
       'ProjectOptions',
       'Report',
       'RunCommand',
-      'SourceEntry',
-      'TargetSelector',
       'Workflow',
     ])
   } finally {
@@ -1373,7 +1406,7 @@ test('the compiler CLI release candidate installs with its project-first command
 }, 30_000)
 
 test('the wasm release candidate is a self-contained ESM package', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-wasm-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-wasm-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -1393,7 +1426,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
 
-    expect(manifest.name).toBe('@silk-lang/wasm')
+    expect(manifest.name).toBe('@silklang/wasm')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {})).toEqual(['effect'])
     expect(Object.keys(manifest.exports).sort()).toEqual([
@@ -1443,7 +1476,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
       JSON.stringify({
         private: true,
         type: 'module',
-        dependencies: { '@silk-lang/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
+        dependencies: { '@silklang/wasm': `file:${resolve(archiveRoot, archive ?? '')}` },
       }),
     )
     writeFileSync(resolve(consumerRoot, 'pnpm-workspace.yaml'), consumerWorkspace())
@@ -1458,7 +1491,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/wasm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-lang/wasm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './WasmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
+          `import * as api from '@silklang/wasm'; const paths = ${JSON.stringify(deepPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silklang/wasm/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), rootNamespaces: Object.fromEntries(paths.filter((path) => path !== './WasmError').map((path) => [path, Object.keys(api[path.slice(2)]).sort()])), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }))`,
         ],
         {
           cwd: consumerRoot,
@@ -1515,7 +1548,7 @@ test('the wasm release candidate is a self-contained ESM package', () => {
 })
 
 test('the lsp release candidate installs and answers an initialize request', async () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-lsp-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-lsp-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -1525,11 +1558,9 @@ test('the lsp release candidate installs and answers an initialize request', asy
 
     for (const root of [
       lspPackageRoot,
-      compilerCliPackageRoot,
       compilerPackageRoot,
-      documentationPackageRoot,
+      docgenPackageRoot,
       formatterPackageRoot,
-      inspectorPackageRoot,
       packageRoot,
       wasmPackageRoot,
     ]) {
@@ -1540,35 +1571,28 @@ test('the lsp release candidate installs and answers an initialize request', asy
     }
 
     const archives = readdirSync(archiveRoot)
-    const archive = archives.find((file) => file.startsWith('silk-lang-lsp-'))
-    const cliArchive = archives.find((file) => file.startsWith('silk-lang-compiler-cli-'))
+    const archive = archives.find((file) => file.startsWith('silklang-lsp-'))
     const compilerArchive = archives.find(
-      (file) => file.startsWith('silk-lang-compiler-') && !file.includes('-cli-'),
+      (file) => file.startsWith('silklang-compiler-') && !file.includes('-cli-'),
     )
-    const llvmArchive = archives.find((file) => file.startsWith('silk-lang-llvm-'))
-    const wasmArchive = archives.find((file) => file.startsWith('silk-lang-wasm-'))
-    const documentationArchive = archives.find((file) =>
-      file.startsWith('silk-lang-documentation-'),
-    )
-    const formatterArchive = archives.find((file) => file.startsWith('silk-lang-formatter-'))
-    const inspectorArchive = archives.find((file) => file.startsWith('silk-lang-inspector-'))
+    const llvmArchive = archives.find((file) => file.startsWith('silklang-llvm-'))
+    const wasmArchive = archives.find((file) => file.startsWith('silklang-wasm-'))
+    const docgenArchive = archives.find((file) => file.startsWith('silklang-docgen-'))
+    const formatterArchive = archives.find((file) => file.startsWith('silklang-formatter-'))
     expect(archive).toBeDefined()
-    expect(documentationArchive).toBeDefined()
+    expect(docgenArchive).toBeDefined()
     expect(formatterArchive).toBeDefined()
-    expect(inspectorArchive).toBeDefined()
     execFileSync('tar', ['-xzf', resolve(archiveRoot, archive ?? ''), '-C', unpackRoot])
 
     const packedRoot = resolve(unpackRoot, 'package')
     const manifest = JSON.parse(readFileSync(resolve(packedRoot, 'package.json'), 'utf8'))
-    expect(manifest.name).toBe('@silk-lang/lsp')
+    expect(manifest.name).toBe('@silklang/lsp')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
       '@effect/platform-node',
-      '@silk-lang/compiler',
-      '@silk-lang/compiler-cli',
-      '@silk-lang/documentation',
-      '@silk-lang/formatter',
-      '@silk-lang/inspector',
+      '@silklang/compiler',
+      '@silklang/docgen',
+      '@silklang/formatter',
       'effect',
       'vscode-languageserver',
       'vscode-languageserver-textdocument',
@@ -1599,14 +1623,14 @@ test('the lsp release candidate installs and answers an initialize request', asy
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/lsp': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/lsp': `file:${resolve(archiveRoot, archive ?? '')}`,
         },
       }),
     )
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silk-lang/compiler-cli': file:${resolve(archiveRoot, cliArchive ?? '')}\n  '@silk-lang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silk-lang/documentation': file:${resolve(archiveRoot, documentationArchive ?? '')}\n  '@silk-lang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silk-lang/inspector': file:${resolve(archiveRoot, inspectorArchive ?? '')}\n  '@silk-lang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silk-lang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion('@types/node')}\n  smol-toml: ${installedVersion('smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@effect/platform-node-shared': 4.0.0-beta.103\n  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@silklang/wasm': file:${resolve(archiveRoot, wasmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\n  ws: 8.21.2\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1650,7 +1674,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
 }, 120_000)
 
 test('the WebContainer release candidate exposes every SSR-safe actor subpath', () => {
-  const temporary = mkdtempSync(resolve(tmpdir(), 'silk-lang-webcontainer-release-candidate-'))
+  const temporary = mkdtempSync(resolve(tmpdir(), 'silklang-webcontainer-release-candidate-'))
 
   try {
     const archiveRoot = resolve(temporary, 'archives')
@@ -1676,7 +1700,7 @@ test('the WebContainer release candidate exposes every SSR-safe actor subpath', 
       './WebContainerFileSystem',
       './WebContainerProcess',
     ]
-    expect(manifest.name).toBe('@silk-lang/platform-webcontainer')
+    expect(manifest.name).toBe('@silklang/platform-webcontainer')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual(['@webcontainer/api', 'effect'])
     expect(Object.keys(manifest.exports).sort()).toEqual(['.', ...actorPaths])
@@ -1700,7 +1724,7 @@ test('the WebContainer release candidate exposes every SSR-safe actor subpath', 
         private: true,
         type: 'module',
         dependencies: {
-          '@silk-lang/platform-webcontainer': `file:${resolve(archiveRoot, archive ?? '')}`,
+          '@silklang/platform-webcontainer': `file:${resolve(archiveRoot, archive ?? '')}`,
         },
       }),
     )
@@ -1712,7 +1736,7 @@ test('the WebContainer release candidate exposes every SSR-safe actor subpath', 
         [
           '--input-type=module',
           '--eval',
-          `import * as api from '@silk-lang/platform-webcontainer'; const paths = ${JSON.stringify(actorPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silk-lang/platform-webcontainer/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }));`,
+          `import * as api from '@silklang/platform-webcontainer'; const paths = ${JSON.stringify(actorPaths)}; const modules = await Promise.all(paths.map((path) => import(\`@silklang/platform-webcontainer/\${path.slice(2)}\`))); console.log(JSON.stringify({ root: Object.keys(api).sort(), deep: Object.fromEntries(paths.map((path, index) => [path, Object.keys(modules[index]).sort()])) }));`,
         ],
         { cwd: consumerRoot, encoding: 'utf8' },
       ),

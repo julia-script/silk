@@ -2,7 +2,7 @@
 
 ## 1. Package scaffolding
 
-- [x] 1.1 Create `packages/language` (`@silk-lang/language`): package.json with subpath exports
+- [x] 1.1 Create `packages/editor-support` (`@silklang/editor-support`): package.json with subpath exports
       for `./CodeMirror` and `./TextMate`; tsconfig pair matching sibling packages; CodeMirror
       packages as peer + dev dependencies; wire into pnpm workspace and turbo.
 - [x] 1.2 Verify `pnpm build` and `pnpm check` pass with the empty package in the graph.
@@ -43,13 +43,13 @@
 
 ## 5. Cursor extension
 
-- [x] 5.1 Create `packages/vscode` (private): manifest contributing the `silk` language for
+- [x] 5.1 Create `apps/vscode` (private): manifest contributing the `silk` language for
       `.silk`, grammar, and language configuration; sync script copying both files from
-      `packages/language/grammars/`; test asserting copies are byte-identical to the source files;
+      `packages/editor-support`; test asserting copies are byte-identical to the source files;
       README documenting the symlink install; exclude from Changesets/release-candidate validation.
 - [x] 5.2 Symlink into `~/.cursor/extensions/` and verify a `.silk` file highlights in Cursor.
 
 ## 6. Finish
 
 - [x] 6.1 Run `pnpm build`, `pnpm check`, and the full test suite; fix fallout.
-- [x] 6.2 Update root README package list with `@silk-lang/language`.
+- [x] 6.2 Update root README package list with `@silklang/editor-support`.

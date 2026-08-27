@@ -1,7 +1,7 @@
 ## 1. Canonical Random Surface
 
 - [x] 1.1 Add documented canonical `packages/compiler/stdlib/silk/random.silk` declarations for the exclusive `Random.nextU64` service operation, its public wrapper, the non-`Copy` `Xoshiro256StarStar` provider, and `seeded`; verify the compiler resolves and analyzes a minimal import with no diagnostics.
-- [x] 1.2 Register `silk/random` as a portable manifest module with `Random` as its namespace and `Xoshiro256StarStar` as an alias; run `pnpm --filter @silk-lang/compiler stdlib:generate` and verify `pnpm --filter @silk-lang/compiler stdlib:check` succeeds.
+- [x] 1.2 Register `silk/random` as a portable manifest module with `Random` as its namespace and `Xoshiro256StarStar` as an alias; run `pnpm --filter @silklang/compiler stdlib:generate` and verify `pnpm --filter @silklang/compiler stdlib:check` succeeds.
 
 ## 2. Deterministic Provider
 
@@ -19,7 +19,7 @@
 
 - [x] 4.1 Add one fixed-seed fingerprint program to the existing evaluator/direct-Wasm parity coverage and to `packages/compiler/test/support/corpus.ts`; verify the targeted parity tests and existing native differential return the same fingerprint without a feature-local native compile loop.
 - [x] 4.2 Extend existing standard-library namespace, source-resolution, and privilege coverage for `silk/random`; verify navigation reaches canonical `.silk` declarations, copied renamed source behaves equivalently, and intrinsic inventory and target imports remain unchanged.
-- [x] 4.3 Complete module, service, provider, constructor, and operation doc comments with examples and explicit non-cryptographic warnings; run `pnpm --filter @silk-lang/compiler documentation:generate`, then verify `documentation:policy`, `documentation:check`, and `documentation:examples` succeed.
+- [x] 4.3 Complete module, service, provider, constructor, and operation doc comments with examples and explicit non-cryptographic warnings; run `pnpm --filter @silklang/compiler documentation:generate`, then verify `documentation:policy`, `documentation:check`, and `documentation:examples` succeed.
 
 ## 5. Repository Verification
 

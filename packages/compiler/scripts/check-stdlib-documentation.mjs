@@ -1,12 +1,12 @@
 // Checks maintained documentation policy across the canonical standard-library manifest.
 //
 // Run after building the compiler and documentation packages:
-//   pnpm --filter @silk-lang/compiler documentation:policy
+//   pnpm --filter @silklang/compiler documentation:policy
 
 import { readFileSync } from 'node:fs'
 import * as Effect from 'effect/Effect'
-import * as DocumentationPolicy from '../../documentation/dist/Policy.js'
-import * as DocumentationProject from '../../documentation/dist/Project.js'
+import * as DocumentationPolicy from '../../docgen/dist/Policy.js'
+import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'

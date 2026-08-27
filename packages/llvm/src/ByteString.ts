@@ -34,7 +34,7 @@ export const fromUint8Array = (bytes: Uint8Array): ByteString => fromNumbers(byt
  * **Example** (Encoding UTF-8 text)
  *
  * ```ts
- * import * as ByteString from '@silk-lang/llvm/ByteString'
+ * import * as ByteString from '@silklang/llvm/ByteString'
  *
  * const value = ByteString.fromString('λ')
  * // ByteString.toUint8Array(value) equals Uint8Array.of(0xCE, 0xBB)

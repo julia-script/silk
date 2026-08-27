@@ -1,6 +1,6 @@
 ## 1. Editor Application Setup
 
-- [x] 1.1 Add `@silk-lang/platform-webcontainer`, `@xterm/xterm`, and `@xterm/addon-fit` to the docs app and update the lockfile.
+- [x] 1.1 Add `@silklang/platform-webcontainer`, `@xterm/xterm`, and `@xterm/addon-fit` to the docs app and update the lockfile.
 - [x] 1.2 Add route-scoped COOP/COEP response headers for `/editor` and editor child paths in the Next.js configuration.
 - [x] 1.3 Scaffold the `/editor` route and one route-level `RegistryProvider` boundary that future editor child content will inherit.
 

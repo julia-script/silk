@@ -1,5 +1,5 @@
 import { assert, it } from '@effect/vitest'
-import * as WasmError from '@silk-lang/wasm/WasmError'
+import * as WasmError from '@silklang/wasm/WasmError'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'

@@ -3,7 +3,7 @@ import * as Result from 'effect/Result'
 import * as DocumentVersion from './DocumentVersion.js'
 import type * as SourceEvent from './SourceEvent.js'
 
-const TypeId: unique symbol = Symbol.for('@silk-lang/lsp/SourceLedger')
+const TypeId: unique symbol = Symbol.for('@silklang/lsp/SourceLedger')
 
 /** Latest accepted bytes for one open editor document. */
 export interface Entry {

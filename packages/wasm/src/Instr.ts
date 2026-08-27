@@ -767,7 +767,7 @@ const freeze = <A extends object>(value: A): A => Object.freeze(value)
  * **Example** (Adding two stack values)
  *
  * ```ts
- * import * as Instr from '@silk-lang/wasm/Instr'
+ * import * as Instr from '@silklang/wasm/Instr'
  *
  * const body = [Instr.localGet(0), Instr.localGet(1), Instr.op('i32.add')]
  * ```
@@ -1033,8 +1033,8 @@ export interface MemoryAccessOptions {
  * **Example** (Loading from the second memory)
  *
  * ```ts
- * import * as Instr from '@silk-lang/wasm/Instr'
- * import type * as Memory from '@silk-lang/wasm/Memory'
+ * import * as Instr from '@silklang/wasm/Instr'
+ * import type * as Memory from '@silklang/wasm/Memory'
  *
  * declare const scratch: Memory.Memory
  *
@@ -1309,8 +1309,8 @@ export const catchAllRef = (depth: number): Catch => freeze({ _tag: 'CatchAllRef
  * **Example** (Catching an error tag into an enclosing block)
  *
  * ```ts
- * import * as Instr from '@silk-lang/wasm/Instr'
- * import type * as Tag from '@silk-lang/wasm/Tag'
+ * import * as Instr from '@silklang/wasm/Instr'
+ * import type * as Tag from '@silklang/wasm/Tag'
  *
  * declare const error: Tag.Tag
  *

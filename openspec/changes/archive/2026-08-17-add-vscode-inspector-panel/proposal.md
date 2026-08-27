@@ -50,11 +50,11 @@ consumer can reuse them.
 
 ## Impact
 
-- New package: `packages/inspector` (`@silk-lang/inspector`), depending only on
-  `@silk-lang/compiler`.
+- Compiler inspector actors under `packages/compiler`, depending only on
+  `@silklang/compiler`.
 - `apps/docs/app/labs`: registry and `row/project-*` modules move out; imports and the
   `onActivate` wiring change, behavior does not.
 - `packages/lsp`: new request/notification handlers in `Server.ts`; single-root realization
   cached per committed revision.
-- `packages/vscode`: webview panel, commands, cursor sync; extension stays local-install only.
+- `apps/vscode`: webview panel, commands, cursor sync; extension stays local-install only.
 - No published-release impact: all affected packages are private/unreleased.

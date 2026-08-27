@@ -2,7 +2,7 @@ import * as Option from 'effect/Option'
 import * as SourceOrigin from './SourceOrigin.js'
 import type * as SourceSpan from './SourceSpan.js'
 
-const SourceFileTypeId: unique symbol = Symbol.for('@silk-lang/compiler/SourceFile')
+const SourceFileTypeId: unique symbol = Symbol.for('@silklang/compiler/SourceFile')
 
 /** An immutable snapshot of caller-supplied source bytes and its logical identity. */
 export interface SourceFile {

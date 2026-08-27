@@ -1,5 +1,5 @@
-import * as WebContainer from '@silk-lang/platform-webcontainer/WebContainer'
-import * as WebContainerFileSystem from '@silk-lang/platform-webcontainer/WebContainerFileSystem'
+import * as WebContainer from '@silklang/platform-webcontainer/WebContainer'
+import * as WebContainerFileSystem from '@silklang/platform-webcontainer/WebContainerFileSystem'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import { Atom } from 'effect/unstable/reactivity'

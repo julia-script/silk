@@ -5,9 +5,9 @@ assumes the module has already been populated and validated.
 
 ```typescript
 import * as Effect from 'effect/Effect'
-import * as Bitcode from '@silk-lang/llvm/Bitcode'
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as IrText from '@silk-lang/llvm/IrText'
+import * as Bitcode from '@silklang/llvm/Bitcode'
+import * as Builder from '@silklang/llvm/Builder'
+import * as IrText from '@silklang/llvm/IrText'
 
 const program = Effect.gen(function* () {
   const builder = yield* Builder.make({
@@ -47,8 +47,8 @@ a snapshot and do not consume or mutate the builder.
 To compare repository fixtures with the pinned Zig and LLVM tools, run:
 
 ```sh
-pnpm --filter @silk-lang/llvm fixtures:verify
-pnpm --filter @silk-lang/llvm parity:validate
+pnpm --filter @silklang/llvm fixtures:verify
+pnpm --filter @silklang/llvm parity:validate
 ```
 
 Runtime consumers do not need those external tools. Refer to

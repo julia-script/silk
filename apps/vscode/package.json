@@ -1,0 +1,69 @@
+{
+  "name": "silk-language",
+  "displayName": "Silk Language",
+  "description": "Syntax highlighting and language server support for Silk Effect source files.",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "silk-effect",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:silk"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "silk.restartLanguageServer",
+        "title": "Silk: Restart Language Server"
+      },
+      {
+        "command": "silk.openInspector",
+        "title": "Silk: Open Inspector"
+      }
+    ],
+    "languages": [
+      {
+        "id": "silk",
+        "aliases": [
+          "Silk"
+        ],
+        "extensions": [
+          ".silk"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "silk",
+        "scopeName": "source.silk",
+        "path": "./syntaxes/silk.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "pnpm clean && tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "install:cursor": "node scripts/install-local.mjs",
+    "install:code": "node scripts/install-local.mjs --vscode-only",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@silklang/lsp": "workspace:*",
+    "effect": "catalog:",
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1",
+    "@types/vscode": "^1.90.0"
+  }
+}

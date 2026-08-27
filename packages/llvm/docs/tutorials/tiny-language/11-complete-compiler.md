@@ -85,7 +85,7 @@ The stream boundary gives the CLI a strict contract:
 
 - success writes only valid LLVM IR to stdout;
 - failure writes no IR to stdout and one diagnostic to stderr; and
-- Clang is never invoked inside the compiler or `@silk-lang/llvm`.
+- Clang is never invoked inside the compiler or `@silklang/llvm`.
 
 ## Compile the central program
 
@@ -175,7 +175,7 @@ definitions and confirm the compiler accepted only a zero-parameter Tiny `main`.
 
 ## Confirm the tutorial stands alone
 
-From a clean temporary consumer containing the packed local `@silk-lang/llvm` tarball, run:
+From a clean temporary consumer containing the packed local `@silklang/llvm` tarball, run:
 
 ```sh
 pnpm typecheck

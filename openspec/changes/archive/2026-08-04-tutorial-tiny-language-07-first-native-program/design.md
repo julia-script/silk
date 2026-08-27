@@ -13,7 +13,7 @@ The complete AST can represent `fn main() = 42`, but there is no lowering path. 
 **Non-Goals:**
 
 - Lower general arithmetic, calls, or conditionals.
-- Emit bitcode or invoke Clang from `@silk-lang/llvm`.
+- Emit bitcode or invoke Clang from `@silklang/llvm`.
 - Hide LLVM IR behind a one-call abstraction before learners see its structure.
 
 ## Decisions

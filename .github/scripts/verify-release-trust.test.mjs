@@ -10,11 +10,11 @@ const trusted = {
 }
 
 test('accepts a trusted publish with provenance', () => {
-  assert.deepEqual(checkManifest('@silk-lang/llvm', '0.1.0', trusted), [])
+  assert.deepEqual(checkManifest('@silklang/llvm', '0.1.0', trusted), [])
 })
 
 test('rejects an untrusted publish without provenance', () => {
-  const failures = checkManifest('@silk-lang/llvm', '0.1.0', {
+  const failures = checkManifest('@silklang/llvm', '0.1.0', {
     version: '0.1.0',
     _npmUser: { name: 'manual' },
   })
@@ -27,7 +27,7 @@ test('reads the requested version from the registry packument', async () => {
     ok: true,
     json: async () => ({ versions: { '0.1.0': trusted } }),
   })
-  const manifest = await fetchRegistryManifest('@silk-lang/llvm', '0.1.0', { fetchImpl })
+  const manifest = await fetchRegistryManifest('@silklang/llvm', '0.1.0', { fetchImpl })
 
   assert.equal(manifest.version, '0.1.0')
 })
@@ -36,7 +36,7 @@ test('surfaces registry errors', async () => {
   const fetchImpl = async () => ({ ok: false, status: 503 })
 
   await assert.rejects(
-    () => fetchRegistryManifest('@silk-lang/llvm', '0.1.0', { fetchImpl }),
+    () => fetchRegistryManifest('@silklang/llvm', '0.1.0', { fetchImpl }),
     /returned 503/u,
   )
 })

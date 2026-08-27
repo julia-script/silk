@@ -76,7 +76,7 @@ export class SourceResolver extends Context.Service<
       SourceResolverError
     >
   }
->()('@silk-lang/compiler/SourceResolver') {}
+>()('@silklang/compiler/SourceResolver') {}
 
 /** Resolves one validated canonical module through the active source resolver. */
 export const resolve = Effect.fn('SourceResolver.resolve')(function* (

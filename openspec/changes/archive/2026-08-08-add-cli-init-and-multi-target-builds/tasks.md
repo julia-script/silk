@@ -43,7 +43,7 @@
 
 ## 6. Documentation, Migration, and Verification
 
-- [x] 6.1 Update the compiler CLI README with initialization, sparse and expanded manifests, backend/target precedence, multi-target examples, visible artifact paths, batch summaries, and migration notes
+- [x] 6.1 Update the CLI README with initialization, sparse and expanded manifests, backend/target precedence, multi-target examples, visible artifact paths, batch summaries, and migration notes
 - [x] 6.2 Update LSP fixtures, editor tasks, release-candidate consumers, help assertions, and package exports/subpaths for the evolved project and toolchain actors
 - [x] 6.3 Run `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`, fixing only failures introduced by this change and recording any pre-existing failures
 - [x] 6.4 Run `pnpm check` and `pnpm release:candidate` because package contents, exports, CLI behavior, and consumer fixtures change

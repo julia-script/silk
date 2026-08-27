@@ -1,5 +1,5 @@
 /**
- * The language server's inspector surface: projects `@silk-lang/inspector` views for workspace
+ * The language server's inspector surface: projects compiler inspector views for workspace
  * documents from the committed analysis, so editor clients can render compiler-phase views
  * without running the compiler themselves.
  *
@@ -10,12 +10,13 @@
  * whole cache with the view it belonged to.
  */
 
-import * as Analysis from '@silk-lang/compiler/Analysis'
-import type * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
-import * as SourceFile from '@silk-lang/compiler/SourceFile'
-import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
-import type { Fact, RowModel } from '@silk-lang/inspector'
-import { viewById, views } from '@silk-lang/inspector'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type { Fact } from '@silklang/compiler/InspectorRegistry'
+import { viewById, views } from '@silklang/compiler/InspectorRegistry'
+import type { RowModel } from '@silklang/compiler/InspectorRow'
+import type * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import type * as ProjectSnapshot from './ProjectSnapshot.js'
 
@@ -25,7 +26,7 @@ export const viewRequest = 'silk/inspectorView'
 /**
  * The custom request answering the registry of available views.
  *
- * The VS Code extension host is CommonJS and the inspector package is ESM-only, so the client
+ * The VS Code extension host is CommonJS and the compiler package is ESM-only, so the client
  * cannot import the registry itself; the server, which already depends on it, serves the list.
  */
 export const viewsRequest = 'silk/inspectorViews'
