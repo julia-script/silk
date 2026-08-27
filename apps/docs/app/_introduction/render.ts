@@ -128,12 +128,15 @@ const block = (node: RootContent | BlockContent, state: State): string => {
       return `<blockquote>${node.children.map((child) => block(child, state)).join('')}</blockquote>`
     }
     case 'code': {
-      if (node.lang === 'silk') {
+      const langParts = node.lang?.split(',').map((part) => part.trim()) ?? []
+      if (langParts.at(0) === 'silk') {
         state.silkOrdinal += 1
         // Authored fences may keep a cosmetic blank line before the closing fence; the snippet
         // shows and compiles the code without it.
         const code = node.value.replace(/\s+$/, '')
-        const live = compiles(code, state.silkOrdinal)
+        // `silk,live` forces semantics on: it marks an example whose diagnostics are the point —
+        // deliberately invalid code whose real compiler error the reader should see.
+        const live = langParts.includes('live') || compiles(code, state.silkOrdinal)
         const badge = live
           ? '<span class="live">live · hover for types</span>'
           : '<span class="frag">fragment</span>'

@@ -31,6 +31,9 @@
   font-family: var(--mono);
   font-size: 13.5px;
   line-height: 1.8;
+  /* JetBrains Mono ligatures fuse operators like |> and -> into single glyphs; source and
+     inline code are shown character for character. */
+  font-variant-ligatures: none;
 }
 
 /* ── top bar, like the workbench chrome ───────── */

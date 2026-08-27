@@ -259,6 +259,8 @@ FixedClock { value: 42 } ← implementation
 The logger from the opening example is another service:
 
 ```silk
+import silk.logger { LogError, LogLevel }
+
 service Logger {
   effect fn log(
     level: LogLevel,
@@ -271,12 +273,17 @@ service Logger {
 The contract says nothing about whether a log event goes to stdout, memory, a browser console, a file, telemetry, or something nobody has invented yet. It also says nothing about timestamps, prefixes, newlines, or allocation. Those choices belong to the provider.
 
 ```silk
-let mut logger = Logger.stdoutProvider()
-// or: Logger.inMemoryProvider()
-// or any application-defined provider
+import silk.effect { Effect }
+import silk.logger { Logger }
 
-run Effect.log("connected")
-  |> Effect.provideMut(&mut logger)
+pub effect fn main() -> () ! Logger.LogError {
+  let mut logger = Logger.stdoutProvider()
+  // or: Logger.inMemoryProvider()
+  // or any application-defined provider
+
+  run Effect.log("connected")
+    |> Effect.provideMut(&mut logger)
+}
 
 ```
 
@@ -289,6 +296,8 @@ This is the kind of reuse I care about: the operation keeps its meaning and cont
 Sometimes one computation needs more than one instance of the same service. Every requirement therefore has a role. The default role stays implicit, but you can name it when the distinction matters:
 
 ```silk
+import silk.allocator { Allocator }
+
 role Main
 role Scratch
 
@@ -303,11 +312,30 @@ effect fn prepareBuffers() -> ()
 `Allocator at Main` and `Allocator at Scratch` are different dependency keys, despite referring to the same service.
 
 ```silk
-let pending = prepareBuffers()
-  |> Effect.provide<Allocator at Main>(&systemAllocator)
-  |> Effect.provide<Allocator at Scratch>(&arenaAllocator)
+import silk.allocator { Allocator }
+import silk.effect { Effect }
 
-return run pending
+role Main
+role Scratch
+
+effect fn prepareBuffers() -> ()
+? &Allocator at Main
+| &Allocator at Scratch {
+  return ()
+}
+
+pub fn main() -> i32 {
+  let systemAllocator = Allocator.systemAllocatorProvider()
+  // Stands in for an arena provider: any implementation can satisfy a role.
+  let arenaAllocator = Allocator.systemAllocatorProvider()
+
+  let pending = prepareBuffers()
+    |> Effect.provide<Allocator at Main>(&systemAllocator)
+    |> Effect.provide<Allocator at Scratch>(&arenaAllocator)
+
+  run pending
+  return 0
+}
 
 ```
 
@@ -380,7 +408,7 @@ After `move message`, the original owner is no longer available on that control-
 
 Silk is currently more restrictive than Rust in a few places. Stage-0 Silk, for example, forbids partial moves out of aggregates that remain alive:
 
-```silk
+```silk,live
 struct Token {
   kind: i32
 }
@@ -403,6 +431,9 @@ One thing Zig got exactly right is that allocation policy should not be an invis
 The standard-library service looks roughly like this:
 
 ```silk
+import silk.allocator { OutOfMemoryError }
+import silk.layout { Layout }
+
 service Allocator {
   effect fn allocate(layout: Layout)
     -> Allocation
@@ -543,6 +574,9 @@ Silk does not silently pick a scheduler just because an Effect can park. The app
 `Scheduler` itself is also a service. In simplified form:
 
 ```silk
+import silk.allocator { OutOfMemoryError }
+import silk.scheduler { PendingPublication, TaskIdExhaustedError }
+
 service Scheduler {
   effect fn prepare<A, E>(
     child: once Effect<
