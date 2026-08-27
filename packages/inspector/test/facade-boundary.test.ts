@@ -25,9 +25,7 @@ const sourceFiles = (directory: string): ReadonlyArray<string> =>
 
 const valueImportedNames = (source: string): ReadonlyArray<string> => {
   const names: Array<string> = []
-  const imports = source.matchAll(
-    /import\s+(type\s+)?\{([^}]*)\}\s+from\s+'@silk-lang\/compiler'/g,
-  )
+  const imports = source.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s+from\s+'@silk-lang\/compiler'/g)
   for (const match of imports) {
     if (match[1] !== undefined) continue
     for (const specifier of (match[2] ?? '').split(',')) {
