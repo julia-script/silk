@@ -223,7 +223,7 @@ const block = (node: RootContent | BlockContent, state: State): string => {
         const badge = live
           ? '<span class="live">live · hover for types</span>'
           : '<span class="frag">fragment</span>'
-        let out = `<figure class="pane"><div class="panebar"><span class="lang">silk</span><span class="spacer"></span>${badge}</div><silk-snippet${live ? ' diagnostics hover' : ''}>\n${escapeHtml(code)}</silk-snippet></figure>`
+        let out = `<figure class="pane"><div class="panebar"><span class="lang">silk</span><span class="spacer"></span>${badge}</div><silk-snippet${live ? ' diagnostics hover inlay-hints' : ''}>\n${escapeHtml(code)}</silk-snippet></figure>`
         if (live && !state.liveNoteDone) {
           state.liveNoteDone = true
           out +=
