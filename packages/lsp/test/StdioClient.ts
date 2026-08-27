@@ -9,7 +9,10 @@ export interface Client {
   readonly child: ChildProcess
   readonly messages: Array<Record<string, unknown>>
   readonly send: (message: Record<string, unknown>) => void
-  readonly waitFor: <A>(select: (message: Record<string, unknown>) => A | undefined) => Promise<A>
+  readonly waitFor: <A>(
+    select: (message: Record<string, unknown>) => A | undefined,
+    timeoutMilliseconds?: number,
+  ) => Promise<A>
   readonly close: () => Promise<void>
 }
 
@@ -75,6 +78,8 @@ export const connect = (entryPath = binPath): Client => {
         rawSend({ id: message.id, result: null })
         for (const [uri, version] of openDocuments) pull(uri, version)
       }
+      if (message.method === 'workspace/inlayHint/refresh' && message.id !== undefined)
+        rawSend({ id: message.id, result: null })
     }
   })
   const send = (message: Record<string, unknown>): void => {
@@ -90,7 +95,11 @@ export const connect = (entryPath = binPath): Client => {
           ...parameters,
           capabilities: {
             ...capabilities,
-            workspace: { ...workspace, diagnostics: { refreshSupport: true } },
+            workspace: {
+              ...workspace,
+              diagnostics: { refreshSupport: true },
+              inlayHint: { refreshSupport: true },
+            },
             textDocument: {
               ...textDocument,
               diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
@@ -118,7 +127,10 @@ export const connect = (entryPath = binPath): Client => {
       pull(parameters.textDocument.uri)
     }
   }
-  const waitFor = <A>(select: (message: Record<string, unknown>) => A | undefined): Promise<A> =>
+  const waitFor = <A>(
+    select: (message: Record<string, unknown>) => A | undefined,
+    timeoutMilliseconds = 25_000,
+  ): Promise<A> =>
     new Promise((resolve, reject) => {
       const startedAt = Date.now()
       const poll = (): void => {
@@ -131,7 +143,7 @@ export const connect = (entryPath = binPath): Client => {
         }
         // Kept under the 30s per-test budget: this inner poll must not be the thing that fires
         // first, or a slow runner reports a timeout instead of the test's own limit.
-        if (Date.now() - startedAt > 25_000) {
+        if (Date.now() - startedAt > timeoutMilliseconds) {
           reject(new Error(`Timed out waiting; saw ${JSON.stringify(messages)}`))
           return
         }

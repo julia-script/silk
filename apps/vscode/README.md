@@ -93,9 +93,9 @@ the real editor extension host.
 
 For the scripted form, run **Silk: LSP Extension Host Test**. The guest host drives the same edits
 through VS Code's real `vscode-languageclient` adapter, checks synchronous diagnostic retirement,
-pull-diagnostic generation gating, dependency refresh, hover/quick-fix completion, acknowledged
-restart, and diagnostic removal on close, then exits with a failing launch when an assertion does
-not hold.
+pull-diagnostic generation gating, dependency refresh, hover/inlay-hint/quick-fix completion,
+acknowledged restart, and diagnostic removal on close, then exits with a failing launch when an
+assertion does not hold.
 
 ## Reload vs restart
 
