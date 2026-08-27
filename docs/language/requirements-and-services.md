@@ -28,6 +28,12 @@ Effect requirement or a runtime provider slot.
 - A **provider** is a value whose type conforms to a service and whose operations satisfy that
   service at runtime.
 
+Standard-library constructors intentionally presented as explicit provider helpers use the
+`Provider` suffix, such as `stdoutProvider` or `systemAllocatorProvider`. Other constructors may
+return conforming implementation values under ordinary actor names such as `make` or `seeded`. The
+service remains the capability contract; a constructor named as a provider neither creates a new
+requirement key nor changes conformance selection.
+
 ## SERV-001 — A conformance may define or map each operation
 
 **Status:** Confirmed
@@ -137,7 +143,7 @@ table for interfaces and services.
 **Evidence:** [earlier service mapping requirement](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [interface witness specification](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
 [current parser](../../packages/compiler/src/Parser.ts),
-[current conformance index](../../packages/compiler/src/DeclarationIndex.ts).
+[current conformance facts](../../packages/compiler/src/DeclarationFacts.ts).
 
 ## SERV-002 — Only services may be Effect requirements
 
@@ -193,7 +199,7 @@ it must not silently synthesize a service declaration or wrapper.
 requirement parameters, while concrete structs and ordinary interfaces receive `SEM0070`.
 
 **Evidence:** [service declaration specification](../../openspec/specs/bootstrap-service-declarations/spec.md),
-[requirement validation](../../packages/compiler/src/Elaboration.ts).
+[requirement validation](../../packages/compiler/src/DeclarationResolution.ts).
 
 ## SERV-003 — A service is a dependency-eligible interface
 
@@ -249,8 +255,8 @@ Effect dependency key is formed.
 
 **Evidence:** [earlier service/interface distinction](../../openspec/specs/bootstrap-service-declarations/spec.md),
 [interface contract specification](../../openspec/specs/bootstrap-complete-interface-contracts/spec.md),
-[current conformance index](../../packages/compiler/src/DeclarationIndex.ts),
-[current elaboration](../../packages/compiler/src/Elaboration.ts).
+[current conformance facts](../../packages/compiler/src/DeclarationFacts.ts),
+[current conformance proof](../../packages/compiler/src/ConformanceProof.ts).
 
 ## SERV-004 — A requirement key is a service and nominal role
 
@@ -323,7 +329,7 @@ normalized form.
 spelling is not accepted as a compatibility alias.
 
 **Evidence:** [current requirement representation](../../packages/compiler/src/Type.ts),
-[current row elaboration](../../packages/compiler/src/Elaboration.ts),
+[current row resolution](../../packages/compiler/src/DeclarationResolution.ts),
 [current generic-row specification](../../openspec/specs/bootstrap-type-generics/spec.md).
 
 ## SERV-005 — Generic requirement rows preserve normalized entries
@@ -364,7 +370,7 @@ while the generic body is checked.
 including nominal roles and access, and concrete specializations and diagnostics use `at` spelling.
 
 **Evidence:** [generic Effect-contract rule](effect-contracts.md#eff-012--ordinary-failure-types-and-generic-requirement-rows-preserve-a-contract),
-[current row inference](../../packages/compiler/src/Elaboration.ts),
+[current row inference](../../packages/compiler/src/internal/TypeInference.ts),
 [generic-row tests](../../packages/compiler/test/TypeGenerics.test.ts).
 
 ## SERV-006 — Requirement access and provider ownership are separate
@@ -429,7 +435,7 @@ normalized requirement row. When exactly one service-role key is compatible, tha
 
 ```silk
 // The Effect has one &Clock requirement and SystemClock conforms to Clock.
-let specialized = Effect.provide(effect, &systemClock)
+let specialized = Effect.provide(target, &systemClock)
 ```
 
 Compatibility requires both an ordinary interface conformance from the provider type to the
@@ -536,6 +542,10 @@ Provider lifetime follows the capture used to construct the specialized Effect:
 - a moved provider is owned and eventually cleaned up by the specialized Effect under ordinary
   ownership rules.
 
+The current standard library exposes those modes explicitly: `Effect.provide` (or
+`bindRequirement`) stores a shared borrow, `Effect.provideMut` (or `bindRequirementMut`) stores an
+exclusive borrow, and `Effect.bindRequirementOwned` stores an owned provider.
+
 During execution, the captured provider overrides an outer provider for the selected key. Once that
 execution finishes, the outer provider is visible again. This is lexical replacement attached to
 the Effect value, not mutation of process-wide dependency state.
@@ -591,7 +601,7 @@ layer, selectors and subtraction use access-independent keys, and `flatten` unio
 both layers' requirement rows.
 
 **Evidence:** [effect construction and execution](effects-and-execution.md),
-[nested Effect rule](effects-and-execution.md#eff-004--effects-may-be-nested-and-flattening-is-explicit),
+[nested Effect rule](effects-and-execution.md#eff-004--nested-effects-are-ordinary-values),
 [flow-function provision specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
 [provider ownership tests](../../packages/compiler/test/Ownership.test.ts).
 
@@ -616,7 +626,7 @@ Conceptually, the combinator is ordinary Effect composition:
 ```silk
 effect {
   let mut provider = run acquireProvider()
-  return run Effect.provide<K>(target, &mut provider)
+  return run Effect.provideMut<K>(target, &mut provider)
 }
 ```
 

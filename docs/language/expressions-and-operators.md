@@ -444,6 +444,10 @@ Effect failure channel. When overflow or invalid division is recoverable applica
 named `checked*` operation returning `Option<T>`. When modular or clamped arithmetic is intended,
 use the corresponding named `wrapping*` or `saturating*` operation where supplied.
 
+For every signed width, `checkedRemainder(MIN, -1)` returns `None` on every executor exactly where
+ordinary `%` traps. It never reaches a backend remainder instruction whose behavior differs at that
+boundary.
+
 Bitwise operators do not perform arithmetic overflow, and explicit wrapping or saturating
 functions do not inherit the ordinary operator's trap policy.
 
@@ -470,6 +474,12 @@ traps. Ordinary ordered comparisons involving NaN return `false`; `NaN == NaN` i
 `NaN != NaN` is `true`. Positive and negative zero compare equal, though representation operations
 can distinguish them.
 
+Floating `%` uses exact IEEE `fmod` semantics: for operands `x` and `y`, the mathematical result is
+`x - n*y`, where `n` is `x/y` truncated toward zero, without exposing an intermediate rounding or
+overflow. The result has the dividend's sign, including negative zero. A finite dividend modulo an
+infinite divisor returns the dividend; an infinite dividend, zero divisor, or NaN operand produces
+NaN. Evaluator, native, and WebAssembly execution produce identical finite result bits.
+
 ```silk
 fn unordered(value: f64) -> bool {
   let nan = value / 0.0
@@ -488,7 +498,8 @@ rounded finite results are values, not diagnostics or traps.
 
 **Evidence:** [floating scalar specification](../../openspec/specs/bootstrap-floating-point-scalars/spec.md),
 [floating actor modules](../../packages/compiler/stdlib/silk/f32.silk),
-[floating-point tests](../../packages/compiler/test/FloatingPointScalars.test.ts).
+[floating-point tests](../../packages/compiler/test/FloatingPointScalars.test.ts),
+[cross-engine arithmetic corpus](../../packages/compiler/test/support/corpus.ts).
 
 ### OP-006 — Concrete comparison availability is explicit and narrow
 
@@ -503,6 +514,7 @@ The concrete comparison operators are available as follows:
 | `f32` or `f64` of identical width | Yes | Yes | Ordinary IEEE comparison |
 | `char` | Yes | Yes | Unicode scalar-value order |
 | `string` | Yes | No | Exact UTF-8 sequence equality |
+| One identical scalar enum type | Yes | No | Declared member identity |
 
 Every comparison returns `bool` and evaluates both operands left to right exactly once.
 
@@ -520,9 +532,10 @@ Character ordering is not locale collation, normalization, or grapheme ordering.
 does not normalize, case-fold, or allocate.
 
 **Boundary:** Structs, arrays, unions, references, slices, callable values, Effect values, and
-services do not receive implicit structural or identity equality. Boolean and string ordering are
-also unavailable. A future user-defined equality or ordering contract must be declared explicitly;
-it cannot be inferred from representation.
+services do not receive implicit structural or identity equality. Boolean, string, and scalar enum
+ordering are also unavailable. Enum equality additionally requires one canonical enum type under
+OP-011. A future user-defined equality or ordering contract must be declared explicitly; it cannot
+be inferred from representation.
 
 **Diagnostics:** An unavailable comparison reports `SEM0012` at the incompatible operand under the
 current operator diagnostic model.
@@ -579,7 +592,9 @@ The literal `15` is contextually selected as `u8`, and the result contains only 
 
 **Boundary:** Booleans, characters, floating-point values, and other values do not admit integer
 bitwise operators. Silk currently has no `<<` or `>>` surface operator; shifts and rotates are named
-integer functions whose invalid-count behavior is defined by those APIs.
+integer functions. `rotateLeft` and `rotateRight` reduce every count by unsigned Euclidean modulo
+the value's lane width, so an out-of-range count wraps and a signed count of `-1` is equivalent to
+width minus one. Every executor applies the same reduction.
 
 Prefix `&value` is borrow syntax, while infix `left & right` is bitwise AND. Their grammatical
 positions distinguish them without runtime inspection.
@@ -746,6 +761,43 @@ diagnostic exists.
 [Effect execution boundaries](effects-and-execution.md#eff-006--an-ordinary-function-may-run-only-a-closed-effect),
 [short-circuit elaboration](../../packages/compiler/src/Elaboration.ts),
 [conditional mutation and evaluation tests](../../packages/compiler/test/ShortCircuitOperatorAcceptance.test.ts).
+
+### OP-011 — Scalar enum equality is nominal and ordering requires representation access
+
+**Status:** Confirmed
+
+`==` and `!=` accept scalar enum operands only when both have the same canonical enum type. They
+compare declared member identity and return `bool`; the enum's backing integer is not an implicit
+operand.
+
+```silk
+enum Status { Pending, Ready }
+
+fn isReady(status: Status) -> bool {
+  return status == Status.Ready
+}
+```
+
+`<`, `<=`, `>`, and `>=` do not order enum members. A program that deliberately wants discriminant
+order first exposes both integers with `Enum.value`:
+
+```silk
+fn earlier(left: Status, right: Status) -> bool {
+  return Status.value(left) < Status.value(right)
+}
+```
+
+**Boundary:** Two enums with identical member names and discriminants remain incomparable by
+equality because their nominal identities differ. An enum does not compare directly with its
+representation integer, and declaration order alone does not create source-level ordering.
+
+**Diagnostics:** Equality between different enums reports `SEM0156`; equality between an enum and
+an integer reports `SEM0155`; direct enum ordering reports `SEM0157`. The diagnostic points at the
+operator rather than pretending that either operand converted.
+
+**Evidence:** [scalar enum operator rules](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[enum operator tests](../../packages/compiler/test/OperatorContracts.test.ts),
+[enum value access](values-and-types.md#enum-004--enumvalue-exposes-the-backing-integer-in-one-direction).
 
 ## Assignment and replacement
 
@@ -955,6 +1007,11 @@ fn piped(value: i32) -> i64 {
 
 The direct and piped forms perform the same explicit conversion.
 
+Scalar enum representation access follows the same explicit-source principle but is not a general
+cast: `Status.value(status)` exposes one declared member's backing integer, and Silk provides no
+built-in integer-to-enum inverse. See
+[ENUM-004](values-and-types.md#enum-004--enumvalue-exposes-the-backing-integer-in-one-direction).
+
 **Boundary:** Contextual selection of an exact literal is not conversion. `let` inference, an
 operator result context, assignment, return, and argument passing do not silently insert `toI64`,
 change signedness, or cross between integer and floating point.
@@ -968,7 +1025,8 @@ functions use the ordinary actor-operation diagnostic.
 
 **Evidence:** [narrow compatibility](values-and-types.md#type-003--compatibility-is-exact-except-for-closed-named-relations),
 [integer actor modules](../../packages/compiler/stdlib/silk/i32.silk),
-[floating actor modules](../../packages/compiler/stdlib/silk/f64.silk).
+[floating actor modules](../../packages/compiler/stdlib/silk/f64.silk),
+[scalar enum representation access](values-and-types.md#enum-004--enumvalue-exposes-the-backing-integer-in-one-direction).
 
 ### CONV-002 — Integer conversion chooses trapping or checked range handling explicitly
 

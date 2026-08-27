@@ -14,10 +14,9 @@ This small program creates one shared counter. It updates the value through one 
 value through a second owner.
 
 ```silk
-import silk.allocator { Allocator }
-import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
-import silk.shared as Shared
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
 
 struct Counter { value: i32 }
 fn increment(counter: &mut Counter) -> i32 {

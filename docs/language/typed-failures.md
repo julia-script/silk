@@ -61,6 +61,11 @@ type does not need to be nominal. Built-in values, named structs, and other conc
 appear as an Effect's failure type when the particular payload is detached and can be transferred
 by value. An affine payload transfers ownership; a Copy payload copies its complete valid value.
 
+A generic value-kind parameter may stand for that ordinary failure type while its declaration is
+checked. If an inferred `effect {}` block executes `fail move problem` for `problem: E`, its failure
+channel retains symbolic `E`; each reachable specialization substitutes one concrete detached
+value type. The compiler does not discard the failure merely because it is not nominal yet.
+
 ```silk
 effect fn read() -> i32 ! string {
   fail "not found"
@@ -99,6 +104,10 @@ receives a type diagnostic at the invalid failure channel and identifies the unr
 payload that is not detached receives `SEM0073` at the failure origin or invalid contract and
 identifies the borrow or provider dependency that would escape.
 
+After a generic failure specializes successfully, an ordinary `run` that does not propagate or
+recover that concrete failure reports `SEM0066`, just as it does for a directly written nominal
+failure.
+
 Using a non-nominal concrete type is valid and produces no diagnostic.
 
 **Current compiler:** Aligned. Failure channels accept detached ordinary types, including primitive
@@ -107,6 +116,7 @@ lexical borrow out of scope.
 
 **Evidence:** [confirmed stabilization decision](README.md),
 [current row validation](../../packages/compiler/test/DeclarationIndex.test.ts),
+[generic failure preservation](../../packages/compiler/test/EffectBlockTyping.test.ts),
 [detachment diagnostics](../../packages/compiler/test/Elaboration.test.ts).
 
 ## FAIL-002 — `fail` follows ordinary ownership rules and has type `never`
@@ -244,7 +254,7 @@ the protected Effect succeeds with `A` and the handler succeeds with `B`, the re
 success type is the normalized union `A | B`.
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 struct NotFoundError {}
 
@@ -282,8 +292,8 @@ fn invalid() -> Effect<i32> {
 ```
 
 **Diagnostics:** Using the recovered Effect where only one member of its success union is accepted
-must produce a type mismatch at that use and identify the complete actual success type. A stable
-diagnostic code for this general mismatch is not yet assigned.
+produces `SEM0040` at that use and identifies the complete actual success type and the missing union
+member.
 
 **Current compiler:** Aligned. `Effect.catch` and `Effect.catchAll` use separate protected and
 handler success types and normalize the result to `A | B`.
@@ -309,7 +319,7 @@ Success and failure types use ordinary union normalization. Requirement rows ret
 capability, access, and role normalization.
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 struct NotFoundError {}
 struct InvalidInputError {}
@@ -461,6 +471,11 @@ cleanup; the language makes no cleanup guarantee after the trapping operation. F
 compiler-generated checked operation, the runtime should report its source origin and available
 logical execution trace before termination. Failures such as corrupted runtime state or invalid
 unsafe memory may permit only a best-effort report.
+
+Scheduler outcomes remain on the typed side of this boundary. For example,
+`Fiber.Cancelled`, `Scheduler.TaskIdExhaustedError`, and `LocalScheduler.StalledError` are ordinary
+declared outcomes of the source-level Fiber and scheduler APIs; none turns a trap into a recoverable
+Effect failure.
 
 **Boundary:** A condition the program intends to recover from must be represented before a trap
 occurs: as ordinary data or as a typed failure from a checked operation. An Effect handler cannot

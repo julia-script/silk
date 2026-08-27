@@ -10,6 +10,8 @@ or introduce a scheduler. It also does not make ordinary recursion stack safe au
 Explicit owner-controlled parking and later resumption are defined separately by
 [independently resumable Effect executions](independent-execution.md). Allocation-backed dynamic
 local state shared by those owners is defined by [local shared ownership](local-shared-ownership.md).
+The current source-level scheduler and Fiber policy built over that substrate is defined by
+[single-threaded schedulers and Fibers](single-threaded-fibers.md).
 
 The intended public contract is:
 
@@ -103,8 +105,9 @@ Signaling or dropping the cancelled Wake releases the final package authority an
 readiness.
 
 Schedulers, deferred values, timers, coroutine ports, ready queues, and cancellation policies are
-ordinary source actors built over this narrow seam. The language does not select one of these
-actors, and the compiler does not recognize their source names.
+ordinary source actors built over this narrow seam. The shipped `silk.scheduler`, `silk.fiber`, and
+`silk.local_scheduler` modules follow this rule: the language does not select those actors, and the
+compiler does not recognize their source names.
 
 ## Public contract and recursion
 
@@ -245,8 +248,10 @@ Exhausting the finite compiler-owned execution stack terminates with a fatal tra
 failure channel, like exhausting the ordinary machine stack.
 
 **Boundary:** `Effect.catch`, `catchAll`, `result`, or another typed-failure combinator cannot recover
-execution-stack exhaustion. A future explicit task or fiber constructor may define configurable or
-fallible storage without changing `Effect.suspend`.
+execution-stack exhaustion. `Execution.make` and the source-level Fiber scheduler have their own
+declared allocation and publication failures while constructing owned execution packages, but
+later growth of the compiler-private execution stack remains fatal and does not change
+`Effect.suspend`.
 
 **Diagnostics:** No failure member or requirement is inferred. A reached exhaustion reports a fatal
 runtime trap according to the program-termination rules.
@@ -388,8 +393,9 @@ If this implementation satisfies the ordinary `Allocator` contract, its use of s
 extra conformance rule.
 
 **Boundary:** An allocator operation may independently be recursive or effectful and follows its
-own declared contract. A later task or fiber feature with fallible storage must define that storage
-contract separately.
+own declared contract. `Execution.make` and Fiber task preparation define their fallible allocation
+contracts separately; those failures belong to owned execution construction, not to
+`Effect.suspend`.
 
 **Diagnostics:** No allocator-specific conformance or recursion diagnostic applies merely because
 an allocator is reachable from suspendable code.
@@ -505,14 +511,19 @@ let value = run Effect.suspend(readNext())
 This transfers stack-safe execution of `readNext`; it does not wait for another task to publish a
 value unless `readNext` already has some separately defined synchronous way to complete.
 
-**Boundary:** Runtime parking, streams, queues, tasks, fibers, executors, and async I/O require a
-separate language direction covering registration, wakeup, ownership, cancellation, and cleanup.
+**Boundary:** Runtime parking and owner-controlled resumption use the separate `Execution` and
+`Wake` lifecycle. The shipped single-threaded scheduler and Fiber APIs add ready queues, child
+tasks, observation, and structured cancellation as ordinary source policy over that lifecycle.
+Those facilities still do not turn suspension into parking or establish a general async-I/O model.
 
 **Diagnostics:** Suspension alone adds no Scheduler, Executor, or concurrency service requirement.
-Using a future unavailable async construct receives that construct's own diagnostic rather than
-changing `Effect.suspend`.
+An unowned park-capable executable, an invalid Execution lifecycle transition, or an unresolved
+Scheduler requirement receives that facility's own diagnostic or trap rather than changing
+`Effect.suspend`.
 
 **Evidence:** [no ambient runtime facilities](runtime-and-standard-library.md#runtime-004--silk-has-no-ambient-runtime-facilities),
+[independent execution lifecycle](independent-execution.md),
+[single-threaded scheduler and Fiber policy](single-threaded-fibers.md),
 [suspension implementation scope](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/proposal.md).
 
 ## Private lowering model
@@ -523,11 +534,18 @@ These are compiler architecture rules, not additional source obligations:
   that invocation changes its resume state; it does not allocate another continuation record.
 - Every resume state names only the values needed after that transfer. One statically known maximum
   layout covers all mutually exclusive states, including compiler-generated temporaries.
+- A suspendable specialization's frame identity includes its complete specialization key,
+  including the normalized provider contract row. Two otherwise identical specializations that
+  bind different provider rows cannot share or select each other's frame layout.
 - The parent completes its ownership and state transition before the deferred child begins. A live
   value therefore has one owner throughout transfer, execution, resumption, and cleanup.
 - Evaluation keeps frames in its activation machine. Native uses non-moving segmented private
   storage. Direct Wasm uses a private, non-overlapping linear-memory region. Growth failure follows
   SUSP-006 on all three engines.
+
+The complete-key frame invariant is exercised by the
+[coroutine-frame lookup](../../packages/compiler/src/CoroutineFrame.ts) and the
+[contract-row suspension parity corpus](../../packages/compiler/test/support/corpus.ts).
 
 The complete architecture contract remains in the archived
 [suspension implementation design](../../openspec/changes/archive/2026-08-19-align-effect-suspension-coroutine-storage/design.md).

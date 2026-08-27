@@ -229,6 +229,46 @@ The contract is semantic: a trailing return is unnecessary when no reachable pat
 [Effect return semantics](effects-and-execution.md#eff-002--an-effect-body-returns-its-success-value),
 [unit fallthrough tests](../../packages/compiler/test/IntegerScalars.test.ts).
 
+### RETURN-002 — An Effect block derives its contract from every reachable terminal
+
+**Status:** Confirmed
+
+The success and failure types of `effect { ... }` come from every reachable `return` and `fail` in
+the deferred block. Equal return types remain that type; distinct joinable ordinary value types form
+their canonical union; `never` contributes no success member. Source order never makes the last
+written terminal override earlier branches.
+
+```silk
+fn later(flag: bool) -> Effect<bool | i32> {
+  return effect {
+    if flag {
+      return true
+    }
+    return 42
+  }
+}
+```
+
+The block has success type `bool | i32`, not `i32`. A `fail` contributes its precise ordinary value
+type to the failure row, including a value-kind generic type parameter. Terminals nested in an
+`unsafe { ... }` statement count exactly like terminals at the block's top level.
+
+**Boundary:** A surrounding expected `Effect` type does not discard a block terminal or coerce its
+value. If the example were returned as `Effect<i32>`, the inferred `Effect<bool | i32>` would be
+incompatible. A pair of return types with no legal finite representation cannot form a block result.
+
+Capture analysis follows the same complete block traversal. A binding used only as the argument of
+`Enum.value` is still captured when the Effect is constructed and read when it runs.
+
+**Diagnostics:** An inferred union incompatible with the surrounding expected Effect reports the
+ordinary union or type mismatch at that boundary. Return types with no legal join report `SEM0163`
+at the offending terminal and identify the contributing types. A failure left unhandled at `run`
+reports `SEM0066`; generic failure values are not dropped from that check.
+
+**Evidence:** [effect-block terminal specification](../../openspec/specs/bootstrap-flow-functions/spec.md),
+[canonical join implementation](../../packages/compiler/src/Match.ts),
+[effect-block typing tests](../../packages/compiler/test/EffectBlockTyping.test.ts).
+
 ## Callable values and pipelines
 
 ### CALLABLE-001 — Naming a function produces a first-class callable value
@@ -267,7 +307,7 @@ reports `SEM0080` or the more specific represented-storage diagnostic.
 
 **Evidence:** [callable specification](../../openspec/specs/bootstrap-callable-values/spec.md),
 [indirect-call tests](../../packages/compiler/test/IndirectCallAcceptance.test.ts),
-[unsafe callable contracts](unsafe-intrinsics-and-targets.md#unsafe-002--source-callable-contracts-carry-an-unsafe-qualifier).
+[unsafe callable contracts](unsafe-intrinsics-and-targets.md#unsafe-002--ordinary-source-may-declare-a-caller-owned-unsafe-contract).
 
 ### CALLABLE-002 — Supplying a trailing argument suffix constructs a section
 
@@ -595,13 +635,20 @@ fn classify(event: Token | End) -> i32 {
 The second `Token` arm remains necessary because the first arm's guard may be false. Every guard
 must have type `bool` and may inspect its provisional pattern bindings without consuming them.
 
+A scalar enum begins with its complete declared member set. An unguarded qualified member pattern
+such as `Status.Ready` covers that exact canonical member; a guarded occurrence does not remove it.
+Enum patterns bind no payload, and `_` covers every remaining member just as it does for a
+structural union.
+
 **Boundary:** A match missing any member is invalid. A duplicate unguarded member, an arm after `_`,
 or another arm made impossible by earlier coverage is unreachable. A guarded arm alone never makes
 a member exhaustive.
 
-**Diagnostics:** An incomplete match reports `SEM0044` and lists the uncovered members. An
-unreachable arm reports `SEM0043`. A non-boolean guard reports `SEM0045`. Consuming a provisional
-guard binding reports `OWN0008` because later arms may still need the unchanged payload.
+**Diagnostics:** An incomplete structural-union match reports `SEM0044` and lists the uncovered
+members. An unreachable arm reports `SEM0043`. Scalar enums use the more specific coverage codes:
+`SEM0158` for missing members, `SEM0159` for a duplicate unguarded member, and `SEM0160` for an arm
+after `_`. A non-boolean guard reports `SEM0045`. Consuming a provisional guard binding reports
+`OWN0008` because later arms may still need the unchanged payload.
 
 **Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
 [coverage tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
@@ -630,12 +677,17 @@ fn inspect(event: Token | End) -> i32 {
 Within the first arm, `kind` comes from a precise `Token`. Outside the match, `event` remains
 `Token | End`.
 
+A scalar enum member pattern selects one value but introduces no member subtype or backing-integer
+narrowing. The scrutinee and every use of it remain the enum's nominal type inside and outside the
+arm.
+
 **Boundary:** Match narrowing does not introduce general subtyping, mutate a binding's declared
 type, expose a union's numeric runtime tag, or carry a borrowed member binding outside its arm.
 
-**Diagnostics:** A pattern member absent from the scrutinee reports `SEM0042`. Using a member-only
-field without branch proof receives the ordinary field/type diagnostic. Escaping a borrowed narrowed
-binding reports `OWN0006`.
+**Diagnostics:** A structural pattern member absent from the scrutinee reports `SEM0042`. A scalar
+enum pattern from another enum reports `SEM0161`; an integer literal pattern against an enum reports
+`SEM0162`. Using a member-only field without branch proof receives the ordinary field/type
+diagnostic. Escaping a borrowed narrowed binding reports `OWN0006`.
 
 **Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),
 [matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts).
@@ -671,10 +723,8 @@ types and the precise unavailable member. An unreachable arm contributes neither
 a second result mismatch. Ownership transfers from result expressions remain governed by their
 arm's access mode.
 
-**Current compiler:** Match joining accepts distinct nominal results only. General unions require
-the join to accept ordinary value types and require an exact type-pattern form for non-nominal
-members. PATT-015–019 define exact whole-value bindings for non-nominal union
-members; nominal patterns keep the rules in MATCH-002 and all forms share the contextual rules in
+PATT-015–019 define exact whole-value bindings for non-nominal union members; nominal patterns keep
+the rules in MATCH-002 and all forms share the contextual rules in
 [patterns and destructuring](patterns-and-destructuring.md).
 
 **Evidence:** [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md),

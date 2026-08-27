@@ -25,10 +25,10 @@ task storage, Fiber observation, and structured cancellation remain standard-lib
 
 ```silk
 import silk.allocator { OutOfMemoryError }
-import silk.effect as Effect
-import silk.fiber as Fiber
-import silk.local_scheduler as LocalScheduler
-import silk.scheduler as Scheduler
+import silk.effect { Effect }
+import silk.fiber { Fiber }
+import silk.local_scheduler { LocalScheduler }
+import silk.scheduler { Scheduler }
 
 effect fn work() -> i32 {
   return 42

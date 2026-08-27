@@ -92,8 +92,22 @@ fn deferred() -> Effect<i32> { return inner() }
 fn executed() -> i32 { return run inner() }
 ```
 
-**Evidence:** [effect elaboration](../../packages/compiler/src/Elaboration.ts),
+**Local inference:** An explicit `effect {}` block derives its success and failure channels from
+every reachable `return` and `fail`, including terminals nested inside `unsafe {}`. Every available
+return type participates in the language's canonical result join. Equal types remain equal,
+joinable distinct types form their normalized union, and a set with no representable join is
+invalid; lexical order never lets the last return silently choose the block's success type.
+
+**Diagnostics:** A joinable block whose return sites produce, for example, `bool` and `i32` has
+success type `bool | i32`; a surrounding `Effect<i32>` context rejects that union with the ordinary
+conversion diagnostic such as `SEM0040`. When the return sites themselves have no representable
+join, `SEM0163` is reported at the first disagreeing return. A terminal inside `unsafe {}` keeps the
+same success or failure contribution it would have outside `unsafe`.
+
+**Evidence:** [statement return analysis](../../packages/compiler/src/StatementAnalysis.ts),
+[effect-block analysis](../../packages/compiler/src/ExpressionAnalysis.ts),
 [return-contract regressions](../../packages/compiler/test/InterfaceBounds.test.ts),
+[effect-block terminal regressions](../../packages/compiler/test/EffectBlockTyping.test.ts),
 [MIR return verification](../../packages/compiler/src/Mir.ts).
 
 ## EFF-003 — `run` executes exactly one Effect layer
@@ -193,7 +207,12 @@ Values retained by the deferred block follow the ordinary
 **Diagnostics:** This evaluation order is valid behavior, not a source restriction, so it has no
 diagnostic. Invalid captures receive the corresponding capture, borrow, move, or escape diagnostic.
 
-**Evidence:** [effect-block elaboration](../../packages/compiler/src/Elaboration.ts),
+Capture discovery visits every expression operand in the deferred body. In particular, a binding
+used only as the argument of `Enum.value(binding)` is still captured; enum conversion does not hide
+the dependency from the Effect environment.
+
+**Evidence:** [effect-block capture analysis](../../packages/compiler/src/ExpressionAnalysis.ts),
+[effect-block capture parity corpus](../../packages/compiler/test/support/corpus.ts),
 [effect-block lowering](../../packages/compiler/src/Lower.ts).
 
 ## EFF-006 — An ordinary function may run only a closed Effect
@@ -210,7 +229,7 @@ handler can fail, or a provision operation whose acquisition has requirements, d
 boundary unless those new channels are also eliminated.
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 struct ProblemError {}
 
@@ -284,7 +303,13 @@ language-level Effect model is defined in focused pages:
 | Captures, run access, reuse, and cleanup | [Ownership and borrowing](ownership-and-borrowing.md) |
 | Typed propagation, recovery, and traps | [Typed failures](typed-failures.md) |
 | Stack-safe recursive transfer | [Effect suspension and stack-safe recursion](effect-suspension.md) |
-| Cancellation, interruption, concurrency, and async cleanup | Not part of the stabilized language |
+| Owner-controlled parking and resumption | [Independently resumable Effect executions](independent-execution.md) |
+| Single-threaded scheduling, Fibers, and structured cancellation | [Single-threaded schedulers and Fibers](single-threaded-fibers.md) |
+
+These execution facilities are explicit source-level layers. They do not make ordinary Effect
+construction concurrent, add an ambient scheduler, or turn `Effect.suspend` into a parking
+operation. Parallel execution, ambient interruption, and a general async-I/O model remain outside
+the stabilized language.
 
 The standard-library operations built from these rules—including `of`, `result`, `mapBoth`, `map`,
 `mapError`, `flatMap`, `flatten`, `zip`, `zip3`, `tap`, `catch`, `catchAll`, `ensuring`,

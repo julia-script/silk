@@ -3,6 +3,7 @@
 Patterns inspect existing value structure and introduce local bindings. Silk uses the same pattern
 grammar in exhaustive `match`, unconditional `let` destructuring, and conditional `if let`.
 The surrounding construct decides whether a pattern must always match or provides a mismatch path.
+Scalar enums additionally provide a qualified, payload-free member pattern for exhaustive `match`.
 
 Patterns are not expressions. They perform no conversion, equality call, interface dispatch,
 constructor call, or user-defined extraction.
@@ -27,8 +28,10 @@ fn sum(point: Point) -> i32 {
 }
 ```
 
-**Boundary:** Sharing the grammar does not make every pattern valid everywhere. An unconditional
-`let` must prove success, while a `match` arm or `if let` may test a refutable member.
+**Boundary:** Sharing the destructuring grammar does not make every pattern valid everywhere. An
+unconditional `let` must prove success, while a `match` arm or `if let` may test a refutable union
+member. The qualified scalar enum member form is currently match-only under PATT-020; it is not an
+`if let` or unconditional destructuring form.
 
 **Diagnostics:** A pattern form unavailable in its current context reports the form, context, and
 nearest valid construct. No stable general code is assigned.
@@ -330,7 +333,7 @@ does not make `if` value-producing or replace exhaustive `match` where every res
 **Diagnostics:** Exhaustiveness, unreachable-arm, guard, and join diagnostics remain those of
 MATCH-003–005.
 
-**Evidence:** [match rules](functions-callables-and-control-flow.md#matches),
+**Evidence:** [match coverage rules](functions-callables-and-control-flow.md#match-003--match-coverage-is-exhaustive-and-guards-do-not-prove-coverage),
 [exhaustive matching specification](../../openspec/specs/bootstrap-exhaustive-matching/spec.md).
 
 ## PATT-014 — The first destructuring surface stays deliberately small
@@ -490,3 +493,42 @@ diagnostic. Member collapse during a valid complete application produces no comp
 
 **Evidence:** [generic body checking](generics-interfaces-and-specialization.md#gen-004--a-generic-body-is-checked-once-against-its-declared-contract),
 [finite specialization](generics-interfaces-and-specialization.md#gen-005--every-reachable-generic-application-becomes-finite-monomorphic-code).
+
+## PATT-020 — A qualified scalar enum member pattern selects one exact member
+
+**Status:** Confirmed
+
+A match over a scalar enum uses `Enum.Member` to select one member of that exact canonical enum.
+The pattern has no payload and introduces no binding. An unguarded member arm removes that member
+from the remaining coverage set; a guarded arm handles the member only when its guard succeeds and
+therefore proves no coverage.
+
+```silk
+enum Status { Pending, Ready, Done }
+
+fn code(status: Status) -> i32 {
+  return match status {
+    Status.Pending => 0
+    Status.Ready => 1
+    Status.Done => 2
+  }
+}
+```
+
+The match is exhaustive without `_` because every declared member appears in an unguarded arm.
+`_` may instead cover all members still remaining, after which every later arm is unreachable. The
+scrutinee remains type `Status`; a member pattern does not narrow it to an integer or a distinct
+member subtype.
+
+**Boundary:** The member name must be qualified and belong to the scrutinee's canonical enum. A bare
+`Ready`, `Other.Ready`, or integer literal equal to a discriminant does not select
+`Status.Ready`. The current qualified enum-member pattern is available only in `match`; scalar enum
+`let` and `if let` selection are not part of the stabilized surface.
+
+**Diagnostics:** Missing declared members report `SEM0158`. A duplicate unguarded member reports
+`SEM0159` at the later arm and relates the first; an arm after `_` reports `SEM0160`. A foreign enum
+member reports `SEM0161`, and an integer literal pattern against an enum reports `SEM0162`.
+
+**Evidence:** [scalar enum matching specification](../../openspec/specs/bootstrap-scalar-enums/spec.md),
+[enum matching tests](../../packages/compiler/test/ExhaustiveMatching.test.ts),
+[match coverage rules](functions-callables-and-control-flow.md#match-003--match-coverage-is-exhaustive-and-guards-do-not-prove-coverage).

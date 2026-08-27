@@ -691,6 +691,11 @@ The binding `view` does not own or copy `values`. It keeps a shared loan of `val
 its last use. An exclusive local view analogously keeps one exclusive loan active and requires a
 mutable owner.
 
+Last-use analysis follows the complete containing expression. A use nested in a place replacement,
+a backing-value observation such as `Enum.value(...)`, `Effect.result`, or requirement binding
+extends the loan through that nested use; an outer wrapper or an earlier direct callable invocation
+does not end it prematurely.
+
 A borrowed value cannot be stored inside a struct, array, union, generic wrapper, Effect success or
 failure value, or other owned value. Callable and Effect captures must satisfy the captured-loan
 rules in Batch 4 rather than gaining an untracked lifetime.
@@ -707,7 +712,9 @@ boundary reports that boundary's specific diagnostic rather than silently extend
 lifetime.
 
 **Evidence:** [runtime-slice specification](../../openspec/specs/bootstrap-runtime-slices/spec.md),
-[slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts).
+[loan live-range correction](../../openspec/changes/archive/2026-08-26-compiler-review-stability-fixes/specs/bootstrap-ownership/spec.md),
+[slice semantics tests](../../packages/compiler/test/RuntimeSliceSemantics.test.ts),
+[loan regression tests](../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
 
 ### BORROW-009 — Slice length is runtime information
 
@@ -859,9 +866,11 @@ fn invalid(token: Token, consumeNow: bool) -> i32 {
 binding must have one compatible live state on every continuing path; the compiler does not choose
 an ownership state from whichever path happens to run at runtime.
 
-**Diagnostics:** A use reached by any path on which its binding was consumed reports `OWN0001` and
-relates the consuming move. Branch-local bindings are unavailable outside their declared region and
-use the ordinary name or scope diagnostic rather than an ownership merge error.
+**Diagnostics:** Continuing `if` or `if let` arms that disagree on whether a move-only binding is
+live report `OWN0017` at the merge, even when there is no later use. A use reached by a path on which
+its binding was consumed also reports `OWN0001` and relates the consuming move. Branch-local
+bindings are unavailable outside their declared region and use the ordinary name or scope
+diagnostic rather than an ownership merge error.
 
 **Evidence:** [ownership specification](../../openspec/specs/bootstrap-ownership/spec.md),
 [branch ownership tests](../../packages/compiler/test/Ownership.test.ts).
@@ -969,16 +978,20 @@ fn repeat(token: Token, again: bool) -> i32 {
 A path may move an owner and then `break` or `return` because it does not re-enter the loop. Whether
 the owner is usable after the loop still depends on every path that reaches that later use.
 
-**Boundary:** Reassigning only one field after moving the complete owner does not restore it. The
-replacement must initialize the complete binding under OWN-005. Loans created inside an iteration
-must also end or have one compatible continuing state before the next iteration.
+**Boundary:** The loop-header baseline is the ownership state before the condition runs, because the
+condition is evaluated again on every iteration. A condition that consumes an outer owner therefore
+cannot silently establish a weaker repeating state. Reassigning only one field after moving the
+complete owner does not restore it. The replacement must initialize the complete binding under
+OWN-005. Loans created inside an iteration must also end or have one compatible continuing state
+before the next iteration.
 
 **Diagnostics:** A repeating path that reaches the loop header with an owner missing or
 incompatibly borrowed reports `OWN0005`. A direct later use after an unconditional move reports the
 ordinary `OWN0001` use-after-move diagnostic.
 
 **Evidence:** [ownership specification](../../openspec/specs/bootstrap-ownership/spec.md),
-[mutable-loop tests](../../packages/compiler/test/MutableLoops.test.ts).
+[mutable-loop tests](../../packages/compiler/test/MutableLoops.test.ts),
+[ownership regression tests](../../packages/compiler/test/Ownership.test.ts).
 
 ### GENERIC-001 — Unconstrained type parameters may be affine
 
@@ -1299,13 +1312,14 @@ root. Dropping an uninvoked callable ends its loans and cleans its owned capture
 Invoking an exclusive callable through shared access reports the callable-access diagnostic.
 Escaping the callable beyond a captured root reports an ownership escape at the boundary.
 
-**Current compiler:** Capture loans retained by callable sections currently require explicit
-`drop` before conflicting owner access, even when the preceding invocation is the callable's last
-use. Effect capture loans already end after their last run. Stabilization should apply the same
-last-use rule to both delayed-value forms.
+**Current compiler:** Aligned. Capture loans retained by callable sections end after a statically
+proven last invocation or an explicit `drop`; Effect capture loans analogously end after their last
+run. A later non-invocation use that may store, move, or escape the callable prevents the earlier
+invocation from being treated as final.
 
 **Evidence:** [ownership specification](../../openspec/specs/bootstrap-ownership/spec.md),
-[callable ownership tests](../../packages/compiler/test/Ownership.test.ts).
+[callable ownership tests](../../packages/compiler/test/Ownership.test.ts),
+[callable loan last-use tests](../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
 
 ### EFFECT-OWN-001 — Effect construction captures without executing
 

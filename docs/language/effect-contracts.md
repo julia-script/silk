@@ -178,7 +178,7 @@ been written explicitly. Omitting `-> ()` is valid, including on `pub effect fn 
 produce a missing-entry or unresolved-result diagnostic.
 
 **Evidence:** [function grammar](../../packages/compiler/src/Parser.ts),
-[declaration default](../../packages/compiler/src/DeclarationIndex.ts).
+[declaration default](../../packages/compiler/src/DeclarationCollection.ts).
 
 ## EFF-011 — Omitted channels have fixed empty meanings
 
@@ -191,6 +191,12 @@ accepting that edit changes the source signature explicitly.
 
 This does not prevent an `effect {}` expression from deriving a contract locally from its body and
 its immediate expected type.
+
+Local derivation examines every reachable `return` and `fail`, including terminals nested inside
+`unsafe {}`. Return types use the canonical result join rather than lexical last-return-wins, and a
+value-kind type parameter used by `fail` remains in the derived failure channel until concrete
+specialization. `unsafe` changes which operations source may perform; it does not hide an Effect
+terminal or erase one of its channels.
 
 **Boundary:** A body that needs a channel omitted by its declaration is invalid under EFF-009. A
 caller or later use cannot supply the missing channel through expected-type inference.
@@ -206,7 +212,9 @@ function has one locally readable contract. Tooling may propose an explicit cont
 language does not silently infer one.
 
 **Evidence:** [function grammar](../../packages/compiler/src/Parser.ts),
-[declaration defaults](../../packages/compiler/src/DeclarationIndex.ts).
+[declaration defaults](../../packages/compiler/src/DeclarationCollection.ts),
+[effect-block contract collection](../../packages/compiler/src/ExpressionAnalysis.ts),
+[effect-block typing regressions](../../packages/compiler/test/EffectBlockTyping.test.ts).
 
 ## EFF-012 — Ordinary failure types and generic requirement rows preserve a contract
 
@@ -251,11 +259,14 @@ typed-failure validity diagnostic. Supplying an argument of the wrong kind for `
 `SEM0088`. A requirement row that cannot be specialized to one finite, unambiguous contract reports
 `SEM0089` at the call and explains the missing, conflicting, or ambiguous row evidence.
 
-**Current compiler:** Aligned. Generic failure parameters are ordinary parameters such as `E` and
-may be used in every ordinary type position. Generic requirement parameters remain the distinct
-`?R` kind.
+**Current compiler:** Aligned. Generic failure parameters are ordinary value-kind parameters such
+as `E` and may be used in every ordinary type position. A `fail` inside an inferred effect block
+retains symbolic `E` in that block's failure channel; specialization substitutes the concrete
+failure and the enclosing `run` must then propagate or handle it. Generic requirement parameters
+remain the distinct `?R` kind.
 
 **Evidence:** [row-preserving ownership tests](../../packages/compiler/test/Ownership.test.ts),
+[generic effect-block failure regression](../../packages/compiler/test/EffectBlockTyping.test.ts),
 [contract-row inference diagnostics](../../packages/compiler/src/Diagnostic.ts).
 
 ## EFF-013 — Compatible Effects may join across construction sites
@@ -298,6 +309,12 @@ This rule covers finite statically known alternatives. It does not by itself int
 heterogeneous Effect collections, unknown runtime implementations, universal boxing, or infinitely
 recursive inline representations. Those require a separate explicit erasure, indirection, or
 storage design.
+
+This construction-site join is distinct from the success-type join used while deriving an
+`effect {}` contract. Return sites first establish one observable success type through the
+canonical result join; only then can Effect values with that contract join across hidden
+construction identities. A non-representable return-type join reports `SEM0163`, while an
+incompatible finite Effect-representation join reports `SEM0132`.
 
 **Diagnostics:** Compatible construction sites produce no diagnostic. An incompatible join must
 identify the observable contract, access, ownership, or lifetime difference at the branch that

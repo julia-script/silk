@@ -89,18 +89,20 @@ not belong in a language rule unless a program can observe them.
   affine strong handles, callback-scoped access, conflict traps, exact last-handle cleanup, and the
   explicit cycle and thread-transfer boundaries.
 - [Functions, callables, and control flow](functions-callables-and-control-flow.md) — named function
-  contracts, ordered calls, returns, callable sections, pipelines, conditionals, loops, and matches.
+  contracts, Effect-block terminal inference, ordered calls, returns, callable sections, pipelines,
+  conditionals, loops, and matches.
 - [Patterns and destructuring](patterns-and-destructuring.md) — one pattern language across exact
-  union-member matches, irrefutable local destructuring, and conditional `if let`.
+  union-member matches, scalar enum member matches, irrefutable local destructuring, and
+  conditional `if let`.
 - [Values and types](values-and-types.md) — foundational scalars, literals, nominal structs, fixed
-  arrays, lexical views, structural unions, precise inference, and compatibility.
+  arrays, lexical views, structural unions, scalar enums, precise inference, and compatibility.
 - [Expressions and operators](expressions-and-operators.md) — deterministic evaluation, expression
-  composition, scalar and explicitly declared custom operators, short-circuiting, assignment,
-  atomic replacement, and explicit conversion.
+  composition, scalar and explicitly declared custom operators, scalar enum equality,
+  short-circuiting, assignment, atomic replacement, and explicit conversion.
 - [Modules, names, and visibility](modules-names-and-visibility.md) — path-derived module identity,
   source-root lookup, contextual import-path segments, static imports, cycles, namespace bindings,
-  aliases, collisions, public declaration boundaries, redundancy, explicit standard-library
-  imports, and re-export boundaries.
+  aliases, collisions, file-named struct and contract scopes, public declaration boundaries,
+  redundancy, explicit standard-library imports, and re-export boundaries.
 - [Generics, interfaces, and specialization](generics-interfaces-and-specialization.md) — generic
   parameters and inference, compile-time interface contracts, conformances, coherence, and finite
   static specialization, including exact and opaque callable and Effect representations.

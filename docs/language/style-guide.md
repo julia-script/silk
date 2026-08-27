@@ -82,7 +82,7 @@ waiting for its remaining leading arguments, so the same convention supports ope
 value:
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 let specialized = Effect.provide(computation, &clock)
 let piped = computation |> Effect.provide(&clock)
@@ -124,15 +124,16 @@ and reopening another module or type remain invalid language boundaries, not sty
 
 **Evidence:** [callable pipeline specification](../../openspec/specs/bootstrap-callable-values/spec.md).
 
-## STYLE-003 — Examples prefer namespace imports and qualified operations
+## STYLE-003 — Examples prefer actor imports and qualified operations
 
 **Status:** Confirmed
 
-Documentation, tutorials, and public API examples should normally import an actor module as a
-namespace and qualify its operations:
+When a module contains a struct, service, or interface matching its filename, documentation,
+tutorials, and public API examples should normally import that actor declaration directly and
+qualify its operations through the imported name:
 
 ```silk
-import model.User
+import model.User { User }
 
 let user = User.make(42)
 let reassigned = User.withId(move user, 43)
@@ -143,18 +144,22 @@ This keeps the operation's owner visible where it is used. A reader can identify
 distinct function name. It also keeps related APIs visually grouped and matches the qualified,
 data-first convention in STYLE-002.
 
-Prefer this form in ordinary examples:
+The matching struct, service, or interface makes the module's public operations available through
+the imported actor qualifier, so this form keeps both the actor type and related operations under
+one binding. Prefer it in ordinary examples:
 
 ```silk
-import silk.effect as Effect
+import silk.effect { Effect }
 
 let provided = computation |> Effect.provide(&clock)
 return run provided
 ```
 
-Selective imports remain valid. Use them when the selected name itself is the subject being taught,
-when an API is conventionally read unqualified, or when repeated qualification would obscure the
-example's actual point:
+Import a module namespace when no matching struct, service, or interface exists, or when the module
+rather than a matching actor declaration is the subject being taught. A matching scalar enum is
+not a nominal module scope: its qualifier exposes only its members and generated `value` operation.
+Import other selected members when an API is conventionally read unqualified or repeated
+qualification would obscure the example's actual point:
 
 ```silk
 import model.User { User }
@@ -164,25 +169,28 @@ fn id(user: &User) -> i32 {
 }
 ```
 
-When two namespaces have the same default name, alias one explicitly and keep its operations
-qualified:
+When two matching actors have the same default name, alias one selected actor explicitly and keep
+its operations qualified:
 
 ```silk
-import model.User
-import audit.User as UserAudit
+import model.User { User }
+import audit.User { User as UserAudit }
 
 let user = User.make(42)
 UserAudit.record(&user)
 ```
 
 **Boundary:** This is a documentation and API-style preference, not a compiler restriction.
-Selective imports, member aliases, and hybrid imports have their ordinary language meaning. A
+Namespace imports, member aliases, and hybrid imports have their ordinary language meaning. A
 reference page specifically documenting those forms should show them directly even though general
-examples prefer namespace qualification.
+examples prefer the matching actor import. For a matching service or interface, declared contract
+operations take precedence over same-named top-level module members; a namespace alias performs
+ordinary module-member lookup instead. A matching struct has no separate contract-operation lookup.
 
 **Tooling:** Formatters do not rewrite between namespace and selective imports. Documentation lint
 may prefer qualification in general examples but must permit selective imports where the example is
 teaching that syntax or naming an imported type directly.
 
-**Evidence:** [namespace imports](modules-names-and-visibility.md#import-001--a-namespace-import-binds-the-targets-final-path-segment),
+**Evidence:** [nominal module scopes](modules-names-and-visibility.md#name-005--a-file-named-struct-or-contract-also-scopes-that-modules-public-members),
+[namespace imports](modules-names-and-visibility.md#import-001--a-namespace-import-binds-the-targets-final-path-segment),
 [qualified data-first APIs](#style-002--public-apis-prefer-qualified-data-first-functions).
