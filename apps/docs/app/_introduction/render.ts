@@ -105,6 +105,54 @@ const chatCard = (children: ReadonlyArray<BlockContent>): string => {
   return `<figure class="chat">${rows.join('')}</figure>`
 }
 
+/**
+ * The signature-anatomy graphic: `Effect<A ! E ? R>` with its three channels color-coded and
+ * drawn out with real connectors instead of box-drawing characters. JetBrains Mono's advance
+ * width is exactly 0.6em and the signature text is pinned with `textLength`, so the connector
+ * anchors sit under their letters on every platform. Colors come from the page's own tokens.
+ */
+const signatureAnatomy = (): string => {
+  const size = 24
+  const cw = size * 0.6
+  const x0 = 40
+  const baseline = 48
+  // Character offsets inside `Effect<A ! E ? R>`: A at 7, E at 11, R at 15.
+  const anchor = (index: number): number => x0 + (index + 0.5) * cw
+  const a = anchor(7)
+  const e = anchor(11)
+  const r = anchor(15)
+  const rows: ReadonlyArray<{
+    readonly x: number
+    readonly y: number
+    readonly color: string
+    readonly chip: string
+    readonly text: string
+  }> = [
+    { x: r, y: 104, color: 'var(--amber)', chip: '? R', text: 'what the computation requires' },
+    { x: e, y: 148, color: 'var(--error-ink)', chip: '! E', text: 'how the computation may fail' },
+    { x: a, y: 192, color: 'var(--green-ink)', chip: 'A', text: 'what the computation may produce' },
+  ]
+  const connectors = rows
+    .map(
+      (row) =>
+        `<circle cx="${row.x}" cy="${baseline + 12}" r="2.5" fill="${row.color}"/>` +
+        `<path d="M ${row.x} ${baseline + 12} L ${row.x} ${row.y - 12} Q ${row.x} ${row.y - 4} ${row.x + 8} ${row.y - 4} L 300 ${row.y - 4}" fill="none" stroke="${row.color}" stroke-opacity="0.55" stroke-width="1.5"/>`,
+    )
+    .join('')
+  const labels = rows
+    .map(
+      (row) =>
+        `<text x="312" y="${row.y}" font-size="13" fill="${row.color}" font-weight="500">${row.chip}</text>` +
+        `<text x="${row.chip === 'A' ? 328 : 348}" y="${row.y}" font-size="13" fill="var(--ink-2)">${row.text}</text>`,
+    )
+    .join('')
+  return `<figure class="anatomy" aria-label="Anatomy of Effect of A, failing with E, requiring R"><svg viewBox="0 0 640 216" role="img">
+<text x="${x0}" y="${baseline}" font-size="${size}" textLength="${17 * cw}" lengthAdjust="spacing" fill="var(--ink-3)"><tspan>Effect&lt;</tspan><tspan fill="var(--green-ink)">A</tspan><tspan> </tspan><tspan fill="var(--error-ink)">! E</tspan><tspan> </tspan><tspan fill="var(--amber)">? R</tspan><tspan>&gt;</tspan></text>
+${connectors}
+${labels}
+</svg></figure>`
+}
+
 const block = (node: RootContent | BlockContent, state: State): string => {
   switch (node.type) {
     case 'heading':
@@ -148,6 +196,7 @@ const block = (node: RootContent | BlockContent, state: State): string => {
         }
         return out
       }
+      if (node.value.startsWith('Effect<A ! E ? R>')) return signatureAnatomy()
       return `<pre class="diagram"><code>${escapeHtml(node.value.replace(/\s+$/, ''))}</code></pre>`
     }
     case 'thematicBreak':

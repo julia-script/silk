@@ -21,6 +21,7 @@
   --amber: #c6a678;
   --warn: #e0a355;
   --error: #e0703c;
+  --error-ink: #e89468;
   --violet: #b7a6d6;
   --green-ink: #8fc7a8;
   --mono: var(--intro-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -220,6 +221,18 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--ink-3);
+}
+
+/* ── signature anatomy graphic ────────────────── */
+.silk-intro figure.anatomy {
+  margin: 2rem auto;
+  max-width: 40rem;
+}
+.silk-intro figure.anatomy svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--mono);
 }
 
 /* ── snippet panes ────────────────────────────── */
