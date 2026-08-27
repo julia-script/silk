@@ -80,12 +80,12 @@ equals = TaskId.taskIdEquals
 hash = TaskId.taskIdHash
 ```
 
-<a id="declaration-73696c6b2f7363686564756c65723a3a5461736b4964457868617573746564"></a>
+<a id="declaration-73696c6b2f7363686564756c65723a3a5461736b49644578686175737465644572726f72"></a>
 
-## `TaskIdExhausted`
+## `TaskIdExhaustedError`
 
 ```silk
-pub struct TaskIdExhausted
+pub struct TaskIdExhaustedError
 ```
 
 A typed failure that reports exhaustion of the task identity space.
@@ -435,7 +435,7 @@ before the caller registers the returned publication data and parks for the resp
 ### Operation `prepare`
 
 ```silk
-effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhausted ? &mut Scheduler
+effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares one lazy child task and returns its affine publication value.
@@ -450,7 +450,7 @@ endpoints and one task identity before it returns. It does not activate the chil
 ## `prepare`
 
 ```silk
-pub effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhausted ? &mut Scheduler
+pub effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares one lazy child task through the active Scheduler provider.

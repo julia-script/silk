@@ -50,9 +50,11 @@ non-blocking style warning or rename action when a public nominal type is introd
 failure type. Such tooling must not imply that the name changes the type's semantics.
 
 **Current standard library:** Consistent. Public error payloads include `FileError`, `LogError`,
-`ProcessError`, `ParseError`, `HostInputError`, `StreamReadError`, `StreamWriteError`, and
-`OutOfMemoryError`. The `Failure<F>` result outcome keeps its existing name because it is ordinary
-result data rather than an error declaration.
+`ProcessError`, `ParseError`, `HostInputError`, `StreamReadError`, `StreamWriteError`,
+`OutOfMemoryError`, `StalledError`, and `TaskIdExhaustedError`. The `Failure<F>` result outcome
+keeps its existing name because it is ordinary result data rather than an error declaration, and
+the fiber `Cancelled` outcome keeps its name for the same reason: it is the third arm of `Outcome`
+alongside `Success` and `Failure`, not an error payload type.
 
 **Evidence:** [ordinary failure values](typed-failures.md#fail-001--any-concrete-detached-value-may-be-a-typed-failure).
 

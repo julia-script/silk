@@ -19,16 +19,16 @@ effect fn failure() -> bool ! RootProblem ? &mut Scheduler.Scheduler {
 }
 
 effect fn recoverFailure(
-  error: RootProblem | Allocator.OutOfMemoryError | LocalScheduler.Stalled,
+  error: RootProblem | Allocator.OutOfMemoryError | LocalScheduler.StalledError,
 ) -> bool {
   return match move error {
     RootProblem { code } => code == 7
     Allocator.OutOfMemoryError {} => false
-    LocalScheduler.Stalled {} => false
+    LocalScheduler.StalledError {} => false
   }
 }
 
-effect fn scenario() -> i32 ! Allocator.OutOfMemoryError | LocalScheduler.Stalled {
+effect fn scenario() -> i32 ! Allocator.OutOfMemoryError | LocalScheduler.StalledError {
   let mut scheduler = LocalScheduler.make()
   let value = run LocalScheduler.execute(&mut scheduler, success())
   let failed = run Effect.catchAll(
@@ -40,7 +40,7 @@ effect fn scenario() -> i32 ! Allocator.OutOfMemoryError | LocalScheduler.Stalle
 }
 
 effect fn recoverScenario(
-  error: Allocator.OutOfMemoryError | LocalScheduler.Stalled,
+  error: Allocator.OutOfMemoryError | LocalScheduler.StalledError,
 ) -> i32 {
   drop error
   return -2
