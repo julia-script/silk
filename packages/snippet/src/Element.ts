@@ -22,6 +22,11 @@ const encoder = new TextEncoder()
 
 let ordinal = 0
 
+const nextModule = (): string => {
+  ordinal += 1
+  return `snippet/${ordinal}`
+}
+
 /**
  * Shadow-scoped chrome and the default palette for both color schemes. Every value is a
  * `--silk-snippet-*` custom property, so a host page can retheme snippets with one rule on the
@@ -105,7 +110,7 @@ export class SilkSnippetElement extends HTMLElement {
   #source: string | undefined
   #handle: Editor.Handle | undefined
   #observer: IntersectionObserver | undefined
-  #module = `snippet/${(ordinal += 1)}`
+  #module = nextModule()
   #compiled = false
   #recompileTimer: ReturnType<typeof setTimeout> | undefined
 

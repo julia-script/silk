@@ -74,7 +74,8 @@ export const block = (node: Model.Block, links: Links = noLinks): string => {
       return `<h${level}>${inline(node.children, links)}</h${level}>`
     }
     case 'CodeBlock': {
-      const snippet = node.language === undefined ? undefined : silkSnippet(node.language, node.value)
+      const snippet =
+        node.language === undefined ? undefined : silkSnippet(node.language, node.value)
       if (snippet !== undefined) return snippet
       const attribute =
         node.language === undefined

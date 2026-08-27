@@ -7,7 +7,7 @@
  */
 
 import { afterEach, assert, beforeEach, describe, it, vi } from 'vitest'
-import { define, SilkSnippetElement } from '../src/Element.js'
+import { define, type SilkSnippetElement } from '../src/Element.js'
 
 const passing = 'pub fn main() -> i32 {\n  return 0\n}'
 const failing = 'pub fn main() -> i32 {\n  return missing()\n}'
