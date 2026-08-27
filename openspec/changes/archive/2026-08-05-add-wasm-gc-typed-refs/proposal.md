@@ -1,4 +1,4 @@
-# Add GC and typed function references to `@silk-lang/wasm`
+# Add GC and typed function references to `@silklang/wasm`
 
 ## Why
 

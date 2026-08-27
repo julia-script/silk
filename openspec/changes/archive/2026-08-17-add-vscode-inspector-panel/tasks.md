@@ -1,8 +1,8 @@
 # Tasks: Add VS Code Inspector Panel
 
-## 1. Extract `@silk-lang/inspector`
+## 1. Add compiler inspector projections
 
-- [x] 1.1 Scaffold `packages/inspector` (package.json, tsconfig, vitest config) depending only on `@silk-lang/compiler`, wired into the workspace and turbo
+- [x] 1.1 Add inspector projection actors to `packages/compiler`, wired into the compiler exports
 - [x] 1.2 Move row model types (`RowModel`, `Span`, tones, `cursorStateFor`, `spanLabel`) into the package; make `Span` module-qualified and rewrite `cursorStateFor` to compare module + range
 - [x] 1.3 Move `row/project-syntax`, `row/project-backend`, and `row/flow-model` into the package, dropping the `onSelectSpan` parameters so rows carry spans only
 - [x] 1.4 Move the view registry (`ViewDefinition`, `views`, `viewById`, `siblingsOf`, `panels.tsx` helpers) into the package; `ViewContext` loses callbacks, gains `evaluate` input; drop the React-only `source` view body handling from the shared registry
@@ -11,7 +11,7 @@
 
 ## 2. Docs workbench consumes the package
 
-- [x] 2.1 Rewire `apps/docs/app/labs` to import registry and rows from `@silk-lang/inspector`; keep React shells (RowList, pane chrome, picker, editor) local
+- [x] 2.1 Rewire `apps/docs/app/labs` to import registry and rows from compiler inspector subpaths; keep React shells (RowList, pane chrome, picker, editor) local
 - [x] 2.2 Wire activation in the row list from `span !== undefined` (posting to the cursor atom with the active module) instead of `onActivate`; thread the module-qualified cursor through `cursorAtom`
 - [x] 2.3 Restore the evaluation "run" action through the new `evaluate` context input; verify labs behavior (views, meta, facts, cursor tinting, saved layouts/URLs) is unchanged and tests pass
 
@@ -28,4 +28,4 @@
 - [x] 4.2 Build the webview renderer: row grammar + phase picker + filter/trivia controls in plain DOM, styled with `--vscode-*` variables; postMessage protocol (`pickView`, `activateRow`, `setFilter`, `evaluate` / `viewResult`, `cursor`)
 - [x] 4.3 Host wiring: follow active `.silk` editor (sticky on blur), request views over `silk/inspectorView`, refresh on `silk/inspectorInvalidated`
 - [x] 4.4 Cursor sync: editor selection → module-qualified span → tint; row activation → resolve module URI → `showTextDocument` + `revealRange`
-- [x] 4.5 Manual verification in the extension dev host against a real multi-file Silk workspace: phase switching, cross-module row navigation, theme switch, edit-refresh; update `packages/vscode/README.md`
+- [x] 4.5 Manual verification in the extension dev host against a real multi-file Silk workspace: phase switching, cross-module row navigation, theme switch, edit-refresh; update `apps/vscode/README.md`

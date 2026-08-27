@@ -39,6 +39,7 @@ native, browser, Wasm, or test providers without introducing ambient storage or 
   and compatibility boundaries.
 - [Standard library](apps/docs/content/language/stdlib/README.md) and
   [diagnostics](apps/docs/content/language/diagnostics.md) — generated lookup references.
+- [Glossary](apps/docs/content/language/glossary.md) — canonical language and bootstrap vocabulary.
 - [Prescriptive reference](apps/docs/content/reference/README.md) — intended language rules,
   boundaries, diagnostics, and supporting evidence.
 
@@ -49,21 +50,21 @@ commitments.
 
 ## Packages
 
-- [`@silk-lang/compiler`](packages/compiler) — the stage-0 compiler, evaluator, LLVM backend,
+- [`@silklang/compiler`](packages/compiler) — the stage-0 compiler, evaluator, LLVM backend,
   direct WebAssembly backend, embedded Silk standard library, and supported analysis facade.
-- [`@silk-lang/compiler-cli`](packages/compiler-cli) — project initialization, checking,
+- [`@silklang/cli`](packages/cli) — project initialization, checking,
   multi-target builds, native execution, formatting, and documentation generation through `silk`.
-- [`@silk-lang/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
+- [`@silklang/llvm`](packages/llvm) — Effect-native LLVM IR construction and deterministic text
   and bitcode emission.
-- [`@silk-lang/wasm`](packages/wasm) — deterministic WebAssembly module construction and binary
+- [`@silklang/wasm`](packages/wasm) — deterministic WebAssembly module construction and binary
   emission.
-- [`@silk-lang/language`](packages/language) — lexer-driven CodeMirror support and the Silk
-  TextMate grammar consumed by Shiki and VS Code-compatible editors.
-- [`@silk-lang/lsp`](packages/lsp) — project-aware diagnostics, hover, navigation, completion,
+- [`@silklang/editor-support`](packages/editor-support) — portable CodeMirror integration,
+  TextMate grammar, semantic editor projections, and the `<silk-snippet>` custom element.
+- [`@silklang/lsp`](packages/lsp) — project-aware diagnostics, hover, navigation, completion,
   inlay hints, symbols, and canonical formatting over stdio.
-- [`@silk-lang/documentation`](packages/documentation) — CommonMark documentation interpretation,
-  semantic links, examples, highlighting, and deterministic documentation models.
-- [`silk-language`](packages/vscode) — the private Cursor/VS Code extension package.
+- [`@silklang/docgen`](packages/docgen) — CommonMark documentation models, semantic links,
+  highlighting, doctesting, deterministic JSON, and static-site rendering.
+- [`silk-language`](apps/vscode) — the private Cursor/VS Code extension app.
 
 ## Evidence and direction
 

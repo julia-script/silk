@@ -602,8 +602,8 @@ const commonAttributes = Effect.fnUntraced(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Intrinsic from '@silk-lang/llvm/Intrinsic'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Intrinsic from '@silklang/llvm/Intrinsic'
  *
  * const trap = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

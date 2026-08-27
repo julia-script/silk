@@ -5,7 +5,7 @@
       "label": "Silk: Run current file",
       "detail": "Compile the active .silk file with build-exe (source root = its directory) and run it.",
       "type": "shell",
-      "command": "out=$(mktemp -t silk-run) && node \"${workspaceFolder}/packages/compiler-cli/dist/bin.js\" build-exe \"${file}\" --source-root \"${fileDirname}\" --output \"$out\" && \"$out\"; echo \"exit: $?\"; rm -f \"$out\"",
+      "command": "out=$(mktemp -t silk-run) && node \"${workspaceFolder}/packages/cli/dist/bin.js\" build-exe \"${file}\" --source-root \"${fileDirname}\" --output \"$out\" && \"$out\"; echo \"exit: $?\"; rm -f \"$out\"",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -20,7 +20,7 @@
     {
       "label": "Silk: Build language server",
       "type": "shell",
-      "command": "pnpm --filter @silk-lang/lsp run build",
+      "command": "pnpm --filter @silklang/lsp run build",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -56,7 +56,7 @@
     {
       "label": "Silk: Watch language server",
       "type": "shell",
-      "command": "pnpm --filter @silk-lang/lsp run dev",
+      "command": "pnpm --filter @silklang/lsp run dev",
       "options": {
         "cwd": "${workspaceFolder}"
       },

@@ -1,5 +1,5 @@
-import * as Instr from '@silk-lang/wasm/Instr'
-import * as ValType from '@silk-lang/wasm/ValType'
+import * as Instr from '@silklang/wasm/Instr'
+import * as ValType from '@silklang/wasm/ValType'
 import { alignUp } from './internal/Align.js'
 import * as LayoutPlan from './Layout.js'
 import * as Mir from './Mir.js'

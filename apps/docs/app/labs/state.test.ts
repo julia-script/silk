@@ -1,5 +1,5 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-lang/compiler/Analysis'
+import * as Analysis from '@silklang/compiler/Analysis'
 import * as Result from 'effect/Result'
 import * as Schema from 'effect/Schema'
 import { Atom, AtomRegistry } from 'effect/unstable/reactivity'

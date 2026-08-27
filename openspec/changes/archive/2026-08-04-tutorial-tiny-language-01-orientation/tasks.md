@@ -6,7 +6,7 @@
 
 ## 2. Orientation assets
 
-- [x] 2.1 Create the source-to-executable pipeline diagram with explicit Tiny, `@silk-lang/llvm`, Clang, and operating-system ownership.
+- [x] 2.1 Create the source-to-executable pipeline diagram with explicit Tiny, `@silklang/llvm`, Clang, and operating-system ownership.
 - [x] 2.2 Add adjacent prose and text equivalents for every visual artifact.
 - [x] 2.3 Add the artifact-matching checkpoint and concise misconception/recovery guidance.
 

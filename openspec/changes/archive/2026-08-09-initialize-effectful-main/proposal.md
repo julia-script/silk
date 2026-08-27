@@ -24,6 +24,6 @@ None.
 
 ## Impact
 
-The change affects the compiler CLI project initializer, its generated-source fixture, CLI
+The change affects the CLI project initializer, its generated-source fixture, CLI
 end-to-end initialization coverage, and the project-initialization specification. It adds no new
 dependencies and does not remove support for ordinary `main() -> i32` programs.

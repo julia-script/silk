@@ -7,7 +7,7 @@
 
 ## 2. Optional documentation package
 
-- [x] 2.1 Scaffold `@silk-lang/documentation` with explicit actor subpaths, workspace configuration, CommonMark dependency ownership, and package-level test configuration.
+- [x] 2.1 Scaffold `@silklang/docgen` with explicit actor subpaths, workspace configuration, CommonMark dependency ownership, and package-level test configuration.
 - [x] 2.2 Implement the immutable `Document` model and total lazy parser: marker normalization, package-owned CommonMark nodes, source provenance, `Examples` discovery, and malformed-content fallback.
 - [x] 2.3 Implement best-effort Rust-style intra-document links against compiler scope facts, resolving canonical identities and degrading unresolved links to inline code without diagnostics.
 - [x] 2.4 Implement the immutable `Project` model with source-ordered modules/declarations, compiler-derived signatures, child documentation, and public-by-default visibility filtering.

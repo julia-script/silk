@@ -1,4 +1,4 @@
-import type * as LlvmType from '@silk-lang/llvm/Type'
+import type * as LlvmType from '@silklang/llvm/Type'
 import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'

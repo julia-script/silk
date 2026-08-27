@@ -15,7 +15,7 @@ See proposal.md for motivation. Current state that shapes the design:
   `AnalyzedDocument` (`ProjectAnalysis.View`, a `FrontendSnapshot`) per revision, debounced,
   latest-wins. Backend phases need the single-root `Analysis.Snapshot` realization, which the
   server does not currently build.
-- `packages/vscode` is a thin language-client wrapper installed by local symlink.
+- `apps/vscode` is a thin language-client wrapper installed by local symlink.
 - The facade rule (bootstrap-analysis-facade): tooling value-imports only `Analysis` queries and
   data-model types, never phase modules.
 
@@ -38,10 +38,10 @@ See proposal.md for motivation. Current state that shapes the design:
 
 ## Decisions
 
-### D1: New package `packages/inspector` (`@silk-lang/inspector`)
+### D1: Compiler-owned inspector projection actors
 
 The registry (`ViewDefinition`, `views`, `viewById`, `siblingsOf`), row model types, and the
-`project-*`/`flow-model` row builders move here. Depends only on `@silk-lang/compiler`.
+`project-*`/`flow-model` row builders move here. Depends only on `@silklang/compiler`.
 
 *Alternative — fold into the compiler's tooling namespace:* rejected; row models and fact strips
 are a presentation vocabulary, not compiler analysis, and the compiler package should not grow a

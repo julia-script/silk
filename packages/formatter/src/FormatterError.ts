@@ -1,5 +1,5 @@
-import type * as Diagnostic from '@silk-lang/compiler/Diagnostic'
-import type * as CodeFence from '@silk-lang/documentation/CodeFence'
+import type * as Diagnostic from '@silklang/compiler/Diagnostic'
+import type * as CodeFence from '@silklang/docgen/CodeFence'
 import * as Data from 'effect/Data'
 
 export type SourceRange = CodeFence.CodeFence['source']

@@ -46,7 +46,7 @@ the enforcement point for "every step is visualizable."
    obeys the same boundary as the static facts.
 
 5. **Enforcement is a docs-side test**, not tooling magic: one test scans the labs' sources for
-   value imports of the disallowed phase modules from `@silk-lang/compiler`. Cheap, visible,
+   value imports of the disallowed phase modules from `@silklang/compiler`. Cheap, visible,
    and it fails with the offending file named.
 
 ## Risks / Trade-offs

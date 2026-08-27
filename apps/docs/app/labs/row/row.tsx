@@ -3,14 +3,14 @@
 /**
  * The React shell around the shared row grammar.
  *
- * The row model itself lives in `@silk-lang/inspector` — rows are pure data with
+ * The row model itself lives in the compiler's inspector actors — rows are pure data with
  * module-qualified spans, so the same projections serve this workbench and the language server.
  * What stays here is rendering and activation: a row is pickable exactly when it carries a span,
  * and picking one moves the shared span cursor.
  */
 
-import type { RowModel, Span } from '@silk-lang/inspector'
-import { cursorStateFor, spanLabel } from '@silk-lang/inspector'
+import type { RowModel, Span } from '@silklang/compiler/InspectorRow'
+import { cursorStateFor, spanLabel } from '@silklang/compiler/InspectorRow'
 import type { ReactNode } from 'react'
 import styles from './row.module.css'
 

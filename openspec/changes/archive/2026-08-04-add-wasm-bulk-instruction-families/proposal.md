@@ -1,4 +1,4 @@
-# Add SIMD, atomics, and 64-bit memories to `@silk-lang/wasm`
+# Add SIMD, atomics, and 64-bit memories to `@silklang/wasm`
 
 ## Why
 

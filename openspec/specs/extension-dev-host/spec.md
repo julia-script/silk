@@ -11,7 +11,7 @@ extensions directory.
 ### Requirement: Extension Development Host launches the Silk extension from the workspace
 
 The repository SHALL provide a debug launch configuration that starts an Extension Development Host
-with the Silk extension loaded from the workspace `packages/vscode` path (not from
+with the Silk extension loaded from the workspace `apps/vscode` path (not from
 `~/.cursor/extensions` or `~/.vscode/extensions`).
 
 #### Scenario: Launch from the open checkout
@@ -19,7 +19,7 @@ with the Silk extension loaded from the workspace `packages/vscode` path (not fr
 - **WHEN** a contributor runs the Silk Extension Development Host launch configuration from the
   repository workspace
 - **THEN** the host window loads the Silk language contribution from that workspace's
-  `packages/vscode` folder
+  `apps/vscode` folder
 
 #### Scenario: Guest host is independent of global install
 

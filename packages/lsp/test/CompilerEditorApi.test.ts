@@ -1,10 +1,10 @@
 import { assert, it } from '@effect/vitest'
-import * as Analysis from '@silk-lang/compiler/Analysis'
-import type * as Completion from '@silk-lang/compiler/Completion'
-import * as Intrinsic from '@silk-lang/compiler/Intrinsic'
-import * as Presentation from '@silk-lang/compiler/Presentation'
-import * as SemanticOccurrence from '@silk-lang/compiler/SemanticOccurrence'
-import * as TypeHint from '@silk-lang/compiler/TypeHint'
+import * as Analysis from '@silklang/compiler/Analysis'
+import type * as Completion from '@silklang/compiler/Completion'
+import * as Intrinsic from '@silklang/compiler/Intrinsic'
+import * as Presentation from '@silklang/compiler/Presentation'
+import * as SemanticOccurrence from '@silklang/compiler/SemanticOccurrence'
+import * as TypeHint from '@silklang/compiler/TypeHint'
 
 const occurrenceQuery: (
   self: Analysis.FrontendSnapshot,

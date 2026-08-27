@@ -117,12 +117,12 @@ const resolve = (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Alias from '@silk-lang/llvm/Alias'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Constant from '@silk-lang/llvm/Constant'
- * import * as IrText from '@silk-lang/llvm/IrText'
- * import * as Type from '@silk-lang/llvm/Type'
- * import * as Variable from '@silk-lang/llvm/Variable'
+ * import * as Alias from '@silklang/llvm/Alias'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Constant from '@silklang/llvm/Constant'
+ * import * as IrText from '@silklang/llvm/IrText'
+ * import * as Type from '@silklang/llvm/Type'
+ * import * as Variable from '@silklang/llvm/Variable'
  *
  * const text = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

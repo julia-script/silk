@@ -62,7 +62,6 @@ it('contains no obsolete suspension-allocation surface in shipped source or docu
     'apps/docs/content/reference',
     'packages/compiler/src',
     'packages/compiler/stdlib',
-    'packages/inspector/src',
   ]
   const forbidden = [
     'ContinuationAllocator',

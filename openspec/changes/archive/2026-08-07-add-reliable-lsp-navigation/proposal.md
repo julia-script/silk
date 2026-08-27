@@ -45,7 +45,7 @@ semantics or introducing incremental compilation prematurely.
   capabilities, filesystem watching, and integration tests.
 - `packages/compiler`: analysis snapshot query surface, supporting immutable semantic index, and
   nested lexical value-resolution precedence.
-- `packages/vscode`: client file-watching registration only if dynamic server registration is not
+- `apps/vscode`: client file-watching registration only if dynamic server registration is not
   sufficient; language behavior remains in the server.
 - Public package subpaths may gain additive query types and functions. Nested lexical rebinding now
   shadows enclosing values; same-block duplicates remain invalid.

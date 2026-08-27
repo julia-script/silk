@@ -1,5 +1,5 @@
 import { NodeRuntime, NodeServices } from '@effect/platform-node'
-import * as LlvmError from '@silk-lang/llvm/LlvmError'
+import * as LlvmError from '@silklang/llvm/LlvmError'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Stdio from 'effect/Stdio'

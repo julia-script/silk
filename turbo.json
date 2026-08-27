@@ -26,7 +26,7 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "@silk-lang/compiler#typecheck": {
+    "@silklang/compiler#typecheck": {
       "dependsOn": ["build"],
       "outputs": []
     },
@@ -35,8 +35,8 @@
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/vitest.shared.ts"],
       "outputs": []
     },
-    "@silk-lang/compiler#test": {
-      "dependsOn": ["build", "@silk-lang/documentation#build", "@silk-lang/doctest#build"],
+    "@silklang/compiler#test": {
+      "dependsOn": ["build", "@silklang/docgen#build", "@silklang/cli#build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/vitest.shared.ts",

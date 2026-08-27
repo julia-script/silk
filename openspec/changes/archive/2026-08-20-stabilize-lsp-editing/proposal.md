@@ -50,6 +50,6 @@ None.
   expression facts exposed through `Analysis` and `ProjectAnalysis`.
 - Project scheduling, request acquisition, diagnostic publication, lifecycle management, and test
   infrastructure in `packages/lsp`.
-- Language-client lifecycle handling and restart tests in `packages/vscode`.
+- Language-client lifecycle handling and restart tests in `apps/vscode`.
 - No Silk language syntax, public standard-library API, diagnostic code catalog, or backend contract
   changes are intended.

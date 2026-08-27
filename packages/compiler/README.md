@@ -1,16 +1,18 @@
-# `@silk-lang/compiler`
+# `@silklang/compiler`
 
-`@silk-lang/compiler` is the Effect-native stage-0 compiler for Silk. It accepts arbitrary source
+`@silklang/compiler` is the Effect-native stage-0 compiler for Silk. It accepts arbitrary source
 bytes, preserves lossless syntax and recovery facts, resolves a complete module closure, and
 realizes valid programs through HIR, ownership, specialization, target layout, MIR, evaluation, and
 backend emission.
 
-The package deliberately exposes one supported consumer surface: `Analysis`. Individual phase
+The package deliberately exposes one supported compilation surface: `Analysis`. Individual phase
 actors remain importable where their immutable data types are part of an answer, but tools should
-not assemble a second compiler by invoking phases directly.
+not assemble a second compiler by invoking phases directly. Reusable project discovery, file-backed
+source resolution, source-entry identity, target selection, and inspector projections also live
+here because the CLI, language server, and editor applications share them.
 
 ```ts
-import { Analysis } from '@silk-lang/compiler'
+import { Analysis } from '@silklang/compiler'
 import * as Effect from 'effect/Effect'
 
 const program = Effect.gen(function* () {
@@ -119,7 +121,7 @@ points to the shipped `.silk` source rather than virtual intrinsic files.
 `///` declaration documentation and leading `//!` module documentation remain lossless source
 tokens. `DocBlock` attaches them to modules, declarations, type parameters, parameters, fields,
 implementations, and implementation operations. Markdown parsing and generated documentation
-models belong to `@silk-lang/documentation` so ordinary compilation does not pay that cost.
+models belong to `@silklang/docgen` so ordinary compilation does not pay that cost.
 
 ## Byte and span conventions
 

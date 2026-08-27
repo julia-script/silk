@@ -73,7 +73,7 @@ retain defined trap behavior. The language documentation has not previously sepa
 debug violations from the portable undefined-behavior boundary this explicitly.
 
 **Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
-[safe-code vocabulary](../../../../CONTEXT.md),
+[safe-code vocabulary](../language/glossary.md),
 [intrinsic unsafe invariants](../../../../packages/compiler/test/fixtures/intrinsic-inventory.json).
 
 ## Unsafe boundaries and contracts

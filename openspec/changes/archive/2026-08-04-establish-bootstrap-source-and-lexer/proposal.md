@@ -7,7 +7,7 @@ deterministic token stream with precise lexical diagnostics.
 
 ## What Changes
 
-- Add the initial `@silk-lang/compiler` package and only the public actors needed to represent a
+- Add the initial `@silklang/compiler` package and only the public actors needed to represent a
   source file, byte span, token, lexical diagnostic, and lexing result.
 - Preserve the exact bytes and explicit logical identity of one in-memory Silk source file.
 - Lex the subset needed to spell the first future parser fixture: whitespace, line comments, `pub`, `fn`,
@@ -36,7 +36,7 @@ None. This change does not alter the existing LLVM capabilities.
 
 ## Impact
 
-- Adds `packages/compiler` as `@silk-lang/compiler` with strict TypeScript, ESM, explicit package
+- Adds `packages/compiler` as `@silklang/compiler` with strict TypeScript, ESM, explicit package
   subpaths, and `@effect/vitest` coverage.
 - Adds source and lexer fixtures under the compiler package.
 - Adds the compiler package to workspace build, typecheck, test, and packed-package validation.

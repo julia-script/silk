@@ -24,7 +24,7 @@ None.
 
 ## Impact
 
-- Affects compiler tokenization, concrete syntax, parser recovery, formatting, syntax inspection, source fixtures, and parser/formatter tests under `packages/compiler` and `packages/language`.
+- Affects compiler tokenization, concrete syntax, parser recovery, formatting, syntax inspection, source fixtures, and parser/formatter tests under `packages/compiler` and `packages/editor-support`.
 - Requires source examples and syntax-focused OpenSpec scenarios that currently spell `Array<T, N>` to adopt `[T; N]`.
 - Leaves the structural fixed-array semantic type, type equality, ownership, layout, HIR, MIR, and backend behavior unchanged; internal semantic encodings need not adopt source syntax merely to reserve the grammar.
 - Adds no runtime dependency and does not implement or select a template runtime protocol.

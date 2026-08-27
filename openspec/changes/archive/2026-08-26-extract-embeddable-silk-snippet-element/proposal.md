@@ -11,8 +11,8 @@ any reporter that emits plain HTML embed live, compiler-accurate snippets with o
 ## What Changes
 
 - New framework-free package exposing a `<silk-snippet>` custom element built on the existing
-  CodeMirror integration (`@silk-lang/language`) and the synchronous language-server surface
-  (`@silk-lang/lsp/Document`). The element compiles its own content in the browser exactly as
+  CodeMirror integration (`@silklang/editor-support`) and the synchronous language-server surface
+  (`@silklang/lsp/Document`). The element compiles its own content in the browser exactly as
   doctest does: one snippet, one standalone module.
 - Per-snippet feature flags as boolean attributes: syntax highlighting is always on; `diagnostics`,
   `hover`, `inlay-hints`, and `editable` are opt-in. Without semantic flags the element never
@@ -27,7 +27,7 @@ any reporter that emits plain HTML embed live, compiler-accurate snippets with o
   labs-only dark theme.
 - The labs editor (`apps/docs/app/labs/editor.tsx`) becomes a thin React wrapper over the
   extracted element, proving the extraction against its existing observable behavior.
-- The static documentation site (`packages/documentation-site`) emits `<silk-snippet>` for `silk`
+- The static documentation renderer (`packages/docgen`) emits `<silk-snippet>` for `silk`
   fences and ships the element bundle with generated pages. Fences marked `silk,ignore` emit
   highlight-only elements. The documentation JSON is unchanged.
 
@@ -50,11 +50,11 @@ any reporter that emits plain HTML embed live, compiler-accurate snippets with o
 
 ## Impact
 
-- New package (working name `@silk-lang/snippet`), depending on `compiler`, `lsp`, `language`,
-  and CodeMirror. `packages/language` keeps its current dependency boundary (no `lsp` dependency).
+- The portable `@silklang/editor-support` package, depending on `compiler`, `lsp`, and CodeMirror,
+  owns the element alongside the grammar and editor integration.
 - `apps/docs/app/labs/editor.tsx` and `Hover.tsx` shrink to wrappers or are deleted in favor of
   the element; `workbench.tsx` and the rest of labs are untouched.
-- `packages/documentation-site` gains element emission and bundle shipping; its current
+- `packages/docgen` gains element emission and bundle shipping; its current
   `<pre><code>` fallback remains for non-Silk languages.
 - No compiler, LSP-protocol, or documentation-JSON changes. `LspDocument.inlayHints` gains its
   first consumer.

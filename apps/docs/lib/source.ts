@@ -1,7 +1,7 @@
 import { getSlugs, loader } from 'fumadocs-core/source';
 import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
 import { defineDocs } from 'fumadocs-mdx/macro';
-import { TextMate } from '@silk-lang/language';
+import { TextMate } from '@silklang/editor-support';
 import { remarkH1Title } from './remark-h1-title.mjs';
 
 /**

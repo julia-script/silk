@@ -1,6 +1,6 @@
 ## Why
 
-`@silk-lang/llvm` is currently blank, so the port needs a stable Effect-native foundation before LLVM concepts are added. Establishing the builder lifecycle, binary representation, upstream baseline, and differential test oracle first prevents later changes from inheriting accidental Zig-shaped APIs or unverifiable bit encodings.
+`@silklang/llvm` is currently blank, so the port needs a stable Effect-native foundation before LLVM concepts are added. Establishing the builder lifecycle, binary representation, upstream baseline, and differential test oracle first prevents later changes from inheriting accidental Zig-shaped APIs or unverifiable bit encodings.
 
 ## What Changes
 

@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Analyze nested call arguments as recursive semantic expression facts and report a precise temporary

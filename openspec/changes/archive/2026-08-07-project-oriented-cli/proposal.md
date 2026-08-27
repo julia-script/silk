@@ -26,7 +26,7 @@ None.
 
 ## Impact
 
-- Reshapes `packages/compiler-cli` command modules and public subpath exports.
+- Reshapes `packages/cli` command modules and public subpath exports.
 - Adds project and build-plan actors plus a thin executable-running boundary actor.
 - Adds a small TOML decoding dependency and updates the workspace lockfile.
 - Changes the executable command interface and CLI documentation; no backward compatibility is retained during alpha.

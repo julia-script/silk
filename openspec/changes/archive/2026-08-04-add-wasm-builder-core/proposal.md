@@ -1,4 +1,4 @@
-# Add `@silk-lang/wasm` core builder
+# Add `@silklang/wasm` core builder
 
 ## Why
 
@@ -9,12 +9,12 @@ a future compiler backend — a validated, deterministic way to produce WebAssem
 native tooling at runtime.
 
 This change is deliberately independent of the bootstrap-language roadmap: it is a standalone
-library in the same sense `@silk-lang/llvm` is, sharing its purpose (build module state, emit two
+library in the same sense `@silklang/llvm` is, sharing its purpose (build module state, emit two
 representations) but not its architecture. The design is WebAssembly-native.
 
 ## What Changes
 
-- New package `@silk-lang/wasm` with subpath-exported actor modules, Effect-native errors, and no
+- New package `@silklang/wasm` with subpath-exported actor modules, Effect-native errors, and no
   runtime dependency on external tools, the filesystem, or process execution.
 - Instructions are plain immutable data (a discriminated `Instr` union); function bodies are
   `ReadonlyArray<Instr>` committed in one operation. Effects exist only at commit boundaries.
@@ -66,6 +66,6 @@ None — the package is new and touches no existing capability.
 ## Impact
 
 - New workspace package `packages/wasm` wired into pnpm workspace, turbo, CI, and changesets.
-- No changes to `@silk-lang/llvm`, `@silk-lang/compiler`, or any existing package.
+- No changes to `@silklang/llvm`, `@silklang/compiler`, or any existing package.
 - New dev-time-only dependency on a pinned `wasm-tools` binary for fixture generation and parity
   verification; runtime remains dependency-free apart from `effect`.

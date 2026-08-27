@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Add the first lossless concrete syntax tree, deterministic parser diagnostics, and recoverable

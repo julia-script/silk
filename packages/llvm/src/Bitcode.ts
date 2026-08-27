@@ -355,8 +355,8 @@ const encodeSnapshot = (state: BuilderState.Snapshot, options: Options): Uint8Ar
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Bitcode from '@silk-lang/llvm/Bitcode'
- * import * as Builder from '@silk-lang/llvm/Builder'
+ * import * as Bitcode from '@silklang/llvm/Bitcode'
+ * import * as Builder from '@silklang/llvm/Builder'
  *
  * const bytes = await Effect.runPromise(
  *   Effect.gen(function* () {

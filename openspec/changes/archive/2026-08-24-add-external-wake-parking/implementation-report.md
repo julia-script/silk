@@ -66,9 +66,9 @@ payload lane, failure channel, cross-thread transfer, or mandatory atomic fact w
 
 ### Focused checks
 
-- `pnpm --filter @silk-lang/compiler exec vitest run test/ExternalWakeParking.test.ts test/WakeCell.test.ts test/IntrinsicCatalog.test.ts test/ExecutionPackage.test.ts test/SuspensionOwnership.test.ts test/Suspendability.test.ts test/SharedStdlib.test.ts` — **PASS**, 7 files / 64 tests.
-- `pnpm --filter @silk-lang/compiler exec vitest run test/ExternalWakeParking.test.ts` after evaluator/Wasm never-driven evidence — **PASS**, 1 file / 7 tests.
-- `pnpm --filter @silk-lang/compiler typecheck` — **PASS**. One pre-gate run correctly reported stale generated toolchain identity after source edits; `pnpm --filter @silk-lang/compiler toolchain:generate` repaired the generated identity, and the next run passed.
+- `pnpm --filter @silklang/compiler exec vitest run test/ExternalWakeParking.test.ts test/WakeCell.test.ts test/IntrinsicCatalog.test.ts test/ExecutionPackage.test.ts test/SuspensionOwnership.test.ts test/Suspendability.test.ts test/SharedStdlib.test.ts` — **PASS**, 7 files / 64 tests.
+- `pnpm --filter @silklang/compiler exec vitest run test/ExternalWakeParking.test.ts` after evaluator/Wasm never-driven evidence — **PASS**, 1 file / 7 tests.
+- `pnpm --filter @silklang/compiler typecheck` — **PASS**. One pre-gate run correctly reported stale generated toolchain identity after source edits; `pnpm --filter @silklang/compiler toolchain:generate` repaired the generated identity, and the next run passed.
 - Targeted Biome check over changed implementation/tests — **PASS** after formatter applied one mechanical wrap.
 - `openspec validate add-external-wake-parking --strict --json --no-interactive` — **PASS**, 1/1.
 - Post-conformance focused sequence: compiler typecheck plus
@@ -107,7 +107,7 @@ result was:
 - `pnpm typecheck` — **PASS**.
 - `pnpm exec biome check .` — **PASS**.
 - `pnpm test` — **FAIL** in the compiler documentation check before compiler tests:
-  `diagnostics.md is stale. Run pnpm --filter @silk-lang/compiler documentation:generate`.
+  `diagnostics.md is stale. Run pnpm --filter @silklang/compiler documentation:generate`.
 - `pnpm check` — **NOT RUN** because the chained gate stopped at `pnpm test`.
 - `pnpm release:candidate` — **NOT RUN** because the chained gate stopped at `pnpm test`.
 
@@ -123,14 +123,14 @@ the single consolidated conformance fix pass through `91a622b`. It does not repe
 pass because the resume has introduced no semantic implementation change.
 
 - The first documentation-generation attempt could not load
-  `packages/documentation/dist/Project.js` in the new worktree. Relocalization showed that the
+  `packages/docgen/dist/Project.js` in the new worktree. Relocalization showed that the
   documentation package in turn consumes built compiler subpaths and the compiler consumes built
   LLVM/Wasm subpaths. One root topological `pnpm build` supplied the missing workspace outputs; this
   is resume root-cause repair 1/3 and did not change tracked source.
-- `pnpm --filter @silk-lang/compiler documentation:generate` — **PASS** after the prerequisite
+- `pnpm --filter @silklang/compiler documentation:generate` — **PASS** after the prerequisite
   build; regenerated `apps/docs/content/language/diagnostics.md` with the `OWN0016` external-readiness-
   callback form.
-- `pnpm --filter @silk-lang/compiler documentation:check` — **PASS**.
+- `pnpm --filter @silklang/compiler documentation:check` — **PASS**.
 - Focused post-conformance regression sequence over `ExternalWakeParking.test.ts`,
   `SharedStdlib.test.ts`, `OwnedAllocationAcceptance.test.ts`, `WakeCell.test.ts`, and `Mir.test.ts`
   — **PASS**, 5 files / 58 tests.

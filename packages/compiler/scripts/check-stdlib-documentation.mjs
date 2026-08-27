@@ -1,7 +1,7 @@
 // Checks maintained documentation policy across the canonical standard-library manifest.
 //
 // Run after building the compiler and documentation packages:
-//   pnpm --filter @silk-lang/compiler documentation:policy
+//   pnpm --filter @silklang/compiler documentation:policy
 
 import { readFileSync } from 'node:fs'
 import * as Effect from 'effect/Effect'

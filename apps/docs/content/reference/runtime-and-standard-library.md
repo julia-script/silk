@@ -660,7 +660,7 @@ does not reinterpret a broken installation as a source or backend error.
 **Evidence:** [module diagnostics](modules-names-and-visibility.md),
 [entry diagnostics](program-entry.md),
 [target diagnostics](unsafe-intrinsics-and-targets.md#target-availability),
-[compiler CLI reporting](../../../../packages/compiler-cli/src/Report.ts).
+[CLI reporting](../../../../packages/cli/src/Report.ts).
 
 ### TOOLING-001 — Tooling presents library source and derived availability honestly
 

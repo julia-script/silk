@@ -5,7 +5,7 @@ operations or give steps for constructing a module.
 
 LLVM construction looks imperative: declare a type, append a block, move an insertion point, emit
 an instruction. A direct TypeScript port could expose a mutable class and throw whenever an
-operation encounters invalid state. `@silk-lang/llvm` instead treats the module builder as an
+operation encounters invalid state. `@silklang/llvm` instead treats the module builder as an
 Effect-native actor whose state is only reachable through typed operations.
 
 ## One owner, many opaque handles

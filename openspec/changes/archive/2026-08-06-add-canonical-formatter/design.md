@@ -6,7 +6,7 @@ nodes, and missing tokens. That is the right reusable input for formatting, but 
 formatter must distinguish meaningful source text from trivia and recovery artifacts rather than
 formatting an AST that has already discarded them.
 
-The first consumer is `silk format` in `packages/compiler-cli`. A future language server will need
+The first consumer is `silk format` in `packages/cli`. A future language server will need
 the same canonical output while owning editor-specific concerns such as document versions, UTF-16
 positions, minimal text edits, and cursor preservation. The formatter therefore spans the compiler
 and CLI packages now, but its reusable boundary must not depend on filesystems, projects, commands,
@@ -66,7 +66,7 @@ Alternatives considered:
 
 - A string-to-string function would be convenient for the CLI, but would duplicate parsing in an
   LSP and obscure typed syntax failures.
-- Putting the formatter in `compiler-cli` would couple the reusable logic to filesystem and command
+- Putting the formatter in `cli` would couple the reusable logic to filesystem and command
   concerns.
 - Returning LSP edits or a cursor map would make a protocol-specific representation part of the
   language core before an LSP exists.
@@ -168,7 +168,7 @@ production.
 
 ### The CLI owns selection, storage, and per-file reporting
 
-Add a `FormatWorkflow` actor under `packages/compiler-cli` for selection and execution, with a thin
+Add a `FormatWorkflow` actor under `packages/cli` for selection and execution, with a thin
 `FormatCommand` actor for Effect CLI arguments and terminal rendering. Register the command as
 `silk format` with a repeatable positional file-or-directory selection and a `--check` flag.
 
@@ -238,7 +238,7 @@ and does not pre-commit the language core to an editor protocol.
 1. Add the internal document renderer, public formatter actors, exhaustive syntax printers, and core
    tests in `packages/compiler`; expose the new actors through explicit barrel and package exports.
 2. Add CLI selection, workflow, atomic file replacement, reporting, command registration, and
-   integration tests in `packages/compiler-cli`.
+   integration tests in `packages/cli`.
 3. Document the canonical style and command, run the repository checks, and run the release-candidate
    verification because package exports change.
 

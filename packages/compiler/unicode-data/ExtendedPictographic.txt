@@ -1,7 +1,7 @@
 # ExtendedPictographic.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Code point ranges with Extended_Pictographic=Yes, from emoji-data.
-# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silklang/compiler unicode:vendor
 00A9
 00AE
 203C

@@ -2,7 +2,7 @@
 
 Silk cannot read a byte. `StandardStreams` writes only, and its exclusion is scoped to that one
 service: it "does not imply terminal control, color detection, flushing, logging, or interactive
-input" (`CONTEXT.md`). Two properties of the existing contract make an added read impossible rather
+input" (`apps/docs/content/language/glossary.md`). Two properties of the existing contract make an added read impossible rather
 than merely inconvenient:
 
 - Its `destination` is a `bool`. `stdout()` is `false` and `stderr()` is `true`; a two-value type

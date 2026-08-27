@@ -1,5 +1,5 @@
 {
-  "name": "@silk-lang/formatter",
+  "name": "@silklang/formatter",
   "version": "0.0.0",
   "description": "Canonical whole-source formatting for Silk Effect, including active Silk examples in source documentation.",
   "license": "MIT",
@@ -45,18 +45,15 @@
     "build": "pnpm clean && tsc -p tsconfig.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
-    "stdlib:docs:check": "node scripts/format-stdlib-docs.mjs --check",
-    "stdlib:docs:format": "node scripts/format-stdlib-docs.mjs",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-lang/compiler": "workspace:*",
-    "@silk-lang/documentation": "workspace:*",
+    "@silklang/compiler": "workspace:*",
+    "@silklang/docgen": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.103",
     "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1"
   }

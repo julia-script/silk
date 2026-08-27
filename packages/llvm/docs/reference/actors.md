@@ -4,8 +4,8 @@ The public API is organized as actor modules. Import actors from their package s
 states which part of the LLVM model it uses.
 
 ```typescript
-import * as Builder from '@silk-lang/llvm/Builder'
-import * as Type from '@silk-lang/llvm/Type'
+import * as Builder from '@silklang/llvm/Builder'
+import * as Type from '@silklang/llvm/Type'
 ```
 
 Individual exported declarations, parameters, return values, and error cases are documented in

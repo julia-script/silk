@@ -1,6 +1,6 @@
-import * as Analysis from '@silk-lang/compiler/Analysis'
-import * as SourceFile from '@silk-lang/compiler/SourceFile'
-import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
+import * as Analysis from '@silklang/compiler/Analysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 
 /** Builds one browser snapshot from immutable virtual sources at the application boundary. */

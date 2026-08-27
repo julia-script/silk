@@ -4,7 +4,7 @@
 // rendered signatures and prose are exactly the `///` comments in stdlib/silk/*.silk. The
 // diagnostic index comes from the code constants and message templates in src/Diagnostic.ts.
 //
-// Run with: pnpm --filter @silk-lang/compiler documentation:generate
+// Run with: pnpm --filter @silklang/compiler documentation:generate
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -330,7 +330,7 @@ const diagnosticsPage = () => {
     'The prefix names the compiler phase that reports it. Regenerate this page with:',
     '',
     '```console',
-    '$ pnpm --filter @silk-lang/compiler documentation:generate',
+    '$ pnpm --filter @silklang/compiler documentation:generate',
     '```',
     '',
     '| Prefix | Phase | Codes |',
@@ -383,16 +383,14 @@ const write = (name, contents) => {
   if (check) {
     if (!existsSync(destination)) {
       console.error(
-        `${name} is missing. Run pnpm --filter @silk-lang/compiler documentation:generate`,
+        `${name} is missing. Run pnpm --filter @silklang/compiler documentation:generate`,
       )
       process.exitCode = 1
       return
     }
     const existing = readFileSync(destination, 'utf8')
     if (existing !== contents) {
-      console.error(
-        `${name} is stale. Run pnpm --filter @silk-lang/compiler documentation:generate`,
-      )
+      console.error(`${name} is stale. Run pnpm --filter @silklang/compiler documentation:generate`)
       process.exitCode = 1
     }
     return
@@ -409,14 +407,14 @@ const writeStdlib = (files) => {
     for (const path of expected.keys())
       if (!actual.includes(path)) {
         console.error(
-          `stdlib/${path} is missing. Run pnpm --filter @silk-lang/compiler documentation:generate`,
+          `stdlib/${path} is missing. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1
       }
     for (const path of actual)
       if (!expected.has(path)) {
         console.error(
-          `stdlib/${path} is extra or renamed. Run pnpm --filter @silk-lang/compiler documentation:generate`,
+          `stdlib/${path} is extra or renamed. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1
       }
@@ -425,7 +423,7 @@ const writeStdlib = (files) => {
       if (!existsSync(destination)) continue
       if (readFileSync(destination, 'utf8') !== contents) {
         console.error(
-          `stdlib/${path} is stale. Run pnpm --filter @silk-lang/compiler documentation:generate`,
+          `stdlib/${path} is stale. Run pnpm --filter @silklang/compiler documentation:generate`,
         )
         process.exitCode = 1
       }

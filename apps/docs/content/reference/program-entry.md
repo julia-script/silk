@@ -48,7 +48,7 @@ reports `No entry point: \`main\` must be public`.
 
 **Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
 [entry selection](../../../../packages/compiler/src/Instances.ts),
-[CLI entry messages](../../../../packages/compiler-cli/src/Report.ts).
+[CLI entry messages](../../../../packages/cli/src/Report.ts).
 
 ## ENTRY-002 — The compiler executes an effect entry
 

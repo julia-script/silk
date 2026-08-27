@@ -1,5 +1,5 @@
 {
-  "name": "@silk-lang/platform-webcontainer",
+  "name": "@silklang/platform-webcontainer",
   "version": "0.0.0",
   "description": "Effect-native WebContainer runtime, filesystem, process, and event services.",
   "license": "MIT",

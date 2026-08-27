@@ -1,0 +1,352 @@
+import * as Effect from 'effect/Effect'
+import { describe, expect, it } from 'vitest'
+import * as Analysis from '../src/Analysis.js'
+import type { ViewContext, ViewResult } from '../src/InspectorRegistry.js'
+import { siblingsOf, viewById, views } from '../src/InspectorRegistry.js'
+import * as ToolchainPlan from '../src/ToolchainPlan.js'
+
+const project = (viewId: string, source: string): ViewResult => {
+  const sourceId = 'memory/docs/unified-layout'
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'aarch64-apple-darwin'),
+  )
+  const root = snapshot.closure.rootModule
+  const context: ViewContext = {
+    snapshot,
+    modules: { [root]: source },
+    root,
+    mode: 'release',
+    profile: 'release',
+    evaluation: undefined,
+    filter: '',
+    showTrivia: false,
+  }
+  const view = viewById(viewId)
+  expect(view, viewId).toBeDefined()
+  if (view === undefined) throw new Error(`missing view ${viewId}`)
+  return view.project(context)
+}
+
+/** Rows render label and detail in separate columns, so assertions read the pair. */
+const text = (result: ViewResult): string =>
+  result.rows.map((row) => `${row.label} ${row.detail ?? ''}`).join('\n')
+
+/**
+ * The struct-values view wants the whole pipeline: an evaluated wasm run, so the aggregate
+ * Construct/Project events are in the trace alongside the elaboration facts.
+ */
+const projectStructValues = (source: string): ViewResult => {
+  const sourceId = 'memory/docs/unified-struct-values'
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
+  )
+  const evaluation = Analysis.evaluate(snapshot)
+  expect(evaluation._tag).toBe('Completed')
+  const view = viewById('struct-values')
+  expect(view).toBeDefined()
+  if (view === undefined) throw new Error('missing struct-values view')
+  return view.project({
+    snapshot,
+    modules: { [sourceId]: source },
+    root: sourceId,
+    mode: 'release',
+    profile: 'release',
+    evaluation,
+    filter: '',
+    showTrivia: false,
+  })
+}
+
+const projectArrayValues = (source: string): ViewResult => {
+  const sourceId = 'memory/docs/unified-array-values'
+  const snapshot = Effect.runSync(
+    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), 'wasm32-unknown-unknown'),
+  )
+  const evaluation = Analysis.evaluate(snapshot)
+  expect(evaluation._tag).toBe('Completed')
+  const view = viewById('array-values')
+  expect(view).toBeDefined()
+  if (view === undefined) throw new Error('missing array-values view')
+  return view.project({
+    snapshot,
+    modules: { [sourceId]: source },
+    root: sourceId,
+    mode: 'release',
+    profile: 'release',
+    evaluation,
+    filter: '',
+    showTrivia: false,
+  })
+}
+
+describe('view registry', () => {
+  it('resolves every view by its own id', () => {
+    for (const view of views) {
+      expect(viewById(view.id)?.id, view.id).toBe(view.id)
+    }
+  })
+
+  it('has one backend view rather than one per backend', () => {
+    // The target picks the backend, so a pane per backend would be a choice the user cannot get
+    // right — picking the one the target does not serve just yields a rejection.
+    expect(views.filter((view) => view.phase === 'backend').map((view) => view.id)).toEqual([
+      'backend',
+    ])
+  })
+
+  it('reports unknown and retired ids as missing', () => {
+    expect(viewById('llvm')).toBeUndefined()
+    expect(viewById('wasm')).toBeUndefined()
+    expect(viewById('not-a-view')).toBeUndefined()
+  })
+
+  // The syntax inspector was two panels, and the consolidation first ported only the left one.
+  // These are the panels that made it a *syntax* lab rather than a token list.
+  it('carries every panel the syntax inspector shipped', () => {
+    for (const id of ['tokens', 'tree', 'flow', 'evaluation', 'hir', 'diagnostics']) {
+      expect(viewById(id)?.id, id).toBe(id)
+    }
+  })
+
+  it('offers sibling phases from the same group, and never itself', () => {
+    const tree = viewById('tree')
+    expect(tree).toBeDefined()
+    if (tree === undefined) return
+    const siblings = siblingsOf(tree)
+    expect(siblings.map((view) => view.id)).not.toContain('tree')
+    for (const sibling of siblings) expect(sibling.group).toBe(tree.group)
+  })
+})
+
+describe('struct values view', () => {
+  it('reports struct facts, ABI lanes, and aggregate evaluation events', () => {
+    const result = projectStructValues(`struct Pair { left: i32 right: i32 }
+fn make() -> Pair { return Pair { right: 2, left: 1 } }
+pub fn main() -> i32 { let pair = make() return pair.right }`)
+
+    const rendered = text(result)
+    expect(rendered).toContain('struct construction')
+    // The compiler owns the reordering from written order to canonical order; both must show.
+    expect(rendered).toContain('source order right, left')
+    expect(rendered).toContain('canonical order left, right')
+    expect(rendered).toContain('field projection chain')
+    expect(rendered).toContain('compiler-owned calling shapes')
+    expect(rendered).toMatch(/i32:#0, i32:#1/)
+    expect(rendered).toContain('construct')
+    expect(rendered).toContain('project')
+    expect(result.meta).toContain('1 lit')
+  })
+})
+
+describe('array values view', () => {
+  it('links canonical literals, checks, layouts, lanes, and evaluation events', () => {
+    const result = projectArrayValues(`struct Pair { left: i32 right: i32 }
+fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
+pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left: 42, right: 43 }], 1) }`)
+
+    const rendered = text(result)
+    expect(rendered).toContain('canonical array types')
+    expect(rendered).toContain('Array<memory/docs/unified-array-values.Pair, 2>')
+    expect(rendered).toContain('literal elements')
+    expect(rendered).toContain('runtime check < 2')
+    expect(rendered).toContain('stride 8')
+    expect(rendered).toContain('[1].#0')
+    expect(rendered).toContain('construct Array<')
+    expect(rendered).toContain('read Array<')
+    expect(result.rows.some((row) => row.span !== undefined)).toBe(true)
+  })
+})
+
+describe('target layout view', () => {
+  it('reports nominal catalog entries with their sizes', () => {
+    const result = project(
+      'layout',
+      `struct Inner { value: i32 }
+struct Outer { inner: Inner flag: bool }
+pub fn main() -> i32 { return 42 }`,
+    )
+
+    const rendered = text(result)
+    expect(rendered).toContain('nominal catalog')
+    expect(rendered).toContain('memory/docs/unified-layout.Outer')
+    expect(rendered).toContain('memory/docs/unified-layout.Inner')
+    expect(rendered).toContain('reachable runtime layout')
+    // The target is a one-line fact, not a card heading.
+    expect(result.facts?.map((fact) => fact.text)).toContain('aarch64-apple-darwin')
+  })
+
+  it('marks a layout that could not be computed rather than dropping it', () => {
+    // A self-referential struct has no finite layout; the row has to say so, because a missing
+    // row is indistinguishable from a struct that was never declared.
+    const result = project(
+      'layout',
+      `struct Node { next: Node }
+pub fn main() -> i32 { return 42 }`,
+    )
+
+    const rendered = text(result)
+    expect(rendered).toContain('memory/docs/unified-layout.Node')
+    expect(rendered).toContain('unavailable')
+    expect(result.rows.some((row) => row.tone === 'warning')).toBe(true)
+  })
+})
+
+describe('control DAG view', () => {
+  it('shows structured loop regions and lexical repeat outcomes', () => {
+    const result = project(
+      'mir',
+      `pub fn main() -> i32 {
+  let mut value = 0
+  while value < 2 { value = value + 1 }
+  return value
+}`,
+    )
+    const rendered = text(result)
+    expect(rendered).toContain('loop0')
+    expect(rendered).toContain('condition r')
+    expect(rendered).toContain('repeat loop0')
+    expect(result.meta).toContain('region')
+    expect(result.rows.some((row) => row.span !== undefined)).toBe(true)
+  })
+
+  it('shows ownership fixed points and source-linked backend control conversion', () => {
+    const source = `pub fn main() -> i32 {
+  let mut value = 0
+  while value < 2 { value = value + 1 }
+  return value
+}`
+    const ownership = project('ownership', source)
+    expect(text(ownership)).toContain('mutable')
+    expect(text(ownership)).toContain('loop0 fixed point compatible')
+
+    const backend = project('backend', source)
+    expect(text(backend)).toContain('control conversion')
+    expect(text(backend)).toContain('LlvmBranch')
+    expect(
+      backend.rows.some((row) => row.key.startsWith('backend-control-') && row.span !== undefined),
+    ).toBe(true)
+  })
+
+  it('coordinates match facts through the existing HIR, ownership, and MIR panes', () => {
+    const source = `struct Left { value: i32 }
+struct Right { value: i32 }
+fn inspect(input: Left | Right) -> i32 {
+  return match &input {
+    Left { value } if false => 0
+    Left { value: answer } => answer
+    Right { value } => value
+  }
+}
+pub fn main() -> i32 { return inspect(Left { value: 42 }) }`
+    const hir = project('hir', source)
+    const ownership = project('ownership', source)
+    const mir = project('mir', source)
+
+    expect(text(hir)).toContain('match shared')
+    expect(text(hir)).toContain('guarded')
+    expect(text(ownership)).toContain('match shared')
+    expect(text(ownership)).toContain('provisional guard')
+    expect(text(mir)).toContain('decision memory/docs/unified-layout.Left')
+    expect(text(mir)).toContain('guard _')
+    expect(mir.facts?.map((fact) => fact.text)).toContain('1 structured match')
+    expect(mir.rows.some((row) => row.span !== undefined)).toBe(true)
+  })
+})
+
+describe('downstream panes state why they are empty', () => {
+  // A blank pane and a pane for a program that never got that far look identical, which hides
+  // the phase that actually broke. Every absent phase has to name its reason.
+  it('says why MIR is unavailable for an unresolved target', () => {
+    const snapshot = Effect.runSync(
+      Analysis.ofSourceRealized(
+        'memory/docs/unavailable',
+        new TextEncoder().encode('pub fn main() -> i32 { return 42 }'),
+        'not-a-real-target',
+      ),
+    )
+    const view = viewById('mir')
+    expect(view).toBeDefined()
+    if (view === undefined) return
+    const result = view.project({
+      snapshot,
+      modules: { [snapshot.closure.rootModule]: 'pub fn main() -> i32 { return 42 }' },
+      root: snapshot.closure.rootModule,
+      mode: 'release',
+      profile: 'release',
+      evaluation: undefined,
+      filter: '',
+      showTrivia: false,
+    })
+
+    expect(result.unavailable).toBeDefined()
+    expect(result.unavailable).toContain('MIR unavailable')
+    expect(result.rows).toHaveLength(0)
+  })
+})
+
+describe('diagnostics view', () => {
+  it('reports a clean program as clean rather than as empty', () => {
+    const result = project('diagnostics', 'pub fn main() -> i32 { return 42 }')
+    expect(text(result)).toContain('no diagnostics')
+    expect(result.meta).toBe('clean')
+  })
+
+  it('carries the error count in its meta and tones the row', () => {
+    const result = project(
+      'diagnostics',
+      `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer( }`,
+    )
+    expect(result.rows.some((row) => row.tone === 'error')).toBe(true)
+    expect(result.meta).toMatch(/err/)
+  })
+})
+
+describe('concrete tree view', () => {
+  it('renders a token the parser had to insert as a real, amber row', () => {
+    // The tree is lossless, so recovery has to be visible in it — a missing token that is simply
+    // absent from the tree would make the recovery invisible exactly where it matters.
+    const result = project(
+      'tree',
+      `pub fn answer() -> i32 { return 42 }
+pub fn main() -> i32 { return answer( }`,
+    )
+    const missing = result.rows.filter((row) => row.dot === 'missing')
+    expect(missing.length).toBeGreaterThan(0)
+    expect(missing[0]?.detail).toContain('recovery')
+    expect(missing[0]?.tone).toBe('warning')
+  })
+
+  it('hides trivia by default and includes it when asked', () => {
+    const source = 'pub fn main() -> i32 { return 42 }'
+    const view = viewById('tree')
+    if (view === undefined) throw new Error('missing tree view')
+    const snapshot = Effect.runSync(
+      Analysis.ofSourceRealized('memory/docs/trivia', new TextEncoder().encode(source)),
+    )
+    const base = {
+      snapshot,
+      modules: { [snapshot.closure.rootModule]: source },
+      root: snapshot.closure.rootModule,
+      mode: 'release' as const,
+      profile: 'release' as const,
+      evaluation: undefined,
+      filter: '',
+    }
+
+    const without = view.project({ ...base, showTrivia: false })
+    const with_ = view.project({ ...base, showTrivia: true })
+    expect(with_.rows.length).toBeGreaterThan(without.rows.length)
+  })
+})
+
+describe('optimization profile', () => {
+  // The workbench derives codegen's debug-info mode from the profile instead of carrying a second
+  // control. That only stays honest while `-g` profiles map to debug mode: if they diverged, the
+  // backend pane would show stripped IR for a build the toolchain plans with debug info.
+  it('keeps debug info whenever the profile asks clang for -g', () => {
+    expect(ToolchainPlan.codegenModeFor('debug')).toBe('debug')
+    expect(ToolchainPlan.codegenModeFor('release-with-debug')).toBe('debug')
+    expect(ToolchainPlan.codegenModeFor('release')).toBe('release')
+  })
+})

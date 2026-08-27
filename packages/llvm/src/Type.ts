@@ -257,8 +257,8 @@ export const token = Effect.fn('Type.token')(function* (builder: Builder.Builder
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-lang/llvm/Builder'
- * import * as Type from '@silk-lang/llvm/Type'
+ * import * as Builder from '@silklang/llvm/Builder'
+ * import * as Type from '@silklang/llvm/Type'
  *
  * const width = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make()

@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Add a WebAssembly backend satisfying the nominal `Backend` service, emitting structured control

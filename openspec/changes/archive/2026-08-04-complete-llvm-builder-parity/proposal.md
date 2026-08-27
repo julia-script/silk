@@ -23,4 +23,4 @@ None.
 
 ## Impact
 
-This touches the complete `@silk-lang/llvm` package, its tests, README, changelog, package exports, release-candidate validation, and provenance documentation. It depends on all five preceding LLVM changes and does not claim parity with behavior that the pinned Zig builder itself marks unsupported or incomplete.
+This touches the complete `@silklang/llvm` package, its tests, README, changelog, package exports, release-candidate validation, and provenance documentation. It depends on all five preceding LLVM changes and does not claim parity with behavior that the pinned Zig builder itself marks unsupported or incomplete.

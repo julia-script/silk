@@ -14,7 +14,7 @@ This source is a standalone acceptance fixture rather than a manifest-based CLI 
 and execute its evaluator and direct-WebAssembly checks from the repository root with:
 
 ```sh
-pnpm --filter @silk-lang/compiler exec vitest run test/FileSystemAcceptance.test.ts
+pnpm --filter @silklang/compiler exec vitest run test/FileSystemAcceptance.test.ts
 ```
 
 The process exits with `42`, the checksum of the four bytes written and read back.

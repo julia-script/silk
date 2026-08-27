@@ -18,7 +18,7 @@ Tiny now exposes these expected failure families:
 | `ParseError` | Parser | Missing `else` or trailing syntax |
 | `ResolutionError` | Tiny resolution | Unknown name, duplicate function, or wrong arity |
 | `CompileError` | Tiny-to-LLVM lowering invariant | A Tiny `i32` call unexpectedly produces no value |
-| `LlvmError` | `@silk-lang/llvm` | Invalid type, ownership, body, or serialization state |
+| `LlvmError` | `@silklang/llvm` | Invalid type, ownership, body, or serialization state |
 
 `LexError`, `ParseError`, and `ResolutionError` carry `[start, end)` source offsets. `LlvmError`
 keeps its package operation and discriminated reason unchanged. Do not catch these inside

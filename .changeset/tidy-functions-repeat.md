@@ -1,5 +1,5 @@
 ---
-'@silk-lang/compiler': minor
+'@silklang/compiler': minor
 ---
 
 Parse one or more public bootstrap functions as ordered lossless concrete branches while keeping
