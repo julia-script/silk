@@ -7,7 +7,7 @@ reference pages.
 
 ## LEXICAL-001 — Identifiers use the ASCII identifier alphabet
 
-**Status:** Candidate
+**Status:** Confirmed
 
 An identifier starts with an ASCII letter or `_` and continues with ASCII letters, decimal digits,
 and `_`. Matching is case-sensitive. `_` is an identifier token; it gains its wildcard meaning only
@@ -31,7 +31,7 @@ rather than emitting one error per byte.
 
 ## LEXICAL-002 — The keyword vocabulary is closed
 
-**Status:** Candidate
+**Status:** Confirmed
 
 The following complete identifiers are keywords:
 
@@ -59,7 +59,7 @@ different token. There is no separate lexical diagnostic for a correctly spelled
 
 ## LEXICAL-003 — Line comments end at the physical line boundary
 
-**Status:** Candidate
+**Status:** Confirmed
 
 `//` begins an ordinary comment. `///` begins a documentation comment attached to the following
 declaration, and `//!` begins documentation for the containing module. Consecutive documentation
@@ -81,8 +81,8 @@ block. Documentation attachment and which declarations may receive comments are 
 **Boundary:** Silk has no block-comment token. Comment markers inside a static literal are literal
 content, and quote characters inside a comment do not begin literals.
 
-**Diagnostics:** Comments themselves do not produce a diagnostic. An unsupported documentation
-position is diagnosed by the declaration or documentation layer, not by the lexer.
+**Diagnostics:** Comments themselves do not produce a diagnostic. Documentation comments that do
+not attach at a supported declaration position remain trivia and do not become API documentation.
 
 **Evidence:** [lexer specification](../../../../openspec/specs/bootstrap-lexer/spec.md),
 [documentation attachment tests](../../../../packages/compiler/test/DocBlock.test.ts),
@@ -90,7 +90,7 @@ position is diagnosed by the declaration or documentation layer, not by the lexe
 
 ## LEXICAL-004 — Numeric literals have explicit base, separator, and sign rules
 
-**Status:** Candidate
+**Status:** Confirmed
 
 An integer literal is decimal by default. Prefixes `0b`, `0o`, and `0x` select binary, octal, and
 hexadecimal digits; the base letter may be uppercase. `_` may separate digits only when a valid
@@ -125,7 +125,7 @@ and an exponent with no digits are invalid numeric spellings.
 
 ## LEXICAL-005 — Static text and byte literals have a closed form vocabulary
 
-**Status:** Candidate
+**Status:** Confirmed
 
 Silk recognizes six quote-delimited text and byte forms. A modifier must touch its opening
 delimiter.
@@ -205,7 +205,7 @@ reports `LEX0003`; malformed escapes receive their literal diagnostic.
 
 ## LEXICAL-007 — Tokenization is longest and lossless
 
-**Status:** Candidate
+**Status:** Confirmed
 
 At each byte position, the lexer recognizes the longest committed token introduction. Compound
 punctuation such as `==`, `!=`, `<=`, `>=`, `&&`, `||`, `|>`, `=>`, `->`, and `..` is therefore one

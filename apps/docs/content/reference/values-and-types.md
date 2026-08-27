@@ -352,19 +352,20 @@ conversions use the enclosing type-mismatch diagnostic.
 
 ## Constant values
 
-### CONST-001 — A constant has an explicit scalar type and one static initializer
+### CONST-001 — A constant has an explicit scalar or string type and one static initializer
 
-**Status:** Candidate
+**Status:** Confirmed
 
-A `const` declaration requires a type annotation. Its initializer is one bare scalar literal whose
-value is valid for that type. Constants do not infer their type, evaluate computed expressions, or
-hold aggregate values.
+A `const` declaration requires a type annotation. Its type is one foundational scalar type or
+`string`, and its initializer is one matching literal whose value is valid for that type. Constants
+do not infer their type, evaluate computed expressions, or hold aggregate values.
 
 ```silk
 pub const limit: i32 = 2
 const ratio: f64 = 1.5
 const enabled: bool = true
 const separator: char = ':'
+const pattern: string = r"\d+"
 ```
 
 A constant lowers to an immediate value. It has no address and cannot be borrowed, assigned, or
@@ -375,12 +376,13 @@ expressions are not constant initializers. An initializer of the wrong scalar ty
 
 **Diagnostics:** A constant outside this contract reports `SEM0086` at its declaration.
 
-**Evidence:** [numeric constant tests](../../../../packages/compiler/test/NumericConstants.test.ts),
-[constant analysis](../../../../packages/compiler/src/DeclarationIndex.ts).
+**Evidence:** [typed constant tests](../../../../packages/compiler/test/TypedConstants.test.ts),
+[numeric constant tests](../../../../packages/compiler/test/NumericConstants.test.ts),
+[constant analysis](../../../../packages/compiler/src/ExpressionAnalysis.ts).
 
 ### CONST-002 — Target facts are the only non-literal constant initializers
 
-**Status:** Candidate
+**Status:** Confirmed
 
 The following target facts may replace the literal in a constant declaration. The selected target
 determines their values.
