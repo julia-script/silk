@@ -32,7 +32,6 @@ export default function Home() {
     <div className={`silk-intro ${mono.variable}`}>
       <header className="bar">
         <span className="title">silk</span>
-        <span>introduction</span>
         <span className="spacer" />
         <Link href="/docs/language">docs</Link>
         <Link href="/labs">labs</Link>
