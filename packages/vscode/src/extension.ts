@@ -1,5 +1,5 @@
 /**
- * The extension is a thin launcher: the editor session owns the `@silk-effect/lsp` process and
+ * The extension is a thin launcher: the editor session owns the `@silk-lang/lsp` process and
  * hands its detached stdio transport to `vscode-languageclient`. All language behavior lives in
  * the server, so this file should never grow feature logic.
  */
@@ -59,7 +59,7 @@ const reportLifecycleFailure = (operation: string, error: unknown): void => {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const serverModule = require.resolve('@silk-effect/lsp/bin')
+  const serverModule = require.resolve('@silk-lang/lsp/bin')
   session = createSession(serverModule)
   const owned = session
   context.subscriptions.push(

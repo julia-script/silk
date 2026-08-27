@@ -1,6 +1,6 @@
-# `@silk-effect/llvm` documentation
+# `@silk-lang/llvm` documentation
 
-`@silk-effect/llvm` constructs LLVM IR and emits LLVM assembly or bitcode without loading Zig,
+`@silk-lang/llvm` constructs LLVM IR and emits LLVM assembly or bitcode without loading Zig,
 native LLVM libraries, or external executables at runtime.
 
 ## Start here

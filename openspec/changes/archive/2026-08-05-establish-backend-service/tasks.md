@@ -1,6 +1,6 @@
 ## 1. Backend service
 
-- [x] 1.1 Add `@silk-effect/llvm` as a compiler dependency; create
+- [x] 1.1 Add `@silk-lang/llvm` as a compiler dependency; create
   `packages/compiler/src/Backend.ts`: the `Backend` interface (one `emit(program, layout,
   request)` operation) and the artifact shape (bitcode, IR text, canonical-id-to-symbol table)
 - [x] 1.2 `LlvmBackend`: declare-then-define lowering over the builder — blocks, literals, moves,

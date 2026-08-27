@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': major
+'@silk-lang/compiler': major
 ---
 
 Replace preloaded source maps with an explicit root `SourceFile` and the injectable

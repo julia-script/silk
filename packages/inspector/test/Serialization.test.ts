@@ -1,4 +1,4 @@
-import { Analysis } from '@silk-effect/compiler'
+import { Analysis } from '@silk-lang/compiler'
 import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
 import type { ViewContext } from '../src/Registry.js'

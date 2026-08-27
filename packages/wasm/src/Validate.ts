@@ -105,8 +105,8 @@ const compile = (implementation: Host, bytes: Uint8Array): ReadonlyArray<Violati
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Binary from '@silk-effect/wasm/Binary'
- * import * as Validate from '@silk-effect/wasm/Validate'
+ * import * as Binary from '@silk-lang/wasm/Binary'
+ * import * as Validate from '@silk-lang/wasm/Validate'
  *
  * const check = Effect.gen(function* () {
  *   const bytes = yield* Binary.encode(builder)

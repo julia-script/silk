@@ -411,8 +411,8 @@ export const local = Effect.fn('Metadata.local')(function* (
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/llvm/Builder'
- * import * as Metadata from '@silk-effect/llvm/Metadata'
+ * import * as Builder from '@silk-lang/llvm/Builder'
+ * import * as Metadata from '@silk-lang/llvm/Metadata'
  *
  * await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make({ strip: false })

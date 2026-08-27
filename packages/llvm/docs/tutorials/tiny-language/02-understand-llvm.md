@@ -9,7 +9,7 @@ be able to label its types, signature, basic block, instruction, and terminator�
 owns each artifact after it.
 
 We are not writing compiler code yet. Lesson 3 will set up the project, and Lesson 7 will generate
-this function with `@silk-effect/llvm`.
+this function with `@silk-lang/llvm`.
 
 ## Place LLVM in the pipeline
 
@@ -19,7 +19,7 @@ It is not Tiny's parser, and it is not the operating system that runs the final 
 In this tutorial, the responsibilities divide this way:
 
 1. The **Tiny frontend** turns Tiny source into an AST and decides what the program means.
-2. **`@silk-effect/llvm`** helps the frontend construct a valid LLVM module and serialize it.
+2. **`@silk-lang/llvm`** helps the frontend construct a valid LLVM module and serialize it.
 3. The **Clang driver** accepts the emitted IR, asks the LLVM backend to produce host machine code,
    and invokes the platform linker.
 4. The **operating system** loads and runs the linked executable.
@@ -71,8 +71,8 @@ These files are related, but they are not interchangeable:
 | Artifact | Typical form | Produced here by | Consumed here by |
 | --- | --- | --- | --- |
 | Tiny source | `.tiny` text | You | Tiny lexer and parser |
-| LLVM assembly | `.ll` text | `@silk-effect/llvm` | Humans, Clang, LLVM tools |
-| LLVM bitcode | `.bc` bytes | `@silk-effect/llvm` | Clang and LLVM tools |
+| LLVM assembly | `.ll` text | `@silk-lang/llvm` | Humans, Clang, LLVM tools |
+| LLVM bitcode | `.bc` bytes | `@silk-lang/llvm` | Clang and LLVM tools |
 | Object file | `.o` or platform equivalent | Clang/LLVM backend | Platform linker |
 | Native executable | Platform binary | Linker, driven by Clang | Operating system |
 
@@ -80,7 +80,7 @@ Textual IR and bitcode encode the same kind of LLVM module. Textual `.ll` is des
 bitcode is its compact binary representation. Neither is the host machine's object code.
 
 In the final command, Clang acts as a driver for more than one step: it compiles the LLVM module
-for the current target and invokes the linker to create the executable. `@silk-effect/llvm` stops
+for the current target and invokes the linker to create the executable. `@silk-lang/llvm` stops
 before both operations.
 
 ## Avoid three misleading shortcuts
@@ -140,7 +140,7 @@ The artifact order is Tiny source → LLVM IR → object file → native executa
 </details>
 
 You can now read the exact LLVM function we will construct later. Next, we will create a clean
-consumer project and use `@silk-effect/llvm` to render its first empty module.
+consumer project and use `@silk-lang/llvm` to render its first empty module.
 
 [Previous: Meet Tiny](./01-meet-tiny.md) ·
 [Next: Create the consumer project and render a module](./03-consumer-setup.md)

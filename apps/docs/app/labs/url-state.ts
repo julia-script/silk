@@ -11,7 +11,7 @@
  */
 
 import type { SerializedDockview } from 'dockview'
-import { viewById } from '@silk-effect/inspector/Registry'
+import { viewById } from '@silk-lang/inspector/Registry'
 
 export const sourceParam = 's'
 export const layoutParam = 'l'

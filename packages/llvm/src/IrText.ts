@@ -110,8 +110,8 @@ const renderSnapshot = (state: BuilderState.Snapshot): string => {
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Builder from '@silk-effect/llvm/Builder'
- * import * as IrText from '@silk-effect/llvm/IrText'
+ * import * as Builder from '@silk-lang/llvm/Builder'
+ * import * as IrText from '@silk-lang/llvm/IrText'
  *
  * const text = await Effect.runPromise(Effect.gen(function* () {
  *   const builder = yield* Builder.make({ sourceFilename: 'example.ll' })

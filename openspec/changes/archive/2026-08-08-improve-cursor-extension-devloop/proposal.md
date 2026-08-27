@@ -6,7 +6,7 @@ Local Silk editor support in Cursor is fragile and slow to iterate: the document
 
 - Add a **worktree-safe Cursor install** path that retargets the local symlink to the current checkout, builds the extension (and its LSP dependency), and documents reload vs. language-server restart.
 - Add an **Extension Development Host** launch configuration (plus build/watch tasks) so F5 loads `packages/vscode` from the open workspace without touching `~/.cursor/extensions`.
-- Enrich the **TextMate grammar** with finer scopes (control vs storage keywords, function names, broader types/identifiers) so themes color Silk more usefully — still generated from `@silk-effect/language`, still drift-checked.
+- Enrich the **TextMate grammar** with finer scopes (control vs storage keywords, function names, broader types/identifiers) so themes color Silk more usefully — still generated from `@silk-lang/language`, still drift-checked.
 - Update extension README / contributor docs for the two workflows: daily use in main Cursor vs. developing the extension/LSP in a guest host window.
 - **Non-goals:** marketplace/OpenVSX packaging, LSP semantic tokens, tree-sitter, theme contributions, Changesets publication of the private extension.
 
@@ -28,4 +28,4 @@ Local Silk editor support in Cursor is fragile and slow to iterate: the document
 - `packages/language` — `TextMate.ts` patterns/scopes, sync script output, TextMate tests / Shiki fixtures.
 - Generated `packages/vscode/syntaxes/silk.tmLanguage.json` and `language-configuration.json` via existing `sync:vscode`.
 - Docs site Shiki highlighting inherits the richer grammar automatically.
-- Does not change `@silk-effect/lsp` protocol surface; LSP restart remains the thin extension command already present.
+- Does not change `@silk-lang/lsp` protocol surface; LSP restart remains the thin extension command already present.

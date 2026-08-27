@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md. The @silk-effect/llvm boundary is already thin and Effect-native (every op is yield*-ed LlvmError reconciled once via mapError); this change only factors it, it does not re-wrap the external API.
+See proposal.md. The @silk-lang/llvm boundary is already thin and Effect-native (every op is yield*-ed LlvmError reconciled once via mapError); this change only factors it, it does not re-wrap the external API.
 
 ## Decisions
 

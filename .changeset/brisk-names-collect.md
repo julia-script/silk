@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': minor
+'@silk-lang/compiler': minor
 ---
 
 Replace singular semantic fields with ordered function facts, closed declaration-name lookup, and

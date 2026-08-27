@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/doctest",
+  "name": "@silk-lang/doctest",
   "version": "0.0.0",
   "private": true,
   "description": "Compiles the fenced Silk examples carried by Silk Effect documentation JSON and reports each failure with its source position.",
@@ -60,8 +60,8 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.103",
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/documentation": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/documentation": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

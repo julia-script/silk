@@ -5,7 +5,7 @@ Silk's documentation site needs a browser-native execution surface where users c
 ## What Changes
 
 - Add a dedicated `/editor` route to the docs application.
-- Add an interactive xterm.js terminal backed by a scoped `jsh` process from `@silk-effect/platform-webcontainer`.
+- Add an interactive xterm.js terminal backed by a scoped `jsh` process from `@silk-lang/platform-webcontainer`.
 - Establish one editor application environment that constructs a single WebContainer layer and derives both the WebContainer runtime service and Effect's standard `FileSystem` service from that exact layer value.
 - Make the shared application environment available through one module-scope Atom runtime so the terminal and future editor, file-tree, package-management, and preview actors resolve the same filesystem and WebContainer instance.
 - Model boot, session, process output, input, resize, failure, and disposal through Effect scopes and Atom state rather than raw WebContainer promises or component-owned application state.
@@ -26,6 +26,6 @@ None. The existing WebContainer runtime, filesystem, and process contracts alrea
 ## Impact
 
 - Affects `apps/docs` routing, client UI, styles, Next.js response headers, tests, and package dependencies.
-- Adds workspace consumption of `@silk-effect/platform-webcontainer` plus `@xterm/xterm` and `@xterm/addon-fit`.
+- Adds workspace consumption of `@silk-lang/platform-webcontainer` plus `@xterm/xterm` and `@xterm/addon-fit`.
 - Introduces an editor-scoped Atom runtime and application composition layer that future editor features must reuse instead of booting independent WebContainers or constructing parallel filesystem services.
-- Does not change the public API of `@silk-effect/platform-webcontainer` unless implementation reveals a missing capability that cannot be expressed through its current runtime, process, and filesystem actors.
+- Does not change the public API of `@silk-lang/platform-webcontainer` unless implementation reveals a missing capability that cannot be expressed through its current runtime, process, and filesystem actors.

@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler': minor
+'@silk-lang/compiler': minor
 ---
 
 Add the root-confined native `OsFileSystem` provider, opaque affine OS handles, injected evaluator

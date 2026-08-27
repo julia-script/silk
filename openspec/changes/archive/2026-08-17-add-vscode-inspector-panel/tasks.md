@@ -1,8 +1,8 @@
 # Tasks: Add VS Code Inspector Panel
 
-## 1. Extract `@silk-effect/inspector`
+## 1. Extract `@silk-lang/inspector`
 
-- [x] 1.1 Scaffold `packages/inspector` (package.json, tsconfig, vitest config) depending only on `@silk-effect/compiler`, wired into the workspace and turbo
+- [x] 1.1 Scaffold `packages/inspector` (package.json, tsconfig, vitest config) depending only on `@silk-lang/compiler`, wired into the workspace and turbo
 - [x] 1.2 Move row model types (`RowModel`, `Span`, tones, `cursorStateFor`, `spanLabel`) into the package; make `Span` module-qualified and rewrite `cursorStateFor` to compare module + range
 - [x] 1.3 Move `row/project-syntax`, `row/project-backend`, and `row/flow-model` into the package, dropping the `onSelectSpan` parameters so rows carry spans only
 - [x] 1.4 Move the view registry (`ViewDefinition`, `views`, `viewById`, `siblingsOf`, `panels.tsx` helpers) into the package; `ViewContext` loses callbacks, gains `evaluate` input; drop the React-only `source` view body handling from the shared registry
@@ -11,7 +11,7 @@
 
 ## 2. Docs workbench consumes the package
 
-- [x] 2.1 Rewire `apps/docs/app/labs` to import registry and rows from `@silk-effect/inspector`; keep React shells (RowList, pane chrome, picker, editor) local
+- [x] 2.1 Rewire `apps/docs/app/labs` to import registry and rows from `@silk-lang/inspector`; keep React shells (RowList, pane chrome, picker, editor) local
 - [x] 2.2 Wire activation in the row list from `span !== undefined` (posting to the cursor atom with the active module) instead of `onActivate`; thread the module-qualified cursor through `cursorAtom`
 - [x] 2.3 Restore the evaluation "run" action through the new `evaluate` context input; verify labs behavior (views, meta, facts, cursor tinting, saved layouts/URLs) is unchanged and tests pass
 

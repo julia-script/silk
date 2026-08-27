@@ -89,7 +89,7 @@ const spell = (value) => value.toString(16).toUpperCase().padStart(4, '0')
 const spellAll = (values) => values.map(spell).join(' ')
 
 const header = (name, description) =>
-  `# ${name}\n# Unicode ${unicodeVersion}, vendored from ucd-full@${unicodeVersion}.\n# ${description}\n# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor\n`
+  `# ${name}\n# Unicode ${unicodeVersion}, vendored from ucd-full@${unicodeVersion}.\n# ${description}\n# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor\n`
 
 /**
  * Canonical combining class, canonical decomposition, and simple case mappings, one line per code

@@ -1,5 +1,5 @@
-import type * as CompilerDocBlock from '@silk-effect/compiler/DocBlock'
-import type * as SourceFile from '@silk-effect/compiler/SourceFile'
+import type * as CompilerDocBlock from '@silk-lang/compiler/DocBlock'
+import type * as SourceFile from '@silk-lang/compiler/SourceFile'
 import * as Result from 'effect/Result'
 import type {
   BlockContent,

@@ -5,10 +5,10 @@ runs straight from this repository.
 
 Two parts:
 
-- **Grammar and language configuration** are generated from `@silk-effect/language` (the single
-  source of truth) by `pnpm --filter @silk-effect/language sync:vscode`; a test in that package
+- **Grammar and language configuration** are generated from `@silk-lang/language` (the single
+  source of truth) by `pnpm --filter @silk-lang/language sync:vscode`; a test in that package
   fails when the generated files drift.
-- **Language server**: `src/extension.ts` owns the `@silk-effect/lsp` child process and gives its
+- **Language server**: `src/extension.ts` owns the `@silk-lang/lsp` child process and gives its
   detached stdio transport to `vscode-languageclient`. Diagnostics, hover types, go to definition,
   document symbols, formatting (including `editor.formatOnSave`), and dynamic project file watchers
   all come from the server. The stable editor session gates diagnostics by client generation and
@@ -56,14 +56,14 @@ Then reload the editor (`Developer: Reload Window`) and open a `.silk` file. The
 `~/.cursor/extensions/silk-effect.silk-language-0.0.0` (or `~/.vscode/extensions/...`) and always
 points at the checkout where you ran the command — re-run it after switching git worktrees.
 
-The extension resolves `@silk-effect/lsp` through the workspace `node_modules`, so the checkout
+The extension resolves `@silk-lang/lsp` through the workspace `node_modules`, so the checkout
 must stay installed and built.
 
 ## Extension Development Host
 
 To iterate on the extension or LSP without touching the global extensions directory, launch
 **Silk: Extension Development Host** from the Run and Debug view (F5). That opens a guest window
-with `--extensionDevelopmentPath` set to this package; a pre-launch task builds `@silk-effect/lsp`
+with `--extensionDevelopmentPath` set to this package; a pre-launch task builds `@silk-lang/lsp`
 and `silk-language` first.
 
 Optional watch tasks (**Silk: Watch language server**, **Silk: Watch extension**) rebuild on save
@@ -102,7 +102,7 @@ not hold.
 | Change | Action |
 | --- | --- |
 | Retargeted install, grammar (`sync:vscode`), or `extension.ts` / `package.json` contributions | **Developer: Reload Window** (main Cursor or the EDH guest) |
-| Rebuilt `@silk-effect/lsp` only, same extension path | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
+| Rebuilt `@silk-lang/lsp` only, same extension path | **Silk: Restart Language Server** — retires the current client and starts a fresh server from the new `dist` without a window reload |
 
 **Silk: Restart Language Server** also recovers when the old server is unresponsive. The stable
 editor session gives protocol cleanup one bounded retirement window, forcibly terminates a process

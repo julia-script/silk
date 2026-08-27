@@ -10,7 +10,7 @@
  * than replacing it.
  */
 
-import { viewIds } from '@silk-effect/inspector/Registry'
+import { viewIds } from '@silk-lang/inspector/Registry'
 import * as Schema from 'effect/Schema'
 
 /** A pane's slot in the seeded two-row grid. */

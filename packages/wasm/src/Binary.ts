@@ -35,8 +35,8 @@ import type { WasmError } from './WasmError.js'
  *
  * ```ts
  * import * as Effect from 'effect/Effect'
- * import * as Binary from '@silk-effect/wasm/Binary'
- * import * as Builder from '@silk-effect/wasm/Builder'
+ * import * as Binary from '@silk-lang/wasm/Binary'
+ * import * as Builder from '@silk-lang/wasm/Builder'
  *
  * const bytes = Effect.gen(function* () {
  *   const builder = yield* Builder.make()

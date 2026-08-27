@@ -113,7 +113,7 @@ export const none: DIFlags = Object.freeze({ bits: 0 })
  * **Example** (Packing debug flags)
  *
  * ```ts
- * import * as DIFlags from '@silk-effect/llvm/DIFlags'
+ * import * as DIFlags from '@silk-lang/llvm/DIFlags'
  *
  * const flags = DIFlags.make({ visibility: 'public', prototyped: true })
  * // DIFlags.render(flags) === 'DIFlagPublic | DIFlagPrototyped'

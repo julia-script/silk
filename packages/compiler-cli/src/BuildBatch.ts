@@ -1,5 +1,5 @@
-import * as BackendRegistry from '@silk-effect/compiler/BackendRegistry'
-import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
+import * as BackendRegistry from '@silk-lang/compiler/BackendRegistry'
+import type * as ToolchainPlan from '@silk-lang/compiler/ToolchainPlan'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 import * as BuildPlan from './BuildPlan.js'

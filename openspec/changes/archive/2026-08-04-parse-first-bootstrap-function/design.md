@@ -1,6 +1,6 @@
 ## Context
 
-`@silk-effect/compiler` currently ends at an immutable `Lexer.LexicalResult`: exact source bytes,
+`@silk-lang/compiler` currently ends at an immutable `Lexer.LexicalResult`: exact source bytes,
 owner-qualified spans, explicit trivia and invalid tokens, stable lexical diagnostics, and one EOF
 token. The docs app is a Next.js/Fumadocs application whose `/docs` layout can also host direct
 Next routes that are not part of the content tree. See `proposal.md` for motivation and the two
@@ -115,7 +115,7 @@ encodes that text as UTF-8 under one stable demo source identity, invokes `Sourc
 - lexical and parser diagnostic lists.
 
 Recomputation is synchronous and local on each edit. The page does not call an API route, local
-storage, filesystem, or compiler service. `@silk-effect/compiler` becomes a workspace runtime
+storage, filesystem, or compiler service. `@silk-lang/compiler` becomes a workspace runtime
 dependency of the docs app because its code participates in the client bundle.
 
 An MDX content page was rejected because it would enter the content/search tree and need custom

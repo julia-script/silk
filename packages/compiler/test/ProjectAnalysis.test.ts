@@ -54,7 +54,7 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     const project = yield* make()
     const left = ProjectAnalysis.view(project, 'app/A')
     const right = ProjectAnalysis.view(project, 'app/B')
-    const predictableCatalogSymbol = Symbol.for('@silk-effect/compiler/OpaqueRealizationCatalog')
+    const predictableCatalogSymbol = Symbol.for('@silk-lang/compiler/OpaqueRealizationCatalog')
     assert.strictEqual(predictableCatalogSymbol in project, false)
     assert.notInclude(Object.getOwnPropertySymbols(project), predictableCatalogSymbol)
     assert.strictEqual(left === undefined ? false : predictableCatalogSymbol in left, false)

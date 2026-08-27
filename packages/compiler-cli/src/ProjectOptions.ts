@@ -1,5 +1,5 @@
-import * as Target from '@silk-effect/compiler/Target'
-import type * as ToolchainPlan from '@silk-effect/compiler/ToolchainPlan'
+import * as Target from '@silk-lang/compiler/Target'
+import type * as ToolchainPlan from '@silk-lang/compiler/ToolchainPlan'
 import * as Data from 'effect/Data'
 import * as Result from 'effect/Result'
 import { Flag } from 'effect/unstable/cli'

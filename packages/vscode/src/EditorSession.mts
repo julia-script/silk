@@ -84,7 +84,7 @@ interface State {
   readonly invalidationSubscribers: Set<() => void>
 }
 
-const TypeId: unique symbol = Symbol.for('@silk-effect/vscode/EditorSession')
+const TypeId: unique symbol = Symbol.for('@silk-lang/vscode/EditorSession')
 
 export interface EditorSession {
   readonly [TypeId]: State

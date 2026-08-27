@@ -1,4 +1,4 @@
-import type * as FuncActor from '@silk-effect/wasm/Func'
+import type * as FuncActor from '@silk-lang/wasm/Func'
 import type * as Backend from './Backend.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'

@@ -1,4 +1,4 @@
-import type * as Project from '@silk-effect/documentation/Project'
+import type * as Project from '@silk-lang/documentation/Project'
 import * as Effect from 'effect/Effect'
 import * as Stdlib from '../../src/Stdlib.js'
 

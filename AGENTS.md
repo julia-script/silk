@@ -104,7 +104,7 @@ public actor, add its explicit package subpath export and prefer the deep import
 
 ```ts
 import * as Effect from 'effect/Effect'
-import * as Target from '@silk-effect/llvm/Target'
+import * as Target from '@silk-lang/llvm/Target'
 ```
 
 Avoid a growing destructured import from the package barrel.

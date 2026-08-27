@@ -101,10 +101,10 @@ No second conformance review was run.
 - After the consolidated pass, `LocalSharedPressure.test.ts` passed **14/14** in 35.21s; the
   storage-policy migration suite passed **147/147**; and the native differential corpus, including
   four renamed-policy executions, passed **1/1** in 139.87s.
-- `pnpm --filter @silk-effect/compiler documentation:policy` — **PASS**, 46 modules and no
+- `pnpm --filter @silk-lang/compiler documentation:policy` — **PASS**, 46 modules and no
   violations.
-- `pnpm --filter @silk-effect/compiler documentation:check` — **PASS**.
-- `pnpm --filter @silk-effect/compiler documentation:examples` — **PASS**, 54 of 54 doctests after
+- `pnpm --filter @silk-lang/compiler documentation:check` — **PASS**.
+- `pnpm --filter @silk-lang/compiler documentation:examples` — **PASS**, 54 of 54 doctests after
   building the doctest package.
 
 ## Hard gates
@@ -158,7 +158,7 @@ test and no timeout was raised.
 
 - Focused `LocalSharedPressure.test.ts`: **PASS**, 18/18 tests in 40.12s. The four actor-neutral
   cases completed in 4.313s, 5.696s, 3.281s, and 4.147s.
-- Exact full compiler context, `pnpm --filter @silk-effect/compiler test:parallel`: **PASS**, 220
+- Exact full compiler context, `pnpm --filter @silk-lang/compiler test:parallel`: **PASS**, 220
   files and 2,150 tests in 201.36s.
 
 This is gate-resume root-cause fix 1/3. No further repair was needed.

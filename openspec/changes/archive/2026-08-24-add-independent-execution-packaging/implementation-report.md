@@ -17,7 +17,7 @@ Dormant-to-Eligible runtime policy.
 The bounded resume first established this deterministic red loop:
 
 ```text
-pnpm --filter @silk-effect/compiler exec vitest run \
+pnpm --filter @silk-lang/compiler exec vitest run \
   test/EffectJoin.test.ts \
   -t 'preserves the selected alternative capture shape' \
   --reporter=dot
@@ -79,7 +79,7 @@ pass for verified Critical/High lens findings.
 After the conformance fix, the focused command passed six files and 59 tests:
 
 ```text
-pnpm --filter @silk-effect/compiler exec vitest run \
+pnpm --filter @silk-lang/compiler exec vitest run \
   test/ExecutionPackage.test.ts \
   test/EffectSuspensionWasm.test.ts \
   test/IntrinsicCatalog.test.ts \

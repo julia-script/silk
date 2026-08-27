@@ -1,9 +1,9 @@
 ---
-'@silk-effect/compiler': minor
-'@silk-effect/documentation': minor
-'@silk-effect/formatter': minor
-'@silk-effect/compiler-cli': minor
-'@silk-effect/lsp': minor
+'@silk-lang/compiler': minor
+'@silk-lang/documentation': minor
+'@silk-lang/formatter': minor
+'@silk-lang/compiler-cli': minor
+'@silk-lang/lsp': minor
 ---
 
 Format active fenced Silk modules inside source-owned documentation through one canonical formatter

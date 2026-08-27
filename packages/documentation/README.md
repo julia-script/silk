@@ -1,4 +1,4 @@
-# `@silk-effect/documentation`
+# `@silk-lang/documentation`
 
 Lazy documentation tooling for Silk Effect. The compiler retains raw attached comment blocks; this
 optional package interprets them as CommonMark only when hover, highlighting, or documentation

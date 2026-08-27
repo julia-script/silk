@@ -22,7 +22,7 @@ import {
   vectorFailedGrowthSource,
   vectorGrowthSource,
 } from './owned-sequence-presets'
-import type { BootstrapEvaluation } from '@silk-effect/compiler'
+import type { BootstrapEvaluation } from '@silk-lang/compiler'
 
 export interface Preset {
   readonly label: string

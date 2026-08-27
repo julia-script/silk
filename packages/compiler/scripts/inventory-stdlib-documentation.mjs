@@ -1,7 +1,7 @@
 // Writes the source-located standard-library documentation inventory used by documentation passes.
 //
 // Run after building the compiler and documentation packages:
-//   pnpm --filter @silk-effect/compiler documentation:inventory
+//   pnpm --filter @silk-lang/compiler documentation:inventory
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'

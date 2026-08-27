@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/documentation",
+  "name": "@silk-lang/documentation",
   "version": "0.0.0",
   "description": "Lazy, formatter-neutral documentation tooling for Silk Effect source.",
   "license": "MIT",
@@ -61,7 +61,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },
   "dependencies": {
-    "@silk-effect/compiler": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
     "effect": "catalog:",
     "mdast-util-from-markdown": "^2.0.3"
   },

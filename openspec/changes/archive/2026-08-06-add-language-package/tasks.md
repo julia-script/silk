@@ -2,7 +2,7 @@
 
 ## 1. Package scaffolding
 
-- [x] 1.1 Create `packages/language` (`@silk-effect/language`): package.json with subpath exports
+- [x] 1.1 Create `packages/language` (`@silk-lang/language`): package.json with subpath exports
       for `./CodeMirror` and `./TextMate`; tsconfig pair matching sibling packages; CodeMirror
       packages as peer + dev dependencies; wire into pnpm workspace and turbo.
 - [x] 1.2 Verify `pnpm build` and `pnpm check` pass with the empty package in the graph.
@@ -52,4 +52,4 @@
 ## 6. Finish
 
 - [x] 6.1 Run `pnpm build`, `pnpm check`, and the full test suite; fix fallout.
-- [x] 6.2 Update root README package list with `@silk-effect/language`.
+- [x] 6.2 Update root README package list with `@silk-lang/language`.

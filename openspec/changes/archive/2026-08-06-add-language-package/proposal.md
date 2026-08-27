@@ -1,4 +1,4 @@
-# Add `@silk-effect/language` package
+# Add `@silk-lang/language` package
 
 ## Why
 
@@ -9,9 +9,9 @@ highlighting can be derived from the real token stream instead of a duplicated g
 
 ## What Changes
 
-- New workspace package `@silk-effect/language` (`packages/language`) providing:
+- New workspace package `@silk-lang/language` (`packages/language`) providing:
   - A lexer-driven CodeMirror 6 extension that highlights Silk by running the compiler's bootstrap
-    lexer (`@silk-effect/compiler/Lexer`) and mapping `TokenKind` to highlight styles. No Lezer
+    lexer (`@silk-lang/compiler/Lexer`) and mapping `TokenKind` to highlight styles. No Lezer
     grammar; the compiler lexer is the single source of truth.
   - A Silk TextMate grammar (`silk.tmLanguage.json`) plus a language configuration (brackets,
     comments, auto-closing pairs), exported for consumption by Shiki and by editors.
@@ -48,8 +48,8 @@ None — the compiler's specs are unchanged; this change only consumes the exist
 
 - New packages: `packages/language` (publishable later, consumed via `workspace:*` for now) and
   `packages/vscode` (private).
-- `apps/docs`: new dependency on `@silk-effect/language` and CodeMirror packages; workbench source
+- `apps/docs`: new dependency on `@silk-lang/language` and CodeMirror packages; workbench source
   pane and MDX/Shiki configuration change.
 - New third-party dependencies: `@codemirror/state`, `@codemirror/view`, `@codemirror/language`,
   `@lezer/highlight` (style tags only).
-- `@silk-effect/compiler` is unchanged but gains a new consumer of `Lexer` and `Token`.
+- `@silk-lang/compiler` is unchanged but gains a new consumer of `Lexer` and `Token`.

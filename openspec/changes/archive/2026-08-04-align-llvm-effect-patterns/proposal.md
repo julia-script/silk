@@ -1,6 +1,6 @@
 ## Why
 
-`@silk-effect/llvm` is architecturally Effect-native, but several public and internal paths still bypass the intended typed failure, lifecycle, composition, and authoring conventions. The repository guidance also reflects an older version of the Effect patterns policy, so the implementation and its documented standard should be aligned before the package API stabilizes.
+`@silk-lang/llvm` is architecturally Effect-native, but several public and internal paths still bypass the intended typed failure, lifecycle, composition, and authoring conventions. The repository guidance also reflects an older version of the Effect patterns policy, so the implementation and its documented standard should be aligned before the package API stabilizes.
 
 ## What Changes
 
@@ -28,7 +28,7 @@ None. This repository does not yet contain main OpenSpec capability specificatio
 
 ## Impact
 
-- Public API: `@silk-effect/llvm/SilkError` and `SilkError` are replaced by `@silk-effect/llvm/LlvmError` and `LlvmError`; immutable transformation functions gain pipeable overloads.
+- Public API: `@silk-lang/llvm/SilkError` and `SilkError` are replaced by `@silk-lang/llvm/LlvmError` and `LlvmError`; immutable transformation functions gain pipeable overloads.
 - Implementation: builder and function-body state transitions, numeric normalization, bitcode encoding helpers, intrinsic recipes, and internal instruction types are affected.
 - Tests and tooling: `@effect/vitest` is added for package tests; the shared `ManagedRuntime` test harnesses are removed.
 - Documentation and release: actor references, examples, package exports, changelog/changeset metadata, repository conventions, and release-candidate validation must reflect the new contract.

@@ -6,14 +6,14 @@ between a global value and its pointer.
 
 ```typescript
 import * as Effect from 'effect/Effect'
-import * as Alias from '@silk-effect/llvm/Alias'
-import * as Attribute from '@silk-effect/llvm/Attribute'
-import * as Builder from '@silk-effect/llvm/Builder'
-import * as Constant from '@silk-effect/llvm/Constant'
-import * as FunctionActor from '@silk-effect/llvm/Function'
-import * as IrText from '@silk-effect/llvm/IrText'
-import * as Type from '@silk-effect/llvm/Type'
-import * as Variable from '@silk-effect/llvm/Variable'
+import * as Alias from '@silk-lang/llvm/Alias'
+import * as Attribute from '@silk-lang/llvm/Attribute'
+import * as Builder from '@silk-lang/llvm/Builder'
+import * as Constant from '@silk-lang/llvm/Constant'
+import * as FunctionActor from '@silk-lang/llvm/Function'
+import * as IrText from '@silk-lang/llvm/IrText'
+import * as Type from '@silk-lang/llvm/Type'
+import * as Variable from '@silk-lang/llvm/Variable'
 
 const program = Effect.gen(function* () {
   const builder = yield* Builder.make({ sourceFilename: 'declarations.ll' })

@@ -11,7 +11,7 @@
  * what the reader sees is exactly what doctest verified.
  */
 
-import * as Analysis from '@silk-effect/compiler/Analysis'
+import * as Analysis from '@silk-lang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import * as Editor from './Editor.js'
 

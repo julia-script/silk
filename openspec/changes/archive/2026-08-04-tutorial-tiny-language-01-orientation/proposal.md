@@ -7,7 +7,7 @@ The existing LLVM tutorial begins at lowering, so a compiler-curious learner doe
 - Add the opening lesson for the Tiny compiled-language tutorial.
 - Preview the final `abs`/`score`/`main` program, its major intermediate artifacts, and exit code `20`.
 - Introduce the source → tokens → AST → LLVM IR → Clang → executable pipeline.
-- Define the responsibility split between the Tiny frontend, `@silk-effect/llvm`, and Clang.
+- Define the responsibility split between the Tiny frontend, `@silk-lang/llvm`, and Clang.
 - Provide a static pipeline diagram and an artifact-matching checkpoint that do not depend on the playground.
 
 ## Capabilities

@@ -9,10 +9,10 @@
  * variables in workbench.module.css.
  */
 
-import * as Analysis from '@silk-effect/compiler/Analysis'
-import * as SnippetEditor from '@silk-effect/snippet/Editor'
+import * as Analysis from '@silk-lang/compiler/Analysis'
+import * as SnippetEditor from '@silk-lang/snippet/Editor'
 import { type MutableRefObject, useEffect, useRef } from 'react'
-import type { Span } from '@silk-effect/inspector'
+import type { Span } from '@silk-lang/inspector'
 
 const encoder = new TextEncoder()
 

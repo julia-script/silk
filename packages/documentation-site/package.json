@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/documentation-site",
+  "name": "@silk-lang/documentation-site",
   "version": "0.0.0",
   "private": true,
   "description": "Renders a static HTML documentation site and a static search index from Silk Effect documentation JSON.",
@@ -59,13 +59,13 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.103",
-    "@silk-effect/snippet": "workspace:*",
+    "@silk-lang/snippet": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/documentation": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/documentation": "workspace:*",
     "@types/node": "^24.10.1"
   }
 }

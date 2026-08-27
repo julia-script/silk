@@ -1,4 +1,4 @@
-# `@silk-effect/wasm`
+# `@silk-lang/wasm`
 
 Effect-native WebAssembly module construction with deterministic text and binary emission.
 
@@ -9,14 +9,14 @@ produced.
 
 ```typescript
 import * as Effect from 'effect/Effect'
-import * as Binary from '@silk-effect/wasm/Binary'
-import * as Builder from '@silk-effect/wasm/Builder'
-import * as Export from '@silk-effect/wasm/Export'
-import * as Func from '@silk-effect/wasm/Func'
-import * as Instr from '@silk-effect/wasm/Instr'
-import * as Type from '@silk-effect/wasm/Type'
-import * as ValType from '@silk-effect/wasm/ValType'
-import * as WatText from '@silk-effect/wasm/WatText'
+import * as Binary from '@silk-lang/wasm/Binary'
+import * as Builder from '@silk-lang/wasm/Builder'
+import * as Export from '@silk-lang/wasm/Export'
+import * as Func from '@silk-lang/wasm/Func'
+import * as Instr from '@silk-lang/wasm/Instr'
+import * as Type from '@silk-lang/wasm/Type'
+import * as ValType from '@silk-lang/wasm/ValType'
+import * as WatText from '@silk-lang/wasm/WatText'
 
 const program = Effect.gen(function* () {
   const builder = yield* Builder.make({ moduleName: 'demo' })
@@ -54,8 +54,8 @@ An `Instr` is a frozen plain value built without the builder. Bodies compose wit
 logic, structured control flow nests as data, and entity references are opaque handles:
 
 ```typescript
-import * as Instr from '@silk-effect/wasm/Instr'
-import * as ValType from '@silk-effect/wasm/ValType'
+import * as Instr from '@silk-lang/wasm/Instr'
+import * as ValType from '@silk-lang/wasm/ValType'
 
 const clamp = [
   Instr.localGet(0),
@@ -104,8 +104,8 @@ layers.
 ## Development verification
 
 ```sh
-pnpm --filter @silk-effect/wasm test
-pnpm --filter @silk-effect/wasm parity:oracle
+pnpm --filter @silk-lang/wasm test
+pnpm --filter @silk-lang/wasm parity:oracle
 ```
 
 Fixture generation and oracle checks use the pinned `wasm-tools`, but runtime APIs never invoke

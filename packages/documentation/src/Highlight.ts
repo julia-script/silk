@@ -1,7 +1,7 @@
-import * as Lexer from '@silk-effect/compiler/Lexer'
-import * as Scalar from '@silk-effect/compiler/Scalar'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import type * as Token from '@silk-effect/compiler/Token'
+import * as Lexer from '@silk-lang/compiler/Lexer'
+import * as Scalar from '@silk-lang/compiler/Scalar'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
+import type * as Token from '@silk-lang/compiler/Token'
 
 export interface Range {
   readonly from: number

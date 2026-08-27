@@ -1,4 +1,4 @@
-# @silk-effect/inspector
+# @silk-lang/inspector
 
 Compiler-phase view projections for Silk inspectors.
 

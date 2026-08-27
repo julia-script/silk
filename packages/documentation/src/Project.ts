@@ -1,9 +1,9 @@
-import * as Analysis from '@silk-effect/compiler/Analysis'
-import type * as DeclarationFacts from '@silk-effect/compiler/DeclarationFacts'
-import * as Presentation from '@silk-effect/compiler/Presentation'
-import * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
-import type * as SourceFile from '@silk-effect/compiler/SourceFile'
-import type * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
+import * as Analysis from '@silk-lang/compiler/Analysis'
+import type * as DeclarationFacts from '@silk-lang/compiler/DeclarationFacts'
+import * as Presentation from '@silk-lang/compiler/Presentation'
+import * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
+import type * as SourceFile from '@silk-lang/compiler/SourceFile'
+import type * as SyntaxTree from '@silk-lang/compiler/SyntaxTree'
 import * as Document from './Document.js'
 
 export type ItemKind =

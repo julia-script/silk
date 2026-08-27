@@ -1,7 +1,7 @@
 # GraphemeBreakProperty.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Fields: code point range; Grapheme_Cluster_Break value.
-# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
 0600..0605; Prepend
 06DD; Prepend
 070F; Prepend

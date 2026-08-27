@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/wasm",
+  "name": "@silk-lang/wasm",
   "version": "0.0.0",
   "description": "Effect-native WebAssembly module construction with deterministic text and binary emission.",
   "license": "MIT",

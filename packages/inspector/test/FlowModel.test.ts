@@ -1,5 +1,5 @@
-import type { Elaboration } from '@silk-effect/compiler'
-import { Analysis } from '@silk-effect/compiler'
+import type { Elaboration } from '@silk-lang/compiler'
+import { Analysis } from '@silk-lang/compiler'
 import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
 import { projectDataFlow } from '../src/FlowModel.js'

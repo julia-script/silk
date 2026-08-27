@@ -28,7 +28,7 @@ The opening page will contain the confirmed Tiny program, output contract, time 
 
 ### Show one tool-ownership pipeline diagram plus text equivalent
 
-The diagram will distinguish Tiny, `@silk-effect/llvm`, Clang, and the operating system. A purely chronological list would not make ownership boundaries as clear.
+The diagram will distinguish Tiny, `@silk-lang/llvm`, Clang, and the operating system. A purely chronological list would not make ownership boundaries as clear.
 
 ### Keep the playground strictly optional
 

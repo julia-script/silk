@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
-import * as SourceResolver from '@silk-effect/compiler/SourceResolver'
+import * as SourceResolver from '@silk-lang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'

@@ -6,9 +6,9 @@
  * has to say. It also makes each phase testable without rendering anything.
  */
 
-import type { Elaboration, Hir, SyntaxFile } from '@silk-effect/compiler'
-import { Diagnostic, Match, SyntaxTree } from '@silk-effect/compiler'
-import * as Type from '@silk-effect/compiler/Type'
+import type { Elaboration, Hir, SyntaxFile } from '@silk-lang/compiler'
+import { Diagnostic, Match, SyntaxTree } from '@silk-lang/compiler'
+import * as Type from '@silk-lang/compiler/Type'
 import type { FlowModel } from './FlowModel.js'
 import type { RowModel, RowTone, Span } from './Row.js'
 import { spanOf as asSpan } from './Row.js'

@@ -2,7 +2,7 @@ import * as Result from 'effect/Result'
 import { invalidState, type WasmError } from '../WasmError.js'
 import type * as OwnedHandle from './OwnedHandle.js'
 
-const HandleTypeId: unique symbol = Symbol.for('@silk-effect/wasm/internal/Handle')
+const HandleTypeId: unique symbol = Symbol.for('@silk-lang/wasm/internal/Handle')
 
 export interface Handle<Tag extends string> {
   readonly _tag: Tag

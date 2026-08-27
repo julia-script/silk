@@ -8,7 +8,7 @@ Each code is stable: it identifies one condition and never changes meaning betwe
 The prefix names the compiler phase that reports it. Regenerate this page with:
 
 ```console
-$ pnpm --filter @silk-effect/compiler documentation:generate
+$ pnpm --filter @silk-lang/compiler documentation:generate
 ```
 
 | Prefix | Phase | Codes |

@@ -32,7 +32,7 @@ an AST, HIR, or generalized analysis framework.
 
 ## Impact
 
-- Adds a narrow semantic-analysis boundary and public actor namespaces to `@silk-effect/compiler`.
+- Adds a narrow semantic-analysis boundary and public actor namespaces to `@silk-lang/compiler`.
 - Adds focused valid and malformed semantic fixtures and packed-export validation.
 - Updates the existing docs lab client bundle and presentation without adding persistence, network
   requests, or runtime dependencies.

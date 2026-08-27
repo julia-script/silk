@@ -75,7 +75,7 @@ rebuilding the language-server binary when the extension path is already correct
 
 #### Scenario: Contributor updates only the language server
 
-- **WHEN** a contributor rebuilds `@silk-effect/lsp` while the extension is already loaded from
+- **WHEN** a contributor rebuilds `@silk-lang/lsp` while the extension is already loaded from
   the correct checkout
 - **THEN** documentation tells them to run `Silk: Restart Language Server` rather than
   reinstalling the symlink

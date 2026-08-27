@@ -5,12 +5,12 @@ import type { DecorationSet } from '@codemirror/view'
 import { Decoration, EditorView } from '@codemirror/view'
 import type { Tag } from '@lezer/highlight'
 import { tags } from '@lezer/highlight'
-import * as Lexer from '@silk-effect/compiler/Lexer'
-import * as Parser from '@silk-effect/compiler/Parser'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
-import * as SyntaxTree from '@silk-effect/compiler/SyntaxTree'
-import type * as Token from '@silk-effect/compiler/Token'
-import * as DocumentationHighlight from '@silk-effect/documentation/Highlight'
+import * as Lexer from '@silk-lang/compiler/Lexer'
+import * as Parser from '@silk-lang/compiler/Parser'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
+import * as SyntaxTree from '@silk-lang/compiler/SyntaxTree'
+import type * as Token from '@silk-lang/compiler/Token'
+import * as DocumentationHighlight from '@silk-lang/documentation/Highlight'
 
 /** A style bucket: the stable class suffix and the highlight tags themes color it with. */
 interface Category {

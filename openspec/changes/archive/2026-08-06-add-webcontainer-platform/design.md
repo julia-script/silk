@@ -30,7 +30,7 @@ See `proposal.md` for motivation and the four delta specs for behavioral require
 
 ### 1. Publish a platform package with concept-oriented public actors
 
-Create `packages/platform-webcontainer` as `@silk-effect/platform-webcontainer` with these public modules:
+Create `packages/platform-webcontainer` as `@silk-lang/platform-webcontainer` with these public modules:
 
 ```text
 src/
@@ -42,7 +42,7 @@ src/
 └── index.ts
 ```
 
-`index.ts` re-exports actors as namespaces, while `package.json` exposes each actor as an explicit subpath. Consumers should normally use deep public imports such as `@silk-effect/platform-webcontainer/WebContainer`.
+`index.ts` re-exports actors as namespaces, while `package.json` exposes each actor as an explicit subpath. Consumers should normally use deep public imports such as `@silk-lang/platform-webcontainer/WebContainer`.
 
 `WebContainer.ts` is the sole owner of runtime-value imports from `@webcontainer/api`. It defines the capability-bearing service, its live scoped layer, and the thin adapters around raw boot, mount, export, filesystem, process, preview, and subscription calls. The sibling actor modules define safe package values and transformations; they do not call the external API directly. Type-only re-exports needed for inputs such as filesystem trees are allowed, but raw instances are never service fields or public results.
 

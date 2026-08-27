@@ -1,4 +1,4 @@
-# `@silk-effect/doctest`
+# `@silk-lang/doctest`
 
 Compiles the fenced Silk examples carried by Silk Effect documentation JSON, and reports each
 failure with the file and the line the example was written on.

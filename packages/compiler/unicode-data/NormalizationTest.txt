@@ -1,7 +1,7 @@
 # NormalizationTest.txt
 # Unicode 17.0.0, vendored from ucd-full@17.0.0.
 # Conformance data. Fields: source; NFC; NFD; NFKC; NFKD. @PartN lines mark the official sections.
-# Regenerate with: pnpm --filter @silk-effect/compiler unicode:vendor
+# Regenerate with: pnpm --filter @silk-lang/compiler unicode:vendor
 @Part0
 1E0A;1E0A;0044 0307;1E0A;0044 0307
 1E0C;1E0C;0044 0323;1E0C;0044 0323

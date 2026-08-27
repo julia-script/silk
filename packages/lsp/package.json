@@ -1,5 +1,5 @@
 {
-  "name": "@silk-effect/lsp",
+  "name": "@silk-lang/lsp",
   "version": "0.0.0",
   "description": "Language Server Protocol server for Silk Effect, powered by the bootstrap compiler analysis snapshot.",
   "license": "MIT",
@@ -68,11 +68,11 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.103",
-    "@silk-effect/compiler": "workspace:*",
-    "@silk-effect/compiler-cli": "workspace:*",
-    "@silk-effect/documentation": "workspace:*",
-    "@silk-effect/formatter": "workspace:*",
-    "@silk-effect/inspector": "workspace:*",
+    "@silk-lang/compiler": "workspace:*",
+    "@silk-lang/compiler-cli": "workspace:*",
+    "@silk-lang/documentation": "workspace:*",
+    "@silk-lang/formatter": "workspace:*",
+    "@silk-lang/inspector": "workspace:*",
     "effect": "catalog:",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
@@ -80,7 +80,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@silk-effect/language": "workspace:*",
+    "@silk-lang/language": "workspace:*",
     "@types/node": "^24.10.1"
   }
 }

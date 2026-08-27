@@ -1,5 +1,5 @@
 ---
-'@silk-effect/compiler-cli': minor
+'@silk-lang/compiler-cli': minor
 ---
 
 Add the `silk` command line interface built on Effect's CLI primitives. `silk compile` runs the

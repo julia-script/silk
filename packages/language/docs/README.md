@@ -1,4 +1,4 @@
-# `@silk-effect/language` documentation
+# `@silk-lang/language` documentation
 
 ## The Silk language
 
@@ -12,20 +12,20 @@
   source doc comments.
 - **[Diagnostic index](./diagnostics.md)** — every compiler error code and what it means.
 
-The last two pages are generated. Regenerate them with `pnpm --filter @silk-effect/compiler
-documentation:generate`; `pnpm --filter @silk-effect/compiler test` fails while either page is
+The last two pages are generated. Regenerate them with `pnpm --filter @silk-lang/compiler
+documentation:generate`; `pnpm --filter @silk-lang/compiler test` fails while either page is
 stale, so a new stdlib module or diagnostic code cannot land without its page.
 
 ## This package
 
-`@silk-effect/language` provides editor support for Silk: a CodeMirror 6 extension whose
+`@silk-lang/language` provides editor support for Silk: a CodeMirror 6 extension whose
 highlighting is driven by the compiler's own bootstrap lexer, and the Silk TextMate grammar used by
 Shiki and VS Code-compatible editors.
 
 ## Highlighting from the real lexer
 
 The CodeMirror extension does not carry a grammar of its own. It lexes the document with
-`@silk-effect/compiler/Lexer` and maps each token kind to a highlight style, so what the editor
+`@silk-lang/compiler/Lexer` and maps each token kind to a highlight style, so what the editor
 colors is exactly what the compiler sees — including invalid bytes:
 
 ```silk

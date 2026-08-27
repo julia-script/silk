@@ -1,5 +1,5 @@
 import { assert, it } from '@effect/vitest'
-import * as SourceFile from '@silk-effect/compiler/SourceFile'
+import * as SourceFile from '@silk-lang/compiler/SourceFile'
 import * as Result from 'effect/Result'
 import * as BuildBatch from '../src/BuildBatch.js'
 import type * as Project from '../src/Project.js'

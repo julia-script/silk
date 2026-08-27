@@ -1,7 +1,7 @@
 ## 1. Repository Policy and Effect-Native Tests
 
 - [x] 1.1 Update `AGENTS.md` so the current Effect patterns skill governs error semantics, internal/public function authoring, scoped lifecycles, dual APIs, and `@effect/vitest`; remove the superseded `ManagedRuntime` and generic `SilkError` rules.
-- [x] 1.2 Add the compatible `@effect/vitest` development dependency to `@silk-effect/llvm` and update the workspace lockfile.
+- [x] 1.2 Add the compatible `@effect/vitest` development dependency to `@silk-lang/llvm` and update the workspace lockfile.
 - [x] 1.3 Convert pure byte-string and bitstream cases to ordinary `@effect/vitest` tests with `assert`, without manufacturing Effects solely to run assertions.
 - [x] 1.4 Convert all Effect-returning package tests to `it.effect`, use `it.layer` only for genuinely shared service graphs, replace `expect` with `assert`, and remove every test `ManagedRuntime`.
 - [x] 1.5 Run `pnpm typecheck`, `pnpm exec biome check .`, and `pnpm test`; resolve all hygiene-tier failures before proceeding.

@@ -1,4 +1,4 @@
-# @silk-effect/llvm
+# @silk-lang/llvm
 
 ## Unreleased
 

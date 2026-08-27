@@ -1,5 +1,5 @@
 ---
-'@silk-effect/lsp': minor
+'@silk-lang/lsp': minor
 ---
 
 Add the Silk Effect language server: a stdio LSP binary serving whole-phase diagnostics, expression

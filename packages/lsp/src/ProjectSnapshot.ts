@@ -1,5 +1,5 @@
-import type * as ProjectAnalysis from '@silk-effect/compiler/ProjectAnalysis'
-import type * as WorkspaceInventory from '@silk-effect/compiler/WorkspaceInventory'
+import type * as ProjectAnalysis from '@silk-lang/compiler/ProjectAnalysis'
+import type * as WorkspaceInventory from '@silk-lang/compiler/WorkspaceInventory'
 import type * as Document from './Document.js'
 
 /** One document projection owned by a complete immutable project commit. */

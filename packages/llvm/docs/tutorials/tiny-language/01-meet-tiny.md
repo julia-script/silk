@@ -72,7 +72,7 @@ flowchart LR
   tokens --> parser["Tiny frontend: parser"]
   parser --> ast["Abstract syntax tree"]
   ast --> lowering["Tiny frontend: resolution and lowering"]
-  lowering --> builder["@silk-effect/llvm: construct and validate a module"]
+  lowering --> builder["@silk-lang/llvm: construct and validate a module"]
   builder --> ir["Textual LLVM IR (.ll)"]
   ir --> clang["Clang: target compilation and linking"]
   clang --> executable["Native executable"]
@@ -86,7 +86,7 @@ In text, the same path is:
 2. The Tiny lexer groups its characters into tokens.
 3. The Tiny parser arranges those tokens into an abstract syntax tree, or AST.
 4. The Tiny compiler resolves names and lowers the AST into typed LLVM operations.
-5. `@silk-effect/llvm` constructs, validates, and renders an LLVM module as readable `.ll` text.
+5. `@silk-lang/llvm` constructs, validates, and renders an LLVM module as readable `.ll` text.
 6. Clang compiles and links that IR for the current machine.
 7. The operating system loads the native executable, runs `main`, and records status `20`.
 
@@ -138,11 +138,11 @@ these LLVM concepts carefully before you generate any IR yourself.
 | Owner | Responsibility in this tutorial |
 | --- | --- |
 | You and the Tiny frontend | Define Tiny syntax and meaning; lex, parse, resolve, and lower it. |
-| `@silk-effect/llvm` | Construct and validate the LLVM module; emit textual IR or bitcode. |
+| `@silk-lang/llvm` | Construct and validate the LLVM module; emit textual IR or bitcode. |
 | Clang | Compile the emitted IR for the host target and link a native executable. |
 | The operating system | Load the executable, run `main`, and expose its exit status. |
 
-`@silk-effect/llvm` intentionally does not read your source file, run Clang, link an executable,
+`@silk-lang/llvm` intentionally does not read your source file, run Clang, link an executable,
 or provide a JIT. Those boundaries keep the package deterministic and let the tutorial show each
 compiler stage explicitly.
 
@@ -164,7 +164,7 @@ Stages:
 - author
 - Clang
 - lexer
-- Tiny lowering with `@silk-effect/llvm`
+- Tiny lowering with `@silk-lang/llvm`
 
 <details>
 <summary>Check your answer</summary>
@@ -172,7 +172,7 @@ Stages:
 1. The author produces `.tiny` source.
 2. The lexer produces the token stream.
 3. The parser produces the AST.
-4. Tiny lowering uses `@silk-effect/llvm` to produce `.ll` LLVM IR.
+4. Tiny lowering uses `@silk-lang/llvm` to produce `.ll` LLVM IR.
 5. Clang produces native object code and the linked executable.
 6. The operating system exposes the program's exit status.
 

@@ -1,10 +1,10 @@
-import { Analysis } from '@silk-effect/compiler'
+import { Analysis } from '@silk-lang/compiler'
 import { readFileSync } from 'node:fs'
 import * as Snapshot from './snapshot'
 import { describe, expect, it } from 'vitest'
 import { presets } from './presets'
-import { viewById } from '@silk-effect/inspector'
-import type { ViewContext } from '@silk-effect/inspector'
+import { viewById } from '@silk-lang/inspector'
+import type { ViewContext } from '@silk-lang/inspector'
 
 const encoder = new TextEncoder()
 

@@ -1,4 +1,4 @@
-import type * as Backend from '@silk-effect/compiler/Backend'
+import type * as Backend from '@silk-lang/compiler/Backend'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

@@ -50,7 +50,7 @@ coverage fold, and the entry module. Node-based compiler tests load those exact 
 ordinary source resolver. The browser preset embeds the same module map because it cannot read the
 filesystem, and a preset test compares every embedded byte with the canonical fixture files.
 
-Publishing an example module from `@silk-effect/compiler` was rejected because it would expand the
+Publishing an example module from `@silk-lang/compiler` was rejected because it would expand the
 public API for test-data sharing. Allowing unrelated copies was rejected because they could drift
 into different programs.
 

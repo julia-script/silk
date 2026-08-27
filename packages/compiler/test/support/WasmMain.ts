@@ -1,4 +1,4 @@
-import * as WasmError from '@silk-effect/wasm/WasmError'
+import * as WasmError from '@silk-lang/wasm/WasmError'
 import * as Effect from 'effect/Effect'
 
 export const invoke = Effect.fnUntraced(function* (bytes: Uint8Array, operation: string) {
