@@ -102,6 +102,10 @@ pub fn main() -> i32 {
 }`
     didOpen(client, hintUri, hintText)
     await client.waitFor((message) => pulledDiagnostics(message, hintUri))
+    await client.waitFor(
+      (message) => (message.method === 'workspace/inlayHint/refresh' ? true : undefined),
+      1_000,
+    )
     client.send({
       id: 4,
       method: 'textDocument/inlayHint',

@@ -78,6 +78,34 @@ const hover = async (document) => {
   )
 }
 
+const inlayHints = async (document) => {
+  const range = new vscode.Range(
+    document.positionAt(0),
+    document.positionAt(document.getText().length),
+  )
+  await timeout(
+    (async () => {
+      while (true) {
+        const result = await vscode.commands.executeCommand(
+          'vscode.executeInlayHintProvider',
+          document.uri,
+          range,
+        )
+        const labels = Array.isArray(result)
+          ? result.flatMap((hint) =>
+              typeof hint.label === 'string'
+                ? [hint.label]
+                : hint.label.map((part) => part.value),
+            )
+          : []
+        if (labels.includes(': i32')) return
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    })(),
+    'inlay-hint readiness',
+  )
+}
+
 module.exports.run = async () => {
   const workspace = vscode.workspace.workspaceFolders?.[0]
   if (workspace === undefined) throw new Error('LSP acceptance workspace was not opened')
@@ -90,6 +118,7 @@ module.exports.run = async () => {
   const main = await vscode.workspace.openTextDocument(mainUri)
   const mainEditor = await vscode.window.showTextDocument(main)
   await hover(main)
+  await inlayHints(main)
 
   await replace(mainEditor, source('  effects'))
   await waitFor(

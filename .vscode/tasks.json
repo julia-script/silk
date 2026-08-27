@@ -61,15 +61,7 @@
         "cwd": "${workspaceFolder}"
       },
       "isBackground": true,
-      "problemMatcher": {
-        "owner": "typescript",
-        "pattern": "$tsc-watch",
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".",
-          "endsPattern": "Watching for file changes"
-        }
-      },
+      "problemMatcher": "$tsc-watch",
       "presentation": {
         "reveal": "silent",
         "panel": "dedicated"
@@ -83,15 +75,7 @@
         "cwd": "${workspaceFolder}"
       },
       "isBackground": true,
-      "problemMatcher": {
-        "owner": "typescript",
-        "pattern": "$tsc-watch",
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".",
-          "endsPattern": "Watching for file changes"
-        }
-      },
+      "problemMatcher": "$tsc-watch",
       "presentation": {
         "reveal": "silent",
         "panel": "dedicated"

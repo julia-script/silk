@@ -91,6 +91,7 @@ export const start = (options: Options = {}): void => {
   const runtime = ManagedRuntime.make(NodeServices.layer)
   let supportsDynamicWatchers = false
   let supportsDiagnosticRefresh = false
+  let supportsInlayHintRefresh = false
   let watcherRegistration: { readonly dispose: () => void } | undefined
   let shuttingDown = false
 
@@ -146,6 +147,8 @@ export const start = (options: Options = {}): void => {
           parameters.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true
         supportsDiagnosticRefresh =
           parameters.capabilities.workspace?.diagnostics?.refreshSupport === true
+        supportsInlayHintRefresh =
+          parameters.capabilities.workspace?.inlayHint?.refreshSupport === true
         return {
           capabilities: {
             positionEncoding: 'utf-16',
@@ -549,6 +552,10 @@ export const start = (options: Options = {}): void => {
             case 'Committed':
               if (supportsDiagnosticRefresh && event.refreshDiagnostics)
                 yield* Effect.sync(() => connection.languages.diagnostics.refresh())
+              if (supportsInlayHintRefresh)
+                yield* Effect.tryPromise(() => connection.languages.inlayHint.refresh()).pipe(
+                  Effect.ignore,
+                )
               for (const document of event.documents)
                 yield* Effect.tryPromise({
                   try: () =>
