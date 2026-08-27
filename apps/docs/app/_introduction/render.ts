@@ -69,11 +69,19 @@ interface State {
 }
 
 const chatCard = (children: ReadonlyArray<BlockContent>): string => {
+  // A speaker is a strong-only line; everything after it, across paragraphs and hard breaks,
+  // belongs to that speaker's message until the next speaker or the attribution line.
   const rows: Array<string> = []
+  let current: string | undefined
+  const closeCurrent = (): void => {
+    if (current !== undefined) rows.push(`${current}</div></div>`)
+    current = undefined
+  }
   for (const paragraph of children) {
     if (paragraph.type !== 'paragraph') continue
     const text = plain(paragraph.children)
     if (text.startsWith('—')) {
+      closeCurrent()
       rows.push(`<footer>${inline(paragraph.children)}</footer>`)
       continue
     }
@@ -82,19 +90,18 @@ const chatCard = (children: ReadonlyArray<BlockContent>): string => {
       if (child.type === 'break') lines.push([])
       else lines[lines.length - 1]?.push(child)
     }
-    let current: string | undefined
     for (const line of lines) {
       const first = line[0]
       if (line.length === 1 && first?.type === 'strong') {
-        if (current !== undefined) rows.push(`${current}</div></div>`)
+        closeCurrent()
         current = `<div class="msg"><div class="who">${inline(first.children)}</div><div class="said">`
       } else if (line.length > 0) {
         if (current === undefined) current = '<div class="msg"><div class="said">'
         current += `<p>${inline(line)}</p>`
       }
     }
-    if (current !== undefined) rows.push(`${current}</div></div>`)
   }
+  closeCurrent()
   return `<figure class="chat">${rows.join('')}</figure>`
 }
 
@@ -123,11 +130,14 @@ const block = (node: RootContent | BlockContent, state: State): string => {
     case 'code': {
       if (node.lang === 'silk') {
         state.silkOrdinal += 1
-        const live = compiles(node.value, state.silkOrdinal)
+        // Authored fences may keep a cosmetic blank line before the closing fence; the snippet
+        // shows and compiles the code without it.
+        const code = node.value.replace(/\s+$/, '')
+        const live = compiles(code, state.silkOrdinal)
         const badge = live
           ? '<span class="live">live · hover for types</span>'
           : '<span class="frag">fragment</span>'
-        let out = `<figure class="pane"><div class="panebar"><span class="lang">silk</span><span class="spacer"></span>${badge}</div><silk-snippet${live ? ' diagnostics hover' : ''}>\n${escapeHtml(node.value)}</silk-snippet></figure>`
+        let out = `<figure class="pane"><div class="panebar"><span class="lang">silk</span><span class="spacer"></span>${badge}</div><silk-snippet${live ? ' diagnostics hover' : ''}>\n${escapeHtml(code)}</silk-snippet></figure>`
         if (live && !state.liveNoteDone) {
           state.liveNoteDone = true
           out +=
@@ -135,7 +145,7 @@ const block = (node: RootContent | BlockContent, state: State): string => {
         }
         return out
       }
-      return `<pre class="diagram"><code>${escapeHtml(node.value)}</code></pre>`
+      return `<pre class="diagram"><code>${escapeHtml(node.value.replace(/\s+$/, ''))}</code></pre>`
     }
     case 'thematicBreak':
       return '<hr>'
