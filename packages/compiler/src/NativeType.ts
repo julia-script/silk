@@ -22,6 +22,11 @@ export const lanesFor = (
   type: Mir.Type,
 ): ReadonlyArray<Layout.CallingLane> => {
   if (type._tag === 'EffectComposite') {
+    // The registered shape overlaps alternatives into unified payload lanes; every consumer must
+    // agree with it (the wasm backend resolves it the same way in WasmLanes.laneKindsOf). The
+    // concatenating fallback below only covers composites the plan never registered.
+    const registered = Layout.callingShape(context.program.layout, type.type)
+    if (registered !== undefined) return registered.lanes
     const payloadTypes = type.alternatives.flatMap((alternative) =>
       lanesFor(context, alternative).map((lane) => lane.type),
     )

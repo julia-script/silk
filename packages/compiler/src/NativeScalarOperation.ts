@@ -549,7 +549,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           throw new RangeError('LLVM checked division lost its right operand')
         const zero = yield* Constant.integerUnsigned(builder, targetPhysical, 0n)
         invalid = yield* FunctionBody.integerCompare(body, 'eq', right, zero, `${name}_zero`)
-        if (target.signedness === 'Signed' && operation.operation === 'CheckedDivide') {
+        if (
+          target.signedness === 'Signed' &&
+          (operation.operation === 'CheckedDivide' || operation.operation === 'CheckedRemainder')
+        ) {
           const range = Scalar.range(target, pointerBits)
           const minimum = yield* Constant.integerSigned(builder, targetPhysical, range.minimum)
           const negativeOne = yield* Constant.integerSigned(builder, targetPhysical, -1n)

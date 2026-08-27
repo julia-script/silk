@@ -714,3 +714,24 @@ pub fn main() -> i32 { return 0 }`)
     assert.notStrictEqual(ownership?.loans.at(0)?.endRegion.ordinal, continuing?.region?.ordinal)
   }),
 )
+
+it.effect('extends a view loan through a use nested in a place replace', () =>
+  Effect.gen(function* () {
+    // The view's last use sits inside Place.replace's value operand; the owner write between the
+    // direct uses and that nested use must still count as access during the loan.
+    const self = yield* snapshot(`pub fn main() -> i32 {
+  let mut values = [1, 2]
+  let view = &values
+  let first = view[1]
+  values[0] = 40
+  let mut sink = 0
+  let old = Intrinsic.replace(sink, view[0])
+  return first + old + values[0]
+}`)
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['OWN0011'],
+    )
+  }),
+)

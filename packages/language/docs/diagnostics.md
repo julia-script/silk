@@ -16,11 +16,11 @@ $ pnpm --filter @silk-effect/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 154 |
+| `SEM` | Semantic | 155 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 185 codes in total.
+There are 186 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -209,6 +209,7 @@ There are 185 codes in total.
 | `SEM0160` | Stable code for a scalar enum arm following an unguarded wildcard. | `` Enum match arm is unreachable after `_` `` |
 | `SEM0161` | Stable code for a scalar enum pattern naming a member of another enum. | `Enum pattern from <actual> cannot match <expected>` |
 | `SEM0162` | Stable code for an integer literal pattern used against a scalar enum. | `Integer pattern <value> cannot match enum <enum>` |
+| `SEM0163` | Stable code for effect-block return sites whose success types disagree. | `Effect block return sites have incompatible types: <join>` |
 
 ## Ownership (`OWN`)
 

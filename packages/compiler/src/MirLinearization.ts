@@ -167,6 +167,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RawBufferFill' ||
   operation._tag === 'RunEffect' ||
   operation._tag === 'RunEffectValue' ||
+  operation._tag === 'RunEffectComposite' ||
   operation._tag === 'RunStaticEffect' ||
   operation._tag === 'ReifyEffect' ||
   operation._tag === 'CloseEffectEntry' ||
