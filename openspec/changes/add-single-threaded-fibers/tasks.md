@@ -18,12 +18,12 @@
 
 ## 3. Publish the Scheduler and Fiber Actors
 
-- [x] 3.1 Add canonical `silk.scheduler` declarations for the Scheduler service, provider-facing pending-publication protocol, `TaskIdExhausted`, and required internal task actors, and verify a renamed ordinary-source implementation conforms without compiler registration.
+- [x] 3.1 Add canonical `silk.scheduler` declarations for the Scheduler service, provider-facing pending-publication protocol, `TaskIdExhaustedError`, and required internal task actors, and verify a renamed ordinary-source implementation conforms without compiler registration.
 - [x] 3.2 Add canonical `silk.fiber` outcome and affine `Fiber<A, E>` declarations plus consuming `await` and `join`, and verify success, failure, cancellation, immediate completion, and pending parking through evaluator cases.
 - [x] 3.3 Add allocation-free `Fiber.yieldNow` over immediate Wake notification and verify a yielding task moves behind already-ready work and resumes itself when no competitor exists.
 - [x] 3.4 Add `Fiber.forkChild` over the Scheduler preparation SPI and publication handshake, and verify closed work, nested Fiber work, atomic rejection, and deferred first child activation.
 - [x] 3.5 Add the target-neutral `Execution.notifyInitial` transition plus canonical `silk.local_scheduler` construction and generic `execute`, including owned root Scheduler provision, homogeneous `Execution<()>` wrapping, post-publication initial notification, FIFO dispatch, and root outcome extraction; verify exactly-once notification, deferred body activation, root success, and typed failure with generic result types.
-- [x] 3.6 Add `LocalScheduler.Stalled` detection and complete typed shutdown, and verify stalled roots, root success/failure with unfinished descendants, dropped Fiber handles, escaped cancelled handles, and reuse of one scheduler value.
+- [x] 3.6 Add `LocalScheduler.StalledError` detection and complete typed shutdown, and verify stalled roots, root success/failure with unfinished descendants, dropped Fiber handles, escaped cancelled handles, and reuse of one scheduler value.
 - [x] 3.7 Replace the fixed fixture prototypes with the canonical actors and delete superseded Deferred/Fiber/scheduler paths, and verify repository search and compilation find no compatibility alias or separate root-adapter terminology.
 
 ## 4. Harden Semantics and Failure Boundaries

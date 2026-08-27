@@ -175,7 +175,7 @@
     "path": "silk/local_scheduler.silk",
     "layer": "portable",
     "namespace": "LocalScheduler",
-    "aliases": ["Stalled"]
+    "aliases": ["StalledError"]
   },
   {
     "module": "silk/logger",
@@ -262,7 +262,7 @@
     "path": "silk/scheduler.silk",
     "layer": "portable",
     "namespace": "Scheduler",
-    "aliases": ["PendingPublication", "TaskId", "TaskIdExhausted"]
+    "aliases": ["PendingPublication", "TaskId", "TaskIdExhaustedError"]
   },
   {
     "module": "silk/shared",

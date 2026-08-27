@@ -282,7 +282,7 @@ parks with the same allocation-free one-observer protocol as [`await`](#declarat
 ## `forkChild`
 
 ```silk
-pub effect fn forkChild<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/fiber.Fiber<A, E> ! OutOfMemoryError | Scheduler.TaskIdExhausted ? &mut Scheduler.Scheduler
+pub effect fn forkChild<A, E>(child: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> silk/fiber.Fiber<A, E> ! OutOfMemoryError | Scheduler.TaskIdExhaustedError ? &mut Scheduler.Scheduler
 ```
 
 Prepares and atomically publishes one child task, then returns its affine Fiber.

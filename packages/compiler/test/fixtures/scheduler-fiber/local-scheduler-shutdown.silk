@@ -65,7 +65,7 @@ effect fn parkedLeaf(lifetime: Lifetime) -> i32 {
 }
 
 effect fn nestedSuccessChild() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let lifetime = Lifetime { kind: 1 }
   successChildActivated()
@@ -101,11 +101,11 @@ effect fn escapedChild() -> i32 {
 }
 
 effect fn successRoot() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<
     i32,
-    Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted,
+    Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError,
   >(nestedSuccessChild())
   drop child
   successHandleDropped()
@@ -118,7 +118,7 @@ effect fn successRoot() -> i32
 }
 
 effect fn failureRoot() -> i32
-! RootProblem | Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! RootProblem | Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<i32, never>(failureChild())
   drop child
@@ -129,7 +129,7 @@ effect fn failureRoot() -> i32
 }
 
 effect fn escapeRoot() -> Fiber.Fiber<i32, never>
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError
 ? &mut Scheduler.Scheduler {
   let child = run Fiber.forkChild<i32, never>(escapedChild())
   escapeTerminating()
@@ -153,14 +153,14 @@ effect fn freshRoot() -> i32 ? &mut Scheduler.Scheduler {
 effect fn recoverFailure(
   error: RootProblem
     | Allocator.OutOfMemoryError
-    | Scheduler.TaskIdExhausted
-    | LocalScheduler.Stalled,
+    | Scheduler.TaskIdExhaustedError
+    | LocalScheduler.StalledError,
 ) -> i32 {
   return match move error {
     RootProblem { code } => recoverRootProblem(code)
     Allocator.OutOfMemoryError {} => 0
-    Scheduler.TaskIdExhausted {} => 0
-    LocalScheduler.Stalled {} => 0
+    Scheduler.TaskIdExhaustedError {} => 0
+    LocalScheduler.StalledError {} => 0
   }
 }
 
@@ -170,11 +170,11 @@ fn recoverRootProblem(code: i32) -> i32 {
 }
 
 effect fn recoverStalled(
-  error: Allocator.OutOfMemoryError | LocalScheduler.Stalled,
+  error: Allocator.OutOfMemoryError | LocalScheduler.StalledError,
 ) -> i32 {
   return match move error {
     Allocator.OutOfMemoryError {} => 0
-    LocalScheduler.Stalled {} => 1
+    LocalScheduler.StalledError {} => 1
   }
 }
 
@@ -198,7 +198,7 @@ effect fn observeEscapedRoot(fiber: Fiber.Fiber<i32, never>) -> bool
 }
 
 effect fn scenario() -> i32
-! Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | LocalScheduler.Stalled {
+! Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError {
   let mut scheduler = LocalScheduler.make()
 
   let success = run LocalScheduler.execute(&mut scheduler, successRoot())
@@ -231,7 +231,7 @@ effect fn scenario() -> i32
 }
 
 effect fn recoverScenario(
-  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhausted | LocalScheduler.Stalled,
+  error: Allocator.OutOfMemoryError | Scheduler.TaskIdExhaustedError | LocalScheduler.StalledError,
 ) -> i32 {
   drop error
   return -99

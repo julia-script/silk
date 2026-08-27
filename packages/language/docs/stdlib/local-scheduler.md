@@ -32,12 +32,12 @@ A reusable deterministic single-threaded Scheduler provider.
 
 Each call to [`execute`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a65786563757465) creates fresh task storage and readiness state.
 
-<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c6564"></a>
+<a id="declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72"></a>
 
-## `Stalled`
+## `StalledError`
 
 ```silk
-pub struct Stalled
+pub struct StalledError
 ```
 
 Reports that no task is ready while the root is incomplete.
@@ -93,7 +93,7 @@ prepare = SchedulerClient.prepareChild
 ## `execute`
 
 ```silk
-pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | Stalled
+pub effect fn execute<A, E>(self: &mut silk/local_scheduler.LocalScheduler, program: once Effect<A ! E ? &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError
 ```
 
 Runs one lazy root program under this Scheduler and returns its typed outcome.
@@ -104,4 +104,4 @@ The root becomes task zero. This operation owns all per-run task storage, provid
 Scheduler client to each task, and dispatches ready tasks in FIFO order. Before it returns a
 root value or raises a typed error, it cancels every unfinished descendant and releases the
 run state. If the root is incomplete when no task is ready, it performs the same cleanup and
-raises [`Stalled`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c6564).
+raises [`StalledError`](#declaration-73696c6b2f6c6f63616c5f7363686564756c65723a3a5374616c6c65644572726f72).
