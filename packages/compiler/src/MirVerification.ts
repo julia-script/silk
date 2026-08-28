@@ -2450,7 +2450,13 @@ export const verify = (self: Module): ReadonlyArray<Violation> => {
           region.runner.classification === 'Unknown'
         )
           return []
-        return !originReachable.has(instanceText(fn.instance))
+        const declaration = region.runner.declaration
+        return declaration === undefined ||
+          !self.functions.some(
+            (candidate) =>
+              originReachable.has(instanceText(candidate.instance)) &&
+              matchesInstance(candidate, declaration, region.runner.typeArguments),
+          )
           ? [Object.freeze({ fn, region })]
           : []
       }),

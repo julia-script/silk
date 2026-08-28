@@ -720,6 +720,23 @@ const deferredOf = (
     : undefined
 }
 
+const effectCatchOf = (
+  expression: Hir.Expression,
+  context: BuildContext,
+  resolving: ReadonlySet<number> = new Set(),
+): Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }> | undefined => {
+  if (expression._tag === 'BindingReference') {
+    const ordinal = expression.binding.ordinal
+    if (resolving.has(ordinal)) return undefined
+    const initializer = context.bindings.get(ordinal)
+    return initializer === undefined
+      ? undefined
+      : effectCatchOf(initializer, context, new Set(resolving).add(ordinal))
+  }
+  if (expression._tag === 'Move') return effectCatchOf(expression.subject, context, resolving)
+  return expression._tag === 'EffectCatch' ? expression : undefined
+}
+
 const catchHandlerRunner = (
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
   context: BuildContext,
@@ -771,6 +788,7 @@ const controlsOfCatch = (
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
   execution: ExecutionKey,
   context: BuildContext,
+  ordinalOffset = 0,
 ): ReadonlyArray<Region> => {
   const regions: Array<Region> = []
   if (expression.protected._tag === 'Unavailable') return Object.freeze(regions)
@@ -781,8 +799,8 @@ const controlsOfCatch = (
   const protectedRunner = runnerOf(expression.protected, context)
   const protectedPolicy = reifyPolicy(protectedRunner.outcome, context)
   if (protectedRunner.classification !== 'Synchronous' && protectedPolicy !== undefined) {
-    const id = controlId(execution, expression.span, 0, 'Invoke')
-    const complete = controlId(execution, expression.span, 0, 'Complete')
+    const id = controlId(execution, expression.span, ordinalOffset, 'Invoke')
+    const complete = controlId(execution, expression.span, ordinalOffset, 'Complete')
     regions.push(
       Object.freeze({
         _tag: 'ProvisionalRegion',
@@ -826,8 +844,8 @@ const controlsOfCatch = (
     outcome: handlerRunner.outcome,
     failureMappings: Object.freeze(mappings),
   })
-  const id = controlId(execution, expression.span, 1, 'Invoke')
-  const complete = controlId(execution, expression.span, 1, 'Complete')
+  const id = controlId(execution, expression.span, ordinalOffset + 1, 'Invoke')
+  const complete = controlId(execution, expression.span, ordinalOffset + 1, 'Complete')
   regions.push(
     Object.freeze({
       _tag: 'ProvisionalRegion',
@@ -873,6 +891,12 @@ const controlsOf = (
     if (expression._tag === 'Run') {
       const idOrdinal = ordinal
       ordinal += 1
+      const caught = effectCatchOf(expression.subject, context)
+      if (caught !== undefined) {
+        regions.push(...controlsOfCatch(caught, execution, context, idOrdinal))
+        ordinal += 1
+        return
+      }
       if (isSuspendOrigin(expression.subject, context)) {
         const deferred = deferredOf(expression.subject, context)
         if (deferred !== undefined) {
