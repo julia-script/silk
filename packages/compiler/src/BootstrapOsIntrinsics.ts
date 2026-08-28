@@ -9,10 +9,12 @@ import type {
 import type * as ChildProcess from './ChildProcess.js'
 import type * as HostInput from './HostInput.js'
 import type * as Mir from './Mir.js'
+import type * as MonotonicClock from './MonotonicClock.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
 import type * as Scalar from './Scalar.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
+import * as SystemClock from './SystemClock.js'
 import * as Type from './Type.js'
 
 /** Preserves an arbitrary stream-provider throw as observable evaluator data. */
@@ -65,6 +67,8 @@ export interface State {
   readonly processCaptures: Array<ReadonlyArray<number>>
   readonly hostInput?: HostInput.Provider
   readonly osFileSystem?: OsFileSystemHost.Provider
+  readonly systemClock?: SystemClock.Provider
+  readonly monotonicClock?: MonotonicClock.Provider
 }
 
 export interface ExecutionContext {
@@ -176,6 +180,98 @@ export const execute = (
     }
     case 'OsCall': {
       const arguments_ = operation.arguments
+      const commit = (result: Value): void =>
+        write(operation.destination, { value: result, fromCall: false })
+      const name = operation.operation.name
+      const clockResult = (
+        completed: boolean,
+        cause?: unknown,
+      ): Extract<BoundaryStep, { readonly _tag: 'Value' }> => {
+        trace.push(
+          Object.freeze({
+            _tag: 'OsCall',
+            function: fn.id,
+            operation: operation.operation,
+            outcome: completed ? 'Completed' : 'Failure',
+            ...(cause === undefined ? {} : { cause }),
+            span: operation.provenance.span,
+          }),
+        )
+        return Object.freeze({ _tag: 'Value', value: integerValue('i32', completed ? 1 : 0) })
+      }
+      const invokeClock = <A>(run: () => A): { readonly result?: A; readonly cause?: unknown } => {
+        try {
+          return Object.freeze({ result: run() })
+        } catch (cause) {
+          return Object.freeze({ cause })
+        }
+      }
+      if (name === 'osSystemClockNow' || name === 'osMonotonicClockNow') {
+        const host = name === 'osSystemClockNow' ? state.systemClock : state.monotonicClock
+        if (host === undefined)
+          return blockedStep({
+            _tag: name === 'osSystemClockNow' ? 'MissingSystemClock' : 'MissingMonotonicClock',
+          })
+        const seconds = arguments_.at(0)
+        const nanoseconds = arguments_.at(1)
+        if (seconds === undefined || nanoseconds === undefined)
+          throw new RangeError('OS clock read omitted scalar outputs')
+        const invoked = invokeClock(host.now)
+        const result = invoked.result
+        const completed =
+          result !== undefined && result._tag === 'Read' && SystemClock.isInstant(result.instant)
+        if (completed && result?._tag === 'Read') {
+          replaceReferenced(seconds, integerValue('i64', result.instant.seconds))
+          replaceReferenced(nanoseconds, integerValue('i64', result.instant.nanoseconds))
+        }
+        const boundary = clockResult(completed, invoked.cause)
+        commit(boundary.value)
+        break
+      }
+      if (name === 'osSystemClockResolution' || name === 'osMonotonicClockResolution') {
+        const host = name === 'osSystemClockResolution' ? state.systemClock : state.monotonicClock
+        if (host === undefined)
+          return blockedStep({
+            _tag:
+              name === 'osSystemClockResolution' ? 'MissingSystemClock' : 'MissingMonotonicClock',
+          })
+        const output = arguments_.at(0)
+        if (output === undefined) throw new RangeError('OS clock resolution omitted its output')
+        const invoked = invokeClock(host.resolution)
+        const result = invoked.result
+        const completed =
+          result !== undefined &&
+          result._tag === 'Resolution' &&
+          SystemClock.isResolution(result.nanoseconds)
+        if (completed && result?._tag === 'Resolution') {
+          replaceReferenced(output, integerValue('u64', result.nanoseconds))
+        }
+        const boundary = clockResult(completed, invoked.cause)
+        commit(boundary.value)
+        break
+      }
+      if (name === 'osMonotonicClockWaitUntil') {
+        const host = state.monotonicClock
+        if (host === undefined) return blockedStep({ _tag: 'MissingMonotonicClock' })
+        const seconds = arguments_.at(0)
+        const nanoseconds = arguments_.at(1)
+        if (seconds === undefined || nanoseconds === undefined)
+          throw new RangeError('OS monotonic wait omitted its deadline')
+        const deadline = Object.freeze({
+          seconds: readInteger(seconds, 'i64').value,
+          nanoseconds: readInteger(nanoseconds, 'i64').value,
+        })
+        if (deadline.seconds < 0n || !SystemClock.isInstant(deadline)) {
+          const boundary = clockResult(false)
+          commit(boundary.value)
+          break
+        }
+        const invoked = invokeClock(() => host.waitUntil(deadline))
+        const completed = invoked.result?._tag === 'Waited'
+        const boundary = clockResult(completed, invoked.cause)
+        commit(boundary.value)
+        break
+      }
       const reasonOutput = arguments_.at(-2)
       const codeOutput = arguments_.at(-1)
       if (reasonOutput === undefined || codeOutput === undefined)
@@ -202,9 +298,6 @@ export const execute = (
           }),
         )
       }
-      const commit = (result: Value): void =>
-        write(operation.destination, { value: result, fromCall: false })
-      const name = operation.operation.name
       if (name === 'osStandardInputRead') {
         const input = state.standardInput
         if (input === undefined) return blockedStep({ _tag: 'MissingStandardInput' })

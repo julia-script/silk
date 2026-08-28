@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as InspectorFlowModel from '../src/InspectorFlowModel.js'
+import * as InspectorProjectBackend from '../src/InspectorProjectBackend.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as MonotonicClockHost from '../src/MonotonicClock.js'
 import * as Stdlib from '../src/Stdlib.js'
@@ -97,6 +99,39 @@ impl MonotonicClock.MonotonicClock for ScriptedMonotonicClock {
   waitFor: ScriptedMonotonicClock.scriptedWaitFor
 }
 `
+
+const nativeSystemProgram = `import silk.effect as Effect
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+pub fn main() -> i32 {
+  let mut provider = OsSystemClock.make()
+  let instant = run Effect.provideMut(SystemClock.now(), &mut provider)
+  let resolution = run Effect.provideMut(SystemClock.getResolution(), &mut provider)
+  if SystemClock.seconds(&instant) != 9007199254740993 { return 1 }
+  if SystemClock.nanoseconds(&instant) != 999999999 { return 2 }
+  if resolution != 18446744073709551615 { return 3 }
+  return 42
+}`
+
+const nativeMonotonicWaitProgram = `import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+pub fn main() -> i32 {
+  let mut provider = OsMonotonicClock.make()
+  run Effect.provideMut(MonotonicClock.waitFor(0), &mut provider)
+  run Effect.provideMut(MonotonicClock.waitFor(200000000), &mut provider)
+  run Effect.provideMut(MonotonicClock.waitFor(18446744073709551615), &mut provider)
+  return 42
+}`
+
+const nativeSystemReadProgram = `import silk.effect as Effect
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+pub fn main() -> i32 {
+  let mut provider = OsSystemClock.make()
+  let instant = run Effect.provideMut(SystemClock.now(), &mut provider)
+  return 42
+}`
 
 it('keeps fixed system-clock host values exact beyond JavaScript number precision', () => {
   const built = SystemClockHost.fixed(
@@ -298,6 +333,202 @@ pub fn main() -> i32 {
       'osMonotonicClockResolution',
       'osMonotonicClockWaitUntil',
     ])
+  }),
+)
+
+it.effect('executes exact native system-clock values through an injected evaluator host', () =>
+  Effect.gen(function* () {
+    const built = SystemClockHost.fixed(
+      { seconds: 9_007_199_254_740_993n, nanoseconds: 999_999_999n },
+      18_446_744_073_709_551_615n,
+    )
+    assert.strictEqual(built._tag, 'Constructed')
+    if (built._tag !== 'Constructed') return
+    const self = yield* snapshot(nativeSystemProgram)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, { systemClock: built.value.provider })
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42n)
+    assert.deepEqual(
+      outcome.trace
+        .filter((event) => event._tag === 'OsCall')
+        .map((event) => [event.operation.name, event.outcome]),
+      [
+        ['osSystemClockNow', 'Completed'],
+        ['osSystemClockResolution', 'Completed'],
+      ],
+    )
+  }),
+)
+
+it.effect('derives zero, carry, and maximum monotonic waits from one read each', () =>
+  Effect.gen(function* () {
+    const built = MonotonicClockHost.scripted(
+      [
+        { seconds: 1n, nanoseconds: 900_000_000n },
+        { seconds: 1n, nanoseconds: 900_000_000n },
+        { seconds: 2n, nanoseconds: 100_000_000n },
+      ],
+      1n,
+    )
+    assert.strictEqual(built._tag, 'Constructed')
+    if (built._tag !== 'Constructed') return
+    const self = yield* snapshot(nativeMonotonicWaitProgram)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, { monotonicClock: built.value.provider })
+    assert.strictEqual(outcome._tag, 'Completed')
+    if (outcome._tag !== 'Completed') return
+    assert.strictEqual(outcome.result.value, 42n)
+    assert.deepEqual(
+      built.value.waits().map((event) => event.deadline),
+      [
+        { seconds: 1n, nanoseconds: 900_000_000n },
+        { seconds: 2n, nanoseconds: 100_000_000n },
+        { seconds: 18_446_744_075n, nanoseconds: 809_551_615n },
+      ],
+    )
+    assert.deepEqual(
+      outcome.trace.filter((event) => event._tag === 'OsCall').map((event) => event.operation.name),
+      [
+        'osMonotonicClockNow',
+        'osMonotonicClockWaitUntil',
+        'osMonotonicClockNow',
+        'osMonotonicClockWaitUntil',
+        'osMonotonicClockNow',
+        'osMonotonicClockWaitUntil',
+      ],
+    )
+  }),
+)
+
+it.effect('traps on a source-derived monotonic deadline overflow before waiting', () =>
+  Effect.gen(function* () {
+    const built = MonotonicClockHost.scripted(
+      [{ seconds: (1n << 63n) - 1n, nanoseconds: 999_999_999n }],
+      1n,
+    )
+    assert.strictEqual(built._tag, 'Constructed')
+    if (built._tag !== 'Constructed') return
+    const self = yield* snapshot(`import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+pub fn main() -> i32 {
+  let mut provider = OsMonotonicClock.make()
+  run Effect.provideMut(MonotonicClock.waitFor(1), &mut provider)
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, { monotonicClock: built.value.provider })
+    assert.strictEqual(outcome._tag, 'Trap')
+    assert.deepEqual(built.value.waits(), [])
+    assert.deepEqual(
+      outcome.trace.filter((event) => event._tag === 'OsCall').map((event) => event.operation.name),
+      ['osMonotonicClockNow'],
+    )
+  }),
+)
+
+it.effect(
+  'maps explicit, malformed, and thrown clock host results to false without partial output',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* snapshot(nativeSystemReadProgram)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+
+      const explicit = Analysis.evaluate(self, { systemClock: SystemClockHost.failing('offline') })
+      assert.strictEqual(explicit._tag, 'Trap')
+      assert.deepEqual(
+        explicit.trace
+          .filter((event) => event._tag === 'OsCall')
+          .map((event) => [event.outcome, event.cause]),
+        [['Failure', undefined]],
+      )
+
+      const malformed: SystemClockHost.Provider = Object.freeze({
+        now: () =>
+          Object.freeze({
+            _tag: 'Read',
+            instant: Object.freeze({ seconds: 0n, nanoseconds: 1_000_000_000n }),
+          }),
+        resolution: () => Object.freeze({ _tag: 'Resolution', nanoseconds: 1n }),
+      })
+      const rejected = Analysis.evaluate(self, { systemClock: malformed })
+      assert.strictEqual(rejected._tag, 'Trap')
+      assert.deepEqual(
+        rejected.trace.filter((event) => event._tag === 'OsCall').map((event) => event.outcome),
+        ['Failure'],
+      )
+
+      const cause = Object.freeze({ reason: 'clock exploded' })
+      const throwing: SystemClockHost.Provider = Object.freeze({
+        now: () => {
+          throw cause
+        },
+        resolution: () => Object.freeze({ _tag: 'Resolution', nanoseconds: 1n }),
+      })
+      const thrown = Analysis.evaluate(self, { systemClock: throwing })
+      assert.strictEqual(thrown._tag, 'Trap')
+      assert.deepEqual(
+        thrown.trace
+          .filter((event) => event._tag === 'OsCall')
+          .map((event) => [event.outcome, event.cause]),
+        [['Failure', cause]],
+      )
+    }),
+)
+
+it.effect('blocks only the absent matching clock host after retaining preceding trace', () =>
+  Effect.gen(function* () {
+    const system = SystemClockHost.fixed({ seconds: 20n, nanoseconds: 0n }, 1n)
+    assert.strictEqual(system._tag, 'Constructed')
+    if (system._tag !== 'Constructed') return
+    const self = yield* snapshot(`import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  let mut system = OsSystemClock.make()
+  let wall = run Effect.provideMut(SystemClock.now(), &mut system)
+  let mut monotonic = OsMonotonicClock.make()
+  let mark = run Effect.provideMut(MonotonicClock.now(), &mut monotonic)
+  return identity(42)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const outcome = Analysis.evaluate(self, { systemClock: system.value.provider })
+    assert.strictEqual(outcome._tag, 'Blocked')
+    if (outcome._tag !== 'Blocked') return
+    assert.strictEqual(outcome.reason._tag, 'MissingMonotonicClock')
+    assert.deepEqual(
+      outcome.trace
+        .filter((event) => event._tag === 'OsCall')
+        .map((event) => [event.operation.name, event.outcome]),
+      [['osSystemClockNow', 'Completed']],
+    )
+    const flow = InspectorFlowModel.projectDataFlow(Analysis.rootAnalysis(self), outcome)
+    assert.isTrue(
+      flow.nodes.some(
+        (node) => node.kind === 'Terminal' && node.detail.includes('MissingMonotonicClock'),
+      ),
+    )
+    assert.isTrue(
+      InspectorProjectBackend.evaluationRows(outcome).some(
+        (row) => row.detail === 'missing MonotonicClock host provider',
+      ),
+    )
+
+    const missingSystem = Analysis.evaluate(yield* snapshot(nativeSystemReadProgram))
+    assert.strictEqual(missingSystem._tag, 'Blocked')
+    if (missingSystem._tag === 'Blocked') {
+      assert.strictEqual(missingSystem.reason._tag, 'MissingSystemClock')
+    }
+    assert.isTrue(
+      InspectorProjectBackend.evaluationRows(missingSystem).some(
+        (row) => row.detail === 'missing SystemClock host provider',
+      ),
+    )
   }),
 )
 
