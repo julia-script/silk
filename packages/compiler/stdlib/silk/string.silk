@@ -16,23 +16,23 @@
 //! # Examples
 //! ## Validate borrowed UTF-8 bytes
 //! ```silk
-//! import silk.result as Result
+//! import silk.result { Result, unwrapOr }
 //!
 //! import silk.string as String
+//! import silk.string { InvalidUtf8 }
 //!
 //! import silk.usize as usize
 //!
 //! pub fn main() -> i32 {
 //!   let valid = String.fromUtf8(b"Silk")
-//!     |> Result.unwrapOr<string, String.InvalidUtf8>("")
-//!   let invalid = String.fromUtf8(b"a\x80")
-//!   match move invalid {
-//!     Result.Result<string, String.InvalidUtf8>.Success { .. } => return 0
-//!     Result.Result<string, String.InvalidUtf8>.Failure { .. } => ()
-//!   }
+//!     |> unwrapOr<string, InvalidUtf8>("")
+//!   let rejected = String.fromUtf8(b"a\x80")
+//!     |> unwrapOr<string, InvalidUtf8>("")
 //!   let length = String.byteLength(valid)
 //!     |> usize.toI32
-//!   return length + 38
+//!   let rejectedLength = String.byteLength(rejected)
+//!     |> usize.toI32
+//!   return length + rejectedLength + 38
 //! }
 //! ```
 //!
