@@ -737,6 +737,19 @@ const effectCatchOf = (
   return expression._tag === 'EffectCatch' ? expression : undefined
 }
 
+const runSpanOfCatch = (
+  statements: ReadonlyArray<Hir.Statement>,
+  target: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
+  context: BuildContext,
+): SourceSpan.SourceSpan =>
+  statements
+    .flatMap(Hir.statementExpressions)
+    .flatMap(Hir.expressionTree)
+    .find(
+      (candidate) =>
+        candidate._tag === 'Run' && effectCatchOf(candidate.subject, context) === target,
+    )?.span ?? target.span
+
 const catchHandlerRunner = (
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
   context: BuildContext,
@@ -789,6 +802,7 @@ const controlsOfCatch = (
   execution: ExecutionKey,
   context: BuildContext,
   ordinalOffset = 0,
+  runSpan = expression.span,
 ): ReadonlyArray<Region> => {
   const regions: Array<Region> = []
   if (expression.protected._tag === 'Unavailable') return Object.freeze(regions)
@@ -797,6 +811,43 @@ const controlsOfCatch = (
   if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return Object.freeze([])
 
   const protectedRunner = runnerOf(expression.protected, context)
+  const selected = Type.substitute(expression.selected, context.instance.substitution)
+  if (Type.isNever(selected)) {
+    if (protectedRunner.classification === 'Synchronous') return Object.freeze(regions)
+    const policy: Extract<CompletionPolicy, { readonly _tag: 'Propagate' }> = Object.freeze({
+      _tag: 'Propagate',
+      outcome: protectedRunner.outcome,
+      failureMappings: Object.freeze(
+        Type.failureMembers(protectedRunner.outcome).map((_failure, source) =>
+          Object.freeze({ source: source + 1, target: source + 1 }),
+        ),
+      ),
+    })
+    const id = controlId(execution, runSpan, ordinalOffset, 'Invoke')
+    const complete = controlId(execution, runSpan, ordinalOffset, 'Complete')
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'ProvisionalRegion',
+        id,
+        outcome: Object.freeze({
+          _tag: 'RunSuspendableEffect',
+          runner: protectedRunner,
+          completion: policy,
+          complete,
+          relay: Object.freeze({
+            _tag: 'RelayExistingTransfer',
+            preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
+          }),
+          span: runSpan,
+        }),
+      }),
+      Object.freeze({
+        _tag: 'ProvisionalRegion',
+        id: complete,
+        outcome: Object.freeze({ _tag: 'Complete', policy }),
+      }),
+    ])
+  }
   const protectedPolicy = reifyPolicy(protectedRunner.outcome, context)
   if (protectedRunner.classification !== 'Synchronous' && protectedPolicy !== undefined) {
     const id = controlId(execution, expression.span, ordinalOffset, 'Invoke')
@@ -893,7 +944,7 @@ const controlsOf = (
       ordinal += 1
       const caught = effectCatchOf(expression.subject, context)
       if (caught !== undefined) {
-        regions.push(...controlsOfCatch(caught, execution, context, idOrdinal))
+        regions.push(...controlsOfCatch(caught, execution, context, idOrdinal, expression.span))
         ordinal += 1
         return
       }
@@ -1086,7 +1137,13 @@ export const build = (
         const regions =
           expression._tag === 'EffectBlock'
             ? controlsOf(expression.statements, key, runnerClassification, runnerContext)
-            : controlsOfCatch(expression, key, runnerContext)
+            : controlsOfCatch(
+                expression,
+                key,
+                runnerContext,
+                0,
+                runSpanOfCatch(instance.function.statements, expression, runnerContext),
+              )
         if (expression._tag === 'EffectBlock')
           observedProvided.push(...providedRunnersOf(expression.statements, runnerContext))
         else
@@ -1170,7 +1227,13 @@ export const build = (
       const regions =
         body._tag === 'EffectBlock'
           ? controlsOf(body.statements, key, runner.classification, context)
-          : controlsOfCatch(body, key, context)
+          : controlsOfCatch(
+              body,
+              key,
+              context,
+              0,
+              runSpanOfCatch(owner.function.statements, body, context),
+            )
       if (body._tag === 'EffectBlock')
         pendingProvided.push(...providedRunnersOf(body.statements, context))
       const relaysProvidedRunner = regions.some(
