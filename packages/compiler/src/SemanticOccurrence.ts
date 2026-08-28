@@ -151,15 +151,19 @@ const locationOfField = (
   index: DeclarationIndex.Index,
   field: DeclarationFacts.FieldFact,
 ): DeclarationLocation | undefined => {
+  const declarationId = DeclarationFacts.fieldDeclaration(field.id)
+  const module = index.modules.find((candidate) => candidate.module === declarationId.sourceId)
+  const owner = field.id.owner
   const current =
-    index.modules
-      .find((module) => module.module === field.id.struct.sourceId)
-      ?.structs.find(
-        (struct) =>
-          struct.id.sourceId === field.id.struct.sourceId &&
-          struct.id.ordinal === field.id.struct.ordinal,
-      )
-      ?.fields.find((candidate) => candidate.id.ordinal === field.id.ordinal) ?? field
+    (owner._tag === 'StructFieldOwnerId'
+      ? module?.structs
+          .find((struct) => struct.id.ordinal === declarationId.ordinal)
+          ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, field.id))
+      : module?.unions
+          .find((union) => union.id.ordinal === declarationId.ordinal)
+          ?.variants.find((variant) => variant.id.ordinal === owner.variant.ordinal)
+          ?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, field.id))) ??
+    field
   return current.name._tag === 'Present'
     ? location(current.name.token.span.sourceId, current.syntax.span, current.name.token.span)
     : undefined
@@ -1200,7 +1204,11 @@ const collectMember = (
     return
   }
   if (member._tag === 'RoleDeclaration') return
-  for (const field of member.fields) {
+  const fields =
+    member._tag === 'UnionDeclaration'
+      ? member.variants.flatMap((variant) => variant.fields)
+      : member.fields
+  for (const field of fields) {
     if (field.name._tag === 'Present')
       push(
         pending,
@@ -1436,7 +1444,7 @@ export const identityKey = (identity: Identity): string => {
     case 'PatternBindingIdentity':
       return `pattern:${JSON.stringify(identity.id)}`
     case 'FieldIdentity':
-      return `field:${identity.id.struct.sourceId}:${identity.id.struct.ordinal}:${identity.id.ordinal}`
+      return `field:${DeclarationFacts.fieldIdKey(identity.id)}`
     case 'EnumMemberIdentity':
       return `enum-member:${identity.id.enum.module}.${identity.id.enum.name}.${identity.id.name}`
     case 'EnumAssociatedOperationIdentity':

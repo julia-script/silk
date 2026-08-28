@@ -1,3 +1,4 @@
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as Hir from './Hir.js'
 import type {
@@ -183,7 +184,7 @@ export const encode = (self: Plan): string =>
                           case 'StringByteLengthSelector':
                             return 'byte-length'
                           case 'FieldId':
-                            return `${selector.struct.sourceId}#${selector.struct.ordinal}.${selector.ordinal}`
+                            return DeclarationFacts.fieldIdKey(selector)
                           default:
                             return ''
                         }

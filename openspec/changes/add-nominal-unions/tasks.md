@@ -5,12 +5,12 @@
 - [x] 1.3 Implement parser entry points for generic union declarations, constructor qualifiers with explicit argument prefixes, and fully applied variant patterns, and verify focused parser tests cover valid mixed variants and reject empty named-field bodies.
 - [x] 1.4 Implement variant-local parser recovery for missing names, types, separators, and braces, and verify damaged-variant tests preserve valid siblings and following declarations.
 - [x] 1.5 Extend the formatter, syntax correspondence, and source presentation for union declarations, constructors, and patterns, and verify formatting is idempotent and preserves comments.
-- [ ] 1.6 Add stable structured diagnostic catalog entries for union-specific syntax and semantic failures, regenerate catalog artifacts, and verify diagnostic tests assert codes, spans, related spans, and details rather than message text.
+- [x] 1.6 Add stable structured diagnostic catalog entries for union-specific syntax and semantic failures, regenerate catalog artifacts, and verify diagnostic tests assert codes, spans, related spans, and details rather than message text.
 
 ## 2. Canonical Declarations and Module Surfaces
 
-- [ ] 2.1 Add canonical `UnionFact`, subordinate variant identities, and variant-scoped field ownership while generalizing shared field facts away from struct-only owners, and verify identity tests distinguish same-spelled variants and fields under different parents.
-- [ ] 2.2 Collect unions in the ordinary cross-kind module namespace with parent parameters and source-ordered variants before bodies, and verify forward declarations, duplicates, empty unions, and cross-kind collisions in declaration-index tests.
+- [x] 2.1 Add canonical `UnionFact`, subordinate variant identities, and variant-scoped field ownership while generalizing shared field facts away from struct-only owners, and verify identity tests distinguish same-spelled variants and fields under different parents.
+- [x] 2.2 Collect unions in the ordinary cross-kind module namespace with parent parameters and source-ordered variants before bodies, and verify forward declarations, duplicates, empty unions, and cross-kind collisions in declaration-index tests.
 - [ ] 2.3 Resolve every variant field type, visibility exposure, generic reference, and inline aggregate dependency before body analysis, and verify invalid fields preserve sibling facts while making the complete parent non-executable.
 - [ ] 2.4 Encode union declarations in deterministic module semantic surfaces, and verify encode/decode, equality, and dependency invalidation respond to variant order, kind, field, type, visibility, bound, and availability changes but ignore body-only edits.
 - [ ] 2.5 Extend semantic occurrence, navigation, completion, documentation, and Analysis facade queries for parent, variant, and field identities, and verify go-to-definition/reference tests use canonical facts rather than syntax reconstruction.

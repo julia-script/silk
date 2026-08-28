@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as FieldRealization from './FieldRealization.js'
 import { alignUp } from './internal/Align.js'
@@ -839,9 +839,7 @@ const commonViolations = (
 }
 
 const fieldIdEquals = (left: DeclarationFacts.FieldId, right: DeclarationFacts.FieldId): boolean =>
-  left.ordinal === right.ordinal &&
-  left.struct.sourceId === right.struct.sourceId &&
-  left.struct.ordinal === right.struct.ordinal
+  DeclarationFacts.sameFieldId(left, right)
 
 /** Compares two compiler-planned physical selectors. */
 export const selectorEquals = (left: Selector, right: Selector): boolean => {

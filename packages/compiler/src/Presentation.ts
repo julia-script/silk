@@ -19,6 +19,7 @@ export type Presentation =
       readonly functionKind: DeclarationFacts.DeclarationFact['functionKind']
     })
   | (Base & { readonly _tag: 'StructPresentation'; readonly name: string })
+  | (Base & { readonly _tag: 'UnionPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumMemberPresentation'; readonly name: string })
   | (Base & { readonly _tag: 'EnumOperationPresentation'; readonly name: string })
@@ -178,6 +179,21 @@ export const structDeclaration = (self: DeclarationFacts.StructFact): Presentati
     _tag: 'StructPresentation',
     name,
     text: `${visibility}struct ${name}${typeParameters}`,
+  })
+}
+
+/** Renders a nominal tagged-union declaration without expanding its variants. */
+export const unionDeclaration = (self: DeclarationFacts.UnionFact): Presentation => {
+  const name = self.name._tag === 'Present' ? self.name.spelling : '_'
+  const visibility = self.visibility === 'Public' ? 'pub ' : ''
+  const typeParameters =
+    self.typeParameters.length === 0
+      ? ''
+      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  return Object.freeze({
+    _tag: 'UnionPresentation',
+    name,
+    text: `${visibility}union ${name}${typeParameters}`,
   })
 }
 

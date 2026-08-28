@@ -12,6 +12,7 @@ import {
 } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import {
   borrowedWriteRoot,
@@ -1561,11 +1562,8 @@ export function lowerExpressionInner(
         const value = loweredFields.get(field.field.ordinal)
         const declared =
           representation?._tag === 'Aggregate'
-            ? representation.fields.find(
-                (candidate) =>
-                  candidate.id.ordinal === field.field.ordinal &&
-                  candidate.id.struct.sourceId === field.field.struct.sourceId &&
-                  candidate.id.struct.ordinal === field.field.struct.ordinal,
+            ? representation.fields.find((candidate) =>
+                DeclarationFacts.sameFieldId(candidate.id, field.field),
               )
             : undefined
         const stored =

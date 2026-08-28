@@ -3,6 +3,7 @@ import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
@@ -184,11 +185,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (selector._tag === 'FieldSelector') {
           if (selectedLayout?.representation._tag !== 'Aggregate')
             throw new RangeError('LLVM borrow field lost its aggregate layout')
-          const field = selectedLayout.representation.fields.find(
-            (candidate) =>
-              candidate.id.ordinal === selector.field.ordinal &&
-              candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-              candidate.id.struct.ordinal === selector.field.struct.ordinal,
+          const field = selectedLayout.representation.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.id, selector.field),
           )
           if (field === undefined) throw new RangeError('LLVM borrow field lost its field layout')
           staticOffset += field.offset
@@ -446,9 +444,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         return first !== undefined &&
           first._tag === 'FieldId' &&
           selected !== undefined &&
-          first.ordinal === operation.field.ordinal &&
-          first.struct.sourceId === operation.field.struct.sourceId &&
-          first.struct.ordinal === operation.field.struct.ordinal
+          DeclarationFacts.sameFieldId(first, operation.field)
           ? [selected]
           : []
       })
@@ -657,9 +653,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             if (selector._tag === 'FieldSelector') {
               if (
                 physical._tag !== 'FieldId' ||
-                physical.ordinal !== selector.field.ordinal ||
-                physical.struct.sourceId !== selector.field.struct.sourceId ||
-                physical.struct.ordinal !== selector.field.struct.ordinal
+                !DeclarationFacts.sameFieldId(physical, selector.field)
               ) {
                 return []
               }
@@ -959,9 +953,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (selector._tag === 'FieldSelector') {
             if (
               physical._tag !== 'FieldId' ||
-              physical.ordinal !== selector.field.ordinal ||
-              physical.struct.sourceId !== selector.field.struct.sourceId ||
-              physical.struct.ordinal !== selector.field.struct.ordinal
+              !DeclarationFacts.sameFieldId(physical, selector.field)
             ) {
               matches = false
               break

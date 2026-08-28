@@ -1,6 +1,6 @@
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
@@ -1061,7 +1061,10 @@ export const catalog = (
               _tag: 'LayoutField' as const,
               id: Object.freeze({
                 _tag: 'FieldId' as const,
-                struct: structId,
+                owner: Object.freeze({
+                  _tag: 'StructFieldOwnerId' as const,
+                  declaration: structId,
+                }),
                 ordinal: fieldOrdinal,
               }),
               name,
@@ -3882,11 +3885,7 @@ const fieldSlice = (
   if (node._tag !== 'ProductShape') return undefined
   let fieldOffset = offset
   for (const candidate of node.fields) {
-    if (
-      candidate.field.ordinal === field.ordinal &&
-      candidate.field.struct.sourceId === field.struct.sourceId &&
-      candidate.field.struct.ordinal === field.struct.ordinal
-    ) {
+    if (DeclarationFacts.sameFieldId(candidate.field, field)) {
       return fieldSlice(candidate.shape, rest, fieldOffset)
     }
     fieldOffset += candidate.shape.laneCount

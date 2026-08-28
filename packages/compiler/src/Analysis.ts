@@ -394,11 +394,8 @@ const syntaxForIdentity = (
   if (identity._tag === 'FieldIdentity') {
     for (const headers of self.index.modules)
       for (const declaration of headers.structs) {
-        const field = declaration.fields.find(
-          (candidate) =>
-            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
-            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
-            candidate.id.ordinal === identity.id.ordinal,
+        const field = declaration.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, identity.id),
         )
         if (field !== undefined) return field.syntax
       }
@@ -540,11 +537,8 @@ const presentationOfIdentity = (
   if (identity._tag === 'FieldIdentity') {
     for (const headers of self.index.modules)
       for (const declaration of headers.structs) {
-        const field = declaration.fields.find(
-          (candidate) =>
-            candidate.id.struct.sourceId === identity.id.struct.sourceId &&
-            candidate.id.struct.ordinal === identity.id.struct.ordinal &&
-            candidate.id.ordinal === identity.id.ordinal,
+        const field = declaration.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, identity.id),
         )
         if (field !== undefined)
           return hoverPresentation(Presentation.field(field), declaredType(field.declaredType))

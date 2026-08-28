@@ -9,7 +9,7 @@ import type * as LlvmType from '@silklang/llvm/Type'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
@@ -450,9 +450,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           return first !== undefined &&
             first._tag === 'FieldId' &&
             value !== undefined &&
-            first.ordinal === field.field.ordinal &&
-            first.struct.ordinal === field.field.struct.ordinal &&
-            first.struct.sourceId === field.field.struct.sourceId
+            DeclarationFacts.sameFieldId(first, field.field)
             ? [value]
             : []
         })

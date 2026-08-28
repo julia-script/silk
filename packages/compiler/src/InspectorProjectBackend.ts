@@ -130,6 +130,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
       : `<${member.typeParameters.map((parameter) => typeText(parameter.type)).join(', ')}>`
   if (member._tag === 'StructDeclaration')
     return `struct${parameters} · ${member.fields.length} field${member.fields.length === 1 ? '' : 's'}`
+  if (member._tag === 'UnionDeclaration')
+    return `union${parameters} · ${member.variants.length} variant${member.variants.length === 1 ? '' : 's'}`
   if (member._tag === 'EnumDeclaration') {
     const representation =
       member.representation._tag === 'Available'

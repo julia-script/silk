@@ -1,6 +1,6 @@
 import type { AggregateValue, Value } from './BootstrapValue.js'
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import * as Type from './Type.js'
 import * as WakeCell from './WakeCell.js'
@@ -259,11 +259,8 @@ export const selectFieldPath = (
   for (const selector of path) {
     if (selected._tag !== 'AggregateValue')
       throw new RangeError('MIR verifier allowed a match field below a non-struct value')
-    const field: AggregateValue['fields'][number] | undefined = selected.fields.find(
-      (candidate) =>
-        candidate.field.ordinal === selector.ordinal &&
-        candidate.field.struct.sourceId === selector.struct.sourceId &&
-        candidate.field.struct.ordinal === selector.struct.ordinal,
+    const field: AggregateValue['fields'][number] | undefined = selected.fields.find((candidate) =>
+      DeclarationFacts.sameFieldId(candidate.field, selector),
     )
     if (field === undefined) throw new RangeError('MIR verifier allowed a missing match field')
     selected = field.value

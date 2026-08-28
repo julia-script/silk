@@ -318,6 +318,12 @@ export const bodylessOpaqueResultCode = 'SEM0118' as const
 
 /** Stable code for effect-block return sites whose success types disagree. */
 export const effectBlockReturnMismatchCode = 'SEM0163' as const
+/** Stable code for a nominal union declaration with no variants. */
+export const emptyNominalUnionCode = 'SEM0164' as const
+/** Stable code for a repeated variant name within one nominal union. */
+export const duplicateUnionVariantCode = 'SEM0165' as const
+/** Stable code for a named-field variant whose braces contain no field. */
+export const emptyUnionVariantCode = 'SEM0166' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -517,6 +523,9 @@ export type Code =
   | typeof missingOpaqueRealizationCode
   | typeof bodylessOpaqueResultCode
   | typeof effectBlockReturnMismatchCode
+  | typeof emptyNominalUnionCode
+  | typeof duplicateUnionVariantCode
+  | typeof emptyUnionVariantCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
   | typeof explicitMoveRequiredCode
@@ -574,6 +583,13 @@ export type Reason =
     }
   | { readonly _tag: 'ReservedTemplateSyntax' }
   | { readonly _tag: 'ReservedImportBinding'; readonly spelling: string }
+  | { readonly _tag: 'EmptyNominalUnion'; readonly union: string }
+  | {
+      readonly _tag: 'DuplicateUnionVariant'
+      readonly spelling: string
+      readonly originalSpan: SourceSpan.SourceSpan
+    }
+  | { readonly _tag: 'EmptyUnionVariant'; readonly variant: string }
   | { readonly _tag: 'UnknownModule'; readonly module: string }
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
@@ -1655,6 +1671,49 @@ export const emptyEnum = (enumName: string, span: SourceSpan.SourceSpan): Diagno
     severity: 'error',
     message: `Enum ${enumName} must declare at least one member`,
     reason: Object.freeze({ _tag: 'EmptyEnum', enum: enumName }),
+    span,
+  })
+
+/** Creates the diagnostic for a nominal union with no variants. */
+export const emptyNominalUnion = (unionName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyNominalUnionCode,
+    severity: 'error',
+    message: `Union ${unionName} must declare at least one variant`,
+    reason: Object.freeze({ _tag: 'EmptyNominalUnion', union: unionName }),
+    span,
+  })
+
+/** Creates the diagnostic for a repeated variant name within one nominal union. */
+export const duplicateUnionVariant = (
+  spelling: string,
+  originalSpan: SourceSpan.SourceSpan,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: duplicateUnionVariantCode,
+    severity: 'error',
+    message: `Duplicate union variant ${spelling}`,
+    reason: Object.freeze({ _tag: 'DuplicateUnionVariant', spelling, originalSpan }),
+    span,
+    relatedSpans: Object.freeze([
+      Object.freeze({ label: 'first declared here', span: originalSpan }),
+    ]),
+  })
+
+/** Creates the diagnostic for braces used without any named variant field. */
+export const emptyUnionVariant = (variantName: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: emptyUnionVariantCode,
+    severity: 'error',
+    message: `Union variant ${variantName} must omit braces or declare at least one field`,
+    reason: Object.freeze({ _tag: 'EmptyUnionVariant', variant: variantName }),
     span,
   })
 

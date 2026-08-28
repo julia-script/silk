@@ -11,6 +11,7 @@ import type {
   ServiceFact,
   StructFact,
   TypeParameterFact,
+  UnionFact,
 } from './DeclarationFacts.js'
 import {
   closeConformanceSelf,
@@ -283,16 +284,54 @@ export const complete = (
         })
       }
       if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
-      const fields = member.fields.map((field) => {
-        const resolved = resolveDeclaredType(
-          module.module,
-          field.declaredType,
-          resolvers,
-          self.modules,
+      const resolveFields = (fields: StructFact['fields']): StructFact['fields'] =>
+        Object.freeze(
+          fields.map((field) => {
+            const resolved = resolveDeclaredType(
+              module.module,
+              field.declaredType,
+              resolvers,
+              self.modules,
+            )
+            diagnostics.push(...resolved.diagnostics)
+            return Object.freeze({ ...field, declaredType: resolved.fact })
+          }),
         )
-        diagnostics.push(...resolved.diagnostics)
-        return Object.freeze({ ...field, declaredType: resolved.fact })
-      })
+      if (member._tag === 'UnionDeclaration') {
+        const variants = Object.freeze(
+          member.variants.map((variant) =>
+            Object.freeze({ ...variant, fields: resolveFields(variant.fields) }),
+          ),
+        )
+        const unavailableCauses = variants.flatMap((variant) =>
+          variant.fields.flatMap((field) =>
+            field.declaredType._tag === 'Unresolved' && field.declaredType.cause !== undefined
+              ? [field.declaredType.cause]
+              : [],
+          ),
+        )
+        return Object.freeze({
+          ...member,
+          typeParameters: resolveBounds(
+            module.module,
+            member.typeParameters,
+            resolvers,
+            self.modules,
+            diagnostics,
+          ),
+          variants,
+          validity:
+            member.validity._tag === 'Valid' && unavailableCauses.length === 0
+              ? member.validity
+              : Object.freeze({
+                  _tag: 'Invalid' as const,
+                  causes: Object.freeze([
+                    ...(member.validity._tag === 'Invalid' ? member.validity.causes : []),
+                    ...unavailableCauses,
+                  ]),
+                }),
+        })
+      }
       return Object.freeze({
         ...member,
         typeParameters: resolveBounds(
@@ -302,7 +341,7 @@ export const complete = (
           self.modules,
           diagnostics,
         ),
-        fields: Object.freeze(fields),
+        fields: resolveFields(member.fields),
       })
     })
     const conformances = module.conformances.map((conformance) => {
@@ -406,6 +445,9 @@ export const complete = (
       enums: Object.freeze(
         closedMembers.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
       ),
+      unions: Object.freeze(
+        closedMembers.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      ),
       services: Object.freeze(
         closedMembers.filter(
           (member): member is ServiceFact => member._tag === 'ServiceDeclaration',
@@ -499,6 +541,9 @@ export const complete = (
       ),
       enums: Object.freeze(
         members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      ),
+      unions: Object.freeze(
+        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
@@ -1184,7 +1229,11 @@ export const complete = (
         continue
       }
       if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') continue
-      for (const field of member.fields) {
+      const fields =
+        member._tag === 'UnionDeclaration'
+          ? member.variants.flatMap((variant) => variant.fields)
+          : member.fields
+      for (const field of fields) {
         if (
           field.declaredType._tag === 'Resolved' &&
           containsPositionRestrictedBorrow(field.declaredType.type)
@@ -1257,15 +1306,27 @@ export const complete = (
         })
       }
       if (member._tag === 'RoleDeclaration' || member._tag === 'EnumDeclaration') return member
-      const fields = member.fields.map((field) =>
-        field.visibility === 'Public'
-          ? Object.freeze({
-              ...field,
-              declaredType: attachExposure(field.declaredType, modules, diagnostics),
-            })
-          : field,
-      )
-      return Object.freeze({ ...member, fields: Object.freeze(fields) })
+      const exposeFields = (fields: StructFact['fields']): StructFact['fields'] =>
+        Object.freeze(
+          fields.map((field) =>
+            field.visibility === 'Public'
+              ? Object.freeze({
+                  ...field,
+                  declaredType: attachExposure(field.declaredType, modules, diagnostics),
+                })
+              : field,
+          ),
+        )
+      return member._tag === 'UnionDeclaration'
+        ? Object.freeze({
+            ...member,
+            variants: Object.freeze(
+              member.variants.map((variant) =>
+                Object.freeze({ ...variant, fields: exposeFields(variant.fields) }),
+              ),
+            ),
+          })
+        : Object.freeze({ ...member, fields: exposeFields(member.fields) })
     })
     return Object.freeze({
       ...module,
@@ -1280,6 +1341,9 @@ export const complete = (
       ),
       enums: Object.freeze(
         members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      ),
+      unions: Object.freeze(
+        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),
@@ -1372,6 +1436,9 @@ export const complete = (
       ),
       enums: Object.freeze(
         members.filter((member): member is EnumFact => member._tag === 'EnumDeclaration'),
+      ),
+      unions: Object.freeze(
+        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
       ),
       services: Object.freeze(
         members.filter((member): member is ServiceFact => member._tag === 'ServiceDeclaration'),

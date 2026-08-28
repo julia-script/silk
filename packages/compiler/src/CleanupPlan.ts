@@ -337,10 +337,8 @@ export const cleanupTypeAtPath = (
       current.arguments,
     )
     if (substitution === undefined) return undefined
-    const field = declaration.fields.find(
-      (candidate) =>
-        candidate.id.struct.ordinal === fieldId.struct.ordinal &&
-        candidate.id.ordinal === fieldId.ordinal,
+    const field = declaration.fields.find((candidate) =>
+      DeclarationFacts.sameFieldId(candidate.id, fieldId),
     )
     current =
       field?.declaredType._tag === 'Resolved'

@@ -1050,11 +1050,19 @@ export const intrinsicStruct = (
     fields: Object.freeze(
       fieldTypes.map(([name, fieldType], fieldOrdinal) =>
         Object.freeze({
-          _tag: 'StructField' as const,
-          id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+          _tag: 'AggregateField' as const,
+          id: Object.freeze({
+            _tag: 'FieldId' as const,
+            owner: Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration: id }),
+            ordinal: fieldOrdinal,
+          }),
           state: Object.freeze({
             _tag: 'Unique' as const,
-            id: Object.freeze({ _tag: 'FieldId' as const, struct: id, ordinal: fieldOrdinal }),
+            id: Object.freeze({
+              _tag: 'FieldId' as const,
+              owner: Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration: id }),
+              ordinal: fieldOrdinal,
+            }),
           }),
           visibility: 'Public' as const,
           name: Object.freeze({ _tag: 'Present' as const, spelling: name, token }),

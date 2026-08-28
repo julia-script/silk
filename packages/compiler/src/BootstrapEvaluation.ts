@@ -16,6 +16,7 @@ import * as BootstrapPlace from './BootstrapPlace.js'
 import * as BootstrapStorage from './BootstrapStorage.js'
 import type * as ChildProcess from './ChildProcess.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
 import type * as Hir from './Hir.js'
@@ -3963,11 +3964,8 @@ function* executeFunction(
             if (aggregate._tag !== 'AggregateValue') {
               throw new RangeError('MIR verifier allowed projection from a scalar value')
             }
-            const selected = aggregate.fields.find(
-              (candidate) =>
-                candidate.field.ordinal === operation.field.ordinal &&
-                candidate.field.struct.sourceId === operation.field.struct.sourceId &&
-                candidate.field.struct.ordinal === operation.field.struct.ordinal,
+            const selected = aggregate.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.field, operation.field),
             )
             if (selected === undefined) {
               throw new RangeError('MIR verifier allowed projection of a missing aggregate field')
@@ -4004,11 +4002,8 @@ function* executeFunction(
                     'MIR verifier allowed a field selector on a non-struct value',
                   )
                 }
-                const field = selected.fields.find(
-                  (candidate) =>
-                    candidate.field.ordinal === selector.field.ordinal &&
-                    candidate.field.struct.sourceId === selector.field.struct.sourceId &&
-                    candidate.field.struct.ordinal === selector.field.struct.ordinal,
+                const field = selected.fields.find((candidate) =>
+                  DeclarationFacts.sameFieldId(candidate.field, selector.field),
                 )
                 if (field === undefined) {
                   throw new RangeError('MIR verifier allowed a missing field selector')

@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX` | Lexical | 7 |
 | `PAR` | Parser | 4 |
 | `MOD` | Module | 3 |
-| `SEM` | Semantic | 155 |
+| `SEM` | Semantic | 158 |
 | `OWN` | Ownership | 16 |
 | `LAY` | Layout | 1 |
 
-There are 186 codes in total.
+There are 189 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -210,6 +210,9 @@ There are 186 codes in total.
 | `SEM0161` | Stable code for a scalar enum pattern naming a member of another enum. | `Enum pattern from <actual> cannot match <expected>` |
 | `SEM0162` | Stable code for an integer literal pattern used against a scalar enum. | `Integer pattern <value> cannot match enum <enum>` |
 | `SEM0163` | Stable code for effect-block return sites whose success types disagree. | `Effect block return sites have incompatible types: <join>` |
+| `SEM0164` | Stable code for a nominal union declaration with no variants. | `Union <unionName> must declare at least one variant` |
+| `SEM0165` | Stable code for a repeated variant name within one nominal union. | `Duplicate union variant <spelling>` |
+| `SEM0166` | Stable code for a named-field variant whose braces contain no field. | `Union variant <variantName> must omit braces or declare at least one field` |
 
 ## Ownership (`OWN`)
 

@@ -132,12 +132,6 @@ export const hasAppliedUnionVariant = (state: State): boolean => {
   return false
 }
 
-export const hasBareUnionVariantFields = (state: State): boolean =>
-  nextSignificantKind(state) === 'Identifier' &&
-  peek(state, 1) === 'Dot' &&
-  peek(state, 2) === 'Identifier' &&
-  peek(state, 3) === 'LeftBrace'
-
 export const parseIntegerLiteralExpression = (initial: State): NodeResult => {
   if (nextSignificantKind(initial) === 'Minus') {
     const minus = expect(initial, 'Minus', ['DecimalInteger', ...expressionFollowing])
@@ -292,7 +286,7 @@ export const primaryKind = (
         if (member === 'LeftParenthesis') return 'Call'
         const afterMember = peek(state, 3)
         if (afterMember === 'LeftParenthesis') return 'Call'
-        if (afterMember === 'LeftBrace') return allowStructLiteral ? 'UnionVariant' : 'Identifier'
+        if (afterMember === 'LeftBrace') return allowStructLiteral ? 'StructLiteral' : 'Identifier'
       }
       return 'Identifier'
     }
@@ -743,7 +737,6 @@ export const isRowWithoutStart = (state: State): boolean =>
 export const isNominalPatternStart = (state: State): boolean => {
   if (nextSignificantKind(state) !== 'Identifier') return false
   if (hasAppliedUnionVariant(state)) return true
-  if (hasBareUnionVariantFields(state)) return true
   if (hasCompleteAppliedPostfix(state, 'LeftBrace')) return true
   const following = peek(state, 1)
   if (following === 'LeftBrace') return true
@@ -843,8 +836,7 @@ export function parsePattern(
     })
   }
   if (isEnumMemberPatternStart(initial)) return parseEnumMemberPattern(initial)
-  if (hasAppliedUnionVariant(initial) || hasBareUnionVariantFields(initial))
-    return parseUnionVariantPattern(initial)
+  if (hasAppliedUnionVariant(initial)) return parseUnionVariantPattern(initial)
   const kind = nextSignificantKind(initial)
   if (kind === 'DecimalInteger' || (kind === 'Minus' && peek(initial, 1) === 'DecimalInteger'))
     return parseIntegerPattern(initial)
@@ -914,10 +906,9 @@ export function parseUnionVariantPattern(initial: State): NodeResult {
         ])
         state = colon.state
         if (isNominalPatternStart(state)) {
-          const nested =
-            hasAppliedUnionVariant(state) || hasBareUnionVariantFields(state)
-              ? parseUnionVariantPattern(state)
-              : parseNominalPattern(state)
+          const nested = hasAppliedUnionVariant(state)
+            ? parseUnionVariantPattern(state)
+            : parseNominalPattern(state)
           fieldChildren = Object.freeze([...fieldChildren, ...colon.elements, nested.node])
           state = nested.state
         } else {

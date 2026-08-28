@@ -16,7 +16,7 @@ import * as Backend from './Backend.js'
 import { symbolFor } from './Backend.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FloatingPoint from './FloatingPoint.js'
@@ -1769,11 +1769,8 @@ const makeOperationContext = (
             children: Object.freeze(
               plan_.fields.flatMap((field) => {
                 if (!CleanupPlan.hasHook(field.cleanup)) return []
-                const layoutField = representation.fields.find(
-                  (candidate) =>
-                    candidate.id.ordinal === field.field.ordinal &&
-                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                    candidate.id.struct.sourceId === field.field.struct.sourceId,
+                const layoutField = representation.fields.find((candidate) =>
+                  DeclarationFacts.sameFieldId(candidate.id, field.field),
                 )
                 return layoutField === undefined
                   ? []
@@ -2219,9 +2216,7 @@ const makeOperationContext = (
                     return first !== undefined &&
                       first._tag === 'FieldId' &&
                       value !== undefined &&
-                      first.ordinal === field.field.ordinal &&
-                      first.struct.ordinal === field.field.struct.ordinal &&
-                      first.struct.sourceId === field.field.struct.sourceId
+                      DeclarationFacts.sameFieldId(first, field.field)
                       ? [value]
                       : []
                   }),
@@ -2398,11 +2393,8 @@ const makeOperationContext = (
           return Object.freeze({
             children: Object.freeze(
               plan_.fields.flatMap((field) => {
-                const layoutField = representation.fields.find(
-                  (candidate) =>
-                    candidate.id.ordinal === field.field.ordinal &&
-                    candidate.id.struct.ordinal === field.field.struct.ordinal &&
-                    candidate.id.struct.sourceId === field.field.struct.sourceId,
+                const layoutField = representation.fields.find((candidate) =>
+                  DeclarationFacts.sameFieldId(candidate.id, field.field),
                 )
                 return layoutField === undefined
                   ? []
@@ -4817,11 +4809,8 @@ const emitBeginLoanOperation = (
       if (selector._tag === 'FieldSelector') {
         if (selectedLayout?.representation._tag !== 'Aggregate')
           throw new RangeError('Wasm borrow field selector lost its aggregate layout')
-        const field = selectedLayout.representation.fields.find(
-          (candidate) =>
-            candidate.id.ordinal === selector.field.ordinal &&
-            candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-            candidate.id.struct.ordinal === selector.field.struct.ordinal,
+        const field = selectedLayout.representation.fields.find((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.id, selector.field),
         )
         if (field === undefined)
           throw new RangeError('Wasm borrow field selector lost its field layout')
@@ -5008,9 +4997,7 @@ const emitProjectOperation = (
     return field !== undefined &&
       field._tag === 'FieldId' &&
       source !== undefined &&
-      field.ordinal === operation.field.ordinal &&
-      field.struct.sourceId === operation.field.struct.sourceId &&
-      field.struct.ordinal === operation.field.struct.ordinal
+      DeclarationFacts.sameFieldId(field, operation.field)
       ? [source]
       : []
   })
@@ -5125,9 +5112,7 @@ const emitReadPlaceOperation = (
         if (selector._tag === 'FieldSelector') {
           if (
             physical._tag !== 'FieldId' ||
-            physical.ordinal !== selector.field.ordinal ||
-            physical.struct.sourceId !== selector.field.struct.sourceId ||
-            physical.struct.ordinal !== selector.field.struct.ordinal
+            !DeclarationFacts.sameFieldId(physical, selector.field)
           ) {
             return []
           }
@@ -5310,9 +5295,7 @@ const emitWritePlaceOperation = (
       if (selector._tag === 'FieldSelector') {
         if (
           physical._tag !== 'FieldId' ||
-          physical.ordinal !== selector.field.ordinal ||
-          physical.struct.sourceId !== selector.field.struct.sourceId ||
-          physical.struct.ordinal !== selector.field.struct.ordinal
+          !DeclarationFacts.sameFieldId(physical, selector.field)
         ) {
           matches = false
           break

@@ -1,5 +1,5 @@
 import type * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FieldRealization from './FieldRealization.js'
@@ -881,11 +881,8 @@ const placeType = (
           : undefined
       const field =
         entry?.representation._tag === 'Aggregate'
-          ? entry.representation.fields.find(
-              (candidate) =>
-                candidate.id.ordinal === selector.field.ordinal &&
-                candidate.id.struct.sourceId === selector.field.struct.sourceId &&
-                candidate.id.struct.ordinal === selector.field.struct.ordinal,
+          ? entry.representation.fields.find((candidate) =>
+              DeclarationFacts.sameFieldId(candidate.id, selector.field),
             )
           : undefined
       current = field?.type
@@ -930,11 +927,8 @@ const fieldPathType = (
       : undefined
     const field: Layout.Field | undefined =
       entry?.representation._tag === 'Aggregate'
-        ? entry.representation.fields.find(
-            (candidate) =>
-              candidate.id.ordinal === selector.ordinal &&
-              candidate.id.struct.sourceId === selector.struct.sourceId &&
-              candidate.id.struct.ordinal === selector.struct.ordinal,
+        ? entry.representation.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.id, selector),
           )
         : undefined
     current = field?.type
@@ -1361,9 +1355,7 @@ const cleanupMatchesSemanticType = (
     const expected = representation.fields.at(ordinal)
     return (
       expected !== undefined &&
-      field.field.ordinal === expected.id.ordinal &&
-      field.field.struct.sourceId === expected.id.struct.sourceId &&
-      field.field.struct.ordinal === expected.id.struct.ordinal &&
+      DeclarationFacts.sameFieldId(field.field, expected.id) &&
       cleanupMatchesSemanticType(layout, field.cleanup, expected.type, next)
     )
   })

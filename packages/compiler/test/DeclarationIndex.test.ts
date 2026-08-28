@@ -949,6 +949,83 @@ it.effect('indexes mixed struct and function declarations in one canonical names
   }),
 )
 
+it.effect('indexes generic nominal unions with parent-scoped variants and fields', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `pub union Result<A, E> { Success { pub value: A, next: Other }, Failure { error: E }, Pending }
+union Other { Success { value: bool } }`,
+      ],
+    ])
+    const module = index.modules.at(0)
+    const result = module?.unions.at(0)
+    const other = module?.unions.at(1)
+
+    assert.deepEqual(
+      module?.members.map((member) => member._tag),
+      ['UnionDeclaration', 'UnionDeclaration'],
+    )
+    assert.deepEqual(
+      result?.typeParameters.map((parameter) => parameter.type.name),
+      ['A', 'E'],
+    )
+    assert.deepEqual(
+      result?.variants.map((variant) => [
+        variant.name._tag === 'Present' ? variant.name.spelling : '_',
+        variant.kind,
+      ]),
+      [
+        ['Success', 'Fields'],
+        ['Failure', 'Fields'],
+        ['Pending', 'Unit'],
+      ],
+    )
+    assert.strictEqual(result?.validity._tag, 'Valid')
+    assert.strictEqual(result?.variants.at(0)?.fields.at(0)?.visibility, 'Public')
+    assert.strictEqual(result?.variants.at(0)?.fields.at(1)?.declaredType._tag, 'Resolved')
+    assert.notDeepEqual(result?.variants.at(0)?.canonical, other?.variants.at(0)?.canonical)
+    assert.notDeepEqual(
+      result?.variants.at(0)?.fields.at(0)?.id,
+      other?.variants.at(0)?.fields.at(0)?.id,
+    )
+    assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('diagnoses invalid nominal unions while preserving valid siblings', () =>
+  Effect.gen(function* () {
+    const source = `union Empty {}
+union Damaged { Same, Same, EmptyFields {}, Good { value: Missing }, Tail }
+struct Damaged {}`
+    const index = yield* collect('root', [['root', source]])
+    const unions = index.modules.at(0)?.unions ?? []
+    const damaged = unions.at(1)
+
+    assert.deepEqual(
+      damaged?.variants.map((variant) =>
+        variant.name._tag === 'Present' ? variant.name.spelling : '_',
+      ),
+      ['Same', 'Same', 'EmptyFields', 'Good', 'Tail'],
+    )
+    assert.strictEqual(damaged?.variants.at(4)?.canonical._tag, 'Canonical')
+    assert.strictEqual(damaged?.validity._tag, 'Invalid')
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0164', 'SEM0165', 'SEM0166', 'SEM0001', 'SEM0003'],
+    )
+    const duplicate = index.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0165')
+    assert.deepEqual(
+      duplicate?.relatedSpans.map((related) => source.slice(related.span.start, related.span.end)),
+      ['Same'],
+    )
+    assert.strictEqual(
+      duplicate === undefined ? undefined : source.slice(duplicate.span.start, duplicate.span.end),
+      'Same',
+    )
+  }),
+)
+
 it.effect('retains duplicate and damaged struct fields without losing later fields', () =>
   Effect.gen(function* () {
     const index = yield* collect('root', [
