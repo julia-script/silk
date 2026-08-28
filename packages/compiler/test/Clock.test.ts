@@ -2,7 +2,9 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as MonotonicClockHost from '../src/MonotonicClock.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as SystemClockHost from '../src/SystemClock.js'
 
 const encoder = new TextEncoder()
 
@@ -96,15 +98,133 @@ impl MonotonicClock.MonotonicClock for ScriptedMonotonicClock {
 }
 `
 
+it('keeps fixed system-clock host values exact beyond JavaScript number precision', () => {
+  const built = SystemClockHost.fixed(
+    { seconds: 9_007_199_254_740_993n, nanoseconds: 999_999_999n },
+    18_446_744_073_709_551_615n,
+  )
+  assert.strictEqual(built._tag, 'Constructed')
+  if (built._tag !== 'Constructed') return
+  assert.deepEqual(built.value.provider.now(), {
+    _tag: 'Read',
+    instant: { seconds: 9_007_199_254_740_993n, nanoseconds: 999_999_999n },
+  })
+  assert.deepEqual(built.value.provider.resolution(), {
+    _tag: 'Resolution',
+    nanoseconds: 18_446_744_073_709_551_615n,
+  })
+})
+
+it('returns explicit construction failures outside exact clock scalar ranges', () => {
+  const minimum = -(1n << 63n)
+  const maximum = (1n << 63n) - 1n
+  for (const [seconds, nanoseconds, resolution, reason] of [
+    [minimum - 1n, 0n, 1n, 'SecondsOutOfRange'],
+    [maximum + 1n, 0n, 1n, 'SecondsOutOfRange'],
+    [0n, -1n, 1n, 'NanosecondsOutOfRange'],
+    [0n, 1_000_000_000n, 1n, 'NanosecondsOutOfRange'],
+    [0n, 0n, 0n, 'ResolutionOutOfRange'],
+    [0n, 0n, 1n << 64n, 'ResolutionOutOfRange'],
+  ] as const) {
+    const built = SystemClockHost.fixed({ seconds, nanoseconds }, resolution)
+    assert.strictEqual(built._tag, 'ConstructionFailure')
+    if (built._tag === 'ConstructionFailure') assert.strictEqual(built.reason._tag, reason)
+  }
+  assert.strictEqual(
+    SystemClockHost.fixed({ seconds: minimum, nanoseconds: 0n }, 1n)._tag,
+    'Constructed',
+  )
+  assert.strictEqual(
+    SystemClockHost.fixed({ seconds: maximum, nanoseconds: 999_999_999n }, (1n << 64n) - 1n)._tag,
+    'Constructed',
+  )
+})
+
+it('validates and advances only a scripted monotonic timeline', () => {
+  const built = MonotonicClockHost.scripted(
+    [
+      { seconds: 10n, nanoseconds: 5n },
+      { seconds: 10n, nanoseconds: 5n },
+      { seconds: 11n, nanoseconds: 0n },
+    ],
+    7n,
+  )
+  assert.strictEqual(built._tag, 'Constructed')
+  if (built._tag !== 'Constructed') return
+  assert.deepEqual(built.value.provider.now(), {
+    _tag: 'Read',
+    instant: { seconds: 10n, nanoseconds: 5n },
+  })
+  assert.deepEqual(built.value.provider.waitUntil({ seconds: 9n, nanoseconds: 0n }), {
+    _tag: 'Waited',
+  })
+  assert.deepEqual(built.value.current(), { seconds: 10n, nanoseconds: 5n })
+  assert.deepEqual(built.value.provider.waitUntil({ seconds: 12n, nanoseconds: 25n }), {
+    _tag: 'Waited',
+  })
+  assert.deepEqual(built.value.current(), { seconds: 12n, nanoseconds: 25n })
+  assert.deepEqual(built.value.provider.now(), {
+    _tag: 'Read',
+    instant: { seconds: 12n, nanoseconds: 25n },
+  })
+  const waits = built.value.waits()
+  assert.isTrue(Object.isFrozen(waits))
+  assert.deepEqual(waits, [
+    {
+      _tag: 'WaitUntil',
+      deadline: { seconds: 9n, nanoseconds: 0n },
+      before: { seconds: 10n, nanoseconds: 5n },
+      after: { seconds: 10n, nanoseconds: 5n },
+    },
+    {
+      _tag: 'WaitUntil',
+      deadline: { seconds: 12n, nanoseconds: 25n },
+      before: { seconds: 10n, nanoseconds: 5n },
+      after: { seconds: 12n, nanoseconds: 25n },
+    },
+  ])
+})
+
+it('rejects malformed and decreasing monotonic scripts without throwing', () => {
+  assert.strictEqual(MonotonicClockHost.scripted([], 1n)._tag, 'ConstructionFailure')
+  assert.strictEqual(
+    MonotonicClockHost.scripted([{ seconds: 0n, nanoseconds: -1n }], 1n)._tag,
+    'ConstructionFailure',
+  )
+  assert.strictEqual(
+    MonotonicClockHost.scripted([{ seconds: 0n, nanoseconds: 0n }], 0n)._tag,
+    'ConstructionFailure',
+  )
+  const decreasing = MonotonicClockHost.scripted(
+    [
+      { seconds: 1n, nanoseconds: 0n },
+      { seconds: 0n, nanoseconds: 999_999_999n },
+    ],
+    1n,
+  )
+  assert.strictEqual(decreasing._tag, 'ConstructionFailure')
+  if (decreasing._tag === 'ConstructionFailure') {
+    assert.strictEqual(decreasing.reason._tag, 'DecreasingScript')
+  }
+  assert.deepEqual(SystemClockHost.failing('no wall clock').now(), {
+    _tag: 'BoundaryFailure',
+    message: 'no wall clock',
+  })
+  assert.deepEqual(
+    MonotonicClockHost.failing('no monotonic clock').waitUntil({ seconds: 0n, nanoseconds: 0n }),
+    {
+      _tag: 'BoundaryFailure',
+      message: 'no monotonic clock',
+    },
+  )
+})
+
 it('registers the clock modules, namespaces, and shared Instant alias', () => {
   assert.strictEqual(Stdlib.findNamespace('SystemClock')?.module, 'silk/system_clock')
   assert.strictEqual(Stdlib.findNamespace('MonotonicClock')?.module, 'silk/monotonic_clock')
   assert.strictEqual(Stdlib.findNamespace('Instant')?.module, 'silk/system_clock')
   assert.strictEqual(Stdlib.findNamespace('OsSystemClock')?.module, 'silk/os_system_clock')
-  assert.strictEqual(
-    Stdlib.findNamespace('OsMonotonicClock')?.module,
-    'silk/os_monotonic_clock',
-  )
+  assert.strictEqual(Stdlib.findNamespace('OsMonotonicClock')?.module, 'silk/os_monotonic_clock')
   assert.deepEqual(Stdlib.find('silk/system_clock')?.aliases, ['Instant'])
 })
 
