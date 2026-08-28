@@ -748,7 +748,52 @@ export const hirExpression = (fact: ExpressionFact, borrow?: Hir.BorrowId): Hir.
     })
   }
   if (fact._tag === 'UnionVariant') {
-    return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    if (
+      fact.target._tag !== 'Resolved' ||
+      fact.target.variant.canonical._tag !== 'Canonical' ||
+      fact.type._tag !== 'Available' ||
+      fact.fields.length !== fact.target.variant.fields.length
+    ) {
+      return Object.freeze({
+        _tag: 'Unavailable',
+        span: fact.syntax.span,
+        ...(fact.target._tag === 'Unavailable' && fact.target.cause !== undefined
+          ? { cause: fact.target.cause }
+          : {}),
+      })
+    }
+    const substitution =
+      TypeInference.substitution(
+        fact.target.union.typeParameters.map((parameter) => parameter.type),
+        fact.target.type.arguments,
+      ) ?? new Map()
+    return Object.freeze({
+      _tag: 'ConstructUnionVariant',
+      nominal: fact.target.type,
+      variant: fact.target.variant.canonical.id,
+      variantOrdinal: fact.target.variant.id.ordinal,
+      evaluationOrder: Object.freeze(
+        fact.initializers.flatMap((initializer) =>
+          initializer.state._tag === 'Resolved' ? [initializer.state.field.id] : [],
+        ),
+      ),
+      fields: Object.freeze(
+        fact.fields.map(({ field, initializer }) => {
+          const value =
+            field.declaredType._tag === 'Resolved'
+              ? hirExpectedExpression(
+                  initializer.expression,
+                  Type.substitute(field.declaredType.type, substitution),
+                  'StructField',
+                  field.syntax.span,
+                )
+              : hirExpression(initializer.expression)
+          return Object.freeze({ field: field.id, value })
+        }),
+      ),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    })
   }
   if (fact._tag === 'ArrayLiteral') {
     if (fact.state._tag !== 'Complete' || fact.type._tag !== 'Available') {

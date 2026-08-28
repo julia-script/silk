@@ -22,6 +22,8 @@ export type Selector =
   | { readonly _tag: 'EffectCaptureSelector'; readonly ordinal: number }
   | { readonly _tag: 'UnionTagSelector' }
   | { readonly _tag: 'UnionPayloadSelector'; readonly slot: number }
+  | { readonly _tag: 'NominalUnionTagSelector' }
+  | { readonly _tag: 'NominalUnionPayloadSelector'; readonly slot: number }
   | { readonly _tag: 'SliceAddressSelector' }
   | { readonly _tag: 'SliceLengthSelector' }
   | { readonly _tag: 'StringStorageSelector' }
@@ -100,6 +102,21 @@ export type CallingShapeNode =
       readonly zeroFill: true
       readonly members: ReadonlyArray<{
         readonly member: Type.Type
+        readonly ordinal: number
+        readonly shape: CallingShapeNode
+        readonly payloadSlots: ReadonlyArray<number>
+      }>
+      readonly laneCount: number
+    }
+  | {
+      readonly _tag: 'NominalUnionShape'
+      readonly type: Type.Nominal
+      readonly tag: { readonly type: 'i32'; readonly lane: 0 }
+      readonly payloadLaneCount: number
+      readonly payloadTypes: ReadonlyArray<Type.Builtin>
+      readonly zeroFill: true
+      readonly variants: ReadonlyArray<{
+        readonly variant: DeclarationFacts.CanonicalUnionVariantId
         readonly ordinal: number
         readonly shape: CallingShapeNode
         readonly payloadSlots: ReadonlyArray<number>

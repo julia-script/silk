@@ -665,6 +665,9 @@ export const layoutRows = (
         case 'Union':
           representationText = `sum · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
           break
+        case 'NominalUnion':
+          representationText = `nominal union · ${entry.representation.variants.length} variants · tag i${entry.representation.tag.bits} · payload +${entry.representation.payloadOffset}/${entry.representation.payloadSize}`
+          break
         case 'Reference':
           representationText = `reference · address i${entry.representation.address.bits}`
           break

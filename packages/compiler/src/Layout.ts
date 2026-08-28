@@ -149,6 +149,24 @@ export type Representation =
       readonly tagPadding: number
       readonly tailPadding: number
     }
+  | {
+      readonly _tag: 'NominalUnion'
+      readonly union: DeclarationFacts.CanonicalId
+      readonly tag: { readonly bits: 32; readonly size: 4 }
+      readonly variants: ReadonlyArray<{
+        readonly variant: DeclarationFacts.CanonicalUnionVariantId
+        readonly ordinal: number
+        readonly fields: ReadonlyArray<Field>
+        readonly size: number
+        readonly alignment: number
+        readonly tailPadding: number
+      }>
+      readonly payloadOffset: number
+      readonly payloadSize: number
+      readonly payloadAlignment: number
+      readonly tagPadding: number
+      readonly tailPadding: number
+    }
 
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
@@ -618,7 +636,7 @@ export const neverEntry = (): Entry =>
   })
 
 const nominalOf = (
-  declaration: DeclarationFacts.StructFact | DeclarationFacts.EnumFact,
+  declaration: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | DeclarationFacts.EnumFact,
 ): Type.Nominal | undefined =>
   declaration.canonical._tag === 'Canonical'
     ? Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name)
@@ -665,11 +683,15 @@ export const scalarEnumEntry = (
 }
 
 const dependenciesOf = (
-  struct: DeclarationFacts.StructFact,
+  aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact,
   substitution: Type.Substitution = new Map(),
 ): ReadonlyArray<Type.Nominal> => {
   const dependencies = new Map<string, Type.Nominal>()
-  for (const field of struct.fields) {
+  const fields =
+    aggregate._tag === 'StructDeclaration'
+      ? aggregate.fields
+      : aggregate.variants.flatMap((variant) => variant.fields)
+  for (const field of fields) {
     let types: ReadonlyArray<Type.Nominal> = []
     if (field.declaredType._tag === 'Resolved') {
       types = Type.nominals(Type.substitute(field.declaredType.type, substitution))
@@ -719,8 +741,21 @@ export const catalog = (
       return type === undefined ? [] : [Object.freeze({ enum_, type })]
     })
     .sort((left, right) => Type.compare(left.type, right.type))
+  const unionDeclarations = index.modules
+    .flatMap((module) => module.unions)
+    .flatMap((union) => {
+      const type = nominalOf(union)
+      return type === undefined ? [] : [Object.freeze({ union, type })]
+    })
+    .sort((left, right) => Type.compare(left.type, right.type))
   const byType = new Map(
     declarations.map((declaration) => [
+      `${declaration.type.module}\u0000${declaration.type.name}`,
+      declaration,
+    ]),
+  )
+  const unionByType = new Map(
+    unionDeclarations.map((declaration) => [
       `${declaration.type.module}\u0000${declaration.type.name}`,
       declaration,
     ]),
@@ -1089,6 +1124,162 @@ export const catalog = (
           _tag: 'Aggregate',
           fields: Object.freeze(fields),
           tailPadding: packed.tailPadding,
+        }),
+      })
+      completed.set(key, entry)
+      return entry
+    }
+    const unionDeclaration = unionByType.get(`${type.module}\u0000${type.name}`)
+    if (unionDeclaration !== undefined) {
+      const union = unionDeclaration.union
+      if (union.canonical._tag !== 'Canonical') {
+        const result = unavailable(type, Object.freeze([]), {
+          _tag: 'InvalidDeclaration',
+          detail: `canonical identity is unavailable for ${Type.encode(type)}`,
+        })
+        completed.set(key, result)
+        return result
+      }
+      const parameters = union.typeParameters.map((parameter) => parameter.type)
+      const substitution = TypeInference.substitution(parameters, type.arguments)
+      const dependencies =
+        substitution === undefined ? Object.freeze([]) : dependenciesOf(union, substitution)
+      if (substitution === undefined) {
+        return unavailable(type, dependencies, {
+          _tag: 'InvalidDeclaration',
+          detail: `${Type.encode(type)} has ${type.arguments.length} type arguments; expected ${parameters.length}`,
+        })
+      }
+      if (visiting.has(key)) {
+        const result = unavailable(type, dependencies, {
+          _tag: 'InvalidDeclaration',
+          detail: `recursive dependency for ${Type.encode(type)} was not rejected during declaration analysis`,
+        })
+        completed.set(key, result)
+        return result
+      }
+      if (union.validity._tag !== 'Valid' || union.dependency._tag === 'Unavailable') {
+        let cause: Diagnostic.Identity | undefined
+        if (union.validity._tag === 'Invalid') cause = union.validity.causes.at(0)
+        else if (union.dependency._tag === 'Unavailable') cause = union.dependency.cause
+        const result = unavailable(
+          type,
+          dependencies,
+          { _tag: 'InvalidDeclaration', detail: `declaration dependencies are unavailable` },
+          cause,
+        )
+        completed.set(key, result)
+        return result
+      }
+
+      visiting.add(key)
+      let fieldsCopy = true
+      let failure: UnavailableEntry | undefined
+      const variants: Array<
+        Extract<Representation, { readonly _tag: 'NominalUnion' }>['variants'][number]
+      > = []
+      for (const variant of union.variants) {
+        if (variant.canonical._tag !== 'Canonical') {
+          failure = unavailable(type, dependencies, {
+            _tag: 'InvalidDeclaration',
+            detail: `variant identity is unavailable for ${Type.encode(type)}`,
+          })
+          break
+        }
+        const inputs: Array<Packing.Input<Omit<Field, keyof Packing.PlacedField>>> = []
+        for (const field of variant.fields) {
+          if (
+            field.state._tag !== 'Unique' ||
+            field.name._tag !== 'Present' ||
+            field.declaredType._tag !== 'Resolved' ||
+            field.declaredType.exposureCause !== undefined
+          ) {
+            let cause: Diagnostic.Identity | undefined
+            if (field.state._tag === 'Duplicate') cause = field.state.cause
+            else if (field.declaredType._tag === 'Unresolved') {
+              cause = field.declaredType.cause
+            } else if (field.declaredType._tag === 'Resolved') {
+              cause = field.declaredType.exposureCause
+            }
+            failure = unavailable(
+              type,
+              dependencies,
+              { _tag: 'UnavailableField', field: field.id, detail: 'field is unavailable' },
+              cause,
+            )
+            break
+          }
+          const fieldType = Type.substitute(field.declaredType.type, substitution)
+          const fieldLayout = layoutType(fieldType)
+          if (fieldLayout._tag === 'UnavailableLayoutEntry') {
+            failure = unavailable(
+              type,
+              dependencies,
+              { _tag: 'UnavailableDependency', dependency: fieldType },
+              fieldLayout.cause,
+            )
+            break
+          }
+          fieldsCopy = fieldsCopy && fieldLayout.copy
+          inputs.push(
+            Object.freeze({
+              value: Object.freeze({
+                _tag: 'LayoutField' as const,
+                id: field.id,
+                name: field.name.spelling,
+                type: fieldType,
+              }),
+              size: fieldLayout.size,
+              alignment: fieldLayout.alignment,
+            }),
+          )
+        }
+        if (failure !== undefined) break
+        const packed = Packing.pack(inputs)
+        variants.push(
+          Object.freeze({
+            variant: variant.canonical.id,
+            ordinal: variant.id.ordinal,
+            fields: Object.freeze(
+              packed.fields.map(({ value, ...placement }) =>
+                Object.freeze({ ...value, ...placement }),
+              ),
+            ),
+            size: packed.size,
+            alignment: packed.alignment,
+            tailPadding: packed.tailPadding,
+          }),
+        )
+      }
+      visiting.delete(key)
+      if (failure !== undefined) {
+        completed.set(key, failure)
+        return failure
+      }
+      const payloadAlignment = variants.reduce(
+        (maximum, variant) => Math.max(maximum, variant.alignment),
+        1,
+      )
+      const payloadSize = variants.reduce((maximum, variant) => Math.max(maximum, variant.size), 0)
+      const payloadOffset = alignUp(4, payloadAlignment)
+      const alignment = Math.max(4, payloadAlignment)
+      const size = alignUp(payloadOffset + payloadSize, alignment)
+      const entry: Entry = Object.freeze({
+        _tag: 'LayoutEntry',
+        type,
+        copy: ConformanceProof.hasCopyDeclaration(index, type) && fieldsCopy,
+        size,
+        alignment,
+        representation: Object.freeze({
+          _tag: 'NominalUnion',
+          union: union.canonical.id,
+          tag: Object.freeze({ bits: 32, size: 4 }),
+          variants: Object.freeze(variants),
+          payloadOffset,
+          payloadSize,
+          payloadAlignment,
+          tagPadding: payloadOffset - 4,
+          tailPadding: size - (payloadOffset + payloadSize),
         }),
       })
       completed.set(key, entry)
@@ -1618,6 +1809,12 @@ export const catalog = (
         for (const field of member.fields) {
           if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
         }
+      } else if (member._tag === 'UnionDeclaration') {
+        for (const variant of member.variants) {
+          for (const field of variant.fields) {
+            if (field.declaredType._tag === 'Resolved') addReferenced(field.declaredType.type)
+          }
+        }
       } else if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
         for (const operation of member.operations) {
           for (const parameter of operation.parameters)
@@ -1632,6 +1829,9 @@ export const catalog = (
   }
   for (const declaration of declarations) {
     if (declaration.struct.typeParameters.length === 0) layoutNominal(declaration.type)
+  }
+  for (const declaration of unionDeclarations) {
+    if (declaration.union.typeParameters.length === 0) layoutNominal(declaration.type)
   }
   for (const instance of discovery?.instances ?? []) {
     const substitution = instance.substitution
@@ -3276,6 +3476,46 @@ const shapeNode = (
     })
   }
   const candidate = entries.get(Type.key(type))
+  if (Type.isNominal(type) && candidate?.representation._tag === 'NominalUnion') {
+    const variants = Object.freeze(
+      candidate.representation.variants.map((variant) => {
+        const fields = Object.freeze(
+          variant.fields.map((field) =>
+            Object.freeze({ field: field.id, shape: shapeNode(field.type, context) }),
+          ),
+        )
+        const shape: CallingShapeNode = Object.freeze({
+          _tag: 'ProductShape',
+          type,
+          fields,
+          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
+        })
+        return Object.freeze({
+          variant: variant.variant,
+          ordinal: variant.ordinal,
+          shape,
+          payloadSlots: Object.freeze(Array.from({ length: shape.laneCount }, (_, slot) => slot)),
+        })
+      }),
+    )
+    const payloadLaneCount = variants.reduce(
+      (maximum, variant) => Math.max(maximum, variant.shape.laneCount),
+      0,
+    )
+    return Object.freeze({
+      _tag: 'NominalUnionShape',
+      type,
+      tag: Object.freeze({ type: 'i32', lane: 0 }),
+      payloadLaneCount,
+      payloadTypes: unifyPayloadTypes(
+        variants.map((variant) => variant.shape),
+        target,
+      ),
+      zeroFill: true,
+      variants,
+      laneCount: 1 + payloadLaneCount,
+    })
+  }
   if (Type.isFixedArray(type)) {
     const element = shapeNode(type.element, context)
     const laneCount = element.laneCount * type.length
@@ -3474,6 +3714,25 @@ const materializeLanes = (
           path: Object.freeze([
             ...path,
             Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
+          ]),
+          type: node.payloadTypes.at(slot) ?? ('i32' as const),
+        }),
+      ),
+    ])
+  }
+  if (node._tag === 'NominalUnionShape') {
+    return Object.freeze([
+      Object.freeze({
+        _tag: 'CallingLane' as const,
+        path: Object.freeze([...path, Object.freeze({ _tag: 'NominalUnionTagSelector' as const })]),
+        type: 'i32' as const,
+      }),
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
+        Object.freeze({
+          _tag: 'CallingLane' as const,
+          path: Object.freeze([
+            ...path,
+            Object.freeze({ _tag: 'NominalUnionPayloadSelector' as const, slot }),
           ]),
           type: node.payloadTypes.at(slot) ?? ('i32' as const),
         }),

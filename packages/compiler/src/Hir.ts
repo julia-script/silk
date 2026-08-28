@@ -551,6 +551,20 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ConstructUnionVariant'
+      readonly nominal: Type.Nominal
+      readonly variant: DeclarationFacts.CanonicalUnionVariantId
+      readonly variantOrdinal: number
+      /** Field identities in language evaluation order; `fields` remains variant storage order. */
+      readonly evaluationOrder: ReadonlyArray<DeclarationFacts.FieldId>
+      readonly fields: ReadonlyArray<{
+        readonly field: DeclarationFacts.FieldId
+        readonly value: Expression
+      }>
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'ArrayConstruct'
       readonly elements: ReadonlyArray<Expression>
       readonly type: Type.FixedArray
@@ -1010,6 +1024,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
           ),
         ]
       case 'Construct':
+      case 'ConstructUnionVariant':
         return expression.fields.map((field) => field.value)
       case 'ArrayConstruct':
         return expression.elements
@@ -1085,7 +1100,8 @@ export const firstUnavailable = (
         return walk(expression.slice)
       case 'SliceIndexPlace':
         return walk(expression.slice) ?? walk(expression.index)
-      case 'Construct': {
+      case 'Construct':
+      case 'ConstructUnionVariant': {
         for (const field of expression.fields) {
           const found = walk(field.value)
           if (found !== undefined) return found
@@ -1660,6 +1676,15 @@ const encodeExpression = (expression: Expression, depth: number): string => {
     case 'Construct':
       return [
         `${indent}construct ${Type.encode(expression.nominal)} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
+        `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
+        ...expression.fields.map(
+          ({ field, value }) =>
+            `${indent}  field #${field.ordinal}\n${encodeExpression(value, depth + 2)}`,
+        ),
+      ].join('\n')
+    case 'ConstructUnionVariant':
+      return [
+        `${indent}construct-variant ${Type.encode(expression.nominal)}.${expression.variant.name}#${expression.variantOrdinal} : ${Type.encode(expression.type)} ${spanText(expression.span)}`,
         `${indent}  evaluation-order ${expression.evaluationOrder.map((field) => `#${field.ordinal}`).join(', ') || 'empty'}`,
         ...expression.fields.map(
           ({ field, value }) =>

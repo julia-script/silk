@@ -115,6 +115,27 @@ fn ready() -> State { return State.Ready }`),
       ready?.type._tag === 'Available' ? Type.encode(ready.type.type) : undefined,
       'union-values/construction.State',
     )
+    const hir = Analysis.rootAnalysis(self).hir.functions.map(Hir.returned)
+    assert.deepEqual(
+      hir.map((expression) => expression._tag),
+      [
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+        'ConstructUnionVariant',
+      ],
+    )
+    const someHir = hir.at(0)
+    assert.strictEqual(
+      someHir?._tag === 'ConstructUnionVariant' ? someHir.variant.name : undefined,
+      'Some',
+    )
+    assert.deepEqual(
+      someHir?._tag === 'ConstructUnionVariant'
+        ? someHir.fields.map((field) => field.field.ordinal)
+        : undefined,
+      [0],
+    )
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )
@@ -171,6 +192,25 @@ pub fn main() -> i32 { let secret = Secret.Open { value: 1, key: 2 } return 0 }`
       ['SEM0021'],
     )
     assert.notInclude(Analysis.diagnostics(self).at(0)?.message ?? '', 'key')
+  }),
+)
+
+it.effect('does not synthesize fields on the nominal union parent', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'union-values/projection',
+      ascii(`union Result<A, E> { Success { value: A }, Failure { value: E } }
+fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
+    )
+
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      ['SEM0027'],
+    )
+    assert.strictEqual(
+      Analysis.rootAnalysis(self).functions.at(0)?.returnedExpression.type._tag,
+      'Unavailable',
+    )
   }),
 )
 

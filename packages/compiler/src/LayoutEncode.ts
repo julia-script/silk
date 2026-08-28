@@ -47,6 +47,8 @@ const representationText = (representation: Representation): string => {
       return `reference target=${Type.encode(representation.target)} address=i${representation.address.bits}@${representation.address.offset}/${representation.address.size}/${representation.address.alignment}`
     case 'Union':
       return `union tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
+    case 'NominalUnion':
+      return `nominal-union ${representation.union.module}.${representation.union.name} tag=i${representation.tag.bits} payload-offset=${representation.payloadOffset} payload-size=${representation.payloadSize} payload-align=${representation.payloadAlignment} tag-padding=${representation.tagPadding} tail-padding=${representation.tailPadding}`
     case 'Aggregate': {
       const cleanupHook =
         representation.cleanupHook === undefined
@@ -123,6 +125,17 @@ const entryLines = (candidate: Entry): ReadonlyArray<string> => {
             `  member ${member.ordinal} ${Type.encode(member.type)} size=${member.size} align=${member.alignment}`,
         ),
       ]
+    case 'NominalUnion':
+      return [
+        header,
+        ...candidate.representation.variants.flatMap((variant) => [
+          `  variant ${variant.ordinal} ${variant.variant.name} size=${variant.size} align=${variant.alignment} tail-padding=${variant.tailPadding}`,
+          ...variant.fields.map(
+            (field) =>
+              `    field ${DeclarationFacts.fieldIdKey(field.id)} ${field.name}: ${Type.encode(field.type)} offset=${field.offset} size=${field.size} align=${field.alignment} padding=${field.padding}`,
+          ),
+        ]),
+      ]
     default:
       return [header]
   }
@@ -174,6 +187,10 @@ export const encode = (self: Plan): string =>
                             return 'tag'
                           case 'UnionPayloadSelector':
                             return `payload[${selector.slot}]`
+                          case 'NominalUnionTagSelector':
+                            return 'nominal-tag'
+                          case 'NominalUnionPayloadSelector':
+                            return `nominal-payload[${selector.slot}]`
                           case 'SliceAddressSelector':
                           case 'ReferenceAddressSelector':
                             return 'address'

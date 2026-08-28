@@ -21,8 +21,8 @@
 - [x] 3.2 Refactor struct-literal field checking into a shared aggregate-field elaborator without changing existing struct facts or diagnostics, and verify the existing struct construction and generic-inference suites remain byte-for-byte stable where golden data exists.
 - [x] 3.3 Implement two-stage variant constructor resolution—parent declaration and explicit prefix first, field-only suffix inference second—and verify zero-prefix, partial-prefix, conflicting, and parent-only uninferred argument cases.
 - [x] 3.4 Implement unit and named-field construction with complete field initialization, construction authority, visibility fences, type compatibility, represented fields, and precise parent result types, and verify cross-module private fields block raw construction.
-- [ ] 3.5 Preserve every variant through generic specialization, including equal and `never` payloads while independently renormalizing structural-union fields, and verify specialization facts never collapse or flatten variants.
-- [ ] 3.6 Reject direct parent-union field projection and common-field synthesis while retaining diagnostic facts, and verify `result.value` is unavailable until a variant pattern binds its payload.
+- [x] 3.5 Preserve every variant through generic specialization, including equal and `never` payloads while independently renormalizing structural-union fields, and verify specialization facts never collapse or flatten variants.
+- [x] 3.6 Reject direct parent-union field projection and common-field synthesis while retaining diagnostic facts, and verify `result.value` is unavailable until a variant pattern binds its payload.
 - [ ] 3.7 Admit interface, operator, Copy, and Drop declarations against nominal union parents through the ordinary conformance/coherence path, and verify variant names do not become lookup or implementation targets.
 
 ## 4. Variant Patterns and Hierarchical Coverage
@@ -44,11 +44,11 @@
 
 ## 6. Target Layout and Calling Shapes
 
-- [ ] 6.1 Extend the inline dependency graph and nominal layout catalog to include complete non-generic unions and mixed struct/union cycles, and verify unused private and unavailable union entries appear before runtime reachability.
-- [ ] 6.2 Add a distinct nominal-union representation plan with deterministic private tags, source-order ordinals, payload offset, maximum size/alignment, total padding, and per-variant aggregate layouts, and verify unit, padded multi-field, and `never` payload cases.
-- [ ] 6.3 Specialize reachable generic union layouts without speculative open-generic entries, and verify equivalent concrete applications reuse one catalog identity while distinct applications receive distinct physical plans.
-- [ ] 6.4 Publish a backend-neutral tag-plus-payload calling shape with complete per-variant logical-field mappings, and verify call/return plans for heterogeneous variants are deterministic and unavailable dependencies stop before MIR.
-- [ ] 6.5 Extend layout encoding, verification, and Analysis projections with nominal-union facts under unambiguous internal names, and verify no nominal tag, padding, or ABI detail becomes source-observable.
+- [x] 6.1 Extend the inline dependency graph and nominal layout catalog to include complete non-generic unions and mixed struct/union cycles, and verify unused private and unavailable union entries appear before runtime reachability.
+- [x] 6.2 Add a distinct nominal-union representation plan with deterministic private tags, source-order ordinals, payload offset, maximum size/alignment, total padding, and per-variant aggregate layouts, and verify unit, padded multi-field, and `never` payload cases.
+- [x] 6.3 Specialize reachable generic union layouts without speculative open-generic entries, and verify equivalent concrete applications reuse one catalog identity while distinct applications receive distinct physical plans.
+- [x] 6.4 Publish a backend-neutral tag-plus-payload calling shape with complete per-variant logical-field mappings, and verify call/return plans for heterogeneous variants are deterministic and unavailable dependencies stop before MIR.
+- [x] 6.5 Extend layout encoding, verification, and Analysis projections with nominal-union facts under unambiguous internal names, and verify no nominal tag, padding, or ABI detail becomes source-observable.
 
 ## 7. HIR, MIR, and Verification
 
