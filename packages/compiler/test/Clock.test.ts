@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Stdlib from '../src/Stdlib.js'
 
 const encoder = new TextEncoder()
@@ -99,8 +100,86 @@ it('registers the clock modules, namespaces, and shared Instant alias', () => {
   assert.strictEqual(Stdlib.findNamespace('SystemClock')?.module, 'silk/system_clock')
   assert.strictEqual(Stdlib.findNamespace('MonotonicClock')?.module, 'silk/monotonic_clock')
   assert.strictEqual(Stdlib.findNamespace('Instant')?.module, 'silk/system_clock')
+  assert.strictEqual(Stdlib.findNamespace('OsSystemClock')?.module, 'silk/os_system_clock')
+  assert.strictEqual(
+    Stdlib.findNamespace('OsMonotonicClock')?.module,
+    'silk/os_monotonic_clock',
+  )
   assert.deepEqual(Stdlib.find('silk/system_clock')?.aliases, ['Instant'])
 })
+
+it.effect('constructs unused native providers on direct Wasm without retaining host calls', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(
+      `import silk.os_monotonic_clock as OsMonotonicClock
+import silk.os_system_clock as OsSystemClock
+pub fn main() -> i32 {
+  let system = OsSystemClock.make()
+  let monotonic = OsMonotonicClock.make()
+  drop system
+  drop monotonic
+  return 42
+}`,
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(
+      Analysis.loweredMir(self)
+        .functions.flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'OsCall'),
+      [],
+    )
+    const wasm = yield* Analysis.codegenWasm(self, { mode: 'release' })
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(wasm.bytes.slice()), {})
+    assert.strictEqual((instance.exports.silk_main as () => number)(), 42)
+  }),
+)
+
+it.effect('lowers each native clock provider only to its own intrinsic operations', () =>
+  Effect.gen(function* () {
+    const system = yield* snapshot(`import silk.effect as Effect
+import silk.os_system_clock as OsSystemClock
+import silk.system_clock as SystemClock
+import silk.i64 as i64
+pub fn main() -> i32 {
+  let mut provider = OsSystemClock.make()
+  let instant = run Effect.provideMut(SystemClock.now(), &mut provider)
+  let resolution = run Effect.provideMut(SystemClock.getResolution(), &mut provider)
+  if resolution > 0 { return i64.toI32(SystemClock.seconds(&instant)) }
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(system), [])
+    const systemCalls = Analysis.loweredMir(system)
+      .functions.flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'OsCall')
+      .map((operation) => operation.operation.name)
+    assert.deepEqual([...new Set(systemCalls)].sort(), [
+      'osSystemClockNow',
+      'osSystemClockResolution',
+    ])
+
+    const monotonic = yield* snapshot(`import silk.effect as Effect
+import silk.monotonic_clock as MonotonicClock
+import silk.os_monotonic_clock as OsMonotonicClock
+pub fn main() -> i32 {
+  let mut provider = OsMonotonicClock.make()
+  run Effect.provideMut(MonotonicClock.waitFor(18446744073709551615), &mut provider)
+  let resolution = run Effect.provideMut(MonotonicClock.getResolution(), &mut provider)
+  if resolution > 0 { return 42 }
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(monotonic), [])
+    const monotonicCalls = Analysis.loweredMir(monotonic)
+      .functions.flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'OsCall')
+      .map((operation) => operation.operation.name)
+    assert.deepEqual([...new Set(monotonicCalls)].sort(), [
+      'osMonotonicClockNow',
+      'osMonotonicClockResolution',
+      'osMonotonicClockWaitUntil',
+    ])
+  }),
+)
 
 it.effect('reads canonical pre-epoch system time through an ordinary provider', () =>
   Effect.gen(function* () {

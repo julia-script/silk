@@ -238,11 +238,25 @@
     "namespace": "OsHostInput"
   },
   {
+    "module": "silk/os_monotonic_clock",
+    "path": "silk/os_monotonic_clock.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
+    "namespace": "OsMonotonicClock"
+  },
+  {
     "module": "silk/os_standard_input",
     "path": "silk/os_standard_input.silk",
     "layer": "target-provider",
     "providerTargets": ["Evaluator", "LLVM"],
     "namespace": "OsStandardInput"
+  },
+  {
+    "module": "silk/os_system_clock",
+    "path": "silk/os_system_clock.silk",
+    "layer": "target-provider",
+    "providerTargets": ["Evaluator", "LLVM"],
+    "namespace": "OsSystemClock"
   },
   {
     "module": "silk/random",

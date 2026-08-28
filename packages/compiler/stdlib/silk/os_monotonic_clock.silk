@@ -1,0 +1,120 @@
+//! Native monotonic clock provider with source-derived relative waiting.
+//!
+//! # When to use
+//! Construct [`OsMonotonicClock`] at a native application edge for elapsed-time measurement and
+//! blocking deadlines. Use a scripted provider when tests need virtual advancement.
+//!
+//! # Details
+//! Construction performs no host call. Reads, resolution queries, and absolute waits use three
+//! matching native intrinsics. [`waitFor`] performs exactly one starting read, checked split-field
+//! deadline arithmetic in Silk, and then uses the same absolute-wait operation as [`waitUntil`].
+//!
+//! # Gotchas
+//! Marks and deadlines are meaningful only on this provider's monotonic timeline. Native waits
+//! block the calling host thread; they do not park one Fiber. Failure, malformed host output, or
+//! deadline overflow is a fatal trap. Direct WebAssembly has no ambient implementation.
+
+import silk.i64 as i64
+import silk.monotonic_clock as MonotonicClock
+import silk.option { None, Option, Some }
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+import silk.u64 as u64
+
+/// A stateless native provider of monotonic marks and blocking deadlines.
+pub struct OsMonotonicClock {}
+
+/// Creates a native monotonic-clock provider without reading the clock.
+pub fn make() -> OsMonotonicClock {
+  return OsMonotonicClock {}
+}
+
+fn invalidI64() -> i64 {
+  let invalid = 1 / 0
+  return invalidI64()
+}
+
+fn requireI64(value: Option<i64>) -> i64 {
+  return match move value {
+    None {} => invalidI64()
+    Some<i64> { value: present } => present
+  }
+}
+
+effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockNow(seconds, nanoseconds) }
+  return false
+}
+
+effect fn readResolution(nanoseconds: &mut u64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockResolution(nanoseconds) }
+  return false
+}
+
+effect fn waitAt(seconds: i64, nanoseconds: i64) -> bool {
+  unsafe { return run Intrinsic.osMonotonicClockWaitUntil(seconds, nanoseconds) }
+  return false
+}
+
+effect fn readInstant() -> Instant {
+  let mut seconds = i64.toI64(0)
+  let mut nanoseconds = i64.toI64(0)
+  let succeeded = run read(&mut seconds, &mut nanoseconds)
+  if succeeded { return SystemClock.make(seconds, nanoseconds) }
+  let invalid = 1 / 0
+  return SystemClock.make(seconds, nanoseconds)
+}
+
+effect fn now(self: &mut OsMonotonicClock) -> Instant {
+  return run readInstant()
+}
+
+effect fn getResolution(self: &mut OsMonotonicClock) -> u64 {
+  let mut nanoseconds = u64.MIN
+  let succeeded = run readResolution(&mut nanoseconds)
+  if succeeded {
+    if nanoseconds > u64.MIN { return nanoseconds }
+  }
+  let invalid = 1 / 0
+  return nanoseconds
+}
+
+effect fn waitDeadline(when: Instant) -> () {
+  let mut deadline = move when
+  let seconds = SystemClock.seconds(&deadline)
+  let nanoseconds = SystemClock.nanoseconds(&deadline)
+  let succeeded = run waitAt(seconds, nanoseconds)
+  if succeeded { return () }
+  let invalid = 1 / 0
+  return ()
+}
+
+effect fn waitUntil(self: &mut OsMonotonicClock, when: Instant) -> () {
+  return run waitDeadline(move when)
+}
+
+effect fn waitFor(self: &mut OsMonotonicClock, howLong: u64) -> () {
+  let mut start = run readInstant()
+  let startSeconds = SystemClock.seconds(&start)
+  let startNanoseconds = SystemClock.nanoseconds(&start)
+  let billion = u64.toU64(1000000000)
+  let wholeSeconds = requireI64(u64.checkedToI64(howLong / billion))
+  let fraction = u64.toI64(howLong % billion)
+  let mut deadlineNanoseconds = startNanoseconds + fraction
+  let mut carry = i64.toI64(0)
+  if deadlineNanoseconds >= 1000000000 {
+    deadlineNanoseconds = deadlineNanoseconds - 1000000000
+    carry = i64.toI64(1)
+  }
+  let extended = requireI64(i64.checkedAdd(startSeconds, wholeSeconds))
+  let deadlineSeconds = requireI64(i64.checkedAdd(extended, carry))
+  let deadline = SystemClock.make(deadlineSeconds, deadlineNanoseconds)
+  return run waitDeadline(move deadline)
+}
+
+impl MonotonicClock.MonotonicClock for OsMonotonicClock {
+  now: OsMonotonicClock.now
+  getResolution: OsMonotonicClock.getResolution
+  waitUntil: OsMonotonicClock.waitUntil
+  waitFor: OsMonotonicClock.waitFor
+}

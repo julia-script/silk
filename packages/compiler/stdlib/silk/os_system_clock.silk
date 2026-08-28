@@ -1,0 +1,62 @@
+//! Native Unix-epoch clock provider for [`SystemClock`].
+//!
+//! # When to use
+//! Construct [`OsSystemClock`] at a native application edge and provide it to portable code that
+//! requires `&mut SystemClock`. Use an ordinary fixed or scripted provider in deterministic tests.
+//!
+//! # Details
+//! Construction is stateless and performs no host call. Each operation crosses only its matching
+//! native clock intrinsic. A failed read, noncanonical host result, zero resolution, or
+//! unrepresentable resolution is a fatal trap because the public service has no failure channel.
+//!
+//! # Gotchas
+//! The clock may move backwards when the operating system adjusts its external reference. Reachable
+//! operations support Unix-family native targets and evaluator hosts; direct WebAssembly rejects
+//! them rather than inventing an ambient time import.
+
+import silk.i64 as i64
+import silk.system_clock as SystemClock
+import silk.system_clock { Instant }
+import silk.u64 as u64
+
+/// A stateless native provider of Unix-epoch time.
+pub struct OsSystemClock {}
+
+/// Creates a native system-clock provider without reading the clock.
+pub fn make() -> OsSystemClock {
+  return OsSystemClock {}
+}
+
+effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
+  unsafe { return run Intrinsic.osSystemClockNow(seconds, nanoseconds) }
+  return false
+}
+
+effect fn readResolution(nanoseconds: &mut u64) -> bool {
+  unsafe { return run Intrinsic.osSystemClockResolution(nanoseconds) }
+  return false
+}
+
+effect fn now(self: &mut OsSystemClock) -> Instant {
+  let mut seconds = i64.toI64(0)
+  let mut nanoseconds = i64.toI64(0)
+  let succeeded = run read(&mut seconds, &mut nanoseconds)
+  if succeeded { return SystemClock.make(seconds, nanoseconds) }
+  let invalid = 1 / 0
+  return SystemClock.make(seconds, nanoseconds)
+}
+
+effect fn getResolution(self: &mut OsSystemClock) -> u64 {
+  let mut nanoseconds = u64.MIN
+  let succeeded = run readResolution(&mut nanoseconds)
+  if succeeded {
+    if nanoseconds > u64.MIN { return nanoseconds }
+  }
+  let invalid = 1 / 0
+  return nanoseconds
+}
+
+impl SystemClock.SystemClock for OsSystemClock {
+  now: OsSystemClock.now
+  getResolution: OsSystemClock.getResolution
+}
