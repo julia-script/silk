@@ -20,15 +20,13 @@
 //! ```silk
 //! import silk.allocator { Allocator }
 //!
-//! import silk.allocator {Allocator}
-//!
 //! import silk.effect { Effect }
 //!
-//! import silk.layout as Layout
+//! import silk.layout { Layout }
 //!
-//! import silk.raw_buffer as RawBuffer
+//! import silk.raw_buffer { RawBuffer }
 //!
-//! import silk.u8 as u8
+//! import silk.u8
 //!
 //! effect fn build() -> i32
 //! ! Allocator.OutOfMemoryError {
@@ -57,6 +55,16 @@
 import silk.slot as Slot
 import silk.u8 as u8
 import silk.usize as usize
+
+/// The importable name of the `silk.raw_buffer` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.raw_buffer { RawBuffer }` names the module scope, so `RawBuffer.from(...)` and the
+/// other storage operations resolve through it. It is unrelated to the builtin `RawBuffer<T>`
+/// type.
+pub struct RawBuffer {}
 
 /// Adopts an allocation as typed raw storage with the specified element capacity.
 ///

@@ -17,7 +17,7 @@
 //! # Examples
 //! ## Request a secure word
 //! ```silk
-//! import silk.random as Random
+//! import silk.random { Random }
 //!
 //! effect fn tokenWord() -> u64
 //! ? &mut Random.Random {

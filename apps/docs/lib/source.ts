@@ -3,6 +3,7 @@ import { applyMdxPreset, frontmatterSchema } from 'fumadocs-mdx/config';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import * as TextMate from '@silklang/editor-support/TextMate';
 import { remarkH1Title } from './remark-h1-title.mjs';
+import { remarkRelativeDocLinks } from './remark-relative-doc-links.mjs';
 
 /**
  * The language and compiler docs are plain Markdown with no frontmatter, so they remain useful
@@ -31,9 +32,12 @@ const docs = defineDocs({
   dir: './content',
   docs: {
     schema,
+    postprocess: {
+      includeProcessedMarkdown: true,
+    },
     // Collection-level mdxOptions replace the defaults outright, so extend the preset.
     mdxOptions: applyMdxPreset({
-      remarkPlugins: (v) => [remarkH1Title, ...v],
+      remarkPlugins: (v) => [remarkH1Title, remarkRelativeDocLinks, ...v],
       rehypeCodeOptions: {
         // Bundled languages lazy-load regardless of `langs`, so this only adds Silk on top.
         // The grammar's own types are readonly; Shiki's registration type is not.

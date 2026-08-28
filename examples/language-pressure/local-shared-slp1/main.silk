@@ -1,7 +1,7 @@
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.layout { Layout }
-import silk.shared as Shared
+import silk.shared { Shared }
 
 struct Empty {}
 

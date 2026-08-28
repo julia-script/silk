@@ -17,9 +17,9 @@
 //! # Examples
 //! ## Publish a snapshot of one allocation ledger
 //! ```silk
-//! import silk.metrics as Metrics
+//! import silk.metrics { Metrics }
 //!
-//! import silk.usize as usize
+//! import silk.usize
 //!
 //! pub fn main() -> i32 {
 //!   let mut metrics = Metrics.make()
@@ -54,6 +54,15 @@
 
 import silk.allocator { Allocator }
 import silk.usize as usize
+
+/// The importable name of the `silk.metrics` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.metrics { Metrics }` names the module scope, so ledger construction, updates, and
+/// snapshots resolve through `Metrics`.
+pub struct Metrics {}
 
 /// Copyable counters for one provider's successful allocation acquisitions and releases.
 ///

@@ -15,7 +15,7 @@
 //! # Examples
 //! ## Extract one byte from a fixed-width field
 //! ```silk
-//! import silk.u32 as u32
+//! import silk.u32
 //!
 //! pub fn main() -> i32 {
 //!   let shifted = u32.shiftRight(0x00002A00, 8)

@@ -23,7 +23,7 @@
 //! ## Construct the native provider without reading process state
 //!
 //! ```silk
-//! import silk.os_host_input as OsHostInput
+//! import silk.os_host_input { OsHostInput }
 //!
 //! pub fn main() -> i32 {
 //!   let provider = OsHostInput.make()

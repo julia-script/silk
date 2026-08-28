@@ -25,7 +25,7 @@ values are incomparable, [`compare`](#declaration-73696c6b2f6f726465723a3a636f6d
 ### Classify each comparison result
 
 ```silk
-import silk.order as Order
+import silk.order { Order }
 
 pub fn main() -> i32 {
   let low = Order.compare<i32>(2, 7)

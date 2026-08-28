@@ -29,15 +29,13 @@ on a runtime check.
 ```silk
 import silk.allocator { Allocator }
 
-import silk.allocator {Allocator}
-
 import silk.effect { Effect }
 
-import silk.layout as Layout
+import silk.layout { Layout }
 
-import silk.raw_buffer as RawBuffer
+import silk.raw_buffer { RawBuffer }
 
-import silk.slot as Slot
+import silk.slot { Slot }
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
@@ -66,7 +64,23 @@ pub fn main() -> i32 {
 
 Import as `Slot` with `import silk.slot`.
 
-Public declarations: 4.
+Public declarations: 5.
+
+<a id="declaration-73696c6b2f736c6f743a3a536c6f74"></a>
+
+## `Slot`
+
+```silk
+pub struct Slot
+```
+
+The importable name of the `silk.slot` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.slot { Slot }` names the module scope, so `Slot.write(...)` and the other slot
+operations resolve through it. It is unrelated to the builtin `Slot<T>` place type.
 
 <a id="declaration-73696c6b2f736c6f743a3a7772697465"></a>
 

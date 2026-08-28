@@ -17,7 +17,7 @@
 //! # Examples
 //! ## Store and recover one owned value
 //! ```silk
-//! import silk.box as Box
+//! import silk.box { Box }
 //!
 //! import silk.allocator { Allocator }
 //!

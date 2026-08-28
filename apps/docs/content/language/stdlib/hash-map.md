@@ -38,11 +38,11 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.hash as Hash
+import silk.hash { Hash }
 
-import silk.hash_map as HashMap
+import silk.hash_map { HashMap }
 
-import silk.option as Option
+import silk.option { Option }
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {

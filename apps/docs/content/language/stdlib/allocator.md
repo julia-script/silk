@@ -22,11 +22,11 @@ implementation lexically. Allocation failure is typed as [`OutOfMemoryError`](#d
 ```silk
 import silk.allocator { Allocator }
 
-import silk.bytes as Bytes
+import silk.bytes { Bytes }
 
 import silk.effect { Effect }
 
-import silk.usize as usize
+import silk.usize
 
 effect fn copyMessage() -> i32
 ! Allocator.OutOfMemoryError {

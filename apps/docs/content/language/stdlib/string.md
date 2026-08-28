@@ -25,12 +25,11 @@ began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a736361
 ### Validate borrowed UTF-8 bytes
 
 ```silk
-import silk.result { Result, unwrapOr }
+import silk.result { Result }
 
-import silk.string as String
-import silk.string { InvalidUtf8 }
+import silk.string { String }
 
-import silk.usize as usize
+import silk.usize
 
 pub fn main() -> i32 {
   let valid = String.fromUtf8(b"Silk")
@@ -48,17 +47,17 @@ pub fn main() -> i32 {
 ### Build owned text and read its first scalar
 
 ```silk
-import silk.char as char
+import silk.char
 
 import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.option as Option
+import silk.option { Option }
 
-import silk.string as String
+import silk.string { String }
 
-import silk.u32 as u32
+import silk.u32
 
 fn scalarCode(step: String.ScalarStep) -> i32 {
   return String.scalarValue(&step)

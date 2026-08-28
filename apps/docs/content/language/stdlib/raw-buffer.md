@@ -29,15 +29,13 @@ still stored in it; a container must clear initialized `Slot` values before rele
 ```silk
 import silk.allocator { Allocator }
 
-import silk.allocator {Allocator}
-
 import silk.effect { Effect }
 
-import silk.layout as Layout
+import silk.layout { Layout }
 
-import silk.raw_buffer as RawBuffer
+import silk.raw_buffer { RawBuffer }
 
-import silk.u8 as u8
+import silk.u8
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
@@ -65,7 +63,24 @@ pub fn main() -> i32 {
 
 Import as `RawBuffer` with `import silk.raw_buffer`.
 
-Public declarations: 8.
+Public declarations: 9.
+
+<a id="declaration-73696c6b2f7261775f6275666665723a3a526177427566666572"></a>
+
+## `RawBuffer`
+
+```silk
+pub struct RawBuffer
+```
+
+The importable name of the `silk.raw_buffer` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.raw_buffer { RawBuffer }` names the module scope, so `RawBuffer.from(...)` and the
+other storage operations resolve through it. It is unrelated to the builtin `RawBuffer<T>`
+type.
 
 <a id="declaration-73696c6b2f7261775f6275666665723a3a66726f6d"></a>
 

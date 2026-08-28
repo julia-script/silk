@@ -18,9 +18,9 @@
 //! # Examples
 //! ## Hash the fields of one key deterministically
 //! ```silk
-//! import silk.hash as Hash
+//! import silk.hash { Hash }
 //!
-//! import silk.u64 as u64
+//! import silk.u64
 //!
 //! pub fn main() -> i32 {
 //!   let seed = Hash.seed(17)
@@ -47,6 +47,15 @@
 
 import silk.bool as bool
 import silk.u64 as u64
+
+/// The importable name of the `silk.hash` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.hash { Hash }` names the module scope, so seed, mixing, and ready-made key
+/// operations resolve through `Hash`.
+pub struct Hash {}
 
 /// A collection-wide value that changes deterministic hash and bucket results.
 ///

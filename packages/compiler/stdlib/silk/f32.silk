@@ -22,7 +22,7 @@
 //! # Examples
 //! ## Inspect a binary32 boundary by its bits
 //! ```silk
-//! import silk.f32 as f32
+//! import silk.f32
 //!
 //! pub fn main() -> i32 {
 //!   let rounded = f32.round(-0.25)

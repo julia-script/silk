@@ -25,18 +25,18 @@ Integer construction rejects `0xD800` through `0xDFFF` and values above `0x10FFF
 ### Validate a Unicode scalar integer
 
 ```silk
-import silk.char as Char
+import silk.char
 
-import silk.option as Option
+import silk.option { Option }
 
 pub fn main() -> i32 {
-  let scalar = Char.fromU32(0x2603)
+  let scalar = char.fromU32(0x2603)
   let value = move scalar
     |> Option.unwrapOr<char>('?')
-  if Char.toU32(value) != 0x2603 {
+  if char.toU32(value) != 0x2603 {
     return 1
   }
-  let surrogate = Char.fromU32(0xD800)
+  let surrogate = char.fromU32(0xD800)
   let replacement = move surrogate
     |> Option.unwrapOr<char>('?')
   if replacement != '?' {

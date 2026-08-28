@@ -14,7 +14,8 @@ The implemented language includes:
 
 - modules, imports, visibility, globals, and typed constants;
 - integers, floating-point values, booleans, characters, and string and byte data;
-- structs, scalar enums, fixed arrays, runtime slices, structural unions, and exhaustive matching;
+- structs, scalar enums, nominal unions, fixed arrays, runtime slices, structural unions, and
+  exhaustive matching;
 - functions, first-class callables, pipelines, generics, interfaces, and specialization;
 - mutable places, affine ownership, shared and exclusive borrowing, explicit moves, and
   deterministic `Drop` on structured exits;

@@ -31,9 +31,9 @@ as its entry separator, and a native provider cannot preserve an embedded NUL as
 ### Handle a nonzero child exit as outcome data
 
 ```silk
-import silk.bytes as Bytes
+import silk.bytes { Bytes }
 
-import silk.child_process as Process
+import silk.child_process { ChildProcess as Process }
 
 import silk.allocator { Allocator }
 
@@ -41,7 +41,7 @@ import silk.effect { Effect }
 
 import silk.filesystem as Path
 
-import silk.option as Option
+import silk.option { Option }
 
 struct Completed {}
 

@@ -251,7 +251,7 @@ failures and therefore are not captured.
 ```silk
 import silk.effect { Effect }
 
-import silk.result as Result
+import silk.result { Result }
 
 struct Problem {
   answer: i32

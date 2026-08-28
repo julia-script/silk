@@ -30,7 +30,7 @@ The caller must use a non-empty buffer. A zero-capacity host read also transfers
 ### Construct the native provider without reading standard input
 
 ```silk
-import silk.os_standard_input as OsStandardInput
+import silk.os_standard_input { OsStandardInput }
 
 pub fn main() -> i32 {
   let provider = OsStandardInput.make()

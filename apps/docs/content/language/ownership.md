@@ -72,7 +72,7 @@ derive from it. The caller may bind that returned view, and the compiler keeps i
 owner through its last use:
 
 ```silk
-import silk.usize as usize
+import silk.usize
 
 fn identity(values: &[i32]) -> &[i32] {
   return values

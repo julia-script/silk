@@ -7,7 +7,8 @@ the language that the current alpha compiler implements.
 ## Start here
 
 - **[Getting started](./tutorial.md)** — create a project and learn the core language by writing
-  functions, loops, owned values, borrows, unions, Effects, typed failures, and a service provider.
+  functions, loops, owned values, borrows, scalar enums, unions, Effects, typed failures, and a
+  service provider.
 - **[Language reference](../reference/)** — look up the exact lexical, type, ownership, Effect,
   declaration, and control-flow rules.
 - **[Alpha status](./alpha-status.md)** — see what is implemented, which targets are supported, and

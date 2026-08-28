@@ -20,13 +20,13 @@ later appends can reallocate, so do not retain a view across a mutation.
 ### Copy, append, and update bytes
 
 ```silk
-import silk.bytes as Bytes
+import silk.bytes { Bytes }
 
 import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.u8 as u8
+import silk.u8
 
 effect fn build() -> i32
 ! Allocator.OutOfMemoryError {

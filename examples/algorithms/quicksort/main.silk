@@ -1,4 +1,4 @@
-import silk.usize as usize
+import silk.usize
 fn exchange(values: &mut [i32], left: usize, right: usize) {
   let temporary = values[left]
   values[left] = values[right]

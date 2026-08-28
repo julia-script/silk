@@ -26,9 +26,9 @@ The module does not identify allocations or repair an unbalanced provider.
 ### Publish a snapshot of one allocation ledger
 
 ```silk
-import silk.metrics as Metrics
+import silk.metrics { Metrics }
 
-import silk.usize as usize
+import silk.usize
 
 pub fn main() -> i32 {
   let mut metrics = Metrics.make()
@@ -55,7 +55,23 @@ pub fn main() -> i32 {
 
 Import as `AllocationMetrics` with `import silk.metrics`.
 
-Public declarations: 6.
+Public declarations: 7.
+
+<a id="declaration-73696c6b2f6d6574726963733a3a4d657472696373"></a>
+
+## `Metrics`
+
+```silk
+pub struct Metrics
+```
+
+The importable name of the `silk.metrics` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.metrics { Metrics }` names the module scope, so ledger construction, updates, and
+snapshots resolve through `Metrics`.
 
 <a id="declaration-73696c6b2f6d6574726963733a3a416c6c6f636174696f6e4d657472696373"></a>
 

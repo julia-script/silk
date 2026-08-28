@@ -18,7 +18,7 @@
 //! # Examples
 //! ## Select the boundary policy for negation
 //! ```silk
-//! import silk.i8 as i8
+//! import silk.i8
 //!
 //! pub fn main() -> i32 {
 //!   if i8.wrappingNegate(i8.MIN) != i8.MIN {

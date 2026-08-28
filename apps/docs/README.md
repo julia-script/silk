@@ -31,3 +31,12 @@ file name), so the source stays useful both on the site and on GitHub.
 
 The app pins TypeScript 5.9 because Next.js does not yet support the compiler API exposed by the
 repository's TypeScript 7 toolchain.
+
+## AI and LLM access
+
+The site publishes `/llms.txt`, `/llms-full.txt`, and a Markdown representation of every docs page
+at its `.md` URL. A client can also request the Markdown representation at the ordinary page URL
+with `Accept: text/markdown`.
+
+The **Ask AI** panel uses OpenRouter. Set `OPENROUTER_API_KEY` in the deployment environment to
+enable model requests. `OPENROUTER_MODEL` is optional and overrides the default model.

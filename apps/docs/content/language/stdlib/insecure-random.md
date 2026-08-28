@@ -25,7 +25,7 @@ keys, nonces, tokens, or hash-flood protection.
 
 ```silk
 import silk.effect { Effect }
-import silk.insecure_random as InsecureRandom
+import silk.insecure_random { InsecureRandom }
 
 pub fn main() -> i32 {
   let mut provider = InsecureRandom.seeded(0)

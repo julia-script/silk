@@ -8,7 +8,7 @@ Ownership behavior is defined by [ownership and borrowing](ownership-and-borrowi
 callable, and match result types are defined by
 [functions, callables, and control flow](functions-callables-and-control-flow.md). This page defines
 the identities, construction rules, and ordinary compatibility of foundational values, nominal
-structs and scalar enums, arrays, references, slices, and structural unions.
+structs, scalar enums, nominal unions, arrays, references, slices, and structural unions.
 
 ## Terminology
 
