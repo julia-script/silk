@@ -27,6 +27,8 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/i32`](./i32.md) | `i32` | 60 | Thirty-two-bit signed integers and the default type of context-free integer literals. |
 | [`silk/i64`](./i64.md) | `i64` | 60 | Sixty-four-bit signed integers for large fixed-width values and exact integer protocols. |
 | [`silk/i8`](./i8.md) | `i8` | 60 | Eight-bit signed integers for compact values, byte-level formats, and narrow arithmetic. |
+| [`silk/insecure_random`](./insecure-random.md) | `InsecureRandom` | 7 | Provider-replaceable deterministic words, booleans, bounded values, and byte filling. |
+| [`silk/insecure_seed`](./insecure-seed.md) | `InsecureSeed` | 8 | One provider-stable 128-bit value for initialization-time hash-flood hardening. |
 | [`silk/isize`](./isize.md) | `isize` | 60 | Pointer-width signed integers for offsets whose range follows the selected compilation target. |
 | [`silk/layout`](./layout.md) | `Layout` | 6 | Checked size-and-alignment descriptions used to request storage from an allocator. |
 | [`silk/local_scheduler`](./local-scheduler.md) | `LocalScheduler` | 4 | Deterministic single-threaded execution for structured Fibers. |
@@ -40,9 +42,10 @@ The compiler-shipped modules and their complete public documentation.
 | [`silk/os_filesystem`](./os-filesystem.md) | `OsFileSystem` | 2 | Native FileSystem provider confined beneath one explicitly owned platform root. |
 | [`silk/os_host_input`](./os-host-input.md) | `OsHostInput` | 2 | Native HostInput provider for the process command line, environment, and working directory. |
 | [`silk/os_monotonic_clock`](./os-monotonic-clock.md) | `OsMonotonicClock` | 2 | Native monotonic clock provider with source-derived relative waiting. |
+| [`silk/os_random`](./os-random.md) | `OsRandom` | 2 | Native Unix-family cryptographically secure random provider. |
 | [`silk/os_standard_input`](./os-standard-input.md) | `OsStandardInput` | 2 | Native StandardInput provider backed by the process standard-input descriptor. |
 | [`silk/os_system_clock`](./os-system-clock.md) | `OsSystemClock` | 2 | Native Unix-epoch clock provider for SystemClock. |
-| [`silk/random`](./random.md) | `Random` | 7 | Provider-replaceable pseudorandom words, booleans, bounded values, and byte filling. |
+| [`silk/random`](./random.md) | `Random` | 5 | Provider-replaceable cryptographically secure random bytes and derived values. |
 | [`silk/raw_buffer`](./raw-buffer.md) | `RawBuffer` | 8 | Low-level typed views over owned allocations for implementing collections and storage actors. |
 | [`silk/result`](./result.md) | `Result` | 11 | Completed success-or-failure values that can be inspected and transformed as ordinary data. |
 | [`silk/scheduler`](./scheduler.md) | `Scheduler` | 17 | Provider protocol for preparing and atomically publishing child Fibers. |

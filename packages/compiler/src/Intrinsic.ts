@@ -163,6 +163,7 @@ const osConsumer = (spelling: string): string => {
   if (spelling === 'monotonicClockNow') return 'silk/os_monotonic_clock.now'
   if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
   if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
+  if (spelling === 'randomFill') return 'silk/os_random.fillBytes'
   if (spelling === 'standardInputRead') return 'silk/os_standard_input.read'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
   if (spelling === 'processCapture') return 'silk/os_child_process.capture'
@@ -838,6 +839,16 @@ const intrinsicOperations = Object.freeze([
       semanticResult: 'bool',
       invariant:
         'deadline is a canonical non-negative mark from the selected monotonic timeline and success means it has been reached',
+    }),
+    osBuiltin({
+      name: 'randomFill',
+      operation: 'OsRandomFill',
+      parameters: Object.freeze([valueParameter('output', '&mut [u8]')]),
+      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8')]),
+      result: 'Effect<bool>',
+      semanticResult: 'bool',
+      invariant:
+        'true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output',
     }),
     osBuiltin({
       name: 'fileOpen',

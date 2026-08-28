@@ -11,6 +11,7 @@ import type * as HostInput from './HostInput.js'
 import type * as Mir from './Mir.js'
 import type * as MonotonicClock from './MonotonicClock.js'
 import * as OsFileSystemHost from './OsFileSystemHost.js'
+import * as RandomHost from './RandomHost.js'
 import type * as Scalar from './Scalar.js'
 import type * as StandardInput from './StandardInput.js'
 import type * as StandardStreams from './StandardStreams.js'
@@ -69,6 +70,7 @@ export interface State {
   readonly osFileSystem?: OsFileSystemHost.Provider
   readonly systemClock?: SystemClock.Provider
   readonly monotonicClock?: MonotonicClock.Provider
+  readonly randomHost?: RandomHost.Provider
 }
 
 export interface ExecutionContext {
@@ -270,6 +272,84 @@ export const execute = (
         const completed = invoked.result?._tag === 'Waited'
         const boundary = clockResult(completed, invoked.cause)
         commit(boundary.value)
+        break
+      }
+      if (name === 'osRandomFill') {
+        const output = arguments_.at(0)
+        if (output === undefined) throw new RangeError('OS random fill omitted its output')
+        const byteLength = byteView(output).length
+        const recordRandom = (
+          completed: boolean,
+          randomFailure?: RandomHost.FailureCategory,
+        ): void => {
+          trace.push(
+            Object.freeze({
+              _tag: 'OsCall',
+              function: fn.id,
+              operation: operation.operation,
+              outcome: completed ? 'Completed' : 'Failure',
+              byteLength,
+              ...(randomFailure === undefined ? {} : { randomFailure }),
+              span: operation.provenance.span,
+            }),
+          )
+        }
+        if (byteLength === 0) {
+          recordRandom(true)
+          commit(integerValue('i32', 1))
+          break
+        }
+        const host = state.randomHost
+        if (host === undefined) return blockedStep({ _tag: 'MissingRandomHost' })
+        let randomFailure: RandomHost.FailureCategory | undefined
+        let staged: ReadonlyArray<number> | undefined
+        try {
+          const result: unknown = host.fill(byteLength)
+          if (typeof result !== 'object' || result === null) {
+            randomFailure = 'HostThrew'
+          } else {
+            const tag = Reflect.get(result, '_tag')
+            if (tag === 'BoundaryFailure') {
+              const category = Reflect.get(result, 'category')
+              randomFailure = RandomHost.isFailureCategory(category) ? category : 'HostThrew'
+            } else if (tag === 'Filled') {
+              const bytes = Reflect.get(result, 'bytes')
+              if (!Array.isArray(bytes)) {
+                randomFailure = 'HostThrew'
+              } else {
+                const candidate: Array<unknown> = Array.from(bytes)
+                if (candidate.length < byteLength) {
+                  randomFailure = 'Underfill'
+                } else if (candidate.length > byteLength) {
+                  randomFailure = 'Overfill'
+                } else {
+                  const validated: Array<number> = []
+                  for (const byte of candidate) {
+                    if (
+                      typeof byte !== 'number' ||
+                      !Number.isInteger(byte) ||
+                      byte < 0 ||
+                      byte > 255
+                    ) {
+                      randomFailure = 'InvalidByte'
+                      break
+                    }
+                    validated.push(byte)
+                  }
+                  if (randomFailure === undefined) staged = Object.freeze(validated)
+                }
+              }
+            } else {
+              randomFailure = 'HostThrew'
+            }
+          }
+        } catch {
+          randomFailure = 'HostThrew'
+        }
+        const completed = staged !== undefined
+        recordRandom(completed, randomFailure)
+        if (staged !== undefined) writeByteView(output, staged)
+        commit(integerValue('i32', completed ? 1 : 0))
         break
       }
       const reasonOutput = arguments_.at(-2)

@@ -1,7 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import { seededRandomFingerprint } from './support/corpus.js'
+import { portableRandomCapabilities, seededRandomFingerprint } from './support/corpus.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -94,7 +94,13 @@ it.effect(
 )
 
 it.effect(
-  'runs the seeded Random fingerprint on the evaluator and direct WebAssembly',
+  'runs the seeded InsecureRandom fingerprint on the evaluator and direct WebAssembly',
   () => agrees('stdlib-namespace/random', seededRandomFingerprint),
+  60_000,
+)
+
+it.effect(
+  'runs portable secure Random and InsecureSeed providers on the evaluator and direct WebAssembly',
+  () => agrees('stdlib-namespace/random-capabilities', portableRandomCapabilities),
   60_000,
 )

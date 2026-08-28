@@ -694,6 +694,8 @@ const blockedLabel = (reason: BootstrapEvaluation.BlockedReason): string => {
       return 'MissingSystemClock: no system-clock host provider was supplied'
     case 'MissingMonotonicClock':
       return 'MissingMonotonicClock: no monotonic-clock host provider was supplied'
+    case 'MissingRandomHost':
+      return 'MissingRandomHost: no random host provider was supplied'
     case 'IntrinsicTargetUnavailable':
       return `IntrinsicTargetUnavailable: ${reason.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
   }
@@ -728,6 +730,8 @@ const blockedSpan = (
     case 'MissingSystemClock':
       return undefined
     case 'MissingMonotonicClock':
+      return undefined
+    case 'MissingRandomHost':
       return undefined
     case 'EvaluationLimit':
       return reason.span

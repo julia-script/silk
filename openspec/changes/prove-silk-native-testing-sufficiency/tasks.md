@@ -1,6 +1,6 @@
 ## 1. Seeded Random Witnesses
 
-- [ ] 1.1 Add a closed standard-library test that constructs the documented seeded Random provider inside its body and verifies the published first scalar through Test.assert; verify `silk test --standard-library` catalog discovery and a passing default report.
+- [ ] 1.1 Add a closed standard-library test that constructs the documented seeded InsecureRandom provider inside its body and verifies the published first scalar through Test.assert; verify `silk test --standard-library` catalog discovery and a passing default report.
 - [ ] 1.2 Add a closed standard-library test that fills bytes from the documented seed and compares the existing published vector through Test.equalBytes; verify the expected vector has one committed source of truth and no host-language comparison loop remains.
 - [ ] 1.3 Add a representative manifest-rooted user fixture that repeats both the scalar Test.assert and byte-vector Test.equalBytes operations and verify it uses the identical eligibility, inventory, invocation, assertion, and reporting surface.
 

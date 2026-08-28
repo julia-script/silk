@@ -127,13 +127,18 @@ it('declares one discoverable namespace for every standard-library module', () =
   assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')
   assert.strictEqual(Stdlib.findNamespace('Effect')?.module, 'silk/effect')
   assert.strictEqual(Stdlib.findNamespace('Random')?.module, 'silk/random')
+  assert.strictEqual(Stdlib.findNamespace('InsecureRandom')?.module, 'silk/insecure_random')
+  assert.strictEqual(Stdlib.findNamespace('InsecureSeed')?.module, 'silk/insecure_seed')
+  assert.strictEqual(Stdlib.findNamespace('OsRandom')?.module, 'silk/os_random')
   assert.strictEqual(Stdlib.findNamespace('Fiber')?.module, 'silk/fiber')
   assert.strictEqual(Stdlib.findNamespace('LocalScheduler')?.module, 'silk/local_scheduler')
   assert.strictEqual(Stdlib.findNamespace('Scheduler')?.module, 'silk/scheduler')
   assert.isDefined(Stdlib.find('silk/effect'))
   assert.isUndefined(Stdlib.find('silk/effects'))
   assert.deepEqual(Stdlib.find('silk/option')?.aliases, ['None', 'Some'])
-  assert.deepEqual(Stdlib.find('silk/random')?.aliases, ['Xoshiro256StarStar'])
+  assert.deepEqual(Stdlib.find('silk/insecure_random')?.aliases, ['Xoshiro256StarStar'])
+  assert.deepEqual(Stdlib.find('silk/insecure_seed')?.aliases, ['FixedInsecureSeed', 'Seed'])
+  assert.isUndefined(Stdlib.find('silk/random')?.aliases)
   assert.includeMembers([...(Stdlib.find('silk/fiber')?.aliases ?? [])], ['Cancelled', 'Outcome'])
   assert.deepEqual(Stdlib.find('silk/local_scheduler')?.aliases, ['StalledError'])
   assert.includeMembers(
@@ -142,31 +147,31 @@ it('declares one discoverable namespace for every standard-library module', () =
   )
 })
 
-const randomImporter = `import silk.random as Random
+const insecureRandomImporter = `import silk.insecure_random as InsecureRandom
 
 pub fn main() -> i32 {
-  let provider = Random.seeded(0)
+  let provider = InsecureRandom.seeded(0)
   drop provider
   return 42
 }`
 
-it.effect('resolves the complete Random surface to canonical portable Silk source', () =>
+it.effect('resolves the complete InsecureRandom surface to canonical portable Silk source', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
-      'stdlib/random-importer',
-      ascii(randomImporter),
+      'stdlib/insecure-random-importer',
+      ascii(insecureRandomImporter),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
-    const entry = Stdlib.find('silk/random')
+    const entry = Stdlib.find('silk/insecure_random')
     assert.isDefined(entry)
     assert.strictEqual(entry?.layer, 'portable')
     assert.deepEqual(entry?.runtimeInventory, [])
     assert.isUndefined(entry?.providerTargets)
-    assert.isTrue(entry?.sourceUrl.pathname.endsWith('/stdlib/silk/random.silk') ?? false)
+    assert.isTrue(entry?.sourceUrl.pathname.endsWith('/stdlib/silk/insecure_random.silk') ?? false)
 
     const module = Analysis.declarationIndex(snapshot).modules.find(
-      (candidate) => candidate.module === 'silk/random',
+      (candidate) => candidate.module === 'silk/insecure_random',
     )
     assert.isDefined(module)
     const canonicals = [
@@ -178,21 +183,29 @@ it.effect('resolves the complete Random surface to canonical portable Silk sourc
     )
     assert.includeMembers(
       canonicals.map((canonical) => canonical.name),
-      ['Random', 'Xoshiro256StarStar', 'seeded', 'nextU64', 'nextBool', 'below', 'fillBytes'],
+      [
+        'InsecureRandom',
+        'Xoshiro256StarStar',
+        'seeded',
+        'nextU64',
+        'nextBool',
+        'below',
+        'fillBytes',
+      ],
     )
-    assert.isTrue(canonicals.every((canonical) => canonical.module === 'silk/random'))
+    assert.isTrue(canonicals.every((canonical) => canonical.module === 'silk/insecure_random'))
   }),
 )
 
-it.effect('keeps a renamed copy of the Random implementation ordinary and executable', () =>
+it.effect('keeps a renamed copy of the InsecureRandom implementation ordinary and executable', () =>
   Effect.gen(function* () {
-    const source = Stdlib.sources.get('silk/random')
+    const source = Stdlib.sources.get('silk/insecure_random')
     assert.isDefined(source)
     if (source === undefined) return
     const renamed = new TextDecoder()
       .decode(source)
       .replaceAll('Xoshiro256StarStar', 'Sequence256')
-      .replaceAll('Random', 'Entropy')
+      .replaceAll('InsecureRandom', 'Entropy')
     const root = `import app.entropy as Entropy
 import silk.effect as Effect
 
@@ -210,6 +223,58 @@ pub fn main() -> i32 {
     const outcome = Analysis.evaluate(snapshot)
     assert.strictEqual(outcome._tag, 'Completed')
     if (outcome._tag === 'Completed') assert.strictEqual(outcome.result.value, 42n)
+  }),
+)
+
+it.effect('resolves secure Random and InsecureSeed to distinct canonical portable source', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'stdlib/random-capabilities-importer',
+      ascii(`import silk.insecure_seed as InsecureSeed
+import silk.random as Random
+pub fn main() -> i32 {
+  let provider = InsecureSeed.fixed(20, 22)
+  drop provider
+  return 42
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    for (const moduleName of ['silk/random', 'silk/insecure_seed']) {
+      const entry = Stdlib.find(moduleName)
+      assert.strictEqual(entry?.layer, 'portable')
+      assert.deepEqual(entry?.runtimeInventory, [])
+      assert.isUndefined(entry?.providerTargets)
+    }
+    const modules = Analysis.declarationIndex(snapshot).modules
+    const names = (moduleName: string): Array<string> => {
+      const module = modules.find((candidate) => candidate.module === moduleName)
+      return [
+        ...(module?.declarations ?? []),
+        ...(module?.services ?? []),
+        ...(module?.structs ?? []),
+      ].flatMap((declaration) =>
+        declaration.canonical._tag === 'Canonical' ? [declaration.canonical.id.name] : [],
+      )
+    }
+    assert.includeMembers(names('silk/random'), [
+      'Random',
+      'fillBytes',
+      'nextU64',
+      'nextBool',
+      'below',
+    ])
+    assert.notInclude(names('silk/random'), 'seeded')
+    assert.notInclude(names('silk/random'), 'Xoshiro256StarStar')
+    assert.includeMembers(names('silk/insecure_seed'), [
+      'Seed',
+      'InsecureSeed',
+      'FixedInsecureSeed',
+      'first',
+      'second',
+      'fixed',
+      'fromRandom',
+      'get',
+    ])
   }),
 )
 

@@ -6,6 +6,7 @@ import type * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
 import type * as Mir from './Mir.js'
 import type * as OsFileSystemHost from './OsFileSystemHost.js'
+import type * as RandomHost from './RandomHost.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StandardStreams from './StandardStreams.js'
 import type * as Termination from './Termination.js'
@@ -293,6 +294,8 @@ export interface OsCallTraceEvent {
   readonly reason?: OsFileSystemHost.Reason
   readonly nativeCode?: number
   readonly cause?: unknown
+  readonly byteLength?: number
+  readonly randomFailure?: RandomHost.FailureCategory
   readonly span: SourceSpan.SourceSpan
 }
 
@@ -383,6 +386,7 @@ export type BlockedReason =
   | { readonly _tag: 'MissingOsFileSystemHost' }
   | { readonly _tag: 'MissingSystemClock' }
   | { readonly _tag: 'MissingMonotonicClock' }
+  | { readonly _tag: 'MissingRandomHost' }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>

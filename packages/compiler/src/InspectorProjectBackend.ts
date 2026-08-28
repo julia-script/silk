@@ -1319,7 +1319,7 @@ const traceLabel = (event: BootstrapEvaluation.TraceEvent): string => {
     case 'HostWrite':
       return `${event.destination.toLowerCase()} write ${event.bytes.length} bytes · ${event.outcome.toLowerCase()}`
     case 'OsCall':
-      return `${event.operation.actor}.${event.operation.name} · ${event.outcome.toLowerCase()}`
+      return `${event.operation.actor}.${event.operation.name} · ${event.outcome.toLowerCase()}${event.byteLength === undefined ? '' : ` · ${event.byteLength} bytes`}${event.randomFailure === undefined ? '' : ` · ${event.randomFailure}`}`
     case 'StringStatic':
       return `string ${event.storage ?? 'static'} · ${event.byteLength ?? 0} UTF-8 bytes`
     case 'StringRuntime':
@@ -1442,6 +1442,8 @@ const blockedReasonText = (reason: BootstrapEvaluation.BlockedReason): string =>
       return 'missing SystemClock host provider'
     case 'MissingMonotonicClock':
       return 'missing MonotonicClock host provider'
+    case 'MissingRandomHost':
+      return 'missing RandomHost provider'
     case 'IntrinsicTargetUnavailable':
       return reason.diagnostics.map((diagnostic) => diagnostic.message).join(' · ')
   }

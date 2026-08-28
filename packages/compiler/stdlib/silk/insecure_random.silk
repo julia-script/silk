@@ -1,0 +1,165 @@
+//! Provider-replaceable deterministic words, booleans, bounded values, and byte filling.
+//!
+//! # When to use
+//! Require [`InsecureRandom`] when a reproducible pseudorandom stream is needed. Use
+//! [`Xoshiro256StarStar`] with [`seeded`] for one stable cross-engine sequence.
+//!
+//! # Details
+//! [`nextU64`] obtains one word from the active provider. [`nextBool`], [`below`], and [`fillBytes`]
+//! define one stable mapping from provider words to their results. Seed expansion uses SplitMix64.
+//!
+//! # Gotchas
+//! These APIs are deterministic and non-cryptographic. Do not use them for secrets, credentials,
+//! keys, nonces, tokens, or hash-flood protection.
+//!
+//! # Examples
+//! ## Reproduce the first word from one seed
+//! ```silk
+//! import silk.effect { Effect }
+//! import silk.insecure_random as InsecureRandom
+//!
+//! pub fn main() -> i32 {
+//!   let mut provider = InsecureRandom.seeded(0)
+//!   let first = run InsecureRandom.nextU64()
+//!     |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
+//!   if first != 0x99ec5f36cb75f2b4 { return 0 }
+//!   return 42
+//! }
+//! ```
+
+import silk.option as Option
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
+/// An exclusive source of deterministic non-cryptographic `u64` words.
+///
+/// # Details
+///
+/// A provider owns its state. Each call advances only the provider supplied for the lexical Effect.
+///
+/// # Gotchas
+///
+/// This service is unsuitable for secrets, credentials, keys, nonces, tokens, and hash protection.
+pub service InsecureRandom {
+  /// Returns the next deterministic word and advances the active provider once.
+  effect fn nextU64() -> u64 ? &mut InsecureRandom
+}
+
+/// Returns one deterministic word from the active [`InsecureRandom`] provider.
+pub effect fn nextU64() -> u64 ? &mut InsecureRandom {
+  return run InsecureRandom.nextU64()
+}
+
+/// A deterministic xoshiro256** provider with four private `u64` state words.
+///
+/// # Details
+///
+/// The sequence is stable on every Silk engine and is not cryptographically secure.
+pub struct Xoshiro256StarStar {
+  state0: u64
+  state1: u64
+  state2: u64
+  state3: u64
+}
+
+struct SplitMix64Step {
+  state: u64
+  value: u64
+}
+
+fn splitMix64(state: u64) -> SplitMix64Step {
+  let next = u64.wrappingAdd(state, 0x9e3779b97f4a7c15)
+  let first = u64.bitXor(next, u64.shiftRight(next, 30))
+  let spread = u64.wrappingMultiply(first, 0xbf58476d1ce4e5b9)
+  let second = u64.bitXor(spread, u64.shiftRight(spread, 27))
+  let respread = u64.wrappingMultiply(second, 0x94d049bb133111eb)
+  return SplitMix64Step {
+    state: next,
+    value: u64.bitXor(respread, u64.shiftRight(respread, 31)),
+  }
+}
+
+/// Creates a reproducible [`Xoshiro256StarStar`] provider from one `u64` seed.
+///
+/// # Details
+///
+/// Every seed, including zero, expands through four successive SplitMix64 steps.
+pub fn seeded(seed: u64) -> Xoshiro256StarStar {
+  let first = splitMix64(seed)
+  let second = splitMix64(first.state)
+  let third = splitMix64(second.state)
+  let fourth = splitMix64(third.state)
+  return Xoshiro256StarStar {
+    state0: first.value,
+    state1: second.value,
+    state2: third.value,
+    state3: fourth.value,
+  }
+}
+
+effect fn xoshiroNext(self: &mut Xoshiro256StarStar) -> u64 {
+  let multiplied = u64.wrappingMultiply(self.state1, 5)
+  let result = u64.wrappingMultiply(u64.rotateLeft(multiplied, 7), 9)
+  let shifted = u64.shiftLeft(self.state1, 17)
+
+  self.state2 = u64.bitXor(self.state2, self.state0)
+  self.state3 = u64.bitXor(self.state3, self.state1)
+  self.state1 = u64.bitXor(self.state1, self.state2)
+  self.state0 = u64.bitXor(self.state0, self.state3)
+  self.state2 = u64.bitXor(self.state2, shifted)
+  self.state3 = u64.rotateLeft(self.state3, 45)
+
+  return result
+}
+
+impl InsecureRandom for Xoshiro256StarStar {
+  nextU64: Xoshiro256StarStar.xoshiroNext
+}
+
+/// Returns whether bit 63 of the next deterministic provider word is set.
+pub effect fn nextBool() -> bool ? &mut InsecureRandom {
+  let word = run InsecureRandom.nextU64()
+  return u64.shiftRight(word, 63) == 1
+}
+
+/// Returns a deterministic value below `upperExclusive`, or `None` when the bound is zero.
+///
+/// # Details
+///
+/// Positive bounds use complete-word rejection sampling. Progress requires eventual acceptance.
+pub effect fn below(upperExclusive: u64) -> Option.Option<u64> ? &mut InsecureRandom {
+  if upperExclusive == u64.MIN {
+    return Option.none<u64>()
+  }
+
+  let threshold = u64.remainder(u64.wrappingSubtract(u64.MIN, upperExclusive), upperExclusive)
+  let mut word = run InsecureRandom.nextU64()
+  while word < threshold {
+    word = run InsecureRandom.nextU64()
+  }
+  return Option.some<u64>(u64.remainder(word, upperExclusive))
+}
+
+/// Fills `output` from deterministic provider words in least-significant-byte-first order.
+///
+/// # Details
+///
+/// An empty slice consumes no word. A partial final group consumes one complete word.
+pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut InsecureRandom {
+  let mut index = usize.ZERO
+  while index < output.length {
+    let mut word = run InsecureRandom.nextU64()
+    let mut byteIndex = u64.MIN
+    while byteIndex < 8 {
+      if index == output.length {
+        return ()
+      }
+      output[index] = u64.toU8(u64.bitAnd(word, 255))
+      word = u64.shiftRight(word, 8)
+      index = index + usize.ONE
+      byteIndex = byteIndex + 1
+    }
+  }
+  return ()
+}
