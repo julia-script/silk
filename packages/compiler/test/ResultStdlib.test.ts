@@ -122,6 +122,56 @@ fn release(storage: Allocation) -> i32 {
 
 pub fn main() -> i32 { return run build() }`
 
+const alternateResultLikeUnion = `import silk.effect as Effect
+
+union Outcome<A, E> {
+  Good { value: A },
+  Bad { error: E },
+}
+
+struct First { code: i32 }
+struct Second { code: i32 }
+
+fn good<A, E>(value: A) -> Outcome<A, E> {
+  return Outcome<A, E>.Good { value: move value }
+}
+
+effect fn bad<A, E>(error: E) -> Outcome<A, E> {
+  return Outcome<A, E>.Bad { error: move error }
+}
+
+effect fn outcome<A, E, ?R>(
+  protected: once Effect<A ! E ? R>
+) -> Outcome<A, E> ? R {
+  let succeeded = Effect.map<A, Outcome<A, E>, E>(move protected, good)
+  return run Effect.catchAll<Outcome<A, E>, Outcome<A, E>, E, never>(
+    move succeeded,
+    bad
+  )
+}
+
+effect fn choose(first: bool) -> i32 ! First | Second {
+  if first { fail First { code: 20 } }
+  fail Second { code: 22 }
+}
+
+effect fn inspect(first: bool) -> i32 {
+  let completed = run outcome(choose(first))
+  return match move completed {
+    Outcome<i32, First | Second>.Good { value } => value
+    Outcome<i32, First | Second>.Bad { error } => match move error {
+      First { code } => code
+      Second { code } => code
+    }
+  }
+}
+
+pub fn main() -> i32 {
+  let first = run inspect(true)
+  let second = run inspect(false)
+  return first + second
+}`
+
 const reifiedTrap = `import silk.effect as Effect
 import silk.result { Result }
 
@@ -303,6 +353,10 @@ it.effect('reifies every typed Effect branch as ordinary Result data', () =>
 
 it.effect('preserves requirements while moving affine channel data into Result', () =>
   evaluateAndRunWasm('reified-requirement', reifiedRequirement),
+)
+
+it.effect('composes an alternate generic result-like union from map and catchAll', () =>
+  evaluateAndRunWasm('alternate-result-like-union', alternateResultLikeUnion),
 )
 
 it.effect('keeps runtime traps outside the typed Result error channel', () =>

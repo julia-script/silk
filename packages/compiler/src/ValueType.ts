@@ -213,6 +213,7 @@ export const callableValueByIdentity = (
     _tag: 'CallableValue',
     type: specializedType,
     target,
+    typeArguments: identity.typeArguments,
     ...(environment === undefined ? {} : { site: environment.callable.site, environment }),
   })
 }

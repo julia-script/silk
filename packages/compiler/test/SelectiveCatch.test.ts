@@ -62,6 +62,18 @@ const replaceMirOperation = (
           operations: Object.freeze(operation.right.operations.map(rewrite)),
         }),
       })
+    if (operation._tag === 'Conditional')
+      return Object.freeze({
+        ...operation,
+        taken: Object.freeze({
+          ...operation.taken,
+          operations: Object.freeze(operation.taken.operations.map(rewrite)),
+        }),
+        otherwise: Object.freeze({
+          ...operation.otherwise,
+          operations: Object.freeze(operation.otherwise.operations.map(rewrite)),
+        }),
+      })
     if (operation._tag !== 'Match') return operation
     return Object.freeze({
       ...operation,
@@ -354,7 +366,9 @@ pub fn main() -> i32 {
     const self = yield* analyze(source, 'wasm32-unknown-unknown')
     assert.deepEqual(Analysis.diagnostics(self), [])
     const calls = self.instances.intrinsics.filter(
-      (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
+      (call) =>
+        call.span.sourceId === 'root' &&
+        Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
     )
     assert.strictEqual(calls.length, 1)
     for (const target of Intrinsic.executionTargets) {
@@ -460,7 +474,9 @@ pub fn main() -> i32 { return (run completed(true)) + (run completed(false)) }
 `)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const calls = self.instances.intrinsics.filter(
-      (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
+      (call) =>
+        call.span.sourceId === 'root' &&
+        Intrinsic.operationText(call.operation) === 'Intrinsic.catchFailure',
     )
     assert.strictEqual(calls.length, 1)
     for (const target of Intrinsic.executionTargets)
@@ -537,7 +553,11 @@ pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
         .flatMap(Hir.statementExpressions)
         .flatMap((root) => [...Hir.expressionTree(root)])
         .filter((expression) => expression._tag === 'EffectCatch')
-        .map((expression) => Object.freeze({ expression, substitution: instance.substitution })),
+        .map((expression) => Object.freeze({ expression, substitution: instance.substitution }))
+        .filter(
+          ({ expression, substitution }) =>
+            Type.encode(Type.substitute(expression.selected, substitution)) === 'root.A',
+        ),
     )
     assert.strictEqual(catches.length, 1)
     const found = catches.at(0)
@@ -2001,6 +2021,18 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
                 operations: rewriteOperations(operation.right.operations, enclosing),
               }),
             })
+          if (operation._tag === 'Conditional')
+            return Object.freeze({
+              ...operation,
+              taken: Object.freeze({
+                ...operation.taken,
+                operations: rewriteOperations(operation.taken.operations, enclosing),
+              }),
+              otherwise: Object.freeze({
+                ...operation.otherwise,
+                operations: rewriteOperations(operation.otherwise.operations, enclosing),
+              }),
+            })
           if (operation._tag === 'Match') {
             const source =
               operation.scrutineeType._tag === 'Union'
@@ -2160,6 +2192,18 @@ pub fn main() -> i32 { return run Effect.catchAll(selected(1), recoverAll) }`,
               right: Object.freeze({
                 ...operation.right,
                 operations: injectStructuredPrefix(operation.right.operations, region),
+              }),
+            })
+          if (operation._tag === 'Conditional')
+            return Object.freeze({
+              ...operation,
+              taken: Object.freeze({
+                ...operation.taken,
+                operations: injectStructuredPrefix(operation.taken.operations, region),
+              }),
+              otherwise: Object.freeze({
+                ...operation.otherwise,
+                operations: injectStructuredPrefix(operation.otherwise.operations, region),
               }),
             })
           if (operation._tag !== 'Match') return operation

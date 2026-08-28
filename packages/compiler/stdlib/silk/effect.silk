@@ -229,11 +229,20 @@ pub effect fn logError(
 pub effect fn result<A, E, ?R>(
   protected: once Effect<A ! E ? R>
 ) -> Result<A, E> ? R {
-  return run Intrinsic.effectResult<Result<A, E>>(move protected, succeed, failResult)
+  let succeeded = map<A, Result<A, E>, E>(move protected, succeedCompleted)
+  return run catchAll<Result<A, E>, Result<A, E>, E, never>(move succeeded, failCompleted)
 }
 
 effect fn raise<E>(error: E) -> never ! E {
   fail move error
+}
+
+fn succeedCompleted<A, E>(value: A) -> Result<A, E> {
+  return succeed<A, E>(move value)
+}
+
+effect fn failCompleted<A, E>(error: E) -> Result<A, E> {
+  return failResult<A, E>(move error)
 }
 
 /// Transforms both possible typed outcomes with pure callbacks.
@@ -264,11 +273,8 @@ pub effect fn map<A, B, E, ?R>(
   self: once Effect<A ! E ? R>,
   onSuccess: once fn(A) -> B
 ) -> B ! E ? R {
-  let completed = run result(move self)
-  return match move completed {
-    Result<A, E>.Success { value: success } => onSuccess(move success)
-    Result<A, E>.Failure { error } => run raise(move error)
-  }
+  let success = run move self
+  return onSuccess(move success)
 }
 
 /// Applies a pure callback to typed failure while preserving success and requirements.
@@ -406,11 +412,7 @@ pub effect fn catchAll<A, B, E, F, ?R, ?S>(
   self: once Effect<A ! E ? R>,
   onFailure: once fn(E) -> Effect<B ! F ? S>
 ) -> A | B ! F ? R | S {
-  let completed = run result(move self)
-  return match move completed {
-    Result<A, E>.Success { value: success } => move success
-    Result<A, E>.Failure { error } => run onFailure(move error)
-  }
+  return run Intrinsic.catchFailure<E>(move self, move onFailure)
 }
 
 /// Recovers one selected typed failure.

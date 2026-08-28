@@ -1811,10 +1811,36 @@ export const analyzeFunctionItem = (
           unresolvedCallable.schema,
           unresolvedCallable.unsafe,
         )
-  const specialized =
+  let specialized =
     contextualPattern !== undefined &&
     expectedCallable !== undefined &&
     TypeInference.infer(contextualPattern, expectedCallable, contextual)
+  if (!specialized && contextualPattern !== undefined && expectedCallable !== undefined) {
+    const partial = new Map<string, Type.GenericArgument>()
+    const parametersCompatible =
+      contextualPattern.parameters.length === expectedCallable.parameters.length &&
+      contextualPattern.parameters.every((parameter, ordinal) => {
+        const expectedParameter = expectedCallable.parameters.at(ordinal)
+        return (
+          expectedParameter !== undefined &&
+          TypeInference.infer(parameter, expectedParameter, partial)
+        )
+      })
+    const patternResult = contextualPattern.result
+    const expectedResult = expectedCallable.result
+    const resultCompatible =
+      Type.isEffect(patternResult) && Type.isEffect(expectedResult)
+        ? TypeInference.infer(patternResult.success, expectedResult.success, partial)
+        : TypeInference.infer(patternResult, expectedResult, partial)
+    const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
+      partial.has(Type.key(parameter)),
+    )
+    if (parametersCompatible && resultCompatible && allBindersDetermined) {
+      contextual.clear()
+      for (const [key, argument] of partial) contextual.set(key, argument)
+      specialized = true
+    }
+  }
   let callable = unresolvedCallable
   if (callable !== undefined && specialized) {
     const contextualCallable = Type.substitute(callable, contextual)

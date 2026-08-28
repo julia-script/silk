@@ -47,8 +47,9 @@ export const lowerCatchEffectValue = (
     protectedType?._tag !== 'EffectValue' ||
     handler === undefined ||
     handlerType?._tag !== 'CallableValue'
-  )
+  ) {
     return undefined
+  }
 
   const site = Hir.effectCatchSite(
     fn.owner.function.declaration.id,
@@ -347,7 +348,8 @@ export const reifyEffectValue = (
     boolType?._tag !== 'bool' ||
     successType === undefined ||
     successType._tag === 'EffectOutcome' ||
-    (failureType?._tag !== 'Nominal' && failureType?._tag !== 'Union') ||
+    failureType === undefined ||
+    failureType._tag === 'EffectOutcome' ||
     outcomeShape === undefined ||
     successShape === undefined ||
     failureValueShape === undefined ||
@@ -467,8 +469,54 @@ export const lowerEffectCatch = (
   const selected = fn.semantic(expression.selected)
   const protectedEffect = fn.semantic(expression.protected.type)
   const resultEffect = fn.semantic(expression.type)
-  if (Type.isNever(selected) || !Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect))
-    return undefined
+  if (!Type.isEffect(protectedEffect) || !Type.isEffect(resultEffect)) return undefined
+  if (Type.isNever(selected)) {
+    const succeeded = lowerRunEffectValue(
+      fn,
+      protected_.result,
+      protectedType,
+      protectedEffect.success,
+      runSpan,
+    )
+    if (succeeded === undefined) return undefined
+    for (const drop of unusedHandlerDrop()) fn.emit(drop)
+    if (Type.equals(protectedEffect.success, resultEffect.success)) {
+      endRunLoans(fn, runSpan)
+      return succeeded
+    }
+    const conversion = TypeCompatibility.check(protectedEffect.success, resultEffect.success)
+    const sourceType = fn.type(protectedEffect.success)
+    const targetType = fn.type(resultEffect.success)
+    const sourceShape = Layout.callingShape(fn.layout, protectedEffect.success)
+    const targetShape = Layout.callingShape(fn.layout, resultEffect.success)
+    if (
+      conversion._tag !== 'Inject' ||
+      sourceType === undefined ||
+      sourceType._tag === 'EffectOutcome' ||
+      targetType?._tag !== 'Union' ||
+      sourceShape === undefined ||
+      targetShape === undefined
+    )
+      return undefined
+    const destination = fn.alloc(targetType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'ConvertUnion' as const,
+        destination,
+        source: succeeded.result,
+        sourceType,
+        targetType,
+        conversion: 'Inject' as const,
+        mappings: conversion.mappings,
+        sourceShape,
+        targetShape,
+        access: 'Owned' as const,
+        provenance: generated(expression.span),
+      }),
+    )
+    endRunLoans(fn, runSpan)
+    return Object.freeze({ result: destination })
+  }
   const protectedFailures = Type.failureMembers(protectedEffect)
   const selectedMembers: ReadonlyArray<Type.Type> = Type.isUnion(selected)
     ? selected.members
@@ -494,12 +542,63 @@ export const lowerEffectCatch = (
     successType === undefined ||
     successType._tag === 'EffectOutcome' ||
     successShape === undefined ||
-    (failureValueMir?._tag !== 'Nominal' && failureValueMir?._tag !== 'Union') ||
+    failureValueMir === undefined ||
+    failureValueMir._tag === 'EffectOutcome' ||
     propagationEffect === undefined ||
     propagationType?._tag !== 'EffectOutcome' ||
     propagationShape === undefined
   )
     return undefined
+
+  if (failureValueMir._tag !== 'Nominal' && failureValueMir._tag !== 'Union') {
+    const onlyFailure = protectedFailures.at(0)
+    if (
+      protectedFailures.length !== 1 ||
+      onlyFailure === undefined ||
+      !selectedMembers.some((candidate) => Type.equals(candidate, onlyFailure))
+    )
+      return undefined
+    const [handled, handledOperations] = fn.capture(() => {
+      const applied = fn.alloc(handlerEffectType)
+      fn.emit(
+        Object.freeze({
+          _tag: 'ApplyCallable' as const,
+          destination: applied,
+          callable: handler.result,
+          typeArguments:
+            handlerType.environment?.callable.typeArguments ??
+            handlerType.storage?.realization.targetArguments ??
+            handlerType.typeArguments ??
+            Object.freeze([]),
+          captures: Object.freeze([]),
+          arguments: Object.freeze([reified.failure]),
+          callableType: handlerType.type,
+          access: handlerType.type.mode,
+          evaluation: 'CalleeThenArguments' as const,
+          realization: 'Environment' as const,
+          type: handlerEffectType,
+          provenance: generated(expression.span),
+        }),
+      )
+      return lowerRunEffectValue(fn, applied, handlerEffectType, resultEffect.success, runSpan)
+    })
+    if (handled === undefined) return undefined
+    const destination = fn.alloc(successType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'Conditional' as const,
+        destination,
+        condition: reified.valid,
+        taken: Object.freeze({ operations: unusedHandlerDrop(), result: reified.success }),
+        otherwise: Object.freeze({ operations: handledOperations, result: handled.result }),
+        type: successType,
+        resultShape: successShape,
+        provenance: generated(expression.span),
+      }),
+    )
+    endRunLoans(fn, runSpan)
+    return Object.freeze({ result: destination })
+  }
 
   const declaration = fn.owner.function.declaration.id
   const failureMembers =

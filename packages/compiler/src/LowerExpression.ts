@@ -526,7 +526,11 @@ export function lowerExpressionInner(
         if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
         callable = lowered.result
         callableType = loweredType.type
-        typeArguments = loweredType.environment?.callable.typeArguments ?? Object.freeze([])
+        typeArguments =
+          loweredType.environment?.callable.typeArguments ??
+          loweredType.storage?.realization.targetArguments ??
+          loweredType.typeArguments ??
+          Object.freeze([])
         return true
       }
       const lowered =

@@ -252,6 +252,15 @@ export const proveStructural = (
       return Object.freeze({ _tag: 'Member', selected: self.selected, source: self.source })
     }
     case 'FailureSubsetConstraint': {
+      if (
+        self.selected.expression._tag === 'Singleton' &&
+        RowAlgebra.isKnownSubset(Type.failureRowPolicy(), self.selected, self.source)
+      )
+        return Object.freeze({
+          _tag: 'FailureSubset',
+          selected: self.selected,
+          source: self.source,
+        })
       const selected = RowAlgebra.concretize(Type.failureRowPolicy(), self.selected)
       const source = RowAlgebra.concretize(Type.failureRowPolicy(), self.source)
       if (

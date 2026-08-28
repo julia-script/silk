@@ -2838,6 +2838,7 @@ export const plan = (
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
+      if (expression._tag === 'EffectCatch') reached.set(Type.key('bool'), 'bool')
       if (expression._tag === 'EffectResult') {
         reached.set(Type.key('bool'), 'bool')
         const result = Type.substitute(expression.type, instance.substitution)
@@ -2916,6 +2917,9 @@ export const plan = (
     for (const field of candidate.executable?.fields ?? []) add(field.type)
     if (candidate.representation._tag === 'Aggregate') {
       for (const field of candidate.representation.fields) add(field.type)
+    } else if (candidate.representation._tag === 'NominalUnion') {
+      for (const variant of candidate.representation.variants)
+        for (const field of variant.fields) add(field.type)
     } else if (
       candidate.representation._tag === 'CallableEnvironment' ||
       candidate.representation._tag === 'StoredEffectEnvironment'

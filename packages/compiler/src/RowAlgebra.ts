@@ -321,22 +321,10 @@ export const isKnownSubset = <Member, RowParameter, SymbolicMember, MemberParame
     if (expressionKey(policy, left) === expressionKey(policy, right)) return true
     if (left._tag === 'Concrete' && left.row.members.length === 0) return true
     if (left._tag === 'Union') return left.operands.every((operand) => prove(operand, right))
+    if (right._tag === 'Union') return right.operands.some((operand) => prove(left, operand))
     if (left._tag === 'Concrete' && right._tag === 'Concrete')
       return FiniteRow.isSubset(policy.finite, left.row, right.row)
-    if (right._tag !== 'Union') return false
-    if (left._tag === 'Concrete') {
-      const concreteContainer = right.operands.find(
-        (operand): operand is Extract<typeof operand, { readonly _tag: 'Concrete' }> =>
-          operand._tag === 'Concrete',
-      )
-      return (
-        concreteContainer !== undefined &&
-        FiniteRow.isSubset(policy.finite, left.row, concreteContainer.row)
-      )
-    }
-    return right.operands.some(
-      (operand) => expressionKey(policy, left) === expressionKey(policy, operand),
-    )
+    return false
   }
   return prove(candidate.expression, container.expression)
 }
