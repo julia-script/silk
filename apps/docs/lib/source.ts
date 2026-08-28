@@ -32,6 +32,9 @@ const docs = defineDocs({
   dir: './content',
   docs: {
     schema,
+    postprocess: {
+      includeProcessedMarkdown: true,
+    },
     // Collection-level mdxOptions replace the defaults outright, so extend the preset.
     mdxOptions: applyMdxPreset({
       remarkPlugins: (v) => [remarkH1Title, remarkRelativeDocLinks, ...v],
