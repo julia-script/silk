@@ -26,10 +26,10 @@ composition are algorithmic and are not present in these tables.
 ### Read the canonical decomposition of é
 
 ```silk
-import silk.unicode_tables
+import silk.unicode_tables { UnicodeTables }
 
 pub fn main() -> i32 {
-  let decomposition = unicode_tables.canonicalDecomposition(233)
+  let decomposition = UnicodeTables.canonicalDecomposition(233)
   if decomposition.first != 101 || decomposition.second != 769 {
     return 0
   }
@@ -37,9 +37,25 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `UnicodeTables` with `import silk.unicode_tables`.
+Import as `UnicodeTables` with `import silk.unicode_tables { UnicodeTables }`.
 
-Public declarations: 7.
+Public declarations: 8.
+
+<a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a556e69636f64655461626c6573"></a>
+
+## `UnicodeTables`
+
+```silk
+pub struct UnicodeTables
+```
+
+The importable name of the `silk.unicode_tables` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.unicode_tables { UnicodeTables }` names the module scope, so generated lookup
+operations resolve through `UnicodeTables`.
 
 <a id="declaration-73696c6b2f756e69636f64655f7461626c65733a3a4465636f6d706f736974696f6e"></a>
 

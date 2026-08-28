@@ -190,10 +190,10 @@ const emit =
 //! # Examples
 //! ## Read the canonical decomposition of é
 //! \`\`\`silk
-//! import silk.unicode_tables
+//! import silk.unicode_tables { UnicodeTables }
 //!
 //! pub fn main() -> i32 {
-//!   let decomposition = unicode_tables.canonicalDecomposition(233)
+//!   let decomposition = UnicodeTables.canonicalDecomposition(233)
 //!   if decomposition.first != 101 || decomposition.second != 769 {
 //!     return 0
 //!   }
@@ -207,6 +207,15 @@ const emit =
 import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
+
+/// The importable name of the \`silk.unicode_tables\` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// \`import silk.unicode_tables { UnicodeTables }\` names the module scope, so generated lookup
+/// operations resolve through \`UnicodeTables\`.
+pub struct UnicodeTables {}
 
 /// One canonical decomposition with zero sentinels for an absent mapping or second scalar.
 pub struct Decomposition {

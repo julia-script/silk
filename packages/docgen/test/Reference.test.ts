@@ -68,7 +68,7 @@ fn helper() -> i32 { return 0 }
 const rendered = Effect.fnUntraced(function* () {
   const snapshot = yield* Analysis.ofSource('test/reference', encoder.encode(source))
   const project = Project.make(snapshot)
-  return Reference.make([{ module: 'test/reference', namespace: 'Reference' }], project)
+  return Reference.make([{ module: 'test/reference', namespace: 'Recovery' }], project)
 })
 
 it.effect('renders the complete public hierarchy in source order with accurate counts', () =>
@@ -81,6 +81,7 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     assert.include(index, '[Language reference](../../reference/)')
     const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
     assert.isDefined(page)
+    assert.include(page, 'Import as `Recovery` with `import test.reference { Recovery }`.')
     assert.include(page, 'Public declarations: 3.')
     assert.include(page, '### Operation `recover`')
     assert.include(page, '#### Parameter `problem`')
@@ -92,6 +93,19 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     assert.isBelow(page.indexOf('`Recovery`'), page.indexOf('`Provider`'))
     assert.isBelow(page.indexOf('`Provider`'), page.indexOf('Implementation'))
     assert.isBelow(page.indexOf('Implementation'), page.indexOf('`identity`'))
+  }),
+)
+
+it.effect('keeps primitive module imports unscoped', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource('test/reference', encoder.encode(source))
+    const project = Project.make(snapshot)
+    const result = Reference.make([{ module: 'test/reference', namespace: 'i32' }], project)
+    assert.strictEqual(result._tag, 'Success')
+    if (result._tag !== 'Success') return
+    const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
+    assert.isDefined(page)
+    assert.include(page, 'Import as `i32` with `import test.reference`.')
   }),
 )
 

@@ -24,15 +24,15 @@
 //!
 //! import silk.string { String }
 //!
-//! import silk.unicode
+//! import silk.unicode { Unicode }
 //!
 //! effect fn normalize() -> i32
 //! ! Allocator.OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let composing = unicode.normalizeNfc("e\u{301}")
+//!   let composing = Unicode.normalizeNfc("e\u{301}")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let composed = run composing
-//!   let decomposing = unicode.normalizeNfd("é")
+//!   let decomposing = Unicode.normalizeNfd("é")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let decomposed = run decomposing
 //!   if String.view(&composed) != "é" {
@@ -93,6 +93,15 @@ import silk.vector {
   set as vectorSet,
   truncate as vectorTruncate
 }
+
+/// The importable name of the `silk.unicode` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.unicode { Unicode }` names the module scope, so normalization and Unicode-data
+/// operations resolve through `Unicode`.
+pub struct Unicode {}
 
 /// Hangul syllables decompose and compose arithmetically rather than through a table, so UAX #15
 /// names these constants instead of tabulating eleven thousand rows.

@@ -20,20 +20,20 @@ it does not allocate or initialize it.
 ### Size storage for repeated values
 
 ```silk
-import silk.layout
+import silk.layout { Layout }
 
 import silk.usize
 
 pub fn main() -> i32 {
-  let element = layout.of<i32>()
-  return match move layout.repeat(move element, 3) {
-    layout.Layout {bytes, alignment} => usize.toI32(bytes) + 30
-    layout.LayoutOverflow {} => 0
+  let element = Layout.of<i32>()
+  return match move Layout.repeat(move element, 3) {
+    Layout.Layout {bytes, alignment} => usize.toI32(bytes) + 30
+    Layout.LayoutOverflow {} => 0
   }
 }
 ```
 
-Import as `Layout` with `import silk.layout`.
+Import as `Layout` with `import silk.layout { Layout }`.
 
 Public declarations: 6.
 

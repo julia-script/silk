@@ -17,10 +17,10 @@
 //! # Examples
 //! ## Add values through one generic contract
 //! ```silk
-//! import silk.numeric
+//! import silk.numeric { Numeric }
 //!
 //! pub fn main() -> i32 {
-//!   return numeric.add<i32>(40, 2)
+//!   return Numeric.add<i32>(40, 2)
 //! }
 //! ```
 
@@ -34,6 +34,15 @@ import silk.u32 as u32
 import silk.u64 as u64
 import silk.u8 as u8
 import silk.usize as usize
+
+/// The importable name of the `silk.numeric` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.numeric { Numeric }` names the module scope, so generic numeric helpers resolve
+/// through `Numeric` without renaming the [`Integer`] interface.
+pub struct Numeric {}
 
 /// Static addition contract for primitive integer values.
 ///

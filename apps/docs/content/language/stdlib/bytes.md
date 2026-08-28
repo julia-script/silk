@@ -20,7 +20,7 @@ later appends can reallocate, so do not retain a view across a mutation.
 ### Copy, append, and update bytes
 
 ```silk
-import silk.bytes
+import silk.bytes { Bytes }
 
 import silk.allocator { Allocator }
 
@@ -32,16 +32,16 @@ effect fn build() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"AB"
-  let copying = bytes.copy(&source)
+  let copying = Bytes.copy(&source)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut bytes = run copying
   let suffix = b"C"
-  let appending = bytes.append(&mut bytes, &suffix)
+  let appending = Bytes.append(&mut bytes, &suffix)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let appended = run appending
-  let mut writable = bytes.asMutSlice(&mut bytes)
+  let mut writable = Bytes.asMutSlice(&mut bytes)
   writable[1] = u8.toU8(48)
-  let readable = bytes.asSlice(&bytes)
+  let readable = Bytes.asSlice(&bytes)
   return u8.toI32(readable[0]) - u8.toI32(readable[1]) + u8.toI32(readable[2]) - 42
 }
 
@@ -54,7 +54,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Bytes` with `import silk.bytes`.
+Import as `Bytes` with `import silk.bytes { Bytes }`.
 
 Public declarations: 8.
 

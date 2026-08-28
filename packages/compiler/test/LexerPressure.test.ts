@@ -285,7 +285,6 @@ const quotaSourceFor = (input: string, id: string, quota: number): string => {
     `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
 import silk.allocator { SystemAllocator }
-import silk.effect as Effect
 import silk.layout { Layout }
 import silk.vector { Vector, make, append, get, length }
 

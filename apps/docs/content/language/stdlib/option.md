@@ -20,32 +20,32 @@ ownership: a present value moves forward, while an unused fallback or abandoned 
 ### Transform and continue only when a value is present
 
 ```silk
-import silk.option
+import silk.option { Option }
 
 fn double(value: i32) -> i32 {
   return value * 2
 }
 
-fn positive(value: i32) -> option.Option<i32> {
+fn positive(value: i32) -> Option.Option<i32> {
   if value > 0 {
-    return option.some<i32>(value)
+    return Option.some<i32>(value)
   }
-  return option.none<i32>()
+  return Option.none<i32>()
 }
 
 pub fn main() -> i32 {
-  let initial = option.some<i32>(21)
-  let doubled = option.map<i32, i32>(move initial, double)
-  let answer = option.flatMap<i32, i32>(move doubled, positive)
-  let absent = option.none<i32>()
-  let missing = option.map<i32, i32>(move absent, double)
-  let presentValue = option.unwrapOr<i32>(move answer, 0)
-  let absentValue = option.unwrapOr<i32>(move missing, 0)
+  let initial = Option.some<i32>(21)
+  let doubled = Option.map<i32, i32>(move initial, double)
+  let answer = Option.flatMap<i32, i32>(move doubled, positive)
+  let absent = Option.none<i32>()
+  let missing = Option.map<i32, i32>(move absent, double)
+  let presentValue = Option.unwrapOr<i32>(move answer, 0)
+  let absentValue = Option.unwrapOr<i32>(move missing, 0)
   return presentValue + absentValue
 }
 ```
 
-Import as `Option` with `import silk.option`.
+Import as `Option` with `import silk.option { Option }`.
 
 Public declarations: 8.
 
@@ -155,15 +155,15 @@ two owned values leaves this call and the other drops.
 #### Choose between a present value and a fallback
 
 ```silk
-import silk.option
+import silk.option { Option }
 
 pub fn main() -> i32 {
-  let present = option.some<i32>(7)
-  let absent = option.none<i32>()
+  let present = Option.some<i32>(7)
+  let absent = Option.none<i32>()
   let first = move present
-    |> option.unwrapOr<i32>(0)
+    |> Option.unwrapOr<i32>(0)
   let second = move absent
-    |> option.unwrapOr<i32>(5)
+    |> Option.unwrapOr<i32>(5)
   return first + second
 }
 ```

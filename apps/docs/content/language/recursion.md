@@ -91,7 +91,7 @@ the weight:
 ```silk
 import silk.box { Box, make as boxMake, into as boxInto }
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize
 
 pub struct End {}
@@ -185,7 +185,7 @@ bounded by the stack:
 ```silk
 import silk.box { Box, make as boxMake, get as boxGet }
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect as Effect
+import silk.effect { Effect }
 import silk.usize
 
 pub struct End {}

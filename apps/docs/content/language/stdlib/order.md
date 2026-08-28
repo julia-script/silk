@@ -25,26 +25,26 @@ values are incomparable, [`compare`](#declaration-73696c6b2f6f726465723a3a636f6d
 ### Classify each comparison result
 
 ```silk
-import silk.order
+import silk.order { Order }
 
 pub fn main() -> i32 {
-  let low = order.compare<i32>(2, 7)
-  let same = order.compare<i32>(7, 7)
-  let high = order.compare<i32>(9, 7)
-  if !order.isLess(&low) {
+  let low = Order.compare<i32>(2, 7)
+  let same = Order.compare<i32>(7, 7)
+  let high = Order.compare<i32>(9, 7)
+  if !Order.isLess(&low) {
     return 1
   }
-  if !order.isEqual(&same) {
+  if !Order.isEqual(&same) {
     return 2
   }
-  if !order.isGreater(&high) {
+  if !Order.isGreater(&high) {
     return 3
   }
   return 42
 }
 ```
 
-Import as `Order` with `import silk.order`.
+Import as `Order` with `import silk.order { Order }`.
 
 Public declarations: 11.
 

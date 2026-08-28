@@ -25,18 +25,18 @@ collections use a different one-word hash policy and do not consume this seed au
 
 ```silk
 import silk.effect { Effect }
-import silk.insecure_seed
+import silk.insecure_seed { InsecureSeed }
 
 pub fn main() -> i32 {
-  let provider = insecure_seed.fixed(20, 22)
-  let seed = run insecure_seed.get()
-    |> Effect.provide<insecure_seed.InsecureSeed>(&provider)
-  if insecure_seed.first(&seed) + insecure_seed.second(&seed) != 42 { return 0 }
+  let provider = InsecureSeed.fixed(20, 22)
+  let seed = run InsecureSeed.get()
+    |> Effect.provide<InsecureSeed.InsecureSeed>(&provider)
+  if InsecureSeed.first(&seed) + InsecureSeed.second(&seed) != 42 { return 0 }
   return 42
 }
 ```
 
-Import as `InsecureSeed` with `import silk.insecure_seed`.
+Import as `InsecureSeed` with `import silk.insecure_seed { InsecureSeed }`.
 
 Public declarations: 8.
 

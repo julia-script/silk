@@ -23,7 +23,7 @@ virtual providers may satisfy a wait by advancing their own timeline without sle
 invalid or unrepresentable provider result traps because this service has no typed failure
 channel.
 
-Import as `MonotonicClock` with `import silk.monotonic_clock`.
+Import as `MonotonicClock` with `import silk.monotonic_clock { MonotonicClock }`.
 
 Public declarations: 5.
 

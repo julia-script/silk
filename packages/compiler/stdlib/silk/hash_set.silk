@@ -27,26 +27,26 @@
 //!
 //! import silk.effect { Effect }
 //!
-//! import silk.hash
+//! import silk.hash { Hash }
 //!
-//! import silk.hash_set
+//! import silk.hash_set { HashSet }
 //!
-//! import silk.option
+//! import silk.option { Option }
 //!
 //! import silk.u64
 //!
 //! effect fn build() -> i32
 //! ! Allocator.OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let mut set = hash_set.make<hash.Word>(hash.seed(17))
-//!   let inserting = hash_set.insert<hash.Word>(&mut set, hash.word(42))
+//!   let mut set = HashSet.make<Hash.Word>(Hash.seed(17))
+//!   let inserting = HashSet.insert<Hash.Word>(&mut set, Hash.word(42))
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   let existed = run inserting
-//!   if existed || !hash_set.contains<hash.Word>(&set, hash.word(42)) {
+//!   if existed || !HashSet.contains<Hash.Word>(&set, Hash.word(42)) {
 //!     return 0
 //!   }
-//!   let removed = hash_set.remove<hash.Word>(&mut set, hash.word(42))
-//!     |> option.unwrapOr<hash.Word>(hash.word(0))
+//!   let removed = HashSet.remove<Hash.Word>(&mut set, Hash.word(42))
+//!     |> Option.unwrapOr<Hash.Word>(Hash.word(0))
 //!   return u64.toI32(removed.value)
 //! }
 //!

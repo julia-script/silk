@@ -57,7 +57,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Logger` with `import silk.logger`.
+Import as `Logger` with `import silk.logger { Logger }`.
 
 Public declarations: 14.
 

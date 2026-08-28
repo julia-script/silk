@@ -31,16 +31,16 @@ adapter.
 ### Construct the native provider without starting a process
 
 ```silk
-import silk.os_child_process
+import silk.os_child_process { OsChildProcess }
 
 pub fn main() -> i32 {
-  let provider = os_child_process.make()
+  let provider = OsChildProcess.make()
   drop provider
   return 42
 }
 ```
 
-Import as `OsChildProcess` with `import silk.os_child_process`.
+Import as `OsChildProcess` with `import silk.os_child_process { OsChildProcess }`.
 
 Public declarations: 2.
 

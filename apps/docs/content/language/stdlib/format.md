@@ -26,20 +26,20 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.format
+import silk.format { Format }
 
 import silk.i64
 
-import silk.result
+import silk.result { Result }
 
 import silk.string { String }
 
 effect fn convert() -> i32
 ! Allocator.OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let parsed = format.signedValue("-42")
-    |> result.unwrapOr<i64, format.ParseError>(0)
-  let rendering = format.signedText(parsed)
+  let parsed = Format.signedValue("-42")
+    |> Result.unwrapOr<i64, Format.ParseError>(0)
+  let rendering = Format.signedText(parsed)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let rendered = run rendering
   let text = String.view(&rendered)
@@ -59,9 +59,25 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `Format` with `import silk.format`.
+Import as `Format` with `import silk.format { Format }`.
 
-Public declarations: 17.
+Public declarations: 18.
+
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d6174"></a>
+
+## `Format`
+
+```silk
+pub struct Format
+```
+
+The importable name of the `silk.format` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.format { Format }` names the module scope, so parsing and rendering operations
+resolve through `Format`.
 
 <a id="declaration-73696c6b2f666f726d61743a3a4e6f74414e756d626572"></a>
 

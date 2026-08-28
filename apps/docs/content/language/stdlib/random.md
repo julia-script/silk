@@ -26,15 +26,15 @@ deterministic data. [`fillBytes`](#declaration-73696c6b2f72616e646f6d3a3a66696c6
 ### Request a secure word
 
 ```silk
-import silk.random
+import silk.random { Random }
 
 effect fn tokenWord() -> u64
-? &mut random.Random {
-  return run random.nextU64()
+? &mut Random.Random {
+  return run Random.nextU64()
 }
 ```
 
-Import as `Random` with `import silk.random`.
+Import as `Random` with `import silk.random { Random }`.
 
 Public declarations: 5.
 

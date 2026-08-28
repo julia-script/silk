@@ -4,7 +4,7 @@ import silk.allocator {SystemAllocator}
 
 import silk.allocator {OutOfMemoryError}
 
-import silk.effect as Effect
+import silk.effect {Effect}
 
 import silk.i32
 
@@ -57,7 +57,7 @@ import silk.allocator {SystemAllocator}
 
 import silk.allocator {OutOfMemoryError}
 
-import silk.effect as Effect
+import silk.effect {Effect}
 
 import silk.i32
 
@@ -141,7 +141,7 @@ import silk.allocator {SystemAllocator}
 
 import silk.allocator {OutOfMemoryError}
 
-import silk.effect as Effect
+import silk.effect {Effect}
 
 import silk.i32
 
@@ -198,7 +198,7 @@ import silk.allocator {SystemAllocator}
 
 import silk.allocator {OutOfMemoryError}
 
-import silk.effect as Effect
+import silk.effect {Effect}
 
 import silk.i32
 
@@ -254,7 +254,7 @@ import silk.allocator {OutOfMemoryError}
 
 import silk.allocator {SystemAllocator}
 
-import silk.effect as Effect
+import silk.effect {Effect}
 
 import silk.usize
 

@@ -25,18 +25,18 @@ keys, nonces, tokens, or hash-flood protection.
 
 ```silk
 import silk.effect { Effect }
-import silk.insecure_random
+import silk.insecure_random { InsecureRandom }
 
 pub fn main() -> i32 {
-  let mut provider = insecure_random.seeded(0)
-  let first = run insecure_random.nextU64()
-    |> Effect.provideMut<insecure_random.InsecureRandom>(&mut provider)
+  let mut provider = InsecureRandom.seeded(0)
+  let first = run InsecureRandom.nextU64()
+    |> Effect.provideMut<InsecureRandom.InsecureRandom>(&mut provider)
   if first != 0x99ec5f36cb75f2b4 { return 0 }
   return 42
 }
 ```
 
-Import as `InsecureRandom` with `import silk.insecure_random`.
+Import as `InsecureRandom` with `import silk.insecure_random { InsecureRandom }`.
 
 Public declarations: 7.
 

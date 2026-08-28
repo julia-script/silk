@@ -27,26 +27,42 @@ a key may become unreachable.
 ### Hash the fields of one key deterministically
 
 ```silk
-import silk.hash
+import silk.hash { Hash }
 
 import silk.u64
 
 pub fn main() -> i32 {
-  let seed = hash.seed(17)
-  let first = hash.mix(&seed, 4)
-    |> hash.combine(9)
-  let second = hash.mix(&seed, 4)
-    |> hash.combine(9)
+  let seed = Hash.seed(17)
+  let first = Hash.mix(&seed, 4)
+    |> Hash.combine(9)
+  let second = Hash.mix(&seed, 4)
+    |> Hash.combine(9)
   if first != second {
     return 0
   }
-  return u64.toI32(hash.word(42).value)
+  return u64.toI32(Hash.word(42).value)
 }
 ```
 
-Import as `HashKey` with `import silk.hash`.
+Import as `HashKey` with `import silk.hash { HashKey }`.
 
-Public declarations: 7.
+Public declarations: 8.
+
+<a id="declaration-73696c6b2f686173683a3a48617368"></a>
+
+## `Hash`
+
+```silk
+pub struct Hash
+```
+
+The importable name of the `silk.hash` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.hash { Hash }` names the module scope, so seed, mixing, and ready-made key
+operations resolve through `Hash`.
 
 <a id="declaration-73696c6b2f686173683a3a4861736853656564"></a>
 

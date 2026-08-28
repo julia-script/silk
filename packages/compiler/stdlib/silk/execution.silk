@@ -20,6 +20,16 @@
 
 import silk.allocator { Allocator }
 
+/// The importable name of the `silk.execution` module scope.
+///
+/// # Details
+///
+/// This struct carries no data and is never constructed by the library. Importing it as
+/// `import silk.execution { Execution }` names the module scope, so `Execution.make(...)` and the
+/// other lifecycle operations resolve through it. It is unrelated to the builtin
+/// `Intrinsic.Execution<A>` type.
+pub struct Execution {}
+
 fn absurd<T>() -> T {
   let boom = 1 / 0
   return absurd<T>()

@@ -26,16 +26,32 @@ the mathematical result is outside the selected type's range.
 ### Add values through one generic contract
 
 ```silk
-import silk.numeric
+import silk.numeric { Numeric }
 
 pub fn main() -> i32 {
-  return numeric.add<i32>(40, 2)
+  return Numeric.add<i32>(40, 2)
 }
 ```
 
-Import as `Integer` with `import silk.numeric`.
+Import as `Integer` with `import silk.numeric { Integer }`.
 
-Public declarations: 2.
+Public declarations: 3.
+
+<a id="declaration-73696c6b2f6e756d657269633a3a4e756d65726963"></a>
+
+## `Numeric`
+
+```silk
+pub struct Numeric
+```
+
+The importable name of the `silk.numeric` module scope.
+
+### Details
+
+This struct carries no data and is never constructed by the library. Importing it as
+`import silk.numeric { Numeric }` names the module scope, so generic numeric helpers resolve
+through `Numeric` without renaming the [`Integer`](#declaration-73696c6b2f6e756d657269633a3a496e7465676572) interface.
 
 <a id="declaration-73696c6b2f6e756d657269633a3a496e7465676572"></a>
 

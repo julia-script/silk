@@ -31,16 +31,16 @@ instead of inventing process-global imports; evaluator execution requires an inj
 ### Construct the native provider without reading process state
 
 ```silk
-import silk.os_host_input
+import silk.os_host_input { OsHostInput }
 
 pub fn main() -> i32 {
-  let provider = os_host_input.make()
+  let provider = OsHostInput.make()
   drop provider
   return 42
 }
 ```
 
-Import as `OsHostInput` with `import silk.os_host_input`.
+Import as `OsHostInput` with `import silk.os_host_input { OsHostInput }`.
 
 Public declarations: 2.
 

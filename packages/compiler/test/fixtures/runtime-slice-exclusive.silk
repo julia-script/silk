@@ -1,4 +1,4 @@
-import silk.usize as usize
+import silk.usize
 
 struct Token {
   value: i32

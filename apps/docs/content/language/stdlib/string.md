@@ -25,7 +25,7 @@ began. Start with [`scalarCursor`](#declaration-73696c6b2f737472696e673a3a736361
 ### Validate borrowed UTF-8 bytes
 
 ```silk
-import silk.result
+import silk.result { Result }
 
 import silk.string { String }
 
@@ -33,9 +33,9 @@ import silk.usize
 
 pub fn main() -> i32 {
   let valid = String.fromUtf8(b"Silk")
-    |> result.unwrapOr<string, String.InvalidUtf8>("")
+    |> Result.unwrapOr<string, String.InvalidUtf8>("")
   let invalid = String.fromUtf8(b"a\x80")
-  if !result.isFailure<string, String.InvalidUtf8>(&invalid) {
+  if !Result.isFailure<string, String.InvalidUtf8>(&invalid) {
     return 0
   }
   let length = String.byteLength(valid)
@@ -53,7 +53,7 @@ import silk.allocator { Allocator }
 
 import silk.effect { Effect }
 
-import silk.option
+import silk.option { Option }
 
 import silk.string { String }
 
@@ -75,8 +75,8 @@ effect fn build() -> i32
     |> Effect.provideMut<Allocator>(&mut allocator)
   let appended = run appending
   let stepped = String.nextScalar(String.view(&text), String.scalarCursor())
-  let mapped = option.map<String.ScalarStep, i32>(move stepped, scalarCode)
-  let scalar = option.unwrapOr<i32>(move mapped, 0)
+  let mapped = Option.map<String.ScalarStep, i32>(move stepped, scalarCode)
+  let scalar = Option.unwrapOr<i32>(move mapped, 0)
   return scalar - 191
 }
 
@@ -89,7 +89,7 @@ pub fn main() -> i32 {
 }
 ```
 
-Import as `String` with `import silk.string`.
+Import as `String` with `import silk.string { String }`.
 
 Public declarations: 22.
 
